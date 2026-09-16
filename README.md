@@ -557,7 +557,9 @@ j/k move  enter difftool  e edit  space reviewed  a about  t thread  T browse  v
 `Enter` opens the selected file in the difftool, `e` in the editor, `Space` toggles reviewed on
 the row under the cursor — which stays there, since marking is not navigation — `a` opens
 `ABOUT.md`, `t` prompts for a new thread, `T` browses threads, `v` toggles the
-full/unreviewed span, `s` opens a submit prompt taking `b`, `f` or `a`, `q` quits. Submitting
+full/unreviewed span, `s` opens a submit prompt taking `b`, `f` or `a`, `q` quits. In a narrow
+window the shortcut bar wraps between shortcuts rather than through them — `enter difftool`
+never arrives split in half — and the file list gives up the rows it takes. Submitting
 commits the review, moves the ref and **ends the session**, printing one line about what it
 did; `Esc` from the prompt returns to the list. The terminal
 is released while an external program runs and the repository is re-scanned afterwards, so a

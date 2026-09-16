@@ -104,7 +104,7 @@ From the PRD, treated as binding:
 | Post-MVP: `change init` commits, takes `--about` | done | `TestChangeInit*` (11 cases) plus the corrected golden workflow; e2e replay still passes |
 | Post-MVP: author-side `change feedback` and `change wait`, replacing `diff --unreviewed` in author hints | done | `TestChangeFeedbackShowsTheReviewItself`, `TestChangeFeedbackWithoutAReview`, `TestChangeWaitReturnsAtOnceWhenAReviewIsAlreadyIn`, `TestChangeWaitTimeoutReportsWhereThingsStand`, `TestChangeWaitFetchesAndSeesAReviewFromAnotherClone` (two clones, bare remote, no network), `TestPollUntil*` (5 cases) |
 
-Test suite: 27 files, 221 test functions, 13 packages, all passing; `go vet` and `gofmt`
+Test suite: 28 files, 228 test functions, 13 packages, all passing; `go vet` and `gofmt`
 clean. The suite found four real defects, all fixed in `fix: exit codes, added-line
 positions, changeset detection, editor expansion`: an off-by-one in
 `survival.AddedLines` line numbers, state-based refusals exiting 2 instead of 1, unknown
@@ -232,6 +232,16 @@ changeset. Hand-verification of everything the README documents additionally cor
     room; `wait` itself writes nothing, so "no daemon, no cache, no database" still holds for
     it. Fixtures push to local bare remotes, which hygiene allows: it skips `_test.go`, whose
     job is to stage states the CLI itself refuses to create.
+
+15. **The shortcut bar overflowed narrow windows, and the list did not know.** The TUI wrote
+    the key help as one 101-character string, so the terminal broke it wherever 80 columns
+    ended — mid-shortcut — and the scroll window, which reserves a fixed 12 rows for
+    chrome, kept counting one footer row. The helper now wraps between shortcut groups at the
+    terminal width (`wrapGroups`, same wrapping for the submit prompt) and `windowRows()` is
+    the single place the header/footer allowance is computed, used by both `clamp` and
+    `visibleRows`, so the list gives up the rows a wrapped helper uses. Known adjacent gap,
+    not fixed: `truncate` shortens only the *selected* row, so an unselected path longer than
+    the window still wraps in the terminal.
 
 ## Architecture
 

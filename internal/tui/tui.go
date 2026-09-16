@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -438,10 +439,13 @@ func (m reviewModel) View() string {
 	case modePrompt:
 		b.WriteString("New thread: " + m.input + "█\n")
 	case modeSubmit:
-		b.WriteString("Submit review: [b]lock  [f]eedback  [a]pprove  [esc] cancel\n")
+		for _, line := range m.helpLines() {
+			b.WriteString(line + "\n")
+		}
 	default:
-		b.WriteString(styleDim.Render(
-			"j/k move  enter difftool  e edit  space reviewed  a about  t thread  T browse  v span  s submit  q quit") + "\n")
+		for _, line := range m.helpLines() {
+			b.WriteString(styleDim.Render(line) + "\n")
+		}
 	}
 	if m.status != "" {
 		if m.statusErr {
@@ -458,6 +462,56 @@ func (m reviewModel) spanName(label string) string {
 		return "unreviewed"
 	}
 	return label
+}
+
+// helpText is the shortcut helper for the current mode. Shortcut groups are separated by
+// two spaces; wrapping breaks between those groups, never inside one.
+func (m reviewModel) helpText() string {
+	switch m.mode {
+	case modeSubmit:
+		return "Submit review: [b]lock  [f]eedback  [a]pprove  [esc] cancel"
+	case modePrompt:
+		return "" // the thread prompt is the input line, not help
+	}
+	return "j/k move  enter difftool  e edit  space reviewed  a about  t thread  T browse  v span  s submit  q quit"
+}
+
+// helpLines is helpText fitted to the terminal width. A narrow window gets the overflow on
+// the next line instead of leaving it to the terminal, which would break a shortcut in half.
+func (m reviewModel) helpLines() []string {
+	return wrapGroups(m.helpText(), m.width)
+}
+
+// wrapGroups packs groups separated by two or more spaces into lines no wider than width,
+// joined by the same two-space gap. A group wider than width gets a line to itself: cutting
+// a word is worse than one line that overflows. width <= 0 leaves the text unwrapped.
+func wrapGroups(text string, width int) []string {
+	if text == "" || width <= 0 {
+		return []string{text}
+	}
+	const gap = "  "
+	var lines []string
+	current := ""
+	for _, group := range strings.Split(text, gap) {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		switch {
+		case current == "":
+			current = group
+			continue
+		case utf8.RuneCountInString(current)+len(gap)+utf8.RuneCountInString(group) <= width:
+			current += gap + group
+			continue
+		}
+		lines = append(lines, current)
+		current = group
+	}
+	if current != "" || len(lines) == 0 {
+		lines = append(lines, current)
+	}
+	return lines
 }
 
 // --- helpers ----------------------------------------------------------------
@@ -478,10 +532,7 @@ func (m *reviewModel) clamp() {
 	}
 	// Keep the cursor inside a window sized to the terminal, leaving room for
 	// the header, footer, and status lines.
-	window := m.height - 12
-	if window < 5 {
-		window = 5
-	}
+	window := m.windowRows()
 	if m.cursor < m.scroll {
 		m.scroll = m.cursor
 	}
@@ -507,12 +558,19 @@ func (m reviewModel) selected() (File, bool) {
 	return files[m.cursor], true
 }
 
+// windowRows is how many file rows fit between the header and the footer. The shortcut
+// helper takes a row, or several when a narrow window wraps it.
+func (m reviewModel) windowRows() int {
+	window := m.height - 12 - (len(m.helpLines()) - 1)
+	if window < 5 {
+		return 5
+	}
+	return window
+}
+
 func (m reviewModel) visibleRows() []int {
 	total := len(m.sess.Files())
-	window := m.height - 12
-	if window < 5 {
-		window = 5
-	}
+	window := m.windowRows()
 	var rows []int
 	for i := m.scroll; i < total && i < m.scroll+window; i++ {
 		rows = append(rows, i)
