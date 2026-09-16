@@ -992,6 +992,9 @@ d        open the difftool for the selected row: always for a file, and for a do
          only when the span changed it and it already existed where the span starts —
          otherwise the document opens in the editor, with a note naming the reason
 e        open the selected row in the editor, whatever the span did
+p        show/hide the diff preview column (wide terminals)
+ctrl-f   page the preview down
+ctrl-b   page the preview up
 Space    toggle reviewed for a file row
 
 a        open ABOUT.md
@@ -1649,6 +1652,9 @@ Enter    activate the selected row: diff a file, diff or read a changeset docume
          (whichever gives a real comparison), collapse the thread list, create a thread
 d        open the difftool for the selected row, falling back to the editor with a note
 e        edit the selected file or document
+p        show/hide the diff preview column
+ctrl-f   page the preview down
+ctrl-b   page the preview up
 Space    mark file reviewed/unreviewed
 
 a        open ABOUT.md

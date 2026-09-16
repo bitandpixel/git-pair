@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"gitpr/internal/changeset"
@@ -199,6 +200,64 @@ func (s *Session) Threads() ([]string, error) { return s.cs.Threads(s.repo) }
 // and a diff against nothing.
 func (s *Session) HasVersionAt(ctx context.Context, rev, path string) bool {
 	return s.repo.PathExistsAt(ctx, rev, path)
+}
+
+// maxPreviewBytes bounds what a preview pane may carry. A patch longer than this is a file to
+// open in the difftool, not one to read in a side column.
+const maxPreviewBytes = 256 << 10
+
+// Patch is one path's diff across the session's span, in git's own colours.
+//
+// The preview shows these bytes and adds nothing to them, which is deliberate: PRD §3 rules out
+// building a diff renderer, and the way to show a diff without becoming one is to show git's.
+type Patch struct {
+	Lines   []string // git's coloured output, verbatim
+	Added   int      // from git's numstat; -1 when git reported a binary file
+	Deleted int
+	Capped  bool   // longer than a preview can carry
+	Err     string // why there is no patch, if there is none
+}
+
+// Patch asks git for one path's diff across the current span.
+//
+// It returns no error: a preview that cannot be drawn is a line in the pane, not a problem the
+// reviewer has to handle, and this runs in the background while they keep moving the cursor.
+func (s *Session) Patch(ctx context.Context, path string) Patch {
+	sp := s.current
+	out, err := s.repo.Git(ctx, "-c", "core.quotePath=false", "diff",
+		"--no-ext-diff", "--no-textconv", "--color=always", sp.From, sp.To, "--", path)
+	if err != nil {
+		return Patch{Err: err.Error()}
+	}
+	p := Patch{Added: -1, Deleted: -1}
+	if len(out) > maxPreviewBytes {
+		cut := strings.LastIndex(out[:maxPreviewBytes], "\n")
+		if cut < 0 {
+			cut = maxPreviewBytes
+		}
+		out, p.Capped = out[:cut], true
+	}
+	if out != "" {
+		p.Lines = strings.Split(out, "\n")
+	}
+	// The counts come from git rather than by counting these lines, so a capped patch still
+	// reports the file's real size.
+	num, err := s.repo.Git(ctx, "diff", "--no-ext-diff", "--numstat", sp.From, sp.To, "--", path)
+	if err == nil {
+		if line := strings.TrimSpace(strings.SplitN(num, "\n", 2)[0]); line != "" {
+			if fields := strings.Fields(line); len(fields) >= 2 {
+				// A binary file reports "-" for both counts, which leaves the counts at -1
+				// and the header without a size to show.
+				if a, e := strconv.Atoi(fields[0]); e == nil {
+					p.Added = a
+				}
+				if d, e := strconv.Atoi(fields[1]); e == nil {
+					p.Deleted = d
+				}
+			}
+		}
+	}
+	return p
 }
 
 // Changeset is the changeset under review.

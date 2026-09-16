@@ -13,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"gitpr/internal/console"
 	gitmodel "gitpr/internal/model"
@@ -104,6 +105,13 @@ func activateBy(r row) action {
 	return actionNone
 }
 
+// previewMsg carries a patch back from git. The fetch runs off the event loop: reading a large
+// diff is git's work, and the interface should not stop moving the cursor while it happens.
+type previewMsg struct {
+	path  string
+	patch Patch
+}
+
 // externalDoneMsg reports that a launched editor or difftool has exited. What the caller
 // wanted read afterwards is held in reviewModel.pendingNote: a status set before the handoff
 // is buried under the child's own screen, so it has to be said on the way back.
@@ -135,6 +143,14 @@ type reviewModel struct {
 
 	status    string
 	statusErr bool
+	// patchFor is the seam tests use instead of running git.
+	patchFor func(context.Context, string) Patch
+	// The preview pane. previewPath is what it shows and previewOffset where in that patch it
+	// is; patches holds what git already answered, so moving back to a file costs nothing.
+	previewOn     bool
+	previewPath   string
+	previewOffset int
+	patches       map[string]Patch
 	// pendingNote is what goes in the status line when the editor or difftool currently
 	// holding the terminal exits. Every handoff assigns it, so a note can never outlive the
 	// child it was written for.
@@ -178,7 +194,7 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}()
 
-	m := reviewModel{ctx: ctx, sess: sess, out: out, width: 80, height: 24, threadsOpen: true}
+	m := reviewModel{ctx: ctx, sess: sess, out: out, width: 80, height: 24, threadsOpen: true, previewOn: true}
 	m.refresh()
 	if n := sess.Resumed(); n > 0 {
 		m.setStatus(fmt.Sprintf("resumed %d reviewed mark%s from an earlier session", n, plural(n)), false)
@@ -226,7 +242,7 @@ func (m reviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.refresh()
-		return m, nil
+		return m.ensurePreview()
 
 	case externalDoneMsg:
 		// The child had our screen and left its own marks on it — vimdiff prints
@@ -252,12 +268,32 @@ func (m reviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus(note, false)
 		}
 		// The editor may have written a new thread, so the section below the files
-		// has to be listed again.
+		// has to be listed again, and any patch the preview is holding may be stale.
+		m.forgetPatches()
 		m.refresh()
 		return m, nil
 
+	case previewMsg:
+		if m.patches == nil {
+			m.patches = map[string]Patch{}
+		}
+		m.patches[msg.path] = msg.patch
+		if msg.path == m.previewPath {
+			m.previewOffset = 0
+		}
+		return m, nil
+
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		updated, cmd := m.handleKey(msg)
+		rm, ok := updated.(reviewModel)
+		if !ok {
+			return updated, cmd
+		}
+		rm, fetch := rm.ensurePreview()
+		if fetch == nil {
+			return rm, cmd
+		}
+		return rm, tea.Batch(cmd, fetch)
 	}
 	return m, nil
 }
@@ -294,6 +330,12 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toggleMark()
 	case key.Type == tea.KeyEnter:
 		return m.activate()
+	case key.Type == tea.KeyRunes && firstRune(key) == 'p':
+		return m.togglePreview()
+	case key.Type == tea.KeyCtrlF:
+		return m.pagePreview(1)
+	case key.Type == tea.KeyCtrlB:
+		return m.pagePreview(-1)
 	case key.Type == tea.KeyRunes && firstRune(key) == 'd':
 		return m.openDiffOfSelection()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'e':
@@ -309,6 +351,9 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err := m.sess.ToggleSpan(m.ctx); err != nil {
 			m.setStatus(err.Error(), true)
 		} else {
+			// The span is what the preview diffs, so every cached patch is about a span
+			// that is no longer the one on screen.
+			m.forgetPatches()
 			m.refresh()
 			m.setStatus("", false)
 		}
@@ -601,6 +646,20 @@ func (m reviewModel) View() string {
 		return ""
 	}
 	var b strings.Builder
+	if m.paneWidth() > 0 {
+		b.WriteString(joinColumns(m.listBlock(), m.previewLines()))
+	} else {
+		b.WriteString(m.listBlock())
+	}
+	b.WriteString(m.footer())
+	return b.String()
+}
+
+// listBlock is the list column on its own: header, the rows in the window, the reviewed
+// counter, the changeset section, and the rule under it. It is apart from View because the
+// preview is drawn beside exactly this block, row for row.
+func (m reviewModel) listBlock() string {
+	var b strings.Builder
 	h := m.sess.Header()
 	reviewed, total := m.sess.Count()
 
@@ -632,7 +691,13 @@ func (m reviewModel) View() string {
 	// A rule rather than a blank line, so the shortcut bar reads as chrome and not as
 	// another row of the list it sits under.
 	b.WriteString(m.rule() + "\n")
+	return b.String()
+}
 
+// footer is the shortcut bar and the status line. They span the whole terminal rather than the
+// list column, because they belong to the session rather than to either column.
+func (m reviewModel) footer() string {
+	var b strings.Builder
 	switch m.mode {
 	case modePrompt:
 		b.WriteString("New thread: " + m.input + "█\n")
@@ -675,7 +740,7 @@ func (m reviewModel) helpText() string {
 	if m.threadsOpen {
 		threadsHint = "T hide threads"
 	}
-	return "j/k move  tab section  enter open  d diff  e edit  space reviewed  a about  " +
+	return "j/k move  tab section  enter open  d diff  p preview  e edit  space reviewed  a about  " +
 		"t new thread  " + threadsHint + "  v span  s submit  q quit"
 }
 
@@ -884,20 +949,236 @@ func (m reviewModel) window() (files, section []renderedRow) {
 	return files, section
 }
 
-// rule is the separator above the shortcut bar, as wide as the window.
+// The preview pane only exists if the terminal can carry two columns without crushing the
+// list: below previewMinWidth there is no pane at all, and the list never gives up more than
+// previewListFloor columns.
+const (
+	previewMinWidth  = 100
+	previewListFloor = 34
+	previewMinPane   = 40
+	previewGap       = 2 // the divider and the space after it
+)
+
+// paneWidth is how wide the preview column is, or 0 when there is no preview: the reviewer
+// switched it off, the session is taking input, or the terminal is too narrow. One function
+// decides it, because layout and key handling have to agree on whether the pane is there.
+func (m reviewModel) paneWidth() int {
+	if !m.previewOn || m.mode != modeFiles || m.width < previewMinWidth {
+		return 0
+	}
+	w := (m.width - previewGap) * 3 / 5
+	if m.width-previewGap-w < previewListFloor {
+		w = m.width - previewGap - previewListFloor
+	}
+	if w < previewMinPane {
+		return 0
+	}
+	return w
+}
+
+// listWidth is the column the list gets: all of it when there is no preview, less the pane and
+// its divider when there is one.
+func (m reviewModel) listWidth() int {
+	if w := m.paneWidth(); w > 0 {
+		return m.width - w - previewGap
+	}
+	return m.width
+}
+
+// previewBodyRows is how many lines of diff fit in the pane: the window the list gets, less the
+// file it belongs to and the note about what is not on show.
+func (m reviewModel) previewBodyRows() int {
+	rows := m.windowRows() - 2
+	if rows < 1 {
+		return 1
+	}
+	return rows
+}
+
+// rule is the separator above the shortcut bar, as wide as the column it separates.
 func (m reviewModel) rule() string {
-	width := m.width
+	width := m.listWidth()
 	if width <= 0 {
 		width = 80
 	}
 	return styleDim.Render(strings.Repeat("─", width))
 }
 
-// line renders one row, highlighted when the cursor is on it.
+// ensurePreview puts the pane on the file under the cursor, returning the command that fetches
+// a patch git has not answered yet. Fetches are cached per session state, so moving back and
+// forth across a list of files asks git once each.
+func (m reviewModel) ensurePreview() (reviewModel, tea.Cmd) {
+	path := ""
+	if m.paneWidth() > 0 && !m.quitting {
+		if r, ok := m.selectedRow(); ok {
+			path = r.path
+		}
+	}
+	if path == "" {
+		m.previewPath, m.previewOffset = "", 0
+		return m, nil
+	}
+	if path != m.previewPath {
+		m.previewPath, m.previewOffset = path, 0
+	}
+	if _, cached := m.patches[path]; cached {
+		return m, nil
+	}
+	fetch := m.patchFor
+	if fetch == nil {
+		fetch = m.sess.Patch
+	}
+	ctx := m.ctx
+	return m, func() tea.Msg {
+		return previewMsg{path: path, patch: fetch(ctx, path)}
+	}
+}
+
+// forgetPatches drops what git answered, because the span changed or the working tree did and
+// a preview of the wrong diff is worse than no preview.
+func (m *reviewModel) forgetPatches() {
+	m.patches = nil
+	m.previewPath, m.previewOffset = "", 0
+}
+
+// togglePreview is `p`. When it cannot fit it says so with the number the terminal is short by,
+// rather than appearing to do nothing.
+func (m reviewModel) togglePreview() (tea.Model, tea.Cmd) {
+	m.previewOn = !m.previewOn
+	if m.previewOn && m.paneWidth() == 0 {
+		m.setStatus(fmt.Sprintf("the preview needs a terminal %d columns wide; this one is %d",
+			previewMinWidth, m.width), false)
+	} else {
+		m.setStatus("", false)
+	}
+	return m.ensurePreview()
+}
+
+// pagePreview scrolls the pane by half a page, which keeps a line or two of context on screen
+// at the break. ctrl-d is quit, so paging is ctrl-f and ctrl-b as in a pager.
+func (m reviewModel) pagePreview(dir int) (tea.Model, tea.Cmd) {
+	if m.paneWidth() == 0 || m.previewPath == "" {
+		return m, nil
+	}
+	patch, ok := m.patches[m.previewPath]
+	if !ok || len(patch.Lines) == 0 {
+		return m, nil
+	}
+	step := m.previewBodyRows() / 2
+	if step < 1 {
+		step = 1
+	}
+	offset := m.previewOffset + dir*step
+	if max := len(patch.Lines) - m.previewBodyRows(); offset > max {
+		offset = max
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	m.previewOffset = offset
+	return m, nil
+}
+
+// previewLines renders the pane: the file it belongs to, git's own coloured diff, and a note
+// about the part that is not on show. Everything between the first line and the note is git's
+// bytes with nothing added — PRD §3 rules out a diff renderer, and this is the alternative to
+// building one: a window onto what git printed.
+func (m reviewModel) previewLines() []string {
+	width := m.paneWidth()
+	if width <= 0 || m.previewPath == "" {
+		return nil
+	}
+	header := m.previewPath
+	body := m.previewBodyRows()
+	patch, cached := m.patches[m.previewPath]
+	if cached && patch.Added >= 0 {
+		header = fmt.Sprintf("%s  +%d \u2212%d", m.previewPath, patch.Added, patch.Deleted)
+	}
+	out := []string{styleDim.Render(clip(header, width))}
+
+	switch {
+	case !cached:
+		return append(out, styleDim.Render("(reading the diff…)"))
+	case patch.Err != "":
+		return append(out, styleDim.Render(patch.Err))
+	case len(patch.Lines) == 0:
+		return append(out, styleDim.Render("no changes in this span"))
+	}
+
+	offset := m.previewOffset
+	if max := len(patch.Lines) - body; offset > max {
+		offset = max
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	end := offset + body
+	if end > len(patch.Lines) {
+		end = len(patch.Lines)
+	}
+	for _, line := range patch.Lines[offset:end] {
+		out = append(out, clip(line, width))
+	}
+	if end < len(patch.Lines) || offset > 0 {
+		note := fmt.Sprintf("… %d more lines  enter opens", len(patch.Lines)-end)
+		if offset > 0 {
+			note = fmt.Sprintf("%d\u2013%d of %d lines  ctrl-b/ctrl-f  enter opens",
+				offset+1, end, len(patch.Lines))
+		}
+		if patch.Capped {
+			note = "diff too large to read here  enter opens"
+		}
+		out = append(out, styleDim.Render(clip(note, width)))
+	}
+	return out
+}
+
+// joinColumns places the preview beside the list. Each list row is padded to the list's column
+// so the divider falls in the same place on every row; the list is clipped to that width, so
+// nothing here can wrap and shift it.
+func joinColumns(left string, right []string) string {
+	lines := strings.Split(strings.TrimSuffix(left, "\n"), "\n")
+	listWidth := 0
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > listWidth {
+			listWidth = w
+		}
+	}
+	var b strings.Builder
+	for i, l := range lines {
+		preview := ""
+		if i < len(right) {
+			preview = right[i]
+		}
+		b.WriteString(padRight(l, listWidth) + " " + styleDim.Render("│") + " " + preview + "\n")
+	}
+	return b.String()
+}
+
+func padRight(s string, width int) string {
+	if pad := width - lipgloss.Width(s); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s
+}
+
+// clip shortens a line to what the terminal will show, not to bytes: it counts the width of
+// wide characters and ignores the escape sequences styling them, which is the only way a row
+// beside a divider can be trusted to stay on one line.
+func clip(s string, width int) string {
+	if width <= 0 || lipgloss.Width(s) <= width {
+		return s
+	}
+	return ansi.Truncate(s, width, "…")
+}
+
+// line renders one row, highlighted when the cursor is on it. Every row is clipped to the list
+// column, not just the selected one: with the preview beside it, a row that wrapped would move
+// the divider out from under the column above it.
 func (m reviewModel) line(r renderedRow) string {
-	text := m.rowText(r.row)
+	text := clip(m.rowText(r.row), m.listWidth())
 	if m.cursor == r.index {
-		return styleSelected.Render(m.truncate(text))
+		return styleSelected.Render(text)
 	}
 	return text
 }
@@ -935,13 +1216,6 @@ func (m reviewModel) visibleRows() []int {
 		rows = append(rows, i)
 	}
 	return rows
-}
-
-func (m reviewModel) truncate(line string) string {
-	if m.width <= 0 || len(line) <= m.width {
-		return line
-	}
-	return line[:m.width-1] + "…"
 }
 
 func (m *reviewModel) setStatus(text string, isErr bool) {

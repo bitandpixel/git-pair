@@ -570,7 +570,7 @@ ABOUT.md
     does-the-lock-cover-the-map.md
     + new thread…
 ────────────────────────────────────────
-j/k move  tab section  enter open  d diff  e edit  space reviewed  a about  t new thread
+j/k move  tab section  enter open  d diff  p preview  e edit  space reviewed  a about  t new thread
 T hide threads  v span  s submit  q quit
 ```
 
@@ -599,6 +599,16 @@ reviewer can fill it in and come straight back to it. The thread heading counts 
 `▸ Threads (3)` collapsed, plain `▾ Threads` once the threads are on screen — and a rule
 separates the whole list from the shortcut bar, so the bar reads as chrome rather than as more
 rows.
+
+On a wide terminal the list shares the screen with a preview. From 100 columns the session puts a
+column beside the list showing the diff of whatever the cursor is on — the span's diff, the same
+one `gitpr diff` and the reviewed counter describe — with git's own `+N −M` in its header.
+`ctrl-f` and `ctrl-b` page through a diff too long to fit, and the note along the bottom says how
+much of it is left; `ctrl-d` still quits, which is why paging is not `ctrl-d`. `p` switches the
+pane off, and a terminal too narrow to fit it says so rather than doing nothing. What the pane
+prints is git's own bytes with nothing added to them, which is the line that keeps it a preview
+rather than a diff renderer: to read a diff properly you open it, and `Enter` is one keypress
+away.
 
 In a narrow window the shortcut bar wraps between shortcuts rather than through them —
 `space reviewed` never arrives split in half — and the list gives up the rows it takes.

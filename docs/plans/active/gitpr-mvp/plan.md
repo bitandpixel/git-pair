@@ -344,6 +344,28 @@ changeset. Hand-verification of everything the README documents additionally cor
     immediately before a child started (bytes 853→884, 7444→7475, which is the flash); this one
     emits 3, ours a single pair at the ends of the session and the middle two vim's own, with the
     frame after the last tool closing intact.
+21. **Prototype: a diff preview in a right pane when the terminal is wide enough.** The choices
+    were made with the user: a right pane (the list keeps its rows and gives up width), the
+    span's committed diff — matching `gitpr diff`, `--stat` and the reviewed marks, deliberately
+    not the working tree the difftool shows — and paging on `ctrl-f`/`ctrl-b`, because `ctrl-d`
+    already quits and a key must not change meaning depending on whether a pane is on screen.
+
+    The line that mattered: PRD §3 rules out building a diff renderer, so the pane prints git's
+    bytes — `git diff --color=always --no-ext-diff --no-textconv <from> <to> -- <path>` — and adds
+    nothing to them. No parsing, no hunk model, no folding, no colouring of ours; what it adds is
+    a header carrying git's own numstat counts and a note about the lines it is not showing. That
+    boundary is what keeps it a preview and leaves the difftool as the real view.
+
+    Things that needed deciding: 100 columns minimum with the list never below 34, because a pane
+    that squeezes the list is worse than no pane; patches fetched off the event loop and cached
+    per span, so walking a list with `j`/`k` asks git once per file, and a span toggle or a tool
+    handoff drops the cache rather than showing a stale diff; every row clipped by terminal width
+    rather than bytes, since one wrapping row would shift the divider out from under its column —
+    the old selected-row-only truncation was already wrong at any width, it just had no neighbour
+    to expose it.
+
+    Prototype status: the threshold, the split ratio and the header are taste. `p` exists so they
+    can be argued about without rebuilding.
 
 ## Architecture
 
