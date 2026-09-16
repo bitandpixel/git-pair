@@ -368,9 +368,20 @@ func (s *Session) RefreshDrift(ctx context.Context) (moved []span.Drift, reset i
 // CanToggleSpan reports whether an unreviewed span is available.
 func (s *Session) CanToggleSpan() bool { return len(s.summary.Reviews) > 0 }
 
-// Unreviewed reports whether the session currently shows the unreviewed span.
+// Unreviewed reports whether the session is showing what is actually unreviewed: everything
+// after the newest submission, against the working tree. A review further back as the base is a
+// different span and keeps the label it resolved to, because "unreviewed" over a span that
+// starts three submissions back is a claim the header has no way to take back. The predicate
+// is the newest review rather than "some review": after a submission, the span that named the
+// previous newest one by index stops being the unreviewed span, and says so.
 func (s *Session) Unreviewed() bool {
-	return s.sel.Base.Kind == span.KindReview && s.sel.Head.Kind == span.KindWorkingTree
+	latest := len(s.summary.Reviews) - 1
+	if latest < 0 {
+		return false
+	}
+	return s.current.Head.Kind == span.KindWorkingTree &&
+		s.current.Base.Kind == span.KindReview &&
+		s.current.Base.ResolvedIndex == latest
 }
 
 // Span is the resolved span being reviewed.

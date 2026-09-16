@@ -611,6 +611,42 @@ func TestSessionStepFromHistoricalGoesBackWhereItWasReviewing(t *testing.T) {
 	}
 }
 
+// "unreviewed" is the one word the screen substitutes for a span label, so it has to be
+// earned: it means everything after the newest submission. A span based on an older review
+// starts inside work that has already been reviewed, and calling that unreviewed is a claim
+// the reviewer cannot check from the screen they are reading.
+func TestUnreviewedMeansTheNewestReview(t *testing.T) {
+	e := newEnv(t)
+	e.f.CommitReviewMarker(slug, "feedback", gittest.WithFile("notes-0.md", "note\n"))
+	e.f.Commit("response 0", gittest.WithFile("service.go", "package main\n\nfunc Lock() { tx0() }\n"))
+	e.f.CommitReviewMarker(slug, "feedback", gittest.WithFile("notes-1.md", "note\n"))
+	e.f.Commit("response 1", gittest.WithFile("service.go", "package main\n\nfunc Lock() { tx1() }\n"))
+
+	newest := e.session(t, span.SinceReview(-1))
+	if !newest.Unreviewed() {
+		t.Errorf("Unreviewed() = false for the span after the newest review (%s)", newest.Span().Label)
+	}
+
+	older := e.session(t, span.SinceReview(-2))
+	if older.Unreviewed() {
+		t.Errorf("Unreviewed() = true for a span based on an older review (%s)", older.Span().Label)
+	}
+	if older.Span().Label == newest.Span().Label {
+		t.Errorf("both spans are labelled %q, so the header could not tell them apart even in principle",
+			older.Span().Label)
+	}
+
+	// The same holds for a review named by index, which is how the picker names anything
+	// beyond the most recent three.
+	byIndex := e.session(t, span.Selector{Base: span.Review(0), Head: span.WorkingTree()})
+	if byIndex.Unreviewed() {
+		t.Errorf("Unreviewed() = true for a span based on review 0 of 2 (%s)", byIndex.Span().Label)
+	}
+	if e.session(t, span.Full()).Unreviewed() {
+		t.Error("Unreviewed() = true for the full changeset")
+	}
+}
+
 // Marks are kept outside the working tree so a review can be resumed. PRD §16 keeps them
 // out of the review artifact, which they still are: nothing here is committed, shared, or
 // visible to `git status`.

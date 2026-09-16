@@ -535,3 +535,37 @@ func TestVBetweenTwoStopsDoesNotCountOutLoud(t *testing.T) {
 		t.Errorf("v said %q, want the span it stepped to", got.status)
 	}
 }
+
+// The header is where a wrong span name is most convincing: it is the line that says what the
+// whole screen is measuring. `spanName` substitutes the word "unreviewed" for a label, and it
+// may do that only for the span that is unreviewed.
+func TestHeaderNamesUnreviewedOnlyForTheUnreviewedSpan(t *testing.T) {
+	m, _ := pickerFixture(t, 2)
+	ctx := context.Background()
+
+	if err := m.sess.SetSpan(ctx, span.SinceReview(-1)); err != nil {
+		t.Fatalf("SetSpan unreviewed: %v", err)
+	}
+	m.refresh()
+	if !strings.Contains(m.View(), "span: unreviewed") {
+		t.Errorf("the header no longer says unreviewed for the unreviewed span:\n%s", headerOf(m))
+	}
+
+	// Three submissions back is not unreviewed: most of what it contains has been through a
+	// review already, and the span label names the review it starts after.
+	if err := m.sess.SetSpan(ctx, span.SinceReview(-2)); err != nil {
+		t.Fatalf("SetSpan older review: %v", err)
+	}
+	m.refresh()
+	if view := m.View(); strings.Contains(view, "span: unreviewed") {
+		t.Errorf("the header calls a span based on an older review unreviewed:\n%s", headerOf(m))
+	} else if !strings.Contains(view, "after review 0") {
+		t.Errorf("the header does not name the review the span starts after:\n%s", headerOf(m))
+	}
+}
+
+// headerOf is the two header lines, for failure messages that would otherwise dump a whole
+// screen to make a point about one line.
+func headerOf(m reviewModel) string {
+	return strings.Join(m.headerLines(m.sess.Header()), "\n")
+}
