@@ -547,7 +547,10 @@ Diff viewing goes through git, so git configuration decides what you see, e.g.
 `git difftool --no-prompt <from> -- <paths>` — one revision, so the tool compares the span's
 start against your **working tree** instead of two blobs. That is what makes the right-hand
 buffer the real file: edits persist, and changes you made with `e` show up when you open the
-tool again. `diff.tool`, `difftool.<tool>.cmd` and `difftool.prompt` behave as elsewhere.
+tool again. A span that ends at a commit instead of your working tree has no working tree in the
+comparison, so it passes both pinned revisions — `git difftool --no-prompt <from> <to> -- <paths>`
+— and both buffers are the blobs that span named. `diff.tool`, `difftool.<tool>.cmd` and
+`difftool.prompt` behave as elsewhere.
 
 The TUI holds its screen across a handoff. The session takes an alternate screen and keeps it
 while the editor or difftool runs, so the shell's scrollback is never exposed — a session that
@@ -578,7 +581,7 @@ ABOUT.md
     + new thread…
 ────────────────────────────────────────
 j/k move  tab section  enter open  d diff  p preview  e edit  space reviewed  a about  t new thread
-T hide threads  v spans  s submit  q quit
+T hide threads  v spans  V picker  s submit  q quit
 ```
 
 The screen is one navigable list in two blocks: the files the diff touched, and below the

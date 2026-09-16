@@ -1,5 +1,5 @@
 // Package span resolves "what should this review look at" into a pair of pinned
-// commits, per PRD §17 and docs/plans/active/review-span-selection/requirements.md.
+// commits, per PRD §17 and docs/plans/completed/review-span-selection/requirements.md.
 //
 // A span is two checkpoints, a base and a head. A checkpoint stays a *name* — the
 // changeset base, the working tree, a review by index, a commit id, a ref — and

@@ -1,7 +1,11 @@
 # gitpr Review Span Selection — Requirements Handoff
 
-Received from the project owner as a feature handoff. Reproduced verbatim except for heading levels.
-Audited against the code in "audit" notes at the end, written by the assistant during planning.
+Received from the project owner as a feature handoff. Reproduced except for heading levels, with two
+amendments added during execution at the owner's request: §8.1, and the rewrite of Scenario A that
+followed from it. §24 and §30 still describe `v` as a two-state toggle; §8.1 supersedes them, and they
+are left as received so the handoff can be read as it was sent. There is no "audit notes" section in
+this file — what was verified, and what the audit found, is in [plan.md](plan.md) and
+[audits/](audits/).
 
 ## 1. Purpose
 
