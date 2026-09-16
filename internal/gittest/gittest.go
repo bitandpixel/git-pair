@@ -450,6 +450,12 @@ func (f *Fixture) Short(rev string) string {
 	return strings.TrimSpace(f.MustGit("rev-parse", "--short", rev))
 }
 
+// Parent is the first parent of a revision.
+func (f *Fixture) Parent(rev string) string {
+	f.t.Helper()
+	return strings.TrimSpace(f.MustGit("rev-parse", "--verify", rev+"^"))
+}
+
 // Subject is a commit's subject line.
 func (f *Fixture) Subject(rev string) string {
 	f.t.Helper()

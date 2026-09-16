@@ -84,7 +84,7 @@ func Resolve(ctx context.Context, repo *git.Repo, base string, summary lifecycle
 	}
 
 	if opts.Covered {
-		return coveredSpan(ctx, repo, base, summary, head)
+		return coveredSpan(ctx, repo, base, summary)
 	}
 
 	idx := -1
@@ -111,28 +111,33 @@ func Resolve(ctx context.Context, repo *git.Repo, base string, summary lifecycle
 	}, nil
 }
 
-// coveredSpan resolves the changes the newest submission saw: everything since the
-// submission before it, or since the base for the first review. The end is the
-// submission itself, so the span does not drift if the author commits afterwards.
-func coveredSpan(ctx context.Context, repo *git.Repo, base string, summary lifecycle.Summary, head string) (Span, error) {
+// coveredSpan resolves what the newest submission was reviewing: the changeset as it
+// stood when the submission was made.
+//
+// It ends at the submission's *parent*. A review commit carries what the reviewer wrote
+// — a thread, an ABOUT.md edit, occasionally a file of their own — and those are the
+// reviewer's output, not what they were asked to look at. Measuring to the submission
+// itself shows a returning reviewer their own notes instead of the code.
+//
+// It starts at the merge base rather than at the previous submission, for the same
+// reason: two submissions in a row would otherwise produce a span holding nothing but
+// the previous reviewer's notes.
+func coveredSpan(ctx context.Context, repo *git.Repo, base string, summary lifecycle.Summary) (Span, error) {
 	if len(summary.Reviews) == 0 {
 		return Span{}, ErrNoReviews
 	}
 	idx := len(summary.Reviews) - 1
 	review := summary.Reviews[idx]
-	from := ""
-	if idx > 0 {
-		from = summary.Reviews[idx-1].SHA
+	to, err := repo.RevParse(ctx, review.SHA+"^")
+	if err != nil {
+		return Span{}, fmt.Errorf("cannot resolve the state review %s was made against: %w", review.Short, err)
 	}
-	if from == "" {
-		merged, err := repo.MergeBase(ctx, base, review.SHA)
-		if err != nil {
-			return Span{}, fmt.Errorf("cannot resolve the span review %s covered against base %q: %w", review.Short, base, err)
-		}
-		from = merged
+	from, err := repo.MergeBase(ctx, base, review.SHA)
+	if err != nil {
+		return Span{}, fmt.Errorf("cannot resolve the span review %s covered against base %q: %w", review.Short, base, err)
 	}
 	return Span{
-		Kind: Covered, From: from, To: review.SHA,
+		Kind: Covered, From: from, To: to,
 		FromRef:     review.Short,
 		Label:       fmt.Sprintf("review %s", review.Short),
 		ReviewIndex: idx,

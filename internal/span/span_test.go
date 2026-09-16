@@ -253,10 +253,12 @@ func TestResolveIgnoresOrdinaryCommits(t *testing.T) {
 // The span a submission saw. `review reopen` falls back to it when nothing has
 // landed after the review, so it has to end at the submission rather than at HEAD.
 func TestResolveCoveredSpan(t *testing.T) {
-	t.Run("first review covers base to the submission", func(t *testing.T) {
+	t.Run("first review covers the code it was made against", func(t *testing.T) {
 		s := newScenario(t, false)
 		f := s.f
-		review := f.CommitReviewMarker(slug, "feedback")
+		// The submission writes a thread and a file of the reviewer's own: neither
+		// is something they reviewed, so neither belongs in the span.
+		review := f.CommitReviewMarker(slug, "feedback", gittest.WithFile("review-notes.md", "look here\n"))
 		// The author responds afterwards: the covered span must not follow them.
 		f.Commit("response", gittest.WithFile("service.go", "package main\n\nfunc Lock() { tx() }\n"))
 
@@ -271,25 +273,37 @@ func TestResolveCoveredSpan(t *testing.T) {
 		if got.From != want.From {
 			t.Errorf("From = %s, want the merge base %s", got.From, want.From)
 		}
-		if got.To != review {
-			t.Errorf("To = %s, want the submission %s, not HEAD", got.To, review)
+		if got.To != f.Parent(review) {
+			t.Errorf("To = %s, want the submission's parent %s", got.To, f.Parent(review))
 		}
 		if got.Label != "review "+f.Short(review) {
 			t.Errorf("Label = %q, want %q", got.Label, "review "+f.Short(review))
 		}
+		names, err := s.repo.DiffNames(context.Background(), got.From, got.To)
+		if err != nil {
+			t.Fatalf("DiffNames: %v", err)
+		}
+		for _, n := range names {
+			if n == "review-notes.md" {
+				t.Errorf("the covered span lists %q: that is what the reviewer wrote, not what they reviewed", n)
+			}
+		}
+		if !contains(names, "service.go") {
+			t.Errorf("the covered span = %v, want the reviewed code in it", names)
+		}
 	})
 
-	t.Run("later review covers only what came after the previous one", func(t *testing.T) {
+	t.Run("later review covers the whole changeset as it stood", func(t *testing.T) {
 		s := newScenario(t, true)
 		got, err := s.resolve(t, span.Options{Covered: true})
 		if err != nil {
 			t.Fatalf("Resolve(covered): %v", err)
 		}
-		if got.To != s.reviews[2] {
-			t.Errorf("To = %s, want the newest review %s", got.To, s.reviews[2])
+		if got.To != s.f.Parent(s.reviews[2]) {
+			t.Errorf("To = %s, want the newest review's parent", got.To)
 		}
-		if got.From != s.reviews[1] {
-			t.Errorf("From = %s, want the previous review %s", got.From, s.reviews[1])
+		if got.From == s.reviews[1] {
+			t.Error("From = the previous review, which for back-to-back submissions would show only its notes")
 		}
 		if got.ReviewIndex != 2 {
 			t.Errorf("ReviewIndex = %d, want 2", got.ReviewIndex)
@@ -302,4 +316,13 @@ func TestResolveCoveredSpan(t *testing.T) {
 			t.Errorf("Resolve(covered) with no reviews = %v, want ErrNoReviews", err)
 		}
 	})
+}
+
+func contains(haystack []string, needle string) bool {
+	for _, h := range haystack {
+		if h == needle {
+			return true
+		}
+	}
+	return false
 }

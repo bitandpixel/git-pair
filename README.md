@@ -226,7 +226,7 @@ state plus a one-line `Reason`. There is no state file.
 | (default) | `merge-base(base, HEAD)..HEAD` | what is in this changeset |
 | `--unreviewed` | `<latest review>..HEAD` | what happened since I reviewed |
 | `--since-review=N` | `<Nth review>..HEAD` | what happened since review N |
-| `review reopen`, when nothing landed since | `<previous review or base>..<review>` | the changes that submission covered |
+| `review reopen`, when nothing landed since | `merge-base(base, review)..<review>^` | what that submission was reviewing |
 
 `--since-review` with no value means `-1`; indexes are chronological (`0` first, `-1`
 latest) and match `gitpr review history`.
@@ -234,8 +234,11 @@ latest) and match `gitpr review history`.
 Coming back to a changeset you already reviewed is common enough to have its own command:
 `gitpr review reopen` opens the TUI on the `<latest review>..HEAD` span, the same span as
 `review open --unreviewed`. When nothing has been committed since that submission there is
-nothing after it to show, so the session opens instead on the changes the submission
-*covered* — `<previous review or base>..<review>` — and says so on stderr. With no review
+nothing after it to show, so the session opens instead on what the submission was reviewing:
+the changeset as it stood when it was made, `merge-base(base, review)..<review>^`. The end is
+the submission's *parent* because a review commit carries what the reviewer wrote — threads,
+`ABOUT.md` edits, sometimes a file — and those are their output, not the work under review. It
+says so on stderr. With no review
 submitted it refuses and points at `review open`. Every command without a span flag stays on
 the full changeset.
 

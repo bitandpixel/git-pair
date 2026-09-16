@@ -177,10 +177,9 @@ changeset. Hand-verification of everything the README documents additionally cor
 11. **The empty-span refusal was the wrong answer, and is gone.** The owner hit it in the
     dogfood repo: `review reopen` refused because their feedback submission *was* the newest
     commit, which is precisely the state in which a reviewer types `reopen`. Refusing there
-    served the command's definition over the user's intent. `span.Covered` now resolves
-    `<previous review or base>..<review>` — the changes a submission saw, ending at the
-    submission so it cannot drift when the author commits — and `reopen` falls back to it with
-    one stderr line saying nothing has landed since. The only remaining refusal is `ErrNoReviews`
+    served the command's definition over the user's intent. `span.Covered` now resolves the
+    changes a submission saw (discovery 12 settles where that range ends, and why), and
+    `reopen` falls back to it with one stderr line saying nothing has landed since. The only remaining refusal is `ErrNoReviews`
     (exit 2), which has no sensible fallback. `v` from a covered span goes to the full changeset
     rather than the empty since-review span, since covered is only reachable when that span has
     no content. The exit-1 path was deleted rather than tested around: it had no reachable
@@ -188,6 +187,19 @@ changeset. Hand-verification of everything the README documents additionally cor
 
     Lesson for the plan: a guard added to protect an interface detail (an empty file list) should
     be checked against the states where people actually invoke the command.
+12. **The covered span ended in the wrong commit, so reopen showed a reviewer their own notes.**
+    The first cut ran `merge-base(base, review)..<review>`, and `..<review>` from the *previous*
+    review for a second submission. A review commit carries what the reviewer wrote — a thread,
+    an `ABOUT.md` edit, occasionally a file — so reopening listed those as the work under review,
+    and back-to-back submissions produced a span holding nothing but the previous reviewer's
+    notes. Covered now runs `merge-base(base, review)..<review>^`: the changeset as it stood when
+    the submission was made, minus the reviewer's own output. Verified on the dogfood repo, where
+    `changesets/bonjour/greetings.md` — a thread the submission itself wrote — dropped out of the
+    file list.
+
+    Worth keeping: the bug was invisible in the tests I first wrote, because the fixture's review
+    markers touched the same `service.go` the implementation did. A fixture where the submission
+    writes a file nothing else touches is what pins this.
 
 ## Architecture
 
@@ -461,3 +473,4 @@ M0 ──► M1 ──► M2 ──┬──► M3 ──► M4 ──► M6
 | 2026-09-16 | span default reversed | The resume-like default for `review open` (discovery 10) was reverted the same day and replaced by `review reopen`, so `review open` stays on the full changeset as §17.2 specifies. |
 | 2026-09-16 | reopen no longer refuses an empty span | Owner report from the dogfood repo (discovery 11). `span.Covered` added; `review reopen` falls back to the span the submission covered; the exit-1 refusal and its test removed as unreachable. |
 | 2026-09-16 | no undo for submissions | Owner asked whether `review reopen` should undo a submission (reset the commit, or a cancelling commit on top). Neither: D5 records that a submission is corrected by submitting again, with `previous_review` in the submit output making supersession visible. Evidence in the discussion: deleting the review ref left `State: FEEDBACK` unchanged. |
+| 2026-09-16 | covered span ends at the submission's parent | Second owner report on the same command: reopen listed the thread and files the submission itself wrote (discovery 12). `coveredSpan` now diffs to `<review>^` from the merge base, dropping the previous-review start point. |
