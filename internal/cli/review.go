@@ -29,6 +29,7 @@ func newReviewCommand(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "review",
 		Short: "Reviewer-side commands",
+		RunE:  groupUsage("review"),
 	}
 	cmd.AddCommand(
 		newReviewOpenCommand(a),
@@ -56,7 +57,8 @@ span, tracks which ones you have looked at, and launches your editor, your
 difftool, ABOUT.md, and review threads around it, releasing the terminal while
 those processes run.
 
-Submitting a review is also available from the CLI:
+Press s to submit without leaving the screen, then b (block), f (feedback) or
+a (approve); Esc cancels. The same outcomes are available from the CLI:
   gitpr review submit --block | --feedback | --approve`,
 		Example: `  gitpr review open
   gitpr review open --unreviewed
@@ -556,13 +558,13 @@ func runReviewClose(ctx context.Context, a *app, opts *closeOptions) error {
 		return err
 	}
 	if !s.clean {
-		return &usageError{fmt.Errorf("working tree must be clean before closing %s", s.cs.Slug)}
+		return fmt.Errorf("working tree must be clean before closing %s", s.cs.Slug)
 	}
 	switch s.summary.State {
 	case model.StateApproved, model.StateFeedback:
 		// Integration is permitted.
 	case model.StateClosed:
-		return &usageError{fmt.Errorf("changeset %s is already closed", s.cs.Slug)}
+		return fmt.Errorf("changeset %s is already closed", s.cs.Slug)
 	default:
 		return fmt.Errorf("cannot close %s: latest outcome is %s (%s); integration needs approve or feedback",
 			s.cs.Slug, s.summary.State, s.summary.Reason)

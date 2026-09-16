@@ -188,8 +188,15 @@ func archiveRefFor(ctx context.Context, repo *git.Repo, slug, head string) (stri
 	if err != nil {
 		return "", err
 	}
+	// The archive ref points at the approved head, and HEAD is then the close
+	// marker, so equality against HEAD never matches. Newest reachable wins
+	// (`for-each-ref --sort=-committerdate`).
 	for _, e := range entries {
-		if e.SHA == head {
+		reachable, err := repo.IsAncestor(ctx, e.SHA, head)
+		if err != nil {
+			return "", err
+		}
+		if reachable {
 			return e.Name, nil
 		}
 	}

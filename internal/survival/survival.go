@@ -167,6 +167,9 @@ func binaryPaths(numstat string) map[string]bool {
 
 // parseAddedLines walks `git show -U0` output and returns distinct added lines.
 //
+// The hunk header's `+<n>` is the post-image line the hunk starts at, and every
+// added or context line advances it, so the counter is read before it is bumped.
+//
 // It relies on four properties of that stream: the post-image path appears on a
 // `+++ b/<path>` header before any of the file's hunks; a zero-context hunk
 // body contains only `+` and `-` lines; `\ No newline at end of file` is not
@@ -217,18 +220,19 @@ func parseAddedLines(diff string, binary map[string]bool) []Addition {
 			continue
 		}
 		text := raw[1:]
-		lineNo++
 		// Blank lines cannot carry feedback and would dominate the report.
 		if strings.TrimSpace(text) == "" {
+			lineNo++
 			continue
 		}
 		k := key{path, text}
 		if a, ok := seen[k]; ok {
 			a.Count++
-			continue
+		} else {
+			seen[k] = &Addition{Path: path, Text: text, Line: lineNo, Count: 1}
+			order = append(order, k)
 		}
-		seen[k] = &Addition{Path: path, Text: text, Line: lineNo, Count: 1}
-		order = append(order, k)
+		lineNo++
 	}
 
 	out := make([]Addition, 0, len(order))

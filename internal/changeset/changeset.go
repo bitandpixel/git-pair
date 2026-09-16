@@ -158,10 +158,17 @@ func List(repo *git.Repo) ([]Changeset, error) {
 			continue
 		}
 		mdPath := filepath.Join(repo.Dir, Root, e.Name(), MetadataFile)
+		// CHANGESET.yaml is what makes a directory under changesets/ a changeset.
+		// Without this check readMetadata's empty-map-on-missing-file behaviour
+		// would report any stray directory (notes, scratch files) as a changeset
+		// and make `review queue` complain about it.
+		if info, err := os.Stat(mdPath); err != nil || info.IsDir() {
+			continue
+		}
 		md, err := readMetadata(mdPath)
 		if err != nil {
-			// A directory without readable metadata is not a changeset we
-			// can reason about; skip it rather than fail the whole listing.
+			// Unreadable metadata is not a changeset we can reason about; skip
+			// it rather than fail the whole listing.
 			continue
 		}
 		out = append(out, Changeset{

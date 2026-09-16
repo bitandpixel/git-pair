@@ -64,7 +64,7 @@ func Execute(args []string) int {
 	var ge *git.Error
 	var ue *usageError
 	switch {
-	case errors.As(err, &ge):
+	case errors.Is(err, git.ErrNotRepository), errors.As(err, &ge):
 		code = exitGitError
 	case errors.As(err, &ue), isUsageError(err):
 		code = exitUsage
@@ -116,6 +116,9 @@ Inspection:        gitpr status | diff`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return &usageError{fmt.Errorf("unknown command %q; run `gitpr --help` for the command list", args[0])}
+			}
 			return cmd.Help()
 		},
 	}
@@ -127,6 +130,17 @@ Inspection:        gitpr status | diff`,
 		newDiffCommand(a),
 	)
 	return root
+}
+
+// groupUsage makes a parent command report an unknown subcommand instead of
+// silently printing help and exiting 0.
+func groupUsage(name string) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) > 0 {
+			return &usageError{fmt.Errorf("unknown %s command %q; run `gitpr %s --help`", name, args[0], name)}
+		}
+		return cmd.Help()
+	}
 }
 
 // --- shared loading ---------------------------------------------------------

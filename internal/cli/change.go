@@ -21,6 +21,10 @@ func newChangeCommand(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "change",
 		Short: "Author-side commands",
+		// Without a RunE cobra treats an unmatched subcommand as a help
+		// request and exits 0, which is indistinguishable from success for an
+		// agent that typo'd the verb.
+		RunE: groupUsage("change"),
 	}
 	cmd.AddCommand(newChangeInitCommand(a), newChangeReadyCommand(a))
 	return cmd
@@ -181,13 +185,15 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 	}
 
 	if !s.clean {
-		return &usageError{fmt.Errorf("working tree must be clean before marking %s ready; commit or stash your changes first", s.cs.Slug)}
+		// Repository state, not bad arguments: exit 1 so an agent can tell
+		// "fix the tree and retry" apart from "you invoked this wrong".
+		return fmt.Errorf("working tree must be clean before marking %s ready; commit or stash your changes first", s.cs.Slug)
 	}
 	if !s.cs.AboutExists(s.repo) {
-		return &usageError{fmt.Errorf("%s is missing; describe the change before marking it ready", s.cs.AboutPath())}
+		return fmt.Errorf("%s is missing; describe the change before marking it ready", s.cs.AboutPath())
 	}
 	if s.head == "" {
-		return &usageError{fmt.Errorf("nothing to mark ready: the repository has no commits yet")}
+		return fmt.Errorf("nothing to mark ready: the repository has no commits yet")
 	}
 
 	report, err := survivalCheck(ctx, s)

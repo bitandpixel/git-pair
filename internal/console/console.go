@@ -21,8 +21,8 @@ import (
 // EditorCommand builds the command opening path in the user's editor, honouring
 // $VISUAL then $EDITOR then vi.
 //
-// The value is passed through a shell so settings like EDITOR="code --wait"
-// work the way they do for git itself.
+// Resolution order is $VISUAL, then $EDITOR, then vi — the same precedence git
+// uses, so a machine with VISUAL=vim ignores an EDITOR override.
 func EditorCommand(repo *git.Repo, path string) (*exec.Cmd, error) {
 	value := firstSet(os.Getenv("VISUAL"), os.Getenv("EDITOR"), "vi")
 	if runtime.GOOS == "windows" {
@@ -33,7 +33,12 @@ func EditorCommand(repo *git.Repo, path string) (*exec.Cmd, error) {
 		}
 		return command(repo, fields[0], append(fields[1:], path)...), nil
 	}
-	cmd := exec.Command("/bin/sh", "-c", `exec "${VISUAL:-${EDITOR:-vi}}" "$@"`, "gitpr", path)
+	// eval + an unquoted expansion reproduces git's own handling, so
+	// EDITOR="code --wait" splits into a program and its flags. Quoting the
+	// expansion instead treats the whole value as one program name. A value
+	// containing a literal space in the program name needs its own quoting
+	// ("EDITOR=\"/my editor.sh\" --wait"), exactly as it does for git.
+	cmd := exec.Command("/bin/sh", "-c", `eval exec ${VISUAL:-${EDITOR:-vi}} "$@"`, "gitpr", path)
 	cmd.Dir = repo.Dir
 	cmd.Env = append(os.Environ(), "VISUAL="+value)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
