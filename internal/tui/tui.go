@@ -458,6 +458,11 @@ func (m *reviewModel) clamp() {
 		m.cursor, m.scroll = 0, 0
 		return
 	}
+	if m.cursor < 0 {
+		// Without this, k at the top drives the cursor negative and View indexes
+		// files[-1], which panics the whole program.
+		m.cursor = 0
+	}
 	if m.cursor > total-1 {
 		m.cursor = total - 1
 	}
