@@ -151,7 +151,7 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
 		m.move(-1)
 	case key.Type == tea.KeySpace:
-		m.toggleAt(m.cursor)
+		m.sess.Toggle(m.cursor)
 	case key.Type == tea.KeyEnter:
 		return m.openDiff()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'e':
@@ -482,12 +482,6 @@ func (m *reviewModel) move(delta int) {
 	}
 	m.cursor += delta
 	m.clamp()
-}
-
-func (m *reviewModel) toggleAt(i int) {
-	m.sess.Toggle(i)
-	// Moving on after marking a file read is what reviewers expect.
-	m.move(1)
 }
 
 func (m reviewModel) selected() (File, bool) {

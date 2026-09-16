@@ -484,8 +484,9 @@ Threads (1)
 j/k move  enter difftool  e edit  space reviewed  a about  t thread  T browse  v span  s submit  q quit
 ```
 
-`Enter` opens the selected file in the difftool, `e` in the editor, `Space` toggles reviewed,
-`a` opens `ABOUT.md`, `t` prompts for a new thread, `T` browses threads, `v` toggles the
+`Enter` opens the selected file in the difftool, `e` in the editor, `Space` toggles reviewed on
+the row under the cursor — which stays there, since marking is not navigation — `a` opens
+`ABOUT.md`, `t` prompts for a new thread, `T` browses threads, `v` toggles the
 full/unreviewed span, `s` opens a submit prompt taking `b`, `f` or `a`, `q` quits. Submitting
 commits the review, moves the ref and **ends the session**, printing one line about what it
 did; `Esc` from the prompt returns to the list. The terminal
