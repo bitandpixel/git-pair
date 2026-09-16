@@ -105,7 +105,7 @@ From the PRD, treated as binding:
 | Post-MVP: one TUI list, two sections — files, then ABOUT.md and nested threads with `+ new thread…` | done | `TestJRunsFromTheFilesIntoTheChangesetSection`, `TestTabSwitchesBetweenTheTwoSections`, `TestThreadsHeadingCollapsesAndExpands`, `TestEnterOpensWhatTheRowIsFor`, `TestSpaceMarksFilesAndRefusesTheRest`, `TestNewThreadRowSitsUnderItsThreads`, `TestThreadPromptKeepsSpacesInATitle` |
 | Post-MVP: author-side `change feedback` and `change wait`, replacing `diff --unreviewed` in author hints | done | `TestChangeFeedbackShowsTheReviewItself`, `TestChangeFeedbackWithoutAReview`, `TestChangeWaitReturnsAtOnceWhenAReviewIsAlreadyIn`, `TestChangeWaitTimeoutReportsWhereThingsStand`, `TestChangeWaitFetchesAndSeesAReviewFromAnotherClone` (two clones, bare remote, no network), `TestPollUntil*` (5 cases) |
 
-Test suite: 29 files, 236 test functions, 13 packages, all passing; `go vet` and `gofmt`
+Test suite: 29 files, 237 test functions, 13 packages, all passing; `go vet` and `gofmt`
 clean. The suite found four real defects, all fixed in `fix: exit codes, added-line
 positions, changeset detection, editor expansion`: an off-by-one in
 `survival.AddedLines` line numbers, state-based refusals exiting 2 instead of 1, unknown
@@ -257,10 +257,14 @@ changeset. Hand-verification of everything the README documents additionally cor
     shortcut to read it — which the owner chose over deduplicating. Rows live in the model and
     are rebuilt by `refresh`, which preserves the cursor by row kind and path, so a thread
     created in the editor does not move the reviewer; `chromeRows`/`windowRows` now count the
-    real header and footer because the section left the fixed chrome. Driving the real TUI in a
-    pty caught a bug the unit tests could not: bubbletea reports a lone space as `KeySpace`, not
-    `KeyRunes`, so every space in a new thread's title was silently dropped before the file name
-    was derived from it.
+    real header and footer because the section left the fixed chrome. The two blocks are drawn
+    on either side of the reviewed counter — one window and one cursor over one list, split only
+    at render time — so the block above the counter is "files the diff touched" and the one below
+    is "what the review is made of", which is what makes Tab read as skipping a section. The owner
+    asked for that placement after seeing the section directly under the file rows. Driving the
+    real TUI in a pty caught a bug the unit tests could not: bubbletea reports a lone space as
+    `KeySpace`, not `KeyRunes`, so every space in a new thread's title was silently dropped
+    before the file name was derived from it.
 
 ## Architecture
 

@@ -541,30 +541,35 @@ while the tool is for working on it. Plain `gitpr diff` runs `git diff` with
 `core.quotePath=false` and inherits your pager and colour settings; the span label goes to
 stderr so stdout stays pipeable.
 
-`gitpr review open` is an orchestration screen, not an editor — header, changed files with
-per-file marks, then the changeset documents below them:
+`gitpr review open` is an orchestration screen, not an editor. The changed files and their
+marks come first, the reviewed counter under them, then the changeset documents:
 
 ```text
 tuishow
 base: main  span: unreviewed
+
 ○ src/a.ts
+
+0 / 1 reviewed
+
 ABOUT.md
 ▾ Threads (1)
     does-the-lock-cover-the-map.md
     + new thread…
-0 / 1 reviewed
+
 j/k move  tab section  enter open  e edit  space reviewed  a about  t new thread
 T hide threads  v span  s submit  q quit
 ```
 
-The screen is one navigable list in two sections: the files in the span, then ABOUT.md and the
-threads. `j` runs off the bottom of the files into the section below — reading the code and
+The screen is one navigable list in two blocks: the files the diff touched, and below the
+counter the documents the review is made of. `j` runs off the bottom of the files into the
+section below — reading the code and
 then reading what the changeset says about it is one motion, not two modes — and `Tab` toggles
 between the halves. `Enter` does whatever the row under the cursor is for: the difftool for a
 file, the editor for ABOUT.md or a thread, collapse or expand for the `Threads` heading, the
 title prompt for `+ new thread…`. `e` edits the selected row, `Space` toggles reviewed on a
 file row — which stays under the cursor, since marking is not navigation — and refuses the
-rows below the files, because the changeset documents are read rather than diffed. `a` opens
+rows below the counter, because the changeset documents are read rather than diffed. `a` opens
 `ABOUT.md` and `t` prompts for a new thread from anywhere; `T` collapses the thread list; `v`
 toggles the full/unreviewed span; `s` opens a submit prompt taking `b`, `f` or `a`; `q` quits.
 A thread created from the list is written, opened in the editor, and left selected, so the

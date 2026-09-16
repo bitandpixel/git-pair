@@ -475,12 +475,9 @@ func (m reviewModel) View() string {
 	if total == 0 {
 		b.WriteString(styleDim.Render("(no changed files in this span)") + "\n")
 	}
-	for _, idx := range m.visibleRows() {
-		line := m.rowText(m.rows[idx])
-		if m.cursor == idx {
-			line = styleSelected.Render(m.truncate(line))
-		}
-		b.WriteString(line + "\n")
+	files, section := m.window()
+	for _, r := range files {
+		b.WriteString(m.line(r) + "\n")
 	}
 	if m.scroll > 0 {
 		b.WriteString(styleDim.Render(fmt.Sprintf("  (hidden above: %d)", m.scroll)) + "\n")
@@ -489,6 +486,12 @@ func (m reviewModel) View() string {
 	b.WriteString("\n")
 	b.WriteString(fmt.Sprintf("%d / %d reviewed\n", reviewed, total))
 	b.WriteString("\n")
+	// The changeset section is below the counter it does not belong to, so the block above
+	// reads as "these are the files the diff touched" and the block below as "this is what
+	// the review is made of".
+	for _, r := range section {
+		b.WriteString(m.line(r) + "\n")
+	}
 
 	switch m.mode {
 	case modePrompt:
@@ -711,6 +714,37 @@ func (m reviewModel) selectedRow() (row, bool) {
 	return m.rows[m.cursor], true
 }
 
+// renderedRow is a row with its position in the list, so the two blocks can be drawn apart
+// and still know which one carries the cursor.
+type renderedRow struct {
+	row
+	index int
+}
+
+// window splits the rows inside the scroll window into the two blocks View draws: the files,
+// then the changeset section below the reviewed counter. One window over one list, because
+// the cursor walks straight from one block into the other.
+func (m reviewModel) window() (files, section []renderedRow) {
+	for _, idx := range m.visibleRows() {
+		r := renderedRow{row: m.rows[idx], index: idx}
+		if m.rows[idx].kind == rowFile {
+			files = append(files, r)
+		} else {
+			section = append(section, r)
+		}
+	}
+	return files, section
+}
+
+// line renders one row, highlighted when the cursor is on it.
+func (m reviewModel) line(r renderedRow) string {
+	text := m.rowText(r.row)
+	if m.cursor == r.index {
+		return styleSelected.Render(m.truncate(text))
+	}
+	return text
+}
+
 // windowRows is how many rows fit between the header and the footer.
 func (m reviewModel) windowRows() int {
 	window := m.height - m.chromeRows()
@@ -721,11 +755,12 @@ func (m reviewModel) windowRows() int {
 }
 
 // chromeRows counts the lines View writes outside the row list: the title, the base and span
-// line, the blank under them, the blank above the counter, the counter, the blank above the
-// helper, and then the helper itself, the "hidden above" note while scrolled, and the status
-// line when there is one. The changeset section is part of the row list, so it is not here.
+// line, the blank under them, the blank above the counter, the counter, the blank under it,
+// the blank above the helper, and then the helper itself, the "hidden above" note while
+// scrolled, and the status line when there is one. The changeset section is part of the row
+// list, so it is not here — only the counter that separates the two blocks is.
 func (m reviewModel) chromeRows() int {
-	chrome := 6 + len(m.helpLines())
+	chrome := 7 + len(m.helpLines())
 	if m.scroll > 0 {
 		chrome++
 	}

@@ -365,3 +365,67 @@ func TestThreadPromptKeepsSpacesInATitle(t *testing.T) {
 		t.Errorf("the thread file is missing at %s: %v", path, statErr)
 	}
 }
+
+// The counter counts files, so the files and the counter are one block and the changeset
+// section sits below it: the block above answers "what did the diff touch", the one below
+// "what is the review made of". Tab then reads as skipping to the next block.
+func TestChangesetSectionRendersBelowTheCounter(t *testing.T) {
+	m := navModel(t)
+	lines := strings.Split(ansiCodes.ReplaceAllString(m.View(), ""), "\n")
+
+	counter := lineWithPrefix(lines, "0 / ")
+	if counter < 0 {
+		t.Fatalf("no reviewed counter in:\n%s", strings.Join(lines, "\n"))
+	}
+	about := lineWithExact(lines, "ABOUT.md")
+	head := lineWithPrefix(lines, "\u25be Threads (")
+	if about < 0 || head < 0 {
+		t.Fatalf("ABOUT.md (%d) or the thread heading (%d) is missing from:\n%s",
+			about, head, strings.Join(lines, "\n"))
+	}
+	if about < counter || head < counter {
+		t.Errorf("the changeset section is not below the counter (counter %d, ABOUT.md %d, heading %d)",
+			counter, about, head)
+	}
+
+	for _, r := range m.rows {
+		if r.kind != rowFile {
+			continue
+		}
+		at := lineWithSuffix(lines, r.name)
+		if at < 0 {
+			t.Errorf("file %q is not rendered:\n%s", r.name, strings.Join(lines, "\n"))
+			continue
+		}
+		if at > counter {
+			t.Errorf("file %q renders at %d, below the counter at %d", r.name, at, counter)
+		}
+	}
+}
+
+func lineWithPrefix(lines []string, prefix string) int {
+	for i, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), prefix) {
+			return i
+		}
+	}
+	return -1
+}
+
+func lineWithExact(lines []string, want string) int {
+	for i, l := range lines {
+		if strings.TrimSpace(l) == want {
+			return i
+		}
+	}
+	return -1
+}
+
+func lineWithSuffix(lines []string, suffix string) int {
+	for i, l := range lines {
+		if strings.HasSuffix(strings.TrimSpace(l), suffix) {
+			return i
+		}
+	}
+	return -1
+}
