@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -61,6 +62,9 @@ type reviewModel struct {
 	status       string
 	statusErr    bool
 	quitting     bool
+	// submitted is the one-line summary of a review submitted from inside the
+	// session, printed after the alt screen closes.
+	submitted string
 }
 
 // Run starts the review session. It blocks until the reviewer quits.
@@ -75,8 +79,17 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if fm, ok := final.(reviewModel); ok && fm.quitting {
-		return ErrQuit
+	if fm, ok := final.(reviewModel); ok {
+		if fm.submitted != "" {
+			out := opts.Out
+			if out == nil {
+				out = os.Stdout
+			}
+			fmt.Fprintln(out, fm.submitted)
+		}
+		if fm.quitting {
+			return ErrQuit
+		}
 	}
 	return nil
 }
@@ -197,12 +210,13 @@ func (m reviewModel) handleSubmitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	} else if n > 1 {
 		files = fmt.Sprintf("%d files", n)
 	}
-	m.setStatus(fmt.Sprintf("Submitted %s review (%s) covering %s", outcome, short(result.Commit), files), false)
-	if err := m.sess.Reload(m.ctx); err != nil {
-		m.setStatus(err.Error(), true)
-	}
-	m.clamp()
-	return m, nil
+	// Submitting ends the session. The review is committed and the ref has moved,
+	// so there is nothing left to review in this run: staying put would invite a
+	// second submission of the same state, and the file list would be describing
+	// a span that no longer means what it did.
+	m.submitted = fmt.Sprintf("Submitted %s review (%s) covering %s", outcome, short(result.Commit), files)
+	m.quitting = true
+	return m, tea.Quit
 }
 
 func (m reviewModel) handlePromptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -299,7 +313,7 @@ func (m reviewModel) openDiff() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	sp := m.sess.Span()
-	return m.runExternal(console.DiffToolCommand(m.sess.Repo(), sp.From, sp.To, []string{f.Path}),
+	return m.runExternal(console.DiffToolCommand(m.sess.Repo(), sp.From, []string{f.Path}),
 		"Difftool exited with an error")
 }
 

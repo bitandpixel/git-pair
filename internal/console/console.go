@@ -50,8 +50,18 @@ func EditorCommand(repo *git.Repo, path string) (*exec.Cmd, error) {
 // whatever the user configured (vimdiff, meld, ...) instead of a renderer of
 // gitpr's own. --no-prompt avoids a per-file confirmation for what is already
 // an explicit, single-file request.
-func DiffToolCommand(repo *git.Repo, from, to string, paths []string) *exec.Cmd {
-	args := []string{"difftool", "--no-prompt", from, to}
+// DiffToolCommand launches the user's configured difftool for `from` against
+// the working tree.
+//
+// One revision, not two, and that is the whole point. `git difftool <from> <to>`
+// materialises both sides as temporary blob files, so the tool edits throwaway
+// copies: keystrokes that look like an edit have nowhere to be written, and
+// changes made outside the tool never appear in it. Against the working tree the
+// right-hand buffer is the actual file, so edits persist and are visible the next
+// time the tool is opened. The printed and --stat diffs stay on the committed
+// span: they describe review state, while the tool is for a human working on it.
+func DiffToolCommand(repo *git.Repo, from string, paths []string) *exec.Cmd {
+	args := []string{"difftool", "--no-prompt", from}
 	if len(paths) > 0 {
 		args = append(args, "--")
 		args = append(args, paths...)

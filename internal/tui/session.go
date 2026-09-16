@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"strings"
 
 	"gitpr/internal/changeset"
@@ -27,6 +28,10 @@ type Options struct {
 	// Span is the requested starting span; a missing value means the full
 	// changeset.
 	Span span.Options
+	// Out receives the one-line summary printed after the session ends, so a
+	// submission is visible in the normal screen once the alt screen is gone.
+	// Defaults to os.Stdout.
+	Out io.Writer
 }
 
 // Header is the session's identity line.

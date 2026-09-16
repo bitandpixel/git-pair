@@ -46,7 +46,7 @@ settings apply.`,
 	cmd.Flags().StringVar(&opts.sinceReview, "since-review", "",
 		"span since review N (bare --since-review means -1)")
 	cmd.Flags().BoolVar(&opts.stat, "stat", false, "show diffstat instead of the patch")
-	cmd.Flags().BoolVar(&opts.tool, "tool", false, "launch the configured difftool instead of printing")
+	cmd.Flags().BoolVar(&opts.tool, "tool", false, "launch the configured difftool; it compares the span start against the working tree, so edits persist")
 	// A bare --since-review means "the latest review", matching --unreviewed.
 	cmd.Flags().Lookup("since-review").NoOptDefVal = "-1"
 	return cmd
@@ -104,7 +104,7 @@ func runDiff(ctx context.Context, a *app, opts *spanOptions, paths []string) err
 		return s.repo.GitInherit(ctx, args...)
 	}
 	if opts.tool {
-		return console.DiffToolCommand(s.repo, sp.From, sp.To, paths).Run()
+		return console.DiffToolCommand(s.repo, sp.From, paths).Run()
 	}
 	return console.DiffCommand(s.repo, sp.From, sp.To, paths).Run()
 }
