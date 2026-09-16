@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -183,8 +184,8 @@ func TestEnterOpensWhatTheRowIsFor(t *testing.T) {
 		want action
 	}{
 		{rowFile, actionDiff},
-		{rowThread, actionEdit},
-		{rowAbout, actionAbout},
+		{rowThread, actionArtifact},
+		{rowAbout, actionArtifact},
 		{rowThreadsHead, actionCollapse},
 		{rowNewThread, actionNewThread},
 	}
@@ -499,23 +500,28 @@ func TestDDiffsTheSelectedRow(t *testing.T) {
 		t.Errorf("d on a file reported %q", m.status)
 	}
 
-	// A changeset document that did change in the span is diffable too, from either block.
+	// The fixture's ABOUT.md is in the span but was invented by the changeset, so there is
+	// nothing on the left of the comparison: the file opens, and says why.
 	about := indexOf(t, m, rowAbout)
 	if !m.inSpan[m.rows[about].path] {
 		t.Skipf("the fixture's ABOUT.md is not in the span, so this case needs a different fixture")
 	}
 	m.cursor = about
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = after.(reviewModel)
 	if cmd == nil {
-		t.Errorf("d on %q opened nothing", m.rows[about].name)
+		t.Fatalf("d on %q opened nothing", m.rows[about].name)
+	}
+	if !strings.Contains(m.pendingNote, "added by this changeset") {
+		t.Errorf("d on a document the changeset invented said %q, want that it has nothing to compare against",
+			m.pendingNote)
 	}
 
-	// A thread written this session is not in the span: no difftool, and a reason.
 	// A thread written this session is not in the span: no empty difftool, the file instead.
 	m = navModel(t)
 	m.cursor = indexOf(t, m, rowThread)
 	thread := m.rows[m.cursor]
-	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	after, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = after.(reviewModel)
 	if cmd == nil {
 		t.Errorf("d on %q opened nothing, want the editor", thread.name)
@@ -585,5 +591,77 @@ func TestDiffFallbackNoteSurvivesTheEditor(t *testing.T) {
 	}
 	if strings.Contains(m.status, "has not changed") || m.pendingNote != "" {
 		t.Errorf("a failed handoff kept its note: status %q, pending %q", m.status, m.pendingNote)
+	}
+}
+
+// A document is diffable only with two sides to the comparison: the span has to have changed
+// it, and it has to have existed where the span starts.
+func TestArtifactActionNeedsTwoSides(t *testing.T) {
+	cases := []struct {
+		inSpan, hasPrior bool
+		want             action
+		why              string
+	}{
+		{true, true, actionDiff, "the unreviewed span rewrote a document from the last round"},
+		{true, false, actionEdit, "the changeset invented the document"},
+		{false, true, actionEdit, "the span left the document alone"},
+		{false, false, actionEdit, "the document is new and outside the span"},
+	}
+	for _, c := range cases {
+		if got := artifactAction(c.inSpan, c.hasPrior); got != c.want {
+			t.Errorf("artifactAction(%v, %v) = %d, want %d (%s)", c.inSpan, c.hasPrior, got, c.want, c.why)
+		}
+	}
+}
+
+// The two reasons a document opens in the editor instead of a difftool read differently, and
+// the reviewer should get the right one.
+func TestArtifactNoteNamesTheReason(t *testing.T) {
+	inSpan := reviewModel{inSpan: map[string]bool{"changesets/x/locking.md": true}}
+	got := inSpan.artifactNote(row{path: "changesets/x/locking.md", name: "locking.md"})
+	if !strings.Contains(got, "added by this changeset") {
+		t.Errorf("note for a new document = %q", got)
+	}
+
+	outside := reviewModel{inSpan: map[string]bool{}}
+	got = outside.artifactNote(row{path: "changesets/x/locking.md", name: "locking.md"})
+	if !strings.Contains(got, "has not changed in this span") {
+		t.Errorf("note for a document the span left alone = %q", got)
+	}
+	for _, n := range []string{got} {
+		if !strings.Contains(n, "opened in the editor") {
+			t.Errorf("note %q does not say what happened instead", n)
+		}
+	}
+}
+
+// The rule is only as good as the lookup under it: it asks about the file the row names, at
+// the revision the span starts from.
+func TestSessionAnswersWhetherAFileExistedAtTheSpanStart(t *testing.T) {
+	m := navModel(t)
+	ctx := context.Background()
+	from := m.sess.Span().From
+
+	if m.sess.HasVersionAt(ctx, from, m.sess.AboutPath()) {
+		t.Errorf("%s existed at %s, but the fixture's changeset adds it", m.sess.AboutPath(), from)
+	}
+	if !m.sess.HasVersionAt(ctx, from, "main.go") {
+		t.Errorf("main.go did not exist at %s, but the fixture seeds it before the branch", from)
+	}
+}
+
+// Enter on a changeset document goes through the same decision as `d`, so the first review of
+// a changeset reads ABOUT.md rather than diffing it against nothing.
+func TestEnterOnADocumentFollowsTheSpan(t *testing.T) {
+	m := navModel(t)
+	m.cursor = indexOf(t, m, rowAbout)
+	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = after.(reviewModel)
+	if cmd == nil {
+		t.Fatal("Enter on ABOUT.md opened nothing")
+	}
+	if !strings.Contains(m.pendingNote, "added by this changeset") {
+		t.Errorf("Enter on a document the changeset invented said %q, want the editor with a reason",
+			m.pendingNote)
 	}
 }

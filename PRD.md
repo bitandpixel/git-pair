@@ -979,11 +979,13 @@ Suggested bindings:
 ```text
 j/k      navigate the whole list
 Tab      switch between the file section and the changeset section
-Enter    activate the row: difftool for a file, editor for ABOUT.md or a thread,
-         collapse/expand for the Threads heading, new-thread prompt for + new thread…
-d        open the difftool for the selected row, whatever its kind; a file the span
-         does not touch opens in the editor instead, with a note saying so
-e        open the selected row in the editor
+Enter    activate the row: difftool for a file, the decision below for ABOUT.md or a
+         thread, collapse/expand for the Threads heading, new-thread prompt for
+         + new thread…
+d        open the difftool for the selected row: always for a file, and for a document
+         only when the span changed it and it already existed where the span starts —
+         otherwise the document opens in the editor, with a note naming the reason
+e        open the selected row in the editor, whatever the span did
 Space    toggle reviewed for a file row
 
 a        open ABOUT.md
@@ -1630,9 +1632,9 @@ Suggested defaults:
 ```text
 j/k      move through the list: files, then the changeset section
 Tab      switch between the two sections
-Enter    activate the selected row: diff a file, edit ABOUT.md or a thread,
-         collapse the thread list, create a thread
-d        open the difftool for the selected row
+Enter    activate the selected row: diff a file, diff or read a changeset document
+         (whichever gives a real comparison), collapse the thread list, create a thread
+d        open the difftool for the selected row, falling back to the editor with a note
 e        edit the selected file or document
 Space    mark file reviewed/unreviewed
 

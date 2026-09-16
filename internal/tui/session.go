@@ -194,6 +194,13 @@ func (s *Session) AboutPath() string { return s.cs.AboutPath() }
 // Threads lists the changeset's review thread files.
 func (s *Session) Threads() ([]string, error) { return s.cs.Threads(s.repo) }
 
+// HasVersionAt reports whether path existed in rev. It is what separates a document the span
+// rewrote from one the span invented, which is the difference between a diff with two sides
+// and a diff against nothing.
+func (s *Session) HasVersionAt(ctx context.Context, rev, path string) bool {
+	return s.repo.PathExistsAt(ctx, rev, path)
+}
+
 // Changeset is the changeset under review.
 func (s *Session) Changeset() changeset.Changeset { return s.cs }
 

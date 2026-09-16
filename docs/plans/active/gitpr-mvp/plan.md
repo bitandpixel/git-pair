@@ -277,6 +277,24 @@ changeset. Hand-verification of everything the README documents additionally cor
     (`pendingNote`, printed when the child exits) and assigned by every handoff, including a
     failed one — a difftool that fails is a misconfiguration to report, not a reason to pretend
     the fallback happened.
+17. **Enter on a changeset document follows the span, because a diff against nothing is not a
+    diff.** The proposal was to make Enter on ABOUT.md and threads behave like `d`. The
+    objection was that these files are *added* by the changeset, so `git difftool <base> --
+    changesets/x/ABOUT.md` opens a two-pane view with `/dev/null` on the left: the document,
+    with extra steps. That objection only holds for the full span. In a since-review span the
+    documents already exist at its left end, so the span holds a genuine comparison — the lines
+    the author rewrote after the last submission, which is exactly what a returning reviewer
+    came for, in prose as much as in code. So the rule is *in the span and existed where the
+    span starts* → difftool; anything else → editor, with a note naming which case it was.
+    `e` and `a` stay unconditional ways into the editor, so nothing is harder to reach than
+    before. Verified against a two-round fixture (review submitted, then the author's fix
+    commit) with a probing `diff.tool` and `EDITOR`: in the reopen span ABOUT.md and an edited
+    thread launch the difftool with no note; a thread written after the review launches the
+    editor with "added by this changeset"; in the full span ABOUT.md does the same.
+
+    Flagged rather than fixed: `console.EditorCommand` resolves `VISUAL`/`EDITOR` (default
+    `vi`) and ignores `GIT_EDITOR` and `core.editor`, both of which git itself honours, so a
+    reviewer who configured their editor the git way gets `vi` in the TUI. Separate change.
 
 ## Architecture
 

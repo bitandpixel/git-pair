@@ -76,23 +76,25 @@ const (
 	actionNone action = iota
 	actionDiff
 	actionEdit
-	actionAbout
+	// actionArtifact is Enter on a changeset document: the difftool when the span has a real
+	// comparison for it, the editor when it does not. See openArtifact.
+	actionArtifact
 	actionCollapse
 	actionNewThread
 )
 
 // activateBy is the Enter table: one row kind, one action. A file opens in the difftool
-// because that is the thing under review; the changeset artifacts are markdown a reviewer
-// reads, so they open in the editor. The heading toggles its own group, and the last row of
-// the group creates another thread.
+// because that is the thing under review. The changeset documents are markdown, so they get
+// openArtifact: what a returning reviewer wants from ABOUT.md or a thread is usually the two
+// or three lines the author rewrote after the last review, and a diff is the only way to see
+// exactly those — while a document the changeset invented has no comparison worth opening.
+// The heading toggles its own group, and the last row of the group creates another thread.
 func activateBy(r row) action {
 	switch r.kind {
 	case rowFile:
 		return actionDiff
-	case rowThread:
-		return actionEdit
-	case rowAbout:
-		return actionAbout
+	case rowThread, rowAbout:
+		return actionArtifact
 	case rowThreadsHead:
 		return actionCollapse
 	case rowNewThread:
@@ -407,8 +409,8 @@ func (m reviewModel) activate() (tea.Model, tea.Cmd) {
 		return m.openDiff(r.path)
 	case actionEdit:
 		return m.openPath(r.path)
-	case actionAbout:
-		return m.openAbout()
+	case actionArtifact:
+		return m.openArtifact(r)
 	case actionCollapse:
 		m.toggleThreads()
 	case actionNewThread:
@@ -418,25 +420,68 @@ func (m reviewModel) activate() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// openDiffOfSelection is `d`: the difftool for whatever the cursor is on, the same handoff
-// Enter performs on a file row. A row that names a file the span never touched has no diff to
-// show, and saying so beats opening a difftool that displays nothing.
+// openDiffOfSelection is `d`: the difftool for whatever the cursor is on. A file row is
+// always diffable — it is in the span by construction — and anything else goes through the
+// same decision Enter makes for it.
 func (m reviewModel) openDiffOfSelection() (tea.Model, tea.Cmd) {
 	r, ok := m.selectedRow()
 	if !ok {
 		return m, nil
 	}
+	if r.kind == rowFile {
+		return m.openDiff(r.path)
+	}
+	return m.openArtifact(r)
+}
+
+// openArtifact is Enter on a changeset document and `d` on anything that is not a file row:
+// the difftool when the span has a real comparison for the file, the editor when it does not.
+//
+// Two rounds of review are what makes this worth distinguishing. In an unreviewed span,
+// ABOUT.md and the threads already existed at its left end, so the span holds a genuine
+// comparison — the lines the author rewrote after the last review, which is exactly what a
+// returning reviewer is after, in prose as much as in code. On a first look at the changeset
+// those files were invented by it, and the comparison has nothing on its left side: a
+// document diffed against /dev/null is the document with extra steps, so it opens plainly.
+func (m reviewModel) openArtifact(r row) (tea.Model, tea.Cmd) {
 	if r.path == "" {
 		m.setStatus("nothing to diff: "+r.name+" is a heading, not a file", false)
 		return m, nil
 	}
-	if !m.inSpan[r.path] {
-		// Nothing to diff, so give them the file instead — and let the editor's own exit
-		// carry the reason, because the note set now would be under the editor's screen.
-		return m.openPathNoted(r.path,
-			r.name+" has not changed in this span — opened in the editor")
+	if r.kind == rowAbout {
+		// A changeset made before ABOUT.md was scaffolded may not have one. Making it and
+		// opening it is the whole job there, and no note about the span would be true.
+		if _, err := os.Stat(absPath(m.sess.Repo().Dir, r.path)); err != nil {
+			if _, err := m.sess.Changeset().EnsureAbout(m.sess.Repo()); err != nil {
+				m.setStatus(err.Error(), true)
+				return m, nil
+			}
+			return m.openPath(r.path)
+		}
 	}
-	return m.openDiff(r.path)
+	if artifactAction(m.inSpan[r.path], m.sess.HasVersionAt(m.ctx, m.sess.Span().From, r.path)) == actionDiff {
+		return m.openDiff(r.path)
+	}
+	return m.openPathNoted(r.path, m.artifactNote(r))
+}
+
+// artifactAction is the whole rule: a document is worth diffing only when the span changed it
+// *and* it already existed at the span's left end. Otherwise the comparison has no left side,
+// and the file is simply read.
+func artifactAction(inSpan, hasPrior bool) action {
+	if inSpan && hasPrior {
+		return actionDiff
+	}
+	return actionEdit
+}
+
+// artifactNote says which of two different reasons sent a document to the editor: it is new,
+// or nothing happened to it in this span.
+func (m reviewModel) artifactNote(r row) string {
+	if m.inSpan[r.path] {
+		return r.name + " was added by this changeset, so there is nothing to compare it against — opened in the editor"
+	}
+	return r.name + " has not changed in this span — opened in the editor"
 }
 
 func (m reviewModel) openDiff(path string) (tea.Model, tea.Cmd) {
