@@ -21,6 +21,7 @@ import (
 	"gitpr/internal/model"
 	"gitpr/internal/reviewops"
 	"gitpr/internal/reviewref"
+	"gitpr/internal/span"
 	"gitpr/internal/survival"
 	"gitpr/internal/tui"
 )
@@ -33,6 +34,7 @@ func newReviewCommand(a *app) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newReviewOpenCommand(a),
+		newReviewReopenCommand(a),
 		newReviewAboutCommand(a),
 		newReviewThreadCommand(a),
 		newReviewSubmitCommand(a),
@@ -83,16 +85,7 @@ func runReviewOpen(ctx context.Context, a *app, opts *spanOptions) error {
 	if err != nil {
 		return err
 	}
-	if !console.Interactive() {
-		return &usageError{errors.New(
-			"`gitpr review open` needs a terminal; use `gitpr diff`, `gitpr review about`, " +
-				"`gitpr review thread`, and `gitpr review submit` instead")}
-	}
-	err = tui.Run(ctx, tui.Options{Repo: s.repo, Changeset: s.cs, Summary: s.summary, Span: so})
-	if errors.Is(err, tui.ErrQuit) {
-		return nil
-	}
-	return err
+	return openSession(ctx, a, s, so, "open")
 }
 
 // --- review about -----------------------------------------------------------
@@ -683,4 +676,77 @@ func writeIfMissing(repo *git.Repo, relPath, content string) error {
 func fileExists(repo *git.Repo, relPath string) bool {
 	info, err := os.Stat(filepath.Join(repo.Dir, relPath))
 	return err == nil && !info.IsDir()
+}
+
+func newReviewReopenCommand(a *app) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "reopen",
+		Short: "Reopen the review session on what changed since your last review",
+		Long: `Open the review session on the span since the most recent review submission.
+
+The same span as ` + "`gitpr review open --unreviewed`" + `, under a name that says why you are
+back: after the author answers a block or feedback, the work to read is what came after
+your submission, not the whole changeset a second time. ` + "`review open`" + ` keeps showing the
+whole changeset by default. For an earlier review use ` + "`review open --since-review=N`" + `.
+
+Needs a terminal; the author's equivalent is ` + "`gitpr diff --unreviewed`" + `.`,
+		Example: `  gitpr review reopen`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runReviewReopen(cmd.Context(), a)
+		},
+	}
+	return cmd
+}
+
+func runReviewReopen(ctx context.Context, a *app) error {
+	s, err := a.load(ctx)
+	if err != nil {
+		return err
+	}
+	so := span.Options{Unreviewed: true}
+	sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, so)
+	if err != nil {
+		if errors.Is(err, span.ErrNoReviews) {
+			return &usageError{fmt.Errorf("%w; run `gitpr review open` for the whole changeset", err)}
+		}
+		return &usageError{err}
+	}
+	// An author who has not committed yet leaves a span with nothing in it, and an
+	// empty file list reads as a broken tool rather than as "nothing to look at yet".
+	names, err := s.repo.DiffNames(ctx, sp.From, sp.To)
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("nothing has been committed since %s; run `gitpr review open` for the whole changeset, or `gitpr diff --unreviewed` to check",
+			reviewLabel(s.summary.LatestReview))
+	}
+	return openSession(ctx, a, s, so, "reopen")
+}
+
+// openSession runs the TUI on a resolved span choice. name is the subcommand to
+// blame in the no-terminal message.
+func openSession(ctx context.Context, a *app, s *session, so span.Options, name string) error {
+	if !console.Interactive() {
+		return &usageError{fmt.Errorf(
+			"`gitpr review %s` needs a terminal; use `gitpr diff`, `gitpr review about`, "+
+				"`gitpr review thread`, and `gitpr review submit` instead", name)}
+	}
+	err := tui.Run(ctx, tui.Options{Repo: s.repo, Changeset: s.cs, Summary: s.summary, Span: so})
+	if errors.Is(err, tui.ErrQuit) {
+		return nil
+	}
+	return err
+}
+
+// reviewLabel names a review submission the way `review history` does.
+func reviewLabel(r *lifecycle.Event) string {
+	if r == nil {
+		return "your last review"
+	}
+	if r.Outcome == "" {
+		return fmt.Sprintf("review %s", r.Short)
+	}
+	return fmt.Sprintf("review %s (%s)", r.Short, r.Outcome)
 }

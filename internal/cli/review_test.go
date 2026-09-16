@@ -452,3 +452,54 @@ func shortOf(sha string) string {
 	}
 	return sha
 }
+
+// --- review reopen ----------------------------------------------------------
+
+// PRD §17.2 keeps `review open` on the full changeset; reopen is the named way to
+// come back to what the author changed since a submission. Both refusals have to
+// say which command does work.
+func TestReviewReopenWithoutReviews(t *testing.T) {
+	f, _ := newChangeset(t, "booking", "main")
+	ready(t, f)
+
+	got := runIn(t, f.Dir(), "review", "reopen")
+	if got.code != exitUsage {
+		t.Errorf("reopen with no reviews exited %d, want %d\n%s", got.code, exitUsage, got.stderr)
+	}
+	mustContain(t, got.stderr, "no review submissions", "should say why there is nothing to reopen onto")
+	mustContain(t, got.stderr, "gitpr review open", "should name the command that works")
+}
+
+// The author answering a review is the whole point of the command, so the span must
+// be measured from the submission, not from the changeset base.
+func TestReviewReopenAfterTheAuthorResponds(t *testing.T) {
+	f, _ := newChangeset(t, "booking", "main")
+	ready(t, f)
+	submit(t, f, "block")
+	f.Commit("author: use a transaction", gittest.WithFile("service.go",
+		"package main\n\nfunc Lock() { tx() }\n"))
+
+	// Both guards passed, so this reaches the TUI, which the harness has no
+	// terminal for. Anything else would mean the span looked empty to reopen.
+	got := runIn(t, f.Dir(), "review", "reopen")
+	if got.code != exitUsage || !strings.Contains(got.stderr, "needs a terminal") {
+		t.Errorf("reopen exited %d (%s), want the terminal refusal", got.code, got.stderr)
+	}
+}
+
+// An empty span is a real state — the reviewer submitted and the author has not
+// committed yet — and opening a session with no files in it would read as a bug.
+func TestReviewReopenWithNothingSinceTheReview(t *testing.T) {
+	f, _ := newChangeset(t, "booking", "main")
+	ready(t, f)
+	submit(t, f, "block")
+	review := f.Head()
+
+	got := runIn(t, f.Dir(), "review", "reopen")
+	if got.code != exitRefusal {
+		t.Errorf("reopen with nothing after the review exited %d, want %d\n%s", got.code, exitRefusal, got.stderr)
+	}
+	mustContain(t, got.stderr, "nothing has been committed since review", "should say the span is empty")
+	mustContain(t, got.stderr, f.Short(review), "should name the review it is relative to")
+	mustContain(t, got.stderr, "gitpr review open", "should name the command that works")
+}

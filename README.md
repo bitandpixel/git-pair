@@ -141,8 +141,8 @@ gitpr: cannot mark changeset booking-transaction ready: 2 review addition(s) fro
 ```
 
 After resolving the remaining comment `gitpr change ready` succeeds and the changeset is
-back in the queue. The reviewer re-reviews with `gitpr review open --unreviewed`, approves,
-and closes:
+back in the queue. The reviewer re-reviews with `gitpr review reopen`, which starts on what
+changed since their submission, approves, and closes:
 
 ```bash
 $ gitpr review submit --approve
@@ -220,7 +220,15 @@ state plus a one-line `Reason`. There is no state file.
 | `--since-review=N` | `<Nth review>..HEAD` | what happened since review N |
 
 `--since-review` with no value means `-1`; indexes are chronological (`0` first, `-1`
-latest) and match `gitpr review history`. The same range applies to source, `ABOUT.md` and
+latest) and match `gitpr review history`.
+
+Coming back to a changeset you already reviewed is common enough to have its own command:
+`gitpr review reopen` opens the TUI on the `<latest review>..HEAD` span, the same span as
+`review open --unreviewed`, and refuses with the command to use instead when there is no
+review yet or nothing has been committed since the review. Every command without a span flag
+stays on the full changeset.
+
+The same range applies to source, `ABOUT.md` and
 threads, and the resolved span is always printed to stderr:
 `gitpr diff: 332887c..HEAD (after review 0)`.
 
@@ -251,7 +259,8 @@ elsewhere it is accepted and ignored.
 | --- | --- | --- |
 | `change init` | `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is `main`, else `master`, else a usage error |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
-| `review open` | `--unreviewed`, `--since-review[=N]` | TUI; needs a terminal |
+| `review open` | `--unreviewed`, `--since-review[=N]` | TUI; needs a terminal; full changeset unless a span flag says otherwise |
+| `review reopen` | none | TUI on `<latest review>..HEAD`; needs a terminal; refuses if there is no review or nothing changed since it |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), then moves the review ref |
@@ -407,11 +416,13 @@ Never prompt: `change init`, `change ready`, `status`, `diff`, `review submit`,
 even with a terminal attached.
 
 Refuse with exit 2 when stdin or stdout is a pipe or a regular file, because launching an
-editor or the TUI against one would hang: `review open`, `review about`, and `review thread`
+editor or the TUI against one would hang: `review open`, `review reopen`, `review about`,
+and `review thread`
 (which creates the thread file and then refuses to open it). Read and write those files
 directly instead; they are ordinary files in the working tree. `/dev/null` counts as a
 character device, so redirecting to `/dev/null` does not produce this refusal — it makes
-`review open` fail with `could not open a new TTY` (exit 1) and `review about` launch the
+`review open` and `review reopen` fail with `could not open a new TTY` (exit 1) and
+`review about` launch the
 real editor.
 
 An agent must not approve its own work. `gitpr review submit --approve` is a reviewer action
@@ -494,8 +505,9 @@ gitpr review close --allow-surviving-review-additions
 Only the most recent review counts, and only additions outside `changesets/<changeset>/`
 block; surviving `ABOUT.md` and thread text is listed as non-blocking.
 
-`opening an editor needs a terminal` and ``` `gitpr review open` needs a terminal ``` (exit 2)
-— both stdin and stdout must be character devices. Under an agent, a pipe or cron, edit the
+```opening an editor needs a terminal```, ``` `gitpr review open` needs a terminal ``` and
+``` `gitpr review reopen` needs a terminal ``` (exit 2) — both stdin and stdout must be
+character devices. Under an agent, a pipe or cron, edit the
 files directly and use `gitpr diff`, `gitpr status` and `gitpr review submit`.
 
 `changeset has no review submissions yet; run gitpr diff for the full changeset` (exit 2) —

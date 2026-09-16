@@ -36,6 +36,8 @@ Observable end-to-end behaviour, per PRD §29:
     closed, and never merges/pushes/squashes. After the source branch is deleted, the complete
     unsquashed history stays reachable from the archive ref.
 11. `gitpr review open` runs the TUI: file list for the resolved span, per-file reviewed
+    marks, and difftool/editor handoff. `gitpr review reopen` is the same session on the
+    `<latest review>..HEAD` span, for returning to a changeset already reviewed.
     toggles, `a` for `ABOUT.md`, `t`/`T` for threads, `Enter` for difftool, `e` for editor,
     `v` for span toggle, with terminal correctly suspended/resumed around external processes.
 
@@ -91,6 +93,7 @@ From the PRD, treated as binding:
 | M3 spans, `diff`, survival, `change ready` | done | e2e replay blocks `change ready` on exactly the untouched review line, then passes after resolution and with the override |
 | M4 submit, refs, queue, close | done | e2e replay: empty approve commit, ref moves, and after `git branch -D` the archive ref still reaches 13 commits |
 | M5 TUI | done, partially verified | Verified under a pty: first paint, `j/k`, `space` (0/4 → 1/4 → 2/4), `v`, `a` editor handoff, `s`+`b` submit (created `review: block demo` and moved the ref), clean `q` exit. **Not yet verified:** `Enter` launching a real difftool *inside* the TUI — the same command path is verified outside it via `gitpr diff --tool`, which reached the configured tool with the right blob paths |
+| Post-MVP: `review reopen` opens the session on the since-review span | done | `TestReviewReopenWithoutReviews`, `TestReviewReopenAfterTheAuthorResponds`, `TestReviewReopenWithNothingSinceTheReview` |
 | Post-MVP: staleness compares trees, not commit counts | done | `TestSummarizeChangesetOnlyCommitDoesNotInvalidateReady`, `TestSummarizeMixedCommitInvalidatesReady`, `TestSummarizeBaseMovingUnderAReadyChangesetKeepsReady` |
 | Post-MVP: difftool shows the working tree; submit exits the TUI | done | `TestSubmitKeyEndsTheSession`, `TestEscInSubmitModeKeepsTheSessionOpen`; the one-revision difftool argv verified by hand against a configured tool |
 | M6 docs + dogfood | done | `README.md`; `artifacts/e2e-29.sh` is the scripted replay and passes end to end |
@@ -158,6 +161,18 @@ changeset. Hand-verification of everything the README documents additionally cor
    is impossible through memory, since Go test binaries are separate processes. The assertion
    conflated "file left the span" with "still marked", which is what made the reports
    undiagnosable; those are now separate failure messages.
+10. **A resume-like default for `review open` was built, then reverted in favour of `review
+    reopen`.** The complaint was real: with no flag every session opened on `base...HEAD`, so
+    reopening after submitting a review re-showed what had just been read. The first cut had
+    `span.StartingSpan` choose `<latest review>..HEAD` when code had changed since the review,
+    with `--full` as the escape hatch; it passed the gate and an eight-case pty check, and was
+    reverted on the owner's direction. Inferring the span from repository state makes one
+    command mean two things on two days with nothing on the command line saying which you got.
+    `review reopen` names the intent instead and leaves every no-flag command on the full
+    changeset, which is what PRD §17.2 specifies. Two guards are what make it a command rather
+    than an alias: no review yet is a usage error pointing at `review open`, and a span with no
+    files in it — the author has not committed since the submission — refuses with exit 1 and
+    names the review it is relative to, since an empty file list reads as a broken tool.
 
 ## Architecture
 
@@ -335,6 +350,10 @@ Deliverables
 - `gitpr review open [--unreviewed] [--since-review=N]` curses UI matching PRD §14: header
   (changeset, base, span), file list with `○`/`✓`, `n / m reviewed`, `ABOUT.md` and
   `Threads (k)` rows.
+- `gitpr review reopen` — the same session on `<latest review>..HEAD`, with no span
+  flags: it is the named way back to a reviewed changeset. Refuses (exit 2) when no review has
+  been submitted and (exit 1) when nothing has been committed since the latest review, naming
+  `gitpr review open` each time.
 - Bindings `j/k Enter e Space a t T v q`; file state resets to unreviewed when its diff
   changes during the session (PRD §16).
 
@@ -421,6 +440,7 @@ M0 ──► M1 ──► M2 ──┬──► M3 ──► M4 ──► M6
 | --- | --- | --- |
 | 2026-09-16 | — | Initial plan. Plumbing spike complete; D1–D4 raised. |
 | 2026-09-16 | implementation pass | D1–D4 resolved. M0–M4 implemented and verified by the PRD §29 replay; M5 implemented with the TUI verified under a pty. Three implementation-level discoveries recorded above; no PRD requirement dropped. |
+| 2026-09-16 | span default reversed | The resume-like default for `review open` (discovery 10) was reverted the same day and replaced by `review reopen`, so `review open` stays on the full changeset as §17.2 specifies. |
 | 2026-09-16 | review-experience pass | Three owner-reported items. The difftool was read-only and blind to `e` edits because it diffed two revisions — now one revision against the working tree, superseding D4's two-rev form. Submitting with `s` now ends the session. Readiness no longer demotes on changeset-only commits (discovery 8). |
 | 2026-09-16 | dogfood bug report | `status` said `WORKING` after a successful `change ready` in a single-branch repo. Cause: base == branch, so `base...HEAD` is permanently empty and the ready marker sits below the range that reads it. Guarded at init and ready, explained by status; the review workflow itself was never broken. |
 | 2026-09-16 | `change init` change of contract | Init now commits the scaffold (scoped with `git commit --only`) and accepts `ABOUT.md` content by flag or pipe, so agents can initialise and describe atomically. M1 updated above; two further discoveries recorded. Found while this change was being tested, not by it: the template warning in `change ready` was unreachable. |
