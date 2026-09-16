@@ -70,7 +70,8 @@ func runStatus(ctx context.Context, a *app) error {
 		return err
 	}
 	if a.json {
-		return a.emitJSON(view)
+		// view itself is unexported-only; emit its JSON shape.
+		return a.emitJSON(view.json)
 	}
 	printStatus(a, view)
 	return nil

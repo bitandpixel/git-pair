@@ -92,7 +92,19 @@ var ErrNotInteractive = errors.New("interactive input required")
 
 // IsTerminal reports whether stdout is attached to a terminal.
 func IsTerminal() bool {
-	info, err := os.Stdout.Stat()
+	return isCharDevice(os.Stdout)
+}
+
+// Interactive reports whether a full-duplex terminal is available for an
+// editor or difftool to take over. Both stdin and stdout must be character
+// devices: an editor launched with a pipe or file on stdin inherits a terminal
+// it cannot drive, and wedges.
+func Interactive() bool {
+	return isCharDevice(os.Stdin) && isCharDevice(os.Stdout)
+}
+
+func isCharDevice(f *os.File) bool {
+	info, err := f.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 

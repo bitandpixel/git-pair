@@ -66,11 +66,6 @@ func (r *Repo) Git(ctx context.Context, args ...string) (string, error) {
 	return r.run(ctx, "", true, args...)
 }
 
-// GitStdin is Git with text written to the subprocess' stdin.
-func (r *Repo) GitStdin(ctx context.Context, stdin string, args ...string) (string, error) {
-	return r.run(ctx, stdin, true, args...)
-}
-
 // GitInherit runs git attached to the current terminal, for commands whose
 // output belongs to the user (diffs, difftools, editors, hooks).
 func (r *Repo) GitInherit(ctx context.Context, args ...string) error {
@@ -158,15 +153,29 @@ func (r *Repo) Head(ctx context.Context) (string, error) {
 }
 
 // RevParse resolves a revision to a full SHA.
+//
+// `rev-parse --verify --quiet` reports an unresolvable revision by exiting 1
+// with *no stderr at all*, so the exit code is the only signal. Relying on the
+// message alone would turn "ref does not exist" into a generic git failure,
+// which callers like CreateRefIfAbsent must be able to distinguish.
 func (r *Repo) RevParse(ctx context.Context, rev string) (string, error) {
 	out, err := r.Git(ctx, "rev-parse", "--verify", "--quiet", rev)
 	if err != nil {
-		if IsUnknownRevision(err) {
+		if IsUnknownRevision(err) || ExitCode(err) == 1 {
 			return "", fmt.Errorf("%w: %s", ErrUnknownRevision, rev)
 		}
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// ExitCode returns the git subprocess exit code carried by err, or 0.
+func ExitCode(err error) int {
+	var ge *Error
+	if errors.As(err, &ge) {
+		return ge.ExitCode
+	}
+	return 0
 }
 
 // CurrentBranch returns the checked-out branch name, or "" on a detached HEAD.
@@ -401,15 +410,6 @@ func (r *Repo) Commit(ctx context.Context, message string, allowEmpty bool, extr
 	args = append(args, extra...)
 	_, err := r.Git(ctx, args...)
 	return err
-}
-
-// InterpretTrailers appends trailers to a commit message.
-func (r *Repo) InterpretTrailers(ctx context.Context, message string, trailers ...string) (string, error) {
-	args := []string{"interpret-trailers"}
-	for _, t := range trailers {
-		args = append(args, "--trailer", t)
-	}
-	return r.GitStdin(ctx, message, args...)
 }
 
 // --- small helpers ----------------------------------------------------------

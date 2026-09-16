@@ -81,7 +81,7 @@ func runReviewOpen(ctx context.Context, a *app, opts *spanOptions) error {
 	if err != nil {
 		return err
 	}
-	if !console.IsTerminal() {
+	if !console.Interactive() {
 		return &usageError{errors.New(
 			"`gitpr review open` needs a terminal; use `gitpr diff`, `gitpr review about`, " +
 				"`gitpr review thread`, and `gitpr review submit` instead")}
@@ -646,6 +646,13 @@ func openFile(ctx context.Context, a *app, repo *git.Repo, relPath string, ensur
 	abs := filepath.Join(repo.Dir, relPath)
 	if _, err := os.Stat(abs); err != nil {
 		return fmt.Errorf("cannot open %s: %w", relPath, err)
+	}
+	// Refuse rather than hang: an agent running this with no terminal would
+	// otherwise block forever waiting on an editor that cannot draw.
+	if !console.Interactive() {
+		return &usageError{fmt.Errorf(
+			"opening an editor needs a terminal; edit %s directly — it is an ordinary file in the working tree",
+			relPath)}
 	}
 	cmd, err := console.EditorCommand(repo, abs)
 	if err != nil {
