@@ -325,7 +325,7 @@ output for it; elsewhere it is accepted and ignored.
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change feedback` | `--stat`, `--name-only` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
 | `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`/`CLOSED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
-| `review open` | `--unreviewed`, `--since-review[=N]` | TUI; needs a terminal; full changeset unless a span flag says otherwise |
+| `review open` | `--unreviewed`, `--since-review[=N]`, `--head-review[=N]`, `--head-commit`, `--head-ref` | TUI; needs a terminal; full changeset unless a span flag says otherwise; a `--head-*` flag opens a historical span, which is read-only |
 | `review reopen` | none | TUI on `<latest review>..HEAD`, the work that has landed since you reviewed; needs a terminal; refuses if no review exists |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
@@ -626,6 +626,16 @@ What the pane prints is git's own bytes: no hunk model, no folding, no colours o
 that keeps it a preview rather than a diff renderer, since reading a diff properly means opening it
 and `Enter` is one keypress away. The frame fills the terminal: the list keeps the window's height
 even when there are few files, so the shortcut bar rests against the bottom edge.
+
+A span can end at a commit instead of your working tree — `review open --head-review=-1`,
+`--head-commit=abc1234`, `--head-ref=origin/main` — and that is a look at history, not a review. The
+screen stops offering anything that changes something: the counter's place is taken by
+`HISTORICAL · READ ONLY`, files lose their reviewed gutter, `+ new thread…` is gone, and the
+shortcut bar lists only what still works. Pressing a key that does not work says why, names the head
+the span is stuck on, and points at `v`, which returns you to a span you can review. The difftool
+over a historical span compares its two pinned commits rather than your working tree, so it cannot
+show you work the span does not contain. `gitpr diff` takes the same flags and just prints; the
+read-only half is about the screen, where the mistakes would be made.
 
 In a narrow window the shortcut bar wraps between shortcuts rather than through them —
 `space reviewed` never arrives split in half — and the list gives up the rows it takes.

@@ -18,6 +18,7 @@ import (
 	"gitpr/internal/console"
 	gitmodel "gitpr/internal/model"
 	"gitpr/internal/reviewops"
+	"gitpr/internal/span"
 )
 
 // ErrQuit is returned when the reviewer leaves the session normally.
@@ -325,6 +326,16 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	m.refresh()
 
+	// Every action that changes something goes through one gate. Read-only-ness is a
+	// property of the span's head, not of each command, and a screen that grows a new
+	// mutating key must not be able to forget the check.
+	if doing, mutating := mutatingKey(key); mutating {
+		if why := m.cannot(doing); why != "" {
+			m.setStatus(why, false)
+			return m, nil
+		}
+	}
+
 	switch {
 	case key.Type == tea.KeyCtrlC, key.Type == tea.KeyCtrlD,
 		(key.Type == tea.KeyRunes && len(key.Runes) == 1 && key.Runes[0] == 'q'):
@@ -378,6 +389,42 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeSubmit
 	}
 	return m, nil
+}
+
+// mutatingKey is the table of keys that change something: a reviewed mark, a file on
+// disk, a thread, a review submission. Keeping it in one place is what lets the
+// read-only gate cover commands added later.
+func mutatingKey(key tea.KeyMsg) (doing string, ok bool) {
+	if key.Type == tea.KeySpace {
+		return "mark files reviewed", true
+	}
+	if key.Type != tea.KeyRunes || len(key.Runes) != 1 {
+		return "", false
+	}
+	switch key.Runes[0] {
+	case 'e':
+		return "edit files", true
+	case 'a':
+		return "edit ABOUT.md", true
+	case 't':
+		return "start a thread", true
+	case 's':
+		return "submit a review", true
+	}
+	return "", false
+}
+
+// cannot says why an action is unavailable, or "" when the span allows it. A span whose
+// head is a commit is a look at history: you can read it, diff it, and leave, but you
+// cannot mark, edit, or submit against it. The message names the head it is stuck on and
+// the key that gets out, because "read-only" on its own leaves the reviewer guessing.
+func (m reviewModel) cannot(doing string) string {
+	sp := m.sess.Span()
+	if sp.Live() {
+		return ""
+	}
+	return fmt.Sprintf("read-only: this span ends at %s, not your working tree, so you cannot %s "+
+		"\u2014 v opens a span you can review", sp.Head, doing)
 }
 
 // toggleMark marks the file under the cursor reviewed, or explains why the row it is on
@@ -523,6 +570,10 @@ func (m reviewModel) activate() (tea.Model, tea.Cmd) {
 	case actionCollapse:
 		m.toggleThreads()
 	case actionNewThread:
+		if why := m.cannot("start a thread"); why != "" {
+			m.setStatus(why, false)
+			return m, nil
+		}
 		m.mode, m.input, m.promptKind = modePrompt, "", promptThread
 		m.setStatus("New thread title (Enter to create, Esc to cancel)", false)
 	}
@@ -557,6 +608,13 @@ func (m reviewModel) openArtifact(r row) (tea.Model, tea.Cmd) {
 		m.setStatus("nothing to diff: "+r.name+" is a heading, not a file", false)
 		return m, nil
 	}
+	if why := m.cannot("edit " + r.name); why != "" && m.documentAction(r) != actionDiff {
+		// Only the diff is available over history. The file on disk is not the file this
+		// span contains, so opening it in an editor would edit something the review is not
+		// about, and creating a missing ABOUT.md would create it in the working tree.
+		m.setStatus(why, false)
+		return m, nil
+	}
 	if r.kind == rowAbout {
 		// A changeset made before ABOUT.md was scaffolded may not have one. Making it and
 		// opening it is the whole job there, and no note about the span would be true.
@@ -572,6 +630,13 @@ func (m reviewModel) openArtifact(r row) (tea.Model, tea.Cmd) {
 		return m.openDiff(r.path)
 	}
 	return m.openPathNoted(r.path, m.artifactNote(r))
+}
+
+// documentAction is the artifact decision for a row, apart from acting on it: the
+// read-only gate needs to know whether a row still has a legitimate use before anything
+// is created or opened.
+func (m reviewModel) documentAction(r row) action {
+	return artifactAction(m.inSpan[r.path], m.sess.HasVersionAt(m.ctx, m.sess.Span().From, r.path))
 }
 
 // artifactAction is the whole rule: a document is worth diffing only when the span changed it
@@ -595,8 +660,20 @@ func (m reviewModel) artifactNote(r row) string {
 
 func (m reviewModel) openDiff(path string) (tea.Model, tea.Cmd) {
 	sp := m.sess.Span()
-	return m.runExternal(console.DiffToolCommand(m.sess.Repo(), sp.From, []string{path}),
+	return m.runExternal(console.DiffToolCommand(m.sess.Repo(), sp.From, difftoolHead(sp), []string{path}),
 		"Difftool exited with an error", "")
+}
+
+// difftoolHead is the span's second revision for the external tool. A live span has
+// none: the tool compares the start against the working tree, so edits made there survive
+// the handoff. A historical span hands over its pinned head, because comparing a
+// historical head against today's files would put work in the window that the span does
+// not contain.
+func difftoolHead(sp span.Span) string {
+	if sp.Historical() {
+		return sp.To
+	}
+	return ""
 }
 
 // openEditor edits the row under the cursor: a file, a thread, or ABOUT.md.
@@ -720,7 +797,7 @@ func (m reviewModel) listBlock() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("%d / %d reviewed\n", reviewed, total))
+	b.WriteString(m.counterLine(reviewed, total) + "\n")
 	b.WriteString("\n")
 	// The changeset section is below the counter it does not belong to, so the block above
 	// reads as "these are the files the diff touched" and the block below as "this is what
@@ -765,6 +842,16 @@ func (m reviewModel) footer() string {
 	return b.String()
 }
 
+// counterLine is the line under the files. Over history there is no review in progress to
+// count, and any marks on that commit belong to whoever reviewed it, so the slot carries
+// the mode instead of a number that would read as progress.
+func (m reviewModel) counterLine(reviewed, total int) string {
+	if !m.sess.Span().CanMark() {
+		return styleSpan.Render("HISTORICAL") + styleDim.Render(" \u00b7 READ ONLY")
+	}
+	return fmt.Sprintf("%d / %d reviewed", reviewed, total)
+}
+
 func (m reviewModel) spanName(label string) string {
 	if m.sess.Unreviewed() {
 		return "unreviewed"
@@ -784,6 +871,11 @@ func (m reviewModel) helpText() string {
 	threadsHint := "T show threads"
 	if m.threadsOpen {
 		threadsHint = "T hide threads"
+	}
+	if !m.sess.Span().Live() {
+		// Nothing in this bar may imply the reviewer can act on history.
+		return "j/k move  tab section  enter open  d diff  p preview  " + threadsHint +
+			"  v span  q quit"
 	}
 	return "j/k move  tab section  enter open  d diff  p preview  e edit  space reviewed  a about  " +
 		"t new thread  " + threadsHint + "  v span  s submit  q quit"
@@ -874,7 +966,11 @@ func (m *reviewModel) buildRows() {
 		for _, path := range threads {
 			rows = append(rows, row{kind: rowThread, path: path, name: filepath.Base(path), file: -1})
 		}
-		rows = append(rows, row{kind: rowNewThread, name: newThreadLabel, file: -1})
+		// The offer to start a thread is an offer to change the working tree, and a
+		// historical span has no working tree in it.
+		if m.sess.Span().CanEdit() {
+			rows = append(rows, row{kind: rowNewThread, name: newThreadLabel, file: -1})
+		}
 	}
 	m.rows = rows
 }
@@ -902,6 +998,11 @@ func (m *reviewModel) jumpSection() {
 func (m reviewModel) rowText(r row) string {
 	switch r.kind {
 	case rowFile:
+		if !m.sess.Span().CanMark() {
+			// No gutter over history: a tick there means "this reviewer has read it", and
+			// marks left on that commit by an earlier review are not this reviewer's.
+			return r.name
+		}
 		mark := "○ "
 		if f := m.sess.Files(); r.file >= 0 && r.file < len(f) && f[r.file].Reviewed {
 			mark = styleMark.Render("✓ ")
@@ -1119,7 +1220,14 @@ func (m reviewModel) ensurePreview() (reviewModel, tea.Cmd) {
 		m.previewPath, m.previewOffset = path, 0
 	}
 	var cmds []tea.Cmd
-	for _, kind := range []patchKind{patchSpan, patchWorking} {
+	kinds := []patchKind{patchSpan, patchWorking}
+	if m.sess.Span().Historical() {
+		// There are no reviewer edits inside a historical span: the working tree is not one
+		// of its endpoints, so asking git about it would produce a section that belongs to a
+		// different review.
+		kinds = []patchKind{patchSpan}
+	}
+	for _, kind := range kinds {
 		if _, cached := m.patch(kind, path); cached {
 			continue
 		}
@@ -1250,7 +1358,7 @@ func (m reviewModel) previewLines() []string {
 		return append(out, styleDim.Render(patch.Err))
 	case len(patch.Lines) == 0:
 		work, known := m.patch(patchWorking, m.previewPath)
-		if !known {
+		if m.sess.Span().Live() && !known {
 			// Not "no changes" yet: the answer about the reviewer's own edits is still on its way,
 			// and saying it now would be wrong for one git call's duration.
 			return append(out, styleDim.Render("(reading your edits…)"))

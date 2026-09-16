@@ -984,10 +984,11 @@ On a terminal at least 100 columns and 16 rows, the list shares the screen with 
 the diff the common span made to the selected file, paged with `ctrl-f`/`ctrl-b`. It prints git's
 own output, colour included, and adds only what a fixed-width column cannot decline to do: the line
 number git itself put in the hunk header, a break where a line is too wide, and the spaces a tab
-advances to. It does not fold, group, filter, or renumber hunks, and it does not choose colours, which is the shape PRD §3's refusal to build a diff renderer leaves: the pane is for
-glancing, and reading a diff means opening it. The frame fills the terminal — the row area holds the
-window's height and every row is padded to its width — so the shortcut bar sits against the bottom
-edge rather than under a short list.
+advances to. It does not fold, group, filter, or renumber hunks, and it does not choose
+colours, which is the shape PRD §3's refusal to build a diff renderer leaves: the pane is
+for glancing, and reading a diff means opening it. The frame fills the terminal — the row
+area holds the window's height and every row is padded to its width — so the shortcut bar
+sits against the bottom edge rather than under a short list.
 
 When the reviewer has edited a file without committing, the pane shows those edits below the author's,
 under a caption naming them, with counts and line numbers of their own. Git's output does not say who
@@ -995,6 +996,15 @@ typed a line, so the caption is what keeps the reviewer's work from reading as t
 section is diffed from the revision under review, not the span's start, so it cannot repeat the
 author's changes. The reviewed counter stays the span's: a reviewer's typing does not change what has
 been reviewed.
+
+A span whose head is a commit rather than the working tree is a look at history, and the screen
+says so where the reviewer is already looking: the counter's slot carries `HISTORICAL · READ ONLY`,
+the reviewed gutter and the offer to start a thread are absent, and the shortcut bar advertises
+only the keys it can take. Marking, editing, threading and submitting are refused with a message
+naming the head the span is stuck on and the key that gets out — `v`, which lands on a span the
+reviewer can review. Nothing is quietly redirected to a temporary copy of history: the difftool
+over a historical span compares its two pinned commits, so it never shows work the span does not
+contain, and the preview has no `you` section, because a historical span has no working tree in it.
 
 Suggested bindings:
 
@@ -1208,6 +1218,40 @@ Semantics:
 ```
 
 Indexes correspond to `gitpr review history`.
+
+## 17.4 Head checkpoints
+
+A span is two checkpoints — a base and a head — and both can be named:
+
+```text
+Changeset Base    merge-base(base, HEAD)              base end only
+Working Tree      HEAD, pinned when the span is resolved   head end only
+Review N          a submission, N chronological        either end
+Commit <sha>      immutable                            either end
+Ref <name>        pinned to the commit it points at    either end
+```
+
+`HEAD` is deliberately not offered as a checkpoint: beside `Working Tree` it presents two
+similar-looking "current" targets when only one of them can be edited.
+
+The head decides the mode:
+
+| Head         | Mode       | Diff | Edit code | Edit review artifacts | Mark reviewed | Submit review |
+| ------------ | ---------- | ---: | --------: | --------------------: | ------------: | ------------: |
+| Working Tree | live       |  yes |       yes |                   yes |           yes |           yes |
+| anything else | historical |  yes |        no |                    no |            no |            no |
+
+A ref used as the base with a working-tree head stays live: pinning an endpoint is not the same
+thing as being historical.
+
+Refs keep their identity. The name the reviewer chose stays on screen, the span diffs against the
+commit it pointed at when chosen, and later movement is reported rather than followed — following a
+branch mid-review would silently change what the already-reviewed files meant. Advancing a pinned
+checkpoint takes an explicit refresh, which recomputes the span; reviewed marks are keyed on
+commits, so a mark that no longer applies simply does not come back.
+
+`gitpr diff` accepts `--head-review`, `--head-commit` and `--head-ref`. `gitpr review open` accepts
+the same and opens read-only when one of them names the head.
 
 There are no mixed span semantics in the MVP.
 

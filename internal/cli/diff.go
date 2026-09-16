@@ -167,7 +167,13 @@ func runDiff(ctx context.Context, a *app, opts *spanOptions, paths []string) err
 		return s.repo.GitInherit(ctx, args...)
 	}
 	if opts.tool {
-		return console.DiffToolCommand(s.repo, sp.From, paths).Run()
+		// A live span compares the start against the working tree, so edits made in the tool
+		// survive; a historical one compares its two pins.
+		to := ""
+		if sp.Historical() {
+			to = sp.To
+		}
+		return console.DiffToolCommand(s.repo, sp.From, to, paths).Run()
 	}
 	return console.DiffCommand(s.repo, sp.From, sp.To, paths).Run()
 }

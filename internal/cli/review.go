@@ -61,7 +61,11 @@ those processes run.
 
 Press s to submit without leaving the screen, then b (block), f (feedback) or
 a (approve); Esc cancels. The same outcomes are available from the CLI:
-  gitpr review submit --block | --feedback | --approve`,
+  gitpr review submit --block | --feedback | --approve
+
+A span whose head is a commit rather than your working tree is a look at history.
+The screen opens read-only: no marking, no editing, no submission, and the shortcut
+bar says so. v returns you to a span you can review.`,
 		Example: `  gitpr review open
   gitpr review open --unreviewed
   gitpr review open --since-review=-2
@@ -72,6 +76,7 @@ a (approve); Esc cancels. The same outcomes are available from the CLI:
 		},
 	}
 	opts.register(cmd)
+	opts.registerHead(cmd)
 	return cmd
 }
 

@@ -57,12 +57,10 @@ func EditorCommand(ctx context.Context, repo *git.Repo, path string) (*exec.Cmd,
 	return cmd, nil
 }
 
-// DiffToolCommand builds `git difftool <from> -- <paths>` for one revision against the
-// working tree, so review uses whatever the user configured (vimdiff, meld, ...) instead of a
-// renderer of gitpr's own. --no-prompt avoids a per-file confirmation for what is already an
-// explicit, single-file request.
-// DiffToolCommand launches the user's configured difftool for `from` against
-// the working tree.
+// DiffToolCommand builds the `git difftool` invocation for a span, so review uses whatever
+// the user configured (vimdiff, meld, ...) instead of a renderer of gitpr's own.
+// --no-prompt avoids a per-file confirmation for what is already an explicit, single-file
+// request.
 //
 // One revision, not two, and that is the whole point. `git difftool <from> <to>`
 // materialises both sides as temporary blob files, so the tool edits throwaway
@@ -71,8 +69,17 @@ func EditorCommand(ctx context.Context, repo *git.Repo, path string) (*exec.Cmd,
 // right-hand buffer is the actual file, so edits persist and are visible the next
 // time the tool is opened. The printed and --stat diffs stay on the committed
 // span: they describe review state, while the tool is for a human working on it.
-func DiffToolCommand(repo *git.Repo, from string, paths []string) *exec.Cmd {
+//
+// A historical span passes `to` and takes the throwaway copies: there is nothing
+// there to edit, and comparing a historical head against today's working tree would
+// put work in the window that the span does not contain. That form hands the tool
+// two temp files and empty $LOCAL_LABEL/$REMOTE_LABEL, which is an acceptable price
+// for a read-only look.
+func DiffToolCommand(repo *git.Repo, from, to string, paths []string) *exec.Cmd {
 	args := []string{"difftool", "--no-prompt", from}
+	if to != "" {
+		args = append(args, to)
+	}
 	if len(paths) > 0 {
 		args = append(args, "--")
 		args = append(args, paths...)

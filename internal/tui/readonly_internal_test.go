@@ -1,0 +1,250 @@
+package tui
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"gitpr/internal/changeset"
+	"gitpr/internal/git"
+	"gitpr/internal/gittest"
+	"gitpr/internal/lifecycle"
+	"gitpr/internal/span"
+)
+
+// A span whose head is a commit is a look at history. Everything here is about the
+// screen honouring that: refusing the actions that would change something, saying so
+// where the reviewer is already looking, and keeping the reading keys working.
+
+const readonlySlug = "booking"
+
+// readonlyModel builds a changeset with one review submission and work after it, then
+// opens a session over sel. The fixture comes back too, for assertions about the
+// working tree: the point of most of these refusals is that nothing is written.
+func readonlyModel(t *testing.T, sel span.Selector) (reviewModel, *gittest.Fixture) {
+	t.Helper()
+	ctx := context.Background()
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n\nfunc main() {}\n"))
+	f.CreateBranch(readonlySlug)
+	f.CommitChangeset(readonlySlug, "main")
+	f.Commit("implement", gittest.WithFiles(map[string]string{
+		"service.go": "package main\n\nfunc Lock() {}\n",
+		"handler.go": "package main\n\nfunc Serve() {}\n",
+	}))
+	f.CommitReviewMarker(readonlySlug, "feedback",
+		gittest.WithFile("service.go", "package main\n\n// Please use a transaction here\nfunc Lock() {}\n"))
+	f.Commit("author response", gittest.WithFile("handler.go", "package main\n\nfunc Serve() { ctx() }\n"))
+
+	repo := &git.Repo{Dir: f.Dir()}
+	cs, err := changeset.ForBranch(repo, readonlySlug)
+	if err != nil {
+		t.Fatalf("ForBranch: %v", err)
+	}
+	summary, err := lifecycle.SummarizeHEAD(ctx, repo, cs.Slug, cs.Base)
+	if err != nil {
+		t.Fatalf("SummarizeHEAD: %v", err)
+	}
+	sess, err := NewSession(ctx, Options{Repo: repo, Changeset: cs, Summary: summary, Span: sel})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	m := reviewModel{ctx: ctx, sess: sess, width: 100, height: 24, threadsOpen: true}
+	m.refresh()
+	return m, f
+}
+
+// historySel is "what did this changeset look like at the review": both ends commits, so
+// nothing in it can be marked, edited, or submitted against.
+func historySel() span.Selector {
+	return span.Selector{Base: span.ChangesetBase(), Head: span.Review(-1)}
+}
+
+func runeKey(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
+
+func marksOf(files []File) []bool {
+	out := make([]bool, len(files))
+	for i, f := range files {
+		out[i] = f.Reviewed
+	}
+	return out
+}
+
+func TestHistoricalSpanRefusesEverythingThatChangesSomething(t *testing.T) {
+	tests := []struct {
+		name string
+		key  tea.KeyMsg
+	}{
+		{"space marks reviewed", tea.KeyMsg{Type: tea.KeySpace}},
+		{"e edits a file", runeKey('e')},
+		{"a edits ABOUT.md", runeKey('a')},
+		{"t starts a thread", runeKey('t')},
+		{"s submits a review", runeKey('s')},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, f := readonlyModel(t, historySel())
+			if !m.sess.Span().Historical() {
+				t.Fatal("the fixture is not a historical span, so this test proves nothing")
+			}
+			before := marksOf(m.sess.Files())
+			rows := len(m.rows)
+
+			updated, _ := m.Update(tc.key)
+			got := updated.(reviewModel)
+
+			if got.mode != modeFiles {
+				t.Errorf("mode = %v, want the reviewer kept out of submit and prompt modes", got.mode)
+			}
+			if !strings.Contains(got.status, "read-only") {
+				t.Errorf("status = %q, want an explanation rather than silence", got.status)
+			}
+			// "read-only" alone leaves the reviewer hunting for the way out.
+			if !strings.Contains(got.status, "v opens") {
+				t.Errorf("status = %q, want it to name the key that gets back to a reviewable span", got.status)
+			}
+			if !strings.Contains(got.status, "review -1") {
+				t.Errorf("status = %q, want it to name the head the span is stuck on", got.status)
+			}
+			if diff := marksOf(got.sess.Files()); len(diff) != len(before) {
+				t.Errorf("the file list changed length: %d, want %d", len(diff), len(before))
+			} else {
+				for i := range before {
+					if before[i] != diff[i] {
+						t.Errorf("file %d changed its reviewed mark", i)
+					}
+				}
+			}
+			if len(got.rows) != rows {
+				t.Errorf("the row list changed from %d rows to %d", rows, len(got.rows))
+			}
+			if !f.Clean() {
+				t.Error("the refusal wrote to the working tree")
+			}
+		})
+	}
+}
+
+// The other half of a read-only screen: the keys that only read must still work, and `v`
+// must be a way out rather than a dead end.
+func TestHistoricalSpanStillReadsAndEscapes(t *testing.T) {
+	m, _ := readonlyModel(t, historySel())
+
+	updated, _ := m.Update(runeKey('j'))
+	m = updated.(reviewModel)
+	if m.cursor != 1 {
+		t.Errorf("cursor = %d, want j to still move", m.cursor)
+	}
+
+	updated, _ = m.Update(runeKey('v'))
+	m = updated.(reviewModel)
+	if !m.sess.Span().Live() {
+		t.Fatalf("v left the session on a historical span: %s", m.sess.Span().Label)
+	}
+	// Now the same key is legitimate again, which is what makes the refusal a mode
+	// rather than a broken screen.
+	updated, _ = m.Update(runeKey('s'))
+	if got := updated.(reviewModel); got.mode != modeSubmit {
+		t.Errorf("mode = %v after escaping to a live span, want the submit prompt", got.mode)
+	}
+}
+
+func TestHistoricalScreenSaysWhatItIs(t *testing.T) {
+	m, _ := readonlyModel(t, historySel())
+	view := m.View()
+
+	for _, want := range []string{"HISTORICAL", "READ ONLY"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the screen never says %q:\n%s", want, view)
+		}
+	}
+	// A number of files reviewed over a span nobody is reviewing reads as progress
+	// that was not made, so the counter and the gutter are simply absent.
+	for _, absent := range []string{"reviewed", "○ ", "+ new thread"} {
+		if strings.Contains(view, absent) {
+			t.Errorf("the historical screen still offers %q:\n%s", absent, view)
+		}
+	}
+
+	live, _ := readonlyModel(t, span.Full())
+	if !live.sess.Span().Live() {
+		t.Fatal("the comparison model is not live")
+	}
+	liveView := live.View()
+	for _, want := range []string{"reviewed", "○ ", "+ new thread"} {
+		if !strings.Contains(liveView, want) {
+			t.Errorf("the live screen lost %q", want)
+		}
+	}
+}
+
+func TestHistoricalHelpBarOffersOnlyWhatItCanDo(t *testing.T) {
+	m, _ := readonlyModel(t, historySel())
+	help := m.helpText()
+	for _, absent := range []string{"space reviewed", "e edit", "a about", "t new thread", "s submit"} {
+		if strings.Contains(help, absent) {
+			t.Errorf("the historical shortcut bar still advertises %q:\n%s", absent, help)
+		}
+	}
+	for _, want := range []string{"enter open", "d diff", "p preview", "v span"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("the historical shortcut bar lost %q", want)
+		}
+	}
+}
+
+// The tool has to see the span on screen. A live span compares its start against the
+// working tree so edits survive; history compares two pins, because today's files are
+// not what the span contains.
+func TestDifftoolHeadIsThePinOnlyOverHistory(t *testing.T) {
+	history, _ := readonlyModel(t, historySel())
+	if got := difftoolHead(history.sess.Span()); got != history.sess.Span().To {
+		t.Errorf("historical tool head = %q, want the pinned head %q", got, history.sess.Span().To)
+	}
+
+	live, _ := readonlyModel(t, span.Full())
+	if got := difftoolHead(live.sess.Span()); got != "" {
+		t.Errorf("live tool head = %q, want the working tree (no second revision)", got)
+	}
+}
+
+// The `you` section is the reviewer's uncommitted edits against what they are reviewing.
+// Over history that question has no answer, so the pane must not ask it — and must not
+// sit there saying it is still waiting for an answer that will never come.
+func TestHistoricalPreviewAsksGitAboutOneThingOnly(t *testing.T) {
+	m, _ := readonlyModel(t, historySel())
+	m.width, m.height = 140, 24
+	m.previewOn = true
+	m.refresh()
+
+	var asked []string
+	m.patchFor = func(_ context.Context, path string) Patch {
+		asked = append(asked, "span "+path)
+		return Patch{}
+	}
+	m.workingFor = func(_ context.Context, path string) Patch {
+		asked = append(asked, "working "+path)
+		return Patch{}
+	}
+
+	m = askPreview(t, m)
+
+	for _, a := range asked {
+		if strings.HasPrefix(a, "working ") {
+			t.Errorf("the pane asked git about the working tree over a historical span (%s)", a)
+		}
+	}
+	if len(asked) == 0 {
+		t.Fatal("the pane asked git about nothing at all")
+	}
+	// The empty-span note has to be the honest one, not a wait for a fetch that is
+	// never coming.
+	if !strings.Contains(m.View(), "no changes in this span") {
+		t.Errorf("the pane is not reporting the empty span:\n%s", strings.Join(m.previewLines(), "\n"))
+	}
+	if strings.Contains(m.View(), "reading your edits") {
+		t.Error("the pane is waiting for an answer about edits it never asked about")
+	}
+}

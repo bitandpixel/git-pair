@@ -268,7 +268,8 @@ func display(c Checkpoint) string {
 	case KindWorkingTree:
 		return "HEAD"
 	case KindChangesetBase:
-		return "base"
+		// resolve names it after the changeset's base ref, which is how a reviewer names it.
+		return c.Name
 	case KindRef:
 		return c.Name + "@" + short(c.OID)
 	}

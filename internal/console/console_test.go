@@ -145,3 +145,24 @@ func TestNoOpEditorIsHonoured(t *testing.T) {
 		t.Errorf("the no-op editor failed: %v", err)
 	}
 }
+
+// The second revision is the difference between a span you can edit and a span you can
+// only read, so the argument order is worth pinning: git takes the revs before the `--`.
+func TestDiffToolCommandCarriesTheSecondRevisionWhenThereIsOne(t *testing.T) {
+	repo := &git.Repo{Dir: t.TempDir()}
+
+	live := strings.Join(DiffToolCommand(repo, "abc1234", "", []string{"src/a.go"}).Args, " ")
+	if want := "git difftool --no-prompt abc1234 -- src/a.go"; live != want {
+		t.Errorf("live span = %q, want %q", live, want)
+	}
+
+	history := strings.Join(DiffToolCommand(repo, "abc1234", "def5678", []string{"src/a.go"}).Args, " ")
+	if want := "git difftool --no-prompt abc1234 def5678 -- src/a.go"; history != want {
+		t.Errorf("historical span = %q, want %q", history, want)
+	}
+
+	all := strings.Join(DiffToolCommand(repo, "abc1234", "def5678", nil).Args, " ")
+	if want := "git difftool --no-prompt abc1234 def5678"; all != want {
+		t.Errorf("whole span = %q, want %q", all, want)
+	}
+}

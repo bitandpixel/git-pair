@@ -130,17 +130,25 @@ Deliverables:
 
 Tasks:
 
-- [ ] Spike first: confirm `git difftool <from> <to> -- <path>` and check what the tool sees.
-- [ ] Thread `Span` (not just `From`/`To`) into the TUI model; gate each mutating action on
-      `CanEdit`/`CanSubmit`/`CanMark` in one place, so a new command cannot forget the check.
-- [ ] Mode line in the header; gutter, counter and mark shortcuts hidden in historical mode.
-- [ ] Historical difftool path, and no working-tree fetch (`WorkingPatch`) for historical spans.
-- [ ] Hints and README/PRD for the new mode.
+- [x] Spike done (see Spikes): two revs give the tool two temp files; labels arrive empty.
+- [x] The model asks the session for its `Span` rather than endpoints. `mutatingKey` names the
+      keys that change something and `cannot` says why the span forbids one, checked once at the top
+      of the key handler; `activate` covers the row action the table cannot reach.
+- [x] The counter's slot carries `HISTORICAL · READ ONLY`; the reviewed gutter, the counter and
+      the `+ new thread…` row are absent, and the shortcut bar drops the keys it cannot take.
+- [x] `difftoolHead` passes the pinned head over history and nothing over a live span; the pane
+      fetches only the span diff, and says "no changes in this span" rather than waiting for an
+      answer about edits it never asked about.
+- [x] README's command table and TUI prose, PRD §14 (the read-only screen) and a new §17.4 for
+      checkpoints and the mode matrix.
 
 Verification:
 
-- Unit tests per refusal: each mutating key leaves model state untouched and sets an explanatory
-  status; the read-only keys still work.
+- Unit tests per refusal: a table over `Space`, `e`, `a`, `t`, `s` asserts mode unchanged, marks
+  unchanged, row count unchanged, working tree still clean, and a status that names the head and `v`.
+  Falsified by short-circuiting the gate — without it the marks flip, submit mode is entered, and no
+  explanation appears.
+- The escape hatch is tested too: `v` lands on a live span, after which `s` is legitimate again.
 - A test asserting a historical session never issues a worktree diff (`WorkingPatch` not called) and
   always passes two revs to the difftool.
 - End to end in a pty: `review open --head-review=-1`, confirm the header, the refusals, and that
