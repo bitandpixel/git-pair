@@ -14,12 +14,12 @@ session is a live review or a read-only look at history. The common cases stay o
 
 ## Status (audited 2026-09-16)
 
-**Complete, with two defects outstanding.** Every milestone is implemented, verified and committed
-on `gitpr/init-commits`, and the closing audit
+**Complete, and the defects the audit found are fixed.** Every milestone is implemented, verified and
+committed on `gitpr/init-commits`, and the closing audit
 ([audits/2026-09-16-completion.md](audits/2026-09-16-completion.md)) found no milestone incomplete. It
-found two defects in shipped behaviour, recorded under *Known gaps* and left unfixed because an audit
-recommends rather than implements. The first contradicts a Success Criterion and an owner decision, so
-it is not cosmetic.
+found three defects in shipped behaviour, which the audit recorded rather than fixed; all three are now
+fixed in `9b5a877` (marks across a span round trip), `d0ceee7` (the header's span name) and `1575437`
+(the read-only `ABOUT.md` write), each with a test that fails without the fix. See *Known gaps*.
 
 The plan was archived to `docs/plans/completed/review-span-selection/` when the audit closed. Evidence
 marked *pty* below means it was run by hand in a terminal; those scripts are not in this repository, so
@@ -49,19 +49,20 @@ Observable outcomes, not implementation details:
   Verified indirectly: `review open` refuses to run without a terminal, so this rests on `diff`'s
   default-span test plus the flag set the two commands share, not on a `review open` test.
 - A span whose head is not the working tree opens **read-only**: no marking, no submitting, no
-  editing of product files or `ABOUT.md`, no new threads, and the screen says so. **Met, with one
-  narrow escape:** a historical span that removed `ABOUT.md` can have it recreated and opened for
+  editing of product files or `ABOUT.md`, no new threads, and the screen says so. **Met** since
+  `1575437`; before that a historical span could recreate a missing `ABOUT.md` and open it for
   editing. See *Known gaps*.
 - Both ends of a span can be named by review index, commit id, or ref, from the CLI and from the `V`
-  picker; all of them resolve through one implementation shared by CLI and TUI. One label is wrong
-  today: the header prints `span: unreviewed` for any span based at a review and headed at the working
-  tree, so `--since-review=-3` announces itself as the unreviewed span. See *Known gaps*.
+  picker; all of them resolve through one implementation shared by CLI and TUI. **Met** since
+  `d0ceee7`; before that the header printed `span: unreviewed` for any span based at a review and
+  headed at the working tree, so `--since-review=-3` announced itself as the unreviewed span. See
+  *Known gaps*.
 - A ref chosen as a checkpoint keeps its name on screen, diffs against the commit it pointed at when
   chosen, reports drift without acting on it, and changes only when the reviewer says so.
-- Reviewed marks are not carried across a span change: a mark made in one span does not silently
-  mark a file in another. **Partly met.** That half holds and is tested. The other half of the
-  original wording — that marks "remain available if the span goes back" — does not hold inside one
-  session, and the audit found it by experiment. See *Known gaps*.
+- Reviewed marks are not carried across a span change — a mark made in one span does not silently
+  mark a file in another — and they are still there when the span comes back. **Met** since `9b5a877`,
+  which is also what makes the first half worth keeping a test for: before it, both halves failed in
+  the same direction. See *Known gaps*.
 
 ## Context
 
@@ -349,7 +350,7 @@ Verification:
   `refs/reviews/booking` keeps its full name rather than becoming a bare `booking` beside the branch
   of that name.
 
-## Known gaps (found by the audit, left unfixed on purpose)
+## Known gaps (found by the audit, then fixed)
 
 **Marks do not survive a span round trip inside one session.**
 
@@ -368,29 +369,38 @@ gone. Cause, in the order it bites:
   trip persists the emptied set, and a later `review open` on the same commit resumes without marks
   that an earlier session had recorded.
 
-This is reachable through the ring M3b added — `v` is a key reviewers are now told to press — which
-is what makes it worth fixing rather than documenting. Recommended, in order of preference: key
-in-session marks by `(span key, path)` rather than path alone, or re-read the mark store for
-`Span.To` on every span change; then add the round trip above as a regression test next to
-`TestSessionStepSpanWalksFullChangesetAndUnreviewed`. The audit did not implement it, per the
-plan-audit contract, and did not leave a failing test in the tree.
+Fixed in `9b5a877`, which took the third bullet more literally than either suggestion did. A mark is
+a fact about a path *and* a diff key, so the store now keeps several keys per path and `Save` replaces
+only the `(path, key)` pairs it is handed — the two spans a reviewer toggles between most often, full
+changeset and unreviewed, both end at HEAD, and one span's save had been erasing the other's marks from
+disk while both were still on screen. On top of that the session reads the store for the commit the
+span it just entered ends at, rather than once at open. `TestMarksComeBackWhenTheSpanComesBack` marks
+two files, presses `v` twice and checks both are still marked;
+`TestSavingOneSpanLeavesTheOtherSpansMarks` covers the disk case. Both were run against the old code
+and fail: the first reports `0 files are marked`, which is the probe's result.
 
 **The header calls every review-based span `unreviewed`.** `Session.Unreviewed()` asks only whether
 the base is a review and the head is the working tree, and `spanName` swaps the word `unreviewed` in
 for the span label on that answer. So `review open --since-review=-3`, `review open
 --base-review=-3`, and the picker's `Review -3` base all print `span: unreviewed` for a span that
 begins three submissions back. It contradicts Success Criterion 3 and requirement §17 (the current
-span should always be visible), and no test pins it: `Unreviewed()` is asserted once, for the real
-unreviewed span. The fix is a condition — the base is the *latest* review — plus one test; the audit
-left both to the next change because it also has to decide what the label should say for a span based
-at an older review.
+span should always be visible), and no test pinned it: `Unreviewed()` was asserted once, for the real
+unreviewed span. Fixed in `d0ceee7`: the predicate is now the *newest* review — head is the
+working tree, base is a review, and that review is the last one in the changeset — and a span based
+further back keeps the label it resolved to, which already names the review it starts after
+(`bb0f343..HEAD (after review 0)`). `TestUnreviewedMeansTheNewestReview` and
+`TestHeaderNamesUnreviewedOnlyForTheUnreviewedSpan` cover the predicate and the line on screen.
 
 **A historical span can recreate `ABOUT.md`.** `openArtifact` treats `ABOUT.md` as a diff target when
 the historical span touched it and it existed at the span's start, so the read-only gate lets the
 action through; the file is then missing from the working tree, and the code path calls `EnsureAbout`
 before opening the editor. That is a write and an editing handoff in a mode whose entire promise is
 that it changes nothing. Narrow — it needs `ABOUT.md` absent from the worktree — but Success Criterion
-2 is absolute and nothing tests this path.
+2 is absolute and nothing tested this path. Fixed in `1575437` by guarding that branch with
+`Span().CanEdit()`, so a historical span gets the difftool over its two pins instead.
+`TestHistoricalSpanDoesNotCreateTheAboutItDiffersFrom` asserts the working tree is untouched, and
+`TestLiveSpanStillCreatesAWorkingTreeAbout` keeps the live behaviour, so the guard is a mode boundary
+rather than a branch that never runs.
 
 ## Discoveries
 
@@ -417,8 +427,8 @@ Things execution taught that the plan did not know when it was written.
   frame invariants; no nested program.
 - **Pinned refs and the reviewed marks disagreeing after `r`.** Marks are keyed on the end commit, so
   a refreshed base simply matches nothing; the report tells the reviewer why the counter dropped.
-  Realised, and behaved as designed. The same keying bites a different way on span *navigation*,
-  where the marks were expected to come back — see *Known gaps*.
+  Realised, and behaved as designed. The same keying bit a different way on span *navigation*, where
+  the marks were expected to come back — fixed in `9b5a877`, see *Known gaps*.
 - **`gitpr diff`'s meaning drifting.** `gitpr diff` with no flags is base → pinned HEAD, exactly as
   today; the `you` section belongs to the preview, not to `diff`.
 
@@ -433,4 +443,5 @@ per acceptance scenario in the requirements, with the raw bytes checked rather t
 
 | Date       | Audit                                                      | Summary |
 | ---------- | ---------------------------------------------------------- | ------- |
+| 2026-09-16 | `9b5a877`, `d0ceee7`, `1575437` | The three defects the audit recorded, fixed in the order it listed them: marks across a span round trip, then the header's span name, then the read-only `ABOUT.md` write. Each fix was falsified by running its test against the code before it. Coverage the audit recommended and these commits did not take on: a multi-ref drift case, a `review open` flag-registration test, and criterion 1 at the session level. |
 | 2026-09-16 | [audits/2026-09-16-completion.md](audits/2026-09-16-completion.md) | Completion audit, run twice — one pass per reviewer, findings merged. M1–M5 verified against the branch; no milestone incomplete. Plan corrected for five stale or false claims (the `V`/`r` note; a `--base` flag that never existed; a broken-span-stop claim overtaken by pinning; requirements-file departures that were under-described; a flattened M1 task line), two orphaned bullets moved to *Discoveries*, evidence labelled honestly where it was a hand run rather than a test, and criteria 1–3 and 5 qualified where the claim outran the proof. Three shipped defects recorded under *Known gaps* and not fixed: marks lost on a span round trip, `span: unreviewed` shown for any review-based span, and `ABOUT.md` recreation reachable in read-only mode. Plan archived to `docs/plans/completed/`. |
