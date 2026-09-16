@@ -574,3 +574,64 @@ func TestChangeInitCommitDoesNotChangeLifecycleState(t *testing.T) {
 		t.Errorf("a freshly initialised changeset is in the review queue: %v", list)
 	}
 }
+
+// --- change init / ready: a base must not be the branch itself ---------------
+
+// Everything derived from a changeset is measured as `base...HEAD`. With base ==
+// branch that range is empty for all time, so `change ready` writes a marker that
+// no command can observe and `status` answers WORKING forever. This is the
+// configuration that has to be refused, and refused where it is created.
+func TestChangeInitRefusesToBaseAChangesetOnItsOwnBranch(t *testing.T) {
+	f := newRepo(t)
+
+	for _, args := range [][]string{
+		{"change", "init"},                   // the inferred base is main, and we are on main
+		{"change", "init", "--base", "main"}, // asked for explicitly
+		{"change", "init", "--base", "HEAD"}, // self-reference by another name
+	} {
+		res := runIn(t, f.Dir(), args...)
+		if res.code != exitUsage {
+			t.Errorf("%v exited %d, want %d\n%s", args, res.code, exitUsage, res.stderr)
+			continue
+		}
+		mustContain(t, res.stderr, "branch it lives on", "refusal should name the problem")
+		mustContain(t, res.stderr, "switch -c", "refusal should say what to do instead")
+	}
+
+	if f.HasWorktreeFile(filepath.Join("changesets", "main", "CHANGESET.yaml")) {
+		t.Error("init wrote a changeset directory it had just refused to create")
+	}
+}
+
+// The opposite guard: a branch created moments ago shares its tip with main, and
+// init must still work there. Comparing commits instead of refs would break the
+// normal first run of `change init`.
+func TestChangeInitAllowsAFreshBranchThatSharesItsBasesTip(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("booking")
+	if f.MergeBase("main", "HEAD") != f.RevParse("HEAD") {
+		t.Fatal("the fixture branch is not at its base's tip; this test no longer guards anything")
+	}
+
+	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+
+	if got := f.MetadataBase("booking"); got != "main" {
+		t.Errorf("base = %q, want main", got)
+	}
+}
+
+func TestChangeReadyRefusesASelfBasedChangeset(t *testing.T) {
+	f := newRepo(t)
+	f.StageChangeset("main", "main")
+	f.WriteChangesetFile("main", "ABOUT.md", "# main\n\n## Summary\n\nDescribed.\n")
+	f.Commit("work", gittest.WithFile("service.go", "package main\n"))
+
+	res := runIn(t, f.Dir(), "change", "ready")
+	if res.code != exitRefusal {
+		t.Errorf("change ready on a self-based changeset exited %d, want %d\n%s", res.code, exitRefusal, res.stderr)
+	}
+	mustContain(t, res.stderr, "this branch itself", "refusal should name the problem")
+	if strings.HasPrefix(f.Subject("HEAD"), "gitpr: ready") {
+		t.Error("ready created a marker commit it should have refused to write")
+	}
+}

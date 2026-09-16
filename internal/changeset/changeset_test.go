@@ -357,3 +357,44 @@ func TestEnsureThreadReusesExistingFile(t *testing.T) {
 
 // fixRepo keeps the fixture's repository handle explicit at the call site.
 func fixRepo(f *gittest.Fixture) *git.Repo { return &git.Repo{Dir: f.Dir()} }
+
+// A changeset based on its own branch can never contain a commit, because the
+// base moves with every commit the author makes. The test is by ref identity: a
+// branch created moments ago shares its tip with its base legitimately.
+func TestBaseIsOwnBranch(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("feature/booking")
+	f.Commit("work", gittest.WithFile("b.txt", "b\n"))
+	repo := &git.Repo{Dir: f.Dir()}
+	ctx := context.Background()
+
+	cases := []struct {
+		name   string
+		base   string
+		branch string
+		want   bool
+	}{
+		{"main on main", "main", "main", true},
+		{"main on main by full ref name", "refs/heads/main", "main", true},
+		{"main on a branch off main", "main", "feature/booking", false},
+		{"HEAD names the branch it is on", "HEAD", "feature/booking", true},
+		{"HEAD does not name some other branch", "HEAD", "main", false},
+		{"@ is another spelling of HEAD", "@", "feature/booking", true},
+		{"main on a branch off main", "main", "feature/booking", false},
+		{"own branch named as base", "feature/booking", "feature/booking", true},
+		{"a commit sha names no branch", f.RevParse("main"), "main", false},
+		{"a base that does not exist", "gone", "main", false},
+		{"empty base", "", "main", false},
+	}
+	for _, tc := range cases {
+		got, err := changeset.BaseIsOwnBranch(ctx, repo, tc.base, tc.branch)
+		if err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("%s: BaseIsOwnBranch(%q, %q) = %v, want %v", tc.name, tc.base, tc.branch, got, tc.want)
+		}
+	}
+}

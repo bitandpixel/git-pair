@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -119,6 +120,13 @@ func buildStatus(ctx context.Context, s *session) (*statusView, error) {
 	if sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, span.Options{}); err == nil {
 		view.json.Span = sp.Label
 		view.span = sp
+	}
+	if s.baseIsOwnBranch {
+		// "no commits above the base yet" is technically true and useless here:
+		// with base == branch there never will be any. Say what is actually wrong.
+		view.json.Reason = fmt.Sprintf("base %q is this branch itself, so nothing can ever be above it", s.cs.Base)
+		view.json.NextAction = fmt.Sprintf("give the change its own branch (`git switch -c <name>`), or set `base` in %s to an ancestor of %s",
+			s.cs.MetadataPath(), s.cs.Branch)
 	}
 	if s.summary.State == model.StateClosed {
 		view.closed = true

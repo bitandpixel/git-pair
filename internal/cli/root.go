@@ -152,6 +152,10 @@ type session struct {
 	summary lifecycle.Summary
 	clean   bool
 	head    string
+	// baseIsOwnBranch records the unrecoverable base configuration, so the
+	// surfaces that can explain it (status, change ready) do not each redo the
+	// lookup and so they agree on the wording.
+	baseIsOwnBranch bool
 }
 
 // load resolves the repository and the current branch's changeset, requiring
@@ -206,7 +210,11 @@ func (a *app) sessionFor(ctx context.Context, repo *git.Repo, cs changeset.Chang
 			return nil, err
 		}
 	}
-	return &session{repo: repo, cs: cs, summary: summary, clean: clean, head: head}, nil
+	own, err := changeset.BaseIsOwnBranch(ctx, repo, cs.Base, cs.Branch)
+	if err != nil {
+		return nil, err
+	}
+	return &session{repo: repo, cs: cs, summary: summary, clean: clean, head: head, baseIsOwnBranch: own}, nil
 }
 
 // usageWrap marks an error as a usage problem rather than a git failure.

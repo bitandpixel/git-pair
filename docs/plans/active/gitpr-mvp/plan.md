@@ -92,6 +92,7 @@ From the PRD, treated as binding:
 | M4 submit, refs, queue, close | done | e2e replay: empty approve commit, ref moves, and after `git branch -D` the archive ref still reaches 13 commits |
 | M5 TUI | done, partially verified | Verified under a pty: first paint, `j/k`, `space` (0/4 → 1/4 → 2/4), `v`, `a` editor handoff, `s`+`b` submit (created `review: block demo` and moved the ref), clean `q` exit. **Not yet verified:** `Enter` launching a real difftool *inside* the TUI — the same command path is verified outside it via `gitpr diff --tool`, which reached the configured tool with the right blob paths |
 | M6 docs + dogfood | done | `README.md`; `artifacts/e2e-29.sh` is the scripted replay and passes end to end |
+| Post-MVP: refuse a self-referential base | done | `TestBaseIsOwnBranch` (9 cases) + init/ready/status CLI tests; reproduces and closes the owner's dogfood report |
 | Post-MVP: `change init` commits, takes `--about` | done | `TestChangeInit*` (11 cases) plus the corrected golden workflow; e2e replay still passes |
 
 Test suite: 21 files, 160 test functions, 12 packages, all passing; `go vet` and `gofmt`
@@ -129,6 +130,14 @@ changeset. Hand-verification of everything the README documents additionally cor
    trimmed file and the length check always failed. Nothing covered it: an assertion-free
    warning is invisible to the suite until someone reads the output. Now asserted by
    `TestChangeReadyWarnsWhenAboutIsStillTheScaffold`.
+7. **A changeset based on its own branch is unrecoverable, and gitpr let you create one.**
+   Everything is derived from `base...HEAD`; when the base names the branch it is stacked on,
+   that range is empty for all time. `change ready` reported success for a marker no reader
+   could ever observe, and `status` answered `WORKING` forever — found by the owner while
+   dogfooding a single-branch repo. `changeset.BaseIsOwnBranch` now gates `change init` (exit
+   2) and `change ready` (exit 1), and `status` names it as the reason. The predicate compares
+   *refs*, not commits: a branch created moments ago legitimately shares its base's tip, and a
+   commit-based test would have refused the normal first `change init`.
 
 ## Architecture
 
@@ -392,4 +401,5 @@ M0 ──► M1 ──► M2 ──┬──► M3 ──► M4 ──► M6
 | --- | --- | --- |
 | 2026-09-16 | — | Initial plan. Plumbing spike complete; D1–D4 raised. |
 | 2026-09-16 | implementation pass | D1–D4 resolved. M0–M4 implemented and verified by the PRD §29 replay; M5 implemented with the TUI verified under a pty. Three implementation-level discoveries recorded above; no PRD requirement dropped. |
+| 2026-09-16 | dogfood bug report | `status` said `WORKING` after a successful `change ready` in a single-branch repo. Cause: base == branch, so `base...HEAD` is permanently empty and the ready marker sits below the range that reads it. Guarded at init and ready, explained by status; the review workflow itself was never broken. |
 | 2026-09-16 | `change init` change of contract | Init now commits the scaffold (scoped with `git commit --only`) and accepts `ABOUT.md` content by flag or pipe, so agents can initialise and describe atomically. M1 updated above; two further discoveries recorded. Found while this change was being tested, not by it: the template warning in `change ready` was unreachable. |

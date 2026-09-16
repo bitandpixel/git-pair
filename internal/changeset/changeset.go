@@ -33,6 +33,8 @@ var (
 	ErrBaseConflict = errors.New("base already set to a different value")
 	// ErrAboutConflict means ABOUT.md already has content and no override was given.
 	ErrAboutConflict = errors.New("ABOUT.md already has content")
+	// ErrBaseIsOwnBranch means the base is the very branch the changeset lives on.
+	ErrBaseIsOwnBranch = errors.New("self-referential changeset base")
 )
 
 // Changeset is one branch's review state, located in the working tree.
@@ -331,6 +333,31 @@ func normalizeMarkdown(s string) string {
 		return ""
 	}
 	return s + "\n"
+}
+
+// BaseIsOwnBranch reports whether a base ref names the branch it is stacked on.
+//
+// This is the one base configuration that cannot work: the base moves with every
+// commit the author makes, so `base...HEAD` is empty forever, every lifecycle
+// marker lands below the range that reads it, and `change ready` reports success
+// for a changeset that can never be observed as ready.
+//
+// The check is by ref identity, not by commit. A branch created moments ago
+// shares its tip with its base legitimately, so "same SHA" would refuse the
+// normal first run of `change init` on a new branch.
+func BaseIsOwnBranch(ctx context.Context, repo *git.Repo, base, branch string) (bool, error) {
+	if base == "" || branch == "" {
+		return false, nil
+	}
+	// --symbolic-full-name answers "which ref is this?", which is exactly the
+	// question: "main" and "HEAD" on main both answer refs/heads/main, while a
+	// raw SHA answers nothing and a dead ref answers with an error.
+	name, err := repo.Git(ctx, "rev-parse", "--symbolic-full-name", base)
+	if err != nil {
+		return false, nil
+	}
+	name = strings.TrimSpace(name)
+	return name != "" && name == "refs/heads/"+branch, nil
 }
 
 // AboutExists reports whether ABOUT.md is present in the working tree.

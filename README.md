@@ -466,6 +466,12 @@ pass --base <ref>` (exit 2).
 replace it)` (exit 2) — `change init --about` refuses to discard a description that is
 already there. Same rule, same flag shape as changing a base.
 
+`self-referential changeset base: changeset "main" cannot be based on main, the branch it
+lives on` (exit 2 from `change init`, exit 1 from `change ready`) — everything is measured as
+`base...HEAD`, so a changeset based on its own branch is empty forever and its `ready` marker
+can never be observed. Use a branch of its own, or point `base` at an ancestor. The test is on
+the ref, not the commit: a branch created a moment ago shares `main`'s tip and is valid.
+
 `N additions from review <sha> still survive unchanged` (exit 1) — resolve them, or
 acknowledge them deliberately:
 

@@ -332,3 +332,23 @@ func TestDiffSpanArgumentErrors(t *testing.T) {
 	submit(t, f, "block")
 	runIn(t, f.Dir(), "diff", "--unreviewed").mustSucceed(t, "diff", "--unreviewed")
 }
+
+// "no commits above the base yet" is true for a self-based changeset and useless:
+// there never will be any. status has to name the configuration instead.
+func TestStatusExplainsASelfBasedChangeset(t *testing.T) {
+	f := newRepo(t)
+	f.StageChangeset("main", "main")
+	f.Commit("work", gittest.WithFile("service.go", "package main\n"))
+
+	res := runIn(t, f.Dir(), "status").mustSucceed(t, "status")
+	mustContain(t, res.stdout, "is this branch itself", "reason should name the problem")
+	mustContain(t, res.stdout, "switch -c", "status should say what to do instead")
+
+	out := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status").json(t)
+	if reason, _ := out["reason"].(string); !strings.Contains(reason, "this branch itself") {
+		t.Errorf("reason = %q, want it to name the self-referential base", reason)
+	}
+	if next, _ := out["next_action"].(string); !strings.Contains(next, "CHANGESET.yaml") {
+		t.Errorf("next_action = %q, want it to point at CHANGESET.yaml", next)
+	}
+}

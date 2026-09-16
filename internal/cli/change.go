@@ -108,6 +108,13 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		a.warn("warning: base %q does not resolve yet; spans and status will fail until it does\n", base)
 	}
 
+	if own, err := changeset.BaseIsOwnBranch(ctx, repo, base, branch); err != nil {
+		return err
+	} else if own {
+		return &usageError{fmt.Errorf("%w: changeset %q cannot be based on %s, the branch it lives on. The base would move with every commit, so the changeset could never contain anything. Create a branch for the change (`git switch -c <name>`) or pass --base <ancestor-ref>",
+			changeset.ErrBaseIsOwnBranch, cs.Slug, base)}
+	}
+
 	about, err := aboutContent(opts)
 	if err != nil {
 		return err
@@ -273,6 +280,14 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 	}
 	if s.head == "" {
 		return fmt.Errorf("nothing to mark ready: the repository has no commits yet")
+	}
+	if s.baseIsOwnBranch {
+		// Refuse rather than write a marker nobody can read: the marker would
+		// land on the commit that *is* the base, i.e. below the range that
+		// derives state, so `ready` would report success and `status` would
+		// keep saying WORKING.
+		return fmt.Errorf("cannot mark %s ready: base %q is this branch itself, so the changeset can never contain commits. Set `base` in %s to an ancestor of %s, or move the work to its own branch",
+			s.cs.Slug, s.cs.Base, s.cs.MetadataPath(), s.cs.Branch)
 	}
 
 	report, err := survivalCheck(ctx, s)
