@@ -487,19 +487,19 @@ func TestReviewReopenAfterTheAuthorResponds(t *testing.T) {
 	}
 }
 
-// An empty span is a real state — the reviewer submitted and the author has not
-// committed yet — and opening a session with no files in it would read as a bug.
-func TestReviewReopenWithNothingSinceTheReview(t *testing.T) {
+// The review being the newest commit is the state a reviewer actually types `reopen`
+// in: they submitted, the session closed, and they want to get back to that review.
+// Nothing follows the submission, so reopen shows what it covered instead.
+func TestReviewReopenFallsBackToTheSpanTheReviewCovered(t *testing.T) {
 	f, _ := newChangeset(t, "booking", "main")
 	ready(t, f)
-	submit(t, f, "block")
-	review := f.Head()
+	submit(t, f, "feedback")
 
+	// Past both guards and into the TUI, which the harness has no terminal for. A
+	// refusal here would mean the covered span came back empty as well.
 	got := runIn(t, f.Dir(), "review", "reopen")
-	if got.code != exitRefusal {
-		t.Errorf("reopen with nothing after the review exited %d, want %d\n%s", got.code, exitRefusal, got.stderr)
+	if got.code != exitUsage || !strings.Contains(got.stderr, "needs a terminal") {
+		t.Errorf("reopen exited %d (%s), want the terminal refusal", got.code, got.stderr)
 	}
-	mustContain(t, got.stderr, "nothing has been committed since review", "should say the span is empty")
-	mustContain(t, got.stderr, f.Short(review), "should name the review it is relative to")
-	mustContain(t, got.stderr, "gitpr review open", "should name the command that works")
+	mustContain(t, got.stderr, "needs a terminal", "reopen should reach the session, not refuse")
 }

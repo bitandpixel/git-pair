@@ -85,7 +85,7 @@ func runReviewOpen(ctx context.Context, a *app, opts *spanOptions) error {
 	if err != nil {
 		return err
 	}
-	return openSession(ctx, a, s, so, "open")
+	return openSession(ctx, a, s, so, "open", "")
 }
 
 // --- review about -----------------------------------------------------------
@@ -712,26 +712,31 @@ func runReviewReopen(ctx context.Context, a *app) error {
 		}
 		return &usageError{err}
 	}
-	// An author who has not committed yet leaves a span with nothing in it, and an
-	// empty file list reads as a broken tool rather than as "nothing to look at yet".
 	names, err := s.repo.DiffNames(ctx, sp.From, sp.To)
 	if err != nil {
 		return err
 	}
-	if len(names) == 0 {
-		return fmt.Errorf("nothing has been committed since %s; run `gitpr review open` for the whole changeset, or `gitpr diff --unreviewed` to check",
-			reviewLabel(s.summary.LatestReview))
+	if len(names) > 0 {
+		return openSession(ctx, a, s, so, "reopen", "")
 	}
-	return openSession(ctx, a, s, so, "reopen")
+	// The submission is the newest commit, so nothing follows it. The reviewer still
+	// came back to that review, and what it covered is the honest thing to show them.
+	return openSession(ctx, a, s, span.Options{Covered: true}, "reopen",
+		fmt.Sprintf("nothing has landed since %s — showing the changes it covered",
+			reviewLabel(s.summary.LatestReview)))
 }
 
 // openSession runs the TUI on a resolved span choice. name is the subcommand to
 // blame in the no-terminal message.
-func openSession(ctx context.Context, a *app, s *session, so span.Options, name string) error {
+// note, if set, is written to stderr before the session takes the screen.
+func openSession(ctx context.Context, a *app, s *session, so span.Options, name, note string) error {
 	if !console.Interactive() {
 		return &usageError{fmt.Errorf(
 			"`gitpr review %s` needs a terminal; use `gitpr diff`, `gitpr review about`, "+
 				"`gitpr review thread`, and `gitpr review submit` instead", name)}
+	}
+	if note != "" {
+		a.warn("%s\n", note)
 	}
 	err := tui.Run(ctx, tui.Options{Repo: s.repo, Changeset: s.cs, Summary: s.summary, Span: so})
 	if errors.Is(err, tui.ErrQuit) {

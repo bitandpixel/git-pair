@@ -311,3 +311,30 @@ func TestSessionSpanErrorSurfaces(t *testing.T) {
 		t.Error("NewSession succeeded with --unreviewed and no reviews")
 	}
 }
+
+// `review reopen` can open a session on the span a submission covered, which only
+// happens when nothing landed after it. `v` must then have somewhere useful to go.
+func TestSessionToggleSpanFromCoveredGoesToTheFullChangeset(t *testing.T) {
+	e := newEnv(t)
+	e.f.Write("service.go", "package main\n\n// Please use a transaction here\nfunc Lock() {}\n")
+	e.f.CommitReviewMarker(slug, "feedback")
+
+	sess := e.session(t, span.Options{Covered: true})
+	if sess.Unreviewed() {
+		t.Error("Unreviewed() = true on a span that ends at the submission")
+	}
+	covered := filePaths(sess.Files())
+	if len(covered) == 0 {
+		t.Fatal("the covered span listed no files")
+	}
+
+	if err := sess.ToggleSpan(context.Background()); err != nil {
+		t.Fatalf("ToggleSpan: %v", err)
+	}
+	if sess.Unreviewed() {
+		t.Error("toggling landed on the since-review span, which is empty by construction here")
+	}
+	if got := len(filePaths(sess.Files())); got < len(covered) {
+		t.Errorf("full span listed %d file(s), want at least the covered span's %d", got, len(covered))
+	}
+}

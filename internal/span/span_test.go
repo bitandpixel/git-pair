@@ -249,3 +249,57 @@ func TestResolveIgnoresOrdinaryCommits(t *testing.T) {
 // The case where HEAD *is* the review submission (an approval with nothing after
 // it) is covered above: `--unreviewed` resolves to an empty span whose From and
 // To are the review commit, and it must not error.
+
+// The span a submission saw. `review reopen` falls back to it when nothing has
+// landed after the review, so it has to end at the submission rather than at HEAD.
+func TestResolveCoveredSpan(t *testing.T) {
+	t.Run("first review covers base to the submission", func(t *testing.T) {
+		s := newScenario(t, false)
+		f := s.f
+		review := f.CommitReviewMarker(slug, "feedback")
+		// The author responds afterwards: the covered span must not follow them.
+		f.Commit("response", gittest.WithFile("service.go", "package main\n\nfunc Lock() { tx() }\n"))
+
+		got, err := s.resolve(t, span.Options{Covered: true})
+		if err != nil {
+			t.Fatalf("Resolve(covered): %v", err)
+		}
+		want, err := s.resolve(t, span.Options{})
+		if err != nil {
+			t.Fatalf("Resolve(full): %v", err)
+		}
+		if got.From != want.From {
+			t.Errorf("From = %s, want the merge base %s", got.From, want.From)
+		}
+		if got.To != review {
+			t.Errorf("To = %s, want the submission %s, not HEAD", got.To, review)
+		}
+		if got.Label != "review "+f.Short(review) {
+			t.Errorf("Label = %q, want %q", got.Label, "review "+f.Short(review))
+		}
+	})
+
+	t.Run("later review covers only what came after the previous one", func(t *testing.T) {
+		s := newScenario(t, true)
+		got, err := s.resolve(t, span.Options{Covered: true})
+		if err != nil {
+			t.Fatalf("Resolve(covered): %v", err)
+		}
+		if got.To != s.reviews[2] {
+			t.Errorf("To = %s, want the newest review %s", got.To, s.reviews[2])
+		}
+		if got.From != s.reviews[1] {
+			t.Errorf("From = %s, want the previous review %s", got.From, s.reviews[1])
+		}
+		if got.ReviewIndex != 2 {
+			t.Errorf("ReviewIndex = %d, want 2", got.ReviewIndex)
+		}
+	})
+
+	t.Run("nothing to be covered by", func(t *testing.T) {
+		s := newScenario(t, false)
+		if _, err := s.resolve(t, span.Options{Covered: true}); !errors.Is(err, span.ErrNoReviews) {
+			t.Errorf("Resolve(covered) with no reviews = %v, want ErrNoReviews", err)
+		}
+	})
+}

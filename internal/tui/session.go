@@ -125,9 +125,14 @@ func (s *Session) ToggleSpan(ctx context.Context) error {
 	if !s.CanToggleSpan() {
 		return fmt.Errorf("no review submissions yet, so there is nothing to compare HEAD against")
 	}
-	if s.spanOpts.Unreviewed {
+	switch {
+	case s.spanOpts.Covered:
+		// Covered is only reached when nothing landed after the review, so the
+		// since-review span has no content to toggle to; the whole changeset does.
 		s.spanOpts = span.Options{}
-	} else {
+	case s.spanOpts.Unreviewed:
+		s.spanOpts = span.Options{}
+	default:
 		s.spanOpts = span.Options{Unreviewed: true}
 	}
 	return s.Rescan(ctx)

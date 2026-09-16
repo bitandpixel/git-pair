@@ -218,15 +218,18 @@ state plus a one-line `Reason`. There is no state file.
 | (default) | `merge-base(base, HEAD)..HEAD` | what is in this changeset |
 | `--unreviewed` | `<latest review>..HEAD` | what happened since I reviewed |
 | `--since-review=N` | `<Nth review>..HEAD` | what happened since review N |
+| `review reopen`, when nothing landed since | `<previous review or base>..<review>` | the changes that submission covered |
 
 `--since-review` with no value means `-1`; indexes are chronological (`0` first, `-1`
 latest) and match `gitpr review history`.
 
 Coming back to a changeset you already reviewed is common enough to have its own command:
 `gitpr review reopen` opens the TUI on the `<latest review>..HEAD` span, the same span as
-`review open --unreviewed`, and refuses with the command to use instead when there is no
-review yet or nothing has been committed since the review. Every command without a span flag
-stays on the full changeset.
+`review open --unreviewed`. When nothing has been committed since that submission there is
+nothing after it to show, so the session opens instead on the changes the submission
+*covered* — `<previous review or base>..<review>` — and says so on stderr. With no review
+submitted it refuses and points at `review open`. Every command without a span flag stays on
+the full changeset.
 
 The same range applies to source, `ABOUT.md` and
 threads, and the resolved span is always printed to stderr:
@@ -260,7 +263,7 @@ elsewhere it is accepted and ignored.
 | `change init` | `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is `main`, else `master`, else a usage error |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `review open` | `--unreviewed`, `--since-review[=N]` | TUI; needs a terminal; full changeset unless a span flag says otherwise |
-| `review reopen` | none | TUI on `<latest review>..HEAD`; needs a terminal; refuses if there is no review or nothing changed since it |
+| `review reopen` | none | TUI on `<latest review>..HEAD`, or on the span that review covered when nothing landed since; needs a terminal; refuses if no review exists |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), then moves the review ref |

@@ -11,7 +11,7 @@ import (
 	"gitpr/internal/lifecycle"
 )
 
-// Kind distinguishes the two span families.
+// Kind distinguishes the span families.
 type Kind int
 
 const (
@@ -19,11 +19,17 @@ const (
 	Full Kind = iota
 	// SinceReview is `<review>..HEAD`: what happened after a review.
 	SinceReview
+	// Covered is `<previous review or base>..<review>`: the changes a review
+	// submission saw. Its end is the submission, not HEAD.
+	Covered
 )
 
 func (k Kind) String() string {
-	if k == Full {
+	switch k {
+	case Full:
 		return "full"
+	case Covered:
+		return "covered"
 	}
 	return "since-review"
 }
@@ -31,12 +37,16 @@ func (k Kind) String() string {
 // Options come straight from CLI flags. Both zero values mean "full changeset".
 type Options struct {
 	Unreviewed bool
+	// Covered asks for the span the newest review submission covered, rather than
+	// what came after it. Set by `review reopen` when nothing has landed since the
+	// submission; not a flag, since the span is what the command means.
+	Covered bool
 	// SinceReview is nil unless --since-review was given. Indexes are
 	// chronological and may be negative: -1 is the most recent review.
 	SinceReview *int
 }
 
-func (o Options) empty() bool { return !o.Unreviewed && o.SinceReview == nil }
+func (o Options) empty() bool { return !o.Unreviewed && !o.Covered && o.SinceReview == nil }
 
 // ErrNoReviews is returned when a review-relative span is requested but the
 // changeset has never been reviewed.
@@ -73,6 +83,10 @@ func Resolve(ctx context.Context, repo *git.Repo, base string, summary lifecycle
 		}, nil
 	}
 
+	if opts.Covered {
+		return coveredSpan(ctx, repo, base, summary, head)
+	}
+
 	idx := -1
 	if opts.SinceReview != nil {
 		idx = *opts.SinceReview
@@ -94,5 +108,33 @@ func Resolve(ctx context.Context, repo *git.Repo, base string, summary lifecycle
 		FromRef:     review.Short,
 		Label:       fmt.Sprintf("%s..HEAD (after review %d)", review.Short, resolved),
 		ReviewIndex: resolved,
+	}, nil
+}
+
+// coveredSpan resolves the changes the newest submission saw: everything since the
+// submission before it, or since the base for the first review. The end is the
+// submission itself, so the span does not drift if the author commits afterwards.
+func coveredSpan(ctx context.Context, repo *git.Repo, base string, summary lifecycle.Summary, head string) (Span, error) {
+	if len(summary.Reviews) == 0 {
+		return Span{}, ErrNoReviews
+	}
+	idx := len(summary.Reviews) - 1
+	review := summary.Reviews[idx]
+	from := ""
+	if idx > 0 {
+		from = summary.Reviews[idx-1].SHA
+	}
+	if from == "" {
+		merged, err := repo.MergeBase(ctx, base, review.SHA)
+		if err != nil {
+			return Span{}, fmt.Errorf("cannot resolve the span review %s covered against base %q: %w", review.Short, base, err)
+		}
+		from = merged
+	}
+	return Span{
+		Kind: Covered, From: from, To: review.SHA,
+		FromRef:     review.Short,
+		Label:       fmt.Sprintf("review %s", review.Short),
+		ReviewIndex: idx,
 	}, nil
 }
