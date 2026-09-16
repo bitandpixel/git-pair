@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -111,6 +112,24 @@ func Interactive() bool {
 func isCharDevice(f *os.File) bool {
 	info, err := f.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+// ReadPipedStdin returns piped or redirected stdin as text, trimmed, and
+// returns "" when there is nothing to read.
+//
+// A terminal stdin is never read, so a command that offers piped input cannot
+// block waiting for a human who is not typing. /dev/null is a character device
+// and therefore also reads as "nothing supplied", which is what you want from
+// `cmd </dev/null`.
+func ReadPipedStdin() string {
+	if isCharDevice(os.Stdin) {
+		return ""
+	}
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func firstSet(values ...string) string {

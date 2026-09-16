@@ -89,7 +89,8 @@ func (r *Repo) run(ctx context.Context, stdin string, capture bool, args ...stri
 	if !capture {
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		if err := cmd.Run(); err != nil {
-			return "", wrapExit(err)
+			// Nothing to capture: the streams belonged to the terminal.
+			return "", wrapExit(err, "", "")
 		}
 		return "", nil
 	}
@@ -97,21 +98,18 @@ func (r *Repo) run(ctx context.Context, stdin string, capture bool, args ...stri
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
 	if err != nil {
-		return stdout.String(), wrapExitMsg(err, stderr.String())
+		return stdout.String(), wrapExit(err, stdout.String(), stderr.String())
 	}
 	return stdout.String(), nil
 }
 
-func wrapExit(err error) error {
+func wrapExit(err error, stdout, stderr string) error {
 	if ee, ok := err.(*exec.ExitError); ok {
-		return &Error{ExitCode: ee.ExitCode(), Stderr: "git failed"}
-	}
-	return err
-}
-
-func wrapExitMsg(err error, stderr string) error {
-	if ee, ok := err.(*exec.ExitError); ok {
-		return &Error{ExitCode: ee.ExitCode(), Stderr: strings.TrimSpace(stderr)}
+		return &Error{
+			ExitCode: ee.ExitCode(),
+			Stderr:   strings.TrimSpace(stderr),
+			Stdout:   strings.TrimSpace(stdout),
+		}
 	}
 	return err
 }
@@ -120,13 +118,22 @@ func wrapExitMsg(err error, stderr string) error {
 type Error struct {
 	ExitCode int
 	Stderr   string
+	// Stdout is the captured standard output of the failed command. git writes
+	// some of its most useful refusals there rather than to stderr — "nothing to
+	// commit" among them — so an error that only carried stderr could not explain
+	// itself and could not be recognised by callers.
+	Stdout string
 }
 
 func (e *Error) Error() string {
-	if e.Stderr == "" {
+	switch {
+	case e.Stderr != "":
+		return fmt.Sprintf("git exited with status %d: %s", e.ExitCode, e.Stderr)
+	case e.Stdout != "":
+		return fmt.Sprintf("git exited with status %d: %s", e.ExitCode, e.Stdout)
+	default:
 		return fmt.Sprintf("git exited with status %d", e.ExitCode)
 	}
-	return fmt.Sprintf("git exited with status %d: %s", e.ExitCode, e.Stderr)
 }
 
 // IsUnknownRevision reports whether err is git failing to resolve a revision
@@ -389,7 +396,7 @@ func (r *Repo) GitInheritDiscardOutput(ctx context.Context, args ...string) erro
 	cmd.Stdout = nil
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return wrapExit(err)
+		return wrapExit(err, "", "")
 	}
 	return nil
 }
@@ -408,6 +415,46 @@ func (r *Repo) Commit(ctx context.Context, message string, allowEmpty bool, extr
 	}
 	args = append(args, "-m", message)
 	args = append(args, extra...)
+	_, err := r.Git(ctx, args...)
+	return err
+}
+
+// CommitPaths creates a commit containing exactly the given paths and leaves the
+// rest of the index alone.
+//
+// --only is what makes this safe in a dirty repository: without it, `git commit`
+// would also land whatever the author had already staged for an unrelated
+// commit. It also accepts freshly `git add`ed files, which `--only <path>` on
+// its own would reject as untracked.
+// HasStagedChanges reports whether the index differs from HEAD for the given
+// paths, i.e. whether committing exactly those paths would do anything.
+//
+// This is the reliable form of the question. git's "nothing to commit" notice
+// goes to stdout rather than stderr and is translated, so matching on that text
+// is only ever a fallback.
+func (r *Repo) HasStagedChanges(ctx context.Context, paths ...string) (bool, error) {
+	args := []string{"diff", "--cached", "--quiet", "HEAD"}
+	if len(paths) > 0 {
+		args = append(args, "--")
+		args = append(args, paths...)
+	}
+	_, err := r.Git(ctx, args...)
+	switch {
+	case err == nil:
+		return false, nil
+	case ExitCode(err) == 1: // --quiet reports differences by exit status
+		return true, nil
+	default:
+		return false, err
+	}
+}
+
+func (r *Repo) CommitPaths(ctx context.Context, message string, paths []string) error {
+	args := []string{"commit", "--only", "-m", message}
+	if len(paths) > 0 {
+		args = append(args, "--")
+		args = append(args, paths...)
+	}
 	_, err := r.Git(ctx, args...)
 	return err
 }

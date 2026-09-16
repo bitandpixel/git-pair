@@ -105,3 +105,16 @@ func Commit(ctx context.Context, repo *git.Repo, msg Message) (string, error) {
 	}
 	return repo.Head(ctx)
 }
+
+// CommitPaths writes a marker commit covering exactly the given paths, so
+// scaffolding commits cannot sweep unrelated staged work off the author's index.
+func CommitPaths(ctx context.Context, repo *git.Repo, msg Message, paths []string) (string, error) {
+	rendered, err := msg.Render()
+	if err != nil {
+		return "", err
+	}
+	if err := repo.CommitPaths(ctx, rendered, paths); err != nil {
+		return "", err
+	}
+	return repo.Head(ctx)
+}
