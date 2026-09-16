@@ -572,3 +572,32 @@ func TestATabAtTheBreakDoesNotIndentTheNextRow(t *testing.T) {
 		}
 	}
 }
+
+// Closing the editor or difftool drops every cached patch -- the tool may have changed the file,
+// which is the one moment a stale preview is definitely wrong -- and that is exactly when the pane
+// on the file under the cursor has to refill itself rather than wait for the reviewer to move.
+func TestThePreviewRefillsAfterAToolCloses(t *testing.T) {
+	m := previewModel(t)
+	m = askPreview(t, m)
+	at := m.previewPath
+	if at == "" {
+		t.Fatal("the fixture pane is empty before the handoff")
+	}
+
+	updated, cmd := m.Update(externalDoneMsg{})
+	m = updated.(reviewModel)
+	if len(m.patches) != 0 {
+		t.Error("the cached patch survived the tool that may have changed the file")
+	}
+	if m.previewPath != at {
+		t.Errorf("after the tool closed the pane shows %q, want the file under the cursor %q", m.previewPath, at)
+	}
+	if cmd == nil {
+		t.Fatal("nothing was fetched, so the pane stays blank until the cursor moves")
+	}
+	updated, _ = m.Update(cmd())
+	m = updated.(reviewModel)
+	if !strings.Contains(m.View(), "+added line") {
+		t.Errorf("the pane did not come back after the tool:\n%s", m.View())
+	}
+}

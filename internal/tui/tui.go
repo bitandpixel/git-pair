@@ -269,9 +269,11 @@ func (m reviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// The editor may have written a new thread, so the section below the files
 		// has to be listed again, and any patch the preview is holding may be stale.
+		// Dropping it and stopping there would leave the pane blank on the file the cursor
+		// is already on, so ask for the fresh one in the same breath.
 		m.forgetPatches()
 		m.refresh()
-		return m, nil
+		return m.ensurePreview()
 
 	case previewMsg:
 		if m.patches == nil {
