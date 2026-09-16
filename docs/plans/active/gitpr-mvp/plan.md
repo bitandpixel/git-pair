@@ -366,6 +366,31 @@ changeset. Hand-verification of everything the README documents additionally cor
 
     Prototype status: the threshold, the split ratio and the header are taste. `p` exists so they
     can be argued about without rebuilding.
+22. **The preview takes the frame with it.** Four asks on top of discovery 21: fill the window's
+    height, pad to the edges, wrap the diff rather than cut it, and put a line number beside each
+    line. Two of them turned out to be load-bearing for the other two.
+
+    Padding the frame to the terminal's width and the row area to its height exposed a scroll that
+    predates the preview: Bubble Tea's renderer writes one line per frame line and moves down after
+    it, so a frame of exactly `height` lines *ending in a newline* has no row left for the cursor
+    and the terminal scrolls the top line away — which is what any changeset taller than the window
+    did. The frame is joined rather than newline-terminated now, and the invariant is a test rather
+    than an observation. Reading the renderer's source was what made this visible; guessing from a
+    screenshot would not have shown it, because the scroll only bites when the content is exactly
+    full-height.
+
+    Wrapping went through the library first. `ansi.Wrap` is word wrapping: it collapses whitespace
+    at the break, which in a diff is the indentation — the content. `wrapLine` breaks at the column
+    instead, keeps every space and tab where git put it, and moves a wide glyph whole. Wrapped rows
+    then had to become self-contained, because the renderer skips redrawing a row that has not
+    changed and a colour opened at a break would otherwise tint everything drawn beneath it.
+
+    The gutter is the one place the pane reads git's output rather than passing it through, and it
+    reads as little as possible: the two starts of the `@@` header, then counting `+`, `-` and
+    context lines, which is git's own arithmetic. Nothing before a hunk header is numbered, a patch
+    with no hunk header is not numbered at all, and the classification strips colour first because
+    git colours the very characters being looked for. It does not fold, group, filter or restyle —
+    PRD §3 stays intact, and reading a diff still means opening it.
 
 ## Architecture
 
