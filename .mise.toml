@@ -1,2 +1,14 @@
 [tools]
 go = "1.27.1"
+
+# `mise run build` compiles and installs straight onto PATH, so the binary you
+# test is the one you just edited. Tasks run with the mise toolchain active and
+# from this file's directory, so `go` is already 1.27.1 and the task works from
+# any subdirectory of the repo.
+#
+# Deliberately `go build -o` rather than `go install`: GOBIN points inside the
+# mise-managed Go installation, and anything installed there is discarded on the
+# next Go upgrade.
+[tasks.build]
+run = "go build -o \"$HOME/.local/bin/gitpr\" ./cmd/gitpr"
+description = "Compile and install gitpr onto ~/.local/bin (already on PATH)"
