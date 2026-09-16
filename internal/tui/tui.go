@@ -122,6 +122,7 @@ type reviewModel struct {
 	// rows is the navigable list: the files in the span, then the changeset section.
 	// It is rebuilt by refresh whenever the session or the view could have changed.
 	rows        []row
+	inSpan      map[string]bool
 	threadsOpen bool
 
 	promptKind promptKind
@@ -230,6 +231,8 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toggleMark()
 	case key.Type == tea.KeyEnter:
 		return m.activate()
+	case key.Type == tea.KeyRunes && firstRune(key) == 'd':
+		return m.openDiffOfSelection()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'e':
 		return m.openEditor()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'a':
@@ -404,6 +407,25 @@ func (m reviewModel) activate() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// openDiffOfSelection is `d`: the difftool for whatever the cursor is on, the same handoff
+// Enter performs on a file row. A row that names a file the span never touched has no diff to
+// show, and saying so beats opening a difftool that displays nothing.
+func (m reviewModel) openDiffOfSelection() (tea.Model, tea.Cmd) {
+	r, ok := m.selectedRow()
+	if !ok {
+		return m, nil
+	}
+	if r.path == "" {
+		m.setStatus("nothing to diff: "+r.name+" is a heading, not a file", false)
+		return m, nil
+	}
+	if !m.inSpan[r.path] {
+		m.setStatus(r.name+" has not changed in this span, so there is nothing to diff; Enter reads it", false)
+		return m, nil
+	}
+	return m.openDiff(r.path)
+}
+
 func (m reviewModel) openDiff(path string) (tea.Model, tea.Cmd) {
 	sp := m.sess.Span()
 	return m.runExternal(console.DiffToolCommand(m.sess.Repo(), sp.From, []string{path}),
@@ -539,8 +561,8 @@ func (m reviewModel) helpText() string {
 	if m.threadsOpen {
 		threadsHint = "T hide threads"
 	}
-	return "j/k move  tab section  enter open  e edit  space reviewed  a about  t new thread  " +
-		threadsHint + "  v span  s submit  q quit"
+	return "j/k move  tab section  enter open  d diff  e edit  space reviewed  a about  " +
+		"t new thread  " + threadsHint + "  v span  s submit  q quit"
 }
 
 // helpLines is helpText fitted to the terminal width. A narrow window gets the overflow on
@@ -605,9 +627,12 @@ func (m *reviewModel) refresh() {
 
 func (m *reviewModel) buildRows() {
 	var rows []row
+	inSpan := make(map[string]bool, len(m.sess.Files()))
 	for i, f := range m.sess.Files() {
 		rows = append(rows, row{kind: rowFile, path: f.Path, name: f.Path, file: i})
+		inSpan[f.Path] = true
 	}
+	m.inSpan = inSpan
 	rows = append(rows, row{kind: rowAbout, path: m.sess.AboutPath(),
 		name: filepath.Base(m.sess.AboutPath()), file: -1})
 

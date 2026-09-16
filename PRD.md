@@ -981,6 +981,7 @@ j/k      navigate the whole list
 Tab      switch between the file section and the changeset section
 Enter    activate the row: difftool for a file, editor for ABOUT.md or a thread,
          collapse/expand for the Threads heading, new-thread prompt for + new thread…
+d        open the difftool for the selected row, whatever its kind
 e        open the selected row in the editor
 Space    toggle reviewed for a file row
 
@@ -1630,6 +1631,7 @@ j/k      move through the list: files, then the changeset section
 Tab      switch between the two sections
 Enter    activate the selected row: diff a file, edit ABOUT.md or a thread,
          collapse the thread list, create a thread
+d        open the difftool for the selected row
 e        edit the selected file or document
 Space    mark file reviewed/unreviewed
 

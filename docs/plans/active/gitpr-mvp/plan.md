@@ -267,7 +267,10 @@ changeset. Hand-verification of everything the README documents additionally cor
     before the file name was derived from it. Two polish corrections came from using it: the
     thread heading shows its count only while collapsed (expanded, the rows below *are* the
     count), and the shortcut bar needed a rule over it, because sitting directly under the
-    section it read as more rows of the list.
+    section it read as more rows of the list. `d` was added as an explicit diff key: Enter's
+    meaning depends on which block the cursor happens to be in, and a reviewer who wants the
+    difftool should not have to remember where they are. It takes any row naming a file the
+    span touched, and refuses with a reason the ones that have no diff to show.
 
 ## Architecture
 

@@ -472,3 +472,55 @@ func TestRuleSeparatesTheListFromTheShortcuts(t *testing.T) {
 		}
 	}
 }
+
+// `d` is the difftool for whatever the cursor is on, so a reviewer does not have to be on the
+// file block to diff a file. Rows that cannot be diffed say why instead of opening a difftool
+// with nothing in it.
+func TestDDiffsTheSelectedRow(t *testing.T) {
+	m := navModel(t)
+	if !strings.Contains(strings.Join(m.helpLines(), " "), "d diff") {
+		t.Errorf("the shortcut bar does not mention d: %q", m.helpLines())
+	}
+
+	// A file row in the span: the same handoff Enter gives.
+	m.cursor = indexOfNameBySuffix(t, m, ".go")
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if cmd == nil {
+		t.Error("d on a file opened nothing")
+	}
+	if m.status != "" {
+		t.Errorf("d on a file reported %q", m.status)
+	}
+
+	// A changeset document that did change in the span is diffable too, from either block.
+	about := indexOf(t, m, rowAbout)
+	if !m.inSpan[m.rows[about].path] {
+		t.Skipf("the fixture's ABOUT.md is not in the span, so this case needs a different fixture")
+	}
+	m.cursor = about
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if cmd == nil {
+		t.Errorf("d on %q opened nothing", m.rows[about].name)
+	}
+
+	// A thread written this session is not in the span: no difftool, and a reason.
+	m = navModel(t)
+	m.cursor = indexOf(t, m, rowThread)
+	thread := m.rows[m.cursor]
+	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = after.(reviewModel)
+	if cmd != nil {
+		t.Errorf("d opened a difftool for %q, which the span does not touch", thread.name)
+	}
+	if !strings.Contains(m.status, "has not changed in this span") {
+		t.Errorf("d on %q said %q, want the reason", thread.name, m.status)
+	}
+
+	// The heading is not a file at all.
+	m.cursor = indexOf(t, m, rowThreadsHead)
+	after, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = after.(reviewModel)
+	if cmd != nil || !strings.Contains(m.status, "not a file") {
+		t.Errorf("d on the heading gave cmd=%v status=%q", cmd != nil, m.status)
+	}
+}

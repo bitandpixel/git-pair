@@ -557,7 +557,7 @@ ABOUT.md
     does-the-lock-cover-the-map.md
     + new thread…
 ────────────────────────────────────────
-j/k move  tab section  enter open  e edit  space reviewed  a about  t new thread
+j/k move  tab section  enter open  d diff  e edit  space reviewed  a about  t new thread
 T hide threads  v span  s submit  q quit
 ```
 
@@ -567,7 +567,9 @@ section below — reading the code and
 then reading what the changeset says about it is one motion, not two modes — and `Tab` toggles
 between the halves. `Enter` does whatever the row under the cursor is for: the difftool for a
 file, the editor for ABOUT.md or a thread, collapse or expand for the `Threads` heading, the
-title prompt for `+ new thread…`. `e` edits the selected row, `Space` toggles reviewed on a
+title prompt for `+ new thread…`. `d` opens the difftool for the selected row whatever it is —
+a file, or a changeset document that changed in this span — and says why when the row has no
+diff to show. `e` edits the selected row, `Space` toggles reviewed on a
 file row — which stays under the cursor, since marking is not navigation — and refuses the
 rows below the counter, because the changeset documents are read rather than diffed. `a` opens
 `ABOUT.md` and `t` prompts for a new thread from anywhere; `T` collapses the thread list; `v`
