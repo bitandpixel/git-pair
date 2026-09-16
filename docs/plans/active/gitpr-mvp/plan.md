@@ -72,21 +72,44 @@ From the PRD, treated as binding:
 6. A changeset directory's `CHANGESET.yaml` is authoritative once the directory is identified;
    the directory is identified from the current branch name.
 
-## Decisions Required (do not block M1–M4 core)
+## Decisions (resolved)
 
-These are the only items that need owner input. Each has a recommended default; work that
-does not depend on them proceeds in parallel (see *Execution Ordering*).
+| ID | Question | Decision |
+| --- | --- | --- |
+| D1 | Implementation language / toolchain | **Go 1.27.1** (cobra for the command tree, Bubble Tea for the TUI) |
+| D2 | TUI implementation | **Bubble Tea**, with a headless `Session` model so review state is testable without a TTY |
+| D3 | Scope of the surviving-review-additions blocking set | **Block only on additions outside `changesets/`**; surviving `ABOUT.md`/thread additions are reported as a non-blocking list (see findings §"Design problem") |
+| D4 | What `Enter` does in the TUI | **`git difftool <span> -- <path>`**, honouring the user's configured `diff.tool` |
 
-| ID | Question | Recommended default | Blocks |
-| --- | --- | --- | --- |
-| D1 | Implementation language / toolchain | Python 3.14 + uv, stdlib-only runtime deps | Everything after M0 scaffolding |
-| D2 | TUI implementation | stdlib `curses`, no external TUI framework | M5 only |
-| D3 | Scope of the surviving-review-additions blocking set (see findings §"Design problem") | Block on additions outside `changesets/<slug>/`; report surviving `ABOUT.md`/thread additions as a non-blocking list | M3 semantics, M4 close |
-| D4 | What `Enter` does in the TUI | `git difftool <span> -- <path>` (honours the user's configured difftool) | M5 only |
+## Status (updated during implementation)
 
-If D1 is answered with Go or TypeScript instead, the module boundaries below map 1:1
-(`git` wrapper, `changeset`, `lifecycle`, `span`, `survival`, `refs`, `cli`, `tui`); only M0/M5
-would need rework, and M1–M4 tests carry over as a behavioural spec.
+| Milestone | State | Evidence |
+| --- | --- | --- |
+| M0 scaffold + git core | done | `go build ./...`, `go vet` clean; `gitpr --help` |
+| M1 `change init` | done | idempotence and base-conflict paths exercised by `artifacts/e2e-29.sh` |
+| M2 lifecycle, `status`, `history` | done | e2e replay shows `READY → BLOCKED → WORKING → FEEDBACK → APPROVED → CLOSED`; `status --json` matches PRD §11.1 keys |
+| M3 spans, `diff`, survival, `change ready` | done | e2e replay blocks `change ready` on exactly the untouched review line, then passes after resolution and with the override |
+| M4 submit, refs, queue, close | done | e2e replay: empty approve commit, ref moves, and after `git branch -D` the archive ref still reaches 13 commits |
+| M5 TUI | done, partially verified | Verified under a pty: first paint, `j/k`, `space` (0/4 → 1/4 → 2/4), `v`, `a` editor handoff, `s`+`b` submit (created `review: block demo` and moved the ref), clean `q` exit. **Not yet verified:** `Enter` launching a real difftool *inside* the TUI — the same command path is verified outside it via `gitpr diff --tool`, which reached the configured tool with the right blob paths |
+| M6 docs + dogfood | in progress | `artifacts/e2e-29.sh` is the scripted replay; README is being written |
+
+### Deviations and discoveries worth keeping
+
+1. **`git interpret-trailers` cannot be handed a subject without a trailing newline.**
+   With no trailing newline it appends the trailers to the subject paragraph with no blank
+   separator, so git sees a one-line subject, finds no trailer block, and *every* derived
+   state collapses to `WORKING`. `marker.Message.Render` now builds the message directly.
+   Any future change to message construction must keep the blank line before trailers.
+2. **`git rev-parse --verify --quiet` signals an unresolvable rev with exit 1 and empty
+   stderr.** Matching on the message alone turned "ref does not exist" into a generic git
+   failure, which broke `CreateRefIfAbsent` (and therefore `review close`). `git.ExitCode`
+   exists so callers can distinguish the two.
+3. **Interactive subcommands must refuse without a terminal.** `review about`, `review
+   thread`, and `review open` previously inherited the caller's `$VISUAL` and hung forever
+   when stdin was a pipe — which is the normal agent context. They now exit 2 with a
+   message pointing at the file, which is an ordinary file in the working tree.
+4. **Deferred from MVP as planned:** `review queue --global`, the `gitpr repo` registry,
+   persistent review progress, and remote propagation of `refs/reviews/*`.
 
 ## Architecture
 
@@ -341,3 +364,4 @@ M0 ──► M1 ──► M2 ──┬──► M3 ──► M4 ──► M6
 | Date | Audit | Summary |
 | --- | --- | --- |
 | 2026-09-16 | — | Initial plan. Plumbing spike complete; D1–D4 raised. |
+| 2026-09-16 | implementation pass | D1–D4 resolved. M0–M4 implemented and verified by the PRD §29 replay; M5 implemented with the TUI verified under a pty. Three implementation-level discoveries recorded above; no PRD requirement dropped. |
