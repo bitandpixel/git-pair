@@ -25,7 +25,38 @@ func previewModel(t *testing.T) reviewModel {
 			Deleted: 0,
 		}
 	}
+	// The reviewer's own edits are empty unless a test says otherwise: that is the ordinary case,
+	// and it keeps every other expectation in this file about what the pane looks like.
+	m.workingFor = func(_ context.Context, _ string) Patch { return Patch{} }
 	return m
+}
+
+// deliver runs whatever fetches the model asked for, which is a batch now that the pane asks git
+// about two sources per file.
+func deliver(t *testing.T, m reviewModel, cmd tea.Cmd) reviewModel {
+	t.Helper()
+	if cmd == nil {
+		return m
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			var sub tea.Model
+			sub, _ = m.Update(c())
+			rm, ok := sub.(reviewModel)
+			if !ok {
+				t.Fatalf("a preview answer produced %T", sub)
+			}
+			m = rm
+		}
+		return m
+	}
+	updated, _ := m.Update(msg)
+	rm, ok := updated.(reviewModel)
+	if !ok {
+		t.Fatalf("a preview answer produced %T", updated)
+	}
+	return rm
 }
 
 // askPreview moves the pane onto the cursor and delivers whatever git has to say about it. A
@@ -33,18 +64,10 @@ func previewModel(t *testing.T) reviewModel {
 func askPreview(t *testing.T, m reviewModel) reviewModel {
 	t.Helper()
 	m, cmd := m.ensurePreview()
-	if cmd == nil {
-		if m.previewPath == "" {
-			t.Fatal("the pane has nothing to show and asked for nothing")
-		}
-		return m
+	if cmd == nil && m.previewPath == "" {
+		t.Fatal("the pane has nothing to show and asked for nothing")
 	}
-	updated, _ := m.Update(cmd())
-	rm, ok := updated.(reviewModel)
-	if !ok {
-		t.Fatalf("preview answer produced %T", updated)
-	}
-	return rm
+	return deliver(t, m, cmd)
 }
 
 func TestPreviewFollowsTheCursor(t *testing.T) {
@@ -595,9 +618,106 @@ func TestThePreviewRefillsAfterAToolCloses(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("nothing was fetched, so the pane stays blank until the cursor moves")
 	}
-	updated, _ = m.Update(cmd())
-	m = updated.(reviewModel)
+	m = deliver(t, m, cmd)
 	if !strings.Contains(m.View(), "+added line") {
 		t.Errorf("the pane did not come back after the tool:\n%s", m.View())
+	}
+}
+
+// Your uncommitted edits are a diff too, but git's bytes do not say who wrote them -- an added
+// line you typed and one the author typed are the same green -- so the pane prints them below the
+// author's span, under a caption that says whose they are.
+func TestPreviewShowsYourEditsUnderTheirOwnCaption(t *testing.T) {
+	m := previewModel(t)
+	m.workingFor = func(_ context.Context, _ string) Patch {
+		return Patch{Lines: []string{"@@ -1 +1,2 @@", "+a note you typed"}, Added: 1, Deleted: 0}
+	}
+	m = askPreview(t, m)
+	shown := ansi.Strip(m.View())
+
+	if !strings.Contains(shown, "you \u00b7 uncommitted  +1 \u22120") {
+		t.Errorf("your edits are on screen without a caption naming them and their size:\n%s", shown)
+	}
+	if !strings.Contains(shown, "+a note you typed") {
+		t.Errorf("your edits are missing:\n%s", shown)
+	}
+	if !strings.Contains(shown, "+added line") {
+		t.Errorf("the author's span vanished when your edits arrived:\n%s", shown)
+	}
+	if strings.Index(shown, "+added line") > strings.Index(shown, "you \u00b7 uncommitted") {
+		t.Error("your edits come before the author's, which reads as if they were reviewed first")
+	}
+	// Your lines carry line numbers of their own, from git's headers in your diff.
+	if !strings.Contains(shown, "1 +a note you typed") {
+		t.Errorf("your lines are not numbered:\n%s", shown)
+	}
+}
+
+// The file's own header counts belong to the span, so a reviewer with edits of their own must not
+// read a number about the author's work as a tally that includes their typing.
+func TestYourEditsDoNotMoveTheHeadersCounts(t *testing.T) {
+	m := previewModel(t)
+	m.workingFor = func(_ context.Context, _ string) Patch {
+		return Patch{Lines: []string{"@@ -1 +1,4 @@", "+one", "+two", "+three", "+four"}, Added: 4, Deleted: 2}
+	}
+	m = askPreview(t, m)
+	if !strings.Contains(ansi.Strip(m.View()), "  +1 \u22120") {
+		t.Error("the header no longer shows the span's own counts")
+	}
+}
+
+// Most files carry no reviewer edits, and the pane should not mention any.
+func TestPreviewSaysNothingAboutYourEditsWhenThereAreNone(t *testing.T) {
+	m := askPreview(t, previewModel(t))
+	if strings.Contains(ansi.Strip(m.View()), "you \u00b7 uncommitted") {
+		t.Errorf("the pane claimed edits the reviewer never made:\n%s", ansi.Strip(m.View()))
+	}
+}
+
+// While the answer about your edits is still in flight, the pane must not say there is nothing to
+// show -- that message would be wrong for the length of one git call.
+func TestPreviewWaitsForYourEditsBeforeSayingNothingChanged(t *testing.T) {
+	m := previewModel(t)
+	m.patchFor = func(_ context.Context, _ string) Patch { return Patch{} }
+
+	// Keep the model ensurePreview returned: it is the one that knows which file the pane is on.
+	m, cmd := m.ensurePreview()
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("the pane asked for %T, want a batch of fetches", cmd())
+	}
+	for _, c := range batch {
+		if pm, isPatch := c().(previewMsg); isPatch && pm.kind == patchSpan {
+			updated, _ := m.Update(pm)
+			m = updated.(reviewModel)
+		}
+	}
+
+	shown := ansi.Strip(m.View())
+	if !strings.Contains(shown, "reading your edits") {
+		t.Errorf("the pane did not say it was still looking:\n%s", shown)
+	}
+	if strings.Contains(shown, "no changes in this span") {
+		t.Error("it declared nothing changed before the answer about your edits had arrived")
+	}
+}
+
+// Paging counts both sections, so the end of your edits is reachable.
+func TestPagingReachesYourEdits(t *testing.T) {
+	m := previewModel(t)
+	m.workingFor = func(_ context.Context, _ string) Patch {
+		lines := make([]string, 0, 40)
+		for i := range 40 {
+			lines = append(lines, fmt.Sprintf("+yours %02d", i))
+		}
+		return Patch{Lines: lines, Added: 40}
+	}
+	m = askPreview(t, m)
+	for range 30 {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlF})
+		m = updated.(reviewModel)
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "+yours 39") {
+		t.Errorf("paging never reached the end of your edits:\n%s", ansi.Strip(m.View()))
 	}
 }

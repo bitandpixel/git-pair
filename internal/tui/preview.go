@@ -21,6 +21,32 @@ const (
 	previewTabWidth = 8 // what a tab advances to, as in a terminal's own default
 )
 
+// previewRows assembles the pane's body: the author's span, and below it -- when there are any --
+// the reviewer's own uncommitted edits under a caption naming who they came from. Both sections are
+// git's bytes, and git's bytes do not say who typed them: an added line the reviewer wrote and one
+// the author wrote are the same green. The caption is what keeps the reviewer's edits from reading
+// as the author's.
+func previewRows(span, work Patch, width int) []string {
+	rows := previewBody(span, width)
+	if len(work.Lines) == 0 {
+		return rows
+	}
+	if len(rows) > 0 {
+		rows = append(rows, "")
+	}
+	rows = append(rows, styleDim.Render(clip(yourEditsCaption(work), width)))
+	return append(rows, previewBody(work, width)...)
+}
+
+// yourEditsCaption labels the reviewer's own section, with git's counts for it rather than the
+// span's, so the number beside the file cannot be read as a number about the author's work.
+func yourEditsCaption(work Patch) string {
+	if work.Added >= 0 {
+		return fmt.Sprintf("\u2500\u2500 you \u00b7 uncommitted  +%d \u2212%d", work.Added, work.Deleted)
+	}
+	return "\u2500\u2500 you \u00b7 uncommitted"
+}
+
 // previewBody renders a patch as rows of at most width cells: a right-aligned line number, a
 // space, then git's own text, wrapped when it is too long for the column. Every row opens the
 // styles it needs and closes them again, because the renderer skips redrawing a row that has not

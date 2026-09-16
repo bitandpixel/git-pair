@@ -223,9 +223,32 @@ type Patch struct {
 // It returns no error: a preview that cannot be drawn is a line in the pane, not a problem the
 // reviewer has to handle, and this runs in the background while they keep moving the cursor.
 func (s *Session) Patch(ctx context.Context, path string) Patch {
-	sp := s.current
-	out, err := s.repo.Git(ctx, "-c", "core.quotePath=false", "diff",
-		"--no-ext-diff", "--no-textconv", "--color=always", sp.From, sp.To, "--", path)
+	return s.diff(ctx, s.current.From, s.current.To, path)
+}
+
+// WorkingPatch is the reviewer's own uncommitted edits to a file, measured from the revision
+// under review rather than from the span's start. The order is the whole point: whatever sits
+// between the span's ends is the author's work, so whatever sits after its end is the reviewer's.
+//
+// Those bytes look like any other diff, which is why the pane prints them under a caption naming
+// who they belong to, and why the reviewed counter keeps counting the span alone. It is also the
+// same working tree the difftool opens, so an edit made there shows up here.
+//
+// An empty patch is the ordinary case: most files carry no reviewer edits.
+func (s *Session) WorkingPatch(ctx context.Context, path string) Patch {
+	return s.diff(ctx, s.current.To, "", path)
+}
+
+// diff asks git for one path's two-way diff, in colour. With one revision the other side is the
+// working tree.
+func (s *Session) diff(ctx context.Context, from, to, path string) Patch {
+	revs := []string{from}
+	if to != "" {
+		revs = append(revs, to)
+	}
+	show := append([]string{"-c", "core.quotePath=false", "diff",
+		"--no-ext-diff", "--no-textconv", "--color=always"}, revs...)
+	out, err := s.repo.Git(ctx, append(show, "--", path)...)
 	if err != nil {
 		return Patch{Err: err.Error()}
 	}
@@ -242,7 +265,8 @@ func (s *Session) Patch(ctx context.Context, path string) Patch {
 	}
 	// The counts come from git rather than by counting these lines, so a capped patch still
 	// reports the file's real size.
-	num, err := s.repo.Git(ctx, "diff", "--no-ext-diff", "--numstat", sp.From, sp.To, "--", path)
+	numstat := append([]string{"diff", "--no-ext-diff", "--numstat"}, revs...)
+	num, err := s.repo.Git(ctx, append(numstat, "--", path)...)
 	if err == nil {
 		if line := strings.TrimSpace(strings.SplitN(num, "\n", 2)[0]); line != "" {
 			if fields := strings.Fields(line); len(fields) >= 2 {

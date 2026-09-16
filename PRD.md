@@ -982,12 +982,19 @@ place in the section below: the list is what the diff did, the section is the sh
 
 On a terminal at least 100 columns and 16 rows, the list shares the screen with a preview column:
 the diff the common span made to the selected file, paged with `ctrl-f`/`ctrl-b`. It prints git's
-own output, colour included, and adds only two things: the line number git itself put in the hunk
-header, and a break where a line is too wide for the column. It does not fold, group, filter, or
-restyle hunks, which is the shape PRD §3's refusal to build a diff renderer leaves: the pane is for
+own output, colour included, and adds only what a fixed-width column cannot decline to do: the line
+number git itself put in the hunk header, a break where a line is too wide, and the spaces a tab
+advances to. It does not fold, group, filter, or renumber hunks, and it does not choose colours, which is the shape PRD §3's refusal to build a diff renderer leaves: the pane is for
 glancing, and reading a diff means opening it. The frame fills the terminal — the row area holds the
 window's height and every row is padded to its width — so the shortcut bar sits against the bottom
 edge rather than under a short list.
+
+When the reviewer has edited a file without committing, the pane shows those edits below the author's,
+under a caption naming them, with counts and line numbers of their own. Git's output does not say who
+typed a line, so the caption is what keeps the reviewer's work from reading as the author's; the
+section is diffed from the revision under review, not the span's start, so it cannot repeat the
+author's changes. The reviewed counter stays the span's: a reviewer's typing does not change what has
+been reviewed.
 
 Suggested bindings:
 

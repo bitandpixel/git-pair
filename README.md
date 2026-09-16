@@ -605,12 +605,20 @@ session puts a column beside the list showing the diff of whatever the cursor is
 diff, the same one `gitpr diff` and the reviewed counter describe — with git's own `+N −M` in its
 header. The list takes the width its own paths need, up to 48 columns, and the diff gets the rest:
 a changeset of short names is not made to share the screen with whitespace, and one long vendored
-path cannot take the diff's columns. `ctrl-f` and `ctrl-b` page through a diff too long to fit, and the note along the bottom
-says how much of it is left; `ctrl-d` still quits, which is why paging is not `ctrl-d`. Each line
-carries the number git gave it in its hunk header, and a line too wide for the column is broken
-rather than cut, with its colour carried across the break. Tabs are shown as the spaces they
-advance to, because a tab the width maths scores as zero is a row the terminal wraps for you. `p` switches the pane off, and a terminal
-too small to fit it says which way it is short rather than doing nothing.
+path cannot take the diff's columns. `ctrl-f` and `ctrl-b` page through a diff too long to fit, and the note along the bottom says how
+much of it is left; `ctrl-d` still quits, which is why paging is not `ctrl-d`. Each line carries the
+number git gave it in its hunk header, and a line too wide for the column is broken rather than cut,
+with its colour carried across the break. Tabs are shown as the spaces they advance to, because a tab
+the width maths scores as zero is a row the terminal wraps for you. `p` switches the pane off, and a
+terminal too small to fit it says which way it is short rather than doing nothing.
+
+Below the author's diff, the pane shows whatever you have edited without committing, under
+`── you · uncommitted` with counts and line numbers of its own. That caption is not decoration: git's
+bytes do not say who typed them, and an added line you wrote is the same green as one the author
+wrote. Measuring that section from the revision under review rather than from the span's start is
+what keeps it from repeating the author's work. The reviewed counter still counts the span alone, so
+your typing never changes what "reviewed" means — and `d`/`Enter` still open the working tree, which
+is where those edits live.
 
 What the pane prints is git's own bytes: no hunk model, no folding, no colours of its own — the line
 that keeps it a preview rather than a diff renderer, since reading a diff properly means opening it

@@ -409,6 +409,43 @@ changeset. Hand-verification of everything the README documents additionally cor
 
     The 60/40 constant is gone. What remains are two numbers to argue with: `previewListMax` (48)
     and `previewListMin` (24).
+24. **The reviewer's own edits get their own section.** Playing with the preview surfaced an
+    asymmetry the design had left implicit: `d`/`Enter` diff the span's start against the **working
+    tree** so edits persist, while the preview diffs `<from>..<to>`, which is committed state — so
+    the keys showed the reviewer's typing and the pane never did. The reviewer's uncommitted edits
+    are a real part of what they are looking at, and `review submit` already treats them as *not*
+    part of the review ("the working tree is still dirty; those changes are not part of this
+    review").
+
+    Chosen: stack them, the author's span first, then the reviewer's under a caption naming them.
+    Three decisions inside that.
+
+    **Measure the reviewer's section from the span's end, not its start.** `git diff <to> -- path`.
+    From `<from>` it would carry the author's changes as well, and then the two sections would be
+    indistinguishable — the exact confusion the caption exists to prevent. A test pins this: the
+    author's line is in the span patch and absent from `WorkingPatch`, and vice versa.
+
+    **The caption is the disambiguator, not colour.** Git's bytes do not say who typed a line: an
+    added line the reviewer wrote is the same green as one the author wrote. So the section is
+    labelled `── you · uncommitted` and carries its own `+N −M`, while the file header keeps the
+    span's counts — otherwise a number beside the file would read as a statement about the author's
+    work that includes the reviewer's typing.
+
+    **The reviewed counter stays the span's.** Making the pane show a second diff must not silently
+    change what "reviewed" means, or what the marks are keyed on. It is a view, not state.
+
+    Cost of the two-source pane: one more git call per file per first visit, cached and dropped with
+    the rest on a span toggle or a tool handoff. `previewMsg` now carries which source it answers,
+    because the bytes look alike; the cache is two maps for the same reason. The pane also declines
+    to say "no changes in this span" while the answer about the reviewer's edits is still in flight,
+    which would be wrong for the length of one git call.
+
+    Rejected: a three-way view. Git has three-way *merge* machinery (`merge-file`, `mergetool` with
+    `$BASE`/`$LOCAL`/`$REMOTE`, `diff3`/`zdiff3` conflict styles) but no three-way **diff**; a
+    `merge-file` rendering would be a merged file that silently resolves everything except
+    collisions, and pointing a real 3-way tool at base/author/you means owning a per-tool argument
+    convention, which PRD §3 puts outside the project.
+
 
 ## Architecture
 

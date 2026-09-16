@@ -105,11 +105,22 @@ func activateBy(r row) action {
 	return actionNone
 }
 
+// patchKind is which of the two diffs a patch answers: the author's span, or the reviewer's own
+// uncommitted edits. Both arrive as git's coloured bytes and look alike, so which one it is has to
+// travel with the answer rather than be guessed from it.
+type patchKind int
+
+const (
+	patchSpan patchKind = iota
+	patchWorking
+)
+
 // previewMsg carries a patch back from git. The fetch runs off the event loop: reading a large
 // diff is git's work, and the interface should not stop moving the cursor while it happens.
 type previewMsg struct {
 	path  string
 	patch Patch
+	kind  patchKind
 }
 
 // externalDoneMsg reports that a launched editor or difftool has exited. What the caller
@@ -145,12 +156,15 @@ type reviewModel struct {
 	statusErr bool
 	// patchFor is the seam tests use instead of running git.
 	patchFor func(context.Context, string) Patch
-	// The preview pane. previewPath is what it shows and previewOffset where in that patch it
-	// is; patches holds what git already answered, so moving back to a file costs nothing.
+	// workingFor is the same seam for the reviewer's own uncommitted edits.
+	workingFor func(context.Context, string) Patch
+	// The preview pane. previewPath is what it shows and previewOffset where in it that pane is;
+	// patches and working hold what git already answered, so moving back to a file costs nothing.
 	previewOn     bool
 	previewPath   string
 	previewOffset int
 	patches       map[string]Patch
+	working       map[string]Patch
 	// pendingNote is what goes in the status line when the editor or difftool currently
 	// holding the terminal exits. Every handoff assigns it, so a note can never outlive the
 	// child it was written for.
@@ -276,10 +290,7 @@ func (m reviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.ensurePreview()
 
 	case previewMsg:
-		if m.patches == nil {
-			m.patches = map[string]Patch{}
-		}
-		m.patches[msg.path] = msg.patch
+		m.store(msg.kind, msg.path, msg.patch)
 		if msg.path == m.previewPath {
 			m.previewOffset = 0
 		}
@@ -1090,8 +1101,9 @@ func (m reviewModel) rule() string {
 }
 
 // ensurePreview puts the pane on the file under the cursor, returning the command that fetches
-// a patch git has not answered yet. Fetches are cached per session state, so moving back and
-// forth across a list of files asks git once each.
+// whatever git has not answered yet -- the span's diff and the reviewer's own edits to that file.
+// Fetches are cached per session state, so walking a list asks git once per file per source, and a
+// span toggle or a tool handoff drops the cache rather than showing a stale diff.
 func (m reviewModel) ensurePreview() (reviewModel, tea.Cmd) {
 	path := ""
 	if m.paneWidth() > 0 && !m.quitting {
@@ -1106,23 +1118,68 @@ func (m reviewModel) ensurePreview() (reviewModel, tea.Cmd) {
 	if path != m.previewPath {
 		m.previewPath, m.previewOffset = path, 0
 	}
-	if _, cached := m.patches[path]; cached {
+	var cmds []tea.Cmd
+	for _, kind := range []patchKind{patchSpan, patchWorking} {
+		if _, cached := m.patch(kind, path); cached {
+			continue
+		}
+		kind, fetch, ctx := kind, m.fetcher(kind), m.ctx
+		cmds = append(cmds, func() tea.Msg {
+			return previewMsg{path: path, patch: fetch(ctx, path), kind: kind}
+		})
+	}
+	if len(cmds) == 0 {
 		return m, nil
 	}
-	fetch := m.patchFor
-	if fetch == nil {
-		fetch = m.sess.Patch
-	}
-	ctx := m.ctx
-	return m, func() tea.Msg {
-		return previewMsg{path: path, patch: fetch(ctx, path)}
+	return m, tea.Batch(cmds...)
+}
+
+// fetcher is where one kind's patch comes from, with the test seam in front of the real thing.
+func (m reviewModel) fetcher(kind patchKind) func(context.Context, string) Patch {
+	switch kind {
+	case patchWorking:
+		if m.workingFor != nil {
+			return m.workingFor
+		}
+		return m.sess.WorkingPatch
+	default:
+		if m.patchFor != nil {
+			return m.patchFor
+		}
+		return m.sess.Patch
 	}
 }
 
-// forgetPatches drops what git answered, because the span changed or the working tree did and
-// a preview of the wrong diff is worse than no preview.
+// patch answers "have I already asked git about this file" per source, which a single map cannot:
+// the same path carries two different patches on screen at once.
+func (m reviewModel) patch(kind patchKind, path string) (Patch, bool) {
+	cache := m.patches
+	if kind == patchWorking {
+		cache = m.working
+	}
+	p, ok := cache[path]
+	return p, ok
+}
+
+func (m *reviewModel) store(kind patchKind, path string, p Patch) {
+	if kind == patchWorking {
+		if m.working == nil {
+			m.working = map[string]Patch{}
+		}
+		m.working[path] = p
+		return
+	}
+	if m.patches == nil {
+		m.patches = map[string]Patch{}
+	}
+	m.patches[path] = p
+}
+
+// forgetPatches drops what git answered, because the span changed or the working tree did, and a
+// preview of the wrong diff is worse than no preview -- the reviewer's own edits are the ones most
+// likely to have just changed, so both sources go.
 func (m *reviewModel) forgetPatches() {
-	m.patches = nil
+	m.patches, m.working = nil, nil
 	m.previewPath, m.previewOffset = "", 0
 }
 
@@ -1149,7 +1206,8 @@ func (m reviewModel) pagePreview(dir int) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	total := len(previewBody(patch, m.paneWidth()))
+	work, _ := m.patch(patchWorking, m.previewPath)
+	total := len(previewRows(patch, work, m.paneWidth()))
 	if total == 0 {
 		return m, nil
 	}
@@ -1191,12 +1249,21 @@ func (m reviewModel) previewLines() []string {
 	case patch.Err != "":
 		return append(out, styleDim.Render(patch.Err))
 	case len(patch.Lines) == 0:
-		return append(out, styleDim.Render("no changes in this span"))
+		work, known := m.patch(patchWorking, m.previewPath)
+		if !known {
+			// Not "no changes" yet: the answer about the reviewer's own edits is still on its way,
+			// and saying it now would be wrong for one git call's duration.
+			return append(out, styleDim.Render("(reading your edits…)"))
+		}
+		if len(work.Lines) == 0 {
+			return append(out, styleDim.Render("no changes in this span"))
+		}
 	}
 
 	// Rows, not source lines: a line wider than the column is drawn as several rows, so paging
 	// and the note have to count what is actually on screen.
-	lines := previewBody(patch, width)
+	work, _ := m.patch(patchWorking, m.previewPath)
+	lines := previewRows(patch, work, width)
 	offset := m.previewOffset
 	if max := len(lines) - body; offset > max {
 		offset = max

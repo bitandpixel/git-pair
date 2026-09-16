@@ -2,8 +2,12 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"gitpr/internal/changeset"
 	"gitpr/internal/git"
@@ -70,5 +74,70 @@ func TestPatchAsksGitForTheSpan(t *testing.T) {
 	missing := sess.Patch(ctx, "does/not/exist.go")
 	if missing.Err == "" && len(missing.Lines) != 0 {
 		t.Error("a path that cannot be diffed was reported as an empty preview")
+	}
+}
+
+// The author's change and the reviewer's typing are two different diffs, and the pane shows both at
+// once, so which revisions each one spans is not a detail: measured from the span's start, the
+// reviewer's edits would carry the author's work and be indistinguishable from it.
+func TestWorkingPatchIsTheReviewersOwnEdits(t *testing.T) {
+	ctx := context.Background()
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFiles(map[string]string{
+		"service.go": "package main\n\nfunc Lock() {}\n",
+		"main.go":    "package main\n\nfunc main() {}\n",
+	}))
+	const slug = "booking"
+	f.CreateBranch(slug)
+	f.CommitChangeset(slug, "main")
+	f.Commit("author reworks the lock", gittest.WithFiles(map[string]string{
+		"service.go": "package main\n\nfunc lock() { panic(\"no\") }\n",
+	}))
+
+	repo := &git.Repo{Dir: f.Dir()}
+	cs, err := changeset.ForBranch(repo, slug)
+	if err != nil {
+		t.Fatalf("ForBranch: %v", err)
+	}
+	summary, err := lifecycle.SummarizeHEAD(ctx, repo, cs.Slug, cs.Base)
+	if err != nil {
+		t.Fatalf("SummarizeHEAD: %v", err)
+	}
+	sess, err := NewSession(ctx, Options{Repo: repo, Changeset: cs, Summary: summary, Span: span.Options{}})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	// The reviewer disagrees with the panic and edits the file, without committing.
+	path := filepath.Join(f.Dir(), "service.go")
+	if err := os.WriteFile(path, []byte("package main\n\nfunc lock() { return }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	spanPatch := ansi.Strip(strings.Join(sess.Patch(ctx, "service.go").Lines, "\n"))
+	workPatch := ansi.Strip(strings.Join(sess.WorkingPatch(ctx, "service.go").Lines, "\n"))
+
+	if !strings.Contains(spanPatch, "+func lock() { panic(\"no\") }") {
+		t.Errorf("the span no longer carries the author's change:\n%s", spanPatch)
+	}
+	if strings.Contains(spanPatch, "return") {
+		t.Errorf("the span picked up the reviewer's uncommitted edit:\n%s", spanPatch)
+	}
+	if !strings.Contains(workPatch, "+func lock() { return }") {
+		t.Errorf("WorkingPatch is missing the reviewer's edit:\n%s", workPatch)
+	}
+	if strings.Contains(workPatch, "+func lock() { panic") {
+		t.Errorf("WorkingPatch repeats the author's change, so the two sections cannot be told apart:\n%s", workPatch)
+	}
+
+	// Its counts are the reviewer's too -- the pane prints them beside the caption for that reason.
+	work := sess.WorkingPatch(ctx, "service.go")
+	if work.Added != 1 || work.Deleted != 1 {
+		t.Errorf("WorkingPatch reported +%d \u2212%d, want +1 \u22121", work.Added, work.Deleted)
+	}
+
+	// A file nobody has touched since it was committed has no reviewer section at all.
+	if empty := sess.WorkingPatch(ctx, "main.go"); len(empty.Lines) != 0 || empty.Err != "" {
+		t.Errorf("an untouched file produced %d lines and err %q", len(empty.Lines), empty.Err)
 	}
 }
