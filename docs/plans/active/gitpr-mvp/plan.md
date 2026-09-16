@@ -91,7 +91,15 @@ From the PRD, treated as binding:
 | M3 spans, `diff`, survival, `change ready` | done | e2e replay blocks `change ready` on exactly the untouched review line, then passes after resolution and with the override |
 | M4 submit, refs, queue, close | done | e2e replay: empty approve commit, ref moves, and after `git branch -D` the archive ref still reaches 13 commits |
 | M5 TUI | done, partially verified | Verified under a pty: first paint, `j/k`, `space` (0/4 → 1/4 → 2/4), `v`, `a` editor handoff, `s`+`b` submit (created `review: block demo` and moved the ref), clean `q` exit. **Not yet verified:** `Enter` launching a real difftool *inside* the TUI — the same command path is verified outside it via `gitpr diff --tool`, which reached the configured tool with the right blob paths |
-| M6 docs + dogfood | in progress | `artifacts/e2e-29.sh` is the scripted replay; README is being written |
+| M6 docs + dogfood | done | `README.md`; `artifacts/e2e-29.sh` is the scripted replay and passes end to end |
+
+Test suite: 21 files, 160 test functions, 12 packages, all passing; `go vet` and `gofmt`
+clean. The suite found four real defects, all fixed in `fix: exit codes, added-line
+positions, changeset detection, editor expansion`: an off-by-one in
+`survival.AddedLines` line numbers, state-based refusals exiting 2 instead of 1, unknown
+subcommands exiting 0, and `changeset.List` treating any directory under `changesets/` as a
+changeset. Hand-verification of everything the README documents additionally corrected
+`status`'s `archive_ref` and `$VISUAL`/`$EDITOR` word splitting.
 
 ### Deviations and discoveries worth keeping
 
