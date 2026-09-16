@@ -248,16 +248,24 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 		return err
 	}
 
+	// A second submission supersedes the first rather than undoing it: the newest
+	// review decides the state and the earlier one stays in history. Surfaced here
+	// because this is the moment a false start gets corrected.
+	previous := ""
+	if s.summary.LatestReview != nil {
+		previous = s.summary.LatestReview.SHA
+	}
 	if a.json {
 		return a.emitJSON(map[string]any{
-			"changeset":   s.cs.Slug,
-			"outcome":     string(result.Outcome),
-			"commit":      result.Commit,
-			"short":       short(result.Commit),
-			"review_ref":  result.Ref,
-			"files":       result.Files,
-			"empty":       result.Empty(),
-			"next_action": nextActionFor(result.Outcome),
+			"changeset":       s.cs.Slug,
+			"outcome":         string(result.Outcome),
+			"commit":          result.Commit,
+			"short":           short(result.Commit),
+			"review_ref":      result.Ref,
+			"files":           result.Files,
+			"empty":           result.Empty(),
+			"previous_review": previous,
+			"next_action":     nextActionFor(result.Outcome),
 		})
 	}
 	a.printf("Review submitted: %s\n", s.cs.Slug)
@@ -272,6 +280,10 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 		}
 	}
 	a.printf("  ref:     %s -> %s\n", result.Ref, short(result.Commit))
+	if s.summary.LatestReview != nil {
+		a.printf("  supersedes: %s (the newest submission decides the state)\n",
+			reviewLabel(s.summary.LatestReview))
+	}
 	a.printf("  next:    %s\n", nextActionFor(result.Outcome))
 	if clean, err := s.repo.IsClean(ctx); err == nil && !clean {
 		a.warn("\nwarning: the working tree is still dirty; those changes are not part of this review\n")

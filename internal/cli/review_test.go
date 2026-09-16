@@ -503,3 +503,35 @@ func TestReviewReopenFallsBackToTheSpanTheReviewCovered(t *testing.T) {
 	}
 	mustContain(t, got.stderr, "needs a terminal", "reopen should reach the session, not refuse")
 }
+
+// There is no `review undo`: a submission is corrected by submitting again, because
+// state is derived from commit trailers and gitpr does not rewrite history. The
+// supersession has to be visible at the moment it happens.
+func TestSecondSubmissionSupersedesTheFirst(t *testing.T) {
+	f, _ := newChangeset(t, "booking", "main")
+	ready(t, f)
+
+	first := submitJSON(t, f, "feedback")
+	if prev, ok := first["previous_review"].(string); !ok || prev != "" {
+		t.Errorf("first submit reported previous_review = %#v, want the empty string", first["previous_review"])
+	}
+
+	second := runIn(t, f.Dir(), "review", "submit", "--approve", "--json").
+		mustSucceed(t, "review", "submit", "--approve", "--json").json(t)
+	prev, _ := second["previous_review"].(string)
+	if prev == "" {
+		t.Fatal("second submit reported no previous review")
+	}
+	if got := runIn(t, f.Dir(), "status").mustSucceed(t, "status").stdout; !strings.Contains(got, "State: APPROVED") {
+		t.Errorf("state after the correcting submission is not APPROVED\n%s", got)
+	}
+	if got := runIn(t, f.Dir(), "review", "history").mustSucceed(t, "review", "history").stdout; strings.Count(got, "review:") != 2 {
+		t.Errorf("history lost the superseded submission\n%s", got)
+	}
+
+	human := runIn(t, f.Dir(), "review", "submit", "--block", "-m", "one more").
+		mustSucceed(t, "review", "submit", "--block").stdout
+	prevShort, _ := second["short"].(string)
+	mustContain(t, human, "supersedes: review "+prevShort+" (approve)",
+		"the human summary should name the submission it supersedes")
+}

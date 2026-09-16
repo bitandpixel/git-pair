@@ -200,6 +200,14 @@ variables:
 A commit counts as a marker only when its trailer block parses and `GitPR-Changeset` matches
 the changeset being inspected; anything else is an ordinary commit.
 
+**A review is corrected by submitting again.** There is no `review undo`. The newest
+submission decides the state, earlier ones stay in `gitpr review history`, and the summary of
+a later submission names what it supersedes. Undo by rewriting history is not on the table —
+gitpr runs no `reset`, `rebase` or `push`, and a review commit may already be shared; a
+withdrawal *marker* would work but needs a trailer older gitpr builds cannot read, which
+would leave two versions of the tool disagreeing about one branch. Moving the review ref back
+is not an undo either: state comes from commit trailers, so the submission would still count.
+
 **Derived state.** State comes from walking `base..HEAD`, reading the newest marker, then
 asking whether what it approved is still there: if anything outside `changesets/<slug>/`
 differs between the marker's parent and `HEAD`, the marker is stale and the state is
@@ -362,7 +370,9 @@ changeset directories the queue could not classify (`null` when empty).
 }
 ```
 
-`gitpr review submit --approve --json`, on a clean tree
+`gitpr review submit --approve --json`, on a clean tree and the first review
+(`previous_review` is the full SHA of the submission this one supersedes, empty when there
+is none)
 
 ```json
 {
@@ -372,6 +382,7 @@ changeset directories the queue could not classify (`null` when empty).
   "files": null,
   "next_action": "`gitpr review close` before squash/merge",
   "outcome": "approve",
+  "previous_review": "",
   "review_ref": "refs/reviews/feat",
   "short": "941266b"
 }
