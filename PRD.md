@@ -981,7 +981,8 @@ j/k      navigate the whole list
 Tab      switch between the file section and the changeset section
 Enter    activate the row: difftool for a file, editor for ABOUT.md or a thread,
          collapse/expand for the Threads heading, new-thread prompt for + new thread…
-d        open the difftool for the selected row, whatever its kind
+d        open the difftool for the selected row, whatever its kind; a file the span
+         does not touch opens in the editor instead, with a note saying so
 e        open the selected row in the editor
 Space    toggle reviewed for a file row
 

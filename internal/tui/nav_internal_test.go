@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -365,10 +366,16 @@ func TestThreadPromptKeepsSpacesInATitle(t *testing.T) {
 		t.Fatalf("prompt input = %q, want the title with its spaces", m.input)
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(reviewModel)
-	if !strings.Contains(m.status, "does-the-lock-cover-the-map.md") {
-		t.Errorf("creating the thread reported %q, want a slug of the spaced title:\n%s", m.status, rowList(m))
+	if cmd == nil {
+		t.Fatal("creating the thread did not hand off to the editor")
+	}
+	// The report rides the handoff, so it is on screen when the editor closes.
+	updated, _ = m.Update(externalDoneMsg{label: "Editor exited with an error"})
+	m = updated.(reviewModel)
+	if !strings.Contains(m.status, "Created") || !strings.Contains(m.status, "does-the-lock-cover-the-map.md") {
+		t.Errorf("creating the thread reported %q, want the created path:\n%s", m.status, rowList(m))
 	}
 	path := filepath.Join(m.sess.Repo().Dir, "changesets", "booking", "does-the-lock-cover-the-map.md")
 	if info, statErr := os.Stat(path); statErr != nil || info.IsDir() {
@@ -504,16 +511,17 @@ func TestDDiffsTheSelectedRow(t *testing.T) {
 	}
 
 	// A thread written this session is not in the span: no difftool, and a reason.
+	// A thread written this session is not in the span: no empty difftool, the file instead.
 	m = navModel(t)
 	m.cursor = indexOf(t, m, rowThread)
 	thread := m.rows[m.cursor]
 	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = after.(reviewModel)
-	if cmd != nil {
-		t.Errorf("d opened a difftool for %q, which the span does not touch", thread.name)
+	if cmd == nil {
+		t.Errorf("d on %q opened nothing, want the editor", thread.name)
 	}
-	if !strings.Contains(m.status, "has not changed in this span") {
-		t.Errorf("d on %q said %q, want the reason", thread.name, m.status)
+	if m.status != "" {
+		t.Errorf("d on %q reported %q before the handoff, where nothing can read it", thread.name, m.status)
 	}
 
 	// The heading is not a file at all.
@@ -522,5 +530,60 @@ func TestDDiffsTheSelectedRow(t *testing.T) {
 	m = after.(reviewModel)
 	if cmd != nil || !strings.Contains(m.status, "not a file") {
 		t.Errorf("d on the heading gave cmd=%v status=%q", cmd != nil, m.status)
+	}
+}
+
+// The fallback note has to arrive after the editor closes: set before the handoff, it is
+// under the editor's own screen and gone by the time the reviewer looks again.
+func TestDiffFallbackNoteSurvivesTheEditor(t *testing.T) {
+	m := navModel(t)
+	m.cursor = indexOf(t, m, rowThread) // a thread the span does not touch
+	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = after.(reviewModel)
+	if cmd == nil {
+		t.Fatal("the fallback did not open the editor")
+	}
+	if !strings.Contains(m.pendingNote, "has not changed in this span") {
+		t.Fatalf("the handoff carries nothing to say afterwards: %q", m.pendingNote)
+	}
+
+	updated, _ := m.Update(externalDoneMsg{label: "Editor exited with an error"})
+	m = updated.(reviewModel)
+	if !strings.Contains(m.status, "has not changed in this span") {
+		t.Errorf("after the editor closed, status = %q, want the reason it opened the editor", m.status)
+	}
+	if !strings.Contains(m.status, "editor") {
+		t.Errorf("status %q does not say the file was opened in the editor", m.status)
+	}
+	if m.statusErr {
+		t.Error("the fallback is a hint, not an error")
+	}
+	if m.pendingNote != "" {
+		t.Errorf("the note outlived the handoff it belonged to: %q", m.pendingNote)
+	}
+
+	// A diff that actually diffed has nothing to report, so the screen comes back clean.
+	m = navModel(t)
+	m.cursor = indexOfNameBySuffix(t, m, ".go")
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")}); cmd == nil {
+		t.Fatal("d on a file did not hand off")
+	}
+	updated, _ = m.Update(externalDoneMsg{})
+	if got := updated.(reviewModel).status; got != "" {
+		t.Errorf("after a real diff the status = %q, want nothing", got)
+	}
+
+	// A handoff that failed reports the failure, and drops the note it was carrying.
+	m.cursor = indexOf(t, m, rowThread)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = updated.(reviewModel)
+	updated, _ = m.Update(externalDoneMsg{err: errors.New("no editor configured"),
+		label: "Editor exited with an error"})
+	m = updated.(reviewModel)
+	if !strings.Contains(m.status, "no editor configured") || !m.statusErr {
+		t.Errorf("a failed handoff said %q (err=%v), want the failure", m.status, m.statusErr)
+	}
+	if strings.Contains(m.status, "has not changed") || m.pendingNote != "" {
+		t.Errorf("a failed handoff kept its note: status %q, pending %q", m.status, m.pendingNote)
 	}
 }

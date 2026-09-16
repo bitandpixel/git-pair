@@ -101,7 +101,9 @@ func activateBy(r row) action {
 	return actionNone
 }
 
-// externalDoneMsg reports that a launched editor or difftool has exited.
+// externalDoneMsg reports that a launched editor or difftool has exited. What the caller
+// wanted read afterwards is held in reviewModel.pendingNote: a status set before the handoff
+// is buried under the child's own screen, so it has to be said on the way back.
 type externalDoneMsg struct {
 	err   error
 	label string
@@ -130,7 +132,11 @@ type reviewModel struct {
 
 	status    string
 	statusErr bool
-	quitting  bool
+	// pendingNote is what goes in the status line when the editor or difftool currently
+	// holding the terminal exits. Every handoff assigns it, so a note can never outlive the
+	// child it was written for.
+	pendingNote string
+	quitting    bool
 	// submitted is the one-line summary of a review submitted from inside the
 	// session, printed after the alt screen closes.
 	submitted string
@@ -179,6 +185,8 @@ func (m reviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case externalDoneMsg:
 		// An editor or difftool just exited: refresh repository state so the
 		// file list and review marks reflect what it changed (PRD §15).
+		note := m.pendingNote
+		m.pendingNote = ""
 		if msg.err != nil {
 			m.setStatus(fmt.Sprintf("%s: %v", msg.label, msg.err), true)
 			return m, nil
@@ -186,7 +194,9 @@ func (m reviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err := m.sess.Reload(m.ctx); err != nil {
 			m.setStatus(err.Error(), true)
 		} else {
-			m.setStatus("", false)
+			// Empty unless the handoff had something to report, in which case this is
+			// the first moment the reviewer can actually read it.
+			m.setStatus(note, false)
 		}
 		// The editor may have written a new thread, so the section below the files
 		// has to be listed again.
@@ -363,10 +373,9 @@ func (m reviewModel) openThreadTitle(title string) (tea.Model, tea.Cmd) {
 		m.setStatus(err.Error(), true)
 		return m, nil
 	}
+	note := "Opened existing thread " + path
 	if created {
-		m.setStatus("Created "+path, false)
-	} else {
-		m.setStatus("Opened existing thread "+path, false)
+		note = "Created " + path
 	}
 	// The new file belongs in the section the reviewer was just in, so put the cursor on
 	// it instead of leaving them where the prompt started.
@@ -378,7 +387,9 @@ func (m reviewModel) openThreadTitle(title string) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.clamp()
-	return m.openPath(path)
+	// The note rides the handoff, so "Created …" is still on screen when the editor closes
+	// rather than having been covered by it.
+	return m.openPathNoted(path, note)
 }
 
 // --- external process handoff ----------------------------------------------
@@ -420,8 +431,10 @@ func (m reviewModel) openDiffOfSelection() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if !m.inSpan[r.path] {
-		m.setStatus(r.name+" has not changed in this span, so there is nothing to diff; Enter reads it", false)
-		return m, nil
+		// Nothing to diff, so give them the file instead — and let the editor's own exit
+		// carry the reason, because the note set now would be under the editor's screen.
+		return m.openPathNoted(r.path,
+			r.name+" has not changed in this span — opened in the editor")
 	}
 	return m.openDiff(r.path)
 }
@@ -429,7 +442,7 @@ func (m reviewModel) openDiffOfSelection() (tea.Model, tea.Cmd) {
 func (m reviewModel) openDiff(path string) (tea.Model, tea.Cmd) {
 	sp := m.sess.Span()
 	return m.runExternal(console.DiffToolCommand(m.sess.Repo(), sp.From, []string{path}),
-		"Difftool exited with an error")
+		"Difftool exited with an error", "")
 }
 
 // openEditor edits the row under the cursor: a file, a thread, or ABOUT.md.
@@ -450,23 +463,28 @@ func (m reviewModel) openAbout() (tea.Model, tea.Cmd) {
 }
 
 func (m reviewModel) openPath(relPath string) (tea.Model, tea.Cmd) {
+	return m.openPathNoted(relPath, "")
+}
+
+// openPathNoted opens a file in the editor and reports note on the way back. The handoff
+// takes the whole screen, so a status set before it is gone by the time the reviewer looks
+// again; this is the only way a note outlives the editor.
+func (m reviewModel) openPathNoted(relPath, note string) (tea.Model, tea.Cmd) {
 	repo := m.sess.Repo()
 	cmd, err := console.EditorCommand(repo, absPath(repo.Dir, relPath))
 	if err != nil {
 		m.setStatus(err.Error(), true)
 		return m, nil
 	}
-	return m.runExternal(cmd, "Editor exited with an error")
+	return m.runExternal(cmd, "Editor exited with an error", note)
 }
 
-// runExternal hands the terminal to an editor or difftool. tea.ExecCommand
-// suspends the program, attaches the child to the real terminal, and restores
-// the screen afterwards, which is what PRD §15 requires.
-// runExternal hands the terminal to an editor or difftool. tea.ExecProcess
-// suspends the renderer, gives the child process the real terminal, and resumes
-// drawing when it exits — which is what PRD §15 requires. The callback turns the
-// child's exit status into a message so the screen can refresh or report.
-func (m reviewModel) runExternal(cmd *exec.Cmd, label string) (tea.Model, tea.Cmd) {
+// runExternal hands the terminal to an editor or difftool. tea.ExecProcess suspends the
+// renderer, gives the child process the real terminal, and resumes drawing when it exits —
+// which is what PRD §15 requires. The callback turns the child's exit status into a message,
+// along with whatever note the caller wanted read afterwards.
+func (m reviewModel) runExternal(cmd *exec.Cmd, label, note string) (tea.Model, tea.Cmd) {
+	m.pendingNote = note
 	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return externalDoneMsg{err: err, label: label}
 	})

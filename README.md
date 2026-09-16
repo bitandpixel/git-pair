@@ -568,8 +568,11 @@ then reading what the changeset says about it is one motion, not two modes — a
 between the halves. `Enter` does whatever the row under the cursor is for: the difftool for a
 file, the editor for ABOUT.md or a thread, collapse or expand for the `Threads` heading, the
 title prompt for `+ new thread…`. `d` opens the difftool for the selected row whatever it is —
-a file, or a changeset document that changed in this span — and says why when the row has no
-diff to show. `e` edits the selected row, `Space` toggles reviewed on a
+a file, or a changeset document that changed in this span. A row naming a file the span never
+touched has no diff, so `d` opens that file in the editor and says so once the editor closes;
+the note has to wait for that moment, because anything written to the screen before the
+handoff is under the editor by the time you look again. `e` edits the selected row, `Space`
+toggles reviewed on a
 file row — which stays under the cursor, since marking is not navigation — and refuses the
 rows below the counter, because the changeset documents are read rather than diffed. `a` opens
 `ABOUT.md` and `t` prompts for a new thread from anywhere; `T` collapses the thread list; `v`
