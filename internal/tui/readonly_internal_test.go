@@ -188,7 +188,7 @@ func TestHistoricalHelpBarOffersOnlyWhatItCanDo(t *testing.T) {
 			t.Errorf("the historical shortcut bar still advertises %q:\n%s", absent, help)
 		}
 	}
-	for _, want := range []string{"enter open", "d diff", "p preview", "v span"} {
+	for _, want := range []string{"enter open", "d diff", "p preview", "v spans"} {
 		if !strings.Contains(help, want) {
 			t.Errorf("the historical shortcut bar lost %q", want)
 		}

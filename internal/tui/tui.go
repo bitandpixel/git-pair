@@ -385,14 +385,16 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pick = m.newSpanPicker()
 		m.setStatus("", false)
 	case key.Type == tea.KeyRunes && firstRune(key) == 'v':
-		if err := m.sess.ToggleSpan(m.ctx); err != nil {
+		before := countMarked(m.sess)
+		pos, total, err := m.sess.StepSpan(m.ctx)
+		if err != nil {
 			m.setStatus(err.Error(), true)
 		} else {
 			// The span is what the preview diffs, so every cached patch is about a span
 			// that is no longer the one on screen.
 			m.forgetPatches()
 			m.refresh()
-			m.setStatus("", false)
+			m.setStatus(spanNote(before, m.sess, pos, total), false)
 		}
 	case key.Type == tea.KeyRunes && firstRune(key) == 's':
 		if !m.sess.CanToggleSpan() {
@@ -895,10 +897,10 @@ func (m reviewModel) helpText() string {
 	if !m.sess.Span().Live() {
 		// Nothing in this bar may imply the reviewer can act on history.
 		return "j/k move  tab section  enter open  d diff  p preview  " + threadsHint +
-			"  v span  V picker  q quit"
+			"  v spans  V picker  q quit"
 	}
 	return "j/k move  tab section  enter open  d diff  p preview  e edit  space reviewed  a about  " +
-		"t new thread  " + threadsHint + "  v span  V picker  s submit  q quit"
+		"t new thread  " + threadsHint + "  v spans  V picker  s submit  q quit"
 }
 
 // helpLines is helpText fitted to the terminal width. A narrow window gets the overflow on

@@ -29,7 +29,8 @@ Already in the code, so this plan does not rebuild it:
   chronologically, so §5's stable negative aliases exist.
 - `--unreviewed` and `--since-review=N` (bare `-1`) exist on `diff` and `review open` and share that
   resolver — §21's "one canonical implementation" holds for the base end today.
-- `v` toggles the two common spans (§7).
+- `v` toggles the two common spans (§7), which M3b generalises into a walk over the session's
+  spans.
 - `internal/reviewmark` keys marks by end commit plus a per-file diff key (§14's invalidation).
 - The preview pane shows the author's span diff and, beneath a `── you · uncommitted` caption, the
   reviewer's own uncommitted edits.
@@ -195,6 +196,40 @@ Verification:
 - [x] The frame invariant in both picker layouts (columns and drill).
 - [x] Pty walkthrough of scenarios B and C, and of a live span whose base is a commit — §23's first
       matrix row.
+
+### M3b — `v` walks the spans this session has been in
+
+Deliverables:
+
+- The session keeps the spans it has stood on: the span it opened on (including one named
+  entirely by CLI flags), the two presets, and every span chosen with `V`. `v` steps forward
+  and wraps, and the status names the position when there are enough stops for it to mean
+  something.
+- It is a set of spans, not a keystroke log: choosing the same span twice is one stop, and a
+  rescan after an external tool closes is not a visit.
+- From a read-only span, `v` returns to the last span that was reviewable — the promise M2's
+  refusal message makes.
+
+Tasks:
+
+- [x] `Session` ring (`noteSpan`, `seedRing`, `StepSpan`, `SpanPosition`, `SpanRing`) and
+      `span.Selector.Key()` for identity; the presets are seeded at open so PRD §17.2's toggle
+      still works before anything custom has been chosen, and `Reload` re-seeds so the first
+      review submission mid-session does not leave `v` with nowhere to go.
+- [x] `v` in the TUI steps the ring and reports `span <label> (n of m)`, sharing the status
+      sentence with the picker's apply path so both say the same thing about marks that stopped
+      applying and read-only spans.
+- [x] README and PRD §14, §28.
+
+Verification:
+
+- [x] Walking with a custom span chosen: a whole turn returns to it.
+- [x] Rescans add no stops; choosing the same span twice is one stop.
+- [x] A stop whose ref was deleted leaves the span, the ring and the position alone, and works
+      again once the ref is back.
+- [x] From a read-only span `v` lands on a live one — and on the *last live* one, not merely a
+      live one, which is the difference between getting back to work and being sent to a preset.
+- [x] Two-stop sessions say `span <label>` with no position.
 
 ### M4 — Drift the reviewer can see and act on
 

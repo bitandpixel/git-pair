@@ -238,16 +238,27 @@ func (m reviewModel) applySpan(base, head span.Checkpoint) (tea.Model, tea.Cmd) 
 	m.forgetPatches()
 	m.refresh()
 
-	sp := m.sess.Span()
+	m.setStatus(spanNote(before, m.sess, 0, 0), false)
+	return m, nil
+}
+
+// spanNote is what a span change says: the span now on screen, where it sits among the
+// spans this session has been in when there are enough of them to be worth a position, how
+// many reviewed marks stopped applying, and whether the screen went read-only with it. The
+// position is left out for two-stop sessions, where it would only be noise.
+func spanNote(before int, sess *Session, pos, total int) string {
+	sp := sess.Span()
 	note := "span " + sp.Label
-	if dropped := before - countMarked(m.sess); dropped > 0 {
-		note += fmt.Sprintf(" · %d reviewed mark%s no longer applies", dropped, plural(dropped))
+	if total > 2 {
+		note += fmt.Sprintf(" (%d of %d)", pos, total)
+	}
+	if dropped := before - countMarked(sess); dropped > 0 {
+		note += fmt.Sprintf(" \u00b7 %d reviewed mark%s no longer applies", dropped, plural(dropped))
 	}
 	if sp.Historical() {
-		note += " · read-only"
+		note += " \u00b7 read-only"
 	}
-	m.setStatus(note, false)
-	return m, nil
+	return note
 }
 
 func countMarked(sess *Session) int {

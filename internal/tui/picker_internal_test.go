@@ -496,3 +496,42 @@ func TestThePickerFillsTheWindow(t *testing.T) {
 		}
 	}
 }
+
+// `v` is one key for walking the spans this session has been in — the span it opened on,
+// the two presets, and anything chosen with V — and the status line has to say where it
+// landed, since the header's span label looks the same shape either way.
+func TestVStepsThroughTheSessionSpansAndSaysWhere(t *testing.T) {
+	m, f := pickerFixture(t, 1)
+	custom := span.Selector{Base: span.Commit(f.Parent(f.Head())), Head: span.WorkingTree()}
+	if err := m.sess.SetSpan(m.ctx, custom); err != nil {
+		t.Fatalf("SetSpan: %v", err)
+	}
+	m.refresh()
+
+	updated, _ := m.Update(runeKey('v'))
+	got := updated.(reviewModel)
+	if got.statusErr {
+		t.Fatalf("v reported an error: %s", got.status)
+	}
+	if !strings.Contains(got.status, "(1 of 3)") {
+		t.Errorf("v said %q, want the span named with its position, 1 of 3", got.status)
+	}
+	if got.sess.Selector().Base.Kind != span.KindChangesetBase {
+		t.Errorf("v wrapped to a span based on %s, want the span the session opened on",
+			got.sess.Selector().Base.Kind)
+	}
+}
+
+// With nothing but the presets on the ring, the position would be noise: two stops is the
+// toggle the manual describes, and it should read like one.
+func TestVBetweenTwoStopsDoesNotCountOutLoud(t *testing.T) {
+	m, _ := pickerFixture(t, 1)
+	updated, _ := m.Update(runeKey('v'))
+	got := updated.(reviewModel)
+	if strings.Contains(got.status, " of ") {
+		t.Errorf("v between two spans said %q; a position is noise when there are two stops", got.status)
+	}
+	if !strings.Contains(got.status, "span ") {
+		t.Errorf("v said %q, want the span it stepped to", got.status)
+	}
+}

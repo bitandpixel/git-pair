@@ -68,19 +68,40 @@ type Session struct {
 	markErr   error
 	persisted reviewmark.Set
 	resumed   int
+
+	// ring holds every span this session has been in, in the order they were first
+	// entered, and ringIdx is the stop it is standing on. `v` walks it; see StepSpan.
+	ring    []span.Selector
+	ringIdx int
+	// lastLive is the most recent stop on the ring that was reviewable, or -1. A read-only
+	// span is a detour, and `v` is how you leave it, so it goes back there rather than to
+	// whatever sits next.
+	lastLive int
 }
 
 // NewSession resolves the span and scans the changed files.
 func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	s := &Session{
 		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span,
-		reviewRef: "refs/reviews/" + opts.Changeset.Slug,
+		reviewRef: "refs/reviews/" + opts.Changeset.Slug, lastLive: -1,
 	}
 	if err := s.Rescan(ctx); err != nil {
 		return nil, err
 	}
 	s.loadMarks(ctx)
+	s.seedRing()
 	return s, nil
+}
+
+// seedRing puts the two common spans on the ring beside the one the session opened on, so
+// the first press of `v` still reaches the unreviewed span and back (PRD §17.2). Custom
+// spans join later; the ring grows rather than replacing that behaviour.
+func (s *Session) seedRing() {
+	s.ringIdx = s.noteSpan(s.sel)
+	if s.CanToggleSpan() {
+		s.noteSpan(span.Full())
+		s.noteSpan(span.SinceReview(-1))
+	}
 }
 
 // Rescan recomputes the span and file list, preserving review marks whose file
@@ -90,7 +111,11 @@ func (s *Session) Rescan(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return s.scan(ctx, sp)
+	if err := s.scan(ctx, sp); err != nil {
+		return err
+	}
+	s.noteSpan(s.sel)
+	return nil
 }
 
 // SetSpan moves the session to a span the reviewer chose, which is what `V`'s Enter does.
@@ -102,7 +127,14 @@ func (s *Session) SetSpan(ctx context.Context, sel span.Selector) error {
 		return err
 	}
 	s.sel = sel
-	return s.scan(ctx, sp)
+	if err := s.scan(ctx, sp); err != nil {
+		return err
+	}
+	s.ringIdx = s.noteSpan(sel)
+	if sp.Live() {
+		s.lastLive = s.ringIdx
+	}
+	return nil
 }
 
 // Selector is the span as it was chosen rather than as it resolved, which is what the
@@ -153,23 +185,79 @@ func (s *Session) Reload(ctx context.Context) error {
 		return err
 	}
 	s.summary = summary
-	return s.Rescan(ctx)
+	if err := s.Rescan(ctx); err != nil {
+		return err
+	}
+	// The presets can become available while an external tool is open — the first review
+	// submission does that — and the ring has to know about them by the time `v` is next
+	// pressed. Seeding is idempotent, so this only adds stops that were not there.
+	s.seedRing()
+	return nil
 }
 
-// ToggleSpan flips between the full changeset and the unreviewed span, which is
-// what `v` does. From any other span it goes to the unreviewed one, which is the
-// way out of a historical look. It is a no-op when there is nothing to compare
-// against.
-func (s *Session) ToggleSpan(ctx context.Context) error {
-	if !s.CanToggleSpan() {
-		return fmt.Errorf("no review submissions yet, so there is nothing to compare HEAD against")
+// StepSpan moves to the next span this session has been in, wrapping: the span it opened
+// on, the two presets, and any span the reviewer chose with `V`. Walking the ring is what
+// makes a custom span reachable again without opening the picker, and the presets stay
+// reachable from a custom span rather than being replaced by it.
+//
+// From a read-only span the step goes back to the last span the reviewer could review
+// instead, because that is what `v` is for there: the screen has just refused to mark
+// something, and the message named `v` as the way out. Stepping into another read-only span
+// would break that promise, and `V` remains the way to compare two pieces of history.
+//
+// A stop that no longer resolves — the review ref it named is gone, the branch was deleted
+// — leaves the session where it was: a span is only ever replaced by a whole span that
+// works. It returns the stop's 1-based position and the number of stops.
+func (s *Session) StepSpan(ctx context.Context) (pos, total int, err error) {
+	total = len(s.ring)
+	if total < 2 {
+		return 1, total, fmt.Errorf("this session has only been in this span so far \u2014 V chooses another")
 	}
-	if s.Unreviewed() {
-		s.sel = span.Full()
-	} else {
-		s.sel = span.SinceReview(-1)
+	target := (s.ringIdx + 1) % total
+	if s.current.Historical() {
+		if live := s.liveStop(); live >= 0 && live != s.ringIdx {
+			target = live
+		}
 	}
-	return s.Rescan(ctx)
+	if err := s.SetSpan(ctx, s.ring[target]); err != nil {
+		return s.ringIdx + 1, total, err
+	}
+	return s.ringIdx + 1, total, nil
+}
+
+// liveStop is a stop the reviewer can review into: the last one visited, or, for a session
+// that has only ever looked at history, any stop that names the working tree as its head —
+// which is what makes a span live, and what the two presets do.
+func (s *Session) liveStop() int {
+	if s.lastLive >= 0 {
+		return s.lastLive
+	}
+	for i, sel := range s.ring {
+		if sel.Head.Kind == span.KindWorkingTree {
+			return i
+		}
+	}
+	return -1
+}
+
+// SpanPosition is the stop the session stands on, 1-based, and how many stops there are.
+func (s *Session) SpanPosition() (pos, total int) { return s.ringIdx + 1, len(s.ring) }
+
+// SpanRing is the spans on the ring in the order `v` walks them.
+func (s *Session) SpanRing() []span.Selector { return s.ring }
+
+// noteSpan records a chosen span as a stop on the ring and says where it sits. It does not
+// move the session's position: a rescan after an external tool closed is not a visit, and
+// counting it as one would fill the ring with near-duplicates.
+func (s *Session) noteSpan(sel span.Selector) int {
+	key := sel.Key()
+	for i, existing := range s.ring {
+		if existing.Key() == key {
+			return i
+		}
+	}
+	s.ring = append(s.ring, sel)
+	return len(s.ring) - 1
 }
 
 // CanToggleSpan reports whether an unreviewed span is available.

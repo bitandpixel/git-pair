@@ -208,17 +208,20 @@ func TestSessionPicksUpNewlyChangedFiles(t *testing.T) {
 	}
 }
 
-// PRD §14's `v` binding toggles between the full changeset and the unreviewed span,
-// and PRD §17.2 makes the unreviewed span the work done since the latest review.
-func TestSessionToggleSpanSwitchesBetweenFullAndUnreviewed(t *testing.T) {
+// PRD §14's `v` binding steps through the spans this session has been in, and PRD §17.2
+// makes the unreviewed span one of them. With nothing custom chosen yet the ring is the full
+// changeset and the unreviewed span, so `v` is still the toggle the manual describes.
+func TestSessionStepSpanWalksFullChangesetAndUnreviewed(t *testing.T) {
 	e := newEnv(t)
 	sess := e.session(t, span.Full())
 
 	if sess.CanToggleSpan() {
 		t.Error("CanToggleSpan() = true before any review submission")
 	}
-	if err := sess.ToggleSpan(context.Background()); err == nil {
-		t.Error("ToggleSpan succeeded with no reviews to compare against")
+	if _, total, err := sess.StepSpan(context.Background()); err == nil {
+		t.Error("StepSpan succeeded with no review submissions and nowhere to step")
+	} else if total != 1 {
+		t.Errorf("the ring holds %d stops before any review, want only the span it opened on", total)
 	}
 
 	// A review that touches one file, then the author's response to it.
@@ -233,11 +236,15 @@ func TestSessionToggleSpanSwitchesBetweenFullAndUnreviewed(t *testing.T) {
 		t.Fatal("CanToggleSpan() = false after a review submission")
 	}
 
-	if err := sess.ToggleSpan(context.Background()); err != nil {
-		t.Fatalf("ToggleSpan: %v", err)
+	pos, total, err := sess.StepSpan(context.Background())
+	if err != nil {
+		t.Fatalf("StepSpan: %v", err)
+	}
+	if pos != 2 || total != 2 {
+		t.Errorf("StepSpan landed on stop %d of %d, want 2 of 2", pos, total)
 	}
 	if !sess.Unreviewed() {
-		t.Error("Unreviewed() = false after toggling to the unreviewed span")
+		t.Error("Unreviewed() = false after stepping to the unreviewed span")
 	}
 	files := filePaths(sess.Files())
 	if len(files) != 1 || files[0] != "service.go" {
@@ -247,20 +254,136 @@ func TestSessionToggleSpanSwitchesBetweenFullAndUnreviewed(t *testing.T) {
 		t.Errorf("Span() = %s → %s, want a live span starting at a review", got.Base.Kind, got.Head.Kind)
 	}
 
-	// Marks are per-span content: switching spans must not silently keep marks for
-	// a file whose diff in the new span was never looked at.
+	// Marks are keyed on a file's diff within a span: stepping to a span where that diff
+	// is not the whole story must not carry the mark over quietly.
 	sess.Toggle(indexOfFile(sess.Files(), "service.go"))
-	if err := sess.ToggleSpan(context.Background()); err != nil {
-		t.Fatalf("ToggleSpan back: %v", err)
+	pos, total, err = sess.StepSpan(context.Background())
+	if err != nil {
+		t.Fatalf("StepSpan back: %v", err)
+	}
+	if pos != 1 || total != 2 {
+		t.Errorf("StepSpan wrapped to %d of %d, want 1 of 2", pos, total)
 	}
 	if sess.Unreviewed() {
-		t.Error("Unreviewed() = true after toggling back to the full span")
+		t.Error("Unreviewed() = true after stepping back to the full span")
 	}
 	if got := sess.Span(); got.Base.Kind != span.KindChangesetBase || !got.Live() {
 		t.Errorf("Span() = %s → %s, want the full changeset", got.Base.Kind, got.Head.Kind)
 	}
 	if len(sess.Files()) < 3 {
 		t.Errorf("full span Files() = %v, want the whole changeset again", filePaths(sess.Files()))
+	}
+	if f := sess.Files()[indexOfFile(sess.Files(), "service.go")]; f.Reviewed {
+		t.Error("a mark made in the unreviewed span carried into the full changeset, where the " +
+			"file's diff is a different piece of work")
+	}
+}
+
+// A span chosen with `V` is a stop on the ring, which is the point of the ring: a custom
+// span should still be one keystroke away after you have stepped off it, rather than
+// something you have to pick out of the list again.
+func TestSessionStepSpanWalksSpansChosenWithThePicker(t *testing.T) {
+	e := newEnv(t)
+	e.f.CommitReviewMarker(slug, "feedback")
+	sess := e.session(t, span.Full())
+	earlier := e.f.Parent(e.f.Head())
+	ctx := context.Background()
+
+	custom := span.Selector{Base: span.Commit(earlier), Head: span.WorkingTree()}
+	if err := sess.SetSpan(ctx, custom); err != nil {
+		t.Fatalf("SetSpan: %v", err)
+	}
+	pos, total := sess.SpanPosition()
+	if want := len(sess.SpanRing()); pos != want || total != want {
+		t.Errorf("the span just chosen sits at %d of %d, want it at the end of the ring", pos, total)
+	}
+	if total != 3 {
+		t.Errorf("the ring holds %d stops (full, unreviewed, custom), want 3", total)
+	}
+
+	// A whole turn of the ring arrives back at the stop the reviewer chose. That is the
+	// point of the ring: a custom span does not vanish the moment you step off it.
+	for i := 0; i < total; i++ {
+		if _, _, err := sess.StepSpan(ctx); err != nil {
+			t.Fatalf("StepSpan %d: %v", i+1, err)
+		}
+	}
+	got := sess.Selector()
+	if got.Base.Kind != span.KindCommit || got.Base.Name != earlier || got.Head.Kind != span.KindWorkingTree {
+		t.Errorf("a turn of the ring ended at %s %q \u2192 %s, want the span based on %s that was chosen",
+			got.Base.Kind, got.Base.Name, got.Head.Kind, earlier[:7])
+	}
+}
+
+// A rescan after an editor or difftool closes is not a visit: without this, the ring would
+// fill with copies of the span the session never left, and `v` would become a way to stand
+// still.
+func TestSessionRescanAddsNoStopsToTheRing(t *testing.T) {
+	e := newEnv(t)
+	sess := e.session(t, span.Full())
+	before := len(sess.SpanRing())
+	for i := 0; i < 3; i++ {
+		if err := sess.Reload(context.Background()); err != nil {
+			t.Fatalf("Reload: %v", err)
+		}
+	}
+	if after := len(sess.SpanRing()); after != before {
+		t.Errorf("three rescans left %d stops on the ring, want %d", after, before)
+	}
+}
+
+// A stop whose checkpoint has gone away — the branch it named was deleted — must leave the
+// session where it was, and must not chew through the rest of the ring.
+func TestStepSpanStopsShortWhenAStopNoLongerResolves(t *testing.T) {
+	e := newEnv(t)
+	e.f.CommitReviewMarker(slug, "feedback")
+	later := e.f.Commit("author response", gittest.WithFile("service.go",
+		"package main\n\nfunc Lock() { transaction() }\n"))
+	e.f.MustGit("branch", "gone", later)
+	ctx := context.Background()
+
+	sess := e.session(t, span.Full())
+	// A live stop, so the step from it is an ordinary step around the ring rather than the
+	// escape from a read-only span, and the stop after it is the one that will break.
+	customLive := span.Selector{Base: span.Commit(e.f.Parent(e.f.Head())), Head: span.WorkingTree()}
+	refSel := span.Selector{Base: span.ChangesetBase(), Head: span.Ref("refs/heads/gone")}
+	if err := sess.SetSpan(ctx, customLive); err != nil {
+		t.Fatalf("SetSpan live: %v", err)
+	}
+	if err := sess.SetSpan(ctx, refSel); err != nil {
+		t.Fatalf("SetSpan ref: %v", err)
+	}
+	if err := sess.SetSpan(ctx, customLive); err != nil {
+		t.Fatalf("SetSpan live again: %v", err)
+	}
+	if stops := len(sess.SpanRing()); stops != 4 {
+		t.Errorf("the ring holds %d stops, want 4: the ring is a set of spans, not a log of "+
+			"keystrokes", stops)
+	}
+
+	e.f.MustGit("branch", "-D", "gone")
+	held := sess.Span().Label
+	pos, total := sess.SpanPosition()
+	if _, _, err := sess.StepSpan(ctx); err == nil {
+		t.Fatal("StepSpan stepped into a span whose ref no longer exists")
+	}
+	if sess.Span().Label != held {
+		t.Errorf("a broken stop moved the session from %s to %s", held, sess.Span().Label)
+	}
+	if now, _ := sess.SpanPosition(); now != pos {
+		t.Errorf("the failed step moved the ring position from %d to %d", pos, now)
+	}
+
+	// The ring itself is intact: with the branch back, the same press arrives at it.
+	e.f.MustGit("branch", "gone", later)
+	if _, _, err := sess.StepSpan(ctx); err != nil {
+		t.Fatalf("StepSpan after the ref came back: %v", err)
+	}
+	if got := sess.Selector().Head; got.Kind != span.KindRef || got.Name != "refs/heads/gone" {
+		t.Errorf("after recovery the head is %s %q, want refs/heads/gone", got.Kind, got.Name)
+	}
+	if _, totalNow := sess.SpanPosition(); totalNow != total {
+		t.Errorf("the ring shrank from %d stops to %d", total, totalNow)
 	}
 }
 
@@ -312,9 +435,10 @@ func TestSessionSpanErrorSurfaces(t *testing.T) {
 	}
 }
 
-// A historical span is a look at history, and `v` must not be a dead end: from any
-// span that is not the unreviewed one it lands on the span you can review into.
-func TestSessionToggleFromHistoricalEscapesToTheUnreviewedSpan(t *testing.T) {
+// A historical span is a look at history, and `v` must not be a dead end there: the screen
+// has just refused to mark something and named `v` as the way out, so the step has to
+// arrive at a span you can review into rather than at another read-only one.
+func TestSessionStepFromHistoricalReturnsToAReviewableSpan(t *testing.T) {
 	e := newEnv(t)
 	e.f.CommitReviewMarker(slug, "feedback")
 
@@ -322,18 +446,51 @@ func TestSessionToggleFromHistoricalEscapesToTheUnreviewedSpan(t *testing.T) {
 	if !sess.Span().Historical() {
 		t.Fatalf("the session opened live, want a historical span")
 	}
-	if sess.Unreviewed() {
-		t.Error("Unreviewed() = true on a historical span")
+	ctx := context.Background()
+	history := e.f.Commit("author response", gittest.WithFile("service.go",
+		"package main\n\nfunc Lock() { transaction() }\n"))
+	if err := sess.SetSpan(ctx, span.Selector{Base: span.ChangesetBase(), Head: span.Commit(history)}); err != nil {
+		t.Fatalf("SetSpan: %v", err)
 	}
 
-	if err := sess.ToggleSpan(context.Background()); err != nil {
-		t.Fatalf("ToggleSpan: %v", err)
-	}
-	if !sess.Unreviewed() {
-		t.Error("v from a historical span should land on the unreviewed span")
+	if _, _, err := sess.StepSpan(ctx); err != nil {
+		t.Fatalf("StepSpan: %v", err)
 	}
 	if !sess.Span().Live() {
-		t.Error("the span v lands on must be one you can review into")
+		t.Errorf("v from a read-only span landed on %s, which is read-only as well", sess.Span().Label)
+	}
+	if got := sess.Selector().Head; got.Kind != span.KindWorkingTree {
+		t.Errorf("the span v landed on ends at %s, want the working tree", got.Kind)
+	}
+}
+
+// What it returns to is the last span that was reviewable, not merely some reviewable span:
+// a reviewer who stepped off their own span wants their own span back.
+func TestSessionStepFromHistoricalGoesBackWhereItWasReviewing(t *testing.T) {
+	e := newEnv(t)
+	e.f.CommitReviewMarker(slug, "feedback")
+	ctx := context.Background()
+
+	// A live span that is neither preset: a fixed commit as the base, the working tree as
+	// the head. The ring also holds the two presets and a historical span, so the next stop
+	// around the ring is not this one.
+	working := e.session(t, span.Selector{Base: span.Commit(e.f.Parent(e.f.Head())), Head: span.WorkingTree()})
+	if !working.Span().Live() {
+		t.Fatalf("the session opened read-only, want a live span")
+	}
+	if err := working.SetSpan(ctx, span.Selector{Base: span.ChangesetBase(), Head: span.Review(-1)}); err != nil {
+		t.Fatalf("SetSpan: %v", err)
+	}
+	if !working.Span().Historical() {
+		t.Fatalf("the custom span did not resolve read-only, want it to")
+	}
+
+	if _, _, err := working.StepSpan(ctx); err != nil {
+		t.Fatalf("StepSpan: %v", err)
+	}
+	if got := working.Selector().Base; got.Kind != span.KindCommit {
+		t.Errorf("v returned to a span based on %s, want the commit %s it was reviewing from",
+			got.Kind, got.Name[:7])
 	}
 }
 

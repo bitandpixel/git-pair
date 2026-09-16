@@ -1044,7 +1044,9 @@ a        open ABOUT.md
 t        create a review thread
 T        collapse/expand the thread list
 
-v        toggle common review span
+v        step to the next span this session has been in: the span it opened on, the full
+         and unreviewed presets, and any span chosen with V; from a read-only span, back to
+         the last span you could review
 V        open the span picker: pending base and head, applied together on enter
 s        submit review (block / feedback / approve)
 q        quit
@@ -1739,8 +1741,9 @@ a        open ABOUT.md
 t        create thread
 T        collapse/expand the thread list
 
-v        toggle common span:
-         full changeset ↔ unreviewed
+v        step through the spans this session has been in:
+         opened-on, full changeset, unreviewed, then any span chosen with V;
+         from a read-only span, back to the last span that was reviewable
 V        span picker: BASE and HEAD columns, space to choose an end, enter to apply;
          Commit… and Ref… open searchable lists, u and f are the two presets
 

@@ -272,9 +272,26 @@ V
 Uppercase `V` is intentionally paired with lowercase `v`:
 
 ```text
-v    quick toggle
+v    walk the spans this session has been in
 V    advanced/custom span selection
 ```
+
+### 8.1 Session span history
+
+`v` is not a two-state switch. It steps through the spans this session has been in, in the
+order they were first entered, and wraps:
+
+* the span the session opened on, including one named entirely by command-line arguments,
+* the full-changeset and unreviewed presets,
+* every span chosen with `V`.
+
+It is a set of spans, not a log of keystrokes: choosing the same span twice is one stop, and a
+rescan after an editor or difftool closes is not a visit. The two presets are present from the
+first press so the documented full/unreviewed toggle still works before anything custom has
+been chosen (PRD §17.2). From a read-only span, `v` goes back to the last span that was
+reviewable rather than to whatever sits next, because that is what `v` is advertised for there
+(§13); comparing two historical spans is what `V` is for. A stop whose checkpoint no longer
+resolves leaves the session where it was.
 
 The picker uses a two-column model.
 
@@ -930,10 +947,13 @@ Do not implement:
 
 ## 29. Acceptance Scenarios
 
-### Scenario A: Quick toggle
+### Scenario A: Walking the session's spans
 
-Current: `Review -1 → Working Tree`. User presses `v`. Result: `Changeset Base → Working Tree`.
-Pressing `v` again returns to Unreviewed.
+The session opened on `Review -1 → Working Tree` (named on the command line), so the ring is
+that span plus the two presets. Pressing `v` steps to the next stop, and the status names both
+the span and its position: `span main..HEAD (2 of 3)`. A turn of the ring arrives back at the
+span it started from. With nothing but the two presets on the ring — the ordinary case — `v` is
+the full/unreviewed toggle PRD §17.2 describes, and the position is left out.
 
 ### Scenario B: Custom historical span
 

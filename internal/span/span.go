@@ -357,6 +357,25 @@ func (s Span) RefreshRef(ctx context.Context, repo *git.Repo, name string) (Span
 	return next, nil
 }
 
+// Key names a chosen span the way it was chosen, before and after resolution: the same
+// review index, the same ref, the same id as typed. The session's span ring uses it so that
+// rescanning a span is not mistaken for visiting a new one, while a span reached twice by
+// two different routes is still two stops a keystroke apart.
+func (s Selector) Key() string { return s.Base.key() + "\x1f" + s.Head.key() }
+
+func (c Checkpoint) key() string {
+	switch c.Kind {
+	case KindReview:
+		return fmt.Sprintf("review:%d", c.Index)
+	case KindRef:
+		return "ref:" + c.Name
+	case KindCommit:
+		return "commit:" + strings.ToLower(c.Name)
+	default:
+		return c.Kind.String()
+	}
+}
+
 // short is the form a reviewer can type back.
 func short(oid string) string {
 	if len(oid) > 7 {

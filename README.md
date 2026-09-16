@@ -573,7 +573,7 @@ ABOUT.md
     + new thread…
 ────────────────────────────────────────
 j/k move  tab section  enter open  d diff  p preview  e edit  space reviewed  a about  t new thread
-T hide threads  v span  s submit  q quit
+T hide threads  v spans  s submit  q quit
 ```
 
 The screen is one navigable list in two blocks: the files the diff touched, and below the
@@ -595,7 +595,9 @@ file row — which stays under the cursor, since marking is not navigation — a
 rows below the counter. `a` opens
 `ABOUT.md` in the editor whatever the span did; `t` prompts for a new thread from anywhere;
 `T` collapses the thread list; `v`
-toggles the full/unreviewed span; `s` opens a submit prompt taking `b`, `f` or `a`; `q` quits.
+steps to the next span this session has been in — the span it opened on, the full and
+unreviewed presets, and any span chosen with `V` — and from a read-only span goes back to the
+last span you could review; `s` opens a submit prompt taking `b`, `f` or `a`; `q` quits.
 A thread created from the list is written, opened in the editor, and left selected, so the
 reviewer can fill it in and come straight back to it. The thread heading counts what it hides —
 `▸ Threads (3)` collapsed, plain `▾ Threads` once the threads are on screen — and a rule
