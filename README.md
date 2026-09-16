@@ -608,7 +608,8 @@ a changeset of short names is not made to share the screen with whitespace, and 
 path cannot take the diff's columns. `ctrl-f` and `ctrl-b` page through a diff too long to fit, and the note along the bottom
 says how much of it is left; `ctrl-d` still quits, which is why paging is not `ctrl-d`. Each line
 carries the number git gave it in its hunk header, and a line too wide for the column is broken
-rather than cut, with its colour carried across the break. `p` switches the pane off, and a terminal
+rather than cut, with its colour carried across the break. Tabs are shown as the spaces they
+advance to, because a tab the width maths scores as zero is a row the terminal wraps for you. `p` switches the pane off, and a terminal
 too small to fit it says which way it is short rather than doing nothing.
 
 What the pane prints is git's own bytes: no hunk model, no folding, no colours of its own — the line

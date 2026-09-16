@@ -16,7 +16,10 @@ import (
 // reason for those restrictions -- a pane that interprets diffs is a diff renderer, and the way to
 // read a diff properly remains opening it in the difftool.
 
-const sgrReset = "\x1b[0m"
+const (
+	sgrReset        = "\x1b[0m"
+	previewTabWidth = 8 // what a tab advances to, as in a terminal's own default
+)
 
 // previewBody renders a patch as rows of at most width cells: a right-aligned line number, a
 // space, then git's own text, wrapped when it is too long for the column. Every row opens the
@@ -126,12 +129,18 @@ func parseHunk(header string) (old, new int, ok bool) {
 
 // wrapLine breaks a line at the column limit and changes nothing else about it: escapes travel
 // with the text they style, a continuation row re-opens the styles in force at its break, and
-// spaces and tabs stay exactly where git put them. That last part is why this is not ansi.Wrap,
-// whose word wrapping collapses whitespace at the break -- indentation in a diff is the content.
-// Widths come from go-runewidth, the library lipgloss measures with, so the two agree; combining
-// marks carry no width and so stay attached to the character before them.
+// spaces stay exactly where git put them. Tabs are the one thing that cannot be left alone: git
+// emits them literally, a terminal advances them to the next stop, and a column measured with the
+// tab worth nothing is a column the terminal wraps for you -- which shifts the whole frame. So a
+// tab becomes the spaces it would advance to, counted against the row it lands on.
+//
+// That last part is why this is not ansi.Wrap, whose word wrapping collapses whitespace at the
+// break -- indentation in a diff is the content, so the spaces are kept, only spelled out.
 func wrapLine(s string, limit int) []string {
-	if limit <= 0 || ansi.StringWidth(s) <= limit {
+	if limit <= 0 {
+		return []string{s}
+	}
+	if !strings.ContainsRune(s, '\t') && ansi.StringWidth(s) <= limit {
 		return []string{s}
 	}
 
@@ -174,6 +183,18 @@ func wrapLine(s string, limit int) []string {
 			continue
 		}
 		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == '\t' {
+			pad := previewTabWidth - width%previewTabWidth
+			if width+pad > limit {
+				flush()
+				i += size // the tab's padding belonged to the row it started on
+				continue
+			}
+			row.WriteString(strings.Repeat(" ", pad))
+			width += pad
+			i += size
+			continue
+		}
 		w := runewidth.RuneWidth(r)
 		if width+w > limit && row.Len() > 0 {
 			flush()

@@ -350,10 +350,9 @@ func TestTheFrameFillsTheWindow(t *testing.T) {
 	}
 }
 
-// A diff line wider than the pane is broken rather than cut, and the break must not lose anything:
-// the whitespace in a diff is the code.
+// A diff line wider than the pane is broken rather than cut, and the break must not lose anything.
 func TestPreviewWrapsWithoutLosingCharacters(t *testing.T) {
-	long := "+\t\treturn service.Lock(ctx, r.URL.Path, tenant.ID, \"already held\")"
+	long := "+return service.Lock(ctx, r.URL.Path, tenant.ID, \"already held\")"
 	rows := wrapLine(long, 12)
 	if len(rows) < 4 {
 		t.Fatalf("a %d-column line became %d rows, want several", lipgloss.Width(long), len(rows))
@@ -426,7 +425,9 @@ func TestPreviewNumbersTheLinesItCan(t *testing.T) {
 	if !strings.Contains(ansi.Strip(rows), "10  func a() {") {
 		t.Errorf("a context line does not carry its number on the side being reviewed:\n%s", ansi.Strip(rows))
 	}
-	if !strings.Contains(ansi.Strip(rows), "11 -\told := 1") || !strings.Contains(ansi.Strip(rows), "11 +\tnew := 2") {
+	// The tabs are spelled out to their stops by then, so the expectation says the same.
+	padded := func(rest string) string { return "11 " + strings.Replace(rest, "\t", strings.Repeat(" ", 7), 1) }
+	if !strings.Contains(ansi.Strip(rows), padded("-\told := 1")) || !strings.Contains(ansi.Strip(rows), padded("+\tnew := 2")) {
 		t.Errorf("the removed and added lines should each carry the number of their own side:\n%s", ansi.Strip(rows))
 	}
 }
@@ -535,5 +536,39 @@ func TestHidingThePreviewGivesTheListBackItsWidth(t *testing.T) {
 	}
 	if strings.Contains(m.View(), "\u2502") {
 		t.Error("the divider is still drawn with the preview hidden")
+	}
+}
+
+// A tab is the one character the pane cannot take as git wrote it: the terminal moves it to the
+// next stop, so a row measured with the tab worth nothing is a row the terminal wraps, and a
+// wrapped row shifts every row under it. Tabs become the spaces they advance to, counted where
+// they land.
+func TestPreviewExpandsTabsToTheirStops(t *testing.T) {
+	long := "+\treturn " + strings.Repeat("x", 40)
+	rows := wrapLine(long, 14)
+	for _, row := range rows {
+		if strings.ContainsRune(row, '\t') {
+			t.Errorf("a row still carries a tab, which the terminal will move: %q", row)
+		}
+		if w := lipgloss.Width(row); w > 14 {
+			t.Errorf("row %q is %d columns, over the limit of 14", row, w)
+		}
+	}
+	if !strings.HasPrefix(rows[0], "+       ") {
+		t.Errorf("the tab after the + should be spelled out to the next stop of 8: %q", rows[0])
+	}
+	if got := strings.Count(strings.Join(rows, ""), "x"); got != 40 {
+		t.Errorf("wrapping around the tab lost %d of the 40 characters", 40-got)
+	}
+}
+
+// A tab that would be pushed past the column by its own padding is not left dangling on the next
+// row as phantom indentation.
+func TestATabAtTheBreakDoesNotIndentTheNextRow(t *testing.T) {
+	rows := wrapLine("+-\t\tmore", 4)
+	for _, row := range rows {
+		if strings.HasPrefix(row, " ") {
+			t.Errorf("a row opens with padding a tab left behind: %q", row)
+		}
 	}
 }
