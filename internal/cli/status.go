@@ -218,11 +218,11 @@ func nextAction(s lifecycle.Summary) string {
 	case model.StateWorking:
 		return "implement, commit, then `gitpr change ready`"
 	case model.StateReady:
-		return "waiting for a reviewer: `gitpr review open`"
+		return "waiting for a reviewer: `gitpr review open` (author: `gitpr change wait` to block on it)"
 	case model.StateBlocked:
-		return "address the review, then `gitpr change ready` (see `gitpr diff --unreviewed`)"
+		return "address the review, then `gitpr change ready` (read it with `gitpr change feedback`)"
 	case model.StateFeedback:
-		return "optionally address feedback, then `gitpr review close`"
+		return "optionally address feedback (read it with `gitpr change feedback`), then `gitpr review close`"
 	case model.StateApproved:
 		return "run `gitpr review close` before squash/merge"
 	case model.StateClosed:

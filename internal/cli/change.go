@@ -7,12 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"gitpr/internal/changeset"
 	"gitpr/internal/console"
 	"gitpr/internal/git"
+	"gitpr/internal/lifecycle"
 	"gitpr/internal/marker"
 	"gitpr/internal/model"
 	"gitpr/internal/survival"
@@ -27,7 +29,8 @@ func newChangeCommand(a *app) *cobra.Command {
 		// agent that typo'd the verb.
 		RunE: groupUsage("change"),
 	}
-	cmd.AddCommand(newChangeInitCommand(a), newChangeReadyCommand(a))
+	cmd.AddCommand(newChangeInitCommand(a), newChangeReadyCommand(a),
+		newChangeFeedbackCommand(a), newChangeWaitCommand(a))
 	return cmd
 }
 
@@ -379,4 +382,469 @@ func isNothingToCommit(err error) bool {
 		return strings.Contains(strings.ToLower(ge.Stderr+ge.Stdout), "nothing to commit")
 	}
 	return false
+}
+
+// --- change feedback --------------------------------------------------------
+
+type feedbackOptions struct {
+	stat     bool
+	nameOnly bool
+}
+
+func newChangeFeedbackCommand(a *app) *cobra.Command {
+	opts := &feedbackOptions{}
+	cmd := &cobra.Command{
+		Use:   "feedback",
+		Short: "Show what the most recent review submission told you",
+		Long: `Print the diff of the latest review submission: <review>^ .. <review>.
+
+This is the author's command for consuming review feedback. It shows everything the
+reviewer introduced — source edits, added comments, ABOUT.md changes, new threads and
+replies to existing ones — through git's own diff plumbing, with no custom renderer.
+
+` + "`gitpr diff --unreviewed`" + ` is the reviewer's command and answers a different question:
+` + "`<latest review>..HEAD`" + `, what changed *after* the review. Immediately after a submission
+that range is empty, because HEAD is the review commit itself, so it cannot be how an author
+reads the feedback that was just written.
+
+Exits non-zero when the changeset has no review submission yet.`,
+		Example: `  gitpr change feedback
+  gitpr change feedback --stat
+  gitpr change feedback --name-only`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChangeFeedback(cmd.Context(), a, opts)
+		},
+	}
+	cmd.Flags().BoolVar(&opts.stat, "stat", false, "show a diffstat instead of the full diff")
+	cmd.Flags().BoolVar(&opts.nameOnly, "name-only", false, "list only the files the review changed")
+	return cmd
+}
+
+func runChangeFeedback(ctx context.Context, a *app, opts *feedbackOptions) error {
+	s, err := a.load(ctx)
+	if err != nil {
+		return err
+	}
+	if opts.stat && opts.nameOnly {
+		return &usageError{errors.New("--stat and --name-only cannot be combined")}
+	}
+	review := s.summary.LatestReview
+	if review == nil {
+		return &usageError{fmt.Errorf(
+			"changeset %s has no review submission yet, so there is no feedback to read; "+
+				"`gitpr change wait` blocks until a reviewer submits one", s.cs.Slug)}
+	}
+	from, err := reviewParent(ctx, s.repo, review)
+	if err != nil {
+		return err
+	}
+	names, err := s.repo.DiffNames(ctx, from, review.SHA)
+	if err != nil {
+		return err
+	}
+
+	a.warn("gitpr change feedback: review %s (%s) on %s\n", review.Short, review.Outcome, s.cs.Slug)
+	switch {
+	case len(names) == 0:
+		// A review that touches nothing is still a verdict; saying so beats an
+		// empty screen that looks like a broken command.
+		a.warn("(the review changed no files: the outcome and its message are the feedback)\n")
+		return nil
+	case opts.nameOnly:
+		for _, n := range names {
+			a.printf("%s\n", n)
+		}
+		return nil
+	case opts.stat:
+		return s.repo.GitInherit(ctx, "diff", "--stat", from, review.SHA)
+	default:
+		return console.DiffCommand(s.repo, from, review.SHA, nil).Run()
+	}
+}
+
+// reviewParent is the state a review submission was made against. A submission with no
+// parent is compared against the empty tree, the same reading lifecycle uses for a root
+// marker.
+func reviewParent(ctx context.Context, repo *git.Repo, review *lifecycle.Event) (string, error) {
+	sha, err := repo.RevParse(ctx, review.SHA+"^")
+	if err != nil {
+		if errors.Is(err, git.ErrUnknownRevision) {
+			return git.EmptyTree, nil
+		}
+		return "", err
+	}
+	return sha, nil
+}
+
+// --- change wait ------------------------------------------------------------
+
+type waitOptions struct {
+	fetch    bool
+	interval string
+	timeout  string
+}
+
+func newChangeWaitCommand(a *app) *cobra.Command {
+	opts := &waitOptions{}
+	cmd := &cobra.Command{
+		Use:   "wait",
+		Short: "Block until a reviewer makes the changeset actionable",
+		Long: `Wait for review activity, so an author can hand off and sleep instead of polling.
+
+Exits when the changeset stops being ready and becomes actionable — BLOCKED, FEEDBACK,
+APPROVED or CLOSED — and prints what happened. Fully non-interactive.
+
+  gitpr change ready
+  gitpr change wait --fetch --interval 30s --json
+  gitpr change feedback
+
+Without --fetch only local repository state is re-read, which is enough when the reviewer
+works in the same clone. With --fetch every round runs ` + "`git fetch`" + ` against the
+configured remote first and also evaluates the branch's remote-tracking ref, so reviews
+submitted in another clone end the wait. This stays forge-agnostic: no forge APIs, only
+ordinary refs that git fetch brings down.
+
+Exits non-zero if the changeset is not ready to begin with, since then there is nothing to
+wait for, and on timeout. Without --timeout it waits indefinitely.`,
+		Example: `  gitpr change wait
+  gitpr change wait --fetch
+  gitpr change wait --fetch --interval 30s --timeout 2h --json`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChangeWait(cmd.Context(), a, opts)
+		},
+	}
+	cmd.Flags().BoolVar(&opts.fetch, "fetch", false, "run `git fetch` before each check")
+	cmd.Flags().StringVar(&opts.interval, "interval", "10s", "pause between checks (go duration: 30s, 1m)")
+	cmd.Flags().StringVar(&opts.timeout, "timeout", "", "give up after this long (default: wait forever)")
+	return cmd
+}
+
+// waitResult is what `change wait --json` prints. States use the same spelling as
+// `gitpr status --json`, so an agent can compare what the two commands report.
+type waitResult struct {
+	Changeset        string `json:"changeset"`
+	PreviousState    string `json:"previous_state"`
+	State            string `json:"state"`
+	ReviewCommit     string `json:"review_commit,omitempty"`
+	ReviewCommitFull string `json:"review_commit_full,omitempty"`
+	Ref              string `json:"ref"`
+	Fetches          int    `json:"fetches"`
+	WaitedSeconds    int    `json:"waited_seconds"`
+	TimedOut         bool   `json:"timed_out"`
+	NextAction       string `json:"next_action"`
+}
+
+// waitInput is what a check found; reportWait turns it into the printed contract.
+type waitInput struct {
+	PreviousState string
+	State         model.State
+	Ref           string
+	Review        *lifecycle.Event
+	Fetches       int
+	Waited        int
+	TimedOut      bool
+}
+
+func runChangeWait(ctx context.Context, a *app, opts *waitOptions) error {
+	s, err := a.load(ctx)
+	if err != nil {
+		return err
+	}
+	interval, err := parseWaitDuration(opts.interval, "--interval")
+	if err != nil {
+		return err
+	}
+	if interval <= 0 {
+		return &usageError{fmt.Errorf("--interval must be positive, got %q", opts.interval)}
+	}
+	var timeout time.Duration
+	if opts.timeout != "" {
+		timeout, err = parseWaitDuration(opts.timeout, "--timeout")
+		if err != nil {
+			return err
+		}
+		if timeout <= 0 {
+			return &usageError{fmt.Errorf("--timeout must be positive, got %q", opts.timeout)}
+		}
+	}
+
+	start, err := lifecycle.SummarizeHEAD(ctx, s.repo, s.cs.Slug, s.cs.Base)
+	if err != nil {
+		return err
+	}
+	if start.State == model.StateWorking {
+		return fmt.Errorf("changeset %s is %s, not ready: `gitpr change ready` puts it in the review queue",
+			s.cs.Slug, string(start.State))
+	}
+
+	remotes := []string(nil)
+	if opts.fetch {
+		remotes, err = fetchTargets(ctx, s.repo)
+		if err != nil {
+			return err
+		}
+		if len(remotes) == 0 {
+			return &usageError{errors.New(
+				"no git remote is configured, so --fetch has nothing to fetch; " +
+					"add one (`git remote add origin <url>`) or drop --fetch and watch local state only")}
+		}
+	}
+
+	branch, err := s.repo.CurrentBranch(ctx)
+	if err != nil {
+		return err
+	}
+	began := time.Now()
+	if !a.json {
+		a.warn("gitpr: waiting for review activity on %s (every %s%s)\n",
+			s.cs.Slug, interval, fetchNote(remotes))
+	}
+
+	fetches := 0
+	seen, found, err := pollUntil(ctx, interval, timeout, func() (waitInput, bool, error) {
+		if opts.fetch {
+			for _, remote := range remotes {
+				if err := s.repo.Fetch(ctx, remote); err != nil {
+					// A failed fetch is not a reason to stop waiting: the next round
+					// may succeed, and the review could land locally anyway.
+					a.warn("gitpr: fetch %s failed: %s\n", remote, messageOf(err))
+				}
+			}
+			fetches++
+		}
+		obs, err := s.observeReview(ctx, branch, opts.fetch)
+		if err != nil {
+			return waitInput{}, false, err
+		}
+		waited := int(time.Since(began).Seconds())
+		if obs.State != "" {
+			return waitInput{PreviousState: stateName(start.State), State: obs.State, Ref: obs.Ref,
+				Review: obs.Review, Fetches: fetches, Waited: waited}, true, nil
+		}
+		// Reported when the wait ends without news, so the answer says where things
+		// stand rather than nothing at all.
+		return waitInput{PreviousState: stateName(start.State), State: obs.Local, Ref: "HEAD",
+			Fetches: fetches, Waited: waited}, false, nil
+	})
+	if err != nil {
+		return err
+	}
+	seen.TimedOut = !found
+	return reportWait(a, s.cs.Slug, seen)
+}
+
+// pollUntil calls check every interval until it reports a result, the timeout elapses,
+// or ctx is cancelled; a zero timeout waits indefinitely. Split out of runChangeWait so
+// the waiting behaviour is testable without a reviewer in the room.
+func pollUntil(ctx context.Context, interval, timeout time.Duration,
+	check func() (waitInput, bool, error)) (waitInput, bool, error) {
+	var deadline time.Time
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
+	}
+	var last waitInput
+	for {
+		out, found, err := check()
+		if err != nil {
+			return waitInput{}, false, err
+		}
+		if found {
+			return out, true, nil
+		}
+		last = out
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			return last, false, nil
+		}
+		// Sleep no longer than what is left of the timeout: an agent that asked for
+		// 30 seconds must not be held for the full polling interval.
+		wait := interval
+		if !deadline.IsZero() {
+			if until := time.Until(deadline); wait > until {
+				wait = until
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return waitInput{}, false, ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+}
+
+// observation is what one check of the repository found.
+type observation struct {
+	// State is an actionable state, or empty when nothing is actionable yet.
+	State model.State
+	// Local is the state of the working copy this round, actionable or not, so a
+	// timeout can report where things actually stand instead of an empty string.
+	Local  model.State
+	Ref    string
+	Review *lifecycle.Event
+}
+
+// observeReview looks for review activity that makes the changeset actionable, first in
+// the working copy and then — only when fetching — in remote-tracking copies of the same
+// branch, which is where a review submitted in another clone lands.
+func (s *session) observeReview(ctx context.Context, branch string, includeRemote bool) (observation, error) {
+	local, err := lifecycle.SummarizeHEAD(ctx, s.repo, s.cs.Slug, s.cs.Base)
+	if err != nil {
+		return observation{}, err
+	}
+	seen := observation{Local: local.State, Ref: "HEAD"}
+	if actionable(local.State) {
+		seen.State, seen.Review = local.State, local.LatestReview
+		return seen, nil
+	}
+	if !includeRemote || branch == "" {
+		return seen, nil
+	}
+	refs, err := s.repo.ForEachRef(ctx, "refs/remotes")
+	if err != nil {
+		return observation{}, err
+	}
+	for _, ref := range refs {
+		if filepath.Base(ref.Name) != branch {
+			continue
+		}
+		sum, err := lifecycle.Summarize(ctx, s.repo, s.cs.Slug, s.cs.Base, ref.Name)
+		if err != nil {
+			// A remote ref can be anything: a changeset that does not exist there,
+			// or history without a base. Skipping is correct, failing is not.
+			continue
+		}
+		if actionable(sum.State) {
+			seen.State, seen.Ref, seen.Review = sum.State, ref.Name, sum.LatestReview
+			return seen, nil
+		}
+	}
+	return seen, nil
+}
+
+func reportWait(a *app, slug string, r waitInput) error {
+	out := waitResult{
+		Changeset: slug, PreviousState: r.PreviousState, State: stateName(r.State),
+		Ref: r.Ref, Fetches: r.Fetches, WaitedSeconds: r.Waited, TimedOut: r.TimedOut,
+	}
+	if r.Review != nil {
+		out.ReviewCommit = r.Review.Short
+		out.ReviewCommitFull = r.Review.SHA
+	}
+	out.NextAction = waitNextAction(r.State, r.Ref)
+
+	if a.json {
+		if err := a.emitJSON(out); err != nil {
+			return err
+		}
+		if r.TimedOut {
+			return errSilent
+		}
+		return nil
+	}
+	if r.TimedOut {
+		// The exit code says "nothing happened"; the hint says what to do about it.
+		a.printf("Timed out waiting for review activity on %s after %ds (%d fetch(es)).\n",
+			slug, out.WaitedSeconds, out.Fetches)
+		a.printf("  next:    %s\n", out.NextAction)
+		return errors.New("timed out waiting for review activity")
+	}
+	a.printf("Review activity on %s: %s\n", slug, strings.ToUpper(string(r.State)))
+	if out.ReviewCommit != "" {
+		a.printf("  review:  %s\n", out.ReviewCommit)
+	}
+	a.printf("  ref:     %s\n", out.Ref)
+	a.printf("  waited:  %ds over %d fetch(es)\n", out.WaitedSeconds, out.Fetches)
+	a.printf("  next:    %s\n", out.NextAction)
+	return nil
+}
+
+// actionable are the states where the author has something to do, all of them reached
+// from READY by someone else acting on the changeset.
+func actionable(s model.State) bool {
+	switch s {
+	case model.StateBlocked, model.StateFeedback, model.StateApproved, model.StateClosed:
+		return true
+	}
+	return false
+}
+
+// stateName is the contract spelling for an agent: the state names `gitpr status --json`
+// already prints, so a comparison between the two commands is a comparison of literals.
+func stateName(s model.State) string {
+	return string(s)
+}
+
+func waitNextAction(s model.State, ref string) string {
+	if s == "" {
+		return "nothing has changed yet; run `gitpr status --json` to see where things stand"
+	}
+	local := ref == "" || ref == "HEAD"
+	switch s {
+	case model.StateBlocked:
+		if !local {
+			return fmt.Sprintf("the review landed on %s; bring it into this branch with ordinary "+
+				"Git, then `gitpr change feedback`", ref)
+		}
+		return "`gitpr change feedback`, address it, then `gitpr change ready`"
+	case model.StateFeedback:
+		if !local {
+			return fmt.Sprintf("the review landed on %s; bring it into this branch with ordinary "+
+				"Git, then `gitpr change feedback`", ref)
+		}
+		return "`gitpr change feedback`; feedback is non-blocking, `gitpr review close` when integration is due"
+	case model.StateApproved:
+		return "`gitpr review close` before squash/merge"
+	case model.StateClosed:
+		return "safe to squash/merge; review history is under refs/reviews/"
+	case model.StateReady, model.StateWorking:
+		// Only reachable on a timeout: nothing became actionable.
+		return "still waiting for review activity; run `gitpr change wait` again or check `gitpr status --json`"
+	}
+	return ""
+}
+
+func fetchNote(remotes []string) string {
+	if len(remotes) == 0 {
+		return ""
+	}
+	return ", fetching " + strings.Join(remotes, ", ")
+}
+
+func parseWaitDuration(value, flag string) (time.Duration, error) {
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, &usageError{fmt.Errorf("%s expects a duration like 30s or 2m, got %q", flag, value)}
+	}
+	return d, nil
+}
+
+// fetchTargets picks the remotes to fetch: the branch's own upstream remote when it has
+// one, otherwise origin, otherwise every configured remote.
+func fetchTargets(ctx context.Context, repo *git.Repo) ([]string, error) {
+	remotes, err := repo.Remotes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(remotes) == 0 {
+		return nil, nil
+	}
+	branch, err := repo.CurrentBranch(ctx)
+	if err == nil {
+		if up, err := repo.Upstream(ctx, branch); err == nil {
+			if remote, _, found := strings.Cut(up, "/"); found {
+				for _, r := range remotes {
+					if r == remote {
+						return []string{remote}, nil
+					}
+				}
+			}
+		}
+	}
+	for _, r := range remotes {
+		if r == "origin" {
+			return []string{"origin"}, nil
+		}
+	}
+	return remotes, nil
 }

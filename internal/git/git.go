@@ -362,6 +362,43 @@ func (r *Repo) Numstat(ctx context.Context, from, to string) ([]NumstatEntry, er
 // --- refs -------------------------------------------------------------------
 
 // ResolveRef returns the SHA a ref points at, or ErrUnknownRevision.
+// Remotes lists the configured remotes, in git's order.
+func (r *Repo) Remotes(ctx context.Context) ([]string, error) {
+	out, err := r.Git(ctx, "remote")
+	if err != nil {
+		return nil, err
+	}
+	return splitLines(out), nil
+}
+
+// Upstream is the remote-tracking branch a local branch tracks, e.g.
+// "origin/booking", or "" when it tracks nothing.
+func (r *Repo) Upstream(ctx context.Context, branch string) (string, error) {
+	out, err := r.Git(ctx, "rev-parse", "--abbrev-ref", "--symbolic-full-name", branch+"@{upstream}")
+	if err != nil {
+		if IsUnknownRevision(err) || ExitCode(err) == 128 {
+			return "", nil
+		}
+		return "", err
+	}
+	up := strings.TrimSpace(out)
+	if up == "" || up == "HEAD" {
+		return "", nil
+	}
+	return up, nil
+}
+
+// Fetch refreshes remote-tracking refs. It changes nothing in the working tree or index,
+// which is what makes it safe for `change wait` to run unattended.
+func (r *Repo) Fetch(ctx context.Context, remote string) error {
+	args := []string{"fetch", "--quiet", "--no-tags"}
+	if remote != "" {
+		args = append(args, remote)
+	}
+	_, err := r.Git(ctx, args...)
+	return err
+}
+
 func (r *Repo) ResolveRef(ctx context.Context, ref string) (string, error) {
 	return r.RevParse(ctx, ref)
 }

@@ -294,9 +294,9 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 func nextActionFor(o model.Outcome) string {
 	switch o {
 	case model.OutcomeBlock:
-		return "author: `gitpr diff --unreviewed`, address it, then `gitpr change ready`"
+		return "author: `gitpr change feedback`, address it, then `gitpr change ready`"
 	case model.OutcomeFeedback:
-		return "feedback is non-blocking; `gitpr review close` when integration is due"
+		return "author: `gitpr change feedback` to read it; feedback is non-blocking, `gitpr review close` when integration is due"
 	case model.OutcomeApprove:
 		return "`gitpr review close` before squash/merge"
 	}
@@ -701,7 +701,7 @@ back: after the author answers a block or feedback, the work to read is what cam
 your submission, not the whole changeset a second time. ` + "`review open`" + ` keeps showing the
 whole changeset by default. For an earlier review use ` + "`review open --since-review=N`" + `.
 
-Needs a terminal; the author's equivalent is ` + "`gitpr diff --unreviewed`" + `.`,
+Needs a terminal; the author reads the submission itself with ` + "`gitpr change feedback`" + `.`,
 		Example: `  gitpr review reopen`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
