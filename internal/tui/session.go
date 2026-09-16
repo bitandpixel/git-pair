@@ -62,11 +62,19 @@ type Session struct {
 	files     []File
 	reviewRef string
 
+	// marks and markErr hold the resolved store, so a repository without a usable git directory
+	// does not pay for it on every toggle.
+	marks   *reviewmark.Store
+	markErr error
 	// Marks are persisted outside the working tree so a review can be resumed; see
-	// internal/reviewmark for where and why.
-	marks     *reviewmark.Store
-	markErr   error
+	// internal/reviewmark for where and why. persisted is the set recorded against the commit
+	// the *current* span ends at, re-read on every scan: `v` can bring the session back to a
+	// span whose marks it made an hour ago, and the list it is rebuilding is the only place
+	// those marks live.
 	persisted reviewmark.Set
+	// marksRead is how many of the marks in the list just built came off disk, and resumed is
+	// that number as the session opened, which is what the opening status line reports.
+	marksRead int
 	resumed   int
 
 	// ring holds every span this session has been in, in the order they were first
@@ -93,7 +101,7 @@ func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	if err := s.Rescan(ctx); err != nil {
 		return nil, err
 	}
-	s.loadMarks(ctx)
+	s.resumed = s.marksRead
 	s.seedRing()
 	return s, nil
 }
@@ -182,23 +190,26 @@ func (s *Session) scan(ctx context.Context, sp span.Span) error {
 	for _, f := range s.files {
 		previous[f.Path] = f
 	}
+	s.persisted = s.marksFor(ctx, sp.To)
 
 	files := make([]File, 0, len(names))
+	read := 0
 	for _, name := range names {
 		key := keys[name]
 		marked := false
 		if old, ok := previous[name]; ok && old.Key == key {
 			marked = old.Reviewed
 		}
-		if !marked && s.persisted[name] == key {
-			// Same file, same diff content as when it was marked in an earlier
-			// session. Anything else — new commit, rebase, different span — keys
-			// differently and so stays unreviewed.
-			marked = true
+		if !marked && s.persisted.Has(name, key) {
+			// Same file, same diff content as when it was marked — in an earlier session, or
+			// in this one before `v` took the reviewer elsewhere. Anything else — new commit,
+			// rebase, different span — keys differently and so stays unreviewed.
+			marked, read = true, read+1
 		}
 		files = append(files, File{Path: name, Key: key, Reviewed: marked})
 	}
 	s.files = files
+	s.marksRead = read
 	return nil
 }
 
@@ -570,41 +581,33 @@ func (s *Session) store(ctx context.Context) (*reviewmark.Store, error) {
 	return s.marks, s.markErr
 }
 
-// loadMarks restores marks recorded for the commit under review. Failing to find or read
-// them is not a reason to refuse to open a review, so this reports nothing.
-func (s *Session) loadMarks(ctx context.Context) {
+// marksFor reads the marks recorded against a commit. Failing to find or read them is not a
+// reason to refuse to open a review, so this reports nothing.
+func (s *Session) marksFor(ctx context.Context, commit string) reviewmark.Set {
 	store, err := s.store(ctx)
 	if err != nil {
-		return
+		return nil
 	}
-	set, err := store.Load(s.current.To)
+	set, err := store.Load(commit)
 	if err != nil || len(set) == 0 {
-		return
+		return nil
 	}
-	s.persisted = set
-	for i, f := range s.files {
-		if !s.files[i].Reviewed && set[f.Path] == f.Key {
-			s.files[i].Reviewed = true
-			s.resumed++
-		}
-	}
+	return set
 }
 
-// SaveMarks writes the current marks against the commit under review. An empty set is
-// written too: clearing every mark has to overwrite the stored set, or the marks would
-// reappear next session.
+// SaveMarks writes the reviewer's answers for this span against the commit under review. Every
+// file in the span is answered, not only the marked ones: clearing a mark has to overwrite what
+// was stored, or the mark would reappear next session.
 func (s *Session) SaveMarks(ctx context.Context) error {
 	store, err := s.store(ctx)
 	if err != nil {
 		return err
 	}
-	set := reviewmark.Set{}
+	answers := make([]reviewmark.Answer, 0, len(s.files))
 	for _, f := range s.files {
-		if f.Reviewed {
-			set[f.Path] = f.Key
-		}
+		answers = append(answers, reviewmark.Answer{Path: f.Path, Key: f.Key, Reviewed: f.Reviewed})
 	}
-	return store.Save(s.current.To, set)
+	return store.Save(s.current.To, answers)
 }
 
 // Resumed is how many marks came from an earlier session.

@@ -18,7 +18,12 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	set := reviewmark.Set{"service.go": "aabbccdd11223344", "handler.go": "9988776655443322"}
+	set := []reviewmark.Answer{
+		{Path: "service.go", Key: "aabbccdd11223344", Reviewed: true},
+		{Path: "handler.go", Key: "9988776655443322", Reviewed: true},
+		// Answered but not marked: this is what overwrites a mark from an earlier session.
+		{Path: "main.go", Key: "1122334455667788", Reviewed: false},
+	}
 	if err := store.Save(commit, set); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -26,12 +31,12 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(got) != len(set) {
-		t.Fatalf("Load returned %d marks, want %d", len(got), len(set))
+	if len(got) != 2 {
+		t.Fatalf("Load returned %d paths, want 2 (the unreviewed answer stores nothing)", len(got))
 	}
-	for path, key := range set {
-		if got[path] != key {
-			t.Errorf("%s = %q, want %q", path, got[path], key)
+	for _, a := range set {
+		if has := got.Has(a.Path, a.Key); has != a.Reviewed {
+			t.Errorf("Has(%s, %s) = %v, want %v", a.Path, a.Key, has, a.Reviewed)
 		}
 	}
 	// Inside the git directory, so nothing about it can reach the working tree.
@@ -46,7 +51,7 @@ func TestLoadIsScopedToTheCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := store.Save(commit, reviewmark.Set{"service.go": "aabb"}); err != nil {
+	if err := store.Save(commit, []reviewmark.Answer{{Path: "service.go", Key: "aabb", Reviewed: true}}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	other := "1111111111111111111111111111111111111111"
@@ -59,17 +64,17 @@ func TestLoadIsScopedToTheCommit(t *testing.T) {
 	}
 }
 
-// Saving an empty set has to overwrite the stored one, or clearing every mark would be
-// undone by the next session.
+// Saving an answer that says unreviewed has to overwrite the stored mark, or clearing every
+// mark would be undone by the next session.
 func TestSaveEmptySetClearsTheStoredOne(t *testing.T) {
 	store, err := reviewmark.New(t.TempDir(), "booking")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := store.Save(commit, reviewmark.Set{"service.go": "aabb"}); err != nil {
+	if err := store.Save(commit, []reviewmark.Answer{{Path: "service.go", Key: "aabb", Reviewed: true}}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	if err := store.Save(commit, reviewmark.Set{}); err != nil {
+	if err := store.Save(commit, []reviewmark.Answer{{Path: "service.go", Key: "aabb"}}); err != nil {
 		t.Fatalf("Save empty: %v", err)
 	}
 	got, err := store.Load(commit)
@@ -78,6 +83,56 @@ func TestSaveEmptySetClearsTheStoredOne(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("Load after clearing = %v, want no marks", got)
+	}
+}
+
+// The span you are standing on is not the only span that can end at this commit: the full
+// changeset and the unreviewed span both end at HEAD, and the same file has a different diff
+// in each. Saving one must not erase the other's marks — this is the write that made marks
+// vanish when a reviewer pressed `v` away and back.
+func TestSaveKeepsTheMarksAnotherSpanMade(t *testing.T) {
+	store, err := reviewmark.New(t.TempDir(), "booking")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	full := []reviewmark.Answer{
+		{Path: "service.go", Key: "keyFull", Reviewed: true},
+		{Path: "handler.go", Key: "keyFullHandler", Reviewed: false},
+	}
+	if err := store.Save(commit, full); err != nil {
+		t.Fatalf("Save full span: %v", err)
+	}
+	unreviewed := []reviewmark.Answer{
+		{Path: "service.go", Key: "keyUnreviewed", Reviewed: true},
+	}
+	if err := store.Save(commit, unreviewed); err != nil {
+		t.Fatalf("Save unreviewed span: %v", err)
+	}
+
+	got, err := store.Load(commit)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !got.Has("service.go", "keyFull") {
+		t.Error("the other span's mark was erased by this span's save")
+	}
+	if !got.Has("service.go", "keyUnreviewed") {
+		t.Error("this span's mark was not recorded")
+	}
+
+	// Clearing in one span answers that pair alone.
+	if err := store.Save(commit, []reviewmark.Answer{{Path: "service.go", Key: "keyUnreviewed"}}); err != nil {
+		t.Fatalf("Save cleared: %v", err)
+	}
+	got, err = store.Load(commit)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Has("service.go", "keyUnreviewed") {
+		t.Error("the cleared mark came back")
+	}
+	if !got.Has("service.go", "keyFull") {
+		t.Error("clearing one span cleared the other's mark too")
 	}
 }
 
@@ -120,7 +175,7 @@ func TestLoadRejectsUnusableCommitIDs(t *testing.T) {
 		if _, err := store.Load(bad); err == nil {
 			t.Errorf("Load(%q) succeeded, want an error", bad)
 		}
-		if err := store.Save(bad, reviewmark.Set{"a.go": "k"}); err == nil {
+		if err := store.Save(bad, []reviewmark.Answer{{Path: "a.go", Key: "k", Reviewed: true}}); err == nil {
 			t.Errorf("Save(%q) succeeded, want an error", bad)
 		}
 	}
@@ -155,7 +210,7 @@ func TestSavePrunesOldCommits(t *testing.T) {
 		}
 	}
 	fresh := shaFor(999)
-	if err := store.Save(fresh, reviewmark.Set{"a.go": "k"}); err != nil {
+	if err := store.Save(fresh, []reviewmark.Answer{{Path: "a.go", Key: "k", Reviewed: true}}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	entries, err := os.ReadDir(store.Dir())
