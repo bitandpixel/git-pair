@@ -949,31 +949,38 @@ func (m reviewModel) window() (files, section []renderedRow) {
 	return files, section
 }
 
-// The preview pane only exists if the terminal can carry two columns without crushing the
-// list: below previewMinWidth there is no pane at all, and the list never gives up more than
-// previewListFloor columns.
+// The preview pane is a wide-terminal luxury, so it has an entry condition rather than a
+// squeeze: below these dimensions there is no pane at all, and `p` says which way the terminal
+// is short. At 60/40 the list keeps 40 columns at the threshold, which is what it needs for a
+// path and a mark.
 const (
 	previewMinWidth  = 100
-	previewListFloor = 34
-	previewMinPane   = 40
-	previewGap       = 2 // the divider and the space after it
+	previewMinHeight = 16
+	previewGap       = 3  // a space, the divider, a space -- joinColumns renders exactly this
+	previewShare     = 60 // percent of the columns left after the gap
 )
 
 // paneWidth is how wide the preview column is, or 0 when there is no preview: the reviewer
-// switched it off, the session is taking input, or the terminal is too narrow. One function
+// switched it off, the session is taking input, or the terminal is too small. One function
 // decides it, because layout and key handling have to agree on whether the pane is there.
 func (m reviewModel) paneWidth() int {
-	if !m.previewOn || m.mode != modeFiles || m.width < previewMinWidth {
+	if !m.previewOn || m.mode != modeFiles || m.previewShortfall() != "" {
 		return 0
 	}
-	w := (m.width - previewGap) * 3 / 5
-	if m.width-previewGap-w < previewListFloor {
-		w = m.width - previewGap - previewListFloor
+	return (m.width - previewGap) * previewShare / 100
+}
+
+// previewShortfall names why the pane cannot fit, or "" when it can. Width and height are
+// separate excuses -- a terminal can be one without the other -- and a reviewer who pressed `p`
+// and saw nothing deserves to be told which way to grow the window.
+func (m reviewModel) previewShortfall() string {
+	if m.width < previewMinWidth {
+		return fmt.Sprintf("the preview wants %d columns; this terminal has %d", previewMinWidth, m.width)
 	}
-	if w < previewMinPane {
-		return 0
+	if m.height < previewMinHeight {
+		return fmt.Sprintf("the preview wants %d rows; this terminal has %d", previewMinHeight, m.height)
 	}
-	return w
+	return ""
 }
 
 // listWidth is the column the list gets: all of it when there is no preview, less the pane and
@@ -1045,9 +1052,8 @@ func (m *reviewModel) forgetPatches() {
 // rather than appearing to do nothing.
 func (m reviewModel) togglePreview() (tea.Model, tea.Cmd) {
 	m.previewOn = !m.previewOn
-	if m.previewOn && m.paneWidth() == 0 {
-		m.setStatus(fmt.Sprintf("the preview needs a terminal %d columns wide; this one is %d",
-			previewMinWidth, m.width), false)
+	if reason := m.previewShortfall(); m.previewOn && reason != "" {
+		m.setStatus(reason, false)
 	} else {
 		m.setStatus("", false)
 	}

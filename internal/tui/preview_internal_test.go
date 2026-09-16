@@ -88,8 +88,13 @@ func TestPreviewOnlyAppearsWhenThereIsRoom(t *testing.T) {
 	}
 
 	wide := previewModel(t)
-	if wide.paneWidth() < previewMinPane {
-		t.Errorf("a %d-column terminal gets only %d columns of preview", wide.width, wide.paneWidth())
+	pane := wide.paneWidth()
+	list := wide.width - pane - previewGap
+	if pane+list+previewGap != wide.width {
+		t.Errorf("pane %d + list %d + gap %d != the terminal's %d columns", pane, list, previewGap, wide.width)
+	}
+	if list < 40 {
+		t.Errorf("a %d-column terminal leaves the list %d columns, which cannot show a path", wide.width, list)
 	}
 	if !strings.Contains(wide.View(), "│") {
 		t.Error("a wide terminal draws no preview")
@@ -243,4 +248,68 @@ func TestPatchesAreFetchedOncePerFile(t *testing.T) {
 	if asks[m.rows[0].path] != 2 {
 		t.Error("forgetting the patches did not make the next visit ask again")
 	}
+}
+
+// A short terminal has no room for a column of diff either, and the two excuses are different:
+// a reviewer with a 140x10 window is not being told about columns.
+func TestPreviewNeedsRowsAsWellAsColumns(t *testing.T) {
+	short := previewModel(t)
+	short.height = 10
+	if short.paneWidth() != 0 {
+		t.Errorf("a %d-row terminal gets a %d-column pane", short.height, short.paneWidth())
+	}
+
+	short.previewOn = false
+	updated, _ := short.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	short = updated.(reviewModel)
+	if !strings.Contains(short.status, fmt.Sprint(previewMinHeight)) || !strings.Contains(short.status, "10") {
+		t.Errorf("toggling in a 10-row terminal said %q, want the rows it needs", short.status)
+	}
+}
+
+// The frame has to fit the terminal and the columns have to add up to it: an off-by-one in the
+// gap around the divider wraps every row, which is the classic failure of putting a second column
+// in a terminal program. It only shows up with diff lines wide enough to fill the pane, which is
+// why the fixture's short lines are not enough.
+func TestTheFrameIsExactlyTheWidthOfTheTerminal(t *testing.T) {
+	m := previewModel(t)
+	m.patchFor = func(_ context.Context, path string) Patch {
+		return Patch{Lines: []string{strings.Repeat("x", 400), "short", strings.Repeat("y", 400)}, Added: 3}
+	}
+	m = askPreview(t, m)
+
+	rows := strings.Split(strings.TrimSuffix(joinColumns(m.listBlock(), m.previewLines()), "\n"), "\n")
+	if len(rows) < 5 {
+		t.Fatalf("the block is %d rows, want a list with a pane beside it", len(rows))
+	}
+	divider := dividerColumn(rows[0])
+	if divider < 0 {
+		t.Fatal("no divider to hang the layout on")
+	}
+
+	widest := 0
+	for i, row := range rows {
+		if w := lipgloss.Width(row); w > m.width {
+			t.Errorf("row %d is %d columns in a %d-column terminal, so it wraps: %q", i, w, m.width, row)
+		} else if w > widest {
+			widest = w
+		}
+		// Measured in cells, not bytes: the rows carry wide characters and styling, and a byte
+		// offset would put this divider in a different place on every row.
+		if at := dividerColumn(row); at != divider {
+			t.Errorf("row %d puts the divider at column %d, not %d: %q", i, at, divider, row)
+		}
+	}
+	if widest != m.width {
+		t.Errorf("the widest row is %d columns in a %d-column terminal: pane %d + list %d + gap %d do not add up",
+			widest, m.width, m.paneWidth(), m.listWidth(), previewGap)
+	}
+}
+
+func dividerColumn(row string) int {
+	i := strings.Index(row, "\u2502")
+	if i < 0 {
+		return -1
+	}
+	return lipgloss.Width(row[:i])
 }
