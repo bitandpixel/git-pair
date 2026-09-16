@@ -330,7 +330,9 @@ Target MVP structure:
 gitpr
 ├── change
 │   ├── init
-│   └── ready
+│   ├── ready
+│   ├── feedback
+│   └── wait
 │
 ├── review
 │   ├── open
@@ -460,6 +462,61 @@ gitpr change ready --allow-surviving-review-additions
 This is intended for cases where review-added code or comments are deliberately retained.
 
 The check applies only to additions from the **most recent review submission**, not all historical review additions.
+
+## 9.3 `gitpr change feedback`
+
+Shows what the most recent review submission told the author, by showing the submission itself.
+
+```bash
+gitpr change feedback
+```
+
+Requirements:
+
+-   diff `latest-review^..latest-review`, using ordinary Git diff output,
+-   include the review's changeset artifacts (threads, `ABOUT.md` edits) and any direct code edits the reviewer made,
+-   support `--stat` and `--name-only`,
+-   exit non-zero with a clear message when the changeset has no review submission yet.
+
+This is the author's answer to "what did the reviewer just tell me?".
+
+`gitpr diff --unreviewed` (§17.2) answers a different question — "what has changed after the review I last read?" — and is the reviewer's command. It is usually empty right after a submission, because the submission is then the newest commit on the branch. An author who has just been told a review exists reads it with `gitpr change feedback`, not with `gitpr diff --unreviewed`.
+
+## 9.4 `gitpr change wait`
+
+Blocks until a reviewer makes the changeset actionable.
+
+```bash
+gitpr change wait
+gitpr change wait --fetch --interval 30s
+gitpr change wait --fetch --timeout 2h --json
+```
+
+Requirements:
+
+-   exit successfully when the effective state moves from `ready` to `blocked`, `feedback`, `approved`, or `closed`,
+-   report immediately, without waiting, when the changeset is already in one of those states,
+-   exit non-zero when the changeset is `working`: the author is not waiting on anyone,
+-   poll local GitPR state by default,
+-   with `--fetch`, run `git fetch` against the configured remotes before each check, so a review submitted in another clone becomes visible through `refs/remotes/...`,
+-   `--interval` sets the polling interval (default 10s),
+-   `--timeout` gives up after a duration instead of waiting forever,
+-   `--json` prints `previous_state`, `state`, `review_commit`, `ref`, `fetches`, `waited_seconds`, `timed_out` and `next_action`, with state names spelled as `gitpr status --json` spells them,
+-   a wait that ends because of `--timeout` exits non-zero,
+-   waiting never writes to the repository: no commits, no refs, no index changes.
+
+The command is non-interactive and must be safe for an agent to run unattended.
+
+`--fetch` is ordinary Git fetching. Forge notifications, webhooks and forge API polling are out of scope (§25): a review reaches the author by being pushed to the repository, like any other commit.
+
+The author-side loop is therefore:
+
+```bash
+gitpr change ready
+git push origin my-feature
+gitpr change wait --fetch --json   # exits when a reviewer has acted
+gitpr change feedback               # read what they said
+```
 
 ---
 
@@ -782,6 +839,8 @@ gitpr diff src/booking/service.ts
 
 and span options described below.
 
+`gitpr diff` and its span options serve review. An author who wants to read a review that was just submitted uses `gitpr change feedback` (§9.3) instead.
+
 ---
 
 # 12. Review Lifecycle
@@ -805,6 +864,8 @@ review feedback / approve
     ↓
 close
 ```
+
+The author's side of that loop is `gitpr change ready`, then `gitpr change wait` to learn that a reviewer has acted, then `gitpr change feedback` to read the submission before addressing it.
 
 Possible effective states:
 
@@ -1032,6 +1093,8 @@ latest-review.commit .. HEAD
 It answers:
 
 > What has happened since I submitted my most recent review?
+
+That is the reviewer's question. The author's question — "what did the reviewer just tell me?" — is answered by `gitpr change feedback` (§9.3), which shows the submission itself rather than what came after it. Immediately after a submission the two differ completely: `--unreviewed` is empty, because the submission is the newest commit.
 
 This deliberately includes the removal or modification of review-added lines.
 
@@ -1319,8 +1382,9 @@ Primary agent commands:
 gitpr change init --base <ref>
 gitpr status --json
 gitpr diff
-gitpr diff --unreviewed
 gitpr change ready
+gitpr change wait --json
+gitpr change feedback
 ```
 
 Agent behavior:
@@ -1331,13 +1395,14 @@ Agent behavior:
 4. commit implementation using ordinary Git,
 5. run `gitpr change ready`,
 6. if surviving review additions cause failure, inspect and consciously resolve or explicitly retain them,
-7. wait for review,
-8. detect review outcome through `gitpr status`,
-9. inspect the latest review commit and relevant changeset artifacts,
-10. address blocking feedback,
-11. update code and discussion documents as appropriate,
-12. commit implementation changes normally,
-13. run `gitpr change ready` again.
+7. run `gitpr change wait` — with `--fetch` when the reviewer works in another clone — until it reports an actionable state,
+8. read the submission with `gitpr change feedback`: threads, `ABOUT.md` edits and any code the reviewer edited directly,
+9. address blocking feedback,
+10. update code and discussion documents as appropriate,
+11. commit implementation changes normally,
+12. run `gitpr change ready` again.
+
+`gitpr status --json` remains the way to check state without blocking. `gitpr diff --unreviewed` is the reviewer's span command; an author consuming a newly submitted review uses `gitpr change feedback`.
 
 An agent must **not approve its own work**.
 
@@ -1406,6 +1471,8 @@ gitpr review queue --json
 ```
 
 `gitpr` itself does not need to implement notifications in MVP.
+
+The author's side of notification is `gitpr change wait` (§9.4): it polls GitPR state, and with `--fetch` it polls through ordinary `git fetch`, so a review pushed from another clone reaches the author without a forge integration, a webhook, or a long-lived service. Waiting is a command an author or agent runs, not a daemon `gitpr` operates.
 
 ---
 
@@ -1607,15 +1674,21 @@ gitpr review submit --block
 
 Agent:
 
--   observes blocked status,
--   reads the review commit,
--   runs:
+-   waits for the review:
 
 ```bash
-gitpr diff --unreviewed
+gitpr change wait --fetch --json
 ```
 
-to see the response-oriented span,
+which exits once the submission makes the changeset actionable and names the review commit,
+
+-   reads what the reviewer said:
+
+```bash
+gitpr change feedback
+```
+
+which shows the submission itself: the threads, the `ABOUT.md` edits, and the code the reviewer edited directly,
 
 -   addresses review comments and direct edits,
 -   responds in code/ABOUT/threads,

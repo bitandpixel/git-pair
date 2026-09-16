@@ -88,14 +88,49 @@ Review submitted: booking-transaction
            changesets/booking-transaction/concurrency-tests.md
            src/service.ts
   ref:     refs/reviews/booking-transaction -> 332887c
-  next:    author: `gitpr diff --unreviewed`, address it, then `gitpr change ready`
+  next:    author: `gitpr change feedback`, address it, then `gitpr change ready`
 ```
 
 The review is an ordinary commit: `review: block booking-transaction` followed by a blank
 line and the `GitPR-Outcome: block` / `GitPR-Changeset: booking-transaction` trailers.
 
-The author answers. A review-relative span shows review lines being deleted, which is how
-a reviewer sees feedback consumed:
+The author waits for that submission and reads it. `change wait` blocks until a review makes
+the changeset actionable and names the commit; `change feedback` shows the submission itself —
+the thread, the `ABOUT.md` edits, and any code the reviewer touched:
+
+```bash
+$ gitpr change wait --json
+{
+  "changeset": "booking-transaction",
+  "previous_state": "READY",
+  "state": "BLOCKED",
+  "review_commit": "332887c",
+  "review_commit_full": "332887cf6413e66d45d0ad5d59d93f7d30484ffd",
+  "ref": "HEAD",
+  "fetches": 0,
+  "waited_seconds": 0,
+  "timed_out": false,
+  "next_action": "`gitpr change feedback`, address it, then `gitpr change ready`"
+}
+
+$ gitpr change feedback --stat
+gitpr change feedback: review 332887c (block) on booking-transaction
+ changesets/booking-transaction/concurrency-tests.md | 12 ++++++++++++
+ src/service.ts                                      |  1 +
+ 2 files changed, 13 insertions(+)
+```
+
+It returns here at once because the submission is already committed in this clone. Run it
+while the reviewer is still working and it polls instead, exiting the moment the state leaves
+`READY`; add `--fetch` to pull before each check — that is how a review pushed from another
+clone reaches you — `--interval` to change how often, and `--timeout` to give up (exit 1,
+still reporting where things stand). `change feedback` is the author's "what did the reviewer
+just tell me?". It is not the reviewer's command: right after a submission the
+reviewer's own span, `diff --unreviewed`, is empty because the submission is the newest commit.
+
+The author addresses the feedback in code, `ABOUT.md` and the thread. What the reviewer sees
+next is the review-relative span, where review lines are deleted — that is how a reviewer sees
+feedback being consumed:
 
 ```bash
 $ gitpr diff --unreviewed -- src/service.ts
@@ -233,6 +268,17 @@ command reports them.)
 `--since-review` with no value means `-1`; indexes are chronological (`0` first, `-1`
 latest) and match `gitpr review history`.
 
+Those spans answer the reviewer's questions. The author's question — *what did the reviewer
+just tell me?* — is `gitpr change feedback`, which diffs the submission itself
+(`review^..review`) and so shows the threads, the `ABOUT.md` edits and any code the reviewer
+edited in one place. Immediately after a submission the two disagree completely:
+`--unreviewed` is empty, because the submission *is* the newest commit.
+
+Waiting for that submission is a command rather than a notification. `gitpr change wait`
+re-derives the state on an interval and exits when it leaves `READY`; `--fetch` runs
+`git fetch` before each check, so a review pushed from another clone arrives the way every
+other commit does — through the repository, with no forge integration and no daemon.
+
 Coming back to a changeset you already reviewed is common enough to have its own command:
 `gitpr review reopen` opens the TUI on the `<latest review>..HEAD` span, the same span as
 `review open --unreviewed`. When nothing has been committed since that submission there is
@@ -268,13 +314,15 @@ of the override. See `docs/plans/active/gitpr-mvp/research/git-plumbing-findings
 ## Command reference
 
 Every command accepts the persistent `--json` flag, but only `status`, `change ready`,
-`review submit`, `review history`, `review queue` and `review close` change output for it;
-elsewhere it is accepted and ignored.
+`change wait`, `review submit`, `review history`, `review queue` and `review close` change
+output for it; elsewhere it is accepted and ignored.
 
 | Command | Flags | Notes |
 | --- | --- | --- |
 | `change init` | `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is `main`, else `master`, else a usage error |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
+| `change feedback` | `--stat`, `--name-only` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
+| `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`/`CLOSED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
 | `review open` | `--unreviewed`, `--since-review[=N]` | TUI; needs a terminal; full changeset unless a span flag says otherwise |
 | `review reopen` | none | TUI on `<latest review>..HEAD`, or on the span that review covered when nothing landed since; needs a terminal; refuses if no review exists |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
@@ -295,8 +343,8 @@ so work you had already staged for another commit stays on your index.
 | Exit code | Meaning | Seen as |
 | --- | --- | --- |
 | 0 | success | — |
-| 1 | a gitpr rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot close <cs>: latest outcome is BLOCKED`; `changeset <cs> is already closed`; `cannot resolve changeset base "vanished"`; submitting to a closed changeset |
-| 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`; `no changeset for this branch`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal |
+| 1 | a gitpr rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot close <cs>: latest outcome is BLOCKED`; `changeset <cs> is already closed`; `cannot resolve changeset base "vanished"`; submitting to a closed changeset; `change wait` timing out, or refusing a changeset that is `WORKING` |
+| 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`; `no changeset for this branch`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
 The split between 1 and 2 is deliberate and load-bearing for agents: exit 1 means the
@@ -330,7 +378,7 @@ reachable from `HEAD`, which is the approved commit rather than the close marker
   "reviews": 0,
   "reason": "marked ready by 8065dae",
   "span": "main...HEAD",
-  "next_action": "waiting for a reviewer: `gitpr review open`"
+  "next_action": "waiting for a reviewer: `gitpr review open` (author: `gitpr change wait` to block on it)"
 }
 ```
 
@@ -412,27 +460,47 @@ is none)
 `gitpr change ready --json` returns the `status` fields plus `ready_commit` (full SHA),
 `review_queue_visible`, `acknowledged_survivors` and `surviving_review_artifacts`.
 
+`gitpr change wait --json` — states are spelled as `status` spells them. `ref` is where the
+activity appeared: `HEAD`, or a remote-tracking branch when it was found with `--fetch` and
+has not been brought into this branch yet. `review_commit` and `review_commit_full` appear
+only when a review submission is what ended the wait. `timed_out` is the difference between
+"a reviewer acted" and "gave up", and both exit 0 and 1 respectively:
+
+```json
+{
+  "changeset": "booking-transaction",
+  "previous_state": "READY",
+  "state": "FEEDBACK",
+  "review_commit": "332887c",
+  "review_commit_full": "332887cf6413e66d45d0ad5d59d93f7d30484ffd",
+  "ref": "HEAD",
+  "fetches": 3,
+  "waited_seconds": 91,
+  "timed_out": false,
+  "next_action": "`gitpr change feedback`; feedback is non-blocking, `gitpr review close` when integration is due"
+}
+```
+
 ## Agent contract
 
 The non-interactive loop from PRD §22:
 
 ```bash
 gitpr change init --base main --about "$ABOUT"   # once, on a named branch
-gitpr status --json              # read state and next_action
+gitpr status --json              # read state and next_action without blocking
 gitpr diff                       # see the whole changeset
 # implement and commit with ordinary git
 gitpr change ready               # hand off to the reviewer
-# ... the reviewer works and submits a review ...
-gitpr status --json              # detect BLOCKED / FEEDBACK / APPROVED
-gitpr diff --unreviewed          # read the response-oriented span
-gitpr review history --json      # enumerate review commits
+gitpr change wait --fetch --json # block until a reviewer acts; exits 1 on --timeout
+gitpr change feedback            # read that submission: threads, ABOUT.md, code edits
 # address feedback in code, ABOUT.md and threads; commit normally
-gitpr change ready               # re-ready, or fail on surviving additions
+gitpr review history --json      # enumerate review commits
+gitpr change ready               # again
 ```
 
-Never prompt: `change init`, `change ready`, `status`, `diff`, `review submit`,
-`review history`, `review queue`, `review close`. They report and exit instead of asking,
-even with a terminal attached.
+Never prompt: `change init`, `change ready`, `change feedback`, `change wait`, `status`,
+`diff`, `review submit`, `review history`, `review queue`, `review close`. They report and
+exit instead of asking, even with a terminal attached.
 
 Refuse with exit 2 when stdin or stdout is a pipe or a regular file, because launching an
 editor or the TUI against one would hang: `review open`, `review reopen`, `review about`,

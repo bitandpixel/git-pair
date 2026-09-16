@@ -102,8 +102,9 @@ From the PRD, treated as binding:
 | M6 docs + dogfood | done | `README.md`; `artifacts/e2e-29.sh` is the scripted replay and passes end to end |
 | Post-MVP: refuse a self-referential base | done | `TestBaseIsOwnBranch` (9 cases) + init/ready/status CLI tests; reproduces and closes the owner's dogfood report |
 | Post-MVP: `change init` commits, takes `--about` | done | `TestChangeInit*` (11 cases) plus the corrected golden workflow; e2e replay still passes |
+| Post-MVP: author-side `change feedback` and `change wait`, replacing `diff --unreviewed` in author hints | done | `TestChangeFeedbackShowsTheReviewItself`, `TestChangeFeedbackWithoutAReview`, `TestChangeWaitReturnsAtOnceWhenAReviewIsAlreadyIn`, `TestChangeWaitTimeoutReportsWhereThingsStand`, `TestChangeWaitFetchesAndSeesAReviewFromAnotherClone` (two clones, bare remote, no network), `TestPollUntil*` (5 cases) |
 
-Test suite: 21 files, 160 test functions, 12 packages, all passing; `go vet` and `gofmt`
+Test suite: 27 files, 221 test functions, 13 packages, all passing; `go vet` and `gofmt`
 clean. The suite found four real defects, all fixed in `fix: exit codes, added-line
 positions, changeset detection, editor expansion`: an off-by-one in
 `survival.AddedLines` line numbers, state-based refusals exiting 2 instead of 1, unknown
@@ -213,6 +214,24 @@ changeset. Hand-verification of everything the README documents additionally cor
     anything; clearing every mark writes an empty set so the old ones do not reappear; the newest
     12 commits' sets are kept per changeset. `status`, `diff` and the JSON contracts are untouched,
     because reading progress is not derived state.
+
+14. **The author was being sent to the reviewer's command.** `nextActionFor(BLOCK)` and
+    `status`'s `next_action` both told an author to read a new review with
+    `gitpr diff --unreviewed`, and PRD §29's success-criteria walkthrough said the same. That
+    span is `<latest review>..HEAD`, so immediately after a submission it is empty — the
+    submission is the newest commit — and the author's own code changes sit in it too. Added
+    `change feedback` (diff the submission: `review^..review`, so threads, `ABOUT.md` edits and
+    reviewer code edits arrive together) and `change wait` (block until the state leaves
+    `READY`; `--fetch` re-derives after `git fetch` and also inspects `refs/remotes/*/<branch>`,
+    so a review pushed from another clone is noticed without a forge integration). Every
+    author-facing hint now points at `change feedback`; `diff --unreviewed` stays the
+    reviewer's command. `wait`'s JSON spells states the way `status --json` does — an agent
+    comparing the two should be comparing literals — and a timeout reports the state it
+    actually saw plus `timed_out: true`, exiting 1. The polling loop lives in `pollUntil`,
+    separate from the repository reading, so its timing is tested without a reviewer in the
+    room; `wait` itself writes nothing, so "no daemon, no cache, no database" still holds for
+    it. Fixtures push to local bare remotes, which hygiene allows: it skips `_test.go`, whose
+    job is to stage states the CLI itself refuses to create.
 
 ## Architecture
 
