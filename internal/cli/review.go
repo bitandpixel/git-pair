@@ -64,15 +64,14 @@ a (approve); Esc cancels. The same outcomes are available from the CLI:
   gitpr review submit --block | --feedback | --approve`,
 		Example: `  gitpr review open
   gitpr review open --unreviewed
-  gitpr review open --since-review=-2`,
+  gitpr review open --since-review=-2
+  gitpr review open --since-review=-3 --head-review=-1`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewOpen(cmd.Context(), a, opts)
 		},
 	}
-	cmd.Flags().BoolVar(&opts.unreviewed, "unreviewed", false, "start with the span since the most recent review")
-	cmd.Flags().StringVar(&opts.sinceReview, "since-review", "", "start with the span since review N (bare flag means -1)")
-	cmd.Flags().Lookup("since-review").NoOptDefVal = "-1"
+	opts.register(cmd)
 	return cmd
 }
 
@@ -81,7 +80,7 @@ func runReviewOpen(ctx context.Context, a *app, opts *spanOptions) error {
 	if err != nil {
 		return err
 	}
-	so, err := opts.toSpanOptions()
+	so, err := opts.selector()
 	if err != nil {
 		return err
 	}
@@ -716,32 +715,31 @@ func runReviewReopen(ctx context.Context, a *app) error {
 	if err != nil {
 		return err
 	}
-	so := span.Options{Unreviewed: true}
-	sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, so)
+	// Reopening continues the review, so the span ends at the working tree: a span
+	// that ends at a commit is a look at history, and you cannot resume a review from
+	// something you are not allowed to mark, edit, or submit. What the reviewer has
+	// typed but not committed still shows up, in the preview's `you` section.
+	sel := span.SinceReview(-1)
+	sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, sel)
 	if err != nil {
 		if errors.Is(err, span.ErrNoReviews) {
 			return &usageError{fmt.Errorf("%w; run `gitpr review open` for the whole changeset", err)}
 		}
 		return &usageError{err}
 	}
-	names, err := s.repo.DiffNames(ctx, sp.From, sp.To)
-	if err != nil {
+	note := ""
+	if names, err := s.repo.DiffNames(ctx, sp.From, sp.To); err != nil {
 		return err
+	} else if len(names) == 0 {
+		note = fmt.Sprintf("nothing has landed since %s", reviewLabel(s.summary.LatestReview))
 	}
-	if len(names) > 0 {
-		return openSession(ctx, a, s, so, "reopen", "")
-	}
-	// The submission is the newest commit, so nothing follows it. The reviewer still
-	// came back to that review, and what it covered is the honest thing to show them.
-	return openSession(ctx, a, s, span.Options{Covered: true}, "reopen",
-		fmt.Sprintf("nothing has landed since %s — showing the changes it covered",
-			reviewLabel(s.summary.LatestReview)))
+	return openSession(ctx, a, s, sel, "reopen", note)
 }
 
-// openSession runs the TUI on a resolved span choice. name is the subcommand to
+// openSession runs the TUI on a chosen span. name is the subcommand to
 // blame in the no-terminal message.
 // note, if set, is written to stderr before the session takes the screen.
-func openSession(ctx context.Context, a *app, s *session, so span.Options, name, note string) error {
+func openSession(ctx context.Context, a *app, s *session, sel span.Selector, name, note string) error {
 	if !console.Interactive() {
 		return &usageError{fmt.Errorf(
 			"`gitpr review %s` needs a terminal; use `gitpr diff`, `gitpr review about`, "+
@@ -750,7 +748,7 @@ func openSession(ctx context.Context, a *app, s *session, so span.Options, name,
 	if note != "" {
 		a.warn("%s\n", note)
 	}
-	err := tui.Run(ctx, tui.Options{Repo: s.repo, Changeset: s.cs, Summary: s.summary, Span: so})
+	err := tui.Run(ctx, tui.Options{Repo: s.repo, Changeset: s.cs, Summary: s.summary, Span: sel})
 	if errors.Is(err, tui.ErrQuit) {
 		return nil
 	}

@@ -68,16 +68,16 @@ func (s *scenario) summary(t *testing.T) lifecycle.Summary {
 	return summary
 }
 
-func (s *scenario) resolve(t *testing.T, opts span.Options) (span.Span, error) {
+func (s *scenario) resolve(t *testing.T, sel span.Selector) (span.Span, error) {
 	t.Helper()
-	return span.Resolve(context.Background(), s.repo, s.base, s.summary(t), opts)
+	return span.Resolve(context.Background(), s.repo, s.base, s.summary(t), sel)
 }
 
 // PRD §17.1: the default span is `changeset.base ... HEAD`.
 func TestResolveFullChangesetSpan(t *testing.T) {
 	s := newScenario(t, true)
 
-	got, err := s.resolve(t, span.Options{})
+	got, err := s.resolve(t, span.Full())
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -88,11 +88,11 @@ func TestResolveFullChangesetSpan(t *testing.T) {
 	if got.To != s.f.Head() {
 		t.Errorf("To = %s, want HEAD %s", got.To, s.f.Head())
 	}
-	if got.Kind != span.Full {
-		t.Errorf("Kind = %s, want full", got.Kind)
+	if got.Base.Kind != span.KindChangesetBase || got.Head.Kind != span.KindWorkingTree {
+		t.Errorf("span = %s → %s, want changeset base → working tree", got.Base.Kind, got.Head.Kind)
 	}
-	if got.ReviewIndex != -1 {
-		t.Errorf("ReviewIndex = %d, want -1 for a full span", got.ReviewIndex)
+	if !got.Live() {
+		t.Error("a span ending at the working tree is a live review")
 	}
 	if !strings.Contains(got.Label, "main") || !strings.Contains(got.Label, "HEAD") {
 		t.Errorf("Label = %q, want it to name the resolved range", got.Label)
@@ -128,7 +128,7 @@ func TestResolveSinceReviewIndexes(t *testing.T) {
 	}
 	for _, tc := range tests {
 		index := tc.index
-		got, err := s.resolve(t, span.Options{SinceReview: &index})
+		got, err := s.resolve(t, span.SinceReview(index))
 		if err != nil {
 			t.Fatalf("Resolve(--since-review=%d): %v", index, err)
 		}
@@ -138,11 +138,13 @@ func TestResolveSinceReviewIndexes(t *testing.T) {
 		if got.To != s.f.Head() {
 			t.Errorf("--since-review=%d resolved To = %s, want HEAD %s", index, got.To, s.f.Head())
 		}
-		if got.Kind != span.SinceReview {
-			t.Errorf("--since-review=%d Kind = %s, want since-review", index, got.Kind)
+		if got.Base.Kind != span.KindReview || got.Head.Kind != span.KindWorkingTree {
+			t.Errorf("--since-review=%d span = %s → %s, want review → working tree",
+				index, got.Base.Kind, got.Head.Kind)
 		}
-		if got.ReviewIndex != tc.wantRevIdx {
-			t.Errorf("--since-review=%d ReviewIndex = %d, want %d", index, got.ReviewIndex, tc.wantRevIdx)
+		if got.Base.ResolvedIndex != tc.wantRevIdx {
+			t.Errorf("--since-review=%d resolved index = %d, want %d",
+				index, got.Base.ResolvedIndex, tc.wantRevIdx)
 		}
 	}
 }
@@ -152,12 +154,12 @@ func TestResolveSinceReviewIndexes(t *testing.T) {
 func TestResolveUnreviewedIsLatestReviewSpan(t *testing.T) {
 	s := newScenario(t, true)
 
-	unreviewed, err := s.resolve(t, span.Options{Unreviewed: true})
+	unreviewed, err := s.resolve(t, span.SinceReview(-1))
 	if err != nil {
 		t.Fatalf("Resolve(--unreviewed): %v", err)
 	}
-	latest := -1
-	sinceLatest, err := s.resolve(t, span.Options{SinceReview: &latest})
+	// -1 has to mean the same submission as the positive index of the newest one.
+	sinceLatest, err := s.resolve(t, span.SinceReview(len(s.reviews)-1))
 	if err != nil {
 		t.Fatalf("Resolve(--since-review=-1): %v", err)
 	}
@@ -165,8 +167,8 @@ func TestResolveUnreviewedIsLatestReviewSpan(t *testing.T) {
 		t.Errorf("--unreviewed From = %s, want %s (same as --since-review=-1 = %s)",
 			unreviewed.From, s.reviews[2], sinceLatest.From)
 	}
-	if unreviewed.ReviewIndex != 2 {
-		t.Errorf("--unreviewed ReviewIndex = %d, want 2", unreviewed.ReviewIndex)
+	if unreviewed.Base.ResolvedIndex != 2 {
+		t.Errorf("--unreviewed resolved index = %d, want 2", unreviewed.Base.ResolvedIndex)
 	}
 	// The span answers "what happened after I reviewed": it must include the
 	// author's response commit and exclude anything before the review.
@@ -177,8 +179,7 @@ func TestResolveUnreviewedIsLatestReviewSpan(t *testing.T) {
 
 	// A span measured from R2 shows the work done since then, including the
 	// deletion/edit of reviewer-added lines (PRD §17.2 makes resolution visible).
-	one := 1
-	fromR2, err := s.resolve(t, span.Options{SinceReview: &one})
+	fromR2, err := s.resolve(t, span.SinceReview(1))
 	if err != nil {
 		t.Fatalf("Resolve(--since-review=1): %v", err)
 	}
@@ -190,8 +191,7 @@ func TestResolveUnreviewedIsLatestReviewSpan(t *testing.T) {
 func TestResolveOutOfRangeIndex(t *testing.T) {
 	s := newScenario(t, true)
 	for _, index := range []int{3, -4, 99, -99} {
-		index := index
-		_, err := s.resolve(t, span.Options{SinceReview: &index})
+		_, err := s.resolve(t, span.SinceReview(index))
 		if err == nil {
 			t.Fatalf("Resolve(--since-review=%d) succeeded, want an error", index)
 		}
@@ -209,19 +209,13 @@ func TestResolveOutOfRangeIndex(t *testing.T) {
 func TestResolveWithoutReviews(t *testing.T) {
 	s := newScenario(t, false)
 
-	if _, err := s.resolve(t, span.Options{Unreviewed: true}); !errors.Is(err, span.ErrNoReviews) {
-		t.Errorf("Resolve(--unreviewed) with no reviews = %v, want ErrNoReviews", err)
-	}
-	zero := 0
-	if _, err := s.resolve(t, span.Options{SinceReview: &zero}); !errors.Is(err, span.ErrNoReviews) {
-		t.Errorf("Resolve(--since-review=0) with no reviews = %v, want ErrNoReviews", err)
-	}
-	minus := -1
-	if _, err := s.resolve(t, span.Options{SinceReview: &minus}); !errors.Is(err, span.ErrNoReviews) {
-		t.Errorf("Resolve(--since-review=-1) with no reviews = %v, want ErrNoReviews", err)
+	for _, index := range []int{0, -1} {
+		if _, err := s.resolve(t, span.SinceReview(index)); !errors.Is(err, span.ErrNoReviews) {
+			t.Errorf("Resolve(review %d) with no reviews = %v, want ErrNoReviews", index, err)
+		}
 	}
 	// The full changeset span still works without any review.
-	if _, err := s.resolve(t, span.Options{}); err != nil {
+	if _, err := s.resolve(t, span.Full()); err != nil {
 		t.Errorf("Resolve(full) with no reviews = %v, want success", err)
 	}
 }
@@ -233,8 +227,7 @@ func TestResolveIgnoresOrdinaryCommits(t *testing.T) {
 	s := newScenario(t, true)
 	lookalike := s.f.Commit("review: block booking-transaction", gittest.WithFile("lookalike.go", "package main\n"))
 
-	one := -1
-	got, err := s.resolve(t, span.Options{SinceReview: &one})
+	got, err := s.resolve(t, span.SinceReview(-1))
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -244,85 +237,4 @@ func TestResolveIgnoresOrdinaryCommits(t *testing.T) {
 	if got.From != s.reviews[2] {
 		t.Errorf("From = %s, want the real approve commit %s", got.From, s.reviews[2])
 	}
-}
-
-// The case where HEAD *is* the review submission (an approval with nothing after
-// it) is covered above: `--unreviewed` resolves to an empty span whose From and
-// To are the review commit, and it must not error.
-
-// The span a submission saw. `review reopen` falls back to it when nothing has
-// landed after the review, so it has to end at the submission rather than at HEAD.
-func TestResolveCoveredSpan(t *testing.T) {
-	t.Run("first review covers the code it was made against", func(t *testing.T) {
-		s := newScenario(t, false)
-		f := s.f
-		// The submission writes a thread and a file of the reviewer's own: neither
-		// is something they reviewed, so neither belongs in the span.
-		review := f.CommitReviewMarker(slug, "feedback", gittest.WithFile("review-notes.md", "look here\n"))
-		// The author responds afterwards: the covered span must not follow them.
-		f.Commit("response", gittest.WithFile("service.go", "package main\n\nfunc Lock() { tx() }\n"))
-
-		got, err := s.resolve(t, span.Options{Covered: true})
-		if err != nil {
-			t.Fatalf("Resolve(covered): %v", err)
-		}
-		want, err := s.resolve(t, span.Options{})
-		if err != nil {
-			t.Fatalf("Resolve(full): %v", err)
-		}
-		if got.From != want.From {
-			t.Errorf("From = %s, want the merge base %s", got.From, want.From)
-		}
-		if got.To != f.Parent(review) {
-			t.Errorf("To = %s, want the submission's parent %s", got.To, f.Parent(review))
-		}
-		if got.Label != "review "+f.Short(review) {
-			t.Errorf("Label = %q, want %q", got.Label, "review "+f.Short(review))
-		}
-		names, err := s.repo.DiffNames(context.Background(), got.From, got.To)
-		if err != nil {
-			t.Fatalf("DiffNames: %v", err)
-		}
-		for _, n := range names {
-			if n == "review-notes.md" {
-				t.Errorf("the covered span lists %q: that is what the reviewer wrote, not what they reviewed", n)
-			}
-		}
-		if !contains(names, "service.go") {
-			t.Errorf("the covered span = %v, want the reviewed code in it", names)
-		}
-	})
-
-	t.Run("later review covers the whole changeset as it stood", func(t *testing.T) {
-		s := newScenario(t, true)
-		got, err := s.resolve(t, span.Options{Covered: true})
-		if err != nil {
-			t.Fatalf("Resolve(covered): %v", err)
-		}
-		if got.To != s.f.Parent(s.reviews[2]) {
-			t.Errorf("To = %s, want the newest review's parent", got.To)
-		}
-		if got.From == s.reviews[1] {
-			t.Error("From = the previous review, which for back-to-back submissions would show only its notes")
-		}
-		if got.ReviewIndex != 2 {
-			t.Errorf("ReviewIndex = %d, want 2", got.ReviewIndex)
-		}
-	})
-
-	t.Run("nothing to be covered by", func(t *testing.T) {
-		s := newScenario(t, false)
-		if _, err := s.resolve(t, span.Options{Covered: true}); !errors.Is(err, span.ErrNoReviews) {
-			t.Errorf("Resolve(covered) with no reviews = %v, want ErrNoReviews", err)
-		}
-	})
-}
-
-func contains(haystack []string, needle string) bool {
-	for _, h := range haystack {
-		if h == needle {
-			return true
-		}
-	}
-	return false
 }

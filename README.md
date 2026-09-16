@@ -263,7 +263,9 @@ command reports them.)
 | (default) | `merge-base(base, HEAD)..HEAD` | what is in this changeset |
 | `--unreviewed` | `<latest review>..HEAD` | what happened since I reviewed |
 | `--since-review=N` | `<Nth review>..HEAD` | what happened since review N |
-| `review reopen`, when nothing landed since | `merge-base(base, review)..<review>^` | what that submission was reviewing |
+| `--head-review=N` | `<span start>..<Nth review>` | what things looked like at review N |
+| `--head-commit=SHA` | `<span start>..<commit>` | a fixed historical range |
+| `--head-ref=NAME` | `<span start>..<NAME @ its commit>` | a range measured to where a branch pointed when you chose it |
 
 `--since-review` with no value means `-1`; indexes are chronological (`0` first, `-1`
 latest) and match `gitpr review history`.
@@ -324,7 +326,7 @@ output for it; elsewhere it is accepted and ignored.
 | `change feedback` | `--stat`, `--name-only` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
 | `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`/`CLOSED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
 | `review open` | `--unreviewed`, `--since-review[=N]` | TUI; needs a terminal; full changeset unless a span flag says otherwise |
-| `review reopen` | none | TUI on `<latest review>..HEAD`, or on the span that review covered when nothing landed since; needs a terminal; refuses if no review exists |
+| `review reopen` | none | TUI on `<latest review>..HEAD`, the work that has landed since you reviewed; needs a terminal; refuses if no review exists |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), then moves the review ref |
@@ -332,7 +334,7 @@ output for it; elsewhere it is accepted and ignored.
 | `review queue` | — | every changeset in this repo whose derived state is `READY`, longest wait first |
 | `review close` | `--allow-surviving-review-additions` | archives and closes; never merges, pushes or squashes |
 | `status` | — | derived state for the current branch's changeset |
-| `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
+| `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
 commits, no blocking surviving additions. `review close` checks: clean tree, latest outcome

@@ -27,9 +27,9 @@ type Options struct {
 	Repo      *git.Repo
 	Changeset changeset.Changeset
 	Summary   lifecycle.Summary
-	// Span is the requested starting span; a missing value means the full
-	// changeset.
-	Span span.Options
+	// Span is the starting span. Use span.Full() or span.SinceReview(n): the zero
+	// Selector names the changeset base as both ends, which is not a span.
+	Span span.Selector
 	// Out receives the one-line summary printed after the session ends, so a
 	// submission is visible in the normal screen once the alt screen is gone.
 	// Defaults to os.Stdout.
@@ -57,7 +57,7 @@ type Session struct {
 	repo      *git.Repo
 	cs        changeset.Changeset
 	summary   lifecycle.Summary
-	spanOpts  span.Options
+	sel       span.Selector
 	current   span.Span
 	files     []File
 	reviewRef string
@@ -73,7 +73,7 @@ type Session struct {
 // NewSession resolves the span and scans the changed files.
 func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	s := &Session{
-		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, spanOpts: opts.Span,
+		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span,
 		reviewRef: "refs/reviews/" + opts.Changeset.Slug,
 	}
 	if err := s.Rescan(ctx); err != nil {
@@ -86,7 +86,7 @@ func NewSession(ctx context.Context, opts Options) (*Session, error) {
 // Rescan recomputes the span and file list, preserving review marks whose file
 // content in the span has not changed.
 func (s *Session) Rescan(ctx context.Context) error {
-	sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, s.spanOpts)
+	sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, s.sel)
 	if err != nil {
 		return err
 	}
@@ -136,20 +136,17 @@ func (s *Session) Reload(ctx context.Context) error {
 }
 
 // ToggleSpan flips between the full changeset and the unreviewed span, which is
-// what `v` does. It is a no-op when there is nothing to compare against.
+// what `v` does. From any other span it goes to the unreviewed one, which is the
+// way out of a historical look. It is a no-op when there is nothing to compare
+// against.
 func (s *Session) ToggleSpan(ctx context.Context) error {
 	if !s.CanToggleSpan() {
 		return fmt.Errorf("no review submissions yet, so there is nothing to compare HEAD against")
 	}
-	switch {
-	case s.spanOpts.Covered:
-		// Covered is only reached when nothing landed after the review, so the
-		// since-review span has no content to toggle to; the whole changeset does.
-		s.spanOpts = span.Options{}
-	case s.spanOpts.Unreviewed:
-		s.spanOpts = span.Options{}
-	default:
-		s.spanOpts = span.Options{Unreviewed: true}
+	if s.Unreviewed() {
+		s.sel = span.Full()
+	} else {
+		s.sel = span.SinceReview(-1)
 	}
 	return s.Rescan(ctx)
 }
@@ -158,7 +155,9 @@ func (s *Session) ToggleSpan(ctx context.Context) error {
 func (s *Session) CanToggleSpan() bool { return len(s.summary.Reviews) > 0 }
 
 // Unreviewed reports whether the session currently shows the unreviewed span.
-func (s *Session) Unreviewed() bool { return s.spanOpts.Unreviewed }
+func (s *Session) Unreviewed() bool {
+	return s.sel.Base.Kind == span.KindReview && s.sel.Head.Kind == span.KindWorkingTree
+}
 
 // Span is the resolved span being reviewed.
 func (s *Session) Span() span.Span { return s.current }

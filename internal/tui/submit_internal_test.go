@@ -37,7 +37,7 @@ func TestSubmitKeyEndsTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SummarizeHEAD: %v", err)
 	}
-	sess, err := NewSession(ctx, Options{Repo: repo, Changeset: cs, Summary: summary, Span: span.Options{}})
+	sess, err := NewSession(ctx, Options{Repo: repo, Changeset: cs, Summary: summary, Span: span.Full()})
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestEscInSubmitModeKeepsTheSessionOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SummarizeHEAD: %v", err)
 	}
-	sess, err := NewSession(ctx, Options{Repo: repo, Changeset: cs, Summary: summary})
+	sess, err := NewSession(ctx, Options{Repo: repo, Changeset: cs, Summary: summary, Span: span.Full()})
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}

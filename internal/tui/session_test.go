@@ -47,7 +47,7 @@ func newEnv(t *testing.T) *env {
 	return e
 }
 
-func (e *env) session(t *testing.T, opts span.Options) *tui.Session {
+func (e *env) session(t *testing.T, opts span.Selector) *tui.Session {
 	t.Helper()
 	summary, err := lifecycle.SummarizeHEAD(context.Background(), e.repo, e.cs.Slug, e.cs.Base)
 	if err != nil {
@@ -84,7 +84,7 @@ func indexOfFile(files []tui.File, path string) int {
 func TestSessionListsChangedFilesForFullChangeset(t *testing.T) {
 	e := newEnv(t)
 
-	sess := e.session(t, span.Options{})
+	sess := e.session(t, span.Full())
 
 	files := sess.Files()
 	// The three implementation files plus the two changeset artifacts.
@@ -126,7 +126,7 @@ func TestSessionListsChangedFilesForFullChangeset(t *testing.T) {
 
 func TestSessionToggleMarksFilesReviewed(t *testing.T) {
 	e := newEnv(t)
-	sess := e.session(t, span.Options{})
+	sess := e.session(t, span.Full())
 
 	i := indexOfFile(sess.Files(), "service.go")
 	sess.Toggle(i)
@@ -154,7 +154,7 @@ func TestSessionToggleMarksFilesReviewed(t *testing.T) {
 // during the current session, gitpr should ideally reset it to unreviewed."
 func TestSessionResetsReviewedMarkWhenFileDiffChanges(t *testing.T) {
 	e := newEnv(t)
-	sess := e.session(t, span.Options{})
+	sess := e.session(t, span.Full())
 
 	sess.Toggle(indexOfFile(sess.Files(), "service.go"))
 	sess.Toggle(indexOfFile(sess.Files(), "handler.go"))
@@ -189,7 +189,7 @@ func TestSessionResetsReviewedMarkWhenFileDiffChanges(t *testing.T) {
 // A new file appearing in the span shows up unreviewed.
 func TestSessionPicksUpNewlyChangedFiles(t *testing.T) {
 	e := newEnv(t)
-	sess := e.session(t, span.Options{})
+	sess := e.session(t, span.Full())
 	before := len(sess.Files())
 
 	e.f.Commit("add a file", gittest.WithFile("cache.go", "package main\n\nfunc Cache() {}\n"))
@@ -212,7 +212,7 @@ func TestSessionPicksUpNewlyChangedFiles(t *testing.T) {
 // and PRD §17.2 makes the unreviewed span the work done since the latest review.
 func TestSessionToggleSpanSwitchesBetweenFullAndUnreviewed(t *testing.T) {
 	e := newEnv(t)
-	sess := e.session(t, span.Options{})
+	sess := e.session(t, span.Full())
 
 	if sess.CanToggleSpan() {
 		t.Error("CanToggleSpan() = true before any review submission")
@@ -243,8 +243,8 @@ func TestSessionToggleSpanSwitchesBetweenFullAndUnreviewed(t *testing.T) {
 	if len(files) != 1 || files[0] != "service.go" {
 		t.Errorf("unreviewed span Files() = %v, want only the file the review touched", files)
 	}
-	if got := sess.Span().Kind; got != span.SinceReview {
-		t.Errorf("Span().Kind = %s, want since-review", got)
+	if got := sess.Span(); got.Base.Kind != span.KindReview || !got.Live() {
+		t.Errorf("Span() = %s → %s, want a live span starting at a review", got.Base.Kind, got.Head.Kind)
 	}
 
 	// Marks are per-span content: switching spans must not silently keep marks for
@@ -256,8 +256,8 @@ func TestSessionToggleSpanSwitchesBetweenFullAndUnreviewed(t *testing.T) {
 	if sess.Unreviewed() {
 		t.Error("Unreviewed() = true after toggling back to the full span")
 	}
-	if got := sess.Span().Kind; got != span.Full {
-		t.Errorf("Span().Kind = %s, want full", got)
+	if got := sess.Span(); got.Base.Kind != span.KindChangesetBase || !got.Live() {
+		t.Errorf("Span() = %s → %s, want the full changeset", got.Base.Kind, got.Head.Kind)
 	}
 	if len(sess.Files()) < 3 {
 		t.Errorf("full span Files() = %v, want the whole changeset again", filePaths(sess.Files()))
@@ -267,7 +267,7 @@ func TestSessionToggleSpanSwitchesBetweenFullAndUnreviewed(t *testing.T) {
 // A thread created during a review appears in the thread list (PRD §14's `T`).
 func TestSessionThreadsAndChangesetAccessors(t *testing.T) {
 	e := newEnv(t)
-	sess := e.session(t, span.Options{})
+	sess := e.session(t, span.Full())
 
 	threads, err := sess.Threads()
 	if err != nil {
@@ -306,36 +306,34 @@ func TestSessionSpanErrorSurfaces(t *testing.T) {
 		t.Fatalf("SummarizeHEAD: %v", err)
 	}
 	if _, err := tui.NewSession(context.Background(), tui.Options{
-		Repo: e.repo, Changeset: e.cs, Summary: summary, Span: span.Options{Unreviewed: true},
+		Repo: e.repo, Changeset: e.cs, Summary: summary, Span: span.SinceReview(-1),
 	}); err == nil {
 		t.Error("NewSession succeeded with --unreviewed and no reviews")
 	}
 }
 
-// `review reopen` can open a session on the span a submission covered, which only
-// happens when nothing landed after it. `v` must then have somewhere useful to go.
-func TestSessionToggleSpanFromCoveredGoesToTheFullChangeset(t *testing.T) {
+// A historical span is a look at history, and `v` must not be a dead end: from any
+// span that is not the unreviewed one it lands on the span you can review into.
+func TestSessionToggleFromHistoricalEscapesToTheUnreviewedSpan(t *testing.T) {
 	e := newEnv(t)
-	e.f.Write("service.go", "package main\n\n// Please use a transaction here\nfunc Lock() {}\n")
 	e.f.CommitReviewMarker(slug, "feedback")
 
-	sess := e.session(t, span.Options{Covered: true})
-	if sess.Unreviewed() {
-		t.Error("Unreviewed() = true on a span that ends at the submission")
+	sess := e.session(t, span.Selector{Base: span.ChangesetBase(), Head: span.Review(-1)})
+	if !sess.Span().Historical() {
+		t.Fatalf("the session opened live, want a historical span")
 	}
-	covered := filePaths(sess.Files())
-	if len(covered) == 0 {
-		t.Fatal("the covered span listed no files")
+	if sess.Unreviewed() {
+		t.Error("Unreviewed() = true on a historical span")
 	}
 
 	if err := sess.ToggleSpan(context.Background()); err != nil {
 		t.Fatalf("ToggleSpan: %v", err)
 	}
-	if sess.Unreviewed() {
-		t.Error("toggling landed on the since-review span, which is empty by construction here")
+	if !sess.Unreviewed() {
+		t.Error("v from a historical span should land on the unreviewed span")
 	}
-	if got := len(filePaths(sess.Files())); got < len(covered) {
-		t.Errorf("full span listed %d file(s), want at least the covered span's %d", got, len(covered))
+	if !sess.Span().Live() {
+		t.Error("the span v lands on must be one you can review into")
 	}
 }
 
@@ -344,7 +342,7 @@ func TestSessionToggleSpanFromCoveredGoesToTheFullChangeset(t *testing.T) {
 // visible to `git status`.
 func TestReviewedMarksResumeInALaterSession(t *testing.T) {
 	e := newEnv(t)
-	first := e.session(t, span.Options{})
+	first := e.session(t, span.Full())
 	first.Toggle(0)
 	first.Toggle(2)
 	if err := first.SaveMarks(context.Background()); err != nil {
@@ -352,7 +350,7 @@ func TestReviewedMarksResumeInALaterSession(t *testing.T) {
 	}
 	want := filePaths(first.Files())
 
-	second := e.session(t, span.Options{})
+	second := e.session(t, span.Full())
 	if got := second.Resumed(); got != 2 {
 		t.Errorf("Resumed() = %d, want 2", got)
 	}
@@ -379,7 +377,7 @@ func TestReviewedMarksResumeInALaterSession(t *testing.T) {
 // reviewer read are not the files that exist, so nothing may come back marked.
 func TestMarksDoNotResumeOnceTheCodeHasChanged(t *testing.T) {
 	e := newEnv(t)
-	first := e.session(t, span.Options{})
+	first := e.session(t, span.Full())
 	for i := range first.Files() {
 		first.Toggle(i)
 	}
@@ -389,7 +387,7 @@ func TestMarksDoNotResumeOnceTheCodeHasChanged(t *testing.T) {
 
 	e.f.Commit("author response", gittest.WithFile("service.go", "package main\n\nfunc Lock() { tx() }\n"))
 
-	second := e.session(t, span.Options{})
+	second := e.session(t, span.Full())
 	for _, f := range second.Files() {
 		if f.Reviewed {
 			t.Errorf("%q came back reviewed after the code changed", f.Path)
@@ -400,7 +398,7 @@ func TestMarksDoNotResumeOnceTheCodeHasChanged(t *testing.T) {
 // Clearing every mark is a state worth remembering; otherwise the old set would reappear.
 func TestClearingEveryMarkIsRemembered(t *testing.T) {
 	e := newEnv(t)
-	first := e.session(t, span.Options{})
+	first := e.session(t, span.Full())
 	first.Toggle(0)
 	if err := first.SaveMarks(context.Background()); err != nil {
 		t.Fatalf("SaveMarks: %v", err)
@@ -410,7 +408,7 @@ func TestClearingEveryMarkIsRemembered(t *testing.T) {
 		t.Fatalf("SaveMarks after clearing: %v", err)
 	}
 
-	second := e.session(t, span.Options{})
+	second := e.session(t, span.Full())
 	for _, f := range second.Files() {
 		if f.Reviewed {
 			t.Errorf("%q is marked in a new session after every mark was cleared", f.Path)

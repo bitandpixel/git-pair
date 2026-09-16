@@ -489,14 +489,16 @@ func TestReviewReopenAfterTheAuthorResponds(t *testing.T) {
 
 // The review being the newest commit is the state a reviewer actually types `reopen`
 // in: they submitted, the session closed, and they want to get back to that review.
-// Nothing follows the submission, so reopen shows what it covered instead.
-func TestReviewReopenFallsBackToTheSpanTheReviewCovered(t *testing.T) {
+// Nothing has landed since the submission, so the span is empty — and it is still the
+// session they came back to, because an empty span is the honest answer and their own
+// uncommitted notes show up in the preview.
+func TestReviewReopenReachesTheSessionWhenNothingHasLanded(t *testing.T) {
 	f, _ := newChangeset(t, "booking", "main")
 	ready(t, f)
 	submit(t, f, "feedback")
 
 	// Past both guards and into the TUI, which the harness has no terminal for. A
-	// refusal here would mean the covered span came back empty as well.
+	// refusal here would mean an empty span was treated as an error.
 	got := runIn(t, f.Dir(), "review", "reopen")
 	if got.code != exitUsage || !strings.Contains(got.stderr, "needs a terminal") {
 		t.Errorf("reopen exited %d (%s), want the terminal refusal", got.code, got.stderr)

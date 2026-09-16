@@ -285,6 +285,68 @@ func TestDiffSinceReviewIndexes(t *testing.T) {
 	}
 }
 
+// The head is an end of the span too. Naming one turns `diff` into a look at a
+// historical range; a ref keeps its name next to the commit it was pinned to.
+func TestDiffHeadCheckpoints(t *testing.T) {
+	f, _ := newChangeset(t, "booking", "main")
+	ready(t, f)
+
+	f.Write("service.go", "package main\n\n// first review\nfunc Lock() {}\n")
+	submit(t, f, "block")
+	firstReview := f.Head()
+	f.Commit("response 1", gittest.WithFile("service.go", "package main\n\nfunc Lock() {}\n"))
+	f.Write("handler.go", "package main\n\n// second review\nfunc Serve() {}\n")
+	submit(t, f, "feedback")
+	secondReview := f.Head()
+
+	want, err := f.Git("diff", firstReview, secondReview)
+	if err != nil {
+		t.Fatalf("git diff: %v", err)
+	}
+
+	t.Run("review head", func(t *testing.T) {
+		got := runIn(t, f.Dir(), "diff", "--since-review=0", "--head-review=-1").
+			mustSucceed(t, "diff --since-review=0 --head-review=-1")
+		if got.stdout != want {
+			t.Error("the span between two reviews differs from `git diff <first> <second>`")
+		}
+	})
+
+	t.Run("commit head", func(t *testing.T) {
+		got := runIn(t, f.Dir(), "diff", "--since-review=0", "--head-commit="+secondReview).
+			mustSucceed(t, "diff --head-commit")
+		if got.stdout != want {
+			t.Error("a commit head differs from the same span named by review")
+		}
+	})
+
+	t.Run("ref head keeps its name", func(t *testing.T) {
+		f.MustGit("branch", "probe", secondReview)
+		got := runIn(t, f.Dir(), "diff", "--since-review=0", "--head-ref=probe").
+			mustSucceed(t, "diff --head-ref=probe")
+		if got.stdout != want {
+			t.Error("a ref head differs from the same span named by commit")
+		}
+		// §16: the name is the identity; the pin is secondary.
+		mustContain(t, got.stderr, "probe@", "the span must name the ref, not just its commit")
+	})
+
+	t.Run("one end, one name", func(t *testing.T) {
+		res := runIn(t, f.Dir(), "diff", "--head-review=-1", "--head-commit="+secondReview)
+		if res.code != exitUsage {
+			t.Errorf("naming the head twice exited %d, want %d\nstderr: %s", res.code, exitUsage, res.stderr)
+		}
+	})
+
+	t.Run("a head that is not there", func(t *testing.T) {
+		res := runIn(t, f.Dir(), "diff", "--head-commit=no-such-thing")
+		if res.code == 0 {
+			t.Fatalf("a commit that does not exist resolved a span\nstdout: %s", res.stdout)
+		}
+		mustContain(t, res.stderr, "no-such-thing", "the error must name what failed to resolve")
+	})
+}
+
 // PRD §11.2 / §17: a path narrows the same resolved span.
 func TestDiffWithFilePath(t *testing.T) {
 	f, _ := newChangeset(t, "booking", "main")

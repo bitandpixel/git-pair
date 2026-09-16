@@ -117,7 +117,7 @@ func buildStatus(ctx context.Context, s *session) (*statusView, error) {
 	} else if !errors.Is(err, reviewref.ErrNoReviewRef) {
 		return nil, err
 	}
-	if sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, span.Options{}); err == nil {
+	if sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, span.Full()); err == nil {
 		view.json.Span = sp.Label
 		view.span = sp
 	}

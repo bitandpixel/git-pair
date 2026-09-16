@@ -1,5 +1,10 @@
-// Package span resolves "what should this review look at" into a pair of
-// commits, per PRD §17.
+// Package span resolves "what should this review look at" into a pair of pinned
+// commits, per PRD §17 and docs/plans/active/review-span-selection/requirements.md.
+//
+// A span is two checkpoints, a base and a head. A checkpoint stays a *name* — the
+// changeset base, the working tree, a review by index, a commit id, a ref — and
+// resolving it is a separate step that pins it to a commit for the life of the
+// session. Nothing outside this package asks git for a rev on its own behalf.
 package span
 
 import (
@@ -11,135 +16,330 @@ import (
 	"gitpr/internal/lifecycle"
 )
 
-// Kind distinguishes the span families.
-type Kind int
+// CheckpointKind says what sort of thing an end of the span names.
+type CheckpointKind int
 
 const (
-	// Full is `base...HEAD`: the whole changeset.
-	Full Kind = iota
-	// SinceReview is `<review>..HEAD`: what happened after a review.
-	SinceReview
-	// Covered is `<previous review or base>..<review>`: the changes a review
-	// submission saw. Its end is the submission, not HEAD.
-	Covered
+	// KindChangesetBase is the merge base of the changeset's base ref and the head.
+	// It names a base, never a head.
+	KindChangesetBase CheckpointKind = iota
+	// KindWorkingTree is the working tree, which for a diff means HEAD as pinned
+	// when the span was resolved. It names a head, never a base: the working tree
+	// is where the reviewer's own edits live, and a base cannot contain them.
+	KindWorkingTree
+	// KindReview is a review submission, chosen by chronological index.
+	KindReview
+	// KindCommit is an immutable commit. It cannot drift.
+	KindCommit
+	// KindRef is a named ref kept for its identity, pinned to the commit it
+	// pointed at when it was chosen.
+	KindRef
 )
 
-func (k Kind) String() string {
+func (k CheckpointKind) String() string {
 	switch k {
-	case Full:
-		return "full"
-	case Covered:
-		return "covered"
+	case KindChangesetBase:
+		return "changeset base"
+	case KindWorkingTree:
+		return "working tree"
+	case KindReview:
+		return "review"
+	case KindCommit:
+		return "commit"
+	case KindRef:
+		return "ref"
 	}
-	return "since-review"
+	return fmt.Sprintf("kind(%d)", int(k))
 }
 
-// Options come straight from CLI flags. Both zero values mean "full changeset".
-type Options struct {
-	Unreviewed bool
-	// Covered asks for the span the newest review submission covered, rather than
-	// what came after it. Set by `review reopen` when nothing has landed since the
-	// submission; not a flag, since the span is what the command means.
-	Covered bool
-	// SinceReview is nil unless --since-review was given. Indexes are
-	// chronological and may be negative: -1 is the most recent review.
-	SinceReview *int
+// Checkpoint is one end of a span. It is meaningful before git has seen it —
+// "review -1" is a thing a reviewer chose — and resolution is what pins it to a
+// commit. The pinning matters: a ref that kept resolving to whatever it points at
+// now would move the ground under a review that is already part way through.
+type Checkpoint struct {
+	Kind CheckpointKind
+	// Index is the requested review index. Negative counts back from the newest
+	// submission and is relative to the whole review history, so it does not move
+	// when the other end of the span does.
+	Index int
+	// ResolvedIndex is Index once resolved, or -1 for every other kind.
+	ResolvedIndex int
+	// Name is the ref for KindRef, the id as typed for KindCommit, and a
+	// display name for the rest.
+	Name string
+	// OID is the commit the checkpoint is pinned to. Empty until resolved.
+	OID string
 }
 
-func (o Options) empty() bool { return !o.Unreviewed && !o.Covered && o.SinceReview == nil }
+// ChangesetBase names the merge base of the changeset's base ref and the head.
+func ChangesetBase() Checkpoint { return Checkpoint{Kind: KindChangesetBase, ResolvedIndex: -1} }
 
-// ErrNoReviews is returned when a review-relative span is requested but the
+// WorkingTree names the reviewer's working tree, which for a diff means HEAD as
+// pinned at resolution. A span ending here is a live review; any other head is a
+// look at history.
+func WorkingTree() Checkpoint { return Checkpoint{Kind: KindWorkingTree, ResolvedIndex: -1} }
+
+// Review names a review submission by index, negative counted from the newest.
+func Review(index int) Checkpoint {
+	return Checkpoint{Kind: KindReview, Index: index, ResolvedIndex: -1}
+}
+
+// Commit names an immutable commit. It is never re-resolved, so it cannot drift.
+func Commit(id string) Checkpoint {
+	return Checkpoint{Kind: KindCommit, Name: id, ResolvedIndex: -1}
+}
+
+// Ref names a branch, tag, remote-tracking ref or any other ref git can resolve.
+// The name survives resolution so drift can be detected later.
+func Ref(name string) Checkpoint { return Checkpoint{Kind: KindRef, Name: name, ResolvedIndex: -1} }
+
+// String renders the checkpoint the way a reviewer named it, plus the pin once
+// there is one: "main @ abc1234".
+func (c Checkpoint) String() string {
+	switch c.Kind {
+	case KindReview:
+		return fmt.Sprintf("review %d", c.Index)
+	case KindCommit:
+		if c.OID != "" {
+			return short(c.OID)
+		}
+		return c.Name
+	case KindRef:
+		if c.OID != "" {
+			return c.Name + " @ " + short(c.OID)
+		}
+		return c.Name
+	}
+	return c.Kind.String()
+}
+
+// Selector is a span as a reviewer chooses it: both ends named, neither resolved.
+type Selector struct {
+	Base Checkpoint
+	Head Checkpoint
+}
+
+// Full is the changeset as a whole: base to working tree. It is the default span.
+func Full() Selector { return Selector{Base: ChangesetBase(), Head: WorkingTree()} }
+
+// SinceReview is what landed after a review, which is what `v` and `--unreviewed`
+// mean.
+func SinceReview(index int) Selector { return Selector{Base: Review(index), Head: WorkingTree()} }
+
+// Validate rejects the two selectors that cannot mean anything: a working tree as
+// a base, and a changeset base as a head.
+func (s Selector) Validate() error {
+	switch {
+	case s.Base.Kind == KindWorkingTree:
+		return errors.New("the working tree cannot be the base of a span: it is where your own edits are")
+	case s.Head.Kind == KindChangesetBase:
+		return errors.New("the changeset base cannot be the head of a span: a head is a commit or the working tree")
+	case s.Base.Kind == KindCommit && s.Base.Name == "",
+		s.Head.Kind == KindCommit && s.Head.Name == "",
+		s.Base.Kind == KindRef && s.Base.Name == "",
+		s.Head.Kind == KindRef && s.Head.Name == "":
+		return errors.New("a commit or ref checkpoint needs a name")
+	}
+	return nil
+}
+
+// ErrNoReviews is returned when a review-relative checkpoint is requested but the
 // changeset has never been reviewed.
 var ErrNoReviews = errors.New("changeset has no review submissions yet")
 
-// Span is a resolved commit range. From and To are full SHAs, so callers can
-// hand them to git as two separate revs and never rely on `...` semantics.
+// Span is a resolved range: both ends pinned to commits, so callers can hand them
+// to git as two separate revs and never rely on `...` semantics.
 type Span struct {
-	Kind    Kind
-	From    string
-	To      string
-	FromRef string // how the start was named: a base ref or a short review SHA
-	// Label is the human-facing rendering, e.g. "main...HEAD" or "8ab932f..HEAD".
+	From string
+	To   string
+	// Base and Head are the checkpoints as resolved, pins included.
+	Base, Head Checkpoint
+	// ChangesetBase is the changeset's base ref, kept so labels and refreshes can
+	// name the base the way the changeset does.
+	ChangesetBase string
+	// Label is the human-facing rendering: "main...HEAD", "8ab932f..HEAD (after
+	// review 1)", "main@abc1234..8ab932f".
 	Label string
-	// ReviewIndex is the resolved chronological index of the start review, or
-	// -1 for a full span.
-	ReviewIndex int
 }
 
-// Resolve turns options into a commit range against the current HEAD.
-func Resolve(ctx context.Context, repo *git.Repo, base string, summary lifecycle.Summary, opts Options) (Span, error) {
+// Live reports whether this span is a review the reviewer can act on. Only a
+// working-tree head is: everything else is a commit, and a commit cannot be
+// edited, marked, or submitted against.
+func (s Span) Live() bool { return s.Head.Kind == KindWorkingTree }
+
+// Historical is the read-only half of the mode matrix.
+func (s Span) Historical() bool { return !s.Live() }
+
+// CanEdit is editing product files and review documents.
+func (s Span) CanEdit() bool { return s.Live() }
+
+// CanMark is marking files reviewed, which is state about a span under review.
+func (s Span) CanMark() bool { return s.Live() }
+
+// CanSubmit is writing a review submission.
+func (s Span) CanSubmit() bool { return s.Live() }
+
+// Resolve turns a selector into pinned commits against the current HEAD.
+func Resolve(ctx context.Context, repo *git.Repo, base string, summary lifecycle.Summary, sel Selector) (Span, error) {
+	if err := sel.Validate(); err != nil {
+		return Span{}, err
+	}
 	head, err := repo.Head(ctx)
 	if err != nil {
 		return Span{}, err
 	}
-	if opts.empty() {
-		from, err := repo.MergeBase(ctx, base, head)
-		if err != nil {
-			return Span{}, fmt.Errorf("cannot resolve changeset span against base %q: %w", base, err)
-		}
-		return Span{
-			Kind: Full, From: from, To: head,
-			FromRef: base, Label: fmt.Sprintf("%s...HEAD", base), ReviewIndex: -1,
-		}, nil
+	from, err := sel.Base.resolve(ctx, repo, base, summary, head)
+	if err != nil {
+		return Span{}, err
 	}
-
-	if opts.Covered {
-		return coveredSpan(ctx, repo, base, summary)
-	}
-
-	idx := -1
-	if opts.SinceReview != nil {
-		idx = *opts.SinceReview
-	}
-	if len(summary.Reviews) == 0 {
-		return Span{}, ErrNoReviews
-	}
-	review, ok := summary.ReviewIndex(idx)
-	if !ok {
-		return Span{}, fmt.Errorf("no review at index %d: this changeset has %d review(s) (valid: 0..%d or -1..-%d)",
-			idx, len(summary.Reviews), len(summary.Reviews)-1, len(summary.Reviews))
-	}
-	resolved := idx
-	if resolved < 0 {
-		resolved += len(summary.Reviews)
+	to, err := sel.Head.resolve(ctx, repo, base, summary, head)
+	if err != nil {
+		return Span{}, err
 	}
 	return Span{
-		Kind: SinceReview, From: review.SHA, To: head,
-		FromRef:     review.Short,
-		Label:       fmt.Sprintf("%s..HEAD (after review %d)", review.Short, resolved),
-		ReviewIndex: resolved,
+		From: from.OID, To: to.OID, Base: from, Head: to,
+		ChangesetBase: base, Label: label(from, to, base),
 	}, nil
 }
 
-// coveredSpan resolves what the newest submission was reviewing: the changeset as it
-// stood when the submission was made.
-//
-// It ends at the submission's *parent*. A review commit carries what the reviewer wrote
-// — a thread, an ABOUT.md edit, occasionally a file of their own — and those are the
-// reviewer's output, not what they were asked to look at. Measuring to the submission
-// itself shows a returning reviewer their own notes instead of the code.
-//
-// It starts at the merge base rather than at the previous submission, for the same
-// reason: two submissions in a row would otherwise produce a span holding nothing but
-// the previous reviewer's notes.
-func coveredSpan(ctx context.Context, repo *git.Repo, base string, summary lifecycle.Summary) (Span, error) {
-	if len(summary.Reviews) == 0 {
-		return Span{}, ErrNoReviews
+// resolve pins one checkpoint. It takes HEAD because two kinds need it: the
+// changeset base is a merge base against it, and the working tree is it.
+func (c Checkpoint) resolve(ctx context.Context, repo *git.Repo, base string, summary lifecycle.Summary, head string) (Checkpoint, error) {
+	out := c
+	switch c.Kind {
+	case KindChangesetBase:
+		mb, err := repo.MergeBase(ctx, base, head)
+		if err != nil {
+			return out, fmt.Errorf("cannot resolve changeset span against base %q: %w", base, err)
+		}
+		out.OID, out.Name = mb, base
+		return out, nil
+	case KindWorkingTree:
+		out.OID, out.Name = head, "working tree"
+		return out, nil
+	case KindReview:
+		if len(summary.Reviews) == 0 {
+			return out, ErrNoReviews
+		}
+		review, ok := summary.ReviewIndex(c.Index)
+		if !ok {
+			return out, fmt.Errorf("no review at index %d: this changeset has %d review(s) (valid: 0..%d or -1..-%d)",
+				c.Index, len(summary.Reviews), len(summary.Reviews)-1, len(summary.Reviews))
+		}
+		idx := c.Index
+		if idx < 0 {
+			idx += len(summary.Reviews)
+		}
+		out.OID, out.Name, out.ResolvedIndex = review.SHA, review.Short, idx
+		return out, nil
+	case KindCommit:
+		oid, err := repo.RevParse(ctx, c.Name+"^{commit}")
+		if err != nil {
+			return out, fmt.Errorf("no commit %q in this repository: %w", c.Name, err)
+		}
+		out.OID = oid
+		out.Name = short(oid)
+		return out, nil
+	case KindRef:
+		oid, err := repo.RevParse(ctx, c.Name+"^{commit}")
+		if err != nil {
+			return out, fmt.Errorf("cannot resolve %q to a commit: %w", c.Name, err)
+		}
+		out.OID = oid
+		return out, nil
 	}
-	idx := len(summary.Reviews) - 1
-	review := summary.Reviews[idx]
-	to, err := repo.RevParse(ctx, review.SHA+"^")
-	if err != nil {
-		return Span{}, fmt.Errorf("cannot resolve the state review %s was made against: %w", review.Short, err)
+	return out, fmt.Errorf("unknown checkpoint kind %d", int(c.Kind))
+}
+
+// label renders a resolved span. The two shapes reviewers see every day keep the
+// wording they have always had; everything a picker can reach is spelled out.
+func label(base, head Checkpoint, changesetBase string) string {
+	switch {
+	case base.Kind == KindChangesetBase && head.Kind == KindWorkingTree:
+		return changesetBase + "...HEAD"
+	case base.Kind == KindReview && head.Kind == KindWorkingTree:
+		return fmt.Sprintf("%s..HEAD (after review %d)", base.Name, base.ResolvedIndex)
 	}
-	from, err := repo.MergeBase(ctx, base, review.SHA)
-	if err != nil {
-		return Span{}, fmt.Errorf("cannot resolve the span review %s covered against base %q: %w", review.Short, base, err)
+	return display(base) + ".." + display(head)
+}
+
+func display(c Checkpoint) string {
+	switch c.Kind {
+	case KindWorkingTree:
+		return "HEAD"
+	case KindChangesetBase:
+		return "base"
+	case KindRef:
+		return c.Name + "@" + short(c.OID)
 	}
-	return Span{
-		Kind: Covered, From: from, To: to,
-		FromRef:     review.Short,
-		Label:       fmt.Sprintf("review %s", review.Short),
-		ReviewIndex: idx,
-	}, nil
+	return short(c.OID)
+}
+
+// Drift is a ref checkpoint whose ref has moved since it was pinned.
+type Drift struct {
+	// Name is the ref, as the reviewer chose it.
+	Name string
+	// Pinned is the commit the span is using. Current is where the ref is now.
+	Pinned, Current string
+}
+
+// String renders the drift the way the banner will: "main abc1234 → def5678".
+func (d Drift) String() string { return fmt.Sprintf("%s %s → %s", d.Name, d.Pinned, d.Current) }
+
+// Drift re-resolves every ref checkpoint in the span and reports the ones that
+// have moved. It changes nothing: a moved ref stays pinned until the reviewer says
+// otherwise, because following a branch mid-review would silently change what the
+// already-reviewed files meant.
+func (s Span) Drift(ctx context.Context, repo *git.Repo) ([]Drift, error) {
+	var out []Drift
+	for _, c := range [2]Checkpoint{s.Base, s.Head} {
+		if c.Kind != KindRef {
+			continue
+		}
+		now, err := repo.RevParse(ctx, c.Name+"^{commit}")
+		if err != nil {
+			return nil, fmt.Errorf("cannot check whether %s has moved: %w", c.Name, err)
+		}
+		if now != c.OID {
+			out = append(out, Drift{Name: c.Name, Pinned: short(c.OID), Current: short(now)})
+		}
+	}
+	return out, nil
+}
+
+// RefreshRef re-pins one ref checkpoint to where the ref points now and recomputes
+// the span. It is the only way a live span's endpoints move, and it exists because
+// the reviewer asked for it.
+func (s Span) RefreshRef(ctx context.Context, repo *git.Repo, name string) (Span, error) {
+	next := s
+	moved := false
+	for i, c := range [2]Checkpoint{s.Base, s.Head} {
+		if c.Kind != KindRef || c.Name != name {
+			continue
+		}
+		now, err := repo.RevParse(ctx, name+"^{commit}")
+		if err != nil {
+			return Span{}, fmt.Errorf("cannot refresh %q: %w", name, err)
+		}
+		c.OID = now
+		if i == 0 {
+			next.Base, next.From = c, now
+		} else {
+			next.Head, next.To = c, now
+		}
+		moved = true
+	}
+	if !moved {
+		return Span{}, fmt.Errorf("this span has no ref checkpoint named %q", name)
+	}
+	next.Label = label(next.Base, next.Head, next.ChangesetBase)
+	return next, nil
+}
+
+// short is the form a reviewer can type back.
+func short(oid string) string {
+	if len(oid) > 7 {
+		return oid[:7]
+	}
+	return oid
 }
