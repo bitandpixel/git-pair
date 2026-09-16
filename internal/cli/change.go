@@ -261,7 +261,7 @@ func aboutIsTemplate(ctx context.Context, repo *git.Repo, cs changeset.Changeset
 	if err != nil {
 		return false
 	}
-	template := strings.Split(strings.TrimPrefix(changeset.AboutTemplate(cs.Slug), "# "+cs.Slug+"\n"), "\n")
+	template := strings.Split(strings.TrimRight(strings.TrimPrefix(changeset.AboutTemplate(cs.Slug), "# "+cs.Slug+"\n"), "\n"), "\n")
 	actual := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	if len(actual) < 2 {
 		return false
