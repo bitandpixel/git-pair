@@ -139,10 +139,10 @@ type reviewModel struct {
 	// holding the terminal exits. Every handoff assigns it, so a note can never outlive the
 	// child it was written for.
 	pendingNote string
-	// handedOff records that a child tool took the terminal at least once, which is what
-	// makes Run clear the screen on the way out.
-	handedOff bool
-	quitting  bool
+	// out is the terminal the session renders on, which is where a cleared screen has to be
+	// written when a tool hands it back.
+	out      io.Writer
+	quitting bool
 	// submitted is the one-line summary of a review submitted from inside the
 	// session, printed after the alt screen closes.
 	submitted string
@@ -154,32 +154,46 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	m := reviewModel{ctx: ctx, sess: sess, width: 80, height: 24, threadsOpen: true}
+	out := opts.Out
+	if out == nil {
+		out = os.Stdout
+	}
+	// The session takes its own alt screen rather than asking bubbletea for one, because of
+	// what happens on a handoff: tea.ExecProcess releases the terminal before starting the
+	// child, and for bubbletea releasing means *exiting* the alt screen. The shell's
+	// scrollback is then exposed for as long as the editor takes to paint — tens of
+	// milliseconds for vim, hundreds for the heavier ones — which is the flash people see,
+	// and the tool's own exit messages are left on that screen behind the prompt. With the
+	// alt screen ours, the child inherits it and paints over the session, so the screen
+	// behind is never shown and never dirtied. bubbletea then renders in its inline mode,
+	// which tracks its own frame relative to the cursor: equivalent here, as long as the
+	// screen is cleared and homed whenever something else has had it (see externalDoneMsg).
+	fmt.Fprint(out, enterAltScreen)
+	leftScreen := false
+	defer func() {
+		if !leftScreen {
+			// A panic must not leave the user's terminal looking at a screen that no longer
+			// exists, so this is the last line of defence rather than the normal path.
+			fmt.Fprint(out, exitAltScreen)
+		}
+	}()
+
+	m := reviewModel{ctx: ctx, sess: sess, out: out, width: 80, height: 24, threadsOpen: true}
 	m.refresh()
 	if n := sess.Resumed(); n > 0 {
 		m.setStatus(fmt.Sprintf("resumed %d reviewed mark%s from an earlier session", n, plural(n)), false)
 	}
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
+	p := tea.NewProgram(m, tea.WithContext(ctx), tea.WithOutput(out))
 	final, err := p.Run()
+	// Back on the shell's screen before anything is printed, so the submitted summary and any
+	// error land where the user will still be looking.
+	fmt.Fprint(out, exitAltScreen)
+	leftScreen = true
 	if err != nil {
 		return err
 	}
 	if fm, ok := final.(reviewModel); ok {
-		// A tool that took the terminal writes to the screen the alt screen was covering.
-		// vimdiff leaves "2 files to edit" behind — once per difftool opened — and it sits
-		// right where the session's last frame ended, so it reappears over the prompt when
-		// the alt screen closes. Clearing is the only cleanup available: the message is the
-		// child's, printed after the renderer has suspended. It goes to the terminal the alt
-		// screen drew on, and only for sessions that handed off — one that never left the alt
-		// screen has no business erasing what was on the screen before it.
-		if fm.handedOff {
-			clearScreen(os.Stdout)
-		}
 		if fm.submitted != "" {
-			out := opts.Out
-			if out == nil {
-				out = os.Stdout
-			}
 			fmt.Fprintln(out, fm.submitted)
 		}
 		if fm.quitting {
@@ -188,6 +202,16 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	return nil
 }
+
+// The session's own alt screen. These are the sequences bubbletea writes for
+// tea.WithAltScreen — the DEC private mode that switches screens and saves the cursor, plus a
+// clear and home, plus an explicit cursor-visibility reset because some terminals keep cursor
+// state per screen — and the reason to write them by hand is the handoff: bubbletea exits the
+// screen it owns before starting a child, and this one is not its own to exit.
+const (
+	enterAltScreen = "\x1b[?1049h\x1b[2J\x1b[H\x1b[?25h"
+	exitAltScreen  = "\x1b[?1049l\x1b[?25h"
+)
 
 // clearScreen erases the visible screen and homes the cursor, leaving scrollback alone:
 // whatever the child printed is still in history if anyone wants it.
@@ -205,6 +229,13 @@ func (m reviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case externalDoneMsg:
+		// The child had our screen and left its own marks on it — vimdiff prints
+		// "2 files to edit" on the way out. The renderer counts the lines it wrote, and a
+		// handoff resets that count, so the next frame would be written onto the debris
+		// instead of replacing it. Start it on a clean screen.
+		if m.out != nil {
+			clearScreen(m.out)
+		}
 		// An editor or difftool just exited: refresh repository state so the
 		// file list and review marks reflect what it changed (PRD §15).
 		note := m.pendingNote
@@ -550,7 +581,6 @@ func (m reviewModel) openPathNoted(relPath, note string) (tea.Model, tea.Cmd) {
 // along with whatever note the caller wanted read afterwards.
 func (m reviewModel) runExternal(cmd *exec.Cmd, label, note string) (tea.Model, tea.Cmd) {
 	m.pendingNote = note
-	m.handedOff = true
 	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return externalDoneMsg{err: err, label: label}
 	})

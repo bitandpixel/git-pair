@@ -320,6 +320,30 @@ changeset. Hand-verification of everything the README documents additionally cor
     does not wipe what the user had on screen; scrollback is left alone, because that output is
     history rather than debris. Verified at the byte level on the two-round fixture: after the
     last `\x1b[?1049l` there is `\x1b[2J\x1b[H` when a difftool ran, and nothing when none did.
+    Superseded by 20 — the flash that prompted the report had the same cause, and holding the
+    screen instead of mopping up afterwards removes both.
+20. **The session keeps its alt screen through a handoff, which removes the flash and the
+    debris together.** Opening an editor or difftool exposed the command-line history for a
+    beat first: `tea.ExecProcess` calls `ReleaseTerminal()` before starting the child, and for
+    bubbletea releasing means `exitAltScreen()` and a 10 ms pause — so the shell screen is
+    visible for as long as the tool takes to paint, which is tens of milliseconds for vim and
+    several hundred for the rest. Cleaning up afterwards could not reach that.
+
+    The session now takes the screen itself — the sequences bubbletea would write, `?1049h` +
+    erase + home + cursor reset, and `?1049l` on the way out — and starts the program without
+    `tea.WithAltScreen()`. bubbletea falls back to its inline renderer, which is sound here:
+    it tracks its own frame relative to the cursor, so the frame lands from the top after the
+    screen is cleared and homed, and dropping lines taller than the window is moot at our
+    sizes. The one obligation is to clear and home when something else has had the screen, done
+    in the `externalDoneMsg` handler: a handoff resets the renderer's line count, so without it
+    the next frame is written *onto* the tool's output instead of over it. Leaving the screen is
+    explicit before anything is printed — the submitted summary has to land where the user is
+    still looking — and deferred for the panic path.
+
+    A/B on the same fixture and keys: the previous build emitted 5 alt-screen exits, two of them
+    immediately before a child started (bytes 853→884, 7444→7475, which is the flash); this one
+    emits 3, ours a single pair at the ends of the session and the middle two vim's own, with the
+    frame after the last tool closing intact.
 
 ## Architecture
 
