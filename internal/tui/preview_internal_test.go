@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // previewModel is the navigation fixture with room for a pane and a fake git, so a test can say
@@ -312,4 +313,137 @@ func dividerColumn(row string) int {
 		return -1
 	}
 	return lipgloss.Width(row[:i])
+}
+
+// The frame is the terminal now: filled top to bottom and padded to the edges. Ending with a
+// newline matters -- the renderer writes a line per line and moves down afterwards, so a frame
+// that already fills the screen has nowhere to put the cursor and the terminal scrolls.
+func TestTheFrameFillsTheWindow(t *testing.T) {
+	for _, preview := range []bool{false, true} {
+		m := previewModel(t)
+		m.previewOn = preview
+		m.width, m.height = 140, 30
+		if preview {
+			m = askPreview(t, m)
+		}
+		view := m.View()
+		if strings.HasSuffix(view, "\n") {
+			t.Errorf("preview %v: the frame ends in a newline, which scrolls the terminal", preview)
+		}
+		rows := strings.Split(view, "\n")
+		if len(rows) != m.height {
+			t.Errorf("preview %v: the frame is %d rows in a %d-row window", preview, len(rows), m.height)
+		}
+		for i, row := range rows {
+			if w := lipgloss.Width(row); w != m.width {
+				t.Errorf("preview %v: row %d is %d columns, want the %d the window has", preview, i, w, m.width)
+			}
+		}
+	}
+}
+
+// A diff line wider than the pane is broken rather than cut, and the break must not lose anything:
+// the whitespace in a diff is the code.
+func TestPreviewWrapsWithoutLosingCharacters(t *testing.T) {
+	long := "+\t\treturn service.Lock(ctx, r.URL.Path, tenant.ID, \"already held\")"
+	rows := wrapLine(long, 12)
+	if len(rows) < 4 {
+		t.Fatalf("a %d-column line became %d rows, want several", lipgloss.Width(long), len(rows))
+	}
+	for _, row := range rows {
+		if w := lipgloss.Width(row); w > 12 {
+			t.Errorf("row %q is %d columns, over the limit of 12", row, w)
+		}
+	}
+	if got := strings.Join(rows, ""); got != long {
+		t.Errorf("wrapping changed the text:\n in  %q\n out %q", long, got)
+	}
+}
+
+// The renderer skips rows that have not changed, so a colour left open at a break would tint
+// whatever got drawn under it. Each row carries its own styling in and out.
+func TestWrappedRowsCarryTheirOwnColour(t *testing.T) {
+	rows := wrapLine("\x1b[32m"+strings.Repeat("y", 25)+"\x1b[0m", 10)
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3", len(rows))
+	}
+	for _, row := range rows {
+		if !strings.HasPrefix(row, "\x1b[32m") {
+			t.Errorf("row %q does not open the colour it is drawn in", row)
+		}
+		if !strings.HasSuffix(row, "\x1b[0m") {
+			t.Errorf("row %q leaves the colour open for whatever comes next", row)
+		}
+		if w := lipgloss.Width(row); w > 10 {
+			t.Errorf("row %q is %d columns", row, w)
+		}
+	}
+}
+
+// The numbers come out of git's own @@ headers and the +,- and context lines under them. Nothing
+// before a hunk header is numbered, and a line git gave no position keeps the gutter blank rather
+// than inventing one.
+func TestPreviewNumbersTheLinesItCan(t *testing.T) {
+	patch := Patch{Lines: []string{
+		"diff --git a/service.go b/service.go",
+		"index 1111111..2222222 100644",
+		"--- a/service.go",
+		"+++ b/service.go",
+		"@@ -10,4 +10,5 @@",
+		" func a() {",
+		"-\told := 1",
+		"+\tnew := 2",
+		" }",
+		"\\ No newline at end of file",
+		"diff --git a/other.go b/other.go",
+		"new file mode 100644",
+		"--- /dev/null",
+		"+++ b/other.go",
+		"@@ -0,0 +1,2 @@",
+		"+package main",
+		"+",
+	}}
+	numbers, max := lineNumbers(patch.Lines)
+	want := []int{0, 0, 0, 0, 0, 10, 11, 11, 12, 0, 0, 0, 0, 0, 0, 1, 2}
+	for i := range want {
+		if numbers[i] != want[i] {
+			t.Errorf("line %d (%q) numbered %d, want %d", i, patch.Lines[i], numbers[i], want[i])
+		}
+	}
+	if max != 12 {
+		t.Errorf("the largest number is %d, want 12, which sets the gutter width", max)
+	}
+
+	rows := strings.Join(previewBody(patch, 60), "\n")
+	if !strings.Contains(ansi.Strip(rows), "10  func a() {") {
+		t.Errorf("a context line does not carry its number on the side being reviewed:\n%s", ansi.Strip(rows))
+	}
+	if !strings.Contains(ansi.Strip(rows), "11 -\told := 1") || !strings.Contains(ansi.Strip(rows), "11 +\tnew := 2") {
+		t.Errorf("the removed and added lines should each carry the number of their own side:\n%s", ansi.Strip(rows))
+	}
+}
+
+// Colours are classification-proof: git colours the very + and - characters the numbering looks
+// for, so the decision is made on the stripped line while the display keeps the original.
+func TestNumberingSurvivesGitsColours(t *testing.T) {
+	numbers, _ := lineNumbers([]string{
+		"\x1b[32m@@ -1 +1,2 @@\x1b[0m",
+		"\x1b[32m+added\x1b[0m",
+	})
+	if numbers[1] != 1 {
+		t.Errorf("a coloured added line was numbered %d, want 1", numbers[1])
+	}
+}
+
+// A patch with no hunk header -- a binary note, a truncated diff -- gets no numbers rather than
+// numbers that would be wrong.
+func TestNothingIsNumberedWithoutAHunkHeader(t *testing.T) {
+	numbers, max := lineNumbers([]string{
+		"diff --git a/logo.png b/logo.png",
+		"index 1111111..2222222 100644",
+		"Binary files a/logo.png and b/logo.png differ",
+	})
+	if max != 0 || numbers[2] != 0 {
+		t.Errorf("metadata was numbered: %v", numbers)
+	}
 }

@@ -15,6 +15,25 @@ import (
 // `j` runs off the bottom of the files into ABOUT.md and the threads rather than into a
 // separate mode, and Tab jumps between the halves.
 
+// viewRows splits a rendered frame into rows with the padding removed, which is how tests compare
+// against what the model wrote: the frame is padded to the edges of the terminal now.
+func viewRows(view string) []string {
+	rows := strings.Split(strings.TrimSuffix(view, "\n"), "\n")
+	for i, row := range rows {
+		rows[i] = strings.TrimRight(row, " ")
+	}
+	return rows
+}
+
+func hasRow(rows []string, want string) bool {
+	for _, row := range rows {
+		if row == want {
+			return true
+		}
+	}
+	return false
+}
+
 func navModel(t *testing.T) reviewModel {
 	t.Helper()
 	m := newFileListModel(t)
@@ -287,7 +306,7 @@ func TestNewThreadRowSitsUnderItsThreads(t *testing.T) {
 		t.Errorf("threads are not nested under the heading:\n%s", view)
 	}
 	// Expanded, the heading does not repeat a count that the rows below it already give.
-	if !strings.Contains(view, "▾ Threads\n") && !strings.Contains(view, "▾ Threads\r") {
+	if !hasRow(viewRows(view), "▾ Threads") && strings.Contains(view, "▾ Threads") {
 		if strings.Contains(view, "▾ Threads (") {
 			t.Errorf("the expanded heading still shows a count:\n%s", view)
 		} else {
@@ -457,7 +476,7 @@ func TestRuleSeparatesTheListFromTheShortcuts(t *testing.T) {
 
 	rule := -1
 	for i, l := range lines {
-		if l == strings.Repeat("─", 60) {
+		if strings.TrimRight(l, " ") == strings.Repeat("─", 60) { // padded to the window now
 			rule = i
 			break
 		}
@@ -470,8 +489,8 @@ func TestRuleSeparatesTheListFromTheShortcuts(t *testing.T) {
 		t.Fatalf("nothing after the rule:\n%s", strings.Join(lines, "\n"))
 	}
 	for i, want := range help {
-		if lines[rule+1+i] != want {
-			t.Errorf("line %d after the rule = %q, want the shortcut %q", i+1, lines[rule+1+i], want)
+		if got := strings.TrimRight(lines[rule+1+i], " "); got != want {
+			t.Errorf("line %d after the rule = %q, want the shortcut %q", i+1, got, want)
 		}
 	}
 	for _, l := range lines[:rule] {

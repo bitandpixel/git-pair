@@ -982,8 +982,12 @@ place in the section below: the list is what the diff did, the section is the sh
 
 On a terminal at least 100 columns and 16 rows, the list shares the screen with a preview column:
 the diff the common span made to the selected file, paged with `ctrl-f`/`ctrl-b`. It prints git's
-output — colour included — and adds nothing to it, which is the shape PRD §3's refusal to build a
-diff renderer leaves: the pane is for glancing, and reading a diff means opening it.
+own output, colour included, and adds only two things: the line number git itself put in the hunk
+header, and a break where a line is too wide for the column. It does not fold, group, filter, or
+restyle hunks, which is the shape PRD §3's refusal to build a diff renderer leaves: the pane is for
+glancing, and reading a diff means opening it. The frame fills the terminal — the row area holds the
+window's height and every row is padded to its width — so the shortcut bar sits against the bottom
+edge rather than under a short list.
 
 Suggested bindings:
 

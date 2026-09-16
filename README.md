@@ -604,11 +604,15 @@ On a wide terminal the list shares the screen with a preview. From 100 columns a
 session puts a column beside the list showing the diff of whatever the cursor is on — the span's
 diff, the same one `gitpr diff` and the reviewed counter describe — with git's own `+N −M` in its
 header. `ctrl-f` and `ctrl-b` page through a diff too long to fit, and the note along the bottom
-says how much of it is left; `ctrl-d` still quits, which is why paging is not `ctrl-d`. `p`
-switches the pane off, and a terminal too small to fit it says which way it is short rather than
-doing nothing. What the pane prints is git's own bytes with nothing added to them, which is the
-line that keeps it a preview rather than a diff renderer: to read a diff properly you open it, and
-`Enter` is one keypress away.
+says how much of it is left; `ctrl-d` still quits, which is why paging is not `ctrl-d`. Each line
+carries the number git gave it in its hunk header, and a line too wide for the column is broken
+rather than cut, with its colour carried across the break. `p` switches the pane off, and a terminal
+too small to fit it says which way it is short rather than doing nothing.
+
+What the pane prints is git's own bytes: no hunk model, no folding, no colours of its own — the line
+that keeps it a preview rather than a diff renderer, since reading a diff properly means opening it
+and `Enter` is one keypress away. The frame fills the terminal: the list keeps the window's height
+even when there are few files, so the shortcut bar rests against the bottom edge.
 
 In a narrow window the shortcut bar wraps between shortcuts rather than through them —
 `space reviewed` never arrives split in half — and the list gives up the rows it takes.

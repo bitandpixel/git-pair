@@ -109,7 +109,7 @@ func TestRenderedViewWrapsTheHelperInsideTheWindow(t *testing.T) {
 		}
 		found := false
 		for _, line := range lines {
-			if line == wantLine {
+			if strings.TrimRight(line, " ") == wantLine { // the frame is padded to the edge
 				found = true
 				break
 			}

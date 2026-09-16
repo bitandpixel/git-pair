@@ -652,7 +652,24 @@ func (m reviewModel) View() string {
 		b.WriteString(m.listBlock())
 	}
 	b.WriteString(m.footer())
-	return b.String()
+	// Joined rather than newline-terminated: the renderer writes a line for each line of the
+	// frame and moves down after it, so a frame that fills the terminal has no row left for the
+	// cursor to land on and the terminal scrolls a line off the top.
+	rows := strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n")
+	return strings.Join(padRows(rows, m.height, m.width), "\n")
+}
+
+// padRows squares the frame up to the window: blank rows at the bottom, and every row padded to
+// the full width so the frame is the block the terminal is, rather than a set of ragged lines
+// with the divider hanging over nothing.
+func padRows(rows []string, height, width int) []string {
+	for len(rows) < height {
+		rows = append(rows, "")
+	}
+	for i, row := range rows {
+		rows[i] = padRight(row, width)
+	}
+	return rows
 }
 
 // listBlock is the list column on its own: header, the rows in the window, the reviewed
@@ -687,6 +704,11 @@ func (m reviewModel) listBlock() string {
 	// the review is made of".
 	for _, r := range section {
 		b.WriteString(m.line(r) + "\n")
+	}
+	// The row area holds the height the window was given, so the rule and the shortcut bar sit at
+	// the bottom of the terminal instead of floating under a short list.
+	for i := len(files) + len(section); i < m.windowRows(); i++ {
+		b.WriteString("\n")
 	}
 	// A rule rather than a blank line, so the shortcut bar reads as chrome and not as
 	// another row of the list it sits under.
@@ -1061,13 +1083,18 @@ func (m reviewModel) togglePreview() (tea.Model, tea.Cmd) {
 }
 
 // pagePreview scrolls the pane by half a page, which keeps a line or two of context on screen
-// at the break. ctrl-d is quit, so paging is ctrl-f and ctrl-b as in a pager.
+// at the break. It counts rendered rows, because a line wider than the column takes several of
+// them. ctrl-d is quit, so paging is ctrl-f and ctrl-b as in a pager.
 func (m reviewModel) pagePreview(dir int) (tea.Model, tea.Cmd) {
 	if m.paneWidth() == 0 || m.previewPath == "" {
 		return m, nil
 	}
 	patch, ok := m.patches[m.previewPath]
-	if !ok || len(patch.Lines) == 0 {
+	if !ok {
+		return m, nil
+	}
+	total := len(previewBody(patch, m.paneWidth()))
+	if total == 0 {
 		return m, nil
 	}
 	step := m.previewBodyRows() / 2
@@ -1075,7 +1102,7 @@ func (m reviewModel) pagePreview(dir int) (tea.Model, tea.Cmd) {
 		step = 1
 	}
 	offset := m.previewOffset + dir*step
-	if max := len(patch.Lines) - m.previewBodyRows(); offset > max {
+	if max := total - m.previewBodyRows(); offset > max {
 		offset = max
 	}
 	if offset < 0 {
@@ -1111,25 +1138,25 @@ func (m reviewModel) previewLines() []string {
 		return append(out, styleDim.Render("no changes in this span"))
 	}
 
+	// Rows, not source lines: a line wider than the column is drawn as several rows, so paging
+	// and the note have to count what is actually on screen.
+	lines := previewBody(patch, width)
 	offset := m.previewOffset
-	if max := len(patch.Lines) - body; offset > max {
+	if max := len(lines) - body; offset > max {
 		offset = max
 	}
 	if offset < 0 {
 		offset = 0
 	}
 	end := offset + body
-	if end > len(patch.Lines) {
-		end = len(patch.Lines)
+	if end > len(lines) {
+		end = len(lines)
 	}
-	for _, line := range patch.Lines[offset:end] {
-		out = append(out, clip(line, width))
-	}
-	if end < len(patch.Lines) || offset > 0 {
-		note := fmt.Sprintf("… %d more lines  enter opens", len(patch.Lines)-end)
+	out = append(out, lines[offset:end]...)
+	if end < len(lines) || offset > 0 {
+		note := fmt.Sprintf("… %s  enter opens", rowsMore(len(lines)-end))
 		if offset > 0 {
-			note = fmt.Sprintf("%d\u2013%d of %d lines  ctrl-b/ctrl-f  enter opens",
-				offset+1, end, len(patch.Lines))
+			note = fmt.Sprintf("rows %d\u2013%d of %d  ctrl-b/ctrl-f  enter opens", offset+1, end, len(lines))
 		}
 		if patch.Capped {
 			note = "diff too large to read here  enter opens"
@@ -1137,6 +1164,14 @@ func (m reviewModel) previewLines() []string {
 		out = append(out, styleDim.Render(clip(note, width)))
 	}
 	return out
+}
+
+// rowsMore words the count of rows the pane has left to show.
+func rowsMore(n int) string {
+	if n == 1 {
+		return "1 more row"
+	}
+	return fmt.Sprintf("%d more rows", n)
 }
 
 // joinColumns places the preview beside the list. Each list row is padded to the list's column
