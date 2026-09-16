@@ -292,9 +292,23 @@ changeset. Hand-verification of everything the README documents additionally cor
     thread launch the difftool with no note; a thread written after the review launches the
     editor with "added by this changeset"; in the full span ABOUT.md does the same.
 
-    Flagged rather than fixed: `console.EditorCommand` resolves `VISUAL`/`EDITOR` (default
-    `vi`) and ignores `GIT_EDITOR` and `core.editor`, both of which git itself honours, so a
-    reviewer who configured their editor the git way gets `vi` in the TUI. Separate change.
+    Flagged there and fixed below: `console.EditorCommand` resolved `VISUAL`/`EDITOR` (default
+    `vi`) and ignored `GIT_EDITOR` and `core.editor`, both of which git itself honours, so a
+    reviewer who configured their editor the git way got `vi` in the TUI. Fixed in 19.
+19. **The editor now comes from git, which is where everyone configures it.** `EditorCommand`
+    read `$VISUAL`, then `$EDITOR`, then `vi`, so `git config core.editor vim` — what git's own
+    docs recommend, and what my `~/.gitconfig` said — was invisible: the TUI opened `vi`, and an
+    `$EDITOR` set alongside a `core.editor` won in the wrong order. Asking git removes both
+    defects and the rules we should not be maintaining: `git var GIT_EDITOR` answers the whole
+    documented chain, `GIT_EDITOR`, `core.editor` (repository-local included), `VISUAL`,
+    `EDITOR`, and the fallback the git build was configured with — which on this platform is
+    `editor`, not `vi`, a detail the first version of these tests got wrong and the code did
+    not. The environment chain stays as the last resort for a git that cannot answer, where
+    `vi` remains the literal default. The launch shape is unchanged (`eval exec
+    ${GITPR_EDITOR} "$@"`), so `core.editor="code --wait"` still splits into program and flags,
+    and `GIT_EDITOR=true` still means "no editor" exactly as it does for git. Verified in the
+    TUI against a repository whose `core.editor` is a marker script: `e` ran the marker with the
+    absolute path, where the previous binary had opened `vi`.
 18. **The difftool's exit messages outlived the TUI, so a session that handed the terminal away
     clears the screen.** Bubbletea's handoff suspends the renderer and leaves the alt screen,
     so the child draws on the main screen; when vimdiff quits it prints `2 files to edit` there

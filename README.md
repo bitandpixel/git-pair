@@ -519,16 +519,21 @@ progress it uses `gitpr change ready`.
 
 ## Configuration
 
-Editors resolve as `$VISUAL`, then `$EDITOR`, then `vi` — the same precedence git uses, so a
-machine with `VISUAL=vim` set ignores an `EDITOR` override. Automated harnesses must clear
-both, and every editor probe should be wrapped in `timeout`, because an editor that takes the
-terminal and is never driven will block forever.
+The editor is whatever git would use: gitpr asks git with `git var GIT_EDITOR`, so the
+precedence is git's — `GIT_EDITOR`, then `core.editor`, then `VISUAL`, then `EDITOR`, then
+whatever fallback the git build was configured with. `git config core.editor vim` is therefore
+enough, including when it is set in the repository rather than globally, and a caller that
+injects `GIT_EDITOR` (a hook, another tool) is honoured the way every other git consumer
+honours it. Only when git cannot answer does gitpr fall back to `$VISUAL`, then `$EDITOR`, then
+`vi`. Automated harnesses must clear `GIT_EDITOR` along with `VISUAL`/`EDITOR`, and every editor
+probe should be wrapped in `timeout`, because an editor that takes the terminal and is never
+driven will block forever.
 
-The value is expanded by `/bin/sh` with word splitting, exactly as git expands it, so
-`EDITOR="code --wait"` works: `code` is the program and `--wait` its flag. A program path
-containing a literal space needs quoting inside the value
-(`EDITOR='"/my editor.sh" --wait'`), again as it does for git. The editor runs with the
-repository root as its working directory and receives the absolute path of the file.
+The resolved value is a command line, expanded by `/bin/sh` with word splitting exactly as git
+expands it, so `core.editor="code --wait"` works: `code` is the program and `--wait` its flag. A
+program path containing a literal space needs quoting inside the value
+(`git config core.editor '"/my editor.sh" --wait'`), again as it does for git. The editor runs
+with the repository root as its working directory and receives the absolute path of the file.
 
 Diff viewing goes through git, so git configuration decides what you see, e.g.
 `git config diff.tool vimdiff`. `gitpr diff --tool` and the TUI's `Enter` key both run

@@ -536,7 +536,7 @@ func (m reviewModel) openPath(relPath string) (tea.Model, tea.Cmd) {
 // again; this is the only way a note outlives the editor.
 func (m reviewModel) openPathNoted(relPath, note string) (tea.Model, tea.Cmd) {
 	repo := m.sess.Repo()
-	cmd, err := console.EditorCommand(repo, absPath(repo.Dir, relPath))
+	cmd, err := console.EditorCommand(m.ctx, repo, absPath(repo.Dir, relPath))
 	if err != nil {
 		m.setStatus(err.Error(), true)
 		return m, nil

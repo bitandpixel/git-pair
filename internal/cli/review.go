@@ -661,7 +661,7 @@ func openFile(ctx context.Context, a *app, repo *git.Repo, relPath string, ensur
 			"opening an editor needs a terminal; edit %s directly — it is an ordinary file in the working tree",
 			relPath)}
 	}
-	cmd, err := console.EditorCommand(repo, abs)
+	cmd, err := console.EditorCommand(ctx, repo, abs)
 	if err != nil {
 		return err
 	}

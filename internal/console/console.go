@@ -8,6 +8,7 @@ package console
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -19,13 +20,23 @@ import (
 	"gitpr/internal/git"
 )
 
-// EditorCommand builds the command opening path in the user's editor, honouring
-// $VISUAL then $EDITOR then vi.
+// EditorCommand builds the command opening path in the user's editor.
 //
-// Resolution order is $VISUAL, then $EDITOR, then vi — the same precedence git
-// uses, so a machine with VISUAL=vim ignores an EDITOR override.
-func EditorCommand(repo *git.Repo, path string) (*exec.Cmd, error) {
-	value := firstSet(os.Getenv("VISUAL"), os.Getenv("EDITOR"), "vi")
+// The editor is whatever git would use, so gitpr asks git instead of searching on its own:
+// GIT_EDITOR, then core.editor, then VISUAL, then EDITOR, then vi. Two things come from that
+// beyond getting the order right — an EDITOR override does not outrank core.editor in git, and
+// used to here — repo-local core.editor becomes available, which an environment lookup can
+// never see, and a wrapper that injects GIT_EDITOR (a hook, another tool) is honoured the way
+// every other git consumer honours it. The value is a command line, so the launch keeps git's
+// shape: `myeditor --wait` is a program plus flags, not a program named "myeditor --wait".
+func EditorCommand(ctx context.Context, repo *git.Repo, path string) (*exec.Cmd, error) {
+	value, err := repo.Git(ctx, "var", "GIT_EDITOR")
+	value = strings.TrimSpace(value)
+	if err != nil || value == "" {
+		// Only a git that cannot answer gets here. Falling back is also kinder than git,
+		// which would try to run an empty editor name.
+		value = firstSet(os.Getenv("VISUAL"), os.Getenv("EDITOR"), "vi")
+	}
 	if runtime.GOOS == "windows" {
 		// No shell splitting: treat the value as a program name.
 		fields := strings.Fields(value)
@@ -38,18 +49,18 @@ func EditorCommand(repo *git.Repo, path string) (*exec.Cmd, error) {
 	// EDITOR="code --wait" splits into a program and its flags. Quoting the
 	// expansion instead treats the whole value as one program name. A value
 	// containing a literal space in the program name needs its own quoting
-	// ("EDITOR=\"/my editor.sh\" --wait"), exactly as it does for git.
-	cmd := exec.Command("/bin/sh", "-c", `eval exec ${VISUAL:-${EDITOR:-vi}} "$@"`, "gitpr", path)
+	// (core.editor="/my editor.sh" --wait), exactly as it does for git.
+	cmd := exec.Command("/bin/sh", "-c", `eval exec ${GITPR_EDITOR} "$@"`, "gitpr", path)
 	cmd.Dir = repo.Dir
-	cmd.Env = append(os.Environ(), "VISUAL="+value)
+	cmd.Env = append(os.Environ(), "GITPR_EDITOR="+value)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd, nil
 }
 
-// DiffToolCommand builds `git difftool <from> <to> -- <paths>` so review uses
-// whatever the user configured (vimdiff, meld, ...) instead of a renderer of
-// gitpr's own. --no-prompt avoids a per-file confirmation for what is already
-// an explicit, single-file request.
+// DiffToolCommand builds `git difftool <from> -- <paths>` for one revision against the
+// working tree, so review uses whatever the user configured (vimdiff, meld, ...) instead of a
+// renderer of gitpr's own. --no-prompt avoids a per-file confirmation for what is already an
+// explicit, single-file request.
 // DiffToolCommand launches the user's configured difftool for `from` against
 // the working tree.
 //
@@ -69,7 +80,7 @@ func DiffToolCommand(repo *git.Repo, from string, paths []string) *exec.Cmd {
 	return command(repo, "git", args...)
 }
 
-// DiffCommand builds `git git diff <from> <to> -- <paths>` for terminal viewing.
+// DiffCommand builds `git diff <from> <to> -- <paths>` for terminal viewing.
 func DiffCommand(repo *git.Repo, from, to string, paths []string) *exec.Cmd {
 	args := []string{"-c", "core.quotePath=false", "diff", from, to}
 	if len(paths) > 0 {
