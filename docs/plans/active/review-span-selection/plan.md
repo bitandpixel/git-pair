@@ -177,9 +177,10 @@ Tasks:
 - [x] `V` in both shortcut bars. The picker is deliberately outside the read-only gate: it is how a
       historical span gets out, and it changes nothing until `Enter`.
 - [x] README, PRD §14 and §28.
-- [ ] Base-side CLI flags (`--base-review`, `--base-commit`, `--base-ref`), so a scripted call can
-      name a base the way the picker does. Deferred: `--since-review` already covers the review case,
-      and nothing else in the plan needs them.
+- [x] Base-side CLI flags (`--base-review`, `--base-commit`, `--base-ref`) on `diff` and
+      `review open`, so a script can name a base the way the picker does. `--unreviewed` and
+      `--since-review` name the same end, so the two families are mutually exclusive rather than
+      one silently winning; `--base-review` bare means `-1`, like its siblings.
 
 Verification:
 
@@ -196,6 +197,10 @@ Verification:
 - [x] The frame invariant in both picker layouts (columns and drill).
 - [x] Pty walkthrough of scenarios B and C, and of a live span whose base is a commit — §23's first
       matrix row.
+- [x] The CLI says the same thing the picker does: `--base-review=0 --head-review=1` and
+      `--since-review=0 --head-review=1` print byte-identical diffs, a `--base-ref` span names
+      itself `probe@<sha>`, and naming the base twice — within a family or across the two — is a
+      usage error.
 
 ### M3b — `v` walks the spans this session has been in
 

@@ -107,6 +107,9 @@ func TestExitCodeUsageError(t *testing.T) {
 		{"non-integer span index", []string{"diff", "--since-review=xyz"}},
 		{"out-of-range span index", []string{"diff", "--since-review=42"}},
 		{"contradictory spans", []string{"diff", "--unreviewed", "--since-review=-1"}},
+		{"non-integer base index", []string{"diff", "--base-review=xyz"}},
+		{"contradictory bases", []string{"diff", "--base-commit=abc", "--base-ref=main"}},
+		{"base named twice across the families", []string{"diff", "--since-review=-1", "--base-review=-1"}},
 		{"extra argument", []string{"review", "queue", "extra"}},
 		{"thread without a title", []string{"review", "thread"}},
 	} {

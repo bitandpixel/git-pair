@@ -26,6 +26,9 @@ Spans:
   --since-review[=N]     Nth review .. HEAD             N is chronological, -1 is latest
 
 Either end can be named instead, which is how you look at history:
+  --base-review=N        start at review N
+  --base-commit=SHA      start at a commit
+  --base-ref=NAME        start at a ref, pinned to where it points now
   --head-review=N        end at review N                a historical span
   --head-commit=SHA      end at a commit
   --head-ref=NAME        end at a ref, pinned to where it points now
@@ -45,7 +48,9 @@ settings apply.`,
   gitpr diff --unreviewed
   gitpr diff --since-review=-3
   gitpr diff --since-review=0 -- changesets/
-  gitpr diff --since-review=-2 --head-review=-1`,
+  gitpr diff --since-review=-2 --head-review=-1
+  gitpr diff --base-ref=main --head-commit=abc1234
+  gitpr diff --base-review=0 --stat`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDiff(cmd.Context(), a, opts, args)
@@ -59,10 +64,14 @@ settings apply.`,
 }
 
 // spanOptions is the CLI shape of a span selector: the flags `diff` and `review
-// open` share, so both resolve spans the same way the picker will.
+// open` share, so both resolve spans the same way the picker does. Each end of the
+// span can be named by review index, by commit, or by ref.
 type spanOptions struct {
 	unreviewed  bool
 	sinceReview string
+	baseReview  string
+	baseCommit  string
+	baseRef     string
 	headReview  string
 	headCommit  string
 	headRef     string
@@ -72,11 +81,23 @@ type spanOptions struct {
 
 // register adds the base-end span flags. `stat` and `tool` are diff's own and stay
 // with the caller.
+//
+// `--unreviewed` and `--since-review` name a base too, and they are the ones that read as
+// work in progress rather than as an endpoint. They are mutually exclusive with the
+// `--base-*` flags rather than quietly overridden by them: two flags that both name the base
+// and disagree is a command the reviewer should have to fix, not a precedence to remember.
 func (o *spanOptions) register(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&o.unreviewed, "unreviewed", false, "span since the most recent review submission")
 	cmd.Flags().StringVar(&o.sinceReview, "since-review", "",
 		"span since review N (bare --since-review means -1)")
 	cmd.Flags().Lookup("since-review").NoOptDefVal = "-1"
+	cmd.Flags().StringVar(&o.baseReview, "base-review", "",
+		"start the span at review N rather than the changeset base (bare --base-review means -1)")
+	cmd.Flags().StringVar(&o.baseCommit, "base-commit", "",
+		"start the span at a commit rather than the changeset base")
+	cmd.Flags().StringVar(&o.baseRef, "base-ref", "",
+		"start the span at a ref, pinned to the commit it points at now")
+	cmd.Flags().Lookup("base-review").NoOptDefVal = "-1"
 }
 
 // registerHead adds the flags that name the head, which is what turns a span into a
@@ -92,24 +113,38 @@ func (o *spanOptions) registerHead(cmd *cobra.Command) {
 	cmd.Flags().Lookup("head-review").NoOptDefVal = "-1"
 }
 
-// selector turns the flags into a span selector.
+// selector turns the flags into a span selector. Both ends default to the full changeset:
+// the merge base of the changeset's base ref, and the working tree.
 func (o *spanOptions) selector() (span.Selector, error) {
-	if o.unreviewed && o.sinceReview != "" {
-		return span.Selector{}, &usageError{errors.New("--unreviewed and --since-review are mutually exclusive")}
-	}
 	base := span.ChangesetBase()
-	if o.sinceReview != "" {
+	if named := o.baseNamed(); named > 1 {
+		return span.Selector{}, &usageError{errors.New(
+			"--unreviewed, --since-review, --base-review, --base-commit and --base-ref each name the " +
+				"base end; pick one")}
+	}
+	switch {
+	case o.sinceReview != "":
 		n, err := strconv.Atoi(o.sinceReview)
 		if err != nil {
 			return span.Selector{}, &usageError{fmt.Errorf("--since-review expects an integer index, got %q", o.sinceReview)}
 		}
 		base = span.Review(n)
-	} else if o.unreviewed {
+	case o.unreviewed:
 		base = span.Review(-1)
+	case o.baseReview != "":
+		n, err := strconv.Atoi(o.baseReview)
+		if err != nil {
+			return span.Selector{}, &usageError{fmt.Errorf("--base-review expects an integer index, got %q", o.baseReview)}
+		}
+		base = span.Review(n)
+	case o.baseCommit != "":
+		base = span.Commit(o.baseCommit)
+	case o.baseRef != "":
+		base = span.Ref(o.baseRef)
 	}
 
 	head := span.WorkingTree()
-	if named := o.headNamed(); named > 1 {
+	if named := named(o.headReview, o.headCommit, o.headRef); named > 1 {
 		return span.Selector{}, &usageError{errors.New(
 			"--head-review, --head-commit and --head-ref name the same end; pick one")}
 	}
@@ -128,9 +163,21 @@ func (o *spanOptions) selector() (span.Selector, error) {
 	return span.Selector{Base: base, Head: head}, nil
 }
 
-func (o *spanOptions) headNamed() int {
+// baseNamed counts how many ways the base end was named. `--unreviewed` counts as one: it is
+// a base, spelled as a question about work left to do.
+func (o *spanOptions) baseNamed() int {
 	n := 0
-	for _, v := range []string{o.headReview, o.headCommit, o.headRef} {
+	if o.unreviewed {
+		n++
+	}
+	return n + named(o.sinceReview, o.baseReview, o.baseCommit, o.baseRef)
+}
+
+// named counts how many of the flag values were given. Each end of a span has several ways to
+// be named and exactly one may be used.
+func named(values ...string) int {
+	n := 0
+	for _, v := range values {
 		if v != "" {
 			n++
 		}

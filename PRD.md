@@ -1291,8 +1291,15 @@ branch mid-review would silently change what the already-reviewed files meant. A
 checkpoint takes an explicit refresh, which recomputes the span; reviewed marks are keyed on
 commits, so a mark that no longer applies simply does not come back.
 
-`gitpr diff` accepts `--head-review`, `--head-commit` and `--head-ref`. `gitpr review open` accepts
-the same and opens read-only when one of them names the head.
+`gitpr diff` and `gitpr review open` accept both ends of a span: `--base-review`, `--base-commit` and
+`--base-ref` name the start, `--head-review`, `--head-commit` and `--head-ref` the end. `review open`
+opens read-only when one of the head flags names the head; naming only the base leaves the span live,
+including when that base is a ref pinned at selection.
+
+`--unreviewed` and `--since-review` name the start too, spelled as work left to do, so they are
+mutually exclusive with the `--base-*` flags rather than overridden by them. `--base-review` with no
+value means `-1`, as the other review flags do. Both families feed the one span resolver, so
+`--base-review=0 --head-review=1` and `--since-review=0 --head-review=1` are the same two commits.
 
 There are no mixed span semantics in the MVP.
 

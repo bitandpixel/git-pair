@@ -347,6 +347,102 @@ func TestDiffHeadCheckpoints(t *testing.T) {
 	})
 }
 
+// The base is an end of the span like any other, and naming it is how a script says "diff
+// from here" without knowing the merge base. It gets the same three spellings as the head:
+// review index, commit, ref — and the same rule that a ref keeps its name next to its pin.
+func TestDiffBaseCheckpoints(t *testing.T) {
+	f, _ := newChangeset(t, "booking", "main")
+	ready(t, f)
+
+	f.Write("service.go", "package main\n\n// first review\nfunc Lock() {}\n")
+	submit(t, f, "block")
+	firstReview := f.Head()
+	f.Commit("response 1", gittest.WithFile("service.go", "package main\n\nfunc Lock() { tx() }\n"))
+	f.Write("handler.go", "package main\n\n// second review\nfunc Serve() {}\n")
+	submit(t, f, "feedback")
+	secondReview := f.Head()
+
+	want, err := f.Git("diff", firstReview, secondReview)
+	if err != nil {
+		t.Fatalf("git diff: %v", err)
+	}
+
+	t.Run("review base", func(t *testing.T) {
+		got := runIn(t, f.Dir(), "diff", "--base-review=0", "--head-review=1").
+			mustSucceed(t, "diff --base-review=0 --head-review=1")
+		if got.stdout != want {
+			t.Error("a span named by base and head review differs from `git diff <first> <second>`")
+		}
+		// One span, one resolver (requirements §21): naming the base and saying "since" it
+		// must arrive at the same commits.
+		same := runIn(t, f.Dir(), "diff", "--since-review=0", "--head-review=1").
+			mustSucceed(t, "diff --since-review=0 --head-review=1")
+		if got.stdout != same.stdout {
+			t.Error("--base-review=0 and --since-review=0 resolved different spans")
+		}
+	})
+
+	t.Run("commit base", func(t *testing.T) {
+		got := runIn(t, f.Dir(), "diff", "--base-commit="+firstReview, "--head-commit="+secondReview).
+			mustSucceed(t, "diff --base-commit")
+		if got.stdout != want {
+			t.Error("a commit base differs from the same span named by review")
+		}
+	})
+
+	t.Run("ref base keeps its name", func(t *testing.T) {
+		f.MustGit("branch", "probe", firstReview)
+		got := runIn(t, f.Dir(), "diff", "--base-ref=probe", "--head-commit="+secondReview).
+			mustSucceed(t, "diff --base-ref=probe")
+		if got.stdout != want {
+			t.Error("a ref base differs from the same span named by commit")
+		}
+		mustContain(t, got.stderr, "probe@", "the span must name the ref, not just its commit")
+	})
+
+	t.Run("a bare --base-review is the latest review", func(t *testing.T) {
+		wantLatest, err := f.Git("diff", secondReview, "HEAD")
+		if err != nil {
+			t.Fatalf("git diff: %v", err)
+		}
+		got := runIn(t, f.Dir(), "diff", "--base-review").mustSucceed(t, "diff --base-review")
+		if got.stdout != wantLatest {
+			t.Error("a bare --base-review did not resolve to the most recent review")
+		}
+	})
+
+	t.Run("the base is named once", func(t *testing.T) {
+		for _, args := range [][]string{
+			{"--base-commit=" + firstReview, "--base-ref=probe"},
+			{"--base-review=0", "--base-commit=" + firstReview},
+			{"--unreviewed", "--base-commit=" + firstReview},
+			{"--since-review=0", "--base-review=0"},
+		} {
+			res := runIn(t, f.Dir(), append([]string{"diff"}, args...)...)
+			if res.code != exitUsage {
+				t.Errorf("naming the base twice (%s) exited %d, want %d\nstderr: %s",
+					strings.Join(args, " "), res.code, exitUsage, res.stderr)
+			}
+		}
+	})
+
+	t.Run("a base that is not there", func(t *testing.T) {
+		res := runIn(t, f.Dir(), "diff", "--base-commit=no-such-thing")
+		if res.code == 0 {
+			t.Fatalf("a commit that does not exist resolved a span\nstdout: %s", res.stdout)
+		}
+		mustContain(t, res.stderr, "no-such-thing", "the error must name what failed to resolve")
+	})
+
+	t.Run("a base index that is not a number", func(t *testing.T) {
+		res := runIn(t, f.Dir(), "diff", "--base-review=xyz")
+		if res.code != exitUsage {
+			t.Errorf("a non-integer --base-review exited %d, want %d\nstderr: %s", res.code, exitUsage, res.stderr)
+		}
+		mustContain(t, res.stderr, "--base-review", "the error must name the flag it rejected")
+	})
+}
+
 // PRD §11.2 / §17: a path narrows the same resolved span.
 func TestDiffWithFilePath(t *testing.T) {
 	f, _ := newChangeset(t, "booking", "main")

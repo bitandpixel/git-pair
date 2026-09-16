@@ -65,11 +65,19 @@ a (approve); Esc cancels. The same outcomes are available from the CLI:
 
 A span whose head is a commit rather than your working tree is a look at history.
 The screen opens read-only: no marking, no editing, no submission, and the shortcut
-bar says so. v returns you to a span you can review.`,
+bar says so. v returns you to a span you can review.
+
+Both ends can be named from here: --base-review, --base-commit and --base-ref choose where
+the span starts, --head-review, --head-commit and --head-ref where it ends. Inside the
+screen, v walks the spans this session has been in and V picks one out.
+
+A ref endpoint is pinned when the span is created. If the ref moves while you review, the
+screen keeps the pinned span and offers r to re-pin it.`,
 		Example: `  gitpr review open
   gitpr review open --unreviewed
   gitpr review open --since-review=-2
-  gitpr review open --since-review=-3 --head-review=-1`,
+  gitpr review open --since-review=-3 --head-review=-1
+  gitpr review open --base-ref=main --head-commit=abc1234`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewOpen(cmd.Context(), a, opts)

@@ -263,12 +263,17 @@ command reports them.)
 | (default) | `merge-base(base, HEAD)..HEAD` | what is in this changeset |
 | `--unreviewed` | `<latest review>..HEAD` | what happened since I reviewed |
 | `--since-review=N` | `<Nth review>..HEAD` | what happened since review N |
+| `--base-review=N` | `<Nth review>..<span end>` | start at a review rather than the changeset base |
+| `--base-commit=SHA` | `<commit>..<span end>` | "diff from here", with no need to know the merge base |
+| `--base-ref=NAME` | `<NAME @ its commit>..<span end>` | start at a branch or tag, pinned to where it pointed when you chose it |
 | `--head-review=N` | `<span start>..<Nth review>` | what things looked like at review N |
 | `--head-commit=SHA` | `<span start>..<commit>` | a fixed historical range |
 | `--head-ref=NAME` | `<span start>..<NAME @ its commit>` | a range measured to where a branch pointed when you chose it |
 
-`--since-review` with no value means `-1`; indexes are chronological (`0` first, `-1`
-latest) and match `gitpr review history`.
+`--since-review` with no value means `-1`, and so does `--base-review`; indexes are chronological
+(`0` first, `-1` latest) and match `gitpr review history`. `--unreviewed`, `--since-review` and the
+three `--base-*` flags all name the start of the span, so they are mutually exclusive — two of them
+disagreeing is a command to fix, not a precedence to remember.
 
 Those spans answer the reviewer's questions. The author's question — *what did the reviewer
 just tell me?* — is `gitpr change feedback`, which diffs the submission itself
@@ -325,7 +330,7 @@ output for it; elsewhere it is accepted and ignored.
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change feedback` | `--stat`, `--name-only` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
 | `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`/`CLOSED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
-| `review open` | `--unreviewed`, `--since-review[=N]`, `--head-review[=N]`, `--head-commit`, `--head-ref` | TUI; needs a terminal; full changeset unless a span flag says otherwise; a `--head-*` flag opens a historical span, which is read-only |
+| `review open` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref` | TUI; needs a terminal; full changeset unless a span flag says otherwise; a `--head-*` flag opens a historical span, which is read-only |
 | `review reopen` | none | TUI on `<latest review>..HEAD`, the work that has landed since you reviewed; needs a terminal; refuses if no review exists |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
@@ -334,7 +339,7 @@ output for it; elsewhere it is accepted and ignored.
 | `review queue` | — | every changeset in this repo whose derived state is `READY`, longest wait first |
 | `review close` | `--allow-surviving-review-additions` | archives and closes; never merges, pushes or squashes |
 | `status` | — | derived state for the current branch's changeset |
-| `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
+| `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
 commits, no blocking surviving additions. `review close` checks: clean tree, latest outcome
@@ -628,6 +633,11 @@ What the pane prints is git's own bytes: no hunk model, no folding, no colours o
 that keeps it a preview rather than a diff renderer, since reading a diff properly means opening it
 and `Enter` is one keypress away. The frame fills the terminal: the list keeps the window's height
 even when there are few files, so the shortcut bar rests against the bottom edge.
+
+A span can start anywhere as well as end anywhere — `diff --base-ref=main`,
+`--base-commit=abc1234`, `--base-review=0` — which is how a script names a starting point without
+computing the merge base itself, and how the same span can be described from either end
+(`--base-review=0 --head-review=1` is `--since-review=0 --head-review=1`).
 
 A span can end at a commit instead of your working tree — `review open --head-review=-1`,
 `--head-commit=abc1234`, `--head-ref=origin/main` — and that is a look at history, not a review. The
