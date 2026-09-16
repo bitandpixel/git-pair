@@ -94,8 +94,16 @@ func TestPreviewOnlyAppearsWhenThereIsRoom(t *testing.T) {
 	if pane+list+previewGap != wide.width {
 		t.Errorf("pane %d + list %d + gap %d != the terminal's %d columns", pane, list, previewGap, wide.width)
 	}
-	if list < 40 {
-		t.Errorf("a %d-column terminal leaves the list %d columns, which cannot show a path", wide.width, list)
+	// The list is sized to its own rows rather than to a share of the screen: a changeset of
+	// short paths hands the columns it cannot use to the diff.
+	if list != wide.listContentWidth() {
+		t.Errorf("the list took %d columns, want the %d its own rows need", list, wide.listContentWidth())
+	}
+	if list < previewListMin || list > previewListMax {
+		t.Errorf("the list took %d columns, outside the %d to %d it is allowed", list, previewListMin, previewListMax)
+	}
+	if old := (wide.width - previewGap) * 60 / 100; pane <= old {
+		t.Errorf("the pane got %d columns; the fixed 60/40 split used to give it %d, so adapting bought nothing", pane, old)
 	}
 	if !strings.Contains(wide.View(), "│") {
 		t.Error("a wide terminal draws no preview")
@@ -279,7 +287,7 @@ func TestTheFrameIsExactlyTheWidthOfTheTerminal(t *testing.T) {
 	}
 	m = askPreview(t, m)
 
-	rows := strings.Split(strings.TrimSuffix(joinColumns(m.listBlock(), m.previewLines()), "\n"), "\n")
+	rows := strings.Split(strings.TrimSuffix(joinColumns(m.listBlock(), m.previewLines(), m.listWidth()), "\n"), "\n")
 	if len(rows) < 5 {
 		t.Fatalf("the block is %d rows, want a list with a pane beside it", len(rows))
 	}
@@ -445,5 +453,87 @@ func TestNothingIsNumberedWithoutAHunkHeader(t *testing.T) {
 	})
 	if max != 0 || numbers[2] != 0 {
 		t.Errorf("metadata was numbered: %v", numbers)
+	}
+}
+
+// The list stops growing at the cap: one vendored path should not cost the reviewer the columns
+// the diff is read in, and the path that would have widened it is clipped instead.
+func TestTheListStopsGrowingAtTheCap(t *testing.T) {
+	m := previewModel(t)
+	m.rows[0].name = strings.Repeat("vendor/", 30) + "service.go"
+	if got := m.listContentWidth(); got <= previewListMax {
+		t.Fatalf("the widest row is %d columns; the test needs one over the cap of %d", got, previewListMax)
+	}
+	list, pane := m.previewLayout()
+	if list != previewListMax {
+		t.Errorf("the list took %d columns, want the cap of %d", list, previewListMax)
+	}
+	if pane != m.width-list-previewGap {
+		t.Errorf("the pane got %d columns, want the %d left over", pane, m.width-list-previewGap)
+	}
+	if !strings.Contains(clip(m.rowText(m.rows[0]), list), "…") {
+		t.Error("the path over the cap was not clipped to the column")
+	}
+}
+
+// The column is sized for the whole changeset, not the rows currently in the window: a divider
+// that moved as a longer path scrolled into view would make the screen jump under the cursor.
+func TestTheDividerDoesNotMoveWithTheWindow(t *testing.T) {
+	m := previewModel(t)
+	m.height = previewMinHeight
+	for i := range 12 {
+		m.rows = append(m.rows, row{kind: rowFile, name: fmt.Sprintf("f%02d.go", i), path: fmt.Sprintf("f%02d.go", i)})
+	}
+	long := strings.Repeat("deep/", 6) + "thing.go"
+	last := len(m.rows) - 1
+	m.rows[last].name, m.rows[last].path = long, long
+
+	list := m.listWidth()
+	visible := 0
+	for _, idx := range m.visibleRows() {
+		if w := lipgloss.Width(m.rowText(m.rows[idx])); w > visible {
+			visible = w
+		}
+	}
+	if list <= visible {
+		t.Errorf("the column is %d columns, which is the window's own width (%d): it should be sized for the path below", list, visible)
+	}
+	m.scroll = last
+	if got := m.listWidth(); got != list {
+		t.Errorf("scrolling to the long path moved the divider from %d to %d", list, got)
+	}
+}
+
+// The minimums are arithmetic rather than branches, so they need a test instead of a guard: at
+// the narrowest terminal that gets a pane, the diff still gets a readable column even with the
+// list at its cap.
+func TestPreviewHasRoomAtTheThreshold(t *testing.T) {
+	m := previewModel(t)
+	m.width = previewMinWidth
+	m.rows[0].name = strings.Repeat("vendor/", 30) + "service.go"
+
+	list, pane := m.previewLayout()
+	if list != previewListMax {
+		t.Fatalf("the list took %d columns at the threshold, want the cap of %d", list, previewListMax)
+	}
+	if pane < previewMinPane {
+		t.Errorf("at %d columns the pane gets %d, want at least %d", previewMinWidth, pane, previewMinPane)
+	}
+}
+
+// With the pane off, the list is the whole terminal again: hiding the diff must not leave the
+// paths clipped to a column that is no longer there.
+func TestHidingThePreviewGivesTheListBackItsWidth(t *testing.T) {
+	m := previewModel(t)
+	m.rows[0].name = strings.Repeat("deep/", 12) + "service.go"
+	if clip(m.rowText(m.rows[0]), m.listWidth()) == m.rowText(m.rows[0]) {
+		t.Fatal("the long path fits the pane's list column; the test needs one that does not")
+	}
+	m.previewOn = false
+	if got := m.listWidth(); got != m.width {
+		t.Errorf("with the preview hidden the list is %d columns, want the terminal's %d", got, m.width)
+	}
+	if strings.Contains(m.View(), "\u2502") {
+		t.Error("the divider is still drawn with the preview hidden")
 	}
 }

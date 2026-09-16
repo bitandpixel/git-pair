@@ -647,7 +647,7 @@ func (m reviewModel) View() string {
 	}
 	var b strings.Builder
 	if m.paneWidth() > 0 {
-		b.WriteString(joinColumns(m.listBlock(), m.previewLines()))
+		b.WriteString(joinColumns(m.listBlock(), m.previewLines(), m.listWidth()))
 	} else {
 		b.WriteString(m.listBlock())
 	}
@@ -672,6 +672,16 @@ func padRows(rows []string, height, width int) []string {
 	return rows
 }
 
+// headerLines are the two lines over the list: the changeset, and the base and span it is
+// measured against. They are also what the list column has to be wide enough for, so they are
+// built in one place rather than measured in one and drawn in another.
+func (m reviewModel) headerLines(h Header) []string {
+	return []string{
+		styleSpan.Render(h.Title),
+		styleDim.Render("base: "+h.Base) + "  " + styleDim.Render("span: "+m.spanName(h.SpanLabel)),
+	}
+}
+
 // listBlock is the list column on its own: header, the rows in the window, the reviewed
 // counter, the changeset section, and the rule under it. It is apart from View because the
 // preview is drawn beside exactly this block, row for row.
@@ -680,9 +690,9 @@ func (m reviewModel) listBlock() string {
 	h := m.sess.Header()
 	reviewed, total := m.sess.Count()
 
-	b.WriteString(styleSpan.Render(h.Title) + "\n")
-	b.WriteString(styleDim.Render("base: "+h.Base) + "  " +
-		styleDim.Render("span: "+m.spanName(h.SpanLabel)) + "\n")
+	headers := m.headerLines(h)
+	b.WriteString(clip(headers[0], m.listWidth()) + "\n")
+	b.WriteString(clip(headers[1], m.listWidth()) + "\n")
 	b.WriteString("\n")
 
 	if total == 0 {
@@ -971,25 +981,57 @@ func (m reviewModel) window() (files, section []renderedRow) {
 	return files, section
 }
 
-// The preview pane is a wide-terminal luxury, so it has an entry condition rather than a
-// squeeze: below these dimensions there is no pane at all, and `p` says which way the terminal
-// is short. At 60/40 the list keeps 40 columns at the threshold, which is what it needs for a
-// path and a mark.
+// The preview pane is a wide-terminal luxury, so it has an entry condition rather than a squeeze:
+// below these dimensions there is no pane at all, and `p` says which way the terminal is short.
+// Above them the two columns are content-driven: the list takes what its own text needs, capped,
+// and the diff gets the rest.
 const (
 	previewMinWidth  = 100
 	previewMinHeight = 16
 	previewGap       = 3  // a space, the divider, a space -- joinColumns renders exactly this
-	previewShare     = 60 // percent of the columns left after the gap
+	previewListMin   = 24 // a mark, a path, and room to tell one from another
+	previewListMax   = 48 // one vendored path should not cost the reviewer the diff
+	previewMinPane   = 40 // a narrower column of diff is a slit; asserted, not branched on
 )
 
-// paneWidth is how wide the preview column is, or 0 when there is no preview: the reviewer
-// switched it off, the session is taking input, or the terminal is too small. One function
-// decides it, because layout and key handling have to agree on whether the pane is there.
-func (m reviewModel) paneWidth() int {
-	if !m.previewOn || m.mode != modeFiles || m.previewShortfall() != "" {
-		return 0
+// previewLayout returns the width of each column, or a zero pane when there is no pane.
+//
+// A fixed 60/40 split made the diff share the screen with columns of whitespace, because most
+// changesets are named after a package and a feature, not a tarball. So the list sizes itself to
+// its content up to previewListMax, and the remainder is the pane's. The minimums are arithmetic
+// rather than branches here: at previewMinWidth the pane still gets 49 columns even with the list
+// at its cap, which TestPreviewHasRoomAtTheThreshold pins.
+func (m reviewModel) previewLayout() (list, pane int) {
+	if m.previewShortfall() != "" {
+		return m.width, 0
 	}
-	return (m.width - previewGap) * previewShare / 100
+	list = min(max(m.listContentWidth(), previewListMin), previewListMax)
+	return list, m.width - list - previewGap
+}
+
+// listContentWidth is what the list would take to write everything in full: its longest row, and
+// the lines over it. It measures every row rather than the visible window, so the divider does not
+// move when a longer path scrolls into view, and it is the width the rows are then clipped to --
+// a column that grew because a path scrolled past would be a column that never stops growing.
+func (m reviewModel) listContentWidth() int {
+	h := m.sess.Header()
+	widest := 0
+	for _, line := range m.headerLines(h) {
+		if w := lipgloss.Width(line); w > widest {
+			widest = w
+		}
+	}
+	if _, total := m.sess.Count(); total > 0 {
+		if w := len(fmt.Sprintf("%d / %d reviewed", 0, total)); w > widest {
+			widest = w
+		}
+	}
+	for _, r := range m.rows {
+		if w := lipgloss.Width(m.rowText(r)); w > widest {
+			widest = w
+		}
+	}
+	return widest
 }
 
 // previewShortfall names why the pane cannot fit, or "" when it can. Width and height are
@@ -1005,13 +1047,25 @@ func (m reviewModel) previewShortfall() string {
 	return ""
 }
 
-// listWidth is the column the list gets: all of it when there is no preview, less the pane and
-// its divider when there is one.
-func (m reviewModel) listWidth() int {
-	if w := m.paneWidth(); w > 0 {
-		return m.width - w - previewGap
+// paneWidth is how wide the preview column is, or 0 when there is no preview: the reviewer
+// switched it off, the session is taking input, or the terminal is too small. One function decides
+// it, because layout and key handling have to agree on whether the pane is there.
+func (m reviewModel) paneWidth() int {
+	if !m.previewOn || m.mode != modeFiles {
+		return 0
 	}
-	return m.width
+	_, pane := m.previewLayout()
+	return pane
+}
+
+// listWidth is the column the list gets: the whole terminal when there is no preview to make room
+// for, and its own content width when there is.
+func (m reviewModel) listWidth() int {
+	if m.paneWidth() == 0 {
+		return m.width
+	}
+	list, _ := m.previewLayout()
+	return list
 }
 
 // previewBodyRows is how many lines of diff fit in the pane: the window the list gets, less the
@@ -1177,14 +1231,8 @@ func rowsMore(n int) string {
 // joinColumns places the preview beside the list. Each list row is padded to the list's column
 // so the divider falls in the same place on every row; the list is clipped to that width, so
 // nothing here can wrap and shift it.
-func joinColumns(left string, right []string) string {
+func joinColumns(left string, right []string, listWidth int) string {
 	lines := strings.Split(strings.TrimSuffix(left, "\n"), "\n")
-	listWidth := 0
-	for _, l := range lines {
-		if w := lipgloss.Width(l); w > listWidth {
-			listWidth = w
-		}
-	}
 	var b strings.Builder
 	for i, l := range lines {
 		preview := ""

@@ -391,6 +391,24 @@ changeset. Hand-verification of everything the README documents additionally cor
     with no hunk header is not numbered at all, and the classification strips colour first because
     git colours the very characters being looked for. It does not fold, group, filter or restyle —
     PRD §3 stays intact, and reading a diff still means opening it.
+23. **The split is adaptive: the list pays for its own paths.** The 60/40 split made the diff share
+    the screen with columns of whitespace, because most changesets are named after a package and a
+    feature, not a tarball. The list now takes the width of its widest row — plus the two header
+    lines over it, which are the other thing the column has to be able to say — clamped to 24..48
+    columns, and the pane takes what is left. At 140 columns with fixture-sized paths that is a list
+    of 35 and a diff of 102, enough for git's own `diff --git` header to stop wrapping.
+
+    Two decisions worth their weight. **The column is sized from every row, not the rows in the
+    window:** sizing from the window would slide the divider sideways as a longer path scrolled into
+    view, and a screen that jumps under the cursor is worse than one that wastes a few columns. And
+    **the cap is what makes the floor unnecessary in practice**: one vendored path should not cost
+    the reviewer the columns the diff is read in, so the path is clipped instead of widening the
+    column, and at the 100-column threshold the pane still gets 49 columns with the list at its cap.
+    That last fact is a test rather than a guard — the earlier lesson was that minimums nobody can
+    reach are decoration, so `previewMinPane` is asserted against rather than branched on.
+
+    The 60/40 constant is gone. What remains are two numbers to argue with: `previewListMax` (48)
+    and `previewListMin` (24).
 
 ## Architecture
 

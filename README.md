@@ -603,7 +603,9 @@ rows.
 On a wide terminal the list shares the screen with a preview. From 100 columns and 16 rows the
 session puts a column beside the list showing the diff of whatever the cursor is on — the span's
 diff, the same one `gitpr diff` and the reviewed counter describe — with git's own `+N −M` in its
-header. `ctrl-f` and `ctrl-b` page through a diff too long to fit, and the note along the bottom
+header. The list takes the width its own paths need, up to 48 columns, and the diff gets the rest:
+a changeset of short names is not made to share the screen with whitespace, and one long vendored
+path cannot take the diff's columns. `ctrl-f` and `ctrl-b` page through a diff too long to fit, and the note along the bottom
 says how much of it is left; `ctrl-d` still quits, which is why paging is not `ctrl-d`. Each line
 carries the number git gave it in its hunk header, and a line too wide for the column is broken
 rather than cut, with its colour carried across the break. `p` switches the pane off, and a terminal
