@@ -100,6 +100,38 @@ func TestRefCheckpointIsPinnedAndReportsDrift(t *testing.T) {
 	}
 }
 
+// The pin has to survive re-resolution, because a session resolves its span again every
+// time an editor or difftool closes. If resolution followed the ref, the span would move
+// without being asked and the drift would never be visible.
+func TestResolveKeepsAPinnedRefWhereItWas(t *testing.T) {
+	s := newScenario(t, true)
+	s.f.MustGit("update-ref", "refs/heads/probe", s.reviews[1])
+
+	pinned, err := s.resolve(t, span.Selector{Base: span.Review(0), Head: span.Ref("probe")})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	s.f.MustGit("update-ref", "refs/heads/probe", s.reviews[2])
+
+	again, err := s.resolve(t, span.Selector{Base: pinned.Base, Head: pinned.Head})
+	if err != nil {
+		t.Fatalf("re-Resolve: %v", err)
+	}
+	if again.To != s.reviews[1] {
+		t.Errorf("re-resolving the pinned span ended at %s, want it to stay at %s", again.To, s.reviews[1])
+	}
+
+	// Unpinned, the same ref follows where it points now. The pin belongs to the session that
+	// chose it, not to the ref (requirements §15).
+	fresh, err := s.resolve(t, span.Selector{Base: span.Review(0), Head: span.Ref("probe")})
+	if err != nil {
+		t.Fatalf("Resolve unpinned: %v", err)
+	}
+	if fresh.To != s.reviews[2] {
+		t.Errorf("a new span on the moved ref ended at %s, want %s", fresh.To, s.reviews[2])
+	}
+}
+
 // §14: refresh is the reviewer asking for the new pin, and it is the only way a
 // resolved span's endpoints move.
 func TestRefreshRefRepinsAndRecomputes(t *testing.T) {

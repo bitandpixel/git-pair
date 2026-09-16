@@ -332,28 +332,27 @@ func TestSessionRescanAddsNoStopsToTheRing(t *testing.T) {
 	}
 }
 
-// A stop whose checkpoint has gone away — the branch it named was deleted — must leave the
-// session where it was, and must not chew through the rest of the ring.
+// A stop that no longer resolves must not move the session half-way into it, and must not
+// chew through the rest of the ring. The realistic version: the reviewer typed a tag as an
+// endpoint — the picker takes a typed revision — and the tag has been deleted or moved by the
+// time `v` steps back onto it.
 func TestStepSpanStopsShortWhenAStopNoLongerResolves(t *testing.T) {
 	e := newEnv(t)
 	e.f.CommitReviewMarker(slug, "feedback")
-	later := e.f.Commit("author response", gittest.WithFile("service.go",
-		"package main\n\nfunc Lock() { transaction() }\n"))
-	e.f.MustGit("branch", "gone", later)
+	tagged := e.f.Head()
+	e.f.MustGit("tag", "probe-tag", tagged)
 	ctx := context.Background()
 
 	sess := e.session(t, span.Full())
-	// A live stop, so the step from it is an ordinary step around the ring rather than the
-	// escape from a read-only span, and the stop after it is the one that will break.
-	customLive := span.Selector{Base: span.Commit(e.f.Parent(e.f.Head())), Head: span.WorkingTree()}
-	refSel := span.Selector{Base: span.ChangesetBase(), Head: span.Ref("refs/heads/gone")}
-	if err := sess.SetSpan(ctx, customLive); err != nil {
+	live := span.Selector{Base: span.Commit(e.f.Parent(e.f.Head())), Head: span.WorkingTree()}
+	typed := span.Selector{Base: span.ChangesetBase(), Head: span.Commit("probe-tag")}
+	if err := sess.SetSpan(ctx, live); err != nil {
 		t.Fatalf("SetSpan live: %v", err)
 	}
-	if err := sess.SetSpan(ctx, refSel); err != nil {
-		t.Fatalf("SetSpan ref: %v", err)
+	if err := sess.SetSpan(ctx, typed); err != nil {
+		t.Fatalf("SetSpan tagged: %v", err)
 	}
-	if err := sess.SetSpan(ctx, customLive); err != nil {
+	if err := sess.SetSpan(ctx, live); err != nil {
 		t.Fatalf("SetSpan live again: %v", err)
 	}
 	if stops := len(sess.SpanRing()); stops != 4 {
@@ -361,11 +360,11 @@ func TestStepSpanStopsShortWhenAStopNoLongerResolves(t *testing.T) {
 			"keystrokes", stops)
 	}
 
-	e.f.MustGit("branch", "-D", "gone")
 	held := sess.Span().Label
 	pos, total := sess.SpanPosition()
+	e.f.MustGit("update-ref", "-d", "refs/tags/probe-tag")
 	if _, _, err := sess.StepSpan(ctx); err == nil {
-		t.Fatal("StepSpan stepped into a span whose ref no longer exists")
+		t.Fatal("StepSpan stepped onto a span whose typed endpoint no longer resolves")
 	}
 	if sess.Span().Label != held {
 		t.Errorf("a broken stop moved the session from %s to %s", held, sess.Span().Label)
@@ -374,16 +373,134 @@ func TestStepSpanStopsShortWhenAStopNoLongerResolves(t *testing.T) {
 		t.Errorf("the failed step moved the ring position from %d to %d", pos, now)
 	}
 
-	// The ring itself is intact: with the branch back, the same press arrives at it.
-	e.f.MustGit("branch", "gone", later)
+	// The ring itself is intact: with the tag back, the same press arrives at it.
+	e.f.MustGit("update-ref", "refs/tags/probe-tag", tagged)
 	if _, _, err := sess.StepSpan(ctx); err != nil {
-		t.Fatalf("StepSpan after the ref came back: %v", err)
+		t.Fatalf("StepSpan after the tag came back: %v", err)
 	}
-	if got := sess.Selector().Head; got.Kind != span.KindRef || got.Name != "refs/heads/gone" {
-		t.Errorf("after recovery the head is %s %q, want refs/heads/gone", got.Kind, got.Name)
+	if got := sess.Selector().Head; got.Kind != span.KindCommit || got.Name != "probe-tag" {
+		t.Errorf("after recovery the head is %s %q, want the typed probe-tag", got.Kind, got.Name)
 	}
 	if _, totalNow := sess.SpanPosition(); totalNow != total {
 		t.Errorf("the ring shrank from %d stops to %d", total, totalNow)
+	}
+}
+
+// `r` is the reviewer asking for the new pin. The span moves, the report says which ref moved
+// where, and it says what that cost in reviewed marks (requirements §14). The stop on the span
+// ring is rewritten rather than added: the reviewer chose `probe`, not `probe at abc123`.
+func TestRefreshDriftRepinsAndSaysWhatItCost(t *testing.T) {
+	e := newEnv(t)
+	fork := e.f.RevParse("main")
+	// One more commit on the branch, so service.go has two changes in the changeset and a
+	// span that starts before them describes the file with a different diff.
+	e.f.Commit("response", gittest.WithFile("service.go", "package main\n\nfunc Lock() { tx() }\n"))
+	probeStart := e.f.Parent(e.f.Head())
+	e.f.MustGit("branch", "probe", probeStart)
+	ctx := context.Background()
+
+	sess := e.session(t, span.Selector{Base: span.Ref("refs/heads/probe"), Head: span.WorkingTree()})
+	if !sess.Span().Live() {
+		t.Fatal("a span ending at the working tree must be one you can review into")
+	}
+	i := indexOfFile(sess.Files(), "service.go")
+	if i < 0 {
+		t.Fatalf("no service.go in %v", filePaths(sess.Files()))
+	}
+	sess.Toggle(i)
+	if reviewed, _ := sess.Count(); reviewed != 1 {
+		t.Fatalf("reviewed = %d, want 1", reviewed)
+	}
+
+	if _, reset, err := sess.RefreshDrift(ctx); err == nil {
+		t.Errorf("RefreshDrift with nothing drifted reset %d marks and no error, want a refusal", reset)
+	}
+
+	e.f.MustGit("update-ref", "refs/heads/probe", fork)
+	if err := sess.Reload(ctx); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+	if sess.Span().From != probeStart {
+		t.Fatalf("the span followed the ref to %s, want it pinned at %s", sess.Span().From, probeStart[:7])
+	}
+
+	moved, reset, err := sess.RefreshDrift(ctx)
+	if err != nil {
+		t.Fatalf("RefreshDrift: %v", err)
+	}
+	if len(moved) != 1 || moved[0].Name != "refs/heads/probe" {
+		t.Fatalf("refreshed %v, want refs/heads/probe", moved)
+	}
+	if sess.Span().From != fork {
+		t.Errorf("after refresh the base is %s, want %s", sess.Span().From, fork[:7])
+	}
+	if got := sess.Selector().Base; got.Kind != span.KindRef || got.OID != fork {
+		t.Errorf("the selector carries %s @ %q, want the ref pinned at %s: a rescan must not "+
+			"move the span again on its own", got.Kind, got.OID, fork[:7])
+	}
+	if reset != 1 {
+		t.Errorf("reset = %d, want 1: service.go's diff within the span is a different piece of work", reset)
+	}
+	if reviewed, _ := sess.Count(); reviewed != 0 {
+		t.Errorf("reviewed = %d after the refresh, want the mark to have stopped applying", reviewed)
+	}
+	if left := sess.Drifted(); len(left) != 0 {
+		t.Errorf("Drifted() = %v after the refresh, want nothing", left)
+	}
+	pos, _ := sess.SpanPosition()
+	if ring := sess.SpanRing()[pos-1]; ring.Base.Kind != span.KindRef || ring.Base.OID != fork {
+		t.Errorf("the ring's stop still points at %q, want the refreshed pin", ring.Base.OID)
+	}
+}
+
+// A ref endpoint is pinned when the session chooses it, and the pin is what the session keeps
+// using: through a rescan, through the ref moving, and through the ref going away entirely.
+// This is requirements §13 — the ground under a review in progress does not move — and it is
+// what makes drift something the reviewer can act on instead of a thing that already happened.
+func TestSessionStaysOnTheRefItPinned(t *testing.T) {
+	e := newEnv(t)
+	e.f.CommitReviewMarker(slug, "feedback")
+	e.f.MustGit("branch", "probe", "HEAD")
+	ctx := context.Background()
+
+	sess := e.session(t, span.Selector{Base: span.ChangesetBase(), Head: span.Ref("refs/heads/probe")})
+	pinned := sess.Span().To
+	if got := sess.Selector().Head; got.Kind != span.KindRef || got.OID != pinned {
+		t.Fatalf("the session's head is %s %q @ %q, want the ref pinned at %s",
+			got.Kind, got.Name, got.OID, pinned[:7])
+	}
+
+	if moved := sess.CheckDrift(ctx); len(moved) != 0 {
+		t.Fatalf("CheckDrift = %v on a span that has not had a chance to drift", moved)
+	}
+
+	moved := e.f.Commit("response", gittest.WithFile("service.go", "package main\n\nfunc Lock() { tx() }\n"))
+	e.f.MustGit("update-ref", "refs/heads/probe", moved)
+	if err := sess.Reload(ctx); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+	if sess.Span().To != pinned {
+		t.Errorf("the span followed the branch to %s, want it still pinned at %s", sess.Span().To, pinned[:7])
+	}
+	drift := sess.Drifted()
+	if len(drift) != 1 {
+		t.Fatalf("Drifted() = %v, want probe reported as moved", drift)
+	}
+	if drift[0].Name != "refs/heads/probe" || drift[0].Pinned != e.f.Short(pinned) || drift[0].Current != e.f.Short(moved) {
+		t.Errorf("drift = %q, want refs/heads/probe from %s to %s", drift[0], e.f.Short(pinned), e.f.Short(moved))
+	}
+
+	// A ref that has gone is not drift: there is nothing to refresh to, and the commit the
+	// reviewer chose is still the one on screen.
+	e.f.ForceDeleteBranch("probe")
+	if err := sess.Reload(ctx); err != nil {
+		t.Fatalf("Reload after the delete: %v", err)
+	}
+	if sess.Span().To != pinned {
+		t.Errorf("the span moved to %s when the ref was deleted", sess.Span().To)
+	}
+	if moved := sess.Drifted(); len(moved) != 0 {
+		t.Errorf("Drifted() = %v after the ref was deleted, want nothing: the pin still resolves", moved)
 	}
 }
 

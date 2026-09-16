@@ -1023,6 +1023,25 @@ branches, remote refs, tags and other refs under headings, shows the name a revi
 keeps the full `refs/...` name in the checkpoint: a branch and a tag called `main` are two different
 choices, and drift has to be watched on the one that was meant.
 
+A ref endpoint is pinned when chosen, and stays pinned for the session. While a ref-backed endpoint is
+active the session re-resolves it at the cheap points — on a timer, and after an editor or difftool
+closes — and reports movement without acting on it:
+
+```text
+⚠ probe moved bb0f343 → 43915ed  [r] refresh
+```
+
+The banner is a row above the shortcut bar rather than a status line, because a status line is where
+the last keystroke went, and a reviewer who marked a file would otherwise clear the warning by typing.
+It is full width rather than a row of the list column for the same reason: in a split screen the list
+column is narrow, and a warning that loses its key to an ellipsis warns about nothing. `r` re-pins
+every drifted endpoint to where its ref points now, recomputes the span, and reports which refs moved
+and how many reviewed marks stopped applying — marks are keyed on the file's diff within the span, so
+the marks whose diff changed match nothing and drop out, which is the honest outcome rather than a
+reset done for its own sake. Ignoring the banner is legitimate: the comparison the reviewer started is
+the comparison they keep. A ref that no longer resolves is not drift — there is nothing to refresh to
+— and the span stays on its pin.
+
 Suggested bindings:
 
 ```text
@@ -1048,6 +1067,8 @@ v        step to the next span this session has been in: the span it opened on, 
          and unreviewed presets, and any span chosen with V; from a read-only span, back to
          the last span you could review
 V        open the span picker: pending base and head, applied together on enter
+r        re-pin a ref endpoint that has moved (offered by the drift banner, which is only on
+         screen when there is something to re-pin)
 s        submit review (block / feedback / approve)
 q        quit
 ```
@@ -1746,6 +1767,7 @@ v        step through the spans this session has been in:
          from a read-only span, back to the last span that was reviewable
 V        span picker: BASE and HEAD columns, space to choose an end, enter to apply;
          Commit… and Ref… open searchable lists, u and f are the two presets
+r        re-pin drifted ref endpoints, offered by ⚠ <ref> moved <a> → <b>  [r] refresh
 
 s        submit review
 q        quit

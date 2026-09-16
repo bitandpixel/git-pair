@@ -653,6 +653,22 @@ the list is still on screen. `Ref…` groups branches, remote refs, tags and oth
 showing `main` and `origin/main` while the checkpoint keeps `refs/heads/main` — a branch and a tag
 with the same name are two different choices, and drift has to be watched on the one you meant.
 
+An endpoint named as a ref is pinned when you choose it, and the pin is what the screen keeps
+comparing. So when `probe` moves in another window — a fetch, someone else's push — the header still
+reads `probe@bb0f343` and a row above the shortcut bar says:
+
+```text
+⚠ probe moved bb0f343 → 43915ed  [r] refresh
+```
+
+Nothing follows the branch by itself. `r` re-pins the endpoint to where the ref points now, recomputes
+the span and reports what that cost: marks are keyed on each file's diff within the span, so the ones
+whose diff changed stop applying, and the count in the report says how many. Ignoring the banner is a
+legitimate answer too — the span does not move until asked, and the warning is a row of the screen
+rather than the line the last keystroke writes to, so marking a file does not erase it. A ref that has
+gone away is not drift: there is nothing to refresh to, and the pin still resolves to the commit it
+was chosen for.
+
 In a narrow window the shortcut bar wraps between shortcuts rather than through them —
 `space reviewed` never arrives split in half — and the list gives up the rows it takes.
 Submitting commits the review, moves the ref and **ends the session**, printing one line about

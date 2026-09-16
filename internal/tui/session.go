@@ -77,6 +77,11 @@ type Session struct {
 	// span is a detour, and `v` is how you leave it, so it goes back there rather than to
 	// whatever sits next.
 	lastLive int
+
+	// drift holds the ref checkpoints that have moved since this span pinned them, as of the
+	// last check. It is written on the update path only: the banner reads it, and a check
+	// running off the event loop hands its answer back as a message rather than writing here.
+	drift []span.Drift
 }
 
 // NewSession resolves the span and scans the changed files.
@@ -114,7 +119,9 @@ func (s *Session) Rescan(ctx context.Context) error {
 	if err := s.scan(ctx, sp); err != nil {
 		return err
 	}
+	s.sel = pinSelector(s.sel, sp)
 	s.noteSpan(s.sel)
+	s.setDrift(s.CheckDrift(ctx))
 	return nil
 }
 
@@ -126,15 +133,33 @@ func (s *Session) SetSpan(ctx context.Context, sel span.Selector) error {
 	if err != nil {
 		return err
 	}
-	s.sel = sel
+	s.sel = pinSelector(sel, sp)
 	if err := s.scan(ctx, sp); err != nil {
 		return err
 	}
-	s.ringIdx = s.noteSpan(sel)
+	// The endpoints were pinned to where the refs point just now, so nothing about this span
+	// has drifted yet.
+	s.setDrift(nil)
+	s.ringIdx = s.noteSpan(s.sel)
 	if sp.Live() {
 		s.lastLive = s.ringIdx
 	}
 	return nil
+}
+
+// pinSelector writes the pins from a resolved span back into the selector that produced it.
+// Without this the next rescan resolves the ref again and follows it, which is the quiet
+// version of what requirements §13 exists to prevent: the ground would move under a review
+// that is part way through. The checkpoint keeps its ref identity and only gains an OID, and
+// drift is what compares the two.
+func pinSelector(sel span.Selector, sp span.Span) span.Selector {
+	if sel.Base.Kind == span.KindRef {
+		sel.Base.OID = sp.Base.OID
+	}
+	if sel.Head.Kind == span.KindRef {
+		sel.Head.OID = sp.Head.OID
+	}
+	return sel
 }
 
 // Selector is the span as it was chosen rather than as it resolved, which is what the
@@ -258,6 +283,75 @@ func (s *Session) noteSpan(sel span.Selector) int {
 	}
 	s.ring = append(s.ring, sel)
 	return len(s.ring) - 1
+}
+
+// --- drift ------------------------------------------------------------------
+
+// Drifted is the named-ref endpoints that have moved since this span pinned them, as of the
+// last check. It is empty for a span without a ref endpoint, and it is a report rather than
+// a change: the span stays on the commit the reviewer chose (requirements §13).
+func (s *Session) Drifted() []span.Drift { return s.drift }
+
+// CheckDrift asks git where the span's named-ref endpoints point now and returns the ones
+// that have moved. It changes nothing and remembers nothing: a session asks when it can
+// afford to, and stores the answer on the update path so the render path never reads what a
+// goroutine wrote. A span with no ref endpoint asks git nothing.
+//
+// A ref that no longer resolves is not drift — there is nothing to refresh to, and the pin is
+// still the commit the reviewer chose — so the answer is "nothing has moved" rather than an
+// alarm about a span that is still exactly what was asked for.
+func (s *Session) CheckDrift(ctx context.Context) []span.Drift {
+	if !s.current.TracksRefs() {
+		return nil
+	}
+	moved, err := s.current.Drift(ctx, s.repo)
+	if err != nil {
+		return nil
+	}
+	return moved
+}
+
+// setDrift stores the answer from a check.
+func (s *Session) setDrift(moved []span.Drift) { s.drift = moved }
+
+// RefreshDrift moves every drifted ref endpoint to where its ref points now and recomputes
+// the span. It is `r`, and it is the only way an endpoint moves without the reviewer choosing
+// a different span (requirements §14). It reports what moved and how many reviewed marks
+// stopped applying: a mark is keyed on the commit the span ends at and on each file's diff
+// within it, so a span that now compares different commits simply matches nothing it matched
+// before — which is the honest outcome, and why the count is reported rather than hidden.
+//
+// The stop on the span ring is rewritten in place. The reviewer chose `main`, not
+// `main at abc123`, and `main` is what they should step back onto.
+func (s *Session) RefreshDrift(ctx context.Context) (moved []span.Drift, reset int, err error) {
+	if len(s.drift) == 0 {
+		return nil, 0, fmt.Errorf("nothing has moved since this span was chosen")
+	}
+	next := s.current
+	for _, d := range s.drift {
+		if next, err = next.RefreshRef(ctx, s.repo, d.Name); err != nil {
+			return nil, 0, err
+		}
+	}
+	before, _ := s.Count()
+	sel := pinSelector(s.sel, next)
+	s.sel = sel
+	if err := s.scan(ctx, next); err != nil {
+		return nil, 0, err
+	}
+	if s.ringIdx < len(s.ring) {
+		s.ring[s.ringIdx] = sel
+	}
+	if next.Live() {
+		s.lastLive = s.ringIdx
+	}
+	moved = s.drift
+	s.setDrift(nil)
+	after, _ := s.Count()
+	if before > after {
+		reset = before - after
+	}
+	return moved, reset, nil
 }
 
 // CanToggleSpan reports whether an unreviewed span is available.

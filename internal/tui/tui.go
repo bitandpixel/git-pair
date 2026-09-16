@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -255,7 +256,29 @@ func clearScreen(w io.Writer) {
 	fmt.Fprint(w, "\x1b[2J\x1b[H")
 }
 
-func (m reviewModel) Init() tea.Cmd { return nil }
+func (m reviewModel) Init() tea.Cmd { return driftTick() }
+
+// driftCheckEvery is how often the session asks git whether its named-ref endpoints have
+// moved since the span pinned them. Three seconds is long enough that nobody waits on it and
+// short enough that a branch moved in another window shows up while the reviewer is still in
+// the screen; a span with no ref endpoint asks git nothing at all.
+const driftCheckEvery = 3 * time.Second
+
+// driftCheckMsg asks for a check; the check itself runs off the event loop and answers with
+// a driftMsg, the same way the preview fetch works.
+type driftCheckMsg struct{}
+
+// driftMsg carries the answer, with the span it was about. A slow check that comes back
+// after the reviewer stepped to another span describes a span nobody is looking at, so it is
+// dropped rather than shown.
+type driftMsg struct {
+	moved    []span.Drift
+	from, to string
+}
+
+func driftTick() tea.Cmd {
+	return tea.Tick(driftCheckEvery, func(time.Time) tea.Msg { return driftCheckMsg{} })
+}
 
 func (m reviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -301,6 +324,20 @@ func (m reviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.previewOffset = 0
 		}
 		return m, nil
+
+	case driftCheckMsg:
+		sess, ctx := m.sess, m.ctx
+		sp := sess.Span()
+		from, to := sp.From, sp.To
+		return m, func() tea.Msg {
+			return driftMsg{moved: sess.CheckDrift(ctx), from: from, to: to}
+		}
+
+	case driftMsg:
+		if sp := m.sess.Span(); sp.From == msg.from && sp.To == msg.to {
+			m.sess.setDrift(msg.moved)
+		}
+		return m, driftTick()
 
 	case tea.KeyMsg:
 		updated, cmd := m.handleKey(msg)
@@ -396,6 +433,20 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh()
 			m.setStatus(spanNote(before, m.sess, pos, total), false)
 		}
+	case key.Type == tea.KeyRunes && firstRune(key) == 'r':
+		// Refreshing a drifted ref is not one of the mutating keys the read-only gate refuses:
+		// it changes what the screen compares, like `v` does, and a historical span is exactly
+		// where a moved ref is worth catching up with.
+		moved, reset, err := m.sess.RefreshDrift(m.ctx)
+		if err != nil {
+			m.setStatus(err.Error(), true)
+			break
+		}
+		// The span now compares different commits, so every cached patch is about the pair it
+		// used to be.
+		m.forgetPatches()
+		m.refresh()
+		m.setStatus(refreshNote(moved, reset), false)
 	case key.Type == tea.KeyRunes && firstRune(key) == 's':
 		if !m.sess.CanToggleSpan() {
 			// Still allowed: submitting a first review is legitimate.
@@ -744,6 +795,9 @@ var (
 	styleErr      = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	styleMark     = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	styleSpan     = lipgloss.NewStyle().Bold(true)
+	// styleWarn is the drift banner: a warning about the ground moving, not an error about
+	// something the reviewer just did.
+	styleWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 )
 
 func (m reviewModel) View() string {
@@ -840,6 +894,11 @@ func (m reviewModel) listBlock() string {
 // list column, because they belong to the session rather than to either column.
 func (m reviewModel) footer() string {
 	var b strings.Builder
+	// The drift banner is chrome, and it is full width on purpose: in a split screen the list
+	// column is narrow, and a warning that loses its key to an ellipsis warns about nothing.
+	if line := m.driftLine(); line != "" {
+		b.WriteString(line + "\n")
+	}
 	switch m.mode {
 	case modePrompt:
 		b.WriteString("New thread: " + m.input + "█\n")
@@ -860,6 +919,36 @@ func (m reviewModel) footer() string {
 		}
 	}
 	return b.String()
+}
+
+// driftLine is the warning that a named ref has moved since this span pinned it. It is a row
+// of its own rather than a status line because a status line is where the last keystroke went:
+// a reviewer who marked a file would lose the warning before they ever read it. What is on
+// screen stays the pinned span — `r` moves it, and only when asked.
+func (m reviewModel) driftLine() string {
+	moved := m.sess.Drifted()
+	if len(moved) == 0 {
+		return ""
+	}
+	warn := fmt.Sprintf("\u26a0 %s moved %s \u2192 %s", span.ShortRef(moved[0].Name), moved[0].Pinned, moved[0].Current)
+	if len(moved) > 1 {
+		warn += fmt.Sprintf(" (+%d more)", len(moved)-1)
+	}
+	return styleWarn.Render(warn) + styleDim.Render("  [r] refresh")
+}
+
+// refreshNote reports what `r` did, in the shape requirements §14 asks for: which ref moved
+// from where to where, and how many reviewed marks that reset.
+func refreshNote(moved []span.Drift, reset int) string {
+	words := make([]string, 0, len(moved))
+	for _, d := range moved {
+		words = append(words, d.Display())
+	}
+	note := "refreshed " + strings.Join(words, ", ")
+	if reset > 0 {
+		note += fmt.Sprintf(" \u00b7 %d reviewed mark%s no longer applies", reset, plural(reset))
+	}
+	return note
 }
 
 // counterLine is the line under the files. Over history there is no review in progress to
@@ -1482,11 +1571,16 @@ func (m reviewModel) windowRows() int {
 
 // chromeRows counts the lines View writes outside the row list: the title, the base and span
 // line, the blank under them, the blank above the counter, the counter, the blank under it,
-// and then the rule over the helper, the helper itself, the "hidden above" note while
-// scrolled, and the status line when there is one. The changeset section is part of the row
+// and then the rule over the helper, the drift banner while one is pending, the helper
+// itself, the "hidden above" note while scrolled, and the status line when there is one. The changeset section is part of the row
 // list, so it is not here — only the counter that separates the two blocks is.
 func (m reviewModel) chromeRows() int {
 	chrome := 7 + len(m.helpLines())
+	if len(m.sess.Drifted()) > 0 {
+		// The drift banner takes a row above the shortcut bar, and stays there until the
+		// reviewer refreshes it or moves to another span.
+		chrome++
+	}
 	if m.scroll > 0 {
 		chrome++
 	}

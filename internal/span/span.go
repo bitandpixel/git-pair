@@ -247,6 +247,13 @@ func (c Checkpoint) resolve(ctx context.Context, repo *git.Repo, base string, su
 		out.Name = short(oid)
 		return out, nil
 	case KindRef:
+		// A checkpoint that arrives already pinned resolves to its pin. The pin is the answer
+		// to "where was main when I chose it", and re-resolving here would follow the branch
+		// on the next rescan — which is the thing requirements §13 forbids, and would make
+		// drift undetectable, since the span would quietly arrive at wherever main got to.
+		if c.OID != "" {
+			return out, nil
+		}
 		oid, err := repo.RevParse(ctx, c.Name+"^{commit}")
 		if err != nil {
 			return out, fmt.Errorf("cannot resolve %q to a commit: %w", c.Name, err)
@@ -297,6 +304,13 @@ func ShortRef(name string) string {
 }
 
 // Drift is a ref checkpoint whose ref has moved since it was pinned.
+// TracksRefs says whether the span has a named-ref endpoint, which is the only kind that
+// can move underneath a review. A span without one has nothing to watch, and its session
+// should not ask.
+func (s Span) TracksRefs() bool {
+	return s.Base.Kind == KindRef || s.Head.Kind == KindRef
+}
+
 type Drift struct {
 	// Name is the ref, as the reviewer chose it.
 	Name string
@@ -306,6 +320,14 @@ type Drift struct {
 
 // String renders the drift the way the banner will: "main abc1234 → def5678".
 func (d Drift) String() string { return fmt.Sprintf("%s %s → %s", d.Name, d.Pinned, d.Current) }
+
+// Display is the drift as a reviewer reads it: the name they typed rather than the ref git
+// stores, which is what makes the banner say `main moved` instead of `refs/heads/main moved`.
+// The full name stays in Name, because that is what re-resolves and what tells a branch and a
+// tag of the same name apart.
+func (d Drift) Display() string {
+	return fmt.Sprintf("%s %s → %s", ShortRef(d.Name), d.Pinned, d.Current)
+}
 
 // Drift re-resolves every ref checkpoint in the span and reports the ones that
 // have moved. It changes nothing: a moved ref stays pinned until the reviewer says

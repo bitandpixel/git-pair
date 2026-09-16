@@ -240,11 +240,45 @@ Deliverables:
   continues against the pinned OID until `r`.
 - `r` re-pins, recomputes the span, and reports how many marks no longer apply.
 
-Tasks: call `Drift` at the reload points; the banner in the footer area; `r` bound only while drift is
-pending; the refresh report; docs.
+Tasks:
 
-Verification: scenario D, E and F from the requirements, run in a pty against a fixture where a
-branch is moved by a second commit while the TUI is open.
+- [x] Resolution honours a pin: a ref checkpoint with an OID resolves to that OID, and the session
+      writes the pins from a resolved span back into its selector. Without both halves the span
+      follows the branch on the next rescan, which is §13's forbidden move — and drift would never
+      be visible, because the span would have arrived at the new commit already.
+- [x] `Session.CheckDrift` (asks, remembers nothing), `RefreshDrift` (re-pins, rescans, reports),
+      `Span.TracksRefs` so a span with no ref endpoint asks git nothing.
+- [x] The check runs on a 3s tick and after an external tool closes (`Reload`). The answer comes back
+      as a message carrying the span it was about, so a slow check cannot paint a banner for a span
+      the reviewer has stepped off.
+- [x] The banner — `⚠ probe moved bb0f343 → 43915ed  [r] refresh` — is a row of the footer, not of
+      the list column, and takes a chrome row.
+- [x] `r` is bound always, advertised only by the banner: with nothing drifted it says so rather than
+      sitting on an unbound key.
+- [x] README, PRD §14 and §28.
+
+Verification:
+
+- [x] Scenarios D, E and F in a pty, with a branch moved by a background `git branch -f` while the
+      screen is open: the pinned span keeps browsing, the banner appears with its key intact at 110
+      columns with the preview pane up, and `r` re-pins — the header's `probe@bb0f343` becomes
+      `probe@43915ed` and the report reads `refreshed probe bb0f343 → 43915ed`.
+- [x] Tests that the banner is not the status line and does not grow the frame, in both the plain and
+      split layouts — the split-screen case is the one the first implementation failed.
+- [x] That a pinned ref survives a reload, a move, and its own deletion; that a deleted ref is not
+      reported as drift; and that refreshing rewrites the stop on the span ring rather than adding a
+      new one.
+- [x] Falsified: with the banner parked in the list column, the split-screen test fails on both the
+      clipped key and the frame height.
+
+- **Where a pin is taken matters more than where it is stored.** The picker's ref list is a snapshot,
+  but the pin is taken when the reviewer applies the span. In the pty walkthrough that ordering was
+  visible: a branch moved *before* `Enter` is not drift, and the span is honestly labelled with the
+  commit it chose (`probe@43915ed..HEAD`). A drift demo has to move the branch after the apply, which
+  is what a reviewer with a second window open actually experiences.
+- **A banner in the list column loses its key.** `⚠ probe moved …  [r] refresh` in a 24-to-48-column
+  list column clips to `[r]…` at 110 terminal columns with the preview open — a warning that has lost
+  the thing to press. The footer spans the terminal, so the banner lives there.
 
 ## Spikes / Research
 
