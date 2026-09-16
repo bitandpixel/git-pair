@@ -79,6 +79,24 @@ func (r result) mustSucceed(t *testing.T, args ...string) result {
 // captured stdout.
 func run(t *testing.T, args ...string) result {
 	t.Helper()
+	return runWithStdin(t, os.DevNull, args...)
+}
+
+// runStdin runs the command with stdin holding input, which is what a pipe looks like
+// to a command that sniffs stdin. A regular file stands in for the pipe: it cannot
+// block the reader, and it answers the only question the CLI asks, which is "am I
+// attached to a terminal?". With no input at all, pass "".
+func runStdin(t *testing.T, input string, args ...string) result {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "stdin")
+	if err := os.WriteFile(path, []byte(input), 0o644); err != nil {
+		t.Fatalf("write stdin file: %v", err)
+	}
+	return runWithStdin(t, path, args...)
+}
+
+func runWithStdin(t *testing.T, stdinPath string, args ...string) result {
+	t.Helper()
 
 	dir := t.TempDir()
 	outPath := filepath.Join(dir, "stdout")
@@ -91,9 +109,9 @@ func run(t *testing.T, args ...string) result {
 	if err != nil {
 		t.Fatalf("create stderr capture: %v", err)
 	}
-	stdin, err := os.Open(os.DevNull)
+	stdin, err := os.Open(stdinPath)
 	if err != nil {
-		t.Fatalf("open %s: %v", os.DevNull, err)
+		t.Fatalf("open %s: %v", stdinPath, err)
 	}
 
 	os.Stdout, os.Stderr, os.Stdin = stdout, stderr, stdin
@@ -121,6 +139,17 @@ func run(t *testing.T, args ...string) result {
 // runIn runs the command with dir as the process working directory.
 func runIn(t *testing.T, dir string, args ...string) result {
 	t.Helper()
+	return inDir(t, dir, func() result { return run(t, args...) })
+}
+
+// runStdinIn combines runIn and runStdin.
+func runStdinIn(t *testing.T, dir, input string, args ...string) result {
+	t.Helper()
+	return inDir(t, dir, func() result { return runStdin(t, input, args...) })
+}
+
+func inDir(t *testing.T, dir string, fn func() result) result {
+	t.Helper()
 	old, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -133,7 +162,7 @@ func runIn(t *testing.T, dir string, args ...string) result {
 			t.Fatalf("restore cwd: %v", err)
 		}
 	}()
-	return run(t, args...)
+	return fn()
 }
 
 // --- scenario builders ------------------------------------------------------

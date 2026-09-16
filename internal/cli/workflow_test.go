@@ -150,6 +150,7 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 
 	// The history is the noisy-but-honest lifecycle PRD §2.3 describes, in order.
 	want := []string{
+		"gitpr: initialize changeset " + slug,
 		"implement booking transaction locking",
 		"gitpr: ready " + slug,
 		"review: block " + slug,

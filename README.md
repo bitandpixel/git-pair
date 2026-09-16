@@ -48,6 +48,7 @@ $ gitpr change init --base main
 created changesets/booking-transaction/
 created changesets/booking-transaction/CHANGESET.yaml
 created changesets/booking-transaction/ABOUT.md
+committed 9f1c2de
 
 Next: fill in changesets/booking-transaction/ABOUT.md, commit it with your implementation, then run `gitpr change ready`.
 ```
@@ -243,7 +244,7 @@ elsewhere it is accepted and ignored.
 
 | Command | Flags | Notes |
 | --- | --- | --- |
-| `change init` | `--base <ref>`, `--set-base`, `--commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`; never overwrites; does not commit unless `--commit`; default base is `main`, else `master`, else a usage error |
+| `change init` | `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is `main`, else `master`, else a usage error |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `review open` | `--unreviewed`, `--since-review[=N]` | TUI; needs a terminal |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
@@ -258,7 +259,8 @@ elsewhere it is accepted and ignored.
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
 commits, no blocking surviving additions. `review close` checks: clean tree, latest outcome
 `approve` or `feedback`, no blocking surviving additions. `change init` warns without failing
-if the base does not resolve.
+if the base does not resolve, and commits only the changeset directory (`git commit --only`),
+so work you had already staged for another commit stays on your index.
 
 | Exit code | Meaning | Seen as |
 | --- | --- | --- |
@@ -382,7 +384,7 @@ changeset directories the queue could not classify (`null` when empty).
 The non-interactive loop from PRD §22:
 
 ```bash
-gitpr change init --base main    # once, on a named branch
+gitpr change init --base main --about "$ABOUT"   # once, on a named branch
 gitpr status --json              # read state and next_action
 gitpr diff                       # see the whole changeset
 # implement and commit with ordinary git
@@ -460,6 +462,10 @@ gitpr never guesses a base: edit the file, or `gitpr change init --base <ref> --
 From `change init` with no `--base`: `cannot infer a base: no main or master branch exists;
 pass --base <ref>` (exit 2).
 
+`ABOUT.md already has content: changesets/<cs>/ABOUT.md is not empty (pass --set-about to
+replace it)` (exit 2) — `change init --about` refuses to discard a description that is
+already there. Same rule, same flag shape as changing a base.
+
 `N additions from review <sha> still survive unchanged` (exit 1) — resolve them, or
 acknowledge them deliberately:
 
@@ -483,8 +489,10 @@ files directly and use `gitpr diff`, `gitpr status` and `gitpr review submit`.
 the resolved span; the error lists what is.
 
 `working tree must be clean ...` (exit 1) — `change ready` and `review close` act on committed
-state. `change init` does not commit its scaffolding, so a fresh changeset directory is
-untracked and blocks `change ready` until you commit it, or use `change init --commit`.
+state. `change init` commits its scaffolding, so a fresh changeset does not block `change
+ready`; it does block it if you then edit `ABOUT.md` without committing. Use
+`change init --no-commit` to fold the scaffolding into your first implementation commit
+instead.
 
 `no changeset for this branch: changesets/foo` (exit 2), or `HEAD is detached; check out a
 branch first` (exit 2) — the directory is named after the branch, so renaming a branch orphans

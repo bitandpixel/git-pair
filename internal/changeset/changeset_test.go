@@ -156,7 +156,7 @@ func TestWriteCreatesScaffoldingAndIsIdempotent(t *testing.T) {
 	repo := &git.Repo{Dir: f.Dir()}
 
 	cs := changeset.Changeset{Slug: "feature-booking", Branch: "feature/booking", Dir: filepath.Join("changesets", "feature-booking")}
-	written, err := changeset.Write(repo, cs, "main", false)
+	written, err := changeset.Write(repo, cs, changeset.WriteOptions{Base: "main"})
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestWriteCreatesScaffoldingAndIsIdempotent(t *testing.T) {
 	}
 
 	aboutBefore := f.Read(cs.AboutPath())
-	written, err = changeset.Write(repo, cs, "main", false)
+	written, err = changeset.Write(repo, cs, changeset.WriteOptions{Base: "main"})
 	if err != nil {
 		t.Fatalf("second Write: %v", err)
 	}
@@ -192,14 +192,14 @@ func TestWriteNeverClobbersAuthorContent(t *testing.T) {
 	repo := &git.Repo{Dir: f.Dir()}
 
 	cs := changeset.Changeset{Slug: "booking", Branch: "booking", Dir: filepath.Join("changesets", "booking")}
-	if _, err := changeset.Write(repo, cs, "main", false); err != nil {
+	if _, err := changeset.Write(repo, cs, changeset.WriteOptions{Base: "main"}); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 	authorText := "# booking\n\n## Summary\n\nThe author's own description, which must survive.\n"
 	f.Write(cs.AboutPath(), authorText)
 	f.Write(cs.MetadataPath(), "base: main\n")
 
-	if _, err := changeset.Write(repo, cs, "main", false); err != nil {
+	if _, err := changeset.Write(repo, cs, changeset.WriteOptions{Base: "main"}); err != nil {
 		t.Fatalf("re-Write: %v", err)
 	}
 	if got := f.Read(cs.AboutPath()); got != authorText {
@@ -215,7 +215,7 @@ func TestWriteRecordsStackedBase(t *testing.T) {
 	repo := &git.Repo{Dir: f.Dir()}
 
 	cs := changeset.Changeset{Slug: "booking-tests", Branch: "booking-tests", Dir: filepath.Join("changesets", "booking-tests")}
-	if _, err := changeset.Write(repo, cs, "booking-transaction", false); err != nil {
+	if _, err := changeset.Write(repo, cs, changeset.WriteOptions{Base: "booking-transaction"}); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 	if got := f.MetadataBase("booking-tests"); got != "booking-transaction" {
@@ -237,16 +237,16 @@ func TestWriteBaseConflict(t *testing.T) {
 	repo := &git.Repo{Dir: f.Dir()}
 
 	cs := changeset.Changeset{Slug: "booking", Branch: "booking", Dir: filepath.Join("changesets", "booking")}
-	if _, err := changeset.Write(repo, cs, "main", false); err != nil {
+	if _, err := changeset.Write(repo, cs, changeset.WriteOptions{Base: "main"}); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	if _, err := changeset.Write(repo, cs, "trunk", false); !errors.Is(err, changeset.ErrBaseConflict) {
+	if _, err := changeset.Write(repo, cs, changeset.WriteOptions{Base: "trunk"}); !errors.Is(err, changeset.ErrBaseConflict) {
 		t.Errorf("changing base without --set-base = %v, want ErrBaseConflict", err)
 	}
 	if got := f.MetadataBase("booking"); got != "main" {
 		t.Errorf("refused Write changed base to %q, want main", got)
 	}
-	if _, err := changeset.Write(repo, cs, "trunk", true); err != nil {
+	if _, err := changeset.Write(repo, cs, changeset.WriteOptions{Base: "trunk", SetBase: true}); err != nil {
 		t.Fatalf("Write with setBase: %v", err)
 	}
 	if got := f.MetadataBase("booking"); got != "trunk" {
@@ -284,7 +284,7 @@ func TestListAndThreads(t *testing.T) {
 
 	for _, slug := range []string{"booking-ui", "booking-transaction"} {
 		cs := changeset.Changeset{Slug: slug, Branch: slug, Dir: filepath.Join("changesets", slug)}
-		if _, err := changeset.Write(repo, cs, "main", false); err != nil {
+		if _, err := changeset.Write(repo, cs, changeset.WriteOptions{Base: "main"}); err != nil {
 			t.Fatalf("Write %s: %v", slug, err)
 		}
 	}

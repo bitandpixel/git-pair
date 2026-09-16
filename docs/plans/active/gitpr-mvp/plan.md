@@ -92,6 +92,7 @@ From the PRD, treated as binding:
 | M4 submit, refs, queue, close | done | e2e replay: empty approve commit, ref moves, and after `git branch -D` the archive ref still reaches 13 commits |
 | M5 TUI | done, partially verified | Verified under a pty: first paint, `j/k`, `space` (0/4 → 1/4 → 2/4), `v`, `a` editor handoff, `s`+`b` submit (created `review: block demo` and moved the ref), clean `q` exit. **Not yet verified:** `Enter` launching a real difftool *inside* the TUI — the same command path is verified outside it via `gitpr diff --tool`, which reached the configured tool with the right blob paths |
 | M6 docs + dogfood | done | `README.md`; `artifacts/e2e-29.sh` is the scripted replay and passes end to end |
+| Post-MVP: `change init` commits, takes `--about` | done | `TestChangeInit*` (11 cases) plus the corrected golden workflow; e2e replay still passes |
 
 Test suite: 21 files, 160 test functions, 12 packages, all passing; `go vet` and `gofmt`
 clean. The suite found four real defects, all fixed in `fix: exit codes, added-line
@@ -118,6 +119,16 @@ changeset. Hand-verification of everything the README documents additionally cor
    message pointing at the file, which is an ordinary file in the working tree.
 4. **Deferred from MVP as planned:** `review queue --global`, the `gitpr repo` registry,
    persistent review progress, and remote propagation of `refs/reviews/*`.
+5. **git writes "nothing to commit" to stdout, not stderr.** `git.Error` carried only stderr,
+   so `isNothingToCommit` never matched and a no-op commit surfaced as an opaque
+   `git exited with status 1` with exit 3. `git.Error` now carries stdout too, and
+   `change init` asks `git diff --cached --quiet HEAD -- <paths>` first, which is also
+   locale-proof — the message text is translated.
+6. **`aboutIsTemplate` never matched, so the "you left the scaffold" nudge was dead code.**
+   `AboutTemplate` ends with a newline, so splitting it produced one more line than the
+   trimmed file and the length check always failed. Nothing covered it: an assertion-free
+   warning is invisible to the suite until someone reads the output. Now asserted by
+   `TestChangeReadyWarnsWhenAboutIsStillTheScaffold`.
 
 ## Architecture
 
@@ -189,19 +200,27 @@ rule and clean/dirty detection against a real repo.
 ### M1 — Changeset identity and `change init` (unblocked)
 
 Deliverables
-- `gitpr change init --base <ref>` creates `changesets/<slug>/CHANGESET.yaml` and
-  `ABOUT.md`; safe to re-run; refuses to run on a detached `HEAD`.
+- `gitpr change init --base <ref> [--about <text>]` creates `changesets/<slug>/CHANGESET.yaml`
+  and `ABOUT.md`, then commits them; safe to re-run; refuses to run on a detached `HEAD`.
 
 Tasks
 - `changeset.py`: `for_branch()`, `dir`, `metadata` (minimal YAML written/parsed by hand —
   one `key: value` line; no PyYAML dependency), `ABOUT.md` template with PRD §6 headings.
 - Idempotence: never overwrite an existing `ABOUT.md`/`CHANGESET.yaml`; `--base` conflict
-  reported, `--set-base` to change it. Do not auto-commit (the author commits with their
-  implementation, per PRD §22 step 4).
-- `cli/change.py init`.
+  reported, `--set-base` to change it; `--about` content over an existing `ABOUT.md`
+  conflicts the same way, with `--set-about` as the override.
+- Commit the scaffold, scoped to the changeset directory with `git commit --only`, so an
+  unrelated staged file survives on the author's index. `--no-commit` opts out for authors
+  who want the scaffolding inside their first implementation commit (PRD §22 step 4).
+- `--about <text>`, `--about -`, or piped stdin supplies `ABOUT.md` content, making
+  initialise-and-describe one non-interactive call.
+- `cli/change.go init`.
 
 Verification — init twice ⇒ byte-identical files and a non-destructive notice; a populated
-`ABOUT.md` survives a second `init`; `CHANGESET.yaml` round-trips `base: booking-transaction`.
+`ABOUT.md` survives a second `init` and survives `--about` unless `--set-about` is passed;
+`CHANGESET.yaml` round-trips `base: booking-transaction`; a pre-staged unrelated file is still
+staged after init and absent from its commit; an empty pipe yields the scaffold, not an empty
+`ABOUT.md`.
 
 ### M2 — Lifecycle, state derivation, `status`, `review history` (unblocked)
 
@@ -373,3 +392,4 @@ M0 ──► M1 ──► M2 ──┬──► M3 ──► M4 ──► M6
 | --- | --- | --- |
 | 2026-09-16 | — | Initial plan. Plumbing spike complete; D1–D4 raised. |
 | 2026-09-16 | implementation pass | D1–D4 resolved. M0–M4 implemented and verified by the PRD §29 replay; M5 implemented with the TUI verified under a pty. Three implementation-level discoveries recorded above; no PRD requirement dropped. |
+| 2026-09-16 | `change init` change of contract | Init now commits the scaffold (scoped with `git commit --only`) and accepts `ABOUT.md` content by flag or pipe, so agents can initialise and describe atomically. M1 updated above; two further discoveries recorded. Found while this change was being tested, not by it: the template warning in `change ready` was unreachable. |

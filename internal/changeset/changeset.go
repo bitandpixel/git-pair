@@ -31,6 +31,8 @@ var (
 	ErrDetachedHead = errors.New("HEAD is detached; check out a branch first")
 	// ErrBaseConflict means CHANGESET.yaml already names a different base.
 	ErrBaseConflict = errors.New("base already set to a different value")
+	// ErrAboutConflict means ABOUT.md already has content and no override was given.
+	ErrAboutConflict = errors.New("ABOUT.md already has content")
 )
 
 // Changeset is one branch's review state, located in the working tree.
@@ -232,19 +234,34 @@ func readMetadata(path string) (map[string]string, error) {
 	return md, nil
 }
 
+// WriteOptions selects what Write should create or replace.
+type WriteOptions struct {
+	// Base is the ref the changeset diff is measured against. Required.
+	Base string
+	// SetBase replaces an existing base value instead of reporting a conflict.
+	SetBase bool
+	// About is explicit ABOUT.md content. Empty means "scaffold it".
+	About string
+	// SetAbout replaces existing ABOUT.md content instead of reporting a conflict.
+	SetAbout bool
+}
+
 // Write creates the changeset directory, CHANGESET.yaml, and ABOUT.md.
 //
-// It is idempotent: existing files are never overwritten. When CHANGESET.yaml
-// names a different base, ErrBaseConflict is returned unless setBase is true.
-// Nothing is committed — the author commits scaffolding with their own
-// implementation work.
-func Write(repo *git.Repo, c Changeset, base string, setBase bool) (written []string, err error) {
+// It is idempotent and never overwrites content silently: an existing base or
+// ABOUT.md that differs from what was asked for is a conflict, not a rewrite.
+//
+// Nothing here commits. The caller decides, because committing must go through
+// `git commit --only` on the changeset directory so an unrelated staged file in
+// the author's index is not swept into the scaffolding commit.
+func Write(repo *git.Repo, c Changeset, opts WriteOptions) (written []string, err error) {
 	if c.Dir == "" {
 		return nil, errors.New("changeset: empty directory")
 	}
-	if base == "" {
+	if opts.Base == "" {
 		return nil, errors.New("changeset: base must not be empty")
 	}
+	base := opts.Base
 	absDir := filepath.Join(repo.Dir, c.Dir)
 	if _, err := os.Stat(absDir); errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(absDir, 0o755); err != nil {
@@ -258,7 +275,7 @@ func Write(repo *git.Repo, c Changeset, base string, setBase bool) (written []st
 	if err != nil {
 		return written, err
 	}
-	if existing, ok := md["base"]; ok && existing != "" && existing != base && !setBase {
+	if existing, ok := md["base"]; ok && existing != "" && existing != base && !opts.SetBase {
 		return written, fmt.Errorf("%w: %s names base %q, not %q (pass --set-base to change it)",
 			ErrBaseConflict, c.MetadataPath(), existing, base)
 	}
@@ -279,13 +296,41 @@ func Write(repo *git.Repo, c Changeset, base string, setBase bool) (written []st
 	}
 
 	aboutPath := filepath.Join(absDir, AboutFile)
-	if _, err := os.Stat(aboutPath); errors.Is(err, os.ErrNotExist) {
+	_, aboutStatErr := os.Stat(aboutPath)
+	aboutExists := aboutStatErr == nil
+	switch {
+	case opts.About != "" && aboutExists && !opts.SetAbout:
+		return written, fmt.Errorf("%w: %s is not empty (pass --set-about to replace it)",
+			ErrAboutConflict, c.AboutPath())
+	case opts.About != "":
+		body := normalizeMarkdown(opts.About)
+		if err := os.WriteFile(aboutPath, []byte(body), 0o644); err != nil {
+			return written, err
+		}
+		if aboutExists {
+			written = append(written, c.AboutPath()+" (content replaced)")
+		} else {
+			written = append(written, c.AboutPath())
+		}
+	case errors.Is(aboutStatErr, os.ErrNotExist):
 		if err := os.WriteFile(aboutPath, []byte(AboutTemplate(c.Slug)), 0o644); err != nil {
 			return written, err
 		}
 		written = append(written, c.AboutPath())
+	case aboutStatErr != nil:
+		return written, aboutStatErr
 	}
 	return written, nil
+}
+
+// normalizeMarkdown makes piped or flag-supplied content end in exactly one
+// newline, so a here-string and a here-document produce identical files.
+func normalizeMarkdown(s string) string {
+	s = strings.TrimRight(s, "\r\n")
+	if s == "" {
+		return ""
+	}
+	return s + "\n"
 }
 
 // AboutExists reports whether ABOUT.md is present in the working tree.

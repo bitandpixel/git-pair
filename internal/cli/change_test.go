@@ -33,13 +33,16 @@ func TestChangeInitCreatesScaffoldingFromBranchName(t *testing.T) {
 	for _, heading := range []string{"Summary", "What changed", "Design decisions", "Validation"} {
 		mustContain(t, about, heading, "ABOUT.md scaffold")
 	}
-	// The author commits scaffolding with their implementation (PRD §22 step 4), so
-	// init itself must not create a commit.
-	if f.Head() != head {
-		t.Errorf("change init created a commit: HEAD moved from %s to %s", head, f.Head())
+	// `change init` commits the scaffold, so a following `change ready` is not
+	// blocked by a dirty working tree.
+	if f.Head() == head {
+		t.Error("change init did not commit the scaffolding")
 	}
-	if f.Clean() {
-		t.Error("the new scaffolding is not visible as a working-tree change")
+	if got := f.Subject("HEAD"); got != "gitpr: initialize changeset feature-booking-transaction" {
+		t.Errorf("HEAD subject = %q, want the initialize marker", got)
+	}
+	if !f.Clean() {
+		t.Errorf("the scaffolding commit left the working tree dirty:\n%s", f.MustGit("status", "--porcelain"))
 	}
 }
 
@@ -376,4 +379,198 @@ func queueListsChangeset(t *testing.T, res result, slug string) bool {
 		}
 	}
 	return false
+}
+
+// --- change init: committing -------------------------------------------------
+
+// PRD §9.1 + §28 (agent contract): init must leave the repository in a state
+// where the next command works, which means the scaffold cannot sit uncommitted
+// in the working tree and block `change ready`.
+func TestChangeInitCommitsTheScaffold(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("booking")
+	before := f.Head()
+
+	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+
+	if f.RevListCount("main..HEAD") != 1 {
+		t.Errorf("init made %d commits above main, want exactly 1", f.RevListCount("main..HEAD"))
+	}
+	got := f.ChangedFiles(before, f.Head())
+	want := []string{"changesets/booking/ABOUT.md", "changesets/booking/CHANGESET.yaml"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("commit touched %v, want %v", got, want)
+	}
+	if !f.Clean() {
+		t.Errorf("working tree is dirty after init:\n%s", f.MustGit("status", "--porcelain"))
+	}
+}
+
+// The commit is scoped with `git commit --only`. Without that scope, init would
+// silently consume whatever the author had already staged for a different
+// commit, which is the one way this command could destroy work.
+func TestChangeInitCommitLeavesUnstagedAndStagedWorkAlone(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("booking")
+	f.Write("staged.go", "package main\n")
+	f.MustGit("add", "staged.go")
+	f.Write("unstaged.go", "package main\n")
+
+	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+
+	if got := f.ChangedFiles("HEAD~1", "HEAD"); len(got) != 2 {
+		t.Errorf("commit touched %v, want only the two scaffolding files", got)
+	}
+	status := f.MustGit("status", "--porcelain")
+	if !strings.Contains(status, "A  staged.go") {
+		t.Errorf("the author's staged file was swept out of the index:\n%s", status)
+	}
+	if !strings.Contains(status, "?? unstaged.go") {
+		t.Errorf("the author's unstaged file was touched:\n%s", status)
+	}
+	if f.HasFile("HEAD", "staged.go") {
+		t.Error("staged.go was committed by init")
+	}
+}
+
+func TestChangeInitNoCommitLeavesTheScaffoldUncommitted(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("booking")
+	before := f.Head()
+
+	res := runIn(t, f.Dir(), "change", "init", "--base", "main", "--no-commit").mustSucceed(t, "change", "init")
+
+	if f.Head() != before {
+		t.Error("--no-commit still created a commit")
+	}
+	mustContain(t, res.stdout, "--no-commit", "output should say why nothing was committed")
+	if !f.HasWorktreeFile(filepath.Join("changesets", "booking", "ABOUT.md")) {
+		t.Error("--no-commit did not write the scaffolding")
+	}
+}
+
+// Re-running init must not fail and must not add an empty commit.
+func TestChangeInitAfterCommittingIsIdempotent(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("booking")
+	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	first := f.Head()
+
+	second := runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+
+	if f.Head() != first {
+		t.Errorf("re-init created a commit: HEAD moved from %s to %s", first, f.Head())
+	}
+	mustContain(t, second.stdout, "already tracked", "re-init should explain that there is nothing to commit")
+}
+
+// --- change init: ABOUT.md content ------------------------------------------
+
+// The point of --about: initialise and describe in one non-interactive call, so
+// an agent does not have to sequence a write, an add, and a commit.
+func TestChangeInitAboutFlagWritesAndCommitsContent(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("booking")
+
+	body := "# booking\n\n## Summary\n\nAdds row-level locking.\n"
+	runIn(t, f.Dir(), "change", "init", "--base", "main", "--about", body).mustSucceed(t, "change", "init")
+
+	if got := f.Read(filepath.Join("changesets", "booking", "ABOUT.md")); got != body {
+		t.Errorf("ABOUT.md = %q, want %q", got, body)
+	}
+	if got := f.FileAt("HEAD", filepath.Join("changesets", "booking", "ABOUT.md")); got != body {
+		t.Errorf("ABOUT.md at HEAD = %q, want it committed in the same call", got)
+	}
+}
+
+// A piped body is normalised to exactly one trailing newline, so `--about
+// "$(cat f)"` and `--about - < f` agree.
+func TestChangeInitAboutContentIsNewlineNormalised(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("booking")
+
+	runIn(t, f.Dir(), "change", "init", "--base", "main", "--about", "# booking\n\n## Summary\n\nNo trailing newline.\n\n\n").
+		mustSucceed(t, "change", "init")
+
+	if got, want := f.Read(filepath.Join("changesets", "booking", "ABOUT.md")), "# booking\n\n## Summary\n\nNo trailing newline.\n"; got != want {
+		t.Errorf("ABOUT.md = %q, want %q", got, want)
+	}
+}
+
+func TestChangeInitReadsAboutFromStdin(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("booking")
+
+	body := "# booking\n\n## Summary\n\nDescribed through a pipe.\n"
+	runStdinIn(t, f.Dir(), body, "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+
+	if got := f.FileAt("HEAD", filepath.Join("changesets", "booking", "ABOUT.md")); got != body {
+		t.Errorf("ABOUT.md at HEAD = %q, want %q", got, body)
+	}
+}
+
+// Piped-but-empty input is not "described": `cmd </dev/null` and an agent that
+// closes stdin must get the scaffold rather than an empty ABOUT.md.
+func TestChangeInitEmptyStdinFallsBackToTheScaffold(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("booking")
+
+	runStdinIn(t, f.Dir(), "", "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+
+	about := f.Read(filepath.Join("changesets", "booking", "ABOUT.md"))
+	mustContain(t, about, "## Summary", "scaffold headings")
+	mustContain(t, about, "## Known limitations", "scaffold headings")
+}
+
+func TestChangeInitAboutDashNeedsStdin(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("booking")
+
+	res := runStdinIn(t, f.Dir(), "", "change", "init", "--base", "main", "--about", "-")
+	if res.code != exitUsage {
+		t.Errorf("--about - with empty stdin exited %d, want %d\n%s", res.code, exitUsage, res.stderr)
+	}
+}
+
+// PRD §9.1 "should not destroy existing changeset data": --about cannot replace
+// a description that is already there unless --set-about says so.
+func TestChangeInitAboutDoesNotClobberWithoutSetAbout(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("booking")
+	original := "# booking\n\n## Summary\n\nThe author's own description.\n"
+	f.StageChangeset("booking", "main")
+	f.WriteChangesetFile("booking", "ABOUT.md", original)
+	f.MustGit("add", "changesets/booking/ABOUT.md")
+	f.MustGit("commit", "-m", "describe booking")
+
+	res := runIn(t, f.Dir(), "change", "init", "--base", "main", "--about", "# booking\n\noverwritten\n")
+	if res.code != exitUsage {
+		t.Errorf("--about over existing content exited %d, want %d\n%s", res.code, exitUsage, res.stderr)
+	}
+	mustContain(t, res.stderr, "--set-about", "refusal should name the flag that allows it")
+	if got := f.Read(filepath.Join("changesets", "booking", "ABOUT.md")); got != original {
+		t.Errorf("ABOUT.md was modified: %q", got)
+	}
+
+	runIn(t, f.Dir(), "change", "init", "--base", "main", "--about", "# booking\n\nreplaced\n", "--set-about").
+		mustSucceed(t, "change", "init")
+	if got := f.FileAt("HEAD", filepath.Join("changesets", "booking", "ABOUT.md")); got != "# booking\n\nreplaced\n" {
+		t.Errorf("ABOUT.md at HEAD = %q, want the replacement committed", got)
+	}
+}
+
+// The scaffold commit carries the changeset trailer but no lifecycle state, so
+// it must not move the changeset out of WORKING or into the review queue.
+func TestChangeInitCommitDoesNotChangeLifecycleState(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("booking")
+	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+
+	status := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status")
+	if got := status.json(t)["state"]; got != "WORKING" {
+		t.Errorf("state after init = %v, want WORKING", got)
+	}
+	if list := runIn(t, f.Dir(), "review", "queue", "--json").jsonList(t, "ready_for_review"); len(list) != 0 {
+		t.Errorf("a freshly initialised changeset is in the review queue: %v", list)
+	}
 }

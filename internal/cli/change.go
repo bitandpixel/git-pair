@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"gitpr/internal/changeset"
+	"gitpr/internal/console"
 	"gitpr/internal/git"
 	"gitpr/internal/marker"
 	"gitpr/internal/model"
@@ -35,8 +36,9 @@ func newChangeCommand(a *app) *cobra.Command {
 type initOptions struct {
 	base     string
 	setBase  bool
-	commit   bool
-	baseFlag bool
+	about    string
+	setAbout bool
+	noCommit bool
 }
 
 func newChangeInitCommand(a *app) *cobra.Command {
@@ -44,25 +46,37 @@ func newChangeInitCommand(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create review scaffolding for the current branch",
-		Long: `Create changesets/<changeset>/ with CHANGESET.yaml and ABOUT.md.
+		Long: `Create changesets/<changeset>/ with CHANGESET.yaml and ABOUT.md, then commit it.
 
 The changeset directory name is derived from the branch name, so
 feature/booking-transaction becomes changesets/feature-booking-transaction/.
 
-The command is idempotent and never overwrites existing changeset content. It
-does not commit: scaffolding normally lands in the author's first implementation
-commit. Use --commit to make a dedicated commit instead.`,
+The commit covers the changeset directory only, so whatever else is staged on
+your index stays there. Use --no-commit to leave the scaffolding in the working
+tree for your first implementation commit instead.
+
+ABOUT.md gets a scaffold with the standard review headings unless you supply
+content, which makes describe-and-initialise a single non-interactive call:
+
+  gitpr change init --base main --about "$DESCRIPTION"
+  gitpr change init --base main --about - < about.md
+  cat about.md | gitpr change init --base main
+
+Existing content is never overwritten silently: replacing a populated ABOUT.md
+takes --set-about, the same way changing a base takes --set-base.`,
 		Example: `  gitpr change init --base main
-  gitpr change init --base booking-transaction   # stacked branch`,
+  gitpr change init --base booking-transaction   # stacked branch
+  gitpr change init --base main --about - < draft.md`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.baseFlag = cmd.Flags().Changed("base")
 			return runChangeInit(cmd.Context(), a, opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.base, "base", "", "ref this changeset is stacked on (default: main, then master)")
 	cmd.Flags().BoolVar(&opts.setBase, "set-base", false, "overwrite an existing base value")
-	cmd.Flags().BoolVar(&opts.commit, "commit", false, "commit the scaffolding instead of leaving it staged for the author")
+	cmd.Flags().StringVar(&opts.about, "about", "", "ABOUT.md content; - reads it from stdin")
+	cmd.Flags().BoolVar(&opts.setAbout, "set-about", false, "overwrite an existing ABOUT.md")
+	cmd.Flags().BoolVar(&opts.noCommit, "no-commit", false, "leave the scaffolding uncommitted")
 	return cmd
 }
 
@@ -94,9 +108,21 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		a.warn("warning: base %q does not resolve yet; spans and status will fail until it does\n", base)
 	}
 
-	written, err := changeset.Write(repo, cs, base, opts.setBase)
+	about, err := aboutContent(opts)
 	if err != nil {
-		if errors.Is(err, changeset.ErrBaseConflict) {
+		return err
+	}
+
+	written, err := changeset.Write(repo, cs, changeset.WriteOptions{
+		Base:     base,
+		SetBase:  opts.setBase,
+		About:    about,
+		SetAbout: opts.setAbout,
+	})
+	if err != nil {
+		// Both conflicts are "that would discard content you did not say to
+		// discard", which is an argument problem rather than a repository state.
+		if errors.Is(err, changeset.ErrBaseConflict) || errors.Is(err, changeset.ErrAboutConflict) {
 			return &usageError{err}
 		}
 		return err
@@ -108,31 +134,84 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		a.printf("unchanged %s (already initialised)\n", cs.Dir)
 	}
 
-	if opts.commit {
-		if err := repo.StagePaths(ctx, cs.Dir); err != nil {
-			return err
-		}
-		sha, err := marker.Commit(ctx, repo, marker.Message{
-			Subject:  fmt.Sprintf("gitpr: initialize changeset %s", cs.Slug),
-			Trailers: []string{"GitPR-Changeset=" + cs.Slug},
-		})
-		if err != nil {
-			if isNothingToCommit(err) {
-				a.printf("nothing to commit (scaffolding is already tracked)\n")
-				return nil
-			}
-			return err
-		}
-		a.printf("committed %s\n", short(sha))
+	described := about != "" || !aboutIsTemplate(ctx, repo, cs)
+	if opts.noCommit {
+		a.printf("not committed (--no-commit)\n")
+		printInitNext(a, cs, described)
 		return nil
 	}
 
-	if cs.Exists && len(written) > 0 {
-		a.printf("\nNext: describe the change in %s, then commit it with your implementation.\n", cs.AboutPath())
-	} else if !cs.Exists {
-		a.printf("\nNext: fill in %s, commit it with your implementation, then run `gitpr change ready`.\n", cs.AboutPath())
+	// Stage first, then commit with --only: git needs the files in the index to
+	// accept them as pathspecs, and --only keeps the rest of the index out of
+	// this commit.
+	if err := repo.StagePaths(ctx, cs.Dir); err != nil {
+		return err
 	}
+	staged, err := repo.HasStagedChanges(ctx, cs.Dir)
+	if err != nil {
+		// A failure here is not worth inventing a new way for `init` to die:
+		// fall through and let the commit itself report.
+		staged = true
+	}
+	if !staged {
+		a.printf("nothing to commit (scaffolding is already tracked)\n")
+		printInitNext(a, cs, described)
+		return nil
+	}
+	sha, err := marker.CommitPaths(ctx, repo, marker.Message{
+		Subject:  fmt.Sprintf("gitpr: initialize changeset %s", cs.Slug),
+		Trailers: []string{"GitPR-Changeset=" + cs.Slug},
+	}, []string{cs.Dir})
+	if err != nil {
+		if isNothingToCommit(err) {
+			a.printf("nothing to commit (scaffolding is already tracked)\n")
+			printInitNext(a, cs, described)
+			return nil
+		}
+		return err
+	}
+	a.printf("committed %s\n", short(sha))
+	if status, err := repo.StatusPorcelain(ctx); err == nil && strings.TrimSpace(status) != "" {
+		a.printf("left %s uncommitted (not part of the scaffold)\n",
+			plural(len(strings.Split(strings.TrimSpace(status), "\n")), "path", "paths"))
+	}
+	printInitNext(a, cs, described)
 	return nil
+}
+
+// aboutContent resolves the ABOUT.md body from --about or piped stdin.
+//
+// An explicit --about wins. Without it, a pipe is treated as an deliberate act
+// and its content is used; a terminal, or a pipe carrying nothing (including
+// </dev/null), means "no content was supplied" and the scaffold is written.
+func aboutContent(opts *initOptions) (string, error) {
+	switch {
+	case opts.about == "-":
+		piped := console.ReadPipedStdin()
+		if piped == "" {
+			return "", &usageError{errors.New("--about - needs content on stdin, and stdin is empty")}
+		}
+		return piped, nil
+	case opts.about != "":
+		return opts.about, nil
+	default:
+		return console.ReadPipedStdin(), nil
+	}
+}
+
+func printInitNext(a *app, cs changeset.Changeset, described bool) {
+	if described {
+		a.printf("\nNext: implement, commit, then run `gitpr change ready`.\n")
+		return
+	}
+	a.printf("\nNext: fill in %s, commit it with your implementation, then run `gitpr change ready`.\n", cs.AboutPath())
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 // defaultBase picks the repository's trunk without guessing wildly.
@@ -281,7 +360,8 @@ func aboutIsTemplate(ctx context.Context, repo *git.Repo, cs changeset.Changeset
 func isNothingToCommit(err error) bool {
 	var ge *git.Error
 	if errors.As(err, &ge) {
-		return strings.Contains(strings.ToLower(ge.Stderr), "nothing to commit")
+		// git sends this notice to stdout, not stderr.
+		return strings.Contains(strings.ToLower(ge.Stderr+ge.Stdout), "nothing to commit")
 	}
 	return false
 }
