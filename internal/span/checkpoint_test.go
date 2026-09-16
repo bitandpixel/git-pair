@@ -238,3 +238,16 @@ func TestCheckpointNamesMustResolveToCommits(t *testing.T) {
 		t.Errorf("error = %v, want it to say the name is not a commit", err)
 	}
 }
+
+// A checkpoint names itself the way the reviewer met it: an id from a list is long and
+// deserves abbreviating, a revision they typed back is worth quoting exactly.
+func TestCommitCheckpointNamesItselfTheWayItWasReached(t *testing.T) {
+	fromList := span.Commit("4b825dc642cb6eb9a060e54bf8d69288fbee4904")
+	if got := fromList.String(); got != "4b825dc" {
+		t.Errorf("a commit picked from a list names itself %q, want the short id", got)
+	}
+	typed := span.Commit("HEAD^")
+	if got := typed.String(); got != "HEAD^" {
+		t.Errorf("a typed revision names itself %q, want it as typed", got)
+	}
+}

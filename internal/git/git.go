@@ -13,7 +13,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Errors callers branch on.
@@ -444,6 +446,102 @@ func (r *Repo) ForEachRef(ctx context.Context, pattern string) ([]RefEntry, erro
 		refs = append(refs, RefEntry{Name: name, SHA: sha})
 	}
 	return refs, nil
+}
+
+// CommitTip is one commit as a checkpoint chooser sees it: an id to pin, and a subject
+// and age to recognise it by.
+type CommitTip struct {
+	SHA     string
+	Short   string
+	Subject string
+	When    time.Time
+}
+
+// RecentCommits lists commits reachable from revs, newest first, at most limit of them.
+// The limit is a scrollback rather than a rule: the picker that uses it also takes a
+// typed id, so a commit older than the window is still reachable.
+func (r *Repo) RecentCommits(ctx context.Context, limit int, revs ...string) ([]CommitTip, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	args := []string{"log", "--no-color", "--max-count=" + strconv.Itoa(limit),
+		"--pretty=%H" + FieldSep + "%h" + FieldSep + "%at" + FieldSep + "%s"}
+	args = append(args, revs...)
+	out, err := r.Git(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	var tips []CommitTip
+	for _, line := range splitLines(out) {
+		parts := strings.SplitN(line, FieldSep, 4)
+		if len(parts) < 4 {
+			continue
+		}
+		when, err := strconv.ParseInt(parts[2], 10, 64)
+		if err != nil {
+			continue
+		}
+		tips = append(tips, CommitTip{
+			SHA: parts[0], Short: parts[1], Subject: parts[3],
+			When: time.Unix(when, 0),
+		})
+	}
+	return tips, nil
+}
+
+// RefTip is a ref, the commit it points at with tags peeled, and when that commit was
+// made.
+type RefTip struct {
+	Name   string
+	Commit string
+	When   time.Time
+}
+
+// RefTips lists refs under pattern with what they point at, newest first. Unlike
+// ForEachRef it peels tags and carries dates, because a reviewer choosing a branch needs
+// to tell them apart; the name stays the full `refs/...` form, which is what makes a
+// branch and a tag of the same name unambiguous.
+func (r *Repo) RefTips(ctx context.Context, pattern string) ([]RefTip, error) {
+	// Both `objectname` and `*objectname` are asked for because only the latter is peeled,
+	// and it is empty for the refs that need no peeling. An annotated tag's objectname is
+	// the tag object; a reviewer choosing v0.4.0 means the commit behind it. The date is
+	// asked for twice for the same reason: an annotated tag has a taggerdate and no
+	// committerdate, and a ref with no date in this output is still a ref worth listing.
+	out, err := r.Git(ctx, "for-each-ref", "--sort=-committerdate",
+		"--format=%(refname)"+FieldSep+"%(objectname)"+FieldSep+"%(*objectname)"+FieldSep+
+			"%(committerdate:unix)"+FieldSep+"%(taggerdate:unix)", pattern)
+	if err != nil {
+		return nil, err
+	}
+	var tips []RefTip
+	for _, line := range splitLines(out) {
+		parts := strings.SplitN(line, FieldSep, 5)
+		if len(parts) < 5 {
+			continue
+		}
+		commit := parts[1]
+		if parts[2] != "" {
+			commit = parts[2]
+		}
+		tips = append(tips, RefTip{Name: parts[0], Commit: commit, When: parseUnix(parts[3], parts[4])})
+	}
+	return tips, nil
+}
+
+// parseUnix reads the first field that holds a date, and returns the zero time when none
+// does. A missing date is a display gap, not a reason to hide a ref.
+func parseUnix(fields ...string) time.Time {
+	for _, f := range fields {
+		if f == "" {
+			continue
+		}
+		when, err := strconv.ParseInt(f, 10, 64)
+		if err != nil {
+			continue
+		}
+		return time.Unix(when, 0)
+	}
+	return time.Time{}
 }
 
 // --- mutations --------------------------------------------------------------

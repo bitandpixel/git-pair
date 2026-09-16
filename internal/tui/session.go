@@ -90,6 +90,27 @@ func (s *Session) Rescan(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return s.scan(ctx, sp)
+}
+
+// SetSpan moves the session to a span the reviewer chose, which is what `V`'s Enter does.
+// Resolution happens before anything is replaced: a span git refuses leaves the session
+// showing what it showed before, rather than caught half-way between two.
+func (s *Session) SetSpan(ctx context.Context, sel span.Selector) error {
+	sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, sel)
+	if err != nil {
+		return err
+	}
+	s.sel = sel
+	return s.scan(ctx, sp)
+}
+
+// Selector is the span as it was chosen rather than as it resolved, which is what the
+// picker seeds its pending endpoints from.
+func (s *Session) Selector() span.Selector { return s.sel }
+
+// scan rebuilds the file list for an already-resolved span.
+func (s *Session) scan(ctx context.Context, sp span.Span) error {
 	s.current = sp
 
 	names, err := s.repo.DiffNames(ctx, sp.From, sp.To)

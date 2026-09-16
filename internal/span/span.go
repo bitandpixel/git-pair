@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gitpr/internal/git"
 	"gitpr/internal/lifecycle"
@@ -100,15 +101,20 @@ func (c Checkpoint) String() string {
 	case KindReview:
 		return fmt.Sprintf("review %d", c.Index)
 	case KindCommit:
-		if c.OID != "" {
-			return short(c.OID)
+		// Chosen from a list, the name is a full sha; typed, it is whatever the reviewer
+		// wrote ("HEAD^", "v0.4.0"), which is worth more to them than a truncated hex id.
+		if id := c.OID; id != "" {
+			return short(id)
+		}
+		if isHex(c.Name) && len(c.Name) > 7 {
+			return short(c.Name)
 		}
 		return c.Name
 	case KindRef:
 		if c.OID != "" {
-			return c.Name + " @ " + short(c.OID)
+			return ShortRef(c.Name) + " @ " + short(c.OID)
 		}
-		return c.Name
+		return ShortRef(c.Name)
 	}
 	return c.Kind.String()
 }
@@ -271,9 +277,23 @@ func display(c Checkpoint) string {
 		// resolve names it after the changeset's base ref, which is how a reviewer names it.
 		return c.Name
 	case KindRef:
-		return c.Name + "@" + short(c.OID)
+		return ShortRef(c.Name) + "@" + short(c.OID)
 	}
 	return short(c.OID)
+}
+
+// ShortRef trims a full `refs/...` name to the form a reviewer would type, keeping enough
+// to identify it: `refs/heads/main` becomes `main`, `refs/remotes/origin/main` keeps the
+// remote, and anything else (`refs/reviews/booking`) keeps its full name rather than
+// becoming ambiguous. The checkpoint itself keeps the full name, so resolution stays
+// unambiguous and drift can be checked against the right ref.
+func ShortRef(name string) string {
+	for _, prefix := range []string{"refs/heads/", "refs/remotes/", "refs/tags/"} {
+		if rest, ok := strings.CutPrefix(name, prefix); ok {
+			return rest
+		}
+	}
+	return name
 }
 
 // Drift is a ref checkpoint whose ref has moved since it was pinned.
@@ -343,4 +363,20 @@ func short(oid string) string {
 		return oid[:7]
 	}
 	return oid
+}
+
+// isHex recognises what git printed as an object id, so a checkpoint knows the
+// difference between an id to abbreviate and a revision to quote back as typed.
+func isHex(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f', r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }

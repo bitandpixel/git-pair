@@ -637,6 +637,20 @@ over a historical span compares its two pinned commits rather than your working 
 show you work the span does not contain. `gitpr diff` takes the same flags and just prints; the
 read-only half is about the screen, where the mistakes would be made.
 
+`V` opens the span picker, where both ends are chosen before either takes effect: `Tab` moves between
+the BASE and HEAD columns, `j`/`k` move, `Space` sets the end under the cursor, and `Enter` applies
+the pair — with the lines under the columns saying what that pair resolves to, and whether the screen
+would go read-only, before you commit to it. `u` and `f` are the unreviewed and full-changeset
+presets; `Esc` leaves the span exactly as it was. Each column lists the review submissions — the last
+three by alias, `Review -1` to `Review -3`, older ones by index — then `Commit…` and `Ref…`; only the
+base offers the changeset base, only the head offers the working tree, and `HEAD` appears nowhere,
+because beside "Working Tree" it would be two similar-looking current targets when only one of them
+can be edited. `Commit…` is a searchable list of subjects and short ids that also takes a typed
+revision, so history past the window is one keystroke away, and refuses an id git does not know while
+the list is still on screen. `Ref…` groups branches, remote refs, tags and other refs under headings,
+showing `main` and `origin/main` while the checkpoint keeps `refs/heads/main` — a branch and a tag
+with the same name are two different choices, and drift has to be watched on the one you meant.
+
 In a narrow window the shortcut bar wraps between shortcuts rather than through them —
 `space reviewed` never arrives split in half — and the list gives up the rows it takes.
 Submitting commits the review, moves the ref and **ends the session**, printing one line about

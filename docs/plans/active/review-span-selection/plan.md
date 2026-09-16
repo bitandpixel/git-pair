@@ -165,13 +165,36 @@ Deliverables:
   checkpoint pinned at its current OID.
 - `HEAD` is not offered as a first-class option in either column.
 
-Tasks: list commits and refs through `git log`/`git for-each-ref` behind `git.Repo` methods; the
-picker as a model mode with its own update path; the base-side CLI flags (`--base-review`,
-`--base-commit`, `--base-ref`) so the picker and CLI stay equivalent; README, PRD §28, shortcut bar.
+Tasks:
 
-Verification: picker tests for pending-versus-applied (Space then Enter, Esc discards), filtering,
-direct entry, and what happens when the picked commit is not reachable from the span; pty walkthrough
-of scenarios B and C.
+- [x] `Repo.RecentCommits` and `Repo.RefTips` behind `git.Repo` — the latter peels tags and carries
+      dates — and `span.ShortRef` so the screen reads `main` while the checkpoint keeps
+      `refs/heads/main`.
+- [x] The picker as one more mode of the same model (`modeSpan`), with the same frame invariants as
+      the review screen: every row padded to the width, the frame exactly the terminal's height, the
+      divider in one cell.
+- [x] `V` in both shortcut bars. The picker is deliberately outside the read-only gate: it is how a
+      historical span gets out, and it changes nothing until `Enter`.
+- [x] README, PRD §14 and §28.
+- [ ] Base-side CLI flags (`--base-review`, `--base-commit`, `--base-ref`), so a scripted call can
+      name a base the way the picker does. Deferred: `--since-review` already covers the review case,
+      and nothing else in the plan needs them.
+
+Verification:
+
+- [x] Pending versus applied: `Space` leaves the session's span alone while the picker shows what the
+      pair would become (`HISTORICAL · read-only` before it is true); `Enter` applies it; `Esc`
+      discards it and clears the status.
+- [x] Filtering, direct entry, and a typed id git refuses — reported inside the drill, which stays
+      open with the text intact rather than swallowing the keystroke.
+- [x] Ref names friendly on screen and full in the checkpoint; the pin is the commit the ref pointed
+      at; an annotated tag resolves to the commit behind it.
+- [x] `HEAD` is offered nowhere; the last three submissions are aliased `-1`…`-3` and older ones
+      carry their index; the alias displayed is the index stored, so §5's stability holds through the
+      picker.
+- [x] The frame invariant in both picker layouts (columns and drill).
+- [x] Pty walkthrough of scenarios B and C, and of a live span whose base is a commit — §23's first
+      matrix row.
 
 ### M4 — Drift the reviewer can see and act on
 
@@ -196,8 +219,15 @@ branch is moved by a second commit while the TUI is open.
   `$REMOTE_LABEL` arrive empty in the two-rev form, populated in the one-rev-against-the-worktree
   form. A historical session therefore shows the tool unnamed files; acceptable for a read-only look
   and worth a sentence in the help rather than a workaround.
-- `git for-each-ref` formatting for friendly names: what is unambiguous enough to shorten
-  (`refs/heads/main` → `main`) and where a `refs/reviews/...` entry must keep its full name.
+- `git for-each-ref` for friendly names — **done, and it bit twice.** `%(objectname:strip=2)` is
+  rejected by git 2.43 (`unrecognized %(objectname) argument`), so peeling needs `%(*objectname)`,
+  which is empty for the refs that need no peeling. And an annotated tag carries a `taggerdate` and
+  **no** `committerdate`, so a parser requiring the latter silently dropped every tag from the list —
+  caught only by a test with an annotated tag, which is why it has one now. Both date fields are
+  asked for and either may fill it; a ref with no date is still a ref worth listing, shown without an
+  age. `refs/heads/main` displays as `main`, `refs/remotes/origin/main` keeps its remote, and
+  `refs/reviews/booking` keeps its full name rather than becoming a bare `booking` beside the branch
+  of that name.
 
 ## Risks
 

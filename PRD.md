@@ -1006,6 +1006,23 @@ reviewer can review. Nothing is quietly redirected to a temporary copy of histor
 over a historical span compares its two pinned commits, so it never shows work the span does not
 contain, and the preview has no `you` section, because a historical span has no working tree in it.
 
+`V` opens the span picker: two columns, BASE and HEAD, holding a pending checkpoint each. `Space`
+sets the end under the cursor, `Enter` applies the pair, and nothing changes before `Enter` — the
+lines under the columns already say what the pair resolves to and whether it would be read-only,
+which is what makes choosing a historical range safe rather than a negotiation with `Esc`. Both
+columns offer the submissions by alias (the newest three as `Review -1`…`Review -3`, older ones by
+index), then `Commit…` and `Ref…`; only the base offers the changeset base, only the head offers the
+working tree, and `HEAD` is offered nowhere: beside `Working Tree` it would present two
+similar-looking current targets when only one of them can be edited. `u` and `f` set the unreviewed
+and full-changeset presets, `Tab` switches columns, `Esc` cancels.
+
+The two drills are lists, not a history view. `Commit…` shows subject, short id and age; typing
+filters it; a typed revision is taken directly, because the list is a window and history is not, and
+a typed id git cannot resolve is refused while the list is still on screen. `Ref…` groups local
+branches, remote refs, tags and other refs under headings, shows the name a reviewer would type and
+keeps the full `refs/...` name in the checkpoint: a branch and a tag called `main` are two different
+choices, and drift has to be watched on the one that was meant.
+
 Suggested bindings:
 
 ```text
@@ -1028,6 +1045,7 @@ t        create a review thread
 T        collapse/expand the thread list
 
 v        toggle common review span
+V        open the span picker: pending base and head, applied together on enter
 s        submit review (block / feedback / approve)
 q        quit
 ```
@@ -1723,6 +1741,8 @@ T        collapse/expand the thread list
 
 v        toggle common span:
          full changeset ↔ unreviewed
+V        span picker: BASE and HEAD columns, space to choose an end, enter to apply;
+         Commit… and Ref… open searchable lists, u and f are the two presets
 
 s        submit review
 q        quit

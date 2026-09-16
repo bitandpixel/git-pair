@@ -31,6 +31,8 @@ const (
 	modeFiles mode = iota
 	modePrompt
 	modeSubmit
+	// modeSpan is the `V` screen: a pending base and head, neither applied until Enter.
+	modeSpan
 )
 
 type promptKind int
@@ -170,6 +172,9 @@ type reviewModel struct {
 	// holding the terminal exits. Every handoff assigns it, so a note can never outlive the
 	// child it was written for.
 	pendingNote string
+	// pick is the `V` screen's state: pending endpoints, cursors, and any drill-in list.
+	// Only meaningful while mode is modeSpan.
+	pick spanPicker
 	// out is the terminal the session renders on, which is where a cleared screen has to be
 	// written when a tool hands it back.
 	out      io.Writer
@@ -323,6 +328,10 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleSubmitKey(key)
 	case modePrompt:
 		return m.handlePromptKey(key)
+	case modeSpan:
+		// The picker is how a reviewer gets *out* of a read-only span, so it is not
+		// subject to the gate below; it also changes nothing until Enter.
+		return m.handleSpanKey(key)
 	}
 	m.refresh()
 
@@ -371,6 +380,10 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("New thread title (Enter to create, Esc to cancel)", false)
 	case key.Type == tea.KeyRunes && firstRune(key) == 'T':
 		m.toggleThreads()
+	case key.Type == tea.KeyRunes && firstRune(key) == 'V':
+		m.mode = modeSpan
+		m.pick = m.newSpanPicker()
+		m.setStatus("", false)
 	case key.Type == tea.KeyRunes && firstRune(key) == 'v':
 		if err := m.sess.ToggleSpan(m.ctx); err != nil {
 			m.setStatus(err.Error(), true)
@@ -736,10 +749,15 @@ func (m reviewModel) View() string {
 		return ""
 	}
 	var b strings.Builder
-	if m.paneWidth() > 0 {
-		b.WriteString(joinColumns(m.listBlock(), m.previewLines(), m.listWidth()))
-	} else {
-		b.WriteString(m.listBlock())
+	switch m.mode {
+	case modeSpan:
+		b.WriteString(m.pickerBlock())
+	default:
+		if m.paneWidth() > 0 {
+			b.WriteString(joinColumns(m.listBlock(), m.previewLines(), m.listWidth()))
+		} else {
+			b.WriteString(m.listBlock())
+		}
 	}
 	b.WriteString(m.footer())
 	// Joined rather than newline-terminated: the renderer writes a line for each line of the
@@ -867,6 +885,8 @@ func (m reviewModel) helpText() string {
 		return "Submit review: [b]lock  [f]eedback  [a]pprove  [esc] cancel"
 	case modePrompt:
 		return "" // the thread prompt is the input line, not help
+	case modeSpan:
+		return helpSpan(m.pick.list != nil)
 	}
 	threadsHint := "T show threads"
 	if m.threadsOpen {
@@ -875,10 +895,10 @@ func (m reviewModel) helpText() string {
 	if !m.sess.Span().Live() {
 		// Nothing in this bar may imply the reviewer can act on history.
 		return "j/k move  tab section  enter open  d diff  p preview  " + threadsHint +
-			"  v span  q quit"
+			"  v span  V picker  q quit"
 	}
 	return "j/k move  tab section  enter open  d diff  p preview  e edit  space reviewed  a about  " +
-		"t new thread  " + threadsHint + "  v span  s submit  q quit"
+		"t new thread  " + threadsHint + "  v span  V picker  s submit  q quit"
 }
 
 // helpLines is helpText fitted to the terminal width. A narrow window gets the overflow on

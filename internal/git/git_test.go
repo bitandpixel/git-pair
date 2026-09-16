@@ -3,6 +3,7 @@ package git_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"gitpr/internal/git"
@@ -175,5 +176,54 @@ func TestRealGitFailureStaysARealFailure(t *testing.T) {
 	// A not-a-repository directory is its own sentinel, not a git failure.
 	if _, err := git.Open(t.TempDir()); !errors.Is(err, git.ErrNotRepository) {
 		t.Errorf("Open on a non-repository = %v, want ErrNotRepository", err)
+	}
+}
+
+// The span picker lists commits and refs, and both have to come back in the form a
+// checkpoint needs: a full id to pin, and for a tag the commit behind the tag object.
+func TestRecentCommitsAndRefTipsCarryWhatAPickerNeeds(t *testing.T) {
+	f, repo := openFixture(t)
+	second := f.Commit("second thing", gittest.WithFile("b.txt", "2\n"))
+	f.MustGit("branch", "feature/x", second)
+	f.MustGit("tag", "-a", "v1", "-m", "annotated", second)
+
+	tips, err := repo.RecentCommits(context.Background(), 10, "HEAD")
+	if err != nil {
+		t.Fatalf("RecentCommits: %v", err)
+	}
+	if len(tips) != 2 {
+		t.Fatalf("RecentCommits returned %d commits, want 2", len(tips))
+	}
+	if tips[0].SHA != second {
+		t.Errorf("newest is %s, want %s: the picker lists history newest first", tips[0].SHA, second)
+	}
+	if tips[0].Subject != "second thing" || tips[0].Short != second[:7] || tips[0].When.IsZero() {
+		t.Errorf("newest entry = %+v, want sha, short sha, subject and a date", tips[0])
+	}
+
+	// The limit is a window, not a rule, and it is the window that gets respected.
+	one, err := repo.RecentCommits(context.Background(), 1, "HEAD")
+	if err != nil || len(one) != 1 {
+		t.Errorf("RecentCommits(limit 1) = %d commits (%v), want 1", len(one), err)
+	}
+
+	refs, err := repo.RefTips(context.Background(), "refs")
+	if err != nil {
+		t.Fatalf("RefTips: %v", err)
+	}
+	pointing := map[string]string{}
+	for _, r := range refs {
+		pointing[r.Name] = r.Commit
+	}
+	if pointing["refs/heads/feature/x"] != second {
+		t.Errorf("refs/heads/feature/x = %s, want %s", pointing["refs/heads/feature/x"], second)
+	}
+	tagged := strings.TrimSpace(f.MustGit("rev-parse", "v1^{commit}"))
+	if pointing["refs/tags/v1"] != tagged {
+		t.Errorf("refs/tags/v1 = %s, want the commit it tags (%s): a reviewer picking a tag means the code",
+			pointing["refs/tags/v1"], tagged)
+	}
+	if asObject := strings.TrimSpace(f.MustGit("rev-parse", "v1")); asObject != tagged && pointing["refs/tags/v1"] == asObject {
+		t.Error("RefTip carried the tag object rather than the commit")
 	}
 }
