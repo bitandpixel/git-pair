@@ -36,7 +36,12 @@ func readonlyModel(t *testing.T, sel span.Selector) (reviewModel, *gittest.Fixtu
 	}))
 	f.CommitReviewMarker(readonlySlug, "feedback",
 		gittest.WithFile("service.go", "package main\n\n// Please use a transaction here\nfunc Lock() {}\n"))
-	f.Commit("author response", gittest.WithFile("handler.go", "package main\n\nfunc Serve() { ctx() }\n"))
+	// The author edits the prose as well as the code, so a span that starts after the review
+	// contains an ABOUT.md change against a version that already existed.
+	f.Commit("author response", gittest.WithFiles(map[string]string{
+		"handler.go":                  "package main\n\nfunc Serve() { ctx() }\n",
+		"changesets/booking/ABOUT.md": "# booking\n\nResponded: the handler takes a context now.\n",
+	}))
 
 	repo := &git.Repo{Dir: f.Dir()}
 	cs, err := changeset.ForBranch(repo, readonlySlug)
@@ -246,5 +251,69 @@ func TestHistoricalPreviewAsksGitAboutOneThingOnly(t *testing.T) {
 	}
 	if strings.Contains(m.View(), "reading your edits") {
 		t.Error("the pane is waiting for an answer about edits it never asked about")
+	}
+}
+
+// afterReviewAboutSel is a historical span that starts at the review and ends at the author's
+// response. ABOUT.md existed at its left end and was rewritten inside it, which is the shape
+// that makes that row a diff rather than an edit.
+func afterReviewAboutSel() span.Selector {
+	return span.Selector{Base: span.Review(-1), Head: span.Commit("HEAD")}
+}
+
+// The gate has to cover the write as well as the edit. Over history the ABOUT.md row is a
+// legitimate diff, and when the working tree has no ABOUT.md at all, the row's other job is to
+// create one and open it in an editor — a write and a handoff in the mode whose promise is that
+// there is neither.
+func TestHistoricalSpanDoesNotCreateTheAboutItDiffersFrom(t *testing.T) {
+	m, f := readonlyModel(t, afterReviewAboutSel())
+	about := m.sess.AboutPath()
+	if !m.sess.Span().Historical() {
+		t.Fatalf("span %s is not historical, so this test proves nothing", m.sess.Span().Label)
+	}
+	if !m.inSpan[about] {
+		t.Fatalf("%s is not in span %s, so this test proves nothing", about, m.sess.Span().Label)
+	}
+	if !m.sess.HasVersionAt(context.Background(), m.sess.Span().From, about) {
+		t.Fatalf("%s did not exist at the span's left end, so the row is an edit, not a diff", about)
+	}
+
+	f.Remove(about)
+	before := f.MustGit("status", "--porcelain")
+
+	m.cursor = indexOf(t, m, rowAbout)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := updated.(reviewModel)
+
+	if f.HasWorktreeFile(about) {
+		t.Errorf("the read-only screen created %s in the working tree", about)
+	}
+	if after := f.MustGit("status", "--porcelain"); after != before {
+		t.Errorf("the read-only screen changed the working tree:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if strings.Contains(got.status, "read-only") {
+		t.Errorf("the reviewer was refused a document they may read: %q", got.status)
+	}
+	if cmd == nil {
+		t.Error("Enter on the ABOUT.md row over history opened nothing, want the difftool for the span's two pins")
+	}
+}
+
+// The live half, so the guard above is known to be a mode boundary and not a dead branch: a
+// reviewer on a span they can act on still gets a missing ABOUT.md created and opened.
+func TestLiveSpanStillCreatesAWorkingTreeAbout(t *testing.T) {
+	m, f := readonlyModel(t, span.Full())
+	about := m.sess.AboutPath()
+	f.Remove(about)
+
+	m.cursor = indexOf(t, m, rowAbout)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := updated.(reviewModel)
+
+	if cmd == nil {
+		t.Fatalf("Enter on a missing ABOUT.md opened nothing (status %q)", got.status)
+	}
+	if !f.HasWorktreeFile(about) {
+		t.Errorf("%s was not created for a span the reviewer can edit", about)
 	}
 }

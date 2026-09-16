@@ -681,9 +681,13 @@ func (m reviewModel) openArtifact(r row) (tea.Model, tea.Cmd) {
 		m.setStatus(why, false)
 		return m, nil
 	}
-	if r.kind == rowAbout {
+	if r.kind == rowAbout && m.sess.Span().CanEdit() {
 		// A changeset made before ABOUT.md was scaffolded may not have one. Making it and
-		// opening it is the whole job there, and no note about the span would be true.
+		// opening it is the whole job there, and no note about the span would be true — but
+		// only in a span the reviewer can act on. Over history the gate above lets this row
+		// through because the *diff* is legitimate, and the diff is what they should get: the
+		// file on disk is not the file this span contains, and creating one here would be a
+		// write in the mode whose whole promise is that there are none.
 		if _, err := os.Stat(absPath(m.sess.Repo().Dir, r.path)); err != nil {
 			if _, err := m.sess.Changeset().EnsureAbout(m.sess.Repo()); err != nil {
 				m.setStatus(err.Error(), true)
