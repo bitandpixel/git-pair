@@ -169,12 +169,19 @@ func TestSessionResetsReviewedMarkWhenFileDiffChanges(t *testing.T) {
 		t.Fatalf("Reload: %v", err)
 	}
 
+	// Two distinct failures live here, and conflating them made an intermittent
+	// report undiagnosable: the file can be absent from the rescan, or present
+	// and still marked. Say which.
 	changed := indexOfFile(sess.Files(), "service.go")
-	if changed < 0 || sess.Files()[changed].Reviewed {
+	if changed < 0 {
+		t.Errorf("service.go left the span after the author's commit; it is not a diff change but a rescan problem: %+v", sess.Files())
+	} else if sess.Files()[changed].Reviewed {
 		t.Errorf("service.go is still marked reviewed after its diff changed: %+v", sess.Files())
 	}
 	untouched := indexOfFile(sess.Files(), "handler.go")
-	if untouched < 0 || !sess.Files()[untouched].Reviewed {
+	if untouched < 0 {
+		t.Errorf("handler.go left the span even though nothing touched it: %+v", sess.Files())
+	} else if !sess.Files()[untouched].Reviewed {
 		t.Errorf("handler.go lost its reviewed mark even though its diff did not change: %+v", sess.Files())
 	}
 }
