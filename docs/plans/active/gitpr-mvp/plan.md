@@ -79,7 +79,7 @@ From the PRD, treated as binding:
 | D1 | Implementation language / toolchain | **Go 1.27.1** (cobra for the command tree, Bubble Tea for the TUI) |
 | D2 | TUI implementation | **Bubble Tea**, with a headless `Session` model so review state is testable without a TTY |
 | D3 | Scope of the surviving-review-additions blocking set | **Block only on additions outside `changesets/`**; surviving `ABOUT.md`/thread additions are reported as a non-blocking list (see findings §"Design problem") |
-| D4 | What `Enter` does in the TUI | **`git difftool <span> -- <path>`**, honouring the user's configured `diff.tool` |
+| D4 | What `Enter` does in the TUI | **`git difftool <span> -- <path>`**, honouring the user's configured `diff.tool`. Superseded by the review-experience pass: now `git difftool <from> -- <path>`, one revision against the working tree, so the tool's right-hand buffer is the real file and edits persist |
 
 ## Status (updated during implementation)
 
@@ -91,6 +91,8 @@ From the PRD, treated as binding:
 | M3 spans, `diff`, survival, `change ready` | done | e2e replay blocks `change ready` on exactly the untouched review line, then passes after resolution and with the override |
 | M4 submit, refs, queue, close | done | e2e replay: empty approve commit, ref moves, and after `git branch -D` the archive ref still reaches 13 commits |
 | M5 TUI | done, partially verified | Verified under a pty: first paint, `j/k`, `space` (0/4 → 1/4 → 2/4), `v`, `a` editor handoff, `s`+`b` submit (created `review: block demo` and moved the ref), clean `q` exit. **Not yet verified:** `Enter` launching a real difftool *inside* the TUI — the same command path is verified outside it via `gitpr diff --tool`, which reached the configured tool with the right blob paths |
+| Post-MVP: staleness compares trees, not commit counts | done | `TestSummarizeChangesetOnlyCommitDoesNotInvalidateReady`, `TestSummarizeMixedCommitInvalidatesReady`, `TestSummarizeBaseMovingUnderAReadyChangesetKeepsReady` |
+| Post-MVP: difftool shows the working tree; submit exits the TUI | done | `TestSubmitKeyEndsTheSession`, `TestEscInSubmitModeKeepsTheSessionOpen`; the one-revision difftool argv verified by hand against a configured tool |
 | M6 docs + dogfood | done | `README.md`; `artifacts/e2e-29.sh` is the scripted replay and passes end to end |
 | Post-MVP: refuse a self-referential base | done | `TestBaseIsOwnBranch` (9 cases) + init/ready/status CLI tests; reproduces and closes the owner's dogfood report |
 | Post-MVP: `change init` commits, takes `--about` | done | `TestChangeInit*` (11 cases) plus the corrected golden workflow; e2e replay still passes |
@@ -138,6 +140,24 @@ changeset. Hand-verification of everything the README documents additionally cor
    2) and `change ready` (exit 1), and `status` names it as the reason. The predicate compares
    *refs*, not commits: a branch created moments ago legitimately shares its base's tip, and a
    commit-based test would have refused the normal first `change init`.
+8. **PRD §421 says "implementation commit", and counting non-marker commits over-reads it.**
+   An `ABOUT.md` typo fix after `change ready` was demoting the changeset to `WORKING` and
+   calling itself an "implementation commit". Staleness is now a tree comparison — does
+   anything outside `changesets/<slug>/` differ between the marker's parent and `HEAD` — in
+   `lifecycle.ReconcileStaleness`, leaving `derive` a pure commit counter so it stays
+   unit-testable. Consequences: a commit touching both the changeset directory and code still
+   invalidates (the code moved); an unrecognised `GitPR-*` marker invalidates regardless of the
+   tree, because the tree cannot speak for a trailer set gitpr cannot read; and reverting code
+   back to the approved state returns `READY`, which is the intended reading of "the exact
+   implementation state the marker represents".
+9. **Unreproduced test flake, instrumented rather than fixed.**
+   `TestSessionResetsReviewedMarkWhenFileDiffChanges` failed twice in whole-suite runs and
+   passed in roughly 25 targeted ones, including `-count=3` and shuffled orders. Candidates
+   were tested and ruled out: `diff.noprefix` (absorbed by the parser's `+++ ` fallback) and
+   `diff.mnemonicPrefix` (does not apply to commit-to-commit diffs); cross-package interference
+   is impossible through memory, since Go test binaries are separate processes. The assertion
+   conflated "file left the span" with "still marked", which is what made the reports
+   undiagnosable; those are now separate failure messages.
 
 ## Architecture
 
@@ -401,5 +421,6 @@ M0 ──► M1 ──► M2 ──┬──► M3 ──► M4 ──► M6
 | --- | --- | --- |
 | 2026-09-16 | — | Initial plan. Plumbing spike complete; D1–D4 raised. |
 | 2026-09-16 | implementation pass | D1–D4 resolved. M0–M4 implemented and verified by the PRD §29 replay; M5 implemented with the TUI verified under a pty. Three implementation-level discoveries recorded above; no PRD requirement dropped. |
+| 2026-09-16 | review-experience pass | Three owner-reported items. The difftool was read-only and blind to `e` edits because it diffed two revisions — now one revision against the working tree, superseding D4's two-rev form. Submitting with `s` now ends the session. Readiness no longer demotes on changeset-only commits (discovery 8). |
 | 2026-09-16 | dogfood bug report | `status` said `WORKING` after a successful `change ready` in a single-branch repo. Cause: base == branch, so `base...HEAD` is permanently empty and the ready marker sits below the range that reads it. Guarded at init and ready, explained by status; the review workflow itself was never broken. |
 | 2026-09-16 | `change init` change of contract | Init now commits the scaffold (scoped with `git commit --only`) and accepts `ABOUT.md` content by flag or pipe, so agents can initialise and describe atomically. M1 updated above; two further discoveries recorded. Found while this change was being tested, not by it: the template warning in `change ready` was unreachable. |

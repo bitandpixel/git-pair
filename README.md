@@ -198,11 +198,16 @@ variables:
 | close | `gitpr: close <slug>` | `GitPR-State: closed`, `GitPR-Changeset: <slug>` |
 
 A commit counts as a marker only when its trailer block parses and `GitPR-Changeset` matches
-the changeset being inspected; anything else is an implementation commit.
+the changeset being inspected; anything else is an ordinary commit.
 
-**Derived state.** State comes from walking `base..HEAD` and reading the newest marker. If
-implementation commits follow the marker it is stale and the state is `WORKING`, so an
-implementation commit after an approval silently invalidates the approval. States:
+**Derived state.** State comes from walking `base..HEAD`, reading the newest marker, then
+asking whether what it approved is still there: if anything outside `changesets/<slug>/`
+differs between the marker's parent and `HEAD`, the marker is stale and the state is
+`WORKING`, so committing code after an approval silently invalidates it. A commit that only
+touches `ABOUT.md` or a thread does not — PRD §421 invalidates a marker on a later
+*implementation* commit, and editing the description is not one. Comparing trees rather than
+counting commits is also what keeps merges and rebases from reporting a change that never
+happened. States:
 `WORKING`, `READY`, `BLOCKED`, `FEEDBACK`, `APPROVED`, `CLOSED`. `gitpr status` prints the
 state plus a one-line `Reason`. There is no state file.
 
@@ -429,8 +434,12 @@ repository root as its working directory and receives the absolute path of the f
 
 Diff viewing goes through git, so git configuration decides what you see, e.g.
 `git config diff.tool vimdiff`. `gitpr diff --tool` and the TUI's `Enter` key both run
-`git difftool --no-prompt <from> <to> -- <paths>`, so `diff.tool`, `difftool.<tool>.cmd` and
-`difftool.prompt` behave as elsewhere. Plain `gitpr diff` runs `git diff` with
+`git difftool --no-prompt <from> -- <paths>` — one revision, so the tool compares the span's
+start against your **working tree** instead of two blobs. That is what makes the right-hand
+buffer the real file: edits persist, and changes you made with `e` show up when you open the
+tool again. `diff.tool`, `difftool.<tool>.cmd` and `difftool.prompt` behave as elsewhere.
+The printed and `--stat` diffs stay on the committed span, because they describe review state
+while the tool is for working on it. Plain `gitpr diff` runs `git diff` with
 `core.quotePath=false` and inherits your pager and colour settings; the span label goes to
 stderr so stdout stays pipeable.
 
@@ -449,7 +458,9 @@ j/k move  enter difftool  e edit  space reviewed  a about  t thread  T browse  v
 
 `Enter` opens the selected file in the difftool, `e` in the editor, `Space` toggles reviewed,
 `a` opens `ABOUT.md`, `t` prompts for a new thread, `T` browses threads, `v` toggles the
-full/unreviewed span, `s` opens a submit prompt taking `b`, `f` or `a`, `q` quits. The terminal
+full/unreviewed span, `s` opens a submit prompt taking `b`, `f` or `a`, `q` quits. Submitting
+commits the review, moves the ref and **ends the session**, printing one line about what it
+did; `Esc` from the prompt returns to the list. The terminal
 is released while an external program runs and the repository is re-scanned afterwards, so a
 reviewed mark survives only while that file's diff within the span is unchanged. In-session
 progress is memory-only; only submissions are durable.
@@ -505,7 +516,8 @@ branch first` (exit 2) — the directory is named after the branch, so renaming 
 its changeset and a detached HEAD has no name.
 
 A missing entry in `gitpr review queue` is usually not a queue bug: membership is derived
-state, and an implementation commit after the ready marker returns the changeset to `WORKING`.
+state, and a code change after the ready marker returns the changeset to `WORKING` (a commit
+touching only `ABOUT.md` or a thread leaves it `READY`).
 A hand-written ready marker counts only if `GitPR-State: ready` and `GitPR-Changeset: <slug>`
 sit in a real trailer block, separated from the subject by a blank line and from each other by
 no blank line. `changeset <cs> is already closed` and `changeset <cs> is closed` (both exit 1)
