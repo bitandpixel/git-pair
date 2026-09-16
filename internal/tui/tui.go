@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -138,7 +139,10 @@ type reviewModel struct {
 	// holding the terminal exits. Every handoff assigns it, so a note can never outlive the
 	// child it was written for.
 	pendingNote string
-	quitting    bool
+	// handedOff records that a child tool took the terminal at least once, which is what
+	// makes Run clear the screen on the way out.
+	handedOff bool
+	quitting  bool
 	// submitted is the one-line summary of a review submitted from inside the
 	// session, printed after the alt screen closes.
 	submitted string
@@ -161,6 +165,16 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	if fm, ok := final.(reviewModel); ok {
+		// A tool that took the terminal writes to the screen the alt screen was covering.
+		// vimdiff leaves "2 files to edit" behind — once per difftool opened — and it sits
+		// right where the session's last frame ended, so it reappears over the prompt when
+		// the alt screen closes. Clearing is the only cleanup available: the message is the
+		// child's, printed after the renderer has suspended. It goes to the terminal the alt
+		// screen drew on, and only for sessions that handed off — one that never left the alt
+		// screen has no business erasing what was on the screen before it.
+		if fm.handedOff {
+			clearScreen(os.Stdout)
+		}
 		if fm.submitted != "" {
 			out := opts.Out
 			if out == nil {
@@ -173,6 +187,12 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 	return nil
+}
+
+// clearScreen erases the visible screen and homes the cursor, leaving scrollback alone:
+// whatever the child printed is still in history if anyone wants it.
+func clearScreen(w io.Writer) {
+	fmt.Fprint(w, "\x1b[2J\x1b[H")
 }
 
 func (m reviewModel) Init() tea.Cmd { return nil }
@@ -530,6 +550,7 @@ func (m reviewModel) openPathNoted(relPath, note string) (tea.Model, tea.Cmd) {
 // along with whatever note the caller wanted read afterwards.
 func (m reviewModel) runExternal(cmd *exec.Cmd, label, note string) (tea.Model, tea.Cmd) {
 	m.pendingNote = note
+	m.handedOff = true
 	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return externalDoneMsg{err: err, label: label}
 	})

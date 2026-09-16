@@ -295,6 +295,17 @@ changeset. Hand-verification of everything the README documents additionally cor
     Flagged rather than fixed: `console.EditorCommand` resolves `VISUAL`/`EDITOR` (default
     `vi`) and ignores `GIT_EDITOR` and `core.editor`, both of which git itself honours, so a
     reviewer who configured their editor the git way gets `vi` in the TUI. Separate change.
+18. **The difftool's exit messages outlived the TUI, so a session that handed the terminal away
+    clears the screen.** Bubbletea's handoff suspends the renderer and leaves the alt screen,
+    so the child draws on the main screen; when vimdiff quits it prints `2 files to edit` there
+    — where the session's last frame had been — and closing the alt screen reveals it above the
+    prompt, once per difftool opened. Nothing in gitpr's own rendering can stop that, since the
+    child is on screen by then, so the cleanup happens after `p.Run()` returns: every handoff
+    goes through `runExternal`, which sets `handedOff`, and Run emits erase-screen and home to
+    the terminal it drew on. Scoped to sessions that handed off, so one that only read the list
+    does not wipe what the user had on screen; scrollback is left alone, because that output is
+    history rather than debris. Verified at the byte level on the two-round fixture: after the
+    last `\x1b[?1049l` there is `\x1b[2J\x1b[H` when a difftool ran, and nothing when none did.
 
 ## Architecture
 

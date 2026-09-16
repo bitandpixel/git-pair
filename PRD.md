@@ -1035,6 +1035,11 @@ A typical operation might correspond to:
 git difftool <resolved-span> -- path/to/file
 ```
 
+The tool runs on the screen the session had covered, so whatever it prints when it exits stays
+there: `vimdiff` leaves `2 files to edit` behind once per file opened. A session that handed
+the terminal away clears the screen when it ends; one that never did leaves the screen as it
+found it. Neither touches scrollback, so what the tool printed remains in history.
+
 ---
 
 # 16. Local Review Progress

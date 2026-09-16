@@ -536,6 +536,10 @@ Diff viewing goes through git, so git configuration decides what you see, e.g.
 start against your **working tree** instead of two blobs. That is what makes the right-hand
 buffer the real file: edits persist, and changes you made with `e` show up when you open the
 tool again. `diff.tool`, `difftool.<tool>.cmd` and `difftool.prompt` behave as elsewhere.
+Since the tool runs on the screen the session was covering, its exit messages land there —
+`vimdiff` leaves `2 files to edit` behind once per file opened — so a TUI session that handed
+the terminal away clears the screen when it ends. A session that never did leaves the screen
+exactly as it found it, and neither clears scrollback.
 The printed and `--stat` diffs stay on the committed span, because they describe review state
 while the tool is for working on it. Plain `gitpr diff` runs `git diff` with
 `core.quotePath=false` and inherits your pager and colour settings; the span label goes to
