@@ -264,7 +264,10 @@ changeset. Hand-verification of everything the README documents additionally cor
     asked for that placement after seeing the section directly under the file rows. Driving the
     real TUI in a pty caught a bug the unit tests could not: bubbletea reports a lone space as
     `KeySpace`, not `KeyRunes`, so every space in a new thread's title was silently dropped
-    before the file name was derived from it.
+    before the file name was derived from it. Two polish corrections came from using it: the
+    thread heading shows its count only while collapsed (expanded, the rows below *are* the
+    count), and the shortcut bar needed a rule over it, because sitting directly under the
+    section it read as more rows of the list.
 
 ## Architecture
 

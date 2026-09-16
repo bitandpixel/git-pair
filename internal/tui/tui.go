@@ -61,11 +61,12 @@ const (
 // the code, then what the changeset says about it, with `j` running off the bottom of the
 // files and into the artifacts instead of into a separate mode.
 type row struct {
-	kind rowKind
-	path string // repository-relative, for the rows that name a file
-	name string // what the row prints
-	file int    // index into Session.Files() for a file row, -1 otherwise
-	note string // set on the thread heading when the threads could not be listed
+	kind  rowKind
+	path  string // repository-relative, for the rows that name a file
+	name  string // what the row prints
+	file  int    // index into Session.Files() for a file row, -1 otherwise
+	note  string // set on the thread heading when the threads could not be listed
+	count int    // how many threads the heading is standing in for
 }
 
 // action is what Enter does with a row.
@@ -492,6 +493,9 @@ func (m reviewModel) View() string {
 	for _, r := range section {
 		b.WriteString(m.line(r) + "\n")
 	}
+	// A rule rather than a blank line, so the shortcut bar reads as chrome and not as
+	// another row of the list it sits under.
+	b.WriteString(m.rule() + "\n")
 
 	switch m.mode {
 	case modePrompt:
@@ -612,7 +616,7 @@ func (m *reviewModel) buildRows() {
 	// place in the section below. The section is the shortcut to read them; the list is the
 	// record of what the diff did.
 	threads, err := m.sess.Threads()
-	head := row{kind: rowThreadsHead, name: fmt.Sprintf("Threads (%d)", len(threads)), file: -1}
+	head := row{kind: rowThreadsHead, name: "Threads", count: len(threads), file: -1}
 	if err != nil {
 		head.note = err.Error()
 	}
@@ -658,13 +662,18 @@ func (m reviewModel) rowText(r row) string {
 		return r.name
 	case rowThreadsHead:
 		arrow := "▸ "
+		label := r.name
 		if m.threadsOpen {
 			arrow = "▾ "
+			// The count is the promise of what is hidden. Expanded, the threads are
+			// the count, and repeating it next to them is noise.
+		} else {
+			label = fmt.Sprintf("%s (%d)", r.name, r.count)
 		}
 		if r.note != "" {
 			return styleErr.Render("threads: " + r.note)
 		}
-		return styleDim.Render(arrow + r.name)
+		return styleDim.Render(arrow + label)
 	case rowThread:
 		return threadIndent + r.name
 	case rowNewThread:
@@ -736,6 +745,15 @@ func (m reviewModel) window() (files, section []renderedRow) {
 	return files, section
 }
 
+// rule is the separator above the shortcut bar, as wide as the window.
+func (m reviewModel) rule() string {
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	return styleDim.Render(strings.Repeat("─", width))
+}
+
 // line renders one row, highlighted when the cursor is on it.
 func (m reviewModel) line(r renderedRow) string {
 	text := m.rowText(r.row)
@@ -756,7 +774,7 @@ func (m reviewModel) windowRows() int {
 
 // chromeRows counts the lines View writes outside the row list: the title, the base and span
 // line, the blank under them, the blank above the counter, the counter, the blank under it,
-// the blank above the helper, and then the helper itself, the "hidden above" note while
+// and then the rule over the helper, the helper itself, the "hidden above" note while
 // scrolled, and the status line when there is one. The changeset section is part of the row
 // list, so it is not here — only the counter that separates the two blocks is.
 func (m reviewModel) chromeRows() int {

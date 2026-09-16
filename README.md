@@ -553,10 +553,10 @@ base: main  span: unreviewed
 0 / 1 reviewed
 
 ABOUT.md
-▾ Threads (1)
+▾ Threads
     does-the-lock-cover-the-map.md
     + new thread…
-
+────────────────────────────────────────
 j/k move  tab section  enter open  e edit  space reviewed  a about  t new thread
 T hide threads  v span  s submit  q quit
 ```
@@ -573,7 +573,10 @@ rows below the counter, because the changeset documents are read rather than dif
 `ABOUT.md` and `t` prompts for a new thread from anywhere; `T` collapses the thread list; `v`
 toggles the full/unreviewed span; `s` opens a submit prompt taking `b`, `f` or `a`; `q` quits.
 A thread created from the list is written, opened in the editor, and left selected, so the
-reviewer can fill it in and come straight back to it.
+reviewer can fill it in and come straight back to it. The thread heading counts what it hides —
+`▸ Threads (3)` collapsed, plain `▾ Threads` once the threads are on screen — and a rule
+separates the whole list from the shortcut bar, so the bar reads as chrome rather than as more
+rows.
 
 In a narrow window the shortcut bar wraps between shortcuts rather than through them —
 `space reviewed` never arrives split in half — and the list gives up the rows it takes.

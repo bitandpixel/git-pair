@@ -957,17 +957,19 @@ span: unreviewed
 2 / 3 reviewed
 
 ABOUT.md
-▾ Threads (2)
+▾ Threads
     concurrency-tests.md
     locking.md
     + new thread…
+────────────────────────────────
 ```
 
 The changed files and the changeset documents form one navigable list rather than separate
 modes: `j` continues from the last file into `ABOUT.md` and the threads nested under their
 heading, and creating a thread is one of the entries in that list instead of a separate
-prompt-plus-browse flow. The heading collapses, so a changeset with many threads stays
-scannable. The reviewed counter separates the two blocks — above it the files the diff
+prompt-plus-browse flow. The heading collapses and counts what it hides — `▸ Threads (2)`
+collapsed, plain `▾ Threads` when they are on screen — so a changeset with many threads stays
+scannable. A rule separates the list from the shortcut bar. The reviewed counter separates the two blocks — above it the files the diff
 touched, below it the documents the review is made of — which is also what `Tab` skips
 between. A row that changed in the span keeps its file row as well as its place in the
 section below: the list is what the diff did, the section is the shortcut to read it.

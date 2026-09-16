@@ -284,8 +284,18 @@ func TestNewThreadRowSitsUnderItsThreads(t *testing.T) {
 	if !strings.Contains(view, threadIndent+"locking.md") {
 		t.Errorf("threads are not nested under the heading:\n%s", view)
 	}
-	if !strings.Contains(view, "▾ Threads (2)") {
-		t.Errorf("the heading does not show an expanded thread count:\n%s", view)
+	// Expanded, the heading does not repeat a count that the rows below it already give.
+	if !strings.Contains(view, "▾ Threads\n") && !strings.Contains(view, "▾ Threads\r") {
+		if strings.Contains(view, "▾ Threads (") {
+			t.Errorf("the expanded heading still shows a count:\n%s", view)
+		} else {
+			t.Errorf("the thread heading is missing from:\n%s", view)
+		}
+	}
+	collapsed := m
+	collapsed.threadsOpen = false
+	if got := collapsed.rowText(collapsed.rows[indexOf(t, m, rowThreadsHead)]); !strings.Contains(ansiCodes.ReplaceAllString(got, ""), "▸ Threads (2)") {
+		t.Errorf("the collapsed heading reads %q, want it to count the threads it hides", got)
 	}
 }
 
@@ -378,7 +388,7 @@ func TestChangesetSectionRendersBelowTheCounter(t *testing.T) {
 		t.Fatalf("no reviewed counter in:\n%s", strings.Join(lines, "\n"))
 	}
 	about := lineWithExact(lines, "ABOUT.md")
-	head := lineWithPrefix(lines, "\u25be Threads (")
+	head := lineWithPrefix(lines, "\u25be Threads") // expanded: no count on the heading
 	if about < 0 || head < 0 {
 		t.Fatalf("ABOUT.md (%d) or the thread heading (%d) is missing from:\n%s",
 			about, head, strings.Join(lines, "\n"))
@@ -428,4 +438,37 @@ func lineWithSuffix(lines []string, suffix string) int {
 		}
 	}
 	return -1
+}
+
+// The shortcut bar sits under a rule, so it reads as chrome rather than as more rows of the
+// list it follows.
+func TestRuleSeparatesTheListFromTheShortcuts(t *testing.T) {
+	m := navModel(t)
+	m.width = 60
+	lines := strings.Split(ansiCodes.ReplaceAllString(m.View(), ""), "\n")
+
+	rule := -1
+	for i, l := range lines {
+		if l == strings.Repeat("─", 60) {
+			rule = i
+			break
+		}
+	}
+	if rule < 0 {
+		t.Fatalf("no rule across the window:\n%s", strings.Join(lines, "\n"))
+	}
+	help := m.helpLines()
+	if len(lines) <= rule+len(help) {
+		t.Fatalf("nothing after the rule:\n%s", strings.Join(lines, "\n"))
+	}
+	for i, want := range help {
+		if lines[rule+1+i] != want {
+			t.Errorf("line %d after the rule = %q, want the shortcut %q", i+1, lines[rule+1+i], want)
+		}
+	}
+	for _, l := range lines[:rule] {
+		if strings.Contains(l, "j/k move") {
+			t.Errorf("the shortcut bar starts above the rule:\n%s", strings.Join(lines, "\n"))
+		}
+	}
 }
