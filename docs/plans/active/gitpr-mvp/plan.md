@@ -91,6 +91,7 @@ From the PRD, treated as binding:
 | M3 spans, `diff`, survival, `change ready` | done | e2e replay blocks `change ready` on exactly the untouched review line, then passes after resolution and with the override |
 | M4 submit, refs, queue, close | done | e2e replay: empty approve commit, ref moves, and after `git branch -D` the archive ref still reaches 13 commits |
 | M5 TUI | done, partially verified | Verified under a pty: first paint, `j/k`, `space` (0/4 → 1/4 → 2/4), `v`, `a` editor handoff, `s`+`b` submit (created `review: block demo` and moved the ref), clean `q` exit. **Not yet verified:** `Enter` launching a real difftool *inside* the TUI — the same command path is verified outside it via `gitpr diff --tool`, which reached the configured tool with the right blob paths |
+| Post-MVP: `review open` resumes on the since-review span; `--full` opts out | done | `TestStartingSpan` (4 cases), `TestChangedSinceReviewWithoutReviews`, `TestReviewOpenSpanFlagsAreValidatedHeadlessly` |
 | Post-MVP: staleness compares trees, not commit counts | done | `TestSummarizeChangesetOnlyCommitDoesNotInvalidateReady`, `TestSummarizeMixedCommitInvalidatesReady`, `TestSummarizeBaseMovingUnderAReadyChangesetKeepsReady` |
 | Post-MVP: difftool shows the working tree; submit exits the TUI | done | `TestSubmitKeyEndsTheSession`, `TestEscInSubmitModeKeepsTheSessionOpen`; the one-revision difftool argv verified by hand against a configured tool |
 | M6 docs + dogfood | done | `README.md`; `artifacts/e2e-29.sh` is the scripted replay and passes end to end |
@@ -158,6 +159,16 @@ changeset. Hand-verification of everything the README documents additionally cor
    is impossible through memory, since Go test binaries are separate processes. The assertion
    conflated "file left the span" with "still marked", which is what made the reports
    undiagnosable; those are now separate failure messages.
+10. **PRD §17.2's no-flag default was wrong for a return visit, so `review open` now breaks
+    it deliberately.** With no flag every session opened on `base...HEAD`, so reopening after
+    submitting a review re-showed the reviewer what they had just read. `span.StartingSpan`
+    now opens on `<latest review>..HEAD` when code changed since that review — measured as a
+    tree comparison outside `changesets/<slug>/`, so a thread reply does not count as new
+    work — and on the full changeset otherwise. `--full` restores the specified default
+    exactly, which is what makes this a widening rather than a break. `diff` is unchanged:
+    only `review open` interprets the absence of a flag. The policy lives in `span` and is
+    tested there, because `review open` refuses without a terminal and cannot be driven from
+    a test.
 
 ## Architecture
 
@@ -421,6 +432,7 @@ M0 ──► M1 ──► M2 ──┬──► M3 ──► M4 ──► M6
 | --- | --- | --- |
 | 2026-09-16 | — | Initial plan. Plumbing spike complete; D1–D4 raised. |
 | 2026-09-16 | implementation pass | D1–D4 resolved. M0–M4 implemented and verified by the PRD §29 replay; M5 implemented with the TUI verified under a pty. Three implementation-level discoveries recorded above; no PRD requirement dropped. |
+| 2026-09-16 | span default | Owner reported that reopening after a review showed the previous review rather than the new code. Intentional per §17.2, but §22's own loop had to pass `--unreviewed` to get the useful span, so `review open` now resumes instead and `--full` keeps the old default available. |
 | 2026-09-16 | review-experience pass | Three owner-reported items. The difftool was read-only and blind to `e` edits because it diffed two revisions — now one revision against the working tree, superseding D4's two-rev form. Submitting with `s` now ends the session. Readiness no longer demotes on changeset-only commits (discovery 8). |
 | 2026-09-16 | dogfood bug report | `status` said `WORKING` after a successful `change ready` in a single-branch repo. Cause: base == branch, so `base...HEAD` is permanently empty and the ready marker sits below the range that reads it. Guarded at init and ready, explained by status; the review workflow itself was never broken. |
 | 2026-09-16 | `change init` change of contract | Init now commits the scaffold (scoped with `git commit --only`) and accepts `ABOUT.md` content by flag or pipe, so agents can initialise and describe atomically. M1 updated above; two further discoveries recorded. Found while this change was being tested, not by it: the template warning in `change ready` was unreachable. |

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"gitpr/internal/git"
 	"gitpr/internal/lifecycle"
@@ -36,7 +37,11 @@ type Options struct {
 	SinceReview *int
 }
 
-func (o Options) empty() bool { return !o.Unreviewed && o.SinceReview == nil }
+// Empty reports whether the reviewer named no span, which is when a caller may
+// choose one for them.
+func (o Options) Empty() bool { return !o.Unreviewed && o.SinceReview == nil }
+
+func (o Options) empty() bool { return o.Empty() }
 
 // ErrNoReviews is returned when a review-relative span is requested but the
 // changeset has never been reviewed.
@@ -95,4 +100,35 @@ func Resolve(ctx context.Context, repo *git.Repo, base string, summary lifecycle
 		Label:       fmt.Sprintf("%s..HEAD (after review %d)", review.Short, resolved),
 		ReviewIndex: resolved,
 	}, nil
+}
+
+// ChangedSinceReview reports whether anything outside the changeset directory
+// differs between a review submission and HEAD, i.e. whether the author has
+// changed code the reviewer has not seen. Work confined to changesets/<slug>/ —
+// ABOUT.md, a thread reply — is a response to the review, not new code to read.
+func ChangedSinceReview(ctx context.Context, repo *git.Repo, slug string, review *lifecycle.Event) (bool, error) {
+	if review == nil {
+		return false, nil
+	}
+	paths, err := repo.PathsChangedOutside(ctx, review.SHA, "HEAD", filepath.Join("changesets", slug))
+	if err != nil {
+		return false, err
+	}
+	return len(paths) > 0, nil
+}
+
+// StartingSpan chooses the span a review session opens on when the reviewer asked
+// for none. A changeset that was reviewed and then had code changed under it is a
+// return visit for that new work, so it opens on the since-review span; opening
+// the whole changeset would re-show what was already read. Everything else opens
+// on the full changeset, which is what PRD §17.2 specifies as the default.
+//
+// A failed comparison falls back to the full span: this is a convenience, not a
+// reason to refuse to open the session.
+func StartingSpan(ctx context.Context, repo *git.Repo, slug string, summary lifecycle.Summary) Options {
+	changed, err := ChangedSinceReview(ctx, repo, slug, summary.LatestReview)
+	if err != nil || !changed {
+		return Options{}
+	}
+	return Options{Unreviewed: true}
 }

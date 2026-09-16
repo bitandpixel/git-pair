@@ -249,3 +249,54 @@ func TestResolveIgnoresOrdinaryCommits(t *testing.T) {
 // The case where HEAD *is* the review submission (an approval with nothing after
 // it) is covered above: `--unreviewed` resolves to an empty span whose From and
 // To are the review commit, and it must not error.
+
+// The span a session opens on when the reviewer named none. This is the difference
+// between a return visit showing the new work and re-showing what was already read.
+func TestStartingSpan(t *testing.T) {
+	t.Run("no reviews yet, so the whole changeset is unreviewed", func(t *testing.T) {
+		s := newScenario(t, false)
+		if got := span.StartingSpan(context.Background(), s.repo, slug, s.summary(t)); !got.Empty() {
+			t.Errorf("StartingSpan = %+v, want the full span", got)
+		}
+	})
+
+	t.Run("nothing changed since the last review", func(t *testing.T) {
+		s := newScenario(t, true)
+		if got := span.StartingSpan(context.Background(), s.repo, slug, s.summary(t)); !got.Empty() {
+			t.Errorf("StartingSpan = %+v, want the full span when HEAD is the review", got)
+		}
+	})
+
+	t.Run("code changed since the last review", func(t *testing.T) {
+		s := newScenario(t, true)
+		s.f.Commit("author: address the feedback", gittest.WithFile("service.go",
+			"package main\n\nfunc Lock() { tx() }\n"))
+		got := span.StartingSpan(context.Background(), s.repo, slug, s.summary(t))
+		if !got.Unreviewed {
+			t.Errorf("StartingSpan = %+v, want the since-review span", got)
+		}
+	})
+
+	// A thread reply or an ABOUT.md edit is a response to the review, not new code
+	// to read; sending the reviewer back over the whole span for it would be the
+	// same mistake in the other direction.
+	t.Run("only changeset files changed since the last review", func(t *testing.T) {
+		s := newScenario(t, true)
+		s.f.WriteChangesetFile(slug, "threads/please-use-a-transaction.md", "Fixed in the next commit.\n")
+		s.f.Commit("author: reply to thread")
+		if got := span.StartingSpan(context.Background(), s.repo, slug, s.summary(t)); !got.Empty() {
+			t.Errorf("StartingSpan = %+v, want the full span when only the changeset moved", got)
+		}
+	})
+}
+
+func TestChangedSinceReviewWithoutReviews(t *testing.T) {
+	s := newScenario(t, false)
+	changed, err := span.ChangedSinceReview(context.Background(), s.repo, slug, nil)
+	if err != nil {
+		t.Fatalf("ChangedSinceReview: %v", err)
+	}
+	if changed {
+		t.Error("changed = true with no review to be since, want false")
+	}
+}

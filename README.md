@@ -141,8 +141,8 @@ gitpr: cannot mark changeset booking-transaction ready: 2 review addition(s) fro
 ```
 
 After resolving the remaining comment `gitpr change ready` succeeds and the changeset is
-back in the queue. The reviewer re-reviews with `gitpr review open --unreviewed`, approves,
-and closes:
+back in the queue. The reviewer re-reviews with `gitpr review open`, which now opens on the
+changes made since their review, approves, and closes:
 
 ```bash
 $ gitpr review submit --approve
@@ -220,7 +220,11 @@ state plus a one-line `Reason`. There is no state file.
 | `--since-review=N` | `<Nth review>..HEAD` | what happened since review N |
 
 `--since-review` with no value means `-1`; indexes are chronological (`0` first, `-1`
-latest) and match `gitpr review history`. The same range applies to source, `ABOUT.md` and
+latest) and match `gitpr review history`. `review open` is the one command that picks a span
+for you when you name none: if the changeset has been reviewed and code changed since that
+review, it opens on `<latest review>..HEAD`, because a return visit is about the new work,
+not what you already read; otherwise it opens on the full changeset. `--full` forces the
+whole changeset, and `v` toggles either way. The same range applies to source, `ABOUT.md` and
 threads, and the resolved span is always printed to stderr:
 `gitpr diff: 332887c..HEAD (after review 0)`.
 
@@ -251,7 +255,7 @@ elsewhere it is accepted and ignored.
 | --- | --- | --- |
 | `change init` | `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is `main`, else `master`, else a usage error |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
-| `review open` | `--unreviewed`, `--since-review[=N]` | TUI; needs a terminal |
+| `review open` | `--full`, `--unreviewed`, `--since-review[=N]` | TUI; needs a terminal; with no flag it resumes on the changes since your last review if code changed there |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), then moves the review ref |
@@ -458,7 +462,8 @@ j/k move  enter difftool  e edit  space reviewed  a about  t thread  T browse  v
 
 `Enter` opens the selected file in the difftool, `e` in the editor, `Space` toggles reviewed,
 `a` opens `ABOUT.md`, `t` prompts for a new thread, `T` browses threads, `v` toggles the
-full/unreviewed span, `s` opens a submit prompt taking `b`, `f` or `a`, `q` quits. Submitting
+full/unreviewed span (which starts on whichever one you most likely came for), `s` opens a
+submit prompt taking `b`, `f` or `a`, `q` quits. Submitting
 commits the review, moves the ref and **ends the session**, printing one line about what it
 did; `Esc` from the prompt returns to the list. The terminal
 is released while an external program runs and the repository is re-scanned afterwards, so a

@@ -56,8 +56,11 @@ settings apply.`,
 type spanOptions struct {
 	unreviewed  bool
 	sinceReview string
-	stat        bool
-	tool        bool
+	// full forces the whole-changeset span. Registered only by `review open`,
+	// where the no-flag default is otherwise resume-like.
+	full bool
+	stat bool
+	tool bool
 }
 
 func (o spanOptions) toSpanOptions() (span.Options, error) {

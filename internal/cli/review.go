@@ -21,6 +21,7 @@ import (
 	"gitpr/internal/model"
 	"gitpr/internal/reviewops"
 	"gitpr/internal/reviewref"
+	"gitpr/internal/span"
 	"gitpr/internal/survival"
 	"gitpr/internal/tui"
 )
@@ -57,8 +58,11 @@ span, tracks which ones you have looked at, and launches your editor, your
 difftool, ABOUT.md, and review threads around it, releasing the terminal while
 those processes run.
 
-Press s to submit without leaving the screen, then b (block), f (feedback) or
-a (approve); Esc cancels. The same outcomes are available from the CLI:
+With no flag the session opens on the span that matches why you are back: if this
+changeset has been reviewed and code changed since that review, it opens on the
+changes since the review; otherwise on the whole changeset. Use --full to always
+start on the whole changeset, --unreviewed or --since-review to name a span, and v
+in the session to toggle. The same outcomes are available from the CLI:
   gitpr review submit --block | --feedback | --approve`,
 		Example: `  gitpr review open
   gitpr review open --unreviewed
@@ -68,6 +72,7 @@ a (approve); Esc cancels. The same outcomes are available from the CLI:
 			return runReviewOpen(cmd.Context(), a, opts)
 		},
 	}
+	cmd.Flags().BoolVar(&opts.full, "full", false, "start on the whole changeset, even if code changed since the last review")
 	cmd.Flags().BoolVar(&opts.unreviewed, "unreviewed", false, "start with the span since the most recent review")
 	cmd.Flags().StringVar(&opts.sinceReview, "since-review", "", "start with the span since review N (bare flag means -1)")
 	cmd.Flags().Lookup("since-review").NoOptDefVal = "-1"
@@ -75,6 +80,11 @@ a (approve); Esc cancels. The same outcomes are available from the CLI:
 }
 
 func runReviewOpen(ctx context.Context, a *app, opts *spanOptions) error {
+	// Worth checking before touching the repository: two named spans is a usage
+	// mistake whether or not there is a changeset to open.
+	if opts.full && (opts.unreviewed || opts.sinceReview != "") {
+		return &usageError{errors.New("--full cannot be combined with --unreviewed or --since-review; name one span")}
+	}
 	s, err := a.load(ctx)
 	if err != nil {
 		return err
@@ -82,6 +92,9 @@ func runReviewOpen(ctx context.Context, a *app, opts *spanOptions) error {
 	so, err := opts.toSpanOptions()
 	if err != nil {
 		return err
+	}
+	if so.Empty() && !opts.full {
+		so = span.StartingSpan(ctx, s.repo, s.cs.Slug, s.summary)
 	}
 	if !console.Interactive() {
 		return &usageError{errors.New(

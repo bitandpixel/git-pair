@@ -452,3 +452,25 @@ func shortOf(sha string) string {
 	}
 	return sha
 }
+
+// --full is the escape hatch from the resume-like default, and naming two spans
+// is a usage mistake worth reporting before anything else happens.
+func TestReviewOpenSpanFlagsAreValidatedHeadlessly(t *testing.T) {
+	f, _ := newChangeset(t, "booking", "main")
+	ready(t, f)
+	runIn(t, f.Dir(), "review", "submit", "--block", "-m", "note").mustSucceed(t, "review", "submit")
+	runIn(t, f.Dir(), "change", "ready").mustSucceed(t, "change", "ready")
+
+	conflict := runIn(t, f.Dir(), "review", "open", "--full", "--unreviewed")
+	if conflict.code != exitUsage {
+		t.Errorf("--full with --unreviewed exited %d, want %d\n%s", conflict.code, exitUsage, conflict.stderr)
+	}
+	mustContain(t, conflict.stderr, "name one span", "conflict should say what to do")
+
+	// Without a terminal the session cannot open, which also proves --full is a
+	// recognised flag rather than a typo cobra would reject.
+	refusal := runIn(t, f.Dir(), "review", "open", "--full")
+	if refusal.code != exitUsage || !strings.Contains(refusal.stderr, "needs a terminal") {
+		t.Errorf("--full exited %d (%s), want the terminal refusal", refusal.code, refusal.stderr)
+	}
+}
