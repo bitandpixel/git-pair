@@ -275,7 +275,7 @@ func TestReviewQueueGainsAndLosesChangesetAcrossReadyAndImplementation(t *testin
 		t.Errorf("state = %v, want WORKING", status["state"])
 	}
 	// The stale marker is still history, not a lie about the present.
-	mustContain(t, status["reason"].(string), "implementation commit", "status must explain why the marker is stale")
+	mustContain(t, status["reason"].(string), "code changed since ready", "status must explain why the marker is stale")
 
 	// Marking ready again re-queues it.
 	ready(t, f)

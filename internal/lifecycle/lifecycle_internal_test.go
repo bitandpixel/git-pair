@@ -129,8 +129,11 @@ func TestDeriveImplementationCommitAfterApproveYieldsWorking(t *testing.T) {
 	if !got.Stale {
 		t.Error("Stale = false, want true")
 	}
-	if !strings.Contains(got.Reason, "implementation commit") {
-		t.Errorf("Reason = %q, want it to name the trailing implementation commit", got.Reason)
+	// derive only counts commits; it cannot tell an implementation commit from a
+	// changeset-only one, so it says "commit(s)" and lets ReconcileStaleness
+	// decide whether they matter.
+	if !strings.Contains(got.Reason, "commit(s) after review") {
+		t.Errorf("Reason = %q, want it to count the commits after the approve", got.Reason)
 	}
 	// The approval is still history: `review history` must list it (PRD §10.5).
 	if len(got.Reviews) != 1 || got.LatestReview == nil || got.LatestReview.Outcome != model.OutcomeApprove {

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -285,6 +286,26 @@ func parseRecords(out string) [][]string {
 }
 
 // DiffNames returns the paths changed in `git diff` over the given range.
+// EmptyTree is git's empty tree, the diff target for a commit with no parent.
+const EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+// PathsChangedOutside lists paths that differ between two revisions, ignoring
+// anything under the given directory prefixes.
+//
+// The exclusion is on the *result*, which is what makes a rename out of an
+// excluded directory show up: the deletion is excluded, the new path is not.
+func (r *Repo) PathsChangedOutside(ctx context.Context, from, to string, exclude ...string) ([]string, error) {
+	args := []string{"diff", "--name-only", from, to, "--", "."}
+	for _, dir := range exclude {
+		args = append(args, ":(exclude)"+filepath.ToSlash(dir)+"/")
+	}
+	out, err := r.Git(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	return splitLines(out), nil
+}
+
 func (r *Repo) DiffNames(ctx context.Context, from, to string) ([]string, error) {
 	out, err := r.Git(ctx, "diff", "--name-only", from, to)
 	if err != nil {

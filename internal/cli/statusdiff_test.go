@@ -127,7 +127,7 @@ func TestStatusImplementationCommitAfterApproveIsWorking(t *testing.T) {
 	if !ok || latest["outcome"] != "approve" {
 		t.Errorf("latest_review = %v, want the approve to remain the latest review", out["latest_review"])
 	}
-	mustContain(t, out["reason"].(string), "implementation commit", "status must explain the invalidation")
+	mustContain(t, out["reason"].(string), "code changed since review", "status must explain the invalidation")
 	if got := f.RefSHA(reviewRef(slug)); got != approve {
 		t.Errorf("%s moved to %s, want the approval %s", reviewRef(slug), got, approve)
 	}

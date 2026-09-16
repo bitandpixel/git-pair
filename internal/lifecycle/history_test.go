@@ -326,3 +326,74 @@ func subjects(events []lifecycle.Event) []string {
 	}
 	return out
 }
+
+// PRD §421 invalidates a ready marker on a later *implementation* commit. A commit
+// that touches nothing but changesets/<slug>/ is not one, and the reviewer reads
+// ABOUT.md and threads from HEAD anyway, so the marker must stand.
+func TestSummarizeChangesetOnlyCommitDoesNotInvalidateReady(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	f.CreateBranch("booking")
+	slug, base := "booking", "main"
+	f.CommitChangeset(slug, base)
+	f.CommitReadyMarker(slug)
+
+	f.WriteChangesetFile(slug, "ABOUT.md", "# booking\n\n## Summary\n\nExpanded for the reviewer.\n")
+	f.Commit("describe booking")
+
+	got := summarize(t, f, slug, base, "HEAD")
+	if got.State != model.StateReady {
+		t.Errorf("state = %s, want READY: no implementation code changed (reason: %s)", got.State, got.Reason)
+	}
+	if got.Stale {
+		t.Error("Stale = true, want false")
+	}
+	if !strings.Contains(got.Reason, "changeset-only") {
+		t.Errorf("reason = %q, want it to name the commits it looked past", got.Reason)
+	}
+}
+
+// The boundary the tree comparison has to get right: one commit touching both the
+// changeset directory and code is an implementation commit, because the code moved.
+func TestSummarizeMixedCommitInvalidatesReady(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	f.CreateBranch("booking")
+	slug, base := "booking", "main"
+	f.CommitChangeset(slug, base)
+	f.CommitReadyMarker(slug)
+
+	f.WriteChangesetFile(slug, "ABOUT.md", "# booking\n\n## Summary\n\nAlso touched the code.\n")
+	f.Commit("address feedback", gittest.WithFile("service.go", "package main\n\nfunc Lock() {}\n"))
+
+	got := summarize(t, f, slug, base, "HEAD")
+	if got.State != model.StateWorking {
+		t.Errorf("state = %s, want WORKING: code changed above the marker", got.State)
+	}
+	if !got.Stale {
+		t.Error("Stale = false, want true")
+	}
+	if !strings.Contains(got.Reason, "code changed since ready") {
+		t.Errorf("reason = %q, want it to say the code changed since the marker", got.Reason)
+	}
+}
+
+// Counting commits gets merges and rebases wrong; comparing trees does not. Here
+// the changeset is unchanged and merged into an advanced trunk, so the reviewed
+// code is still exactly what was approved.
+func TestSummarizeBaseMovingUnderAReadyChangesetKeepsReady(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	f.CreateBranch("booking")
+	slug, base := "booking", "main"
+	f.CommitChangeset(slug, base)
+	f.CommitReadyMarker(slug)
+
+	f.SwitchTo("main")
+	f.Commit("trunk work", gittest.WithFile("other.go", "package main\n"))
+	f.SwitchTo("booking")
+
+	if got := summarize(t, f, slug, base, "HEAD"); got.State != model.StateReady {
+		t.Errorf("state = %s, want READY: the reviewed code is untouched (reason: %s)", got.State, got.Reason)
+	}
+}
