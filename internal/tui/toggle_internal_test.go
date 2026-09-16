@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -27,6 +28,10 @@ func newFileListModel(t *testing.T) reviewModel {
 		"service.go": "package main\n\nfunc Lock() {}\n",
 		"handler.go": "package main\n\nfunc Serve() {}\n",
 	}))
+	// Two threads exist as working files, which is how a reviewer leaves them between
+	// sessions: untracked until the review is submitted, listed either way.
+	f.Write(filepath.Join("changesets", slug, "locking.md"), "# Thread: locking\n\nWhy the mutex?\n")
+	f.Write(filepath.Join("changesets", slug, "naming.md"), "# Thread: naming\n\nServe or Handle?\n")
 
 	repo := &git.Repo{Dir: f.Dir()}
 	cs, err := changeset.ForBranch(repo, slug)
@@ -44,7 +49,11 @@ func newFileListModel(t *testing.T) reviewModel {
 	if len(sess.Files()) < 3 {
 		t.Fatalf("fixture has %d files, want at least 3", len(sess.Files()))
 	}
-	return reviewModel{ctx: ctx, sess: sess, width: 80, height: 24}
+	// The navigable list is built from the session, so a model that tests are handed must
+	// have it built too, exactly as Run does.
+	m := reviewModel{ctx: ctx, sess: sess, width: 80, height: 24, threadsOpen: true}
+	m.refresh()
+	return m
 }
 
 // Marking a file is not a navigation command. Advancing the cursor after every mark
@@ -79,11 +88,12 @@ func TestSpaceMarksTheFileAndLeavesTheCursorOnIt(t *testing.T) {
 	}
 }
 
-// k at the top of the list used to drive the cursor negative, and View indexes files
-// by cursor, so the program died with an index-out-of-range panic.
+// k at the top of the list used to drive the cursor negative, and View indexes rows by
+// cursor, so the program died with an index-out-of-range panic. The list now runs past the
+// files into the changeset section, so "both ends" means the ends of that whole list.
 func TestNavigationStopsAtBothEndsOfTheList(t *testing.T) {
 	m := newFileListModel(t)
-	total := len(m.sess.Files())
+	total := len(m.rows)
 
 	up, down := tea.KeyMsg{Type: tea.KeyUp}, tea.KeyMsg{Type: tea.KeyDown}
 	for i := 0; i < total+3; i++ {
@@ -113,16 +123,31 @@ func TestNavigationStopsAtBothEndsOfTheList(t *testing.T) {
 	}
 }
 
-// The empty span has no rows to index at all.
+// A span with no changed files still has the changeset section to navigate, so the cursor
+// stays inside that. The genuinely empty list is only reachable from a unit test, and clamp
+// has to leave the cursor at zero rather than index anything.
 func TestNavigationOnAnEmptyListDoesNotPanic(t *testing.T) {
 	m := newFileListModel(t)
 	m.sess.files = nil
+	m.refresh()
+	if len(m.rows) == 0 {
+		t.Fatal("a span with no files still has the changeset section to navigate")
+	}
 	for _, k := range []tea.KeyMsg{{Type: tea.KeyUp}, {Type: tea.KeyDown}, {Type: tea.KeySpace}} {
 		updated, _ := m.Update(k)
 		m = updated.(reviewModel)
-		if m.cursor != 0 || m.scroll != 0 {
-			t.Errorf("cursor=%d scroll=%d on an empty list, want 0/0", m.cursor, m.scroll)
+		if m.cursor < 0 || m.cursor >= len(m.rows) {
+			t.Errorf("cursor=%d outside the %d rows left after %v", m.cursor, len(m.rows), k)
+		}
+		if m.scroll < 0 {
+			t.Errorf("scroll=%d after %v", m.scroll, k)
 		}
 		_ = m.View()
+	}
+
+	m.rows, m.cursor, m.scroll = nil, 4, 4
+	m.clamp()
+	if m.cursor != 0 || m.scroll != 0 {
+		t.Errorf("cursor=%d scroll=%d with no rows at all, want 0/0", m.cursor, m.scroll)
 	}
 }

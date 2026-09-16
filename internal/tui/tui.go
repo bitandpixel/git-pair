@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -26,7 +27,6 @@ type mode int
 const (
 	modeFiles mode = iota
 	modePrompt
-	modeThreads
 	modeSubmit
 )
 
@@ -36,6 +36,69 @@ const (
 	promptNone promptKind = iota
 	promptThread
 )
+
+// rowKind says what a navigable line stands for.
+type rowKind uint8
+
+const (
+	rowFile rowKind = iota
+	rowAbout
+	rowThreadsHead
+	rowThread
+	rowNewThread
+)
+
+// Labels the section rows print. A thread is shown by file name: they all live in one
+// directory, so the name is the whole distinction.
+const (
+	newThreadLabel = "+ new thread…"
+	threadIndent   = "    "
+)
+
+// row is one line of the navigable list: a file in the span, or an entry of the changeset
+// section — ABOUT.md, the thread heading, one thread nested under it, or the action that
+// creates another. Both sections are in one list because a reviewer works down the screen:
+// the code, then what the changeset says about it, with `j` running off the bottom of the
+// files and into the artifacts instead of into a separate mode.
+type row struct {
+	kind rowKind
+	path string // repository-relative, for the rows that name a file
+	name string // what the row prints
+	file int    // index into Session.Files() for a file row, -1 otherwise
+	note string // set on the thread heading when the threads could not be listed
+}
+
+// action is what Enter does with a row.
+type action uint8
+
+const (
+	actionNone action = iota
+	actionDiff
+	actionEdit
+	actionAbout
+	actionCollapse
+	actionNewThread
+)
+
+// activateBy is the Enter table: one row kind, one action. A file opens in the difftool
+// because that is the thing under review; the changeset artifacts are markdown a reviewer
+// reads, so they open in the editor. The heading toggles its own group, and the last row of
+// the group creates another thread.
+func activateBy(r row) action {
+	switch r.kind {
+	case rowFile:
+		return actionDiff
+	case rowThread:
+		return actionEdit
+	case rowAbout:
+		return actionAbout
+	case rowThreadsHead:
+		return actionCollapse
+	case rowNewThread:
+		return actionNewThread
+	}
+	return actionNone
+}
 
 // externalDoneMsg reports that a launched editor or difftool has exited.
 type externalDoneMsg struct {
@@ -55,14 +118,17 @@ type reviewModel struct {
 	width  int
 	height int
 
+	// rows is the navigable list: the files in the span, then the changeset section.
+	// It is rebuilt by refresh whenever the session or the view could have changed.
+	rows        []row
+	threadsOpen bool
+
 	promptKind promptKind
 	input      string
 
-	threads      []string
-	threadCursor int
-	status       string
-	statusErr    bool
-	quitting     bool
+	status    string
+	statusErr bool
+	quitting  bool
 	// submitted is the one-line summary of a review submitted from inside the
 	// session, printed after the alt screen closes.
 	submitted string
@@ -74,7 +140,8 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	m := reviewModel{ctx: ctx, sess: sess, width: 80, height: 24}
+	m := reviewModel{ctx: ctx, sess: sess, width: 80, height: 24, threadsOpen: true}
+	m.refresh()
 	if n := sess.Resumed(); n > 0 {
 		m.setStatus(fmt.Sprintf("resumed %d reviewed mark%s from an earlier session", n, plural(n)), false)
 	}
@@ -104,7 +171,7 @@ func (m reviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.clamp()
+		m.refresh()
 		return m, nil
 
 	case externalDoneMsg:
@@ -119,6 +186,9 @@ func (m reviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatus("", false)
 		}
+		// The editor may have written a new thread, so the section below the files
+		// has to be listed again.
+		m.refresh()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -138,9 +208,8 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleSubmitKey(key)
 	case modePrompt:
 		return m.handlePromptKey(key)
-	case modeThreads:
-		return m.handleThreadKey(key)
 	}
+	m.refresh()
 
 	switch {
 	case key.Type == tea.KeyCtrlC, key.Type == tea.KeyCtrlD,
@@ -154,17 +223,12 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.move(1)
 	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
 		m.move(-1)
+	case key.Type == tea.KeyTab, key.Type == tea.KeyShiftTab:
+		m.jumpSection()
 	case key.Type == tea.KeySpace:
-		m.sess.Toggle(m.cursor)
-		// Marks persist locally so the review can be resumed. A failure is reported
-		// and otherwise ignored: the review itself does not depend on them.
-		if err := m.sess.SaveMarks(m.ctx); err != nil {
-			m.setStatus("marks not saved: "+err.Error(), true)
-		} else {
-			m.setStatus("", false)
-		}
+		m.toggleMark()
 	case key.Type == tea.KeyEnter:
-		return m.openDiff()
+		return m.activate()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'e':
 		return m.openEditor()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'a':
@@ -173,12 +237,12 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode, m.input, m.promptKind = modePrompt, "", promptThread
 		m.setStatus("New thread title (Enter to create, Esc to cancel)", false)
 	case key.Type == tea.KeyRunes && firstRune(key) == 'T':
-		return m.enterThreads()
+		m.toggleThreads()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'v':
 		if err := m.sess.ToggleSpan(m.ctx); err != nil {
 			m.setStatus(err.Error(), true)
 		} else {
-			m.clamp()
+			m.refresh()
 			m.setStatus("", false)
 		}
 	case key.Type == tea.KeyRunes && firstRune(key) == 's':
@@ -189,6 +253,34 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeSubmit
 	}
 	return m, nil
+}
+
+// toggleMark marks the file under the cursor reviewed, or explains why the row it is on
+// cannot be: ABOUT.md and threads are read rather than diffed, and the group rows are not
+// things at all.
+func (m *reviewModel) toggleMark() {
+	r, ok := m.selectedRow()
+	if !ok {
+		return
+	}
+	if r.kind != rowFile {
+		m.setStatus("reviewed marks apply to file rows: "+r.name+" is not one", false)
+		return
+	}
+	m.sess.Toggle(r.file)
+	// Marks persist locally so the review can be resumed. A failure is reported
+	// and otherwise ignored: the review itself does not depend on them.
+	if err := m.sess.SaveMarks(m.ctx); err != nil {
+		m.setStatus("marks not saved: "+err.Error(), true)
+	} else {
+		m.setStatus("", false)
+	}
+}
+
+// toggleThreads collapses or expands the thread list under its heading.
+func (m *reviewModel) toggleThreads() {
+	m.threadsOpen = !m.threadsOpen
+	m.refresh()
 }
 
 func (m reviewModel) handleSubmitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -250,54 +342,13 @@ func (m reviewModel) handlePromptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input = string(runes[:len(runes)-1])
 		}
 		return m, nil
+	case tea.KeySpace:
+		// A lone space arrives as KeySpace rather than KeyRunes, and titles are prose:
+		// "Does the lock cover the map?" used to arrive as "Doesthelockcoverthemap?".
+		m.input += " "
 	case tea.KeyRunes:
 		m.input += string(key.Runes)
 		return m, nil
-	}
-	return m, nil
-}
-
-func (m reviewModel) enterThreads() (tea.Model, tea.Cmd) {
-	threads, err := m.sess.Threads()
-	if err != nil {
-		m.setStatus(err.Error(), true)
-		return m, nil
-	}
-	m.mode = modeThreads
-	m.threads = threads
-	if m.threadCursor >= len(threads) {
-		m.threadCursor = 0
-	}
-	if len(threads) == 0 {
-		m.setStatus("No threads yet — press t to create one", false)
-	} else {
-		m.setStatus("", false)
-	}
-	return m, nil
-}
-
-func (m reviewModel) handleThreadKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Type == tea.KeyEsc, key.Type == tea.KeyRunes && firstRune(key) == 'q',
-		key.Type == tea.KeyRunes && firstRune(key) == 'T':
-		m.mode = modeFiles
-		m.setStatus("", false)
-		return m, nil
-	case key.Type == tea.KeyDown, key.Type == tea.KeyRunes && firstRune(key) == 'j':
-		if m.threadCursor < len(m.threads)-1 {
-			m.threadCursor++
-		}
-	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
-		if m.threadCursor > 0 {
-			m.threadCursor--
-		}
-	case key.Type == tea.KeyEnter:
-		if m.threadCursor < len(m.threads) {
-			return m.openPath(m.threads[m.threadCursor])
-		}
-	case key.Type == tea.KeyRunes && firstRune(key) == 't':
-		m.mode, m.input, m.promptKind = modePrompt, "", promptThread
-		m.setStatus("New thread title (Enter to create, Esc to cancel)", false)
 	}
 	return m, nil
 }
@@ -313,27 +364,58 @@ func (m reviewModel) openThreadTitle(title string) (tea.Model, tea.Cmd) {
 	} else {
 		m.setStatus("Opened existing thread "+path, false)
 	}
+	// The new file belongs in the section the reviewer was just in, so put the cursor on
+	// it instead of leaving them where the prompt started.
+	m.refresh()
+	for i, r := range m.rows {
+		if r.kind == rowThread && r.path == path {
+			m.cursor = i
+			break
+		}
+	}
+	m.clamp()
 	return m.openPath(path)
 }
 
 // --- external process handoff ----------------------------------------------
 
-func (m reviewModel) openDiff() (tea.Model, tea.Cmd) {
-	f, ok := m.selected()
+// activate does whatever the row under the cursor is for. The mapping from row to action is
+// activateBy, kept apart from the process handoff so the table is testable without handing
+// the terminal to an editor.
+func (m reviewModel) activate() (tea.Model, tea.Cmd) {
+	r, ok := m.selectedRow()
 	if !ok {
 		return m, nil
 	}
+	switch activateBy(r) {
+	case actionDiff:
+		return m.openDiff(r.path)
+	case actionEdit:
+		return m.openPath(r.path)
+	case actionAbout:
+		return m.openAbout()
+	case actionCollapse:
+		m.toggleThreads()
+	case actionNewThread:
+		m.mode, m.input, m.promptKind = modePrompt, "", promptThread
+		m.setStatus("New thread title (Enter to create, Esc to cancel)", false)
+	}
+	return m, nil
+}
+
+func (m reviewModel) openDiff(path string) (tea.Model, tea.Cmd) {
 	sp := m.sess.Span()
-	return m.runExternal(console.DiffToolCommand(m.sess.Repo(), sp.From, []string{f.Path}),
+	return m.runExternal(console.DiffToolCommand(m.sess.Repo(), sp.From, []string{path}),
 		"Difftool exited with an error")
 }
 
+// openEditor edits the row under the cursor: a file, a thread, or ABOUT.md.
 func (m reviewModel) openEditor() (tea.Model, tea.Cmd) {
-	f, ok := m.selected()
-	if !ok {
+	r, ok := m.selectedRow()
+	if !ok || r.path == "" {
 		return m, nil
 	}
-	return m.openPath(f.Path)
+	return m.openPath(r.path)
 }
 
 func (m reviewModel) openAbout() (tea.Model, tea.Cmd) {
@@ -393,15 +475,9 @@ func (m reviewModel) View() string {
 	if total == 0 {
 		b.WriteString(styleDim.Render("(no changed files in this span)") + "\n")
 	}
-	visible := m.visibleRows()
-	for _, idx := range visible {
-		f := m.sess.Files()[idx]
-		mark := "○ "
-		if f.Reviewed {
-			mark = styleMark.Render("✓ ")
-		}
-		line := mark + f.Path
-		if m.cursor == idx && m.mode == modeFiles {
+	for _, idx := range m.visibleRows() {
+		line := m.rowText(m.rows[idx])
+		if m.cursor == idx {
 			line = styleSelected.Render(m.truncate(line))
 		}
 		b.WriteString(line + "\n")
@@ -413,28 +489,7 @@ func (m reviewModel) View() string {
 	b.WriteString("\n")
 	b.WriteString(fmt.Sprintf("%d / %d reviewed\n", reviewed, total))
 	b.WriteString("\n")
-	b.WriteString("ABOUT.md\n")
-	threads, err := m.sess.Threads()
-	if err != nil {
-		b.WriteString(styleErr.Render("threads: "+err.Error()) + "\n")
-	} else {
-		b.WriteString(fmt.Sprintf("Threads (%d)\n", len(threads)))
-	}
-	if m.mode == modeThreads {
-		b.WriteString("\n")
-		if len(threads) == 0 {
-			b.WriteString(styleDim.Render("  (none yet)") + "\n")
-		}
-		for i, t := range threads {
-			prefix := "  "
-			if i == m.threadCursor {
-				prefix = "> "
-			}
-			b.WriteString(styleDim.Render(prefix+strings.TrimPrefix(t, "changesets/")) + "\n")
-		}
-	}
 
-	b.WriteString("\n")
 	switch m.mode {
 	case modePrompt:
 		b.WriteString("New thread: " + m.input + "█\n")
@@ -473,7 +528,12 @@ func (m reviewModel) helpText() string {
 	case modePrompt:
 		return "" // the thread prompt is the input line, not help
 	}
-	return "j/k move  enter difftool  e edit  space reviewed  a about  t thread  T browse  v span  s submit  q quit"
+	threadsHint := "T show threads"
+	if m.threadsOpen {
+		threadsHint = "T hide threads"
+	}
+	return "j/k move  tab section  enter open  e edit  space reviewed  a about  t new thread  " +
+		threadsHint + "  v span  s submit  q quit"
 }
 
 // helpLines is helpText fitted to the terminal width. A narrow window gets the overflow on
@@ -516,8 +576,102 @@ func wrapGroups(text string, width int) []string {
 
 // --- helpers ----------------------------------------------------------------
 
+// refresh rebuilds the navigable list from the session, keeping the cursor on the row it was
+// on while that row still exists — a thread created in the editor, a rescan after a difftool
+// closed, or a collapse should not move the reviewer somewhere else.
+func (m *reviewModel) refresh() {
+	var keep *row
+	if m.cursor >= 0 && m.cursor < len(m.rows) {
+		keep = &m.rows[m.cursor]
+	}
+	m.buildRows()
+	if keep != nil {
+		for i, r := range m.rows {
+			if r.kind == keep.kind && r.path == keep.path {
+				m.cursor = i
+				break
+			}
+		}
+	}
+	m.clamp()
+}
+
+func (m *reviewModel) buildRows() {
+	var rows []row
+	for i, f := range m.sess.Files() {
+		rows = append(rows, row{kind: rowFile, path: f.Path, name: f.Path, file: i})
+	}
+	rows = append(rows, row{kind: rowAbout, path: m.sess.AboutPath(),
+		name: filepath.Base(m.sess.AboutPath()), file: -1})
+
+	// Nothing is filtered out of the file list above: a thread or ABOUT.md that changed in
+	// the span is part of what is under review, so it keeps its file row as well as its
+	// place in the section below. The section is the shortcut to read them; the list is the
+	// record of what the diff did.
+	threads, err := m.sess.Threads()
+	head := row{kind: rowThreadsHead, name: fmt.Sprintf("Threads (%d)", len(threads)), file: -1}
+	if err != nil {
+		head.note = err.Error()
+	}
+	rows = append(rows, head)
+	if m.threadsOpen {
+		for _, path := range threads {
+			rows = append(rows, row{kind: rowThread, path: path, name: filepath.Base(path), file: -1})
+		}
+		rows = append(rows, row{kind: rowNewThread, name: newThreadLabel, file: -1})
+	}
+	m.rows = rows
+}
+
+// jumpSection is Tab: it toggles between the two things a reviewer works through, the files
+// and the changeset artifacts under them, landing on the first row of the other. One key
+// both ways, because a key that only goes one direction leaves the reviewer stuck there.
+func (m *reviewModel) jumpSection() {
+	r, ok := m.selectedRow()
+	if !ok {
+		return
+	}
+	toFiles := r.kind != rowFile
+	for i, candidate := range m.rows {
+		if (candidate.kind == rowFile) == toFiles {
+			m.cursor = i
+			m.clamp()
+			return
+		}
+	}
+}
+
+// rowText renders one row. Only a file row carries a reviewed mark: the artifacts below it
+// are read rather than diffed.
+func (m reviewModel) rowText(r row) string {
+	switch r.kind {
+	case rowFile:
+		mark := "○ "
+		if f := m.sess.Files(); r.file >= 0 && r.file < len(f) && f[r.file].Reviewed {
+			mark = styleMark.Render("✓ ")
+		}
+		return mark + r.name
+	case rowAbout:
+		return r.name
+	case rowThreadsHead:
+		arrow := "▸ "
+		if m.threadsOpen {
+			arrow = "▾ "
+		}
+		if r.note != "" {
+			return styleErr.Render("threads: " + r.note)
+		}
+		return styleDim.Render(arrow + r.name)
+	case rowThread:
+		return threadIndent + r.name
+	case rowNewThread:
+		return styleDim.Render(threadIndent + r.name)
+	}
+	return r.name
+}
+
 func (m *reviewModel) clamp() {
-	total := len(m.sess.Files())
+	total := len(m.rows)
 	if total == 0 {
 		m.cursor, m.scroll = 0, 0
 		return
@@ -542,7 +696,7 @@ func (m *reviewModel) clamp() {
 }
 
 func (m *reviewModel) move(delta int) {
-	total := len(m.sess.Files())
+	total := len(m.rows)
 	if total == 0 {
 		return
 	}
@@ -550,26 +704,39 @@ func (m *reviewModel) move(delta int) {
 	m.clamp()
 }
 
-func (m reviewModel) selected() (File, bool) {
-	files := m.sess.Files()
-	if m.cursor < 0 || m.cursor >= len(files) {
-		return File{}, false
+func (m reviewModel) selectedRow() (row, bool) {
+	if m.cursor < 0 || m.cursor >= len(m.rows) {
+		return row{}, false
 	}
-	return files[m.cursor], true
+	return m.rows[m.cursor], true
 }
 
-// windowRows is how many file rows fit between the header and the footer. The shortcut
-// helper takes a row, or several when a narrow window wraps it.
+// windowRows is how many rows fit between the header and the footer.
 func (m reviewModel) windowRows() int {
-	window := m.height - 12 - (len(m.helpLines()) - 1)
+	window := m.height - m.chromeRows()
 	if window < 5 {
 		return 5
 	}
 	return window
 }
 
+// chromeRows counts the lines View writes outside the row list: the title, the base and span
+// line, the blank under them, the blank above the counter, the counter, the blank above the
+// helper, and then the helper itself, the "hidden above" note while scrolled, and the status
+// line when there is one. The changeset section is part of the row list, so it is not here.
+func (m reviewModel) chromeRows() int {
+	chrome := 6 + len(m.helpLines())
+	if m.scroll > 0 {
+		chrome++
+	}
+	if m.status != "" {
+		chrome++
+	}
+	return chrome
+}
+
 func (m reviewModel) visibleRows() []int {
-	total := len(m.sess.Files())
+	total := len(m.rows)
 	window := m.windowRows()
 	var rows []int
 	for i := m.scroll; i < total && i < m.scroll+window; i++ {

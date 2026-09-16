@@ -148,13 +148,13 @@ func TestWindowRowsShrinkWhenTheHelperWraps(t *testing.T) {
 
 	m.width = 200 // one helper row
 	wide := m.windowRows()
-	if wide != 28 {
-		t.Fatalf("window = %d rows at width 200, want 28", wide)
+	if want := 40 - m.chromeRows(); wide != want {
+		t.Fatalf("window = %d rows at width 200, want %d (height less the chrome)", wide, want)
 	}
 
 	m.width = 20
 	rows := m.windowRows()
-	if want := 40 - 12 - (len(m.helpLines()) - 1); rows != want {
+	if want := 40 - m.chromeRows(); rows != want {
 		t.Errorf("window = %d rows, want %d (the helper now takes %d rows)",
 			rows, want, len(m.helpLines()))
 	}
@@ -163,7 +163,7 @@ func TestWindowRowsShrinkWhenTheHelperWraps(t *testing.T) {
 	}
 	// The fixture has fewer files than either window, so nothing scrolls yet; the point is
 	// that the window stops claiming rows the helper is now using.
-	total := len(m.sess.Files())
+	total := len(m.rows)
 	if got := len(m.visibleRows()); got != min(total, rows) {
 		t.Errorf("visibleRows = %d, want %d (total %d, window %d)", got, min(total, rows), total, rows)
 	}

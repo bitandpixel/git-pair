@@ -102,9 +102,10 @@ From the PRD, treated as binding:
 | M6 docs + dogfood | done | `README.md`; `artifacts/e2e-29.sh` is the scripted replay and passes end to end |
 | Post-MVP: refuse a self-referential base | done | `TestBaseIsOwnBranch` (9 cases) + init/ready/status CLI tests; reproduces and closes the owner's dogfood report |
 | Post-MVP: `change init` commits, takes `--about` | done | `TestChangeInit*` (11 cases) plus the corrected golden workflow; e2e replay still passes |
+| Post-MVP: one TUI list, two sections — files, then ABOUT.md and nested threads with `+ new thread…` | done | `TestJRunsFromTheFilesIntoTheChangesetSection`, `TestTabSwitchesBetweenTheTwoSections`, `TestThreadsHeadingCollapsesAndExpands`, `TestEnterOpensWhatTheRowIsFor`, `TestSpaceMarksFilesAndRefusesTheRest`, `TestNewThreadRowSitsUnderItsThreads`, `TestThreadPromptKeepsSpacesInATitle` |
 | Post-MVP: author-side `change feedback` and `change wait`, replacing `diff --unreviewed` in author hints | done | `TestChangeFeedbackShowsTheReviewItself`, `TestChangeFeedbackWithoutAReview`, `TestChangeWaitReturnsAtOnceWhenAReviewIsAlreadyIn`, `TestChangeWaitTimeoutReportsWhereThingsStand`, `TestChangeWaitFetchesAndSeesAReviewFromAnotherClone` (two clones, bare remote, no network), `TestPollUntil*` (5 cases) |
 
-Test suite: 28 files, 228 test functions, 13 packages, all passing; `go vet` and `gofmt`
+Test suite: 29 files, 236 test functions, 13 packages, all passing; `go vet` and `gofmt`
 clean. The suite found four real defects, all fixed in `fix: exit codes, added-line
 positions, changeset detection, editor expansion`: an off-by-one in
 `survival.AddedLines` line numbers, state-based refusals exiting 2 instead of 1, unknown
@@ -242,6 +243,24 @@ changeset. Hand-verification of everything the README documents additionally cor
     `visibleRows`, so the list gives up the rows a wrapped helper uses. Known adjacent gap,
     not fixed: `truncate` shortens only the *selected* row, so an unselected path longer than
     the window still wraps in the terminal.
+
+16. **The threads browse mode was a second place to be, so the TUI is now one list.** ABOUT.md
+    and the threads sat in a fixed block under the counter, reachable only by `T`, and creating
+    a thread was a separate prompt — three gestures for one job. The navigable list is now the
+    files in the span followed by the changeset section: ABOUT.md, a `Threads (N)` heading that
+    collapses, each thread nested under it, and `+ new thread…` as the group's action. `j` runs
+    off the bottom of the files into it; `Tab` toggles between the halves (a key that only goes
+    one way strands the reviewer there); `Enter` activates per row kind through `activateBy`,
+    kept apart from the process handoff so the table is testable without launching an editor.
+    `Space` stays file-only and says so. Files that *are* artifacts keep their file rows when
+    they change in the span — the list is the record of what the diff did, the section is the
+    shortcut to read it — which the owner chose over deduplicating. Rows live in the model and
+    are rebuilt by `refresh`, which preserves the cursor by row kind and path, so a thread
+    created in the editor does not move the reviewer; `chromeRows`/`windowRows` now count the
+    real header and footer because the section left the fixed chrome. Driving the real TUI in a
+    pty caught a bug the unit tests could not: bubbletea reports a lone space as `KeySpace`, not
+    `KeyRunes`, so every space in a new thread's title was silently dropped before the file name
+    was derived from it.
 
 ## Architecture
 

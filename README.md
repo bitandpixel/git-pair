@@ -542,28 +542,40 @@ while the tool is for working on it. Plain `gitpr diff` runs `git diff` with
 stderr so stdout stays pipeable.
 
 `gitpr review open` is an orchestration screen, not an editor — header, changed files with
-per-file marks, progress count, and the changeset documents:
+per-file marks, then the changeset documents below them:
 
 ```text
 tuishow
 base: main  span: unreviewed
 ○ src/a.ts
-0 / 1 reviewed
 ABOUT.md
-Threads (1)
-j/k move  enter difftool  e edit  space reviewed  a about  t thread  T browse  v span  s submit  q quit
+▾ Threads (1)
+    does-the-lock-cover-the-map.md
+    + new thread…
+0 / 1 reviewed
+j/k move  tab section  enter open  e edit  space reviewed  a about  t new thread
+T hide threads  v span  s submit  q quit
 ```
 
-`Enter` opens the selected file in the difftool, `e` in the editor, `Space` toggles reviewed on
-the row under the cursor — which stays there, since marking is not navigation — `a` opens
-`ABOUT.md`, `t` prompts for a new thread, `T` browses threads, `v` toggles the
-full/unreviewed span, `s` opens a submit prompt taking `b`, `f` or `a`, `q` quits. In a narrow
-window the shortcut bar wraps between shortcuts rather than through them — `enter difftool`
-never arrives split in half — and the file list gives up the rows it takes. Submitting
-commits the review, moves the ref and **ends the session**, printing one line about what it
-did; `Esc` from the prompt returns to the list. The terminal
-is released while an external program runs and the repository is re-scanned afterwards, so a
-reviewed mark survives only while that file's diff within the span is unchanged.
+The screen is one navigable list in two sections: the files in the span, then ABOUT.md and the
+threads. `j` runs off the bottom of the files into the section below — reading the code and
+then reading what the changeset says about it is one motion, not two modes — and `Tab` toggles
+between the halves. `Enter` does whatever the row under the cursor is for: the difftool for a
+file, the editor for ABOUT.md or a thread, collapse or expand for the `Threads` heading, the
+title prompt for `+ new thread…`. `e` edits the selected row, `Space` toggles reviewed on a
+file row — which stays under the cursor, since marking is not navigation — and refuses the
+rows below the files, because the changeset documents are read rather than diffed. `a` opens
+`ABOUT.md` and `t` prompts for a new thread from anywhere; `T` collapses the thread list; `v`
+toggles the full/unreviewed span; `s` opens a submit prompt taking `b`, `f` or `a`; `q` quits.
+A thread created from the list is written, opened in the editor, and left selected, so the
+reviewer can fill it in and come straight back to it.
+
+In a narrow window the shortcut bar wraps between shortcuts rather than through them —
+`space reviewed` never arrives split in half — and the list gives up the rows it takes.
+Submitting commits the review, moves the ref and **ends the session**, printing one line about
+what it did; `Esc` from the prompt returns to the list. The terminal is released while an
+external program runs and the repository is re-scanned afterwards, so a reviewed mark survives
+only while that file's diff within the span is unchanged.
 
 Marks also survive quitting: they are written under the repository's git directory at
 `$(git rev-parse --absolute-git-dir)/gitpr/marks/<changeset>/<commit>.json`, keyed on the commit

@@ -953,26 +953,38 @@ span: unreviewed
 ○ src/booking/service.test.ts
 ✓ src/booking/fixtures.ts
 ○ src/booking/concurrency.test.ts
+ABOUT.md
+▾ Threads (2)
+    concurrency-tests.md
+    locking.md
+    + new thread…
 
 2 / 3 reviewed
-
-ABOUT.md
-Threads (2)
 ```
+
+The changed files and the changeset documents form one navigable list rather than separate
+modes: `j` continues from the last file into `ABOUT.md` and the threads nested under their
+heading, and creating a thread is one of the entries in that list instead of a separate
+prompt-plus-browse flow. The heading collapses, so a changeset with many threads stays
+scannable. A row that changed in the span keeps its file row as well as its place in the
+section below: the list is what the diff did, the section is the shortcut to read it.
 
 Suggested bindings:
 
 ```text
-j/k      navigate
-Enter    open selected file with difftool
-e        open working-tree file in editor
-Space    toggle file reviewed/unreviewed
+j/k      navigate the whole list
+Tab      switch between the file section and the changeset section
+Enter    activate the row: difftool for a file, editor for ABOUT.md or a thread,
+         collapse/expand for the Threads heading, new-thread prompt for + new thread…
+e        open the selected row in the editor
+Space    toggle reviewed for a file row
 
 a        open ABOUT.md
-t        create review thread
-T        browse/open review threads
+t        create a review thread
+T        collapse/expand the thread list
 
 v        toggle common review span
+s        submit review (block / feedback / approve)
 q        quit
 ```
 
@@ -1609,18 +1621,21 @@ into a GitHub/GitLab PR description while keeping the repository version as the 
 Suggested defaults:
 
 ```text
-j/k      move
-Enter    open diff for selected file
-e        edit selected current file
+j/k      move through the list: files, then the changeset section
+Tab      switch between the two sections
+Enter    activate the selected row: diff a file, edit ABOUT.md or a thread,
+         collapse the thread list, create a thread
+e        edit the selected file or document
 Space    mark file reviewed/unreviewed
 
 a        open ABOUT.md
 t        create thread
-T        list/open threads
+T        collapse/expand the thread list
 
 v        toggle common span:
          full changeset ↔ unreviewed
 
+s        submit review
 q        quit
 ```
 

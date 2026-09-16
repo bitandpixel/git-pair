@@ -1,0 +1,367 @@
+package tui
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// One list, two sections: the files in the span, then what the changeset says about them.
+// `j` runs off the bottom of the files into ABOUT.md and the threads rather than into a
+// separate mode, and Tab jumps between the halves.
+
+func navModel(t *testing.T) reviewModel {
+	t.Helper()
+	m := newFileListModel(t)
+	if len(m.rows) < 5 {
+		t.Fatalf("fixture has %d rows, want files plus ABOUT.md, the heading and two threads", len(m.rows))
+	}
+	return m
+}
+
+func indexOf(t *testing.T, m reviewModel, kind rowKind) int {
+	t.Helper()
+	for i, r := range m.rows {
+		if r.kind == kind {
+			return i
+		}
+	}
+	t.Fatalf("no row of kind %d in:\n%s", kind, rowList(m))
+	return -1
+}
+
+// lastIndexOfType is where `j` stops: the last file row, or the last row overall.
+func lastIndexOfType(t *testing.T, m reviewModel, kind rowKind) int {
+	t.Helper()
+	last := -1
+	for i, r := range m.rows {
+		if r.kind == kind {
+			last = i
+		}
+	}
+	if last < 0 {
+		t.Fatalf("no row of kind %d in:\n%s", kind, rowList(m))
+	}
+	return last
+}
+
+func rowList(m reviewModel) string {
+	var b strings.Builder
+	for i, r := range m.rows {
+		b.WriteString(m.rowText(r))
+		if i == m.cursor {
+			b.WriteString(" <- cursor")
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func press(m reviewModel, key tea.KeyType) reviewModel {
+	updated, _ := m.Update(tea.KeyMsg{Type: key})
+	return updated.(reviewModel)
+}
+
+func pressRune(m reviewModel, r rune) reviewModel {
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	return updated.(reviewModel)
+}
+
+func selectedKind(t *testing.T, m reviewModel) (rowKind, row) {
+	t.Helper()
+	r, ok := m.selectedRow()
+	if !ok {
+		t.Fatalf("nothing selected:\n%s", rowList(m))
+	}
+	return r.kind, r
+}
+
+func TestJRunsFromTheFilesIntoTheChangesetSection(t *testing.T) {
+	m := navModel(t)
+	m.cursor = lastIndexOfType(t, m, rowFile)
+
+	want := []rowKind{rowAbout, rowThreadsHead, rowThread, rowThread, rowNewThread}
+	for i, kind := range want {
+		m = press(m, tea.KeyDown)
+		got, row := selectedKind(t, m)
+		if got != kind {
+			t.Errorf("press %d of j: cursor on %q (kind %d), want kind %d\n%s", i+1, row.name, got, kind, rowList(m))
+		}
+		_ = m.View()
+	}
+
+	// The action row is the end of the list: j past it stays there.
+	before := m.cursor
+	m = press(m, tea.KeyDown)
+	if m.cursor != before {
+		t.Errorf("cursor moved from the last row to %d:\n%s", m.cursor, rowList(m))
+	}
+
+	// And k walks back out of the section into the threads it came from.
+	if got, _ := selectedKind(t, press(m, tea.KeyUp)); got != rowThread {
+		t.Errorf("k landed on kind %d, want a thread", got)
+	}
+}
+
+func TestTabSwitchesBetweenTheTwoSections(t *testing.T) {
+	m := navModel(t)
+	m.cursor = 0
+
+	toSection := press(m, tea.KeyTab)
+	if got, row := selectedKind(t, toSection); got != rowAbout {
+		t.Errorf("Tab from the files landed on %q (kind %d), want ABOUT.md", row.name, got)
+	}
+
+	back := press(toSection, tea.KeyTab)
+	if got, row := selectedKind(t, back); got != rowFile {
+		t.Errorf("Tab from the changeset section landed on %q (kind %d), want the first file", row.name, got)
+	}
+	if back.cursor != 0 {
+		t.Errorf("Tab back landed on row %d, want the first file row", back.cursor)
+	}
+
+	// Shift+Tab is the same toggle, so a reviewer whose terminal sends it for the other
+	// direction still gets between the two sections.
+	if got, _ := selectedKind(t, press(toSection, tea.KeyShiftTab)); got != rowFile {
+		t.Error("shift-tab should return to the files")
+	}
+	if got, _ := selectedKind(t, press(m, tea.KeyShiftTab)); got != rowAbout {
+		t.Errorf("shift-tab from the files landed on kind %d, want the changeset section", got)
+	}
+}
+
+func TestThreadsHeadingCollapsesAndExpands(t *testing.T) {
+	m := navModel(t)
+	open := len(m.rows)
+	head := indexOf(t, m, rowThreadsHead)
+	m.cursor = head
+
+	collapsed := pressRune(m, 'T')
+	if collapsed.threadsOpen {
+		t.Fatal("T did not collapse the threads")
+	}
+	if len(collapsed.rows) >= open {
+		t.Errorf("collapsing left %d rows, want fewer than %d:\n%s", len(collapsed.rows), open, rowList(collapsed))
+	}
+	for _, r := range collapsed.rows {
+		if r.kind == rowThread || r.kind == rowNewThread {
+			t.Errorf("the collapsed section still lists %q", r.name)
+		}
+	}
+	// The heading stays put through its own toggle: that is the row being looked at.
+	if collapsed.cursor != head {
+		t.Errorf("collapse moved the cursor from the heading at %d to %d", head, collapsed.cursor)
+	}
+	if strings.Contains(collapsed.View(), "locking.md") {
+		t.Error("a collapsed section still showed its threads")
+	}
+	if !strings.Contains(m.View(), "locking.md") {
+		t.Error("the expanded view does not show the nested threads")
+	}
+
+	// Enter on the heading is the same toggle, for a reviewer who never reads the hint.
+	expanded := press(collapsed, tea.KeyEnter)
+	if !expanded.threadsOpen {
+		t.Error("Enter on the heading did not expand the threads")
+	}
+	if len(expanded.rows) != open {
+		t.Errorf("re-expanding gave %d rows, want the original %d", len(expanded.rows), open)
+	}
+	if expanded.cursor != head {
+		t.Errorf("expanding moved the cursor to %d, want the heading at %d", expanded.cursor, head)
+	}
+}
+
+func TestEnterOpensWhatTheRowIsFor(t *testing.T) {
+	// The table itself, then the two rows that do not hand off the terminal.
+	cases := []struct {
+		kind rowKind
+		want action
+	}{
+		{rowFile, actionDiff},
+		{rowThread, actionEdit},
+		{rowAbout, actionAbout},
+		{rowThreadsHead, actionCollapse},
+		{rowNewThread, actionNewThread},
+	}
+	for _, c := range cases {
+		if got := activateBy(row{kind: c.kind}); got != c.want {
+			t.Errorf("kind %d activates as %d, want %d", c.kind, got, c.want)
+		}
+	}
+
+	m := navModel(t)
+	m.cursor = indexOf(t, m, rowThreadsHead)
+	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("the heading launched a process instead of collapsing")
+	}
+	if after.(reviewModel).threadsOpen {
+		t.Error("Enter on the heading did not collapse it")
+	}
+
+	m.cursor = indexOf(t, m, rowNewThread)
+	after, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	prompting := after.(reviewModel)
+	if prompting.mode != modePrompt || prompting.promptKind != promptThread {
+		t.Errorf("Enter on %q gave mode %d/kind %d, want the thread prompt",
+			newThreadLabel, prompting.mode, prompting.promptKind)
+	}
+
+	// A file row hands off to the difftool and a thread row to the editor; both return a
+	// command, and only the table above distinguishes which program.
+	m = navModel(t)
+	m.cursor = indexOf(t, m, rowThread)
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil {
+		t.Error("Enter on a thread opened nothing")
+	}
+	m.cursor = indexOfNameBySuffix(t, m, ".go")
+	_, file := selectedKind(t, m)
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil {
+		t.Errorf("Enter on %q opened nothing", file.name)
+	}
+	if file.kind != rowFile || !strings.HasSuffix(file.path, ".go") {
+		t.Errorf("the row Enter was pressed on is %q, want a code file", file.name)
+	}
+}
+
+func TestSpaceMarksFilesAndRefusesTheRest(t *testing.T) {
+	m := navModel(t)
+	marked := func() int {
+		n := 0
+		for _, f := range m.sess.Files() {
+			if f.Reviewed {
+				n++
+			}
+		}
+		return n
+	}
+	if marked() != 0 {
+		t.Fatalf("the fixture starts with %d marked files", marked())
+	}
+
+	m.cursor = indexOf(t, m, rowAbout)
+	m = press(m, tea.KeySpace)
+	if marked() != 0 {
+		t.Error("marking ABOUT.md marked a file")
+	}
+	if !strings.Contains(m.status, "file rows") {
+		t.Errorf("refusing to mark ABOUT.md said %q, want an explanation about file rows", m.status)
+	}
+	if m.statusErr {
+		t.Error("refusing to mark a changeset row is a hint, not an error")
+	}
+
+	m.cursor = indexOf(t, m, rowThread)
+	m = press(m, tea.KeySpace)
+	if marked() != 0 {
+		t.Error("marking a thread marked a file")
+	}
+
+	m.cursor = indexOf(t, m, rowFile)
+	m = press(m, tea.KeySpace)
+	if marked() != 1 {
+		t.Errorf("marking a file marked %d files", marked())
+	}
+}
+
+func TestNewThreadRowSitsUnderItsThreads(t *testing.T) {
+	m := navModel(t)
+	last := m.rows[len(m.rows)-1]
+	if last.kind != rowNewThread || last.name != newThreadLabel {
+		t.Errorf("the last row is %q (kind %d), want %q", last.name, last.kind, newThreadLabel)
+	}
+	for _, r := range m.rows[indexOf(t, m, rowThreadsHead)+1:] {
+		if r.kind == rowThread && filepath.Base(r.path) != r.name {
+			t.Errorf("thread row prints %q, want the file name of %q", r.name, r.path)
+		}
+	}
+	// Nested rows are indented, so the group reads as one block under its heading.
+	view := m.View()
+	if !strings.Contains(view, threadIndent+"locking.md") {
+		t.Errorf("threads are not nested under the heading:\n%s", view)
+	}
+	if !strings.Contains(view, "▾ Threads (2)") {
+		t.Errorf("the heading does not show an expanded thread count:\n%s", view)
+	}
+}
+
+func TestRefreshKeepsTheCursorOnTheSameRow(t *testing.T) {
+	m := navModel(t)
+	m.cursor = indexOf(t, m, rowThread)
+	_, before := selectedKind(t, m)
+
+	// A thread created elsewhere — in an editor, or another window — must not move the
+	// reviewer off the row they were reading.
+	path := filepath.Join(m.sess.Repo().Dir, "changesets", "booking", "third.md")
+	if err := os.WriteFile(path, []byte("# Thread: third\n"), 0o644); err != nil {
+		t.Fatalf("write thread: %v", err)
+	}
+	m.refresh()
+
+	after, row := selectedKind(t, m)
+	if after != row.kind || row.path != before.path {
+		t.Errorf("refresh moved the cursor from %q to %q:\n%s", before.path, row.path, rowList(m))
+	}
+	if _, ok := indexOfName(m, "third.md"); !ok {
+		t.Errorf("the new thread is not listed:\n%s", rowList(m))
+	}
+}
+
+// codeRow finds a source file in the list: the fixture's span also covers the changeset
+// directory, so the first row is not necessarily code.
+func indexOfNameBySuffix(t *testing.T, m reviewModel, suffix string) int {
+	t.Helper()
+	for i, r := range m.rows {
+		if r.kind == rowFile && strings.HasSuffix(r.path, suffix) {
+			return i
+		}
+	}
+	t.Fatalf("no %s row in:\n%s", suffix, rowList(m))
+	return -1
+}
+
+func indexOfName(m reviewModel, name string) (int, bool) {
+	for i, r := range m.rows {
+		if r.name == name {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// A thread title is prose, and bubbletea reports a lone space as KeySpace instead of
+// KeyRunes: without handling it, every space in a title disappeared before the file name
+// was derived from it.
+func TestThreadPromptKeepsSpacesInATitle(t *testing.T) {
+	m := navModel(t)
+	m = pressRune(m, 't')
+	if m.mode != modePrompt {
+		t.Fatalf("t did not open the thread prompt (mode %d)", m.mode)
+	}
+
+	for _, step := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("does the lock")},
+		{Type: tea.KeySpace},
+		{Type: tea.KeyRunes, Runes: []rune("cover the map")},
+	} {
+		updated, _ := m.Update(step)
+		m = updated.(reviewModel)
+	}
+	if m.input != "does the lock cover the map" {
+		t.Fatalf("prompt input = %q, want the title with its spaces", m.input)
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(reviewModel)
+	if !strings.Contains(m.status, "does-the-lock-cover-the-map.md") {
+		t.Errorf("creating the thread reported %q, want a slug of the spaced title:\n%s", m.status, rowList(m))
+	}
+	path := filepath.Join(m.sess.Repo().Dir, "changesets", "booking", "does-the-lock-cover-the-map.md")
+	if info, statErr := os.Stat(path); statErr != nil || info.IsDir() {
+		t.Errorf("the thread file is missing at %s: %v", path, statErr)
+	}
+}
