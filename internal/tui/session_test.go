@@ -338,3 +338,82 @@ func TestSessionToggleSpanFromCoveredGoesToTheFullChangeset(t *testing.T) {
 		t.Errorf("full span listed %d file(s), want at least the covered span's %d", got, len(covered))
 	}
 }
+
+// Marks are kept outside the working tree so a review can be resumed. PRD §16 keeps them
+// out of the review artifact, which they still are: nothing here is committed, shared, or
+// visible to `git status`.
+func TestReviewedMarksResumeInALaterSession(t *testing.T) {
+	e := newEnv(t)
+	first := e.session(t, span.Options{})
+	first.Toggle(0)
+	first.Toggle(2)
+	if err := first.SaveMarks(context.Background()); err != nil {
+		t.Fatalf("SaveMarks: %v", err)
+	}
+	want := filePaths(first.Files())
+
+	second := e.session(t, span.Options{})
+	if got := second.Resumed(); got != 2 {
+		t.Errorf("Resumed() = %d, want 2", got)
+	}
+	marked := 0
+	for _, f := range second.Files() {
+		if f.Reviewed {
+			marked++
+		}
+	}
+	if marked != 2 {
+		t.Errorf("%d files came back reviewed, want 2 (files: %v)", marked, filePaths(second.Files()))
+	}
+	if got := filePaths(second.Files()); len(got) != len(want) {
+		t.Fatalf("file list changed between sessions: %v vs %v", got, want)
+	}
+
+	// The marks must not be written into the working tree.
+	if !e.f.Clean() {
+		t.Error("saving marks dirtied the working tree; marks live under the git directory")
+	}
+}
+
+// Marks belong to the diff they were made against. Once the author commits, the files the
+// reviewer read are not the files that exist, so nothing may come back marked.
+func TestMarksDoNotResumeOnceTheCodeHasChanged(t *testing.T) {
+	e := newEnv(t)
+	first := e.session(t, span.Options{})
+	for i := range first.Files() {
+		first.Toggle(i)
+	}
+	if err := first.SaveMarks(context.Background()); err != nil {
+		t.Fatalf("SaveMarks: %v", err)
+	}
+
+	e.f.Commit("author response", gittest.WithFile("service.go", "package main\n\nfunc Lock() { tx() }\n"))
+
+	second := e.session(t, span.Options{})
+	for _, f := range second.Files() {
+		if f.Reviewed {
+			t.Errorf("%q came back reviewed after the code changed", f.Path)
+		}
+	}
+}
+
+// Clearing every mark is a state worth remembering; otherwise the old set would reappear.
+func TestClearingEveryMarkIsRemembered(t *testing.T) {
+	e := newEnv(t)
+	first := e.session(t, span.Options{})
+	first.Toggle(0)
+	if err := first.SaveMarks(context.Background()); err != nil {
+		t.Fatalf("SaveMarks: %v", err)
+	}
+	first.Toggle(0)
+	if err := first.SaveMarks(context.Background()); err != nil {
+		t.Fatalf("SaveMarks after clearing: %v", err)
+	}
+
+	second := e.session(t, span.Options{})
+	for _, f := range second.Files() {
+		if f.Reviewed {
+			t.Errorf("%q is marked in a new session after every mark was cleared", f.Path)
+		}
+	}
+}

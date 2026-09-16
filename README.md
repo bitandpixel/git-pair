@@ -217,7 +217,9 @@ touches `ABOUT.md` or a thread does not — PRD §421 invalidates a marker on a 
 counting commits is also what keeps merges and rebases from reporting a change that never
 happened. States:
 `WORKING`, `READY`, `BLOCKED`, `FEEDBACK`, `APPROVED`, `CLOSED`. `gitpr status` prints the
-state plus a one-line `Reason`. There is no state file.
+state plus a one-line `Reason`. There is no state file. (The TUI caches the reviewer's
+per-file marks under the git directory; those are reading progress, not state, and no
+command reports them.)
 
 **Review spans.** `gitpr diff` resolves a span and hands it to git:
 
@@ -491,8 +493,17 @@ full/unreviewed span, `s` opens a submit prompt taking `b`, `f` or `a`, `q` quit
 commits the review, moves the ref and **ends the session**, printing one line about what it
 did; `Esc` from the prompt returns to the list. The terminal
 is released while an external program runs and the repository is re-scanned afterwards, so a
-reviewed mark survives only while that file's diff within the span is unchanged. In-session
-progress is memory-only; only submissions are durable.
+reviewed mark survives only while that file's diff within the span is unchanged.
+
+Marks also survive quitting: they are written under the repository's git directory at
+`$(git rev-parse --absolute-git-dir)/gitpr/marks/<changeset>/<commit>.json`, keyed on the commit
+the review was looking at, with each file's diff key stored beside it. Reopening the same commit
+restores exactly the marks whose files still have that content, so a new commit, a rebase, or a
+different span cannot bring back a mark that no longer describes anything, and clearing every mark
+is remembered rather than resurrected. Nothing is committed or shared — `git status` cannot see the
+directory and `git add` cannot stage it — and no command reports marks, so derived state is
+unaffected. Deleting that directory forgets the marks; the newest 12 commits per changeset are
+kept.
 
 ## Troubleshooting
 

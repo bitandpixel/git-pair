@@ -17,6 +17,7 @@ import (
 	"gitpr/internal/changeset"
 	"gitpr/internal/git"
 	"gitpr/internal/lifecycle"
+	"gitpr/internal/reviewmark"
 	"gitpr/internal/span"
 )
 
@@ -59,6 +60,13 @@ type Session struct {
 	current   span.Span
 	files     []File
 	reviewRef string
+
+	// Marks are persisted outside the working tree so a review can be resumed; see
+	// internal/reviewmark for where and why.
+	marks     *reviewmark.Store
+	markErr   error
+	persisted reviewmark.Set
+	resumed   int
 }
 
 // NewSession resolves the span and scans the changed files.
@@ -70,6 +78,7 @@ func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	if err := s.Rescan(ctx); err != nil {
 		return nil, err
 	}
+	s.loadMarks(ctx)
 	return s, nil
 }
 
@@ -101,6 +110,12 @@ func (s *Session) Rescan(ctx context.Context) error {
 		marked := false
 		if old, ok := previous[name]; ok && old.Key == key {
 			marked = old.Reviewed
+		}
+		if !marked && s.persisted[name] == key {
+			// Same file, same diff content as when it was marked in an earlier
+			// session. Anything else — new commit, rebase, different span — keys
+			// differently and so stays unreviewed.
+			marked = true
 		}
 		files = append(files, File{Path: name, Key: key, Reviewed: marked})
 	}
@@ -247,3 +262,58 @@ func pathFromDiffGit(line string) string {
 	}
 	return rest[i+3:]
 }
+
+// store resolves the mark store for this changeset, remembering a failure so a
+// repository without a usable git directory does not pay for it on every toggle.
+func (s *Session) store(ctx context.Context) (*reviewmark.Store, error) {
+	if s.marks != nil || s.markErr != nil {
+		return s.marks, s.markErr
+	}
+	gitDir, err := s.repo.GitDir(ctx)
+	if err == nil {
+		s.marks, s.markErr = reviewmark.New(gitDir, s.cs.Slug)
+	} else {
+		s.markErr = err
+	}
+	return s.marks, s.markErr
+}
+
+// loadMarks restores marks recorded for the commit under review. Failing to find or read
+// them is not a reason to refuse to open a review, so this reports nothing.
+func (s *Session) loadMarks(ctx context.Context) {
+	store, err := s.store(ctx)
+	if err != nil {
+		return
+	}
+	set, err := store.Load(s.current.To)
+	if err != nil || len(set) == 0 {
+		return
+	}
+	s.persisted = set
+	for i, f := range s.files {
+		if !s.files[i].Reviewed && set[f.Path] == f.Key {
+			s.files[i].Reviewed = true
+			s.resumed++
+		}
+	}
+}
+
+// SaveMarks writes the current marks against the commit under review. An empty set is
+// written too: clearing every mark has to overwrite the stored set, or the marks would
+// reappear next session.
+func (s *Session) SaveMarks(ctx context.Context) error {
+	store, err := s.store(ctx)
+	if err != nil {
+		return err
+	}
+	set := reviewmark.Set{}
+	for _, f := range s.files {
+		if f.Reviewed {
+			set[f.Path] = f.Key
+		}
+	}
+	return store.Save(s.current.To, set)
+}
+
+// Resumed is how many marks came from an earlier session.
+func (s *Session) Resumed() int { return s.resumed }

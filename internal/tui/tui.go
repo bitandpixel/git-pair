@@ -74,6 +74,9 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	m := reviewModel{ctx: ctx, sess: sess, width: 80, height: 24}
+	if n := sess.Resumed(); n > 0 {
+		m.setStatus(fmt.Sprintf("resumed %d reviewed mark%s from an earlier session", n, plural(n)), false)
+	}
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx))
 	final, err := p.Run()
 	if err != nil {
@@ -152,6 +155,13 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.move(-1)
 	case key.Type == tea.KeySpace:
 		m.sess.Toggle(m.cursor)
+		// Marks persist locally so the review can be resumed. A failure is reported
+		// and otherwise ignored: the review itself does not depend on them.
+		if err := m.sess.SaveMarks(m.ctx); err != nil {
+			m.setStatus("marks not saved: "+err.Error(), true)
+		} else {
+			m.setStatus("", false)
+		}
 	case key.Type == tea.KeyEnter:
 		return m.openDiff()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'e':
@@ -540,4 +550,11 @@ func short(sha string) string {
 		return sha[:7]
 	}
 	return sha
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }

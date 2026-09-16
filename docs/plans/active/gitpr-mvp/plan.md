@@ -95,6 +95,8 @@ From the PRD, treated as binding:
 | M4 submit, refs, queue, close | done | e2e replay: empty approve commit, ref moves, and after `git branch -D` the archive ref still reaches 13 commits |
 | M5 TUI | done, partially verified | Verified under a pty: first paint, `j/k`, `space` (0/4 → 1/4 → 2/4), `v`, `a` editor handoff, `s`+`b` submit (created `review: block demo` and moved the ref), clean `q` exit. **Not yet verified:** `Enter` launching a real difftool *inside* the TUI — the same command path is verified outside it via `gitpr diff --tool`, which reached the configured tool with the right blob paths |
 | Post-MVP: `review reopen` opens the session on the since-review span, falling back to the span that submission covered | done | `TestReviewReopenWithoutReviews`, `TestReviewReopenAfterTheAuthorResponds`, `TestReviewReopenFallsBackToTheSpanTheReviewCovered`, `TestResolveCoveredSpan`, `TestSessionToggleSpanFromCoveredGoesToTheFullChangeset` |
+| Post-MVP: reviewed marks persist locally, keyed on the commit under review | done | `internal/reviewmark` tests, `TestReviewedMarksResumeInALaterSession`, `TestMarksDoNotResumeOnceTheCodeHasChanged`, `TestClearingEveryMarkIsRemembered` |
+| Post-MVP: `k` at the top of the file list no longer panics | done | `TestNavigationStopsAtBothEndsOfTheList`, `TestNavigationOnAnEmptyListDoesNotPanic` |
 | Post-MVP: staleness compares trees, not commit counts | done | `TestSummarizeChangesetOnlyCommitDoesNotInvalidateReady`, `TestSummarizeMixedCommitInvalidatesReady`, `TestSummarizeBaseMovingUnderAReadyChangesetKeepsReady` |
 | Post-MVP: difftool shows the working tree; submit exits the TUI | done | `TestSubmitKeyEndsTheSession`, `TestEscInSubmitModeKeepsTheSessionOpen`; the one-revision difftool argv verified by hand against a configured tool |
 | M6 docs + dogfood | done | `README.md`; `artifacts/e2e-29.sh` is the scripted replay and passes end to end |
@@ -124,8 +126,9 @@ changeset. Hand-verification of everything the README documents additionally cor
    thread`, and `review open` previously inherited the caller's `$VISUAL` and hung forever
    when stdin was a pipe — which is the normal agent context. They now exit 2 with a
    message pointing at the file, which is an ordinary file in the working tree.
-4. **Deferred from MVP as planned:** `review queue --global`, the `gitpr repo` registry,
-   persistent review progress, and remote propagation of `refs/reviews/*`.
+4. **Deferred from MVP as planned:** `review queue --global`, the `gitpr repo` registry, and
+   remote propagation of `refs/reviews/*`. Persistent review progress was deferred too and has
+   since been delivered — see discovery 13.
 5. **git writes "nothing to commit" to stdout, not stderr.** `git.Error` carried only stderr,
    so `isNothingToCommit` never matched and a no-op commit surfaced as an opaque
    `git exited with status 1` with exit 3. `git.Error` now carries stdout too, and
@@ -200,6 +203,16 @@ changeset. Hand-verification of everything the README documents additionally cor
     Worth keeping: the bug was invisible in the tests I first wrote, because the fixture's review
     markers touched the same `service.go` the implementation did. A fixture where the submission
     writes a file nothing else touches is what pins this.
+13. **Reviewed marks persist between sessions, as a local cache.** PRD §16 keeps marks out of the
+    durable review artifact and permits an in-memory implementation; caching them locally honours
+    the first while making a review resumable, which the owner asked for. They are written to
+    `<gitdir>/gitpr/marks/<slug>/<commit>.json` — inside the git directory, so `git status` cannot
+    see them and `git add -A` cannot stage them — keyed by the commit the span ends at, each file
+    stored with its diff key. A mark is restored only when that path still has the same diff key,
+    so a new commit, a rebase, or a different span cannot revive a mark that no longer describes
+    anything; clearing every mark writes an empty set so the old ones do not reappear; the newest
+    12 commits' sets are kept per changeset. `status`, `diff` and the JSON contracts are untouched,
+    because reading progress is not derived state.
 
 ## Architecture
 
@@ -473,5 +486,6 @@ M0 ──► M1 ──► M2 ──┬──► M3 ──► M4 ──► M6
 | 2026-09-16 | span default reversed | The resume-like default for `review open` (discovery 10) was reverted the same day and replaced by `review reopen`, so `review open` stays on the full changeset as §17.2 specifies. |
 | 2026-09-16 | reopen no longer refuses an empty span | Owner report from the dogfood repo (discovery 11). `span.Covered` added; `review reopen` falls back to the span the submission covered; the exit-1 refusal and its test removed as unreachable. |
 | 2026-09-16 | space no longer advances the cursor | Owner report. `toggleAt` moved the cursor down after marking, so the file just marked could not be re-read without pressing `k`, and repeated presses marked successive files instead of toggling one. `TestSpaceMarksTheFileAndLeavesTheCursorOnIt` pins it; confirmed to fail with the advance restored. |
+| 2026-09-16 | marks persist locally; cursor clamp fix | Two owner requests. Reviewed marks are cached under the git directory keyed on the commit under review (discovery 13), restored only on a matching diff key. Separately, `clamp()` bounded the cursor from above only, so `k` at the top made it negative and `View` indexed `files[-1]`, panicking the program. |
 | 2026-09-16 | no undo for submissions | Owner asked whether `review reopen` should undo a submission (reset the commit, or a cancelling commit on top). Neither: D5 records that a submission is corrected by submitting again, with `previous_review` in the submit output making supersession visible. Evidence in the discussion: deleting the review ref left `State: FEEDBACK` unchanged. |
 | 2026-09-16 | covered span ends at the submission's parent | Second owner report on the same command: reopen listed the thread and files the submission itself wrote (discovery 12). `coveredSpan` now diffs to `<review>^` from the merge base, dropping the previous-review start point. |

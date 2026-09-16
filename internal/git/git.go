@@ -166,6 +166,16 @@ func (r *Repo) Head(ctx context.Context) (string, error) {
 // with *no stderr at all*, so the exit code is the only signal. Relying on the
 // message alone would turn "ref does not exist" into a generic git failure,
 // which callers like CreateRefIfAbsent must be able to distinguish.
+// GitDir is the repository's git directory, which is where gitpr keeps data that is
+// local to this clone and deliberately outside the working tree.
+func (r *Repo) GitDir(ctx context.Context) (string, error) {
+	out, err := r.Git(ctx, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return "", fmt.Errorf("cannot locate the git directory: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
 func (r *Repo) RevParse(ctx context.Context, rev string) (string, error) {
 	out, err := r.Git(ctx, "rev-parse", "--verify", "--quiet", rev)
 	if err != nil {
