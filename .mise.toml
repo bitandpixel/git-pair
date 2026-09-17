@@ -8,9 +8,61 @@ go = "1.27.1"
 # just edited. Deliberately `go build -o` rather than `go install`: GOBIN points
 # inside the mise-managed Go installation, and anything installed there is
 # discarded on the next Go upgrade.
+#
+# The install name carries the branch it was built from, because this repository is
+# worked in several worktrees at the same time and ~/.local/bin/git-pair is one
+# shared file: whichever worktree built last would be the binary every other one was
+# pretending to test. Trunk keeps the plain name — that is the checkout whose `git
+# pair` is meant to be the real thing — and `build:prod` below writes it from
+# anywhere on purpose. Off trunk, run the namespaced name directly; `git pair` still
+# resolves to the shared binary. The gate scripts under docs/plans take the binary as
+# their first argument, so point them at the name the task prints.
 [tasks.build]
-run = "go build -o \"$HOME/.local/bin/git-pair\" ./cmd/git-pair"
-description = "Compile and install git-pair onto ~/.local/bin (already on PATH)"
+run = """
+set -eu
+branch=$(git branch --show-current)
+if [ -z "$branch" ]; then
+  # Detached HEAD: which worktree this is is the thing the name has to say.
+  branch=$(basename "$(git rev-parse --show-toplevel)")
+fi
+case "$branch" in
+  main | master | git-pair) ns="" ;; # trunk, or the trunk clone sitting on a detached HEAD
+  *)
+    # Drop the `feat/`-style prefix, then keep only what a binary name can hold. A name
+    # that sanitizes away to nothing falls back to the commit, rather than to the shared
+    # name it was supposed to avoid writing.
+    ns=$(printf '%s' "${branch#*/}" | tr -c 'A-Za-z0-9._-' '-' |
+      sed -e 's/--*/-/g' -e 's/^-*//' -e 's/-$//')
+    if [ -z "$ns" ]; then ns=$(git rev-parse --short HEAD); fi
+    ;;
+esac
+name="git-pair${ns:+-$ns}"
+mkdir -p "$HOME/.local/bin"
+go build -o "$HOME/.local/bin/$name" ./cmd/git-pair
+if [ "$name" = git-pair ]; then
+  echo "installed ~/.local/bin/git-pair - this is the binary 'git pair' runs"
+else
+  echo "installed ~/.local/bin/$name (from $branch)"
+  echo "run it as '$name ...'; 'git pair' is still ~/.local/bin/git-pair, and the gate"
+  echo "scripts take the path: bash <script.sh> ~/.local/bin/$name"
+fi
+"""
+description = "Compile and install onto ~/.local/bin as git-pair-<branch> (trunk installs the plain name)"
+
+# The shared name, from wherever you happen to be standing, said out loud: writing it
+# from a branch replaces the binary every other worktree and every `git pair` in the
+# shell sees, which is sometimes exactly what is wanted and never what should happen
+# by surprise.
+[tasks."build:prod"]
+run = """
+set -eu
+branch=$(git branch --show-current)
+if [ -z "$branch" ]; then branch="detached HEAD"; fi
+mkdir -p "$HOME/.local/bin"
+go build -o "$HOME/.local/bin/git-pair" ./cmd/git-pair
+echo "installed ~/.local/bin/git-pair from $branch - this replaces the binary 'git pair' runs"
+"""
+description = "Install the shared ~/.local/bin/git-pair from any branch"
 
 # Just the test suite, for a fast focused loop.
 [tasks.test]
