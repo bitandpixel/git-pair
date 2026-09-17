@@ -82,7 +82,6 @@ type statusView struct {
 	json       statusJSON
 	span       span.Span
 	latestAge  string
-	closed     bool
 	archiveRef string
 }
 
@@ -128,12 +127,16 @@ func buildStatus(ctx context.Context, s *session) (*statusView, error) {
 		view.json.NextAction = fmt.Sprintf("give the change its own branch (`git switch -c <name>`), or set `base` in %s to an ancestor of %s",
 			s.cs.MetadataPath(), s.cs.Branch)
 	}
-	if s.summary.State == model.StateClosed {
-		view.closed = true
-		if ref, err := archiveRefFor(ctx, s.repo, s.cs.Slug, s.head); err == nil {
-			view.archiveRef = ref
-			view.json.ArchiveRef = ref
-		}
+	// Completion leaves no commit, so the archive ref is the only trace of it in
+	// derived state. Report it when it names HEAD exactly: that is the head that was
+	// completed. Once other work lands the archive names an ancestor, and saying so
+	// here would make unfinished work look finished, so it stays quiet.
+	if ref, err := archiveRefAtHead(ctx, s.repo, s.cs.Slug, s.head); err != nil {
+		return nil, err
+	} else if ref != "" {
+		view.archiveRef = ref
+		view.json.ArchiveRef = ref
+		view.json.NextAction = archivedNextAction(ref)
 	}
 	return view, nil
 }
@@ -189,22 +192,19 @@ func yesNo(b bool) string {
 	return "no"
 }
 
-// archiveRefFor returns the close-time archive ref for a changeset, preferring
-// the ref whose commit matches the current HEAD and falling back to the newest.
-func archiveRefFor(ctx context.Context, repo *git.Repo, slug, head string) (string, error) {
+// archiveRefAtHead returns the completion archive ref that points exactly at head,
+// or "" when head has not been completed. An archive is written at the head it
+// completes, so an exact match is the whole test.
+func archiveRefAtHead(ctx context.Context, repo *git.Repo, slug, head string) (string, error) {
+	if head == "" {
+		return "", nil
+	}
 	entries, err := repo.ForEachRef(ctx, reviewref.ArchivePattern(slug))
 	if err != nil {
 		return "", err
 	}
-	// The archive ref points at the approved head, and HEAD is then the close
-	// marker, so equality against HEAD never matches. Newest reachable wins
-	// (`for-each-ref --sort=-committerdate`).
 	for _, e := range entries {
-		reachable, err := repo.IsAncestor(ctx, e.SHA, head)
-		if err != nil {
-			return "", err
-		}
-		if reachable {
+		if e.SHA == head {
 			return e.Name, nil
 		}
 	}
@@ -222,11 +222,15 @@ func nextAction(s lifecycle.Summary) string {
 	case model.StateBlocked:
 		return "address the review, then `git pair change ready` (read it with `git pair change feedback`)"
 	case model.StateFeedback:
-		return "optionally address feedback (read it with `git pair change feedback`), then `git pair review close`"
+		return "optionally address feedback (read it with `git pair change feedback`), then `git pair change complete`"
 	case model.StateApproved:
-		return "run `git pair review close` before squash/merge"
-	case model.StateClosed:
-		return "safe to squash/merge; review history is under refs/reviews/"
+		return "run `git pair change complete` before squash/merge"
 	}
 	return ""
+}
+
+// archivedNextAction replaces the next step once HEAD itself has been completed:
+// there is nothing left for git-pair to do, and integration is ordinary git.
+func archivedNextAction(archiveRef string) string {
+	return fmt.Sprintf("safe to squash/merge; this head is archived at %s", archiveRef)
 }

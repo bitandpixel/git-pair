@@ -36,7 +36,7 @@ type Report struct {
 	ReviewSHA   string `json:"review_commit"`
 	ReviewShort string `json:"review_short"`
 	// Code holds additions outside the changeset directory. These block
-	// `change ready` and `review close`.
+	// `change ready` and `change complete`.
 	Code []Addition `json:"code"`
 	// Artifacts holds additions inside a changesets/ directory. Reviewer text
 	// there is conversation surface rather than code to resolve — a thread

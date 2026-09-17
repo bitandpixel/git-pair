@@ -103,15 +103,15 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 		t.Errorf("upper reviews = %v, want its own approve", reviews)
 	}
 
-	// Archival is per changeset too: closing the upper changeset writes its own
+	// Archival is per changeset too: completing the upper changeset writes its own
 	// archive ref and leaves the lower one's refs alone.
-	runIn(t, f.Dir(), "review", "close").mustSucceed(t, "review", "close")
+	runIn(t, f.Dir(), "change", "complete").mustSucceed(t, "change", "complete")
 	upperArchives := f.RefNames(archivePattern("booking-transaction-tests"))
 	if len(upperArchives) != 1 {
 		t.Errorf("upper archive refs = %v, want exactly one", upperArchives)
 	}
 	if got := f.RefSHA(reviewRef("booking-transaction")); got != lowerRef {
-		t.Errorf("closing the upper changeset moved the lower ref to %s, want %s", got, lowerRef)
+		t.Errorf("completing the upper changeset moved the lower ref to %s, want %s", got, lowerRef)
 	}
 	if got := f.ReachableFrom(lowerReview, upperArchives[0]); !got {
 		t.Logf("note: the upper archive does not include the lower changeset's review commit (expected)")

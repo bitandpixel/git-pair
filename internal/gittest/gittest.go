@@ -344,9 +344,9 @@ func (f *Fixture) CommitMessage(message string, opts ...CommitOpt) string {
 
 // --- lifecycle markers ------------------------------------------------------
 //
-// These build the commit messages PRD §9.2, §10.4 and the plan's M4 specify. CLI
-// tests assert that `git-pair` writes exactly these subjects and trailers; engine
-// tests use them to build histories without depending on the product.
+// These build the commit messages PRD §9.2 and §10.4 specify. CLI tests assert
+// that `git-pair` writes exactly these subjects and trailers; engine tests use
+// them to build histories without depending on the product.
 
 // ReadyMessage is a ready marker commit message (PRD §9.2).
 func ReadyMessage(slug string) string {
@@ -360,11 +360,6 @@ func ReviewMessage(slug, outcome string) string {
 		"\nReview-Changeset: " + slug + "\n"
 }
 
-// CloseMessage is a close marker commit message (plan M4).
-func CloseMessage(slug string) string {
-	return "git-pair: close " + slug + "\n\nReview-State: closed\nReview-Changeset: " + slug + "\n"
-}
-
 // CommitReadyMarker commits a ready marker for slug. Markers may be empty, so
 // these helpers always allow an empty commit, as the product's do.
 func (f *Fixture) CommitReadyMarker(slug string, opts ...CommitOpt) string {
@@ -376,12 +371,6 @@ func (f *Fixture) CommitReadyMarker(slug string, opts ...CommitOpt) string {
 func (f *Fixture) CommitReviewMarker(slug, outcome string, opts ...CommitOpt) string {
 	f.t.Helper()
 	return f.CommitMessage(ReviewMessage(slug, outcome), append([]CommitOpt{WithEmpty()}, opts...)...)
-}
-
-// CommitCloseMarker commits a close marker for slug.
-func (f *Fixture) CommitCloseMarker(slug string, opts ...CommitOpt) string {
-	f.t.Helper()
-	return f.CommitMessage(CloseMessage(slug), append([]CommitOpt{WithEmpty()}, opts...)...)
 }
 
 // --- branches ---------------------------------------------------------------

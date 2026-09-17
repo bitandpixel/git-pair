@@ -10,7 +10,7 @@ import (
 
 // TestPRDTwentyNineGoldenWorkflow replays PRD §29 end to end through the CLI only:
 // init, implement, ready, queue, review block, response, the surviving-additions
-// refusal, ready again, approve, close, and the archival promise. Assertions are on
+// refusal, ready again, approve, complete, and the archival promise. Assertions are on
 // git state (commits, trailers, refs, reachability) rather than on formatted output.
 func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	const slug = "booking-transaction"
@@ -133,19 +133,18 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 		t.Fatalf("state = %v, want APPROVED", got)
 	}
 
-	// --- reviewer: close --------------------------------------------------------
+	// --- author: complete ---------------------------------------------------------
 	// The chain the archive must preserve: everything committed up to the approval.
 	chain := f.RevList("HEAD")
-	closed := runIn(t, f.Dir(), "review", "close").mustSucceed(t, "review", "close")
-	closeMarker := f.Head()
+	completed := runIn(t, f.Dir(), "change", "complete").mustSucceed(t, "change", "complete")
 	archiveRefs := f.RefNames(archivePattern(slug))
 	if len(archiveRefs) != 1 {
 		t.Fatalf("archive refs = %v, want one", archiveRefs)
 	}
-	mustContain(t, closed.stdout, archiveRefs[0], "close must print the archive ref")
-	mustContain(t, closed.stdout, "Safe to squash/merge", "close must report integration readiness")
-	if got := runIn(t, f.Dir(), "status", "--json").json(t)["state"]; got != "CLOSED" {
-		t.Errorf("state = %v, want CLOSED", got)
+	mustContain(t, completed.stdout, archiveRefs[0], "complete must print the archive ref")
+	mustContain(t, completed.stdout, "Safe to squash/merge", "complete must report integration readiness")
+	if got := runIn(t, f.Dir(), "status", "--json").json(t)["state"]; got != "APPROVED" {
+		t.Errorf("state = %v, want APPROVED: completion records no commit and establishes no state", got)
 	}
 
 	// The history is the noisy-but-honest lifecycle PRD §2.3 describes, in order.
@@ -158,7 +157,6 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 		"author: synchronise both transactions before the capacity read",
 		"git-pair: ready " + slug,
 		"review: approve " + slug,
-		"git-pair: close " + slug,
 	}
 	if got := f.SubjectsAbove("main", "HEAD"); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("commit sequence =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -180,8 +178,10 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 			t.Errorf("%s is not reachable from %s after `git branch -D`", sha, archiveRefs[0])
 		}
 	}
-	// The close marker itself stays reachable through the movable ref.
-	if !f.ReachableFrom(closeMarker, reviewRef(slug)) {
-		t.Errorf("the close marker %s is not reachable from %s", closeMarker, reviewRef(slug))
+	// The completed head stays reachable through the movable ref, which is what the
+	// author would find if they came back to the review after the branch was gone.
+	if !f.ReachableFrom(chain[len(chain)-1], reviewRef(slug)) {
+		t.Errorf("the completed head %s is not reachable from %s",
+			chain[len(chain)-1], reviewRef(slug))
 	}
 }

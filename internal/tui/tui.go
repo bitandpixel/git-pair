@@ -556,7 +556,7 @@ func (m reviewModel) handleSubmitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.mode = modeFiles
-	result, err := reviewops.Submit(m.ctx, m.sess.Repo(), m.sess.Changeset(), m.sess.Summary(),
+	result, err := reviewops.Submit(m.ctx, m.sess.Repo(), m.sess.Changeset(),
 		outcome, "", true)
 	if err != nil {
 		m.setStatus(err.Error(), true)

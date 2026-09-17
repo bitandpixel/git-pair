@@ -28,10 +28,6 @@ func review(sha string, outcome model.Outcome) Event {
 	}
 }
 
-func closed(sha string) Event {
-	return Event{SHA: sha, Short: short(sha), Subject: "git-pair: close booking", Kind: KindClosed}
-}
-
 func malformed(sha string) Event {
 	return Event{
 		SHA: sha, Short: short(sha), Subject: "hand-written trailer",
@@ -48,7 +44,9 @@ func short(sha string) string {
 
 // TestDeriveStateIsPRD12Lifecycle walks the effective lifecycle PRD §12 spells
 // out: initialized -> working -> ready -> review block -> working -> ready ->
-// review feedback/approve -> close.
+// review feedback/approve. Completing the changeset is not in it: completion is
+// an archive ref, not a marker, and the merge that finishes the changeset is not
+// git-pair's to derive.
 func TestDeriveStateIsPRD12Lifecycle(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -90,11 +88,6 @@ func TestDeriveStateIsPRD12Lifecycle(t *testing.T) {
 			[]Event{impl("c1"), ready("c2"), review("c3", model.OutcomeBlock), impl("c4"),
 				ready("c5"), review("c6", model.OutcomeApprove)},
 			model.StateApproved, false, 2,
-		},
-		{
-			"close",
-			[]Event{impl("c1"), ready("c2"), review("c3", model.OutcomeApprove), closed("c4")},
-			model.StateClosed, false, 1,
 		},
 	}
 	for _, tc := range tests {
@@ -141,16 +134,32 @@ func TestDeriveImplementationCommitAfterApproveYieldsWorking(t *testing.T) {
 	}
 }
 
-func TestDeriveClosedBeatsEverythingElse(t *testing.T) {
-	got := derive([]Event{
-		impl("c1"), review("c2", model.OutcomeApprove), closed("c3"), impl("c4"),
+// The close marker is retired: completion is an archive ref written by
+// `git pair change complete`, so nothing writes `Review-State: closed` any more,
+// and reading it is not part of the model. What a repository that already carries
+// one gets is the same conservative reading as any other unreadable trailer set.
+func TestRetiredCloseMarkerIsAnUnrecognisedImplementationCommit(t *testing.T) {
+	legacy := parseEvent("booking", []string{
+		"c4", "c4", "0", "author", "git-pair: close booking",
+		"Review-State: closed\nReview-Changeset: booking\n",
 	})
-	if got.State != model.StateWorking {
-		t.Errorf("state = %s, want WORKING: an implementation commit after close also invalidates it", got.State)
+	if legacy.Marker() {
+		t.Errorf("Kind = %s, want the retired close marker to establish no state", legacy.Kind)
 	}
-	got = derive([]Event{impl("c1"), closed("c2")})
-	if got.State != model.StateClosed {
-		t.Errorf("state = %s, want CLOSED", got.State)
+	if !legacy.UnrecognisedMarker {
+		t.Error("UnrecognisedMarker = false, want the retired value reported rather than ignored")
+	}
+
+	got := derive([]Event{impl("c1"), ready("c2"), review("c3", model.OutcomeApprove), legacy})
+	if got.State != model.StateWorking {
+		t.Errorf("state = %s, want WORKING: the retired marker must invalidate the approve, not complete the changeset",
+			got.State)
+	}
+	if got.TrailingUnrecognised != 1 {
+		t.Errorf("TrailingUnrecognised = %d, want 1 so the reason names it", got.TrailingUnrecognised)
+	}
+	if len(got.Reviews) != 1 {
+		t.Errorf("Reviews = %v, want the approve to stay listed", got.Reviews)
 	}
 }
 
@@ -272,7 +281,7 @@ func TestParseEventClassifiesMarkers(t *testing.T) {
 	}{
 		{"plain commit", []string{"c1", "c1", "0", "author", "implement stuff", ""}, KindImplementation, "", false},
 		{"ready marker", []string{"c1", "c1", "0", "author", "git-pair: ready booking", "Review-State: ready\nReview-Changeset: booking\n"}, KindReady, "", false},
-		{"close marker", []string{"c1", "c1", "0", "author", "git-pair: close booking", "Review-State: closed\nReview-Changeset: booking\n"}, KindClosed, "", false},
+		{"retired close marker", []string{"c1", "c1", "0", "author", "git-pair: close booking", "Review-State: closed\nReview-Changeset: booking\n"}, KindImplementation, "", true},
 		{"review block", []string{"c1", "c1", "0", "author", "review: block booking", "Review-Outcome: block\nReview-Changeset: booking\n"}, KindReview, model.OutcomeBlock, false},
 		{"wrong changeset", []string{"c1", "c1", "0", "author", "git-pair: ready other", "Review-State: ready\nReview-Changeset: other\n"}, KindImplementation, "", true},
 		{"missing changeset trailer", []string{"c1", "c1", "0", "author", "git-pair: ready booking", "Review-State: ready\n"}, KindImplementation, "", true},
@@ -303,9 +312,6 @@ func TestEventStateAndKindString(t *testing.T) {
 	if got := ready("c1").State(); got != model.StateReady {
 		t.Errorf("ready marker state = %s", got)
 	}
-	if got := closed("c1").State(); got != model.StateClosed {
-		t.Errorf("close marker state = %s", got)
-	}
 	if got := review("c1", model.OutcomeFeedback).State(); got != model.StateFeedback {
 		t.Errorf("feedback review state = %s", got)
 	}
@@ -313,7 +319,7 @@ func TestEventStateAndKindString(t *testing.T) {
 		t.Errorf("implementation state = %s", got)
 	}
 	for kind, want := range map[Kind]string{
-		KindImplementation: "implementation", KindReady: "ready", KindReview: "review", KindClosed: "closed",
+		KindImplementation: "implementation", KindReady: "ready", KindReview: "review",
 	} {
 		if got := kind.String(); got != want {
 			t.Errorf("Kind(%d).String() = %q, want %q", kind, got, want)

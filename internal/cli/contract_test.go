@@ -48,19 +48,19 @@ func TestExitCodeBusinessRuleRefusal(t *testing.T) {
 		ready(t, f)
 		submit(t, f, "block")
 
-		res := runIn(t, f.Dir(), "review", "close")
+		res := runIn(t, f.Dir(), "change", "complete")
 		if res.code != exitRefusal {
 			t.Errorf("exited %d, want %d\nstderr: %s", res.code, exitRefusal, res.stderr)
 		}
 	})
 
-	t.Run("surviving additions at close time", func(t *testing.T) {
+	t.Run("surviving additions at completion time", func(t *testing.T) {
 		f, _ := newChangeset(t, "booking", "main")
 		ready(t, f)
 		f.Write("service.go", "package main\n\n// Please name this variable\nfunc Lock() {}\n")
 		submit(t, f, "approve")
 
-		res := runIn(t, f.Dir(), "review", "close")
+		res := runIn(t, f.Dir(), "change", "complete")
 		if res.code != exitRefusal {
 			t.Errorf("exited %d, want %d\nstderr: %s", res.code, exitRefusal, res.stderr)
 		}
@@ -286,13 +286,17 @@ func TestJSONKeySets(t *testing.T) {
 		}
 	})
 
-	t.Run("review close", func(t *testing.T) {
+	t.Run("change complete", func(t *testing.T) {
 		f, slug, _, approve := approvedChangeset(t)
-		args := []string{"review", "close", "--json"}
+		args := []string{"change", "complete", "--json"}
 		out := runIn(t, f.Dir(), args...).mustSucceed(t, args...).json(t)
-		assertKeys(t, out, "changeset", "state", "commit", "review_ref", "archive_ref", "squash_safe")
-		if out["state"] != "CLOSED" {
-			t.Errorf("state = %v, want CLOSED", out["state"])
+		assertKeys(t, out, "changeset", "state", "head", "base", "review_ref", "archive_ref",
+			"archive_created", "squash_safe", "acknowledged_survivors")
+		if out["state"] != "APPROVED" {
+			t.Errorf("state = %v, want APPROVED: completion archives a head, it does not move the state", out["state"])
+		}
+		if out["head"] != approve {
+			t.Errorf("head = %v, want the archived commit %s", out["head"], approve)
 		}
 		if out["archive_ref"] != archivePattern(slug)+"/"+f.Short(approve) {
 			t.Errorf("archive_ref = %v, want %s/%s", out["archive_ref"], archivePattern(slug), f.Short(approve))

@@ -237,18 +237,6 @@ func (r *Repo) MergeBase(ctx context.Context, a, b string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// IsAncestor reports whether ancestor is reachable from descendant.
-func (r *Repo) IsAncestor(ctx context.Context, ancestor, descendant string) (bool, error) {
-	_, err := r.Git(ctx, "merge-base", "--is-ancestor", ancestor, descendant)
-	if err == nil {
-		return true, nil
-	}
-	if ge, ok := err.(*Error); ok && ge.ExitCode == 1 {
-		return false, nil
-	}
-	return false, err
-}
-
 // --- content and history ----------------------------------------------------
 
 // ShowFile returns the contents of path at rev.

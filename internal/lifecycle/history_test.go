@@ -85,13 +85,6 @@ func TestSummarizePRD12GoldenHistory(t *testing.T) {
 			wantRev:   3,
 			wantStale: false,
 		},
-		{
-			name:      "close",
-			act:       func() { f.CommitCloseMarker(slug) },
-			want:      model.StateClosed,
-			wantRev:   3,
-			wantStale: false,
-		},
 	}
 
 	for _, step := range steps {

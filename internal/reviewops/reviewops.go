@@ -8,7 +8,6 @@ import (
 
 	"gitpair/internal/changeset"
 	"gitpair/internal/git"
-	"gitpair/internal/lifecycle"
 	"gitpair/internal/marker"
 	"gitpair/internal/model"
 	"gitpair/internal/reviewref"
@@ -37,14 +36,15 @@ func (r Result) Empty() bool { return len(r.Files) == 0 }
 //
 // The ref is updated in the same call as the commit: an anchored review is the
 // point of the operation.
-func Submit(ctx context.Context, repo *git.Repo, cs changeset.Changeset, summary lifecycle.Summary,
+//
+// A completed changeset is not a special case. Completion archives a head and
+// records no commit, so a review submitted against a completed head is an
+// ordinary submission, and completing the result is the owner's call.
+func Submit(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
 	outcome model.Outcome, body string, stageAll bool) (Result, error) {
 
 	if !outcome.Valid() {
 		return Result{}, fmt.Errorf("invalid review outcome %q", outcome)
-	}
-	if summary.State == model.StateClosed {
-		return Result{}, fmt.Errorf("changeset %s is closed", cs.Slug)
 	}
 	if _, err := repo.Head(ctx); err != nil {
 		return Result{}, fmt.Errorf("cannot submit a review with no commits: %w", err)

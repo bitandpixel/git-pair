@@ -87,7 +87,6 @@ func TestTrailerVocabulary(t *testing.T) {
 		{model.TrailerState, "Review-State"},
 		{model.TrailerChangeset, "Review-Changeset"},
 		{model.StateValueReady, "ready"},
-		{model.StateValueClosed, "closed"},
 	}
 	for _, tc := range tests {
 		if tc.got != tc.want {
@@ -96,8 +95,10 @@ func TestTrailerVocabulary(t *testing.T) {
 	}
 }
 
-// PRD §12 names the six effective states verbatim, and `status --json`/agents
-// compare them by string, so the spelling is part of the contract.
+// PRD §12 names the effective states verbatim, and `status --json`/agents
+// compare them by string, so the spelling is part of the contract. There is no
+// completed state: completion is an archive ref at a head, and the changeset is
+// finished by a merge git-pair does not derive.
 func TestStateVocabulary(t *testing.T) {
 	tests := []struct {
 		got  model.State
@@ -108,7 +109,6 @@ func TestStateVocabulary(t *testing.T) {
 		{model.StateBlocked, "BLOCKED"},
 		{model.StateFeedback, "FEEDBACK"},
 		{model.StateApproved, "APPROVED"},
-		{model.StateClosed, "CLOSED"},
 	}
 	for _, tc := range tests {
 		if string(tc.got) != tc.want {

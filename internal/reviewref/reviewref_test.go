@@ -177,7 +177,7 @@ func TestListExcludesArchives(t *testing.T) {
 }
 
 // The archival ref must keep the whole chain reachable on its own, which is the
-// property `git pair review close` relies on. The CLI test replays this through the
+// property `git pair change complete` relies on. The CLI test replays this through the
 // product; this pins the ref primitive.
 func TestArchiveRefKeepsChainReachableWithoutABranch(t *testing.T) {
 	f := gittest.New(t)

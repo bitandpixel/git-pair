@@ -179,7 +179,7 @@ git-pair: cannot mark changeset booking-transaction ready: 2 review addition(s) 
 
 After resolving the remaining comment `git pair change ready` succeeds and the changeset is
 back in the queue. The reviewer re-reviews with `git pair review reopen`, which starts on what
-changed since their submission, approves, and closes:
+changed since their submission, and approves:
 
 ```bash
 $ git pair review submit --approve
@@ -188,10 +188,16 @@ Review submitted: booking-transaction
   commit:  0eaad3b
   files:   none (recorded as an empty review commit)
   ref:     refs/reviews/booking-transaction -> 0eaad3b
-  next:    `git pair review close` before squash/merge
+  next:    author: `git pair change complete` before squash/merge
+```
 
-$ git pair review close
-Closed changeset booking-transaction
+The owner then completes the changeset. Completion is theirs rather than the reviewer's: an
+approve is a judgement about the code, and deciding that the reviewed state is what gets taken
+forward is the owner's call. It adds no commit — the archive ref names the approved head:
+
+```bash
+$ git pair change complete
+Completed changeset booking-transaction
 
 Review archive:
   refs/reviews/archive/booking-transaction/0eaad3b
@@ -225,17 +231,22 @@ submission are high-level feedback. Any other `.md` file in that directory is a 
 `changesets/<changeset>/concurrency-tests.md`. Replies are appended sections and git history
 supplies authorship and order. Both are plain Markdown with no schema.
 
-**Markers are commits.** `ready`, a review outcome, and `close` are commits, not state
-variables:
+**Markers are commits.** `ready` and a review outcome are commits, not state variables:
 
 | Marker | Subject | Trailers |
 | --- | --- | --- |
 | ready | `git-pair: ready <slug>` | `Review-State: ready`, `Review-Changeset: <slug>` |
 | review | `review: <outcome> <slug>` | `Review-Outcome: <outcome>`, `Review-Changeset: <slug>` |
-| close | `git-pair: close <slug>` | `Review-State: closed`, `Review-Changeset: <slug>` |
 
 A commit counts as a marker only when its trailer block parses and `Review-Changeset` matches
 the changeset being inspected; anything else is an ordinary commit.
+
+**Completion is a ref, not a marker.** `git pair change complete` commits nothing. It anchors the
+chain and writes the immutable archive ref at `HEAD`, and the changeset is finished when that
+archived history is merged into the deployment branch — ordinary git, which git-pair neither runs
+nor derives. A completed changeset therefore still reports `APPROVED` (or `FEEDBACK`), with
+`archive_ref` naming the archived commit for as long as `HEAD` is that commit. Ownership follows the
+same split: the reviewer approves the code, the owner decides it is what gets taken forward.
 
 **A review is corrected by submitting again.** There is no `review undo`. The newest
 submission decides the state, earlier ones stay in `git pair review history`, and the summary of
@@ -253,8 +264,10 @@ touches `ABOUT.md` or a thread does not — PRD §421 invalidates a marker on a 
 *implementation* commit, and editing the description is not one. Comparing trees rather than
 counting commits is also what keeps merges and rebases from reporting a change that never
 happened. States:
-`WORKING`, `READY`, `BLOCKED`, `FEEDBACK`, `APPROVED`, `CLOSED`. `git pair status` prints the
-state plus a one-line `Reason`. There is no state file. (The TUI caches the reviewer's
+`WORKING`, `READY`, `BLOCKED`, `FEEDBACK`, `APPROVED`. `git pair status` prints the
+state plus a one-line `Reason`. There is no state file, and no state for a completed
+changeset: completion is an archive ref (below), and the merge that finishes a changeset is not
+something state derivation can see. (The TUI caches the reviewer's
 per-file marks under the git directory; those are reading progress, not state, and no
 command reports them.)
 
@@ -320,12 +333,12 @@ threads, and the resolved span is always printed to stderr:
 
 **Review refs.** Every submission moves `refs/reviews/<changeset>` to the exact resulting
 `HEAD`, in the same operation that creates the commit, keeping the whole
-implementation/review/fix chain reachable from garbage collection. `git pair review close` also
-writes `refs/reviews/archive/<changeset>/<short-sha>` at the pre-close `HEAD`, created only if
-absent and never moved, so re-running close cannot rewrite an archive.
+implementation/review/fix chain reachable from garbage collection. `git pair change complete` also
+writes `refs/reviews/archive/<changeset>/<short-sha>` at the `HEAD` it completes, created only if
+absent and never moved, so re-running complete cannot rewrite an archive.
 
 **Surviving review additions.** Review lines left untouched disappear from a `review..HEAD`
-diff, so `change ready` and `review close` re-derive them with
+diff, so `change ready` and `change complete` re-derive them with
 `git show -U0 --no-renames <review>` and test each line for exact membership in the `HEAD` blob,
 reporting `path:line` at `HEAD`. Blank additions are ignored, binaries are skipped via
 `--numstat`, repeated identical lines collapse to one entry with a count, and only the most
@@ -338,7 +351,7 @@ of the override. See `docs/plans/completed/gitpr-mvp/research/git-plumbing-findi
 ## Command reference
 
 Every command accepts the persistent `--json` flag, but only `status`, `change ready`,
-`change wait`, `review submit`, `review history`, `review queue` and `review close` change
+`change wait`, `change complete`, `review submit`, `review history` and `review queue` change
 output for it; elsewhere it is accepted and ignored.
 
 | Command | Flags | Notes |
@@ -346,7 +359,7 @@ output for it; elsewhere it is accepted and ignored.
 | `change init` | `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is `main`, else `master`, else a usage error |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change feedback` | `--stat`, `--name-only` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
-| `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`/`CLOSED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
+| `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
 | `review open` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref` | TUI; needs a terminal; full changeset unless a span flag says otherwise; a `--head-*` flag opens a historical span, which is read-only |
 | `review reopen` | none | TUI on `<last review>..current`, the work that has landed since you reviewed; needs a terminal; refuses if no review exists |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
@@ -354,20 +367,21 @@ output for it; elsewhere it is accepted and ignored.
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), then moves the review ref |
 | `review history` | — | only review marker commits, indexed from `0` |
 | `review queue` | — | every changeset in this repo whose derived state is `READY`, longest wait first |
-| `review close` | `--allow-surviving-review-additions` | archives and closes; never merges, pushes or squashes |
+| `change complete` | `--allow-surviving-review-additions` | archives the reviewed `HEAD` and reports squash-safety; commits nothing; never merges, pushes or squashes |
 | `status` | — | derived state for the current branch's changeset |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
-commits, no blocking surviving additions. `review close` checks: clean tree, latest outcome
-`approve` or `feedback`, no blocking surviving additions. `change init` warns without failing
+commits, no blocking surviving additions. `change complete` checks: clean tree, newest effective
+review at `HEAD` is `approve` or `feedback`, no blocking surviving additions. `change init` warns
+without failing
 if the base does not resolve, and commits only the changeset directory (`git commit --only`),
 so work you had already staged for another commit stays on your index.
 
 | Exit code | Meaning | Seen as |
 | --- | --- | --- |
 | 0 | success | — |
-| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot close <cs>: latest outcome is BLOCKED`; `changeset <cs> is already closed`; `cannot resolve changeset base "vanished"`; submitting to a closed changeset; `change wait` timing out, or refusing a changeset that is `WORKING` |
+| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot complete <cs>: latest outcome is BLOCKED`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING` |
 | 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`; `no changeset for this branch`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
@@ -382,9 +396,10 @@ Output is indented two spaces, and empty lists may serialise as `null` rather th
 
 `git pair status --json`, waiting for the first review. Once a review exists `latest_review`
 becomes `{"index": 0, "outcome": "block", "commit": "332887c"}`; `unrecognised_markers` (a
-list of `<sha> <subject>`) appears only when non-empty. Once the changeset is closed,
-`archive_ref` names the immutable archive ref — the newest `refs/reviews/archive/<cs>/*`
-reachable from `HEAD`, which is the approved commit rather than the close marker itself.
+list of `<sha> <subject>`) appears only when non-empty. Once the changeset is completed,
+`archive_ref` names the immutable archive ref — the `refs/reviews/archive/<cs>/*` that points
+at `HEAD` exactly. It goes back to `""` as soon as other work lands, so an archive of an
+ancestor never looks like a finished changeset.
 
 ```json
 {
@@ -457,7 +472,7 @@ is none)
   "commit": "941266b18686624cb624722b4e8c348bf03451a7",
   "empty": true,
   "files": null,
-  "next_action": "`git pair review close` before squash/merge",
+  "next_action": "author: `git pair change complete` before squash/merge",
   "outcome": "approve",
   "previous_review": "",
   "review_ref": "refs/reviews/feat",
@@ -465,19 +480,23 @@ is none)
 }
 ```
 
-`git pair review close --json`
+`git pair change complete --json` — `head` is the archived commit and `state` is the derived
+state, which completion does not change; `archive_created` is false when this head was already
+archived, which is a success rather than a refusal.
 
 ```json
 {
-  "acknowledged": false,
+  "acknowledged_survivors": 0,
   "archive_created": true,
   "archive_ref": "refs/reviews/archive/feat/941266b",
+  "base": "main",
   "changeset": "feat",
-  "commit": "dc590e579a05040189261a1e451a3b744568d074",
+  "head": "941266b18686624cb624722b4e8c348bf03451a7",
   "review_ref": "refs/reviews/feat",
+  "short": "941266b",
   "squash_safe": true,
-  "state": "CLOSED",
-  "surviving_additions": 0
+  "state": "APPROVED",
+  "surviving_review_artifacts": 0
 }
 ```
 
@@ -501,7 +520,7 @@ only when a review submission is what ended the wait. `timed_out` is the differe
   "fetches": 3,
   "waited_seconds": 91,
   "timed_out": false,
-  "next_action": "`git pair change feedback`; feedback is non-blocking, `git pair review close` when integration is due"
+  "next_action": "`git pair change feedback`; feedback is non-blocking, `git pair change complete` when integration is due"
 }
 ```
 
@@ -520,10 +539,11 @@ git pair change feedback            # read that submission: threads, ABOUT.md, c
 # address feedback in code, ABOUT.md and threads; commit normally
 git pair review history --json      # enumerate review commits
 git pair change ready               # again
+git pair change complete            # once approved: archive the reviewed head
 ```
 
-Never prompt: `change init`, `change ready`, `change feedback`, `change wait`, `status`,
-`diff`, `review submit`, `review history`, `review queue`, `review close`. They report and
+Never prompt: `change init`, `change ready`, `change feedback`, `change wait`, `change complete`,
+`status`, `diff`, `review submit`, `review history`, `review queue`. They report and
 exit instead of asking, even with a terminal attached.
 
 Refuse with exit 2 when stdin or stdout is a pipe or a regular file, because launching an
@@ -773,7 +793,7 @@ acknowledge them deliberately:
 
 ```bash
 git pair change ready --allow-surviving-review-additions
-git pair review close --allow-surviving-review-additions
+git pair change complete --allow-surviving-review-additions
 ```
 
 Only the most recent review counts, and only additions outside `changesets/<changeset>/`
@@ -791,7 +811,7 @@ files directly and use `git pair diff`, `git pair status` and `git pair review s
 `"<path>" does not appear in main...HEAD; changed paths: ...` (exit 2) — the path is not in
 the resolved span; the error lists what is.
 
-`working tree must be clean ...` (exit 1) — `change ready` and `review close` act on committed
+`working tree must be clean ...` (exit 1) — `change ready` and `change complete` act on committed
 state. `change init` commits its scaffolding, so a fresh changeset does not block `change
 ready`; it does block it if you then edit `ABOUT.md` without committing. Use
 `change init --no-commit` to fold the scaffolding into your first implementation commit
@@ -806,6 +826,7 @@ state, and a code change after the ready marker returns the changeset to `WORKIN
 touching only `ABOUT.md` or a thread leaves it `READY`).
 A hand-written ready marker counts only if `Review-State: ready` and `Review-Changeset: <slug>`
 sit in a real trailer block, separated from the subject by a blank line and from each other by
-no blank line. `changeset <cs> is already closed` and `changeset <cs> is closed` (both exit 1)
-are the refusals for re-closing and for submitting after closing; archival stays
-idempotent because the archive ref is never moved.
+no blank line. `cannot complete <cs>: latest outcome is BLOCKED` (exit 1) is the refusal for a
+head whose newest review does not permit integration; completing an already-archived head is not
+a refusal at all, because archive refs are never moved, so the second run changes nothing and
+says so.

@@ -135,7 +135,7 @@ func TestPollUntilStopsOnContextCancellation(t *testing.T) {
 func TestActionableStates(t *testing.T) {
 	// Everything the author has to act on, and nothing else: WORKING is the author's
 	// own state and must not end a wait.
-	for _, s := range []string{"BLOCKED", "FEEDBACK", "APPROVED", "CLOSED"} {
+	for _, s := range []string{"BLOCKED", "FEEDBACK", "APPROVED"} {
 		if !actionable(model.State(s)) {
 			t.Errorf("%s is not actionable, want actionable", s)
 		}

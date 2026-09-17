@@ -3,6 +3,13 @@ package model
 
 // State is the effective lifecycle state of a changeset, always derived from
 // commit history rather than stored.
+//
+// There is no state for a completed changeset. Completion archives the review
+// history at a head (`git pair change complete`), and the changeset is finished
+// when that archived history is merged into the deployment branch by ordinary
+// git. git-pair derives state from a changeset's own commits, so it does not
+// derive the merge: the archive ref is reported by `status`, not folded into
+// the state name.
 type State string
 
 const (
@@ -11,7 +18,6 @@ const (
 	StateBlocked  State = "BLOCKED"
 	StateFeedback State = "FEEDBACK"
 	StateApproved State = "APPROVED"
-	StateClosed   State = "CLOSED"
 )
 
 // Outcome is the verdict recorded by a review submission.
@@ -45,8 +51,8 @@ func (o Outcome) Valid() bool {
 	return false
 }
 
-// PermitsIntegration reports whether a review with this outcome lets the
-// changeset proceed to close. Block does not; feedback and approve do.
+// PermitsIntegration reports whether a review with this outcome lets the owner
+// complete the changeset. Block does not; feedback and approve do.
 func (o Outcome) PermitsIntegration() bool {
 	return o == OutcomeFeedback || o == OutcomeApprove
 }
@@ -72,6 +78,5 @@ const (
 	TrailerState     = "Review-State"
 	TrailerChangeset = "Review-Changeset"
 
-	StateValueReady  = "ready"
-	StateValueClosed = "closed"
+	StateValueReady = "ready"
 )

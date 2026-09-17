@@ -11,6 +11,7 @@ import (
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 	"gitpair/internal/reviewops"
+	"gitpair/internal/reviewref"
 )
 
 const slug = "booking-transaction"
@@ -52,7 +53,7 @@ func (e *env) summary(t *testing.T) lifecycle.Summary {
 
 func (e *env) submit(t *testing.T, outcome model.Outcome, body string, stageAll bool) reviewops.Result {
 	t.Helper()
-	result, err := reviewops.Submit(context.Background(), e.repo, e.cs, e.summary(t), outcome, body, stageAll)
+	result, err := reviewops.Submit(context.Background(), e.repo, e.cs, outcome, body, stageAll)
 	if err != nil {
 		t.Fatalf("Submit(%s): %v", outcome, err)
 	}
@@ -166,26 +167,36 @@ func TestSubmitRecordsBodyAboveTrailers(t *testing.T) {
 func TestSubmitRejectsInvalidOutcome(t *testing.T) {
 	e := newEnv(t)
 
-	if _, err := reviewops.Submit(context.Background(), e.repo, e.cs, e.summary(t),
+	if _, err := reviewops.Submit(context.Background(), e.repo, e.cs,
 		model.Outcome("approve-self"), "", true); err == nil {
 		t.Error("Submit accepted an outcome that is not block/feedback/approve")
 	}
 }
 
-// An agent must not be able to keep reviewing a closed changeset (PRD §10.7, §22).
-func TestSubmitRefusesClosedChangeset(t *testing.T) {
+// Completion archives a head and records no commit, so it is not a state a review
+// has to be told about. A reviewer who submits against an already-completed head
+// gets an ordinary review commit, and completing the result is the owner's call.
+func TestSubmitStillRecordsAgainstACompletedHead(t *testing.T) {
 	e := newEnv(t)
-	e.submit(t, model.OutcomeApprove, "", true)
-	e.f.CommitCloseMarker(slug)
-
-	if got := e.summary(t).State; got != model.StateClosed {
-		t.Fatalf("derived state = %s, want CLOSED", got)
+	head := e.f.Head()
+	archiveRef, _, err := reviewref.ArchiveCommit(context.Background(), e.repo, e.cs.Slug, head)
+	if err != nil {
+		t.Fatalf("ArchiveCommit: %v", err)
 	}
-	if _, err := reviewops.Submit(context.Background(), e.repo, e.cs, e.summary(t),
-		model.OutcomeApprove, "", true); err == nil {
-		t.Error("Submit succeeded on a closed changeset")
-	} else if !strings.Contains(err.Error(), "closed") {
-		t.Errorf("error = %v, want it to say the changeset is closed", err)
+
+	e.f.Write("service.go", "package main\n\n// Please use a transaction here\nfunc Lock() {}\n")
+	result := e.submit(t, model.OutcomeBlock, "", true)
+
+	if result.Commit == head {
+		t.Error("the submission recorded no commit")
+	}
+	if got := e.f.RefSHA("refs/reviews/" + slug); got != result.Commit {
+		t.Errorf("review ref = %s, want the new review %s", got, result.Commit)
+	}
+	// The archive stays exactly where it was: completing a head is a statement
+	// about that head, and a later review cannot move it.
+	if got := e.f.RefSHA(archiveRef); got != head {
+		t.Errorf("archive ref = %s, want the completed head %s", got, head)
 	}
 }
 
@@ -216,7 +227,7 @@ func TestSubmitRequiresCommits(t *testing.T) {
 
 	// No commits at all: there is nothing to review, and a marker commit would be
 	// the repository's root commit with no base to compare against.
-	if _, err := reviewops.Submit(context.Background(), repo, cs, lifecycle.Summary{},
+	if _, err := reviewops.Submit(context.Background(), repo, cs,
 		model.OutcomeApprove, "", true); err == nil {
 		t.Error("Submit succeeded with no commits in the repository")
 	}

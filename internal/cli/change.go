@@ -17,6 +17,7 @@ import (
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/marker"
 	"gitpair/internal/model"
+	"gitpair/internal/reviewref"
 	"gitpair/internal/survival"
 )
 
@@ -30,7 +31,7 @@ func newChangeCommand(a *app) *cobra.Command {
 		RunE: groupUsage("change"),
 	}
 	cmd.AddCommand(newChangeInitCommand(a), newChangeReadyCommand(a),
-		newChangeFeedbackCommand(a), newChangeWaitCommand(a))
+		newChangeFeedbackCommand(a), newChangeWaitCommand(a), newChangeCompleteCommand(a))
 	return cmd
 }
 
@@ -384,6 +385,134 @@ func isNothingToCommit(err error) bool {
 	return false
 }
 
+// --- change complete --------------------------------------------------------
+
+type completeOptions struct {
+	allowSurviving bool
+}
+
+func newChangeCompleteCommand(a *app) *cobra.Command {
+	opts := &completeOptions{}
+	cmd := &cobra.Command{
+		Use:   "complete",
+		Short: "Archive the changeset's review history at HEAD",
+		Long: `Anchor the complete unsquashed history at HEAD and archive it immutably.
+
+Checks, in order: the working tree is clean, the newest effective review at HEAD
+permits integration (approve or feedback), and no non-blank addition from the most
+recent review survives unchanged. Then the current chain is anchored under
+refs/reviews/, and the immutable archive ref
+refs/reviews/archive/<changeset>/<short-head> is written pointing at HEAD.
+
+Completion is the owner's half of the lifecycle. A reviewer's approve is a judgement
+about the code; completing the changeset is the owner's decision that the reviewed
+state is what they are taking forward. So the command records no commit and moves no
+state: the changeset is finished when that archived history is merged into the
+deployment branch, which is ordinary git and stays yours. ` + "`git pair status`" + ` reports
+the archive ref for as long as HEAD is the archived commit.
+
+Re-running the command at the same HEAD changes nothing: archive refs are neither
+moved nor duplicated. It never merges, pushes, or squashes.`,
+		Example: `  git pair change complete
+  git pair change complete --allow-surviving-review-additions
+  git pair change complete --json`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChangeComplete(cmd.Context(), a, opts)
+		},
+	}
+	cmd.Flags().BoolVar(&opts.allowSurviving, "allow-surviving-review-additions", false,
+		"acknowledge surviving review additions and complete anyway")
+	return cmd
+}
+
+func runChangeComplete(ctx context.Context, a *app, opts *completeOptions) error {
+	s, err := a.load(ctx)
+	if err != nil {
+		return err
+	}
+	if !s.clean {
+		return fmt.Errorf("working tree must be clean before completing %s; commit or stash your changes first", s.cs.Slug)
+	}
+	// The gate is the review at HEAD rather than a lifecycle state named
+	// "completable": completion records no commit, so there is no state for it to
+	// move the changeset into. An approval made stale by a later implementation
+	// commit already reads as WORKING, so it is refused here.
+	switch s.summary.State {
+	case model.StateApproved, model.StateFeedback:
+		// Integration is permitted.
+	default:
+		return fmt.Errorf("cannot complete %s: latest outcome is %s (%s); completion needs an approve or feedback at HEAD",
+			s.cs.Slug, s.summary.State, s.summary.Reason)
+	}
+
+	report, err := survivalCheck(ctx, s)
+	if err != nil {
+		return err
+	}
+	if report != nil && !report.Clean() && !opts.allowSurviving {
+		printSurvivalReport(a.stderr, *report,
+			fmt.Sprintf("Cannot complete changeset %s.", s.cs.Slug),
+			"git pair change complete --allow-surviving-review-additions")
+		printArtifactSurvivals(a.stderr, *report)
+		return fmt.Errorf("cannot complete %s: %d review addition(s) from %s still survive unchanged",
+			s.cs.Slug, len(report.Code), report.ReviewShort)
+	}
+
+	head, err := s.repo.Head(ctx)
+	if err != nil {
+		return err
+	}
+	// Anchor, then archive. The movable ref is the current review HEAD, so it has
+	// to reach the head being completed — a changeset-only commit after the review
+	// submission leaves it short of HEAD — and the archive is the immutable copy of
+	// that same chain, which is what makes a squash merge lossless.
+	if _, err := reviewref.Update(ctx, s.repo, s.cs.Slug, head); err != nil {
+		return err
+	}
+	archiveRef, created, err := reviewref.ArchiveCommit(ctx, s.repo, s.cs.Slug, head)
+	if err != nil {
+		return err
+	}
+	return printComplete(a, s, head, archiveRef, created, report, opts.allowSurviving)
+}
+
+func printComplete(a *app, s *session, head, archiveRef string, created bool,
+	report *survival.Report, acknowledged bool) error {
+	if a.json {
+		out := map[string]any{
+			"changeset":                  s.cs.Slug,
+			"state":                      string(s.summary.State),
+			"head":                       head,
+			"short":                      short(head),
+			"base":                       s.cs.Base,
+			"review_ref":                 reviewref.Head(s.cs.Slug),
+			"archive_ref":                archiveRef,
+			"archive_created":            created,
+			"squash_safe":                true,
+			"acknowledged_survivors":     0,
+			"surviving_review_artifacts": 0,
+		}
+		if report != nil {
+			out["acknowledged_survivors"] = len(report.Code)
+			out["surviving_review_artifacts"] = len(report.Artifacts)
+		}
+		return a.emitJSON(out)
+	}
+	if acknowledged && report != nil && !report.Clean() {
+		a.printf("Acknowledged %d surviving review addition(s) from review %s.\n\n",
+			len(report.Code), report.ReviewShort)
+	}
+	a.printf("Completed changeset %s\n\n", s.cs.Slug)
+	a.printf("Review archive:\n  %s\n\n", archiveRef)
+	if !created {
+		a.printf("%s already points at %s; archive refs are never rewritten.\n\n", archiveRef, short(head))
+	}
+	a.printf("Safe to squash/merge.\n")
+	a.printf("Review history stays reachable at %s\n", reviewref.Head(s.cs.Slug))
+	return nil
+}
+
 // --- change feedback --------------------------------------------------------
 
 type feedbackOptions struct {
@@ -492,8 +621,8 @@ func newChangeWaitCommand(a *app) *cobra.Command {
 		Short: "Block until a reviewer makes the changeset actionable",
 		Long: `Wait for review activity, so an author can hand off and sleep instead of polling.
 
-Exits when the changeset stops being ready and becomes actionable — BLOCKED, FEEDBACK,
-APPROVED or CLOSED — and prints what happened. Fully non-interactive.
+Exits when the changeset stops being ready and becomes actionable — BLOCKED, FEEDBACK
+or APPROVED — and prints what happened. Fully non-interactive.
 
   git pair change ready
   git pair change wait --fetch --interval 30s --json
@@ -763,7 +892,7 @@ func reportWait(a *app, slug string, r waitInput) error {
 // from READY by someone else acting on the changeset.
 func actionable(s model.State) bool {
 	switch s {
-	case model.StateBlocked, model.StateFeedback, model.StateApproved, model.StateClosed:
+	case model.StateBlocked, model.StateFeedback, model.StateApproved:
 		return true
 	}
 	return false
@@ -792,11 +921,9 @@ func waitNextAction(s model.State, ref string) string {
 			return fmt.Sprintf("the review landed on %s; bring it into this branch with ordinary "+
 				"Git, then `git pair change feedback`", ref)
 		}
-		return "`git pair change feedback`; feedback is non-blocking, `git pair review close` when integration is due"
+		return "`git pair change feedback`; feedback is non-blocking, `git pair change complete` when integration is due"
 	case model.StateApproved:
-		return "`git pair review close` before squash/merge"
-	case model.StateClosed:
-		return "safe to squash/merge; review history is under refs/reviews/"
+		return "`git pair change complete` before squash/merge"
 	case model.StateReady, model.StateWorking:
 		// Only reachable on a timeout: nothing became actionable.
 		return "still waiting for review activity; run `git pair change wait` again or check `git pair status --json`"

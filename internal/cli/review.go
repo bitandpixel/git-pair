@@ -17,12 +17,10 @@ import (
 	"gitpair/internal/console"
 	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
-	"gitpair/internal/marker"
 	"gitpair/internal/model"
 	"gitpair/internal/reviewops"
 	"gitpair/internal/reviewref"
 	"gitpair/internal/span"
-	"gitpair/internal/survival"
 	"gitpair/internal/tui"
 )
 
@@ -40,7 +38,6 @@ func newReviewCommand(a *app) *cobra.Command {
 		newReviewSubmitCommand(a),
 		newReviewHistoryCommand(a),
 		newReviewQueueCommand(a),
-		newReviewCloseCommand(a),
 	)
 	return cmd
 }
@@ -255,7 +252,7 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 	if err != nil {
 		return err
 	}
-	result, err := reviewops.Submit(ctx, s.repo, s.cs, s.summary, outcome, opts.message, !opts.noStage)
+	result, err := reviewops.Submit(ctx, s.repo, s.cs, outcome, opts.message, !opts.noStage)
 	if err != nil {
 		return err
 	}
@@ -308,9 +305,10 @@ func nextActionFor(o model.Outcome) string {
 	case model.OutcomeBlock:
 		return "author: `git pair change feedback`, address it, then `git pair change ready`"
 	case model.OutcomeFeedback:
-		return "author: `git pair change feedback` to read it; feedback is non-blocking, `git pair review close` when integration is due"
+		return "author: `git pair change feedback` to read it; feedback is non-blocking, " +
+			"`git pair change complete` when integration is due"
 	case model.OutcomeApprove:
-		return "`git pair review close` before squash/merge"
+		return "author: `git pair change complete` before squash/merge"
 	}
 	return ""
 }
@@ -533,124 +531,6 @@ func ageSeconds(age string) int64 {
 		return n * 86400
 	}
 	return 0
-}
-
-// --- review close -----------------------------------------------------------
-
-type closeOptions struct {
-	allowSurviving bool
-}
-
-func newReviewCloseCommand(a *app) *cobra.Command {
-	opts := &closeOptions{}
-	cmd := &cobra.Command{
-		Use:   "close",
-		Short: "Finalise the review lifecycle before squash/merge",
-		Long: `Archive the complete unsquashed history and mark the changeset closed.
-
-Checks, in order: the working tree is clean, the latest effective outcome permits
-integration (approve or feedback), and no non-blank addition from the most recent
-review survives unchanged. Then the whole chain is anchored under
-refs/reviews/, an immutable archive ref is written, and a close marker is
-committed.
-
-close and approve are different things: approve is a human judgement, close is
-the archival operation. This command never merges, pushes, or squashes — it
-prints what is safe to do next.`,
-		Example: `  git pair review close
-  git pair review close --allow-surviving-review-additions`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runReviewClose(cmd.Context(), a, opts)
-		},
-	}
-	cmd.Flags().BoolVar(&opts.allowSurviving, "allow-surviving-review-additions", false,
-		"acknowledge surviving review additions and close anyway")
-	return cmd
-}
-
-func runReviewClose(ctx context.Context, a *app, opts *closeOptions) error {
-	s, err := a.load(ctx)
-	if err != nil {
-		return err
-	}
-	if !s.clean {
-		return fmt.Errorf("working tree must be clean before closing %s", s.cs.Slug)
-	}
-	switch s.summary.State {
-	case model.StateApproved, model.StateFeedback:
-		// Integration is permitted.
-	case model.StateClosed:
-		return fmt.Errorf("changeset %s is already closed", s.cs.Slug)
-	default:
-		return fmt.Errorf("cannot close %s: latest outcome is %s (%s); integration needs approve or feedback",
-			s.cs.Slug, s.summary.State, s.summary.Reason)
-	}
-
-	report, err := survivalCheck(ctx, s)
-	if err != nil {
-		return err
-	}
-	if report != nil && !report.Clean() && !opts.allowSurviving {
-		printSurvivalReport(a.stderr, *report,
-			fmt.Sprintf("Cannot close changeset %s.", s.cs.Slug),
-			"git pair review close --allow-surviving-review-additions")
-		printArtifactSurvivals(a.stderr, *report)
-		return fmt.Errorf("cannot close %s: %d review addition(s) from %s still survive unchanged",
-			s.cs.Slug, len(report.Code), report.ReviewShort)
-	}
-
-	// Anchor the current chain, archive it immutably, then record the close
-	// marker naming that archive ref. The movable ref ends on the close commit so
-	// the marker itself stays reachable.
-	head, err := s.repo.Head(ctx)
-	if err != nil {
-		return err
-	}
-	if _, err := reviewref.Update(ctx, s.repo, s.cs.Slug, head); err != nil {
-		return err
-	}
-	archiveRef, created, err := reviewref.ArchiveCommit(ctx, s.repo, s.cs.Slug, head)
-	if err != nil {
-		return err
-	}
-	sha, err := marker.Commit(ctx, s.repo, marker.CloseMessage(s.cs.Slug, archiveRef))
-	if err != nil {
-		return err
-	}
-	if _, err := reviewref.Update(ctx, s.repo, s.cs.Slug, sha); err != nil {
-		return err
-	}
-
-	if a.json {
-		return a.emitJSON(map[string]any{
-			"changeset":           s.cs.Slug,
-			"state":               string(model.StateClosed),
-			"commit":              sha,
-			"review_ref":          reviewref.Head(s.cs.Slug),
-			"archive_ref":         archiveRef,
-			"archive_created":     created,
-			"squash_safe":         true,
-			"acknowledged":        report != nil && !report.Clean(),
-			"surviving_additions": survivingCodeCount(report),
-		})
-	}
-	if report != nil && !report.Clean() {
-		a.printf("Acknowledged %d surviving review addition(s) from review %s.\n\n",
-			len(report.Code), report.ReviewShort)
-	}
-	a.printf("Closed changeset %s\n\n", s.cs.Slug)
-	a.printf("Review archive:\n  %s\n\n", archiveRef)
-	a.printf("Safe to squash/merge.\n")
-	a.printf("Review history stays reachable at %s\n", reviewref.Head(s.cs.Slug))
-	return nil
-}
-
-func survivingCodeCount(r *survival.Report) int {
-	if r == nil {
-		return 0
-	}
-	return len(r.Code)
 }
 
 // --- shared file helpers ----------------------------------------------------

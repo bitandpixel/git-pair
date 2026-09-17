@@ -80,18 +80,6 @@ func ReviewMessage(slug string, outcome model.Outcome, body string) Message {
 	}
 }
 
-// CloseMessage describes the final lifecycle marker for a changeset.
-func CloseMessage(slug, archiveRef string) Message {
-	return Message{
-		Subject: fmt.Sprintf("git-pair: close %s", slug),
-		Body:    "Review archive: " + archiveRef,
-		Trailers: []string{
-			"Review-State=" + model.StateValueClosed,
-			"Review-Changeset=" + slug,
-		},
-	}
-}
-
 // Commit writes a marker commit and returns its SHA. Review submissions may be
 // empty (an approval with no edits is a legitimate review), so empty commits are
 // always allowed here.

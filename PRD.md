@@ -332,7 +332,8 @@ git-pair
 │   ├── init
 │   ├── ready
 │   ├── feedback
-│   └── wait
+│   ├── wait
+│   └── complete
 │
 ├── review
 │   ├── open
@@ -340,8 +341,7 @@ git-pair
 │   ├── thread
 │   ├── submit
 │   ├── history
-│   ├── queue
-│   └── close
+│   └── queue
 │
 ├── status
 └── diff
@@ -494,7 +494,7 @@ git pair change wait --fetch --timeout 2h --json
 
 Requirements:
 
--   exit successfully when the effective state moves from `ready` to `blocked`, `feedback`, `approved`, or `closed`,
+-   exit successfully when the effective state moves from `ready` to `blocked`, `feedback`, or `approved`,
 -   report immediately, without waiting, when the changeset is already in one of those states,
 -   exit non-zero when the changeset is `working`: the author is not waiting on anyone,
 -   poll local review state by default,
@@ -516,6 +516,67 @@ git pair change ready
 git push origin my-feature
 git pair change wait --fetch --json   # exits when a reviewer has acted
 git pair change feedback               # read what they said
+```
+
+## 9.5 `git pair change complete`
+
+Archives the complete unsquashed review history at HEAD, before squash/merge.
+
+The owner owns this half of the lifecycle. A reviewer's `approve` is a judgement about the code;
+completing the changeset is the owner's decision that the reviewed state is what they are taking
+forward. The command therefore records no commit and establishes no state (§12).
+
+Responsibilities:
+
+1. verify the working tree is clean,
+2. verify the newest effective review at HEAD permits integration (`approve` or `feedback`),
+3. run the surviving-review-additions diagnostic,
+4. require explicit acknowledgement if surviving additions remain,
+5. ensure the complete current branch history is anchored under `refs/reviews/`,
+6. write the immutable archive ref `refs/reviews/archive/<changeset>/<short-head>` at HEAD, created
+   only if absent and never moved,
+7. print the resulting archive ref and integration readiness.
+
+It must **not** merge, push, or squash.
+
+Example output:
+
+```text
+Completed changeset booking-transaction
+
+Review archive:
+  refs/reviews/archive/booking-transaction/91bf204
+
+Safe to squash/merge.
+Review history stays reachable at refs/reviews/booking-transaction
+```
+
+If surviving review additions remain, completing must fail unless explicitly overridden:
+
+```bash
+git pair change complete --allow-surviving-review-additions
+```
+
+`--json` prints `changeset`, `state`, `head`, `short`, `base`, `review_ref`, `archive_ref`,
+`archive_created`, `squash_safe`, `acknowledged_survivors` and `surviving_review_artifacts`. `state`
+is the derived state, which completion does not change.
+
+Running the command again at the same HEAD succeeds and changes nothing: the operation is "this head
+is archived", and an archive ref is never moved or duplicated (§13).
+
+Completion is not a state. The changeset is finished when the archived history is merged into the
+deployment branch, which is ordinary git that git-pair neither performs nor derives. `git pair
+status` reports `archive_ref` while HEAD is that archived commit and stops reporting it as soon as
+other work lands, so a branch with unfinished work never looks finished.
+
+`approve` and `complete` are intentionally separate concepts:
+
+```text
+approve
+    human judgment about the code
+
+complete
+    the owner's archival operation
 ```
 
 ---
@@ -734,50 +795,6 @@ Global repository management is useful but may be deferred if needed.
 
 The queue command should have a stable machine-readable form suitable for automation and notifications.
 
-## 10.7 `git pair review close`
-
-Finalizes the review lifecycle before squash/merge.
-
-Responsibilities:
-
-1. verify working tree is clean,
-2. verify the latest effective review outcome permits integration,
-3. run the surviving-review-additions diagnostic,
-4. require explicit acknowledgement if surviving additions remain,
-5. ensure the complete current branch history is archived,
-6. create or update a durable final review ref,
-7. mark the changeset logically closed,
-8. print the resulting archive ref and integration readiness.
-
-It must **not** merge, push, or squash by default.
-
-Example output:
-
-```text
-Closed changeset booking-transaction
-
-Review archive:
-  refs/reviews/archive/booking-transaction/91bf204
-
-Safe to squash/merge.
-```
-
-If surviving review additions remain, closing must fail unless explicitly overridden:
-
-```bash
-git pair review close --allow-surviving-review-additions
-```
-
-`approve` and `close` are intentionally separate concepts:
-
-```text
-approve
-    human judgment
-
-close
-    review lifecycle / archival operation
-```
-
 ---
 
 # 11. Top-Level Commands
@@ -868,10 +885,10 @@ ready
     ↓
 review feedback / approve
     ↓
-close
+complete (archival, owner's decision — not a state)
 ```
 
-The author's side of that loop is `git pair change ready`, then `git pair change wait` to learn that a reviewer has acted, then `git pair change feedback` to read the submission before addressing it.
+The author's side of that loop is `git pair change ready`, then `git pair change wait` to learn that a reviewer has acted, then `git pair change feedback` to read the submission before addressing it, then `git pair change complete` (§9.5) to archive the reviewed head.
 
 Possible effective states:
 
@@ -881,8 +898,12 @@ READY
 BLOCKED
 FEEDBACK
 APPROVED
-CLOSED
 ```
+
+There is no state for a completed changeset. `complete` archives a head in `refs/reviews/` and records
+no commit, and the changeset is finished when that archived history is merged into the deployment
+branch. State is derived from a changeset's own commits, so git-pair does not derive the merge:
+`git pair status` reports the archive ref for as long as HEAD is the archived commit.
 
 Avoid maintaining a fragile mutable state variable where possible.
 
@@ -921,10 +942,10 @@ pointing to the exact current `HEAD`.
 
 This keeps the entire implementation/review/fix chain reachable from Git garbage collection.
 
-When closing a changeset, the implementation may optionally create an immutable archival ref:
+Completing a changeset (§9.5) writes an immutable archival ref alongside it:
 
 ```text
-refs/reviews/archive/<changeset>/<identifier>
+refs/reviews/archive/<changeset>/<short-head>
 ```
 
 Example:
@@ -933,7 +954,8 @@ Example:
 refs/reviews/archive/booking-transaction/91bf204
 ```
 
-The exact immutable naming convention can be finalized during implementation.
+It is created only if absent and never moved, so completing the same head twice cannot rewrite an
+archive.
 
 The fundamental invariant is:
 
@@ -1432,14 +1454,14 @@ The command must remain fully non-interactive.
 
 This forces an agent to consciously inspect surviving review material rather than accidentally returning unchanged feedback to the reviewer.
 
-## 19.3 `git pair review close`
+## 19.3 `git pair change complete`
 
-The same diagnostic must run before closing a changeset.
+The same diagnostic must run before completing a changeset.
 
-If surviving additions remain, `git pair review close` must fail unless the reviewer explicitly overrides:
+If surviving additions remain, `git pair change complete` must fail unless the owner explicitly overrides:
 
 ```bash
-git pair review close --allow-surviving-review-additions
+git pair change complete --allow-surviving-review-additions
 ```
 
 This provides a final safety check before archival and squash/merge.
@@ -1530,6 +1552,7 @@ git pair diff
 git pair change ready
 git pair change wait --json
 git pair change feedback
+git pair change complete
 ```
 
 Agent behavior:
@@ -1545,13 +1568,16 @@ Agent behavior:
 9. address blocking feedback,
 10. update code and discussion documents as appropriate,
 11. commit implementation changes normally,
-12. run `git pair change ready` again.
+12. run `git pair change ready` again,
+13. once the reviewer's approval stands at `HEAD`, run `git pair change complete` to archive it.
 
 `git pair status --json` remains the way to check state without blocking. `git pair diff --unreviewed` is the reviewer's span command; an author consuming a newly submitted review uses `git pair change feedback`.
 
 An agent must **not approve its own work**.
 
-Approval remains a reviewer action.
+Approval remains a reviewer action. Completing a changeset is the owner's action and is not
+approval: it archives the head the reviewer approved, and the merge that finishes the changeset
+stays with the human.
 
 ---
 
@@ -1872,14 +1898,15 @@ git pair review open --unreviewed
 
 and sees the changes made after the prior review submission, including explicit deletion or modification of prior inline review feedback.
 
-Human approves:
+Human approves, and the owner completes the changeset:
 
 ```bash
 git pair review submit --approve
-git pair review close
+git pair change complete
 ```
 
-`git pair review close` runs the same surviving-review-additions safety check before finalization.
+`git pair change complete` runs the same surviving-review-additions safety check before archival, and
+records no commit: it anchors the chain and writes the archive ref at the approved head.
 
 At this point:
 

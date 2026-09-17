@@ -106,8 +106,8 @@ Review state lives in the repository: a changeset directory holds ABOUT.md and
 review threads, lifecycle markers are commits carrying Review-* trailers, and
 refs/reviews/* keeps the complete unsquashed history reachable.
 
-Author commands:   git pair change init | ready
-Reviewer commands: git pair review open | about | thread | submit | history | queue | close
+Author commands:   git pair change init | ready | complete
+Reviewer commands: git pair review open | about | thread | submit | history | queue
 Inspection:        git pair status | diff`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if jsonFlag, err := cmd.Flags().GetBool("json"); err == nil {

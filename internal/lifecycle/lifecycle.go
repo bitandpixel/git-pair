@@ -24,7 +24,6 @@ const (
 	KindImplementation Kind = iota
 	KindReady
 	KindReview
-	KindClosed
 )
 
 func (k Kind) String() string {
@@ -33,8 +32,6 @@ func (k Kind) String() string {
 		return "ready"
 	case KindReview:
 		return "review"
-	case KindClosed:
-		return "closed"
 	}
 	return "implementation"
 }
@@ -163,9 +160,11 @@ func parseEvent(slug string, rec []string) Event {
 			e.UnrecognisedMarker = true
 		case state == model.StateValueReady:
 			e.Kind = KindReady
-		case state == model.StateValueClosed:
-			e.Kind = KindClosed
 		default:
+			// `Review-State: closed` was read here until completion became an
+			// archival ref instead of a commit. It now falls through to the
+			// unrecognised path, which is the conservative reading and keeps the
+			// retired vocabulary out of the model.
 			e.UnrecognisedMarker = true
 		}
 	}
@@ -239,8 +238,6 @@ func markerLabel(m Event) string {
 		return "ready " + m.Short
 	case KindReview:
 		return fmt.Sprintf("review %s (%s)", m.Short, m.Outcome)
-	case KindClosed:
-		return "the close marker at " + m.Short
 	}
 	return m.Short
 }
@@ -252,8 +249,6 @@ func markerReason(m Event) string {
 		return "marked ready by " + m.Short
 	case KindReview:
 		return fmt.Sprintf("review %s (%s) is the newest commit", m.Short, m.Outcome)
-	case KindClosed:
-		return "closed by " + m.Short
 	}
 	return m.Subject
 }
@@ -329,8 +324,6 @@ func (e Event) State() model.State {
 	switch e.Kind {
 	case KindReady:
 		return model.StateReady
-	case KindClosed:
-		return model.StateClosed
 	case KindReview:
 		return e.Outcome.State()
 	}

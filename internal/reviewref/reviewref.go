@@ -3,7 +3,7 @@
 // Two kinds exist:
 //
 //	refs/reviews/<changeset>                     movable, current review HEAD
-//	refs/reviews/archive/<changeset>/<short-sha> immutable, written at close
+//	refs/reviews/archive/<changeset>/<short-sha> immutable, written at completion
 //
 // Together they hold the complete unsquashed implementation/review/fix chain
 // so a branch can be squash-merged without losing the review conversation.
@@ -79,7 +79,8 @@ var ErrNoReviewRef = errors.New("no review ref for this changeset")
 
 // ArchiveCommit creates refs/reviews/archive/<slug>/<shortSHA> pointing at sha
 // if it does not already exist, and reports whether it was newly created. The
-// ref is never moved, which is what makes the archive immutable.
+// ref is never moved, which is what makes the archive immutable: completing a
+// changeset twice at the same head reuses the one ref.
 func ArchiveCommit(ctx context.Context, repo *git.Repo, slug, sha string) (ref string, created bool, err error) {
 	short := sha
 	if len(short) > 7 {
