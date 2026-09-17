@@ -156,9 +156,13 @@ changesets/
     transaction-boundary.md
 ```
 
-The directory name should normally derive from the branch name.
+The directory name is the changeset's **ID**, and the ID is what git-pair calls the work
+from here on: it names the directory, and once durable refs exist it names those too
+(§13). The branch name is where the default comes from, not the identity.
 
-For branch names containing `/`, the MVP may normalize them into a filesystem-safe slug.
+For branch names containing `/`, the name is normalised into a filesystem-safe slug:
+`/` becomes `-`, other characters outside `[A-Za-z0-9._-]` become `-`, runs collapse, and
+leading and trailing `-` are trimmed. Case is preserved.
 
 Example:
 
@@ -170,9 +174,19 @@ changeset:
 changesets/feature-booking-transaction/
 ```
 
-The implementation should keep the branch-to-changeset naming rule deterministic.
+The rule is deterministic, and it is a suggestion. `change init --id <id>` chooses the ID
+instead (§9.1), which is what makes the identity independent of the branch: branches get
+renamed, two branches can normalise to the same name, and integration tooling should not
+have to infer an identity from a branch.
 
-An override mechanism may be added later but is not required for MVP.
+An ID is never rewritten to fit. An `--id` that would need normalising is refused rather
+than quietly changed, because refs named after a string nobody typed are not findable by
+the person who typed it.
+
+The directory belongs to the branch its `CHANGESET.yaml` records (§5), not to the branch
+whose name it resembles. That is what allows the two names to differ at all, and it is why
+a child branch created on top of its parent does not appear to own the changeset directory
+it merely inherited.
 
 ---
 
@@ -187,8 +201,23 @@ CHANGESET.yaml
 The minimum required metadata is:
 
 ```yaml
+id: booking-transaction
 base: main
+branch: feature/booking-transaction
 ```
+
+`id` is the changeset ID, and it is the directory's name rather than a second opinion
+about it: a file whose `id` disagrees with the directory holding it is an error to
+correct, not a conflict to resolve. `branch` is the claim that makes the directory belong
+to a branch, and it is the reason the ID can differ from the branch name. `base` is the
+ref the changeset's diff is measured against.
+
+The ID does not change once the changeset has durable refs. Renaming one means moving the
+directory and every ref under it, which is not something git-pair does silently; there is
+no rename command and no automatic migration.
+
+A changeset written before `branch:` existed has no claim, and is found by the name rule
+instead — the same answer the old code gave. A recorded claim always outranks the name.
 
 For stacked branches:
 
@@ -360,12 +389,13 @@ Example:
 
 ```bash
 git pair change init --base main
+git pair change init --id booking-transaction-v2 --base main
 ```
 
 Creates:
 
 ```text
-changesets/<current-changeset>/
+changesets/<id>/
   CHANGESET.yaml
   ABOUT.md
 ```
@@ -373,18 +403,55 @@ changesets/<current-changeset>/
 `CHANGESET.yaml`:
 
 ```yaml
+id: booking-transaction-v2
 base: main
+branch: feature/booking-transaction
 ```
 
 Requirements:
 
 -   determine current Git branch,
+-   determine the changeset ID: `--id` when given, otherwise the branch name normalised (§4),
 -   create deterministic changeset directory,
 -   create metadata,
 -   create `ABOUT.md`,
 -   accept `--base`,
 -   should be safe/idempotent where practical,
 -   should not destroy existing changeset data.
+
+`--id` chooses the identity rather than accepting the default (§4). Three rules follow from
+that:
+
+1. **It is not rewritten.** An ID needing normalisation — a space, a path separator, a
+   doubled hyphen — is refused. Silently turning `booking v2` into `booking-v2` would name
+   refs after a string nobody typed.
+2. **It is unique.** An ID already in use stops the command rather than gaining a suffix.
+   In use means a `changesets/<id>/` directory in the working tree or in `HEAD`'s tree, or a
+   durable ref already belonging to that ID (§13). A suffix would be an identity nobody
+   chose, baked into refs the moment the changeset is readied, so the command fails and
+   offers a free candidate to type instead:
+
+   ```text
+   changeset ID "feature-booking" is already in use: changesets/feature-booking already
+   exists, possibly left behind by a changeset that has landed.
+
+   Choose another ID:
+
+     git pair change init --id feature-booking-2
+   ```
+
+   Two branches whose names normalise alike are a collision once the directory from one is
+   in the other's tree, which is what a derived branch and a landed changeset both look
+   like. Two sibling branches that share no directory are not one yet: nothing is in use.
+3. **It does not change.** A branch that already owns a changeset cannot acquire a second ID
+   by re-running `init`; that would put two claims on one branch (§5).
+
+Deleting a changeset directory releases its ID only when the deletion is committed, since
+retiring a changeset's notes is a commit and not a local edit.
+
+When the branch has no changeset but the tree holds one whose `branch:` names a branch that
+no longer exists — a renamed branch — `init` says so and how to fix the claim, then proceeds.
+Creating a second changeset is a legitimate answer, so this is a warning rather than a gate.
 
 For a stacked branch:
 

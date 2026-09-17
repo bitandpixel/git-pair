@@ -55,8 +55,9 @@ committed 9f1c2de
 Next: fill in changesets/booking-transaction/ABOUT.md, commit it with your implementation, then run `git pair change ready`.
 ```
 
-`CHANGESET.yaml` is one line (`base: main`); `ABOUT.md` is a scaffold with `Summary`,
-`What changed`, `Design decisions`, `Validation`, `Known limitations` and `Open questions`
+`CHANGESET.yaml` records the changeset's `id`, its `base` and the `branch` that owns it;
+`ABOUT.md` is a scaffold with `Summary`, `What changed`, `Design decisions`, `Validation`,
+`Known limitations` and `Open questions`
 headings. Fill it in, commit it with your implementation, then:
 
 ```bash
@@ -218,11 +219,18 @@ $ git rev-list --count refs/reviews/archive/booking-transaction/0eaad3b
 
 ## Concepts
 
-**Changeset.** One branch, one changeset, one review stream. The directory name comes from
-the branch name: `/` and every character outside `[A-Za-z0-9._-]` become `-`, runs collapse,
-leading and trailing `-` are trimmed, case is kept, so `feature/booking-transaction` becomes
-`changesets/feature-booking-transaction/`. `CHANGESET.yaml` holds one meaningful key,
-`base`, which for a stack names another changeset's branch.
+**Changeset.** One branch, one changeset, one review stream. A changeset's identity is its
+**ID** — the name of its directory — and the branch name is only where the default comes
+from. The default normalises the branch: `/` and every character outside `[A-Za-z0-9._-]`
+become `-`, runs collapse, leading and trailing `-` are trimmed, case is kept, so
+`feature/booking-transaction` becomes `changesets/feature-booking-transaction/`. Choose your
+own with `git pair change init --id booking-transaction-v2`; an ID is never rewritten to fit,
+never suffixed to dodge a collision, and never changed once the changeset has refs.
+
+`CHANGESET.yaml` records `id`, `base` and `branch`. The `branch` line is the claim that makes
+the directory belong to a branch, which is what lets the ID and the branch name differ; a
+directory claiming another branch is not yours merely because its name would have matched.
+`base` is what the diff is measured against, and for a stack names another changeset's branch.
 
 **ABOUT.md and threads.** `changesets/<changeset>/ABOUT.md` is the canonical description of
 the change: the author writes it, the reviewer edits it, and edits committed by a review
@@ -389,7 +397,7 @@ Every command accepts the persistent `--json` flag, but only `status`, `change r
 
 | Command | Flags | Notes |
 | --- | --- | --- |
-| `change init` | `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is `main`, else `master`, else a usage error |
+| `change init` | `--id <id>`, `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is `main`, else `master`, else a usage error; `--id` names the changeset instead of the branch-derived default, and a collision with an existing directory or ref refuses rather than suffixing |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` only when it is in review, otherwise succeeds and records nothing |
 | `change abandon` | none | records the terminal `Review-State: abandoned` and anchors it; `change ready`, `change unready` and `review submit` refuse against it afterwards; idempotent |

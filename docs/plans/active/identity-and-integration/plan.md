@@ -106,36 +106,71 @@ Consequences recorded rather than asked separately:
 #### Deliverables
 
 - `change init --id <id>` chooses the identity; the branch name is the default source, not the identity.
-- `CHANGESET.yaml` carries `id:` alongside `base:`.
+- `CHANGESET.yaml` carries `id:` and `branch:` alongside `base:`, and the recorded branch is what makes
+  a directory belong to a branch — without it an explicit ID would be invisible to every command.
 - IDs are unique in the git-pair namespace: a collision refuses with §5's message and a suggested
   command, and nothing is ever suffixed to dodge one.
-- A changeset whose `id:` disagrees with its directory is reported instead of silently resolved.
+- A changeset whose `id:` disagrees with its directory is reported instead of silently resolved, and two
+  directories claiming one branch refuse rather than being guessed between.
 
 #### Tasks
 
-- [ ] `changeset.WriteOptions` and the metadata read path gain `ID`; `parseMetadata` already parses
+- [x] **Resolution had to move first, and the plan did not say so.** `ForBranch` and `AtCommit`
+  derived the directory from `SlugFromBranch(branch)`, so `--id booking-transaction-v2` would
+  have created a directory no command could find. A directory now belongs to the branch its
+  `CHANGESET.yaml` records, claims beat names, and `CHANGESET.yaml` gains `branch:`. That is
+  also what fixes a bug nobody reported: a child branch created on its parent's head carries
+  the parent's directory, and the name rule could make the queue show the child owning work it
+  merely inherited.
+- [x] `changeset.WriteOptions` and the metadata read path gain `ID`; `parseMetadata` already parses
   arbitrary keys, so this is the struct and the writer.
-- [ ] `change init --id` validated by the same character rule `SlugFromBranch` applies; explicit `--id`
+- [x] `change init --id` validated by the same character rule `SlugFromBranch` applies; explicit `--id`
   wins over the branch default, and an `--id` that normalises to something other than what was typed is
-  refused rather than quietly rewritten.
-- [ ] Collision checks before anything is written: the directory at `HEAD` or in the worktree, and any
+  refused rather than quietly rewritten. The path-separator check is redundant with the character
+  loop and stays for its message: pasting a branch name as an ID is the likely mistake, and
+  "must not contain a path separator" says what to fix where "contains `/`" does not.
+- [x] Collision checks before anything is written: the directory at `HEAD` or in the worktree, and any
   ref under the changeset's ref namespace. The ref half is what stops a resurrected slug inheriting the
-  archive of the changeset that owned the name first — the one route by which a second changeset could
-  come to share a ref target. Both go through one helper so M2's rename moves the check with it —
-  `reviewref` should expose the namespace root, not have callers rebuild the path.
-- [ ] Re-running `change init` on one's own changeset stays idempotent; colliding with *someone else's*
+  archive of the changeset that owned the name first. Both go through one helper so M2's rename moves
+  the check with it — `reviewref.Taken` and `reviewref.Namespace` are the only places the layout is
+  spelled out.
+- [x] Re-running `change init` on one's own changeset stays idempotent; colliding with *someone else's*
   changeset of the same ID is the failure.
-- [ ] Resolution enforces `id == filepath.Base(Dir)`; disagreement is an error naming both, which is
+- [x] Resolution enforces `id == filepath.Base(Dir)`; disagreement is an error naming both, which is
   §6's "reject ID mutation once refs exist" expressed as a read rule instead of a write rule.
-- [ ] Tests: `--id` honoured, default unchanged, collision by directory, collision by ref, hand-edited
-  `id:` refused, `--id` with a path separator refused.
-- [ ] PRD §9.1 and README's command surface and `CHANGESET.yaml` sample.
+- [x] Tests: `--id` honoured, default unchanged, collision by directory, collision by ref, hand-edited
+  `id:` refused, `--id` with a path separator refused, a committed deletion releasing the name, and a
+  live claim not being reported as stale.
+- [x] PRD §9.1 and README's command surface and `CHANGESET.yaml` sample.
+
+Not done, deliberately:
+
+- **`change init --json`.** It has no JSON mode today, and inventing one is a new contract with
+  keys to hold stable, which is not what M1 is for. `status`, `queue` and `check` are where
+  machines read.
+- **Two sibling branches whose names normalise alike are not refused.** Nothing is in use until a
+  directory from one is in the other's tree, and refusing on a name that git has not been asked
+  about would block a legitimate branch to prevent a hypothetical one.
+- **`Slug` stays the field name for the ID.** It is the ID (PRD §4), and the concept is spelled
+  `slug` across `reviewref`, `lifecycle`, `marker` and the CLI; renaming it is a mechanical commit
+  of its own, and mixing 100 renamed call sites into a behavioural change helps nobody read either.
+- **Renaming a branch is a hint, not a gate.** `change init` warns about a claim pointing at a branch
+  that no longer exists and says how to fix it, then proceeds, because starting a second changeset
+  after a rename is a legitimate answer.
 
 #### Verification
 
 Two branches whose names normalise to the same slug: the second `change init` fails with the suggestion
 and exits 2; `--id` on the second one succeeds and produces a different directory. A hand-edited `id:`
 makes `status` refuse with both names in the message.
+
+Done. Landed as two commits: the resolution change first (`8845a7a`), because the flag is inert without
+it, then `--id` and the collision rules. Mutations run against the working tree with `cp`
+backup/restore — dropping the leaf-ref arm of `Taken`, matching refs by bare string prefix, ignoring
+HEAD in `Claimed`, allowing a traversal or a separator in `ValidateID`, letting a branch acquire a
+second ID, offering no suggestion, and treating every claim as stale. Two initially survived: the
+separator arm was redundant with the character loop (kept for its message, now asserted), and one
+assertion about stale claims was vacuous because no changeset directory existed in that fixture.
 
 ### M2 — One archive ref per changeset, in the git-pair namespace
 

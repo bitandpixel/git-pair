@@ -41,6 +41,7 @@ func newChangeCommand(a *app) *cobra.Command {
 type initOptions struct {
 	base     string
 	setBase  bool
+	id       string
 	about    string
 	setAbout bool
 	noCommit bool
@@ -51,10 +52,19 @@ func newChangeInitCommand(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create review scaffolding for the current branch",
-		Long: `Create changesets/<changeset>/ with CHANGESET.yaml and ABOUT.md, then commit it.
+		Long: `Create changesets/<id>/ with CHANGESET.yaml and ABOUT.md, then commit it.
 
-The changeset directory name is derived from the branch name, so
-feature/booking-transaction becomes changesets/feature-booking-transaction/.
+The changeset ID is what git-pair calls the work from here on: it names the directory, and
+once refs exist it names those too. The branch name is only where the default comes from,
+so feature/booking-transaction becomes changesets/feature-booking-transaction/ unless you
+say otherwise:
+
+  git pair change init --id booking-transaction-v2
+
+An ID is chosen, not derived, so it is never rewritten to fit: --id booking\ v2 is refused
+rather than quietly turned into booking-v2, because refs named after a string nobody typed
+are not findable by the person who typed it. IDs are unique in git-pair's namespace, and a
+collision stops the command instead of appending a suffix.
 
 The commit covers the changeset directory only, so whatever else is staged on
 your index stays there. Use --no-commit to leave the scaffolding in the working
@@ -70,6 +80,7 @@ content, which makes describe-and-initialise a single non-interactive call:
 Existing content is never overwritten silently: replacing a populated ABOUT.md
 takes --set-about, the same way changing a base takes --set-base.`,
 		Example: `  git pair change init --base main
+  git pair change init --base main --id booking-transaction-v2
   git pair change init --base booking-transaction   # stacked branch
   git pair change init --base main --about - < draft.md`,
 		Args: cobra.NoArgs,
@@ -78,6 +89,7 @@ takes --set-about, the same way changing a base takes --set-base.`,
 		},
 	}
 	cmd.Flags().StringVar(&opts.base, "base", "", "ref this changeset is stacked on (default: main, then master)")
+	cmd.Flags().StringVar(&opts.id, "id", "", "changeset ID (default: the branch name, normalised)")
 	cmd.Flags().BoolVar(&opts.setBase, "set-base", false, "overwrite an existing base value")
 	cmd.Flags().StringVar(&opts.about, "about", "", "ABOUT.md content; - reads it from stdin")
 	cmd.Flags().BoolVar(&opts.setAbout, "set-about", false, "overwrite an existing ABOUT.md")
@@ -100,6 +112,38 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	cs, err := changeset.ForBranch(repo, branch)
 	if err != nil {
 		return &usageError{err}
+	}
+
+	// The ID is the identity and the branch name only supplies the default (PRD §4), so
+	// an explicit --id wins outright. A branch that already owns a changeset under another
+	// id is refused rather than shadowed by a second directory: two claims on one branch
+	// is the conflict resolve refuses to guess about.
+	if opts.id != "" {
+		if err := changeset.ValidateID(opts.id); err != nil {
+			return &usageError{err}
+		}
+		if cs.Exists && cs.Slug != opts.id {
+			return &usageError{fmt.Errorf("changeset %q already belongs to %s, and a changeset id does not change once it exists (PRD §6). Work on something else needs its own branch, or `git pair change init --id %s` on a branch of its own", cs.Slug, branch, opts.id)}
+		}
+		target, err := changeset.ForID(branch, opts.id)
+		if err != nil {
+			return &usageError{err}
+		}
+		cs = target
+	}
+	if !cs.Exists {
+		if err := refuseTakenID(ctx, repo, cs.Slug); err != nil {
+			return err
+		}
+		// A renamed branch leaves its claim behind, and "no changeset for this branch" is
+		// bad advice when the directory is sitting in the tree naming a branch that used to
+		// exist. Warn, because creating a second changeset is still a legitimate answer.
+		if stale, err := changeset.StaleClaims(ctx, repo); err == nil {
+			for _, s := range stale {
+				a.warn("warning: %s records branch %q, which no longer exists; if you renamed the branch, set `branch:` in %s rather than creating a second changeset\n",
+					s.Dir, s.Branch, filepath.Join(s.Dir, changeset.MetadataFile))
+			}
+		}
 	}
 
 	base := opts.base
@@ -194,6 +238,43 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	}
 	printInitNext(a, cs, described)
 	return nil
+}
+
+// refuseTakenID enforces the uniqueness PRD §5 asks for: an id may not already be in
+// use, as a directory or as a ref. Nothing is suffixed to dodge a collision — an id
+// chosen for you is an id nobody chose, and it is baked into refs the moment the
+// changeset is readied. A suggestion is offered only when the candidate is itself free.
+func refuseTakenID(ctx context.Context, repo *git.Repo, id string) error {
+	if taken, err := reviewref.Taken(ctx, repo, id); err != nil {
+		return err
+	} else if taken {
+		return idTakenError(ctx, repo, id, "git-pair refs already exist for it")
+	}
+	if claimed, err := changeset.Claimed(ctx, repo, id); err != nil {
+		return err
+	} else if claimed {
+		return idTakenError(ctx, repo, id, "changesets/"+id+" already exists, possibly left behind by a changeset that has landed")
+	}
+	return nil
+}
+
+func idTakenError(ctx context.Context, repo *git.Repo, id, why string) error {
+	if free := freeID(ctx, repo, id); free != "" {
+		return &usageError{fmt.Errorf("changeset ID %q is already in use: %s.\n\nChoose another ID:\n\n  git pair change init --id %s", id, why, free)}
+	}
+	return &usageError{fmt.Errorf("changeset ID %q is already in use: %s. Choose another ID with --id", id, why)}
+}
+
+// freeID returns the first unused <id>-<n>, or "" when none of the obvious candidates is
+// free or the repository could not be asked.
+func freeID(ctx context.Context, repo *git.Repo, id string) string {
+	for n := 2; n <= 9; n++ {
+		candidate := fmt.Sprintf("%s-%d", id, n)
+		if err := refuseTakenID(ctx, repo, candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
 }
 
 // aboutContent resolves the ABOUT.md body from --about or piped stdin.

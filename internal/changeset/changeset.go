@@ -218,6 +218,78 @@ func resolve(branch string, dirs []string, read func(name string) (map[string]st
 	return Changeset{Slug: fallback, Branch: branch, Dir: filepath.Join(Root, fallback)}, nil
 }
 
+// ForID names the changeset a branch would own if it were given this id, without
+// consulting the tree. `change init` needs the value to check for collisions before it
+// writes anything.
+func ForID(branch, id string) (Changeset, error) {
+	if branch == "" {
+		return Changeset{}, ErrDetachedHead
+	}
+	if err := ValidateID(id); err != nil {
+		return Changeset{}, err
+	}
+	return Changeset{Slug: id, Branch: branch, Dir: filepath.Join(Root, id)}, nil
+}
+
+// Claimed reports whether a changeset directory for id already exists, in the working
+// tree or in HEAD's tree. The committed half is what makes reuse impossible rather than
+// merely untidy: a merged changeset leaves its directory on the deployment branch after
+// its branch is gone, and a new changeset adopting that name would inherit that history.
+func Claimed(ctx context.Context, repo *git.Repo, id string) (bool, error) {
+	if err := ValidateID(id); err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(filepath.Join(repo.Dir, Root, id)); err == nil {
+		return true, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	dirs, err := DirsAt(ctx, repo, "HEAD")
+	if err != nil {
+		return false, err
+	}
+	for _, d := range dirs {
+		if d == id {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// StaleClaim is a changeset directory whose recorded branch is gone, which is what a
+// renamed branch looks like to git-pair.
+type StaleClaim struct {
+	Dir    string
+	Branch string
+}
+
+// StaleClaims lists directories claiming branches that no longer exist locally.
+func StaleClaims(ctx context.Context, repo *git.Repo) ([]StaleClaim, error) {
+	dirs, err := worktreeDirs(repo)
+	if err != nil {
+		return nil, err
+	}
+	branches := map[string]bool{}
+	refs, err := repo.ForEachRef(ctx, "refs/heads")
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range refs {
+		branches[strings.TrimPrefix(r.Name, "refs/heads/")] = true
+	}
+	var stale []StaleClaim
+	for _, name := range dirs {
+		md, err := readMetadata(filepath.Join(repo.Dir, Root, name, MetadataFile))
+		if err != nil {
+			return nil, err
+		}
+		if b := md["branch"]; b != "" && !branches[b] {
+			stale = append(stale, StaleClaim{Dir: filepath.Join(Root, name), Branch: b})
+		}
+	}
+	return stale, nil
+}
+
 // worktreeDirs lists the changeset directories present on disk.
 func worktreeDirs(repo *git.Repo) ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(repo.Dir, Root))

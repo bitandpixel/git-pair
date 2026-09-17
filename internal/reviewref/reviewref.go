@@ -27,6 +27,40 @@ const (
 // Head returns the movable review ref for a changeset.
 func Head(slug string) string { return root + "/" + slug }
 
+// NamespaceRoot is the ref namespace holding every changeset's durable refs. Callers
+// that need to look for a changeset's refs ask for this rather than rebuilding a path,
+// so the layout changes in one place.
+func NamespaceRoot() string { return root }
+
+// Namespace is the ref namespace one changeset owns. Nothing lives at Namespace itself:
+// a git ref cannot be both a leaf and a namespace, which git enforces by refusing the
+// leaf once a child exists. Every ref for a changeset is therefore a child of this path.
+func Namespace(id string) string { return root + "/" + id }
+
+// Taken reports whether any durable ref already belongs to this changeset id, which is
+// how `change init` refuses to hand out a name that is already someone's (PRD §5).
+//
+// Both shapes are checked because the refs are in transit between layouts: a leaf at the
+// namespace (`refs/reviews/<id>`, today) or children of it
+// (`refs/git-pair/changesets/<id>/*`, where this is heading, and the only shape git
+// allows once a child exists). Matching is by path component, so `booking` is not blocked
+// by `booking-v2`. The archive refs are not checked separately: they are written by the
+// same commands as the movable ref and nothing deletes refs, so an archive always has a
+// movable ref alongside it.
+func Taken(ctx context.Context, repo *git.Repo, id string) (bool, error) {
+	ns := Namespace(id)
+	refs, err := repo.ForEachRef(ctx, root)
+	if err != nil {
+		return false, err
+	}
+	for _, r := range refs {
+		if r.Name == ns || strings.HasPrefix(r.Name, ns+"/") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Archive returns the immutable archival ref for a changeset at a commit.
 func Archive(slug, shortSHA string) string {
 	return fmt.Sprintf("%s/%s/%s", archive, slug, shortSHA)
