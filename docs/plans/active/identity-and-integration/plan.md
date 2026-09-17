@@ -119,8 +119,10 @@ Consequences recorded rather than asked separately:
   wins over the branch default, and an `--id` that normalises to something other than what was typed is
   refused rather than quietly rewritten.
 - [ ] Collision checks before anything is written: the directory at `HEAD` or in the worktree, and any
-  ref under the changeset's ref namespace. Both go through one helper so M2's rename moves the check
-  with it — `reviewref` should expose the namespace root, not have callers rebuild the path.
+  ref under the changeset's ref namespace. The ref half is what stops a resurrected slug inheriting the
+  archive of the changeset that owned the name first — the one route by which a second changeset could
+  come to share a ref target. Both go through one helper so M2's rename moves the check with it —
+  `reviewref` should expose the namespace root, not have callers rebuild the path.
 - [ ] Re-running `change init` on one's own changeset stays idempotent; colliding with *someone else's*
   changeset of the same ID is the failure.
 - [ ] Resolution enforces `id == filepath.Base(Dir)`; disagreement is an error naming both, which is
@@ -215,7 +217,9 @@ implementation commit fails again, `change unready` fails.
   `for-each-ref --points-at`, filtered to `/archive` children. Resolve `--source` through `rev-parse`
   first, so an abbreviated SHA from a CI log resolves before discovery rather than matching nothing.
 - [ ] §18 and §19 as written: no match fails saying so; more than one fails listing the candidates and
-  naming `--changeset`; `--changeset` disambiguates but never substitutes for a missing archive.
+  naming `--changeset`; `--changeset` disambiguates but never substitutes for a missing archive. The
+  two-refs-at-one-commit fixture is built by moving a ref by hand, since git-pair cannot create that
+  state itself.
 - [ ] Order the §21 checks so the useful failures come first: unknown source, no archive, ambiguity,
   terminal changeset, unknown integrated commit, `--target` reachability, existing integration ref.
 - [ ] Reachability via `merge-base --is-ancestor`, with a comment on the re-added helper explaining why
@@ -281,9 +285,11 @@ against running the fetch first.
   after integration, but `git update-ref` is always available to a person. The honest claim is "git-pair
   never rewrites these", which is what §22 and §34 actually ask for; the plan says that in the README
   rather than implying a guarantee git does not give.
-- **Ambiguous source SHAs** (§19) are reachable in stacked work, where a child branch with no commits of
-  its own shares a head with its parent. The escape hatch is specified behaviour, and the test fixture
-  should include that shape rather than only the two-independent-changesets case.
+- **Ambiguous source SHAs** (§19) are reachable only through refs moved outside git-pair — a hand-run
+  `update-ref`, a restored or copied namespace — since every command that moves an archive ref commits
+  first and so names a commit that did not exist before (`research/2026-09-17-ref-namespace-reality.md`).
+  The escape hatch is specified behaviour and the recovery path for exactly those cases; the test builds
+  the collision with `update-ref` because no sequence of commands produces it.
 - **Custom refs do not survive a plain clone.** M5 exists for this; until it lands, CI integration is
   half-broken in a way that looks like a state bug. This is why M5 is a milestone and not a README note.
 - **`--points-at` needs the exact object.** Resolving `--source` first is mandatory; abbreviated SHAs
@@ -313,3 +319,4 @@ against running the fetch first.
 | 2026-09-17 | requirements.md | Spec supplied. Reconciled against the closed anchored-lifecycle plan: conflicts in §12/§25 (CLOSED) and §8–§11 (namespace, archive shape, `change complete`); the rest is either already true or additive. |
 | 2026-09-17 | research/2026-09-17-ref-namespace-reality.md | Primitives verified; nothing to migrate; §19's ambiguity is reachable in stacked work; `merge-base` permitted by hygiene, so ancestry may return for verification. |
 | 2026-09-17 | — | Four decisions settled with the reviewer, all as recommended: no CLOSED state, full namespace move, adopt the movable-archive model and retire `change complete`, identity first. `READY`, `--allow-unreviewed-changes` retirement, and the narrowed write rule recorded as consequences. |
+| 2026-09-17 | — | Reviewer corrected the §19 ambiguity claim: an empty child branch shares its parent's head but not its archive ref, because every ref-moving command commits first. Ambiguity is now an out-of-band recovery case, and M4's fixture builds the collision directly. |

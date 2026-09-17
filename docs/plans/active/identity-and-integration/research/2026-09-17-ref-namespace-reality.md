@@ -33,10 +33,23 @@ refs/git-pair/changesets/one/archive
 refs/git-pair/changesets/two/archive
 ```
 
-Two changesets pointing at one commit is reachable, not hypothetical — stacked branches share a head
-whenever a child has no commits of its own. `--changeset` must therefore be a real escape hatch, not a
-formality. Filtering to `/archive` children in-process is enough; `--points-at` does not take a glob, so
-the namespace is listed and the suffix filtered.
+Two changesets pointing at one commit is *not* reachable by ordinary use, which the first reading of
+this spike got wrong. Branches can share a head — a child with no commits of its own sits on its
+parent's head — but archive refs cannot, because every command that moves one commits something first:
+`marker.Commit` calls `repo.Commit` and returns the new head (`internal/marker/marker.go:108`), and
+`review submit` and `change abandon` reach the ref the same way. A ready marker, a review submission and
+an abandonment are each new commits, so a ref always names a commit that did not exist a moment earlier.
+A child branch created at the parent's head also inherits the parent's `changesets/<id>/`, so it is the
+same changeset and the same single ref, not a second one.
+
+So `--changeset` is the recovery path for refs moved outside git-pair — a hand-run `update-ref`, a
+restored or copied namespace — rather than something ordinary stacked work produces. It is still
+mandatory: §19 asks for it, it costs one flag, and when a namespace has been hand-edited it is the only
+way to record the truth without first repairing the ref. The test for it has to build the collision
+directly, since no sequence of commands will.
+
+`--points-at` does not take a glob, so the namespace is listed and the `/archive` suffix filtered in
+process.
 
 **Create-only ref write (§22) is enforced by git itself.**
 
