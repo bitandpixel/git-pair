@@ -90,6 +90,10 @@ $G diff nope/nope.ts >/dev/null 2>&1; check "path outside span" 2 $?
 step "reviewer: feedback then approve"
 $G review submit --feedback -m "Naming only, non-blocking."; check "submit --feedback" 0 $?
 $G status | sed 's/^/  /'
+# The gate's deliverable is `$?`, which is the one thing the Go harness cannot assert: it calls
+# the same cli.Execute that main passes to os.Exit, so only a shell sees an exit status.
+$G check; check "check: feedback alone is not integration-ready" 1 $?
+$G check --allow-feedback >/dev/null; check "check --allow-feedback accepts it" 0 $?
 printf '\n// tighten naming\n' >> src/service.ts
 git commit -qam "rename for clarity"
 $G change archive; check "archive refused: the reviewed content moved" 1 $?
@@ -102,7 +106,17 @@ HEAD_BEFORE=$(git rev-parse HEAD)
 $G change archive; check "change archive" 0 $?
 [ "$(git rev-parse HEAD)" = "$HEAD_BEFORE" ] && echo "  ok: archiving recorded no commit" || { echo "  FAIL: archiving created a commit"; FAILED=1; }
 ARCHIVE=refs/git-pair/changesets/booking-transaction/archive
+$G check >/dev/null; check "check: the archived approved head is integration-ready" 0 $?
 [ "$(git rev-parse "$ARCHIVE")" = "$HEAD_BEFORE" ] && echo "  ok: the archive names the archived head" || { echo "  FAIL: the archive does not point at HEAD"; FAILED=1; }
+# The gate over the two ways a passed gate stops meaning what it passed: the reviewed
+# content moved, and the author withdrew the offer. Both are exit 1 with a bullet naming
+# which, which is what makes the gate usable without reading the source.
+printf '\n// a note added after the approval\n' >> src/service.ts
+git commit -qam "note an edge case after the approval"
+$G check >/dev/null 2>&1; check "check: an implementation commit after the approval fails the gate" 1 $?
+$G change ready >/dev/null; check "ready again after the implementation commit" 0 $?
+$G change unready >/dev/null; check "withdraw the offer" 0 $?
+$G check >/dev/null 2>&1; check "check: a withdrawn changeset fails the gate" 1 $?
 BEFORE=$(git rev-list --count "$ARCHIVE")
 git switch -q main
 git branch -D booking-transaction >/dev/null

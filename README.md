@@ -216,6 +216,15 @@ Archived changeset booking-transaction at 4f2b8c1
 refs/git-pair/changesets/booking-transaction/archive: 0eaad3b → 4f2b8c1
 ```
 
+The gate is its own command, because deciding and observing are different jobs: `status` reports
+what the history says, `check` asserts it, and CI reads the exit code.
+
+```bash
+$ git pair check
+OK: booking-transaction is integration-ready
+archive: 4f2b8c1
+```
+
 Deleting the branch loses nothing:
 
 ```bash
@@ -459,6 +468,7 @@ landed.
 | `review queue` | — | every branch in this repo whose changeset is `READY`, longest wait first; read from the repository, not the checkout |
 | `change archive` | `--allow-surviving-review-additions`, `--allow-unreviewed-changes` | advances the archive ref onto the reviewed `HEAD` and reports squash-safety; refuses a `HEAD` behind the archive; commits nothing; never merges, pushes or squashes |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug |
+| `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition; no `--changeset`, because it is the gate a forge runs *on* a revision |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
@@ -483,7 +493,7 @@ nothing, those reads exit 2. For a span of another branch, name its ends: `git p
 | Exit code | Meaning | Seen as |
 | --- | --- | --- |
 | 0 | success | — |
-| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot archive <cs>: latest outcome is BLOCKED`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING` |
+| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot archive <cs>: latest outcome is BLOCKED`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:` |
 | 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
@@ -616,6 +626,28 @@ count beside it rather than looking like an ordinary approval.
 }
 ```
 
+`git pair check --json` — the verdict an automation consumes. `ready` is the answer, `reasons` names
+every failed condition (an empty array when it passed, so a consumer branches on `ready` rather than
+handling two shapes), and `policy` records which rule produced the verdict — `approve-only`, or
+`approve-or-feedback` with `--allow-feedback` — so a gate's decision in a log can be re-derived.
+`head` and `archive` are full SHAs, not the short forms the human output prints, because the job
+comparing them built one of them; `archive_current` is the two being equal.
+
+```json
+{
+  "changeset": "feat",
+  "ready": false,
+  "state": "APPROVED",
+  "head": "941266b18686624cb624722b4e8c348bf03451a7",
+  "archive": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  "archive_current": false,
+  "reasons": [
+    "archive does not point to the current source commit: refs/git-pair/changesets/feat/archive is at 1a2b3c4, HEAD is 941266b"
+  ],
+  "policy": "approve-only"
+}
+```
+
 `git pair change ready --json` returns the `status` fields plus `ready_commit` (full SHA),
 `review_queue_visible`, `acknowledged_survivors` and `surviving_review_artifacts`.
 
@@ -675,10 +707,11 @@ git pair change feedback            # read that submission: threads, ABOUT.md, c
 git pair review history --json      # enumerate review commits
 git pair change ready               # again
 git pair change archive             # once approved: put the archive where the work is
+git pair check                      # assert integration-readiness; $? is the answer
 ```
 
 Never prompt: `change init`, `change ready`, `change unready`, `change abandon`, `change feedback`,
-`change wait`, `change archive`, `status`, `diff`, `review submit`, `review history`,
+`change wait`, `change archive`, `status`, `check`, `diff`, `review submit`, `review history`,
 `review queue`. They report
 and exit instead of asking, even with a terminal attached.
 
@@ -697,6 +730,28 @@ and nothing in git-pair checks who ran it — identity and permissions are out o
 approval on the human side of the pair is a convention you enforce. When an agent records
 progress it uses `git pair change ready`, and when the work is not finished after all it withdraws the
 offer with `git pair change unready` rather than leaving a reviewer looking at a stale offer.
+
+**As a CI gate.** `check` reads the repository — commits, the archive ref, the trees — so a plain
+checkout of the branch is enough to run it:
+
+```bash
+git pair check || exit 1
+```
+
+The exit code is the verdict: 0 ready, 1 not ready, 2 usage, 3 git failed. A not-ready run writes
+one bullet per failed condition to stdout, so the log explains the gate without a second run, and
+`--json` carries `ready`, `reasons`, `policy` and full SHAs in `head` and `archive` for a job that
+wants to compare them against the revision it built:
+
+```bash
+git pair check --json | jq -e '.ready'
+```
+
+Two things a gate needs to know. `check` accepts `feedback` only with `--allow-feedback`, which is
+stricter than `change archive` — a head that was approved, or given non-blocking feedback, may be
+archived, and the repository decides at the gate whether feedback alone is enough to land. And the archive condition needs
+`refs/git-pair/changesets/<id>/archive` to be present: git-pair never pushes it (§13), so a CI job
+that was not given those refs reports the archive as missing rather than the review as absent.
 
 ## Configuration
 
@@ -995,8 +1050,17 @@ ready`; it does block it if you then edit `ABOUT.md` without committing. Use
 instead.
 
 `no changeset for this branch: changesets/foo` (exit 2), or `HEAD is detached; check out a
-branch first` (exit 2) — the directory is named after the branch, so renaming a branch orphans
-its changeset and a detached HEAD has no name.
+branch first` (exit 2) — the directory is named after the branch by default, so a detached HEAD has
+no name to derive one from. Renaming a branch needs nothing: resolution reads which changeset
+directories the revision carries, not which branch you are standing on, and `--changeset <id>` reads
+one from any branch while HEAD stays where it is.
+
+`git pair check` printing `NOT READY:` while `git pair status` says `APPROVED` is usually one of two
+things, and both bullets name which: the archive ref names the approved commit while `HEAD` has moved
+past it (run `git pair change archive` — a changeset-only commit is not drift, so the approval
+stands), or the newest review is `feedback`, which the default policy does not accept (the bullet
+says so, and `--allow-feedback` is the switch). `check` is also the one command that ignores your
+working tree: it asserts the commit, and uncommitted edits are not in `HEAD` to be reviewed.
 
 A missing entry in `git pair review queue` is usually not a queue bug: membership is derived
 state, and only a command moves it — `change ready`, `change unready`, or a review submission. A

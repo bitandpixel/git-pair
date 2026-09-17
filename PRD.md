@@ -420,7 +420,8 @@ git-pair
 │   └── queue
 │
 ├── status
-└── diff
+├── diff
+└── check
 ```
 
 ---
@@ -1166,6 +1167,88 @@ and span options described below.
 
 `git pair diff` and its span options serve review. An author who wants to read a review that was just submitted uses `git pair change feedback` (§9.3) instead.
 
+## 11.3 `git pair check`
+
+Asserts that the checked-out changeset is integration-ready, and exits non-zero when it is not.
+
+This is the assertion half of the pair with `git pair status` (§11.1). `status` reports what the
+history says; `check` answers the one question a merge gate has, in its exit code, so nothing has
+to parse prose. CI needs `$?` and nothing else:
+
+```bash
+git pair check || exit 1
+```
+
+The conditions, all of them reported rather than the first:
+
+1. the changeset has not ended (§9.7),
+2. the newest lifecycle marker is a review whose outcome permits integration — `approve`, or
+   `feedback` under `--allow-feedback`. A changeset that is merely marked ready, or withdrawn by
+   `change unready`, is not reviewed,
+3. no marker after it carries `Review-*` trailers this build cannot read,
+4. the content that review looked at is still what `HEAD` carries: the tree is compared between the
+   marker and `HEAD`, ignoring `changesets/<changeset>/`, the same comparison `change archive` (§9.5)
+   and `status` make,
+5. the changeset's archive ref (§13) points at `HEAD`.
+
+Every failed condition is printed, because a gate that reports one problem per run turns a
+two-minute fix into a round trip per problem, and a log that explains itself once is the difference
+between a check people read and one they re-run.
+
+```text
+$ git pair check
+
+OK: booking-transaction is integration-ready
+archive: a7f3c98
+
+$ git pair check
+
+NOT READY:
+- latest review outcome is blocking
+- archive does not point to the current source commit: refs/git-pair/changesets/booking-transaction/archive is at 6c1d0aa, HEAD is 91bf204
+```
+
+Exit codes are the existing table: 0 integration-ready, 1 not ready, 2 usage, 3 git failed.
+Failing is the command working, so the verdict is written to stdout and no `git-pair:` diagnostic is
+printed over it.
+
+`--allow-feedback` is the only policy switch:
+
+```text
+                    default    --allow-feedback
+APPROVED            pass       pass
+FEEDBACK            fail       pass
+BLOCKED             fail       fail
+ended               fail       fail
+```
+
+The default is stricter than `change archive`, which accepts `feedback` as permitting integration.
+That is deliberate and the two are not in contradiction: archiving is preservation, and a
+non-blocking review is still a review of that head, so it may be archived; `check` is the gate, and
+the repository decides at the gate whether feedback alone is enough to land. An author can therefore
+archive a changeset that `check` refuses — the archive is not a claim that the work may merge.
+
+`--json` prints `changeset`, `ready`, `state`, `head`, `archive`, `archive_current`, `reasons` and
+`policy` (`approve-only` or `approve-or-feedback`, so a verdict in a log carries the policy that
+produced it). `head` and `archive` are full SHAs rather than the short forms the human output prints,
+because the consumer compares them against the revision it built. `reasons` is an array in both
+verdicts, so a consumer branches on `ready` instead of handling two shapes for one fact.
+
+Two absences are decisions rather than gaps:
+
+-   **No `--changeset`.** This is the check a forge runs *on* a revision. Naming a second changeset
+    would make the verdict ambiguous about what was gated, so the flag does not exist here even
+    though `status` and `diff` take it.
+-   **No surviving-review-additions diagnostic.** §19 lists that check among readiness
+    conditions, but `change ready` is where the decision is made and acknowledged, and conditions 2
+    and 4 here already guarantee nothing has moved since the marker. Re-deriving it in `check`
+    re-litigates a decision the author already took, in a command with no override flag to take it
+    again.
+
+The assertion is about the commit, not the checkout: uncommitted changes are not in `HEAD` and
+cannot invalidate a review of it, so a dirty working tree does not change the answer. `status`
+reports the dirt, because `status` is observing.
+
 ---
 
 # 12. Review Lifecycle
@@ -1894,6 +1977,7 @@ git pair change unready
 git pair change wait --json
 git pair change feedback
 git pair change archive
+git pair check
 ```
 
 Agent behavior:
@@ -1910,7 +1994,10 @@ Agent behavior:
 10. update code and discussion documents as appropriate,
 11. commit implementation changes normally,
 12. run `git pair change ready` again,
-13. once the reviewer's approval stands at `HEAD`, run `git pair change archive` to advance the archive onto it.
+13. once the reviewer's approval stands at `HEAD`, run `git pair change archive` to advance the archive onto it,
+14. run `git pair check` to assert integration-readiness. Its exit code is the answer, and an agent
+    asked to confirm that a changeset may land should call it rather than read `status` output,
+    because `status` is observing and `check` is deciding (§11.3).
 
 `git pair status --json` remains the way to check state without blocking. `git pair diff --unreviewed` is the reviewer's span command; an author consuming a newly submitted review uses `git pair change feedback`.
 
@@ -1920,9 +2007,10 @@ it unconditionally rather than branching on state.
 
 An agent must **not approve its own work**.
 
-Approval remains a reviewer action. Completing a changeset is the owner's action and is not
-approval: it archives the head the reviewer approved, and the merge that finishes the changeset
-stays with the human.
+Approval remains a reviewer action. Archiving a changeset is the owner's action and is not
+approval: it keeps the head the reviewer approved reachable, and the merge that finishes the
+changeset stays with the human. Nor is archiving a licence to merge — `git pair check` is what
+asserts the gate, and it accepts `feedback` only when told to.
 
 ---
 

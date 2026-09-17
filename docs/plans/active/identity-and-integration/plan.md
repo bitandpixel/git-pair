@@ -489,7 +489,7 @@ still resolves and `status --changeset <id>` still reads the history.
 
 #### Tasks
 
-- [ ] One predicate, built from the derivation that already exists: terminal → fail; newest marker's
+- [x] One predicate, built from the derivation that already exists: terminal → fail; newest marker's
   outcome → `APPROVED` passes, `FEEDBACK` passes only with `--allow-feedback`, `BLOCKED` and a withdrawal
   fail; archive not at the source head → fail; implementation drift over the reviewed content → fail.
   - *Decided before implementing:* this makes `check` stricter than `change archive`, which accepts
@@ -498,33 +498,64 @@ still resolves and `status --changeset <id>` still reads the history.
     still a review of that head; `check` is the gate, and the repository decides at the gate whether
     feedback alone is enough to land. An author can therefore archive a changeset that CI refuses, which
     is the intended shape — the archive is not a claim that the work may merge.
-- [ ] §28's wording: `OK: <id> is integration-ready` plus `archive: <sha>`, or `NOT READY:` with one
+- [x] §28's wording: `OK: <id> is integration-ready` plus `archive: <sha>`, or `NOT READY:` with one
   bullet per failed condition — every condition, not the first, so CI output is actionable without a
   second run.
-- [ ] Exit codes follow the existing table: 0 ready, 1 not ready, 2 usage. No new codes.
-- [ ] `--json`: `id`, `ready`, `state`, `archive`, `archive_current`, `reasons` as machine-readable
+  - *Amended while implementing:* the two §28 examples are reproduced exactly, and the archive bullet
+    carries the two ends it compared (`… is at 6c1d0aa, HEAD is 91bf204`) because "the archive does not
+    point at the source commit" without the two SHAs sends someone to run `git rev-parse` twice.
+- [x] Exit codes follow the existing table: 0 ready, 1 not ready, 2 usage. No new codes.
+  - *Amended while implementing:* the not-ready verdict goes to **stdout** and returns the silent-error
+    sentinel, because a failing check is the command working: printing `git-pair: …` over the verdict
+    would put a tool diagnostic where the gate's answer is.
+- [x] `--json`: `id`, `ready`, `state`, `archive`, `archive_current`, `reasons` as machine-readable
   strings, `policy`.
   - *Decided before implementing:* the key is `changeset`, not `id`. Every command that reports a
     changeset in JSON calls it `changeset` today, and `check` naming the same value `id` would make
     the deferred `slug`→`id` rename a breaking change to the JSON contract as well as to the code —
     two things to schedule instead of one. The rename, when it comes, moves every key together.
-- [ ] `check` does **not** re-run the surviving-review-additions diagnostic. §26 lists it among the
+  - *Amended while implementing:* added `head`, which the list did not carry. A CI job runs the gate on
+    the revision it built, and without the source SHA in the output it has to run `git rev-parse` to
+    learn whether the gate looked at that revision. `head` and `archive` are full SHAs — the human
+    output prints short forms, and a short SHA cannot be compared safely. `reasons` is an empty array
+    rather than `null` when the gate passes, so a consumer branches on `ready` instead of handling two
+    shapes for one fact.
+- [x] `check` does **not** re-run the surviving-review-additions diagnostic. §26 lists it among the
   conditions, but `change ready` is where that decision gets made and acknowledged, and the outcome
   and drift conditions already guarantee that nothing has changed since the marker — re-deriving it
   would re-litigate a decision the author already took, in a command with no override flag to take
   it again. This settles the open question at the bottom of this plan; the reason goes in the code
   comment where the conditions are listed.
-- [ ] Works on a checked-out changeset branch; deliberately does not take `--changeset`, since it is the
-  thing a forge check runs *on* a branch.
-- [ ] Table-driven tests over outcome × policy × drift × archive-current, plus a shell-level assertion
+- [x] Works on a checked-out changeset branch; deliberately does not take `--changeset`, since it is the
+  thing a forge check runs *on* a branch. The absence is a test, not a comment: `check --changeset <id>`
+  exits 2 with cobra's `unknown flag`.
+- [x] Table-driven tests over outcome × policy × drift × archive-current, plus a shell-level assertion
   of `$?` because the deliverable is an exit code.
-- [ ] README's agent contract (this is the command agents should call) and a CI example; PRD gets a new
+  - *Amended while implementing:* the predicate tests are white-box over `integrationReasons`
+    (`check_internal_test.go`), which is where the conditions actually live — the table asserts the
+    reason **count** as well as its text, so a merged or dropped condition fails even when the wording
+    still matches. The shell-level `$?` assertion went into `e2e-29.sh` rather than a Go test: the
+    harness calls the same `cli.Execute` that `main` passes to `os.Exit`, so a Go test cannot observe an
+    exit status the harness does not already have, and only a shell sees one.
+- [x] README's agent contract (this is the command agents should call) and a CI example; PRD gets a new
   section beside §9.
+  - *Amended while implementing:* the section is **§11.3**, beside `status` and `diff`, not under §9.
+    `check` is not a `change` subcommand, and filing it with the author commands would have made §8's
+    tree and §11's command disagree about what the command is. README gained the command-table row, the
+    agent-contract line, an "As a CI gate" subsection, a `--json` sample, an exit-code row and a
+    troubleshooting entry — the last because "`check` says NOT READY while `status` says APPROVED" is
+    the confusion this pair of commands will actually produce.
+  - Found and fixed while writing the docs: the README's troubleshooting still claimed renaming a
+    branch orphans its changeset, which the tree rule retired two commits ago.
 
 #### Verification
 
-The matrix in tests, and one end-to-end run in the live gate: unapproved fails, approved passes, a later
-implementation commit fails again, `change unready` fails.
+The matrix in tests — white-box over the predicate for every condition and every policy, and the
+CLI surface for exit codes, both outputs and the JSON key set. The live gate (`e2e-29.sh`) replays
+the four moments a gate has to answer for: feedback alone fails, an approved-and-archived head
+passes, an implementation commit after the approval fails it again, and a withdrawn offer fails it.
+That script is also where the exit code is asserted as a shell sees it, since the Go harness calls
+the same `cli.Execute` that `main` passes to `os.Exit`.
 
 ### M4 — `integration record`
 
@@ -635,9 +666,11 @@ against running the fetch first.
   changeset directories this revision has and trunk does not, rank 1 from archive refs on this line
   only when rank 0 is empty. Seven measured fixtures, the cost table, and the integration-branch
   resolution order the rule newly depends on.
-- Open, to settle during M3: whether `check` should re-verify review-addition survival (§26's last
-  bullet) or leave it to `change ready`'s existing gate. Current position: leave it, because two
-  implementations of one rule drift apart. Record the choice in the plan when M3 lands.
+- Settled during M3: `check` does not re-verify review-addition survival (§26's last bullet). The
+  decision is `change ready`'s to make and acknowledge, and the outcome and drift conditions already
+  guarantee nothing has moved since the marker, so re-deriving it would re-litigate a settled decision
+  in a command with no override flag to settle it again. Two implementations of one rule drift apart;
+  this keeps one. The reason is recorded in the comment above `integrationReasons`.
 
 ## Risks
 

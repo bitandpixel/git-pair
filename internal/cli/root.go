@@ -115,7 +115,8 @@ refs/git-pair/changesets/* keeps the complete unsquashed history reachable.
 
 Author commands:   git pair change init | use | ready | unready | abandon | archive
 Reviewer commands: git pair review open | about | thread | submit | history | queue
-Inspection:        git pair status | diff`,
+Inspection:        git pair status | diff
+Gates:             git pair check`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if jsonFlag, err := cmd.Flags().GetBool("json"); err == nil {
 				a.json = jsonFlag
@@ -137,6 +138,7 @@ Inspection:        git pair status | diff`,
 		newReviewCommand(a),
 		newStatusCommand(a),
 		newDiffCommand(a),
+		newCheckCommand(a),
 	)
 	return root
 }
