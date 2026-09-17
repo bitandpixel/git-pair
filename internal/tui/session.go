@@ -408,6 +408,24 @@ func (s *Session) Toggle(i int) {
 	s.files[i].Reviewed = !s.files[i].Reviewed
 }
 
+// SetReviewedUnder marks or clears every file under dir, a repository-relative directory path
+// ending in its separator. A directory has no state of its own: the store keeps an answer per file
+// and the counter counts files, so marking a directory means marking everything inside it — folded
+// or not, since a fold is a way of looking at the list rather than a claim about what has been read.
+// It returns how many files changed state, which is how the screen can say what one keystroke did
+// to rows the reviewer cannot currently see.
+func (s *Session) SetReviewedUnder(dir string, reviewed bool) int {
+	changed := 0
+	for i := range s.files {
+		if s.files[i].Reviewed == reviewed || !isUnder(s.files[i].Path, dir) {
+			continue
+		}
+		s.files[i].Reviewed = reviewed
+		changed++
+	}
+	return changed
+}
+
 // Count returns reviewed and total file counts.
 func (s *Session) Count() (reviewed, total int) {
 	for _, f := range s.files {
@@ -452,7 +470,9 @@ type Patch struct {
 	Err     string // why there is no patch, if there is none
 }
 
-// Patch asks git for one path's diff across the current span.
+// Patch asks git for one path's diff across the current span. The path may name a directory, which
+// is what a directory row previews and diffs: git takes it as a pathspec and answers for every file
+// the span changed under it.
 //
 // It returns no error: a preview that cannot be drawn is a line in the pane, not a problem the
 // reviewer has to handle, and this runs in the background while they keep moving the cursor.
@@ -498,24 +518,38 @@ func (s *Session) diff(ctx context.Context, from, to, path string) Patch {
 		p.Lines = strings.Split(out, "\n")
 	}
 	// The counts come from git rather than by counting these lines, so a capped patch still
-	// reports the file's real size.
+	// reports the file's real size — and so that a directory, whose numstat is one line per file
+	// under it, reports the subtree's size rather than the first file's.
 	numstat := append([]string{"diff", "--no-ext-diff", "--numstat"}, revs...)
 	num, err := s.repo.Git(ctx, append(numstat, "--", path)...)
 	if err == nil {
-		if line := strings.TrimSpace(strings.SplitN(num, "\n", 2)[0]); line != "" {
-			if fields := strings.Fields(line); len(fields) >= 2 {
-				// A binary file reports "-" for both counts, which leaves the counts at -1
-				// and the header without a size to show.
-				if a, e := strconv.Atoi(fields[0]); e == nil {
-					p.Added = a
-				}
-				if d, e := strconv.Atoi(fields[1]); e == nil {
-					p.Deleted = d
-				}
-			}
+		// Unknown stays -1, which is what leaves the header without a size to show: no diff at all,
+		// or a binary in the patch.
+		if added, deleted, ok := sumNumstat(num); ok {
+			p.Added, p.Deleted = added, deleted
 		}
 	}
 	return p
+}
+
+// sumNumstat adds git's per-file numstat counts: one file for a path, the whole subtree for a
+// directory. A binary file reports "-" for both sides and has no size to add, so the answer is that
+// the patch has no countable size at all rather than the total of the text files alone — a number
+// about some of the files, read as a number about all of them, is the worse mistake of the two.
+func sumNumstat(out string) (added, deleted int, ok bool) {
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 2 {
+			continue
+		}
+		a, errA := strconv.Atoi(fields[0])
+		d, errD := strconv.Atoi(fields[1])
+		if errA != nil || errD != nil {
+			return 0, 0, false
+		}
+		added, deleted, ok = added+a, deleted+d, true
+	}
+	return added, deleted, ok
 }
 
 // Changeset is the changeset under review.

@@ -137,8 +137,10 @@ func TestTabSwitchesBetweenTheTwoSections(t *testing.T) {
 	}
 
 	back := press(toSection, tea.KeyTab)
-	if got, row := selectedKind(t, back); got != rowFile {
-		t.Errorf("Tab from the changeset section landed on %q (kind %d), want the first file", row.name, got)
+	// The first row of the files is the top of the tree, which is a directory when the changeset
+	// reaches into one — and landing there is right: it is where the files start.
+	if got, row := selectedKind(t, back); !inFileBlock(got) {
+		t.Errorf("Tab from the changeset section landed on %q (kind %d), want the first row of the files", row.name, got)
 	}
 	if back.cursor != 0 {
 		t.Errorf("Tab back landed on row %d, want the first file row", back.cursor)
@@ -146,7 +148,7 @@ func TestTabSwitchesBetweenTheTwoSections(t *testing.T) {
 
 	// Shift+Tab is the same toggle, so a reviewer whose terminal sends it for the other
 	// direction still gets between the two sections.
-	if got, _ := selectedKind(t, press(toSection, tea.KeyShiftTab)); got != rowFile {
+	if got, _ := selectedKind(t, press(toSection, tea.KeyShiftTab)); !inFileBlock(got) {
 		t.Error("shift-tab should return to the files")
 	}
 	if got, _ := selectedKind(t, press(m, tea.KeyShiftTab)); got != rowAbout {

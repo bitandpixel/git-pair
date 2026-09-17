@@ -51,6 +51,9 @@ type rowKind uint8
 
 const (
 	rowFile rowKind = iota
+	// rowDir is a directory of the file tree: a prefix of the changed files, foldable, and the
+	// thing Space marks when a reviewer wants a whole subtree read at once.
+	rowDir
 	rowAbout
 	rowThreadsHead
 	rowThread
@@ -70,13 +73,28 @@ const (
 // the code, then what the changeset says about it, with `j` running off the bottom of the
 // files and into the artifacts instead of into a separate mode.
 type row struct {
-	kind  rowKind
-	path  string // repository-relative, for the rows that name a file
-	name  string // what the row prints
-	file  int    // index into Session.Files() for a file row, -1 otherwise
-	note  string // set on the thread heading when the threads could not be listed
-	count int    // how many threads the heading is standing in for
+	kind rowKind
+	// path is repository-relative. A directory row's carries the trailing separator, which makes it
+	// both the prefix that marks the subtree and the pathspec git takes for the directory diff.
+	path string
+	// name is what the row prints: a base name, a folded directory run, or a section label.
+	name string
+	// file is the index into Session.Files() for a file row, -1 for everything else.
+	file int
+	// depth is how far a tree row sits under the top of the file tree. The rows under the reviewed
+	// counter are all at 0, because that section is not a tree.
+	depth int
+	// total and marked count the files under a directory row, folded ones included: they are what
+	// the row promises and what Space is about to set.
+	total, marked int
+	note          string // set on the thread heading when the threads could not be listed
+	count         int    // how many threads the heading is standing in for
 }
+
+// inFileBlock is which rows belong to the file tree rather than to the changeset section under the
+// reviewed counter. Directory rows belong to it: they are part of the files, Tab should land on one
+// when it comes back to them, and folding a directory must not count as having left the files.
+func inFileBlock(k rowKind) bool { return k == rowFile || k == rowDir }
 
 // action is what Enter does with a row.
 type action uint8
@@ -97,14 +115,16 @@ const (
 // openArtifact: what a returning reviewer wants from ABOUT.md or a thread is usually the two
 // or three lines the author rewrote after the last review, and a diff is the only way to see
 // exactly those — while a document the changeset invented has no comparison worth opening.
-// The heading toggles its own group, and the last row of the group creates another thread.
+// The heading toggles its own group, and the last row of the group creates another thread. Enter on
+// a directory does the same to its own part of the tree — fold it, unfold it — which is what the key
+// already means for a group of rows; reading what a directory changed is `d`, as it is for a file.
 func activateBy(r row) action {
 	switch r.kind {
 	case rowFile:
 		return actionDiff
 	case rowThread, rowAbout:
 		return actionArtifact
-	case rowThreadsHead:
+	case rowDir, rowThreadsHead:
 		return actionCollapse
 	case rowNewThread:
 		return actionNewThread
@@ -155,6 +175,11 @@ type reviewModel struct {
 	rows        []row
 	inSpan      map[string]bool
 	threadsOpen bool
+	// folded holds the directories whose contents are hidden, keyed by the directory path with
+	// its trailing separator. It is view state and nothing else: the marks a directory row shows
+	// are computed from the files under it every time the list is built, so there is no directory
+	// state to keep in step with them, or to save.
+	folded map[string]bool
 
 	promptKind promptKind
 	input      string
@@ -407,6 +432,12 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.move(-1)
 	case key.Type == tea.KeyTab, key.Type == tea.KeyShiftTab:
 		m.jumpSection()
+	case key.Type == tea.KeyLeft, key.Type == tea.KeyRunes && firstRune(key) == 'h':
+		m.foldUp()
+	case key.Type == tea.KeyRight, key.Type == tea.KeyRunes && firstRune(key) == 'l':
+		m.unfoldUnder()
+	case key.Type == tea.KeyRunes && firstRune(key) == 'c':
+		m.toggleTree()
 	case key.Type == tea.KeySpace:
 		m.toggleMark()
 	case key.Type == tea.KeyEnter:
@@ -504,32 +535,175 @@ func (m reviewModel) cannot(doing string) string {
 		"\u2014 V chooses a span you can review", sp.Head, doing)
 }
 
-// toggleMark marks the file under the cursor reviewed, or explains why the row it is on
-// cannot be: ABOUT.md and threads are read rather than diffed, and the group rows are not
-// things at all.
+// toggleMark marks the file under the cursor reviewed, or explains why the row it is on cannot be:
+// ABOUT.md and threads are read rather than diffed, and the group rows are not things at all.
+//
+// A directory row marks what it stands for — every file under it, including the ones a fold has
+// hidden, since the fold is a way of looking and not a claim about what was read. One press marks
+// the subtree, and the next clears it, so the key does the same thing to a directory that it does
+// to a file: it flips the state of the row under the cursor.
 func (m *reviewModel) toggleMark() {
 	r, ok := m.selectedRow()
 	if !ok {
 		return
 	}
-	if r.kind != rowFile {
+	var note string
+	switch {
+	case r.kind == rowDir:
+		all := r.total > 0 && r.marked == r.total
+		verb, reviewed := "marked", true
+		if all {
+			verb, reviewed = "cleared", false
+		}
+		n := m.sess.SetReviewedUnder(r.path, reviewed)
+		note = fmt.Sprintf("%s %d file%s under %s", verb, n, plural(n), r.path)
+	case r.kind == rowFile:
+		m.sess.Toggle(r.file)
+	default:
 		m.setStatus("reviewed marks apply to file rows: "+r.name+" is not one", false)
 		return
 	}
-	m.sess.Toggle(r.file)
+	// The list was built before the mark moved, and a directory's mark and its counts are facts
+	// about the files under it rather than about the row: rebuilding is what stops the row the
+	// cursor is on from showing the state one keystroke behind.
+	m.refresh()
 	// Marks persist locally so the review can be resumed. A failure is reported
 	// and otherwise ignored: the review itself does not depend on them.
 	if err := m.sess.SaveMarks(m.ctx); err != nil {
 		m.setStatus("marks not saved: "+err.Error(), true)
-	} else {
-		m.setStatus("", false)
+		return
 	}
+	// Empty for a file, which is what clearing the line after a mark has always meant.
+	m.setStatus(note, false)
 }
 
 // toggleThreads collapses or expands the thread list under its heading.
 func (m *reviewModel) toggleThreads() {
 	m.threadsOpen = !m.threadsOpen
 	m.refresh()
+}
+
+// --- folding the file tree --------------------------------------------------
+
+// setFolded hides or shows the contents of one directory. Unfolding clears the keys above it as
+// well: the row a reviewer is looking at may name a run of single-child directories that `c`
+// folded as three keys, and opening only the deepest of them would leave the two above still
+// hiding the row that was just opened. Deeper folds are left alone, so unfolding a directory
+// reveals the children it has and not the whole world underneath them.
+func (m *reviewModel) setFolded(dir string, folded bool) {
+	if m.folded == nil {
+		m.folded = map[string]bool{}
+	}
+	if folded {
+		m.folded[dir] = true
+	} else {
+		for _, above := range ancestorsOf(dir) {
+			delete(m.folded, above)
+		}
+	}
+	m.refresh()
+}
+
+// foldUp is `h` and the left arrow: the way back up a tree. On an open directory it closes it;
+// anywhere else in the tree — a file, or a directory already closed — it moves the cursor onto the
+// row of the directory containing it, which is how the key leaves the fold decision to the reviewer
+// rather than collapsing whatever the cursor happens to be over. It is a key of the file tree: the
+// changeset section under the counter has paths in it, but no rows that fold.
+func (m *reviewModel) foldUp() {
+	r, ok := m.selectedRow()
+	if !ok {
+		return
+	}
+	if !inFileBlock(r.kind) {
+		m.setStatus(r.name+" is under the counter, where nothing folds — h/l fold the file tree", false)
+		return
+	}
+	if r.kind == rowDir && !m.folded[r.path] {
+		m.setFolded(r.path, true)
+		return
+	}
+	_, idx := m.containingDirRow(r.path)
+	if idx < 0 {
+		m.setStatus(r.name+" sits at the top of the tree", false)
+		return
+	}
+	m.cursor = idx
+	m.clamp()
+	m.setStatus("", false)
+}
+
+// unfoldUnder is `l` and the right arrow, and it only ever opens: the closing half of a directory
+// is `h` or Enter, so that one key cannot be the one that hides what the reviewer is reading.
+func (m *reviewModel) unfoldUnder() {
+	r, ok := m.selectedRow()
+	if !ok {
+		return
+	}
+	if !inFileBlock(r.kind) {
+		m.setStatus(r.name+" is under the counter, where nothing folds — h/l fold the file tree", false)
+		return
+	}
+	if r.kind != rowDir {
+		m.setStatus(r.name+" is a file — h/l fold a directory", false)
+		return
+	}
+	if !m.folded[r.path] {
+		m.setStatus(r.name+" is already open", false)
+		return
+	}
+	m.setFolded(r.path, false)
+}
+
+// toggleTree is `c`: the whole tree at once, and back. A changeset of a hundred files opens as a
+// hundred rows, and the reviewer who wants the shape of it before the detail presses this. It is
+// one key rather than a pair because the two states are the only two there are, and pressing it
+// again has exactly one sensible meaning.
+func (m *reviewModel) toggleTree() {
+	dirs := treeDirs(m.sess.Files())
+	if len(dirs) == 0 {
+		m.setStatus("nothing to fold: this span changes files at the top of the tree only", false)
+		return
+	}
+	if m.treeFolded(dirs) {
+		m.folded = nil
+		m.refresh()
+		return
+	}
+	m.folded = make(map[string]bool, len(dirs))
+	for _, dir := range dirs {
+		m.folded[dir] = true
+	}
+	m.refresh()
+}
+
+// treeFolded is whether every directory of the tree is closed, which is what decides which way `c`
+// goes. It counts the directories rather than the rows, because a folded run of single-child
+// directories hides keys that no row names — and those have to count as folded, or the second press
+// of `c` would fold the tree a second time instead of opening it.
+func (m reviewModel) treeFolded(dirs []string) bool {
+	for _, dir := range dirs {
+		if !m.folded[dir] {
+			return false
+		}
+	}
+	return true
+}
+
+// containingDirRow finds the deepest directory row on screen that path sits under. A file's own
+// directory is always among them — nothing hidden is on screen — and so is every directory above
+// it, which is what makes this the answer for both "where is the row above this file" and "where
+// did the cursor's row go when its subtree was folded away".
+func (m reviewModel) containingDirRow(path string) (row, int) {
+	best, idx := row{}, -1
+	for i, r := range m.rows {
+		if r.kind != rowDir || !isUnder(path, r.path) {
+			continue
+		}
+		if idx < 0 || len(r.path) > len(best.path) {
+			best, idx = r, i
+		}
+	}
+	return best, idx
 }
 
 func (m reviewModel) handleSubmitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -651,6 +825,10 @@ func (m reviewModel) activate() (tea.Model, tea.Cmd) {
 	case actionArtifact:
 		return m.openArtifact(r)
 	case actionCollapse:
+		if r.kind == rowDir {
+			m.setFolded(r.path, !m.folded[r.path])
+			return m, nil
+		}
 		m.toggleThreads()
 	case actionNewThread:
 		if why := m.cannot("start a thread"); why != "" {
@@ -663,15 +841,16 @@ func (m reviewModel) activate() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// openDiffOfSelection is `d`: the difftool for whatever the cursor is on. A file row is
-// always diffable — it is in the span by construction — and anything else goes through the
-// same decision Enter makes for it.
+// openDiffOfSelection is `d`: the difftool for whatever the cursor is on. A file row is always
+// diffable — it is in the span by construction — and so is a directory, where git expands the
+// pathspec into every file the span changed under it: one key for "show me this package". Anything
+// else goes through the same decision Enter makes for it.
 func (m reviewModel) openDiffOfSelection() (tea.Model, tea.Cmd) {
 	r, ok := m.selectedRow()
 	if !ok {
 		return m, nil
 	}
-	if r.kind == rowFile {
+	if inFileBlock(r.kind) {
 		return m.openDiff(r.path)
 	}
 	return m.openArtifact(r)
@@ -764,9 +943,16 @@ func difftoolHead(sp span.Span) string {
 }
 
 // openEditor edits the row under the cursor: a file, a thread, or ABOUT.md.
+// openEditor edits the row under the cursor: a file, a thread, or ABOUT.md. A directory is not a
+// thing an editor has to open — the tool would find its own way in — and the keys that do want the
+// whole subtree are already there, so the row says so instead of sending a path to the editor.
 func (m reviewModel) openEditor() (tea.Model, tea.Cmd) {
 	r, ok := m.selectedRow()
 	if !ok || r.path == "" {
+		return m, nil
+	}
+	if r.kind == rowDir {
+		m.setStatus(r.name+" is a directory — enter folds it, d diffs what is under it", false)
 		return m, nil
 	}
 	return m.openPath(r.path)
@@ -816,6 +1002,10 @@ var (
 	styleErr      = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	styleMark     = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	styleSpan     = lipgloss.NewStyle().Bold(true)
+	// stylePartial is a directory whose files do not all agree: green is a subtree read, faint is
+	// one untouched, and this is the part way through, where the row counts what is left instead of
+	// claiming the mark.
+	stylePartial = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 	// styleWarn is the drift banner: a warning about the ground moving, not an error about
 	// something the reviewer just did.
 	styleWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
@@ -1027,10 +1217,10 @@ func (m reviewModel) helpText() string {
 	}
 	if !m.sess.Span().Live() {
 		// Nothing in this bar may imply the reviewer can act on history.
-		return "j/k move  tab section  enter open  d diff  p preview  " + threadsHint +
+		return "j/k move  tab section  h/l fold  c fold all  enter open  d diff  p preview  " + threadsHint +
 			"  v spans  V picker  q quit"
 	}
-	return "j/k move  tab section  enter open  d diff  p preview  e edit  space reviewed  a about  " +
+	return "j/k move  tab section  h/l fold  c fold all  enter open  d diff  p preview  e edit  space reviewed  a about  " +
 		"t new thread  " + threadsHint + "  v spans  V picker  s submit  q quit"
 }
 
@@ -1138,7 +1328,9 @@ func wrapWords(s string, width int) []string {
 
 // refresh rebuilds the navigable list from the session, keeping the cursor on the row it was
 // on while that row still exists — a thread created in the editor, a rescan after a difftool
-// closed, or a collapse should not move the reviewer somewhere else.
+// closed, or a collapse should not move the reviewer somewhere else. When the row has gone off
+// the screen, the cursor goes to the directory that holds it rather than staying at its old
+// index, which after a fold would be some unrelated row further down the list.
 func (m *reviewModel) refresh() {
 	var keep *row
 	if m.cursor >= 0 && m.cursor < len(m.rows) {
@@ -1146,24 +1338,44 @@ func (m *reviewModel) refresh() {
 	}
 	m.buildRows()
 	if keep != nil {
-		for i, r := range m.rows {
-			if r.kind == keep.kind && r.path == keep.path {
-				m.cursor = i
-				break
-			}
+		if i := m.rowIndex(keep.kind, keep.path); i >= 0 {
+			m.cursor = i
+		} else if _, i := m.containingDirRow(keep.path); i >= 0 {
+			m.cursor = i
 		}
 	}
 	m.clamp()
 }
 
+// rowIndex finds the row of a given kind naming a given path, or -1. It is how the cursor knows it
+// is still looking at the same thing after the list has been rebuilt.
+func (m reviewModel) rowIndex(kind rowKind, path string) int {
+	for i, r := range m.rows {
+		if r.kind == kind && r.path == path {
+			return i
+		}
+	}
+	return -1
+}
+
 func (m *reviewModel) buildRows() {
-	var rows []row
-	inSpan := make(map[string]bool, len(m.sess.Files()))
-	for i, f := range m.sess.Files() {
-		rows = append(rows, row{kind: rowFile, path: f.Path, name: f.Path, file: i})
+	files := m.sess.Files()
+	inSpan := make(map[string]bool, len(files))
+	for _, f := range files {
 		inSpan[f.Path] = true
 	}
 	m.inSpan = inSpan
+	// The tree is rebuilt from the flat list on every refresh, which is what keeps a directory's
+	// counts honest: they are a fact about the files under it, re-read rather than remembered.
+	var rows []row
+	for _, e := range flattenTree(files, m.folded) {
+		if e.dir {
+			rows = append(rows, row{kind: rowDir, path: e.path, name: e.name, depth: e.depth,
+				file: -1, total: e.total, marked: e.marked})
+			continue
+		}
+		rows = append(rows, row{kind: rowFile, path: e.path, name: e.name, depth: e.depth, file: e.file})
+	}
 	rows = append(rows, row{kind: rowAbout, path: m.sess.AboutPath(),
 		name: filepath.Base(m.sess.AboutPath()), file: -1})
 
@@ -1198,9 +1410,9 @@ func (m *reviewModel) jumpSection() {
 	if !ok {
 		return
 	}
-	toFiles := r.kind != rowFile
+	toFiles := !inFileBlock(r.kind)
 	for i, candidate := range m.rows {
-		if (candidate.kind == rowFile) == toFiles {
+		if inFileBlock(candidate.kind) == toFiles {
 			m.cursor = i
 			m.clamp()
 			return
@@ -1208,21 +1420,37 @@ func (m *reviewModel) jumpSection() {
 	}
 }
 
-// rowText renders one row. Only a file row carries a reviewed mark: the artifacts below it
-// are read rather than diffed.
+// The two columns the file tree spends on itself: the indent one level costs, and the fold arrow a
+// directory row puts before its mark. Both are two cells, which is what makes a directory's children
+// land in the column its own mark gutter starts at.
+const treeIndent = "  "
+
+// rowText renders one row. Only the file tree carries a reviewed mark: the artifacts below the
+// counter are read rather than diffed.
 func (m reviewModel) rowText(r row) string {
 	switch r.kind {
+	case rowDir:
+		arrow := "▸ "
+		if !m.folded[r.path] {
+			arrow = "▾ "
+		}
+		text := strings.Repeat(treeIndent, r.depth) + styleDim.Render(arrow)
+		if m.sess.Span().CanMark() {
+			text += m.dirGutter(r)
+		}
+		if r.marked > 0 && r.marked < r.total {
+			// The count is what a reviewer folds a directory to look for, so it is the one state
+			// that says how many are left instead of wearing a mark true of only some of what the
+			// row stands for.
+			return text + r.name + styleDim.Render(fmt.Sprintf("  %d/%d", r.marked, r.total))
+		}
+		return text + r.name
 	case rowFile:
-		if !m.sess.Span().CanMark() {
-			// No gutter over history: a tick there means "this reviewer has read it", and
-			// marks left on that commit by an earlier review are not this reviewer's.
-			return r.name
+		text := strings.Repeat(treeIndent, r.depth)
+		if m.sess.Span().CanMark() {
+			text += m.fileGutter(r)
 		}
-		mark := "○ "
-		if f := m.sess.Files(); r.file >= 0 && r.file < len(f) && f[r.file].Reviewed {
-			mark = styleMark.Render("✓ ")
-		}
-		return mark + r.name
+		return text + r.name
 	case rowAbout:
 		return r.name
 	case rowThreadsHead:
@@ -1245,6 +1473,29 @@ func (m reviewModel) rowText(r row) string {
 		return styleDim.Render(threadIndent + r.name)
 	}
 	return r.name
+}
+
+// fileGutter is a file's reviewed mark. Over history there is none: a tick there would mean "this
+// reviewer has read it", and marks left on that commit by an earlier review are not this
+// reviewer's.
+func (m reviewModel) fileGutter(r row) string {
+	if f := m.sess.Files(); r.file >= 0 && r.file < len(f) && f[r.file].Reviewed {
+		return styleMark.Render("✓ ")
+	}
+	return "○ "
+}
+
+// dirGutter is a subtree's mark, and a directory wears one only when every file under it agrees.
+// Between the two a tick would be a claim about files nobody has opened, so the mixed row counts
+// what is left in rowText and puts the half-mark here.
+func (m reviewModel) dirGutter(r row) string {
+	switch {
+	case r.total > 0 && r.marked == r.total:
+		return styleMark.Render("✓ ")
+	case r.marked == 0:
+		return "○ "
+	}
+	return stylePartial.Render("◐ ")
 }
 
 func (m *reviewModel) clamp() {
@@ -1301,7 +1552,7 @@ type renderedRow struct {
 func (m reviewModel) window() (files, section []renderedRow) {
 	for _, idx := range m.visibleRows() {
 		r := renderedRow{row: m.rows[idx], index: idx}
-		if m.rows[idx].kind == rowFile {
+		if inFileBlock(m.rows[idx].kind) {
 			files = append(files, r)
 		} else {
 			section = append(section, r)
