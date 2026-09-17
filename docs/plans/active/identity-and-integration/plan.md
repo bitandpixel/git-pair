@@ -262,6 +262,10 @@ assertion about stale claims was vacuous because no changeset directory existed 
   drift to `change archive` and carries a foreign path into this changeset's landing.
 - [ ] Ambiguity message names every candidate and points at `change use` and `status --changeset`,
   since both escape hatches already exist.
+- [ ] `status --json` reports the integration branch it resolved, its commit, and which source
+  supplied it (`flag` / `origin-head` / `sole-candidate`), reported the same way whether the ref came
+  from `--integration` or from detection. A CI run should be explainable from its own output rather
+  than from what the machine happened to have fetched.
 - [ ] Cost assertions: resolving on a changeset branch and on trunk stay in single-digit git
   invocations with 300 archive refs present, against 1,802 for the per-ref formulation.
 - [ ] `queue` enumerates local branches and resolves each against trunk — two `ls-tree` calls per
