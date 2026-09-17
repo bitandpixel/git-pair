@@ -220,9 +220,11 @@ assertion about stale claims was vacuous because no changeset directory existed 
 
 #### Deliverables
 
-- Discovery is the combined rule: changeset directories on this revision and not on the
-  integration branch, with archive refs as the fallback for a directory that no longer exists.
-  Specified in `research/2026-09-17-combined-rule.md`.
+- Discovery is the tree rule: the changeset directories on this revision that the integration
+  branch does not have. No ref-based fallback — resolution reads trees, and refs are for
+  archiving, integration and CI. Specified in `research/2026-09-17-combined-rule.md`, including the
+  amendment that drops rank 1.
+- Ambiguity is resolved by a recorded decision (`change use <id>`), not by a heuristic.
 - `refs/git-pair/changesets/<id>/archive` is the only durable ref a changeset has before
   integration, created at `change init` (§11).
 - The `branch:` claim from M1 is gone; `CHANGESET.yaml` is `id` + `base` again.
@@ -238,14 +240,26 @@ assertion about stale claims was vacuous because no changeset directory existed 
   revision and in trunk; nearest archive tip, then `base:`-names-parent to break a stack, then
   ambiguity. `ForID` stays for `--changeset` reads; `ForBranch`/`AtCommit` and the claim machinery
   are deleted, including `StaleClaims` and the renamed-branch warning.
-- [ ] Rank 1 only when rank 0 is empty: archive refs whose target is in one `rev-list <trunk>..<rev>`
-  set, whose directory is absent from trunk, not integrated, not terminal. Reported with a note, in
-  `status` and `--json`, that the directory is missing — it is a degraded state, not a normal answer.
-- [ ] `status` says how it resolved (rank and note) so a rank-1 answer is not mistaken for a
-  directory-backed one; `queue` enumerates local branches plus archive refs with no branch, the
-  latter reported as a distinct condition rather than as active work.
-- [ ] Cost assertions: resolving on a changeset branch and on trunk stay in single-digit and
-  low-teens git invocations with 300 archive refs present, against 1,802 for the per-ref formulation.
+- [ ] No ref fallback. Resolution is rank 0 alone; a branch whose changeset directory was deleted
+  reports `uninitialized` with the normal hint. Fixture asserts exactly that, so the omission is a
+  decision in the test suite rather than an oversight.
+- [ ] `change use <id>`: records which candidate this branch is working on. Refuses an id that is not
+  a candidate here, writes `ignores: <id> [...]` into the chosen changeset's `CHANGESET.yaml` and
+  commits it. A candidate named in another candidate's `ignores:` stops being a candidate. In the
+  chosen file and not the loser's, because an edit under `changesets/<other>/` is implementation
+  drift to `change archive` and carries a foreign path into this changeset's landing.
+- [ ] Ambiguity message names every candidate and points at `change use` and `status --changeset`,
+  since both escape hatches already exist.
+- [ ] Cost assertions: resolving on a changeset branch and on trunk stay in single-digit git
+  invocations with 300 archive refs present, against 1,802 for the per-ref formulation.
+- [ ] `queue` enumerates local branches and resolves each against trunk — two `ls-tree` calls per
+  branch, which is the enumeration shape the previous plan's M4 wanted. Archive refs with no branch
+  behind them are deliberately **not** listed in this milestone: with refs created at init, a
+  branchless ref is as likely to be an abandoned attempt as a deleted branch, and guessing either
+  way is a report nobody asked for. Recorded as a known gap.
+- [ ] README troubleshooting gains the consequence the tree rule accepts: if someone merges your
+  unlanded changeset and lands it, your changeset reads as landed on your own branch, because your
+  directory is in trunk's tree. Measured, not inferred.
 - [ ] `reviewref`: `Archive(id)`, `Update`, `Resolve` against the new namespace; delete the per-head
   archive writer and its exact-SHA matcher; no reader of `refs/reviews/*` remains.
 - [ ] `change archive`: succeeds when the archive is already at `HEAD`; advances when nothing outside
@@ -266,12 +280,11 @@ assertion about stale claims was vacuous because no changeset directory existed 
 
 #### Verification
 
-The seven combined-rule fixtures from the spike, ported to product tests: a deleted directory
-resolves from the ref with a note; a landed changeset is not resurrected by its own ref; two
-unrelated directories on one branch are ambiguous; an init on trunk answers `uninitialized` for
-trunk and its descendants; a stacked child still resolves when its parent has landed; a diverged
-parent and child both resolve to the shared changeset; a clone with no archive refs resolves from
-the tree alone.
+The seven tree-rule fixtures from the spike, ported to product tests: a stacked child resolves and
+so does it after its parent lands; a diverged parent and child both resolve to the shared changeset;
+a clone with no archive refs resolves from the tree alone; two unrelated directories are ambiguous
+until `change use` records the choice, after which the branch resolves; a branch that merged an
+unlanded sibling is ambiguous; a deleted directory is `uninitialized`.
 
 Approve, then: archive == the approval commit with no further command. Commit a reply in `ABOUT.md` →
 `change archive` advances. Commit an implementation change → `change archive` refuses and names the file,
@@ -438,3 +451,4 @@ against running the fetch first.
 | 2026-09-17 | measurements | M1's claim resolution cost 859 extra `git show` calls per queue run (0.29s → 2.3s) and turned `status --changeset` from name matching into a full walk (0.03s → 2.3s) on a 41-branch, 40-directory fixture. Fixed before M2 by `2c465a9`: one `ls-tree` per branch plus one `cat-file --batch` over distinct object ids, back to 0.30s and 0.15s. Worth keeping because the shape is a standing cost: the directory count grows with every changeset that lands and is never garbage-collected (§35). |
 | 2026-09-17 | measurements | Archive-ref discovery prototyped (`research/2026-09-17-archive-ref-discovery.md`). The five rules as written resolve the stacked case but leave a diverged parent without a changeset, make an unrecorded merge landing ambiguous for every later branch, answer differently for squash versus merge, and let a forgotten `change init` own its descendants; measured cost 1,802 invocations per resolution at 300 refs, ~11s per read on a 20k-commit history. Two amendments measured (exclude landed refs; comparable-not-ancestor) each fixed part of it. The tree rule — directories here and not on trunk — passed all six fixtures in 8 invocations. M2 is held until the rule is chosen. |
 | 2026-09-17 | decision | Combined rule adopted after measurement: changeset directories on the revision and not on trunk decide resolution, archive refs are the fallback for a directory that no longer exists (`research/2026-09-17-combined-rule.md`). Seven fixtures in the spike pass, including the two no amendment of the specified rule could answer; cost 8 invocations on a changeset branch and 12 on trunk against 1,802 for the per-ref formulation. The `branch:` claim goes, `change init` still creates the archive ref, and M2 now carries discovery alongside the namespace move. The one new dependency is resolving the integration branch, which nothing in the product does today. |
+| 2026-09-17 | decision | Rank 1 (the archive-ref fallback) removed after the reviewer read its purpose correctly: two of the three justifications were false (a PR checkout has the tree; a rebase that drops the init commit also detaches the archive ref), leaving only a committed deletion of `changesets/<id>/`, where the loss is one confusing message. Resolution is the tree rule alone. Two findings from that probe: merging an unlanded sibling branch makes the branch ambiguous (`[mine@4 theirs@4]`, a case the claim model could not reach), answered by `change use <id>` recording `ignores:` in the chosen changeset rather than the losing one; and landing someone else's merge of your unlanded changeset makes yours read as landed on your own branch, measured with and without any recorded decision — a control run showed the flag was never the cause. |

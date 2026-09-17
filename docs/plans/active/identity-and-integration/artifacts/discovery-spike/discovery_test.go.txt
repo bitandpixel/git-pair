@@ -512,6 +512,14 @@ func combined(t *testing.T, f *gittest.Fixture) discovery.Outcome {
 	return got
 }
 
+func cids(cs []discovery.Candidate) []string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = fmt.Sprintf("%s@%d", c.ID, c.Dist)
+	}
+	return out
+}
+
 func ids(hits []discovery.Hit) []string {
 	out := make([]string, len(hits))
 	for i, h := range hits {
@@ -648,4 +656,194 @@ func TestCostOfCombinedRule(t *testing.T) {
 	if onTrunk > 12 {
 		t.Errorf("the fallback is still iterating refs: %d invocations on trunk", onTrunk)
 	}
+}
+
+// What is lost when the ref fallback goes: a branch whose changeset directory has been
+// deleted has nothing left to resolve from.
+func TestTreeRuleAloneOnTheDeletedDirectory(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("booking")
+	archive(f, "booking", f.CommitChangeset("booking", "main"))
+	f.Commit("work", gittest.WithFile("booking.txt", "1\n"))
+	f.MustGit("rm", "-r", "-q", "changesets/booking")
+	f.Commit("drop the directory", gittest.WithNoStage())
+
+	if got := treeRule(t, f); got.Candidate != nil {
+		t.Fatalf("got %s, want nothing", got.Candidate.ID)
+	}
+	t.Logf("tree rule alone: the branch whose archive ref is an ancestor reports uninitialized")
+}
+
+// Merging a sibling changeset branch brings that directory into this branch's tree. The
+// claim model did not have this problem: their directory claimed their branch.
+func TestTreeRuleAfterMergingASibling(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("theirs")
+	archive(f, "theirs", f.CommitChangeset("theirs", "main"))
+	f.Commit("their work", gittest.WithFile("their.txt", "1\n"))
+
+	f.SwitchTo("main")
+	f.CreateBranch("mine")
+	archive(f, "mine", f.CommitChangeset("mine", "main"))
+	f.Commit("my work", gittest.WithFile("mine.txt", "1\n"))
+	f.MustGit("merge", "--no-ff", "-m", "take their branch too", "theirs")
+
+	got := treeRule(t, f)
+	if got.Candidate != nil {
+		t.Logf("resolved %s@%d", got.Candidate.ID, got.Candidate.Dist)
+	} else {
+		t.Logf("AMBIGUOUS after merging a sibling: %v", cids(got.Ambiguous))
+	}
+	if len(got.Ambiguous) != 2 {
+		t.Errorf("want two candidates after pulling in a sibling changeset, got %+v", got.Candidate)
+	}
+}
+
+// Merging trunk is the common case and must stay clean: landed directories are on trunk,
+// so they are not candidates.
+func TestTreeRuleAfterMergingTrunk(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("landed")
+	f.CommitChangeset("landed", "main")
+	f.Commit("landed work", gittest.WithFile("landed.txt", "1\n"))
+	f.SwitchTo("main")
+	f.CreateBranch("mine")
+	f.CommitChangeset("mine", "main")
+	f.Commit("my work", gittest.WithFile("mine.txt", "1\n"))
+
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "-m", "land it", "landed")
+
+	f.SwitchTo("mine")
+	f.MustGit("merge", "--no-ff", "-m", "catch up", "main")
+	got := treeRule(t, f)
+	if got.Candidate == nil || got.Candidate.ID != "mine" || len(got.Ambiguous) > 0 {
+		t.Fatalf("got %+v %v, want mine", got.Candidate, cids(got.Ambiguous))
+	}
+	t.Logf("merging trunk leaves the branch resolving to its own changeset")
+}
+
+func yaml(t *testing.T, f *gittest.Fixture, id, body string) {
+	path := "changesets/" + id + "/CHANGESET.yaml"
+	if err := os.WriteFile(filepath.Join(f.Dir(), path), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The literal version of the persisted decision, and how it leaks.
+func TestDecisionInTheLoserLeaks(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("theirs")
+	f.CommitChangeset("theirs", "main")
+	f.Commit("their work", gittest.WithFile("their.txt", "1\n"))
+	f.SwitchTo("main")
+	f.CreateBranch("mine")
+	f.CommitChangeset("mine", "main")
+	f.Commit("my work", gittest.WithFile("mine.txt", "1\n"))
+	f.MustGit("merge", "--no-ff", "-m", "take theirs", "theirs")
+
+	if got, err := discovery.Candidates(context.Background(), repo(f), f.Head(), "main"); err != nil || len(got) != 2 {
+		t.Fatalf("before the decision: %v %v, want two candidates", got, err)
+	}
+
+	// Mark the loser inactive on this branch only.
+	yaml(t, f, "theirs", "id: theirs\nbase: main\ninactive: true\n")
+	f.Commit("work on mine, not theirs", gittest.WithFiles(map[string]string{"note.txt": "n\n"}))
+	got, err := discovery.Candidates(context.Background(), repo(f), f.Head(), "main")
+	if err != nil || len(got) != 1 || got[0] != "mine" {
+		t.Fatalf("after the decision: %v %v, want [mine]", got, err)
+	}
+
+	// Land the winner. The inactive line travels inside theirs/ on purpose-of-the-test.
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "-m", "land mine", "mine")
+	f.SwitchTo("theirs")
+	f.MustGit("merge", "--no-ff", "-m", "catch up", "main")
+
+	got, err = discovery.Candidates(context.Background(), repo(f), f.Head(), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("leak not reproduced: their branch resolves %v", got)
+	} else {
+		t.Logf("LEAK: after their branch merges the trunk that carries the winner, their own")
+		t.Logf("changeset is marked inactive on their branch and resolves to nothing.")
+		t.Logf("contents of their CHANGESET.yaml now: %q", trim(f.Read("changesets/theirs/CHANGESET.yaml")))
+	}
+}
+
+// The same decision hosted in the changeset that was chosen.
+func TestDecisionInTheWinnerIsBenign(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("theirs")
+	f.CommitChangeset("theirs", "main")
+	f.Commit("their work", gittest.WithFile("their.txt", "1\n"))
+	f.SwitchTo("main")
+	f.CreateBranch("mine")
+	f.CommitChangeset("mine", "main")
+	f.Commit("my work", gittest.WithFile("mine.txt", "1\n"))
+	f.MustGit("merge", "--no-ff", "-m", "take theirs", "theirs")
+
+	// The winner records who it is working alongside.
+	yaml(t, f, "mine", "id: mine\nbase: main\nignores: theirs\n")
+	f.Commit("record the choice", gittest.WithFiles(map[string]string{"note.txt": "n\n"}))
+	got, err := discovery.Candidates(context.Background(), repo(f), f.Head(), "main")
+	if err != nil || len(got) != 1 || got[0] != "mine" {
+		t.Fatalf("after the decision: %v %v, want [mine]", got, err)
+	}
+
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "-m", "land mine", "mine")
+	f.SwitchTo("theirs")
+	f.MustGit("merge", "--no-ff", "-m", "catch up", "main")
+	got, err = discovery.Candidates(context.Background(), repo(f), f.Head(), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "theirs" {
+		t.Fatalf("their branch after the winner landed: %v, want [theirs]", got)
+	}
+	t.Logf("their changeset still resolves on their branch: the directive rode along in the winner's file")
+
+	f.CreateBranch("later")
+	if got, _ := discovery.Candidates(context.Background(), repo(f), f.Head(), "main"); len(got) != 0 {
+		t.Errorf("a branch off trunk should be uninitialized, got %v", got)
+	} else {
+		t.Logf("and once the winner is on trunk, its ignores list is inert")
+	}
+}
+
+// Control for the leak test: the same scenario with no decision recorded at all. If the
+// loser's branch also resolves to nothing here, the trunk test — not the flag — ended it.
+func TestControlWithoutAnyDecision(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("theirs")
+	f.CommitChangeset("theirs", "main")
+	f.Commit("their work", gittest.WithFile("their.txt", "1\n"))
+	f.SwitchTo("main")
+	f.CreateBranch("mine")
+	f.CommitChangeset("mine", "main")
+	f.Commit("my work", gittest.WithFile("mine.txt", "1\n"))
+	f.MustGit("merge", "--no-ff", "-m", "take theirs", "theirs")
+
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "-m", "land mine", "mine")
+	f.SwitchTo("theirs")
+	f.MustGit("merge", "--no-ff", "-m", "catch up", "main")
+
+	got, err := discovery.Candidates(context.Background(), repo(f), f.Head(), "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("no decision was ever recorded; their branch resolves %v", got)
+	t.Logf("is theirs on trunk now? dir present: %v", trim(f.MustGit("ls-tree", "--name-only", "main", "changesets/theirs/")))
+	t.Logf("are their commits in trunk's history? %v",
+		trim(f.MustGit("merge-base", "--is-ancestor", "theirs", "main")+" yes"[:0]+"ok"))
 }

@@ -138,3 +138,56 @@ only on the survivors, which is normally zero or one. The spike keeps a dead sec
   mistaken for a normal one.
 - `change init` writes `base: refs/git-pair/changesets/<parent>/archive` for a stacked parent
   and creates the archive ref immediately, per §11.
+
+---
+
+## Amended 2026-09-17 after review: rank 1 is dropped, and ambiguity gets a recorded decision
+
+The reviewer read the fallback correctly — it exists for one situation, and two of the three
+justifications I gave for it do not hold:
+
+- **"CI has the code but not the metadata" is false.** A PR or merge-ref checkout gets the
+  branch's tree, directory included.
+- **"A rebase drops the init commit" is false.** Dropping that commit rewrites every descendant,
+  so the archive ref stops being an ancestor of the new line and the fallback would not fire.
+- **What is left is a committed deletion** of `changesets/<id>/` on a branch that was never
+  rebased. Measured loss: the branch reports `uninitialized`; the archive ref stops advancing,
+  which is inert rather than harmful, and the files come back with
+  `git checkout <sha> -- changesets/<id>/`.
+
+Resolution is therefore **rank 0 alone**. The cost is one confusing message in a case the author
+caused, and it buys back the notes field, the rank in `--json`, and the ordering asymmetry.
+
+### Merging an unlanded sibling is the case rank 0 cannot answer
+
+Measured: merging a sibling changeset branch into yours puts *their* directory in your tree, and
+both are absent from trunk, so the branch is ambiguous (`[mine@4 theirs@4]` — equal distance,
+nothing to order them by). The claim model could not hit this, because their directory claimed
+their branch. Merging trunk stays clean (landed directories drop out), so this is specifically
+sibling-into-feature.
+
+The answer is a recorded decision rather than a heuristic: `git pair change use <id>` refuses
+anything that is not a candidate on this branch, and records the choice in the changeset that was
+chosen — `ignores: <id> [...]` in `changesets/<id>/CHANGESET.yaml`. A candidate named in another
+candidate's `ignores:` stops being a candidate.
+
+**Where the field goes was measured, and the intuition was wrong.** Putting `inactive: true` in
+the *losing* changeset's metadata does travel: land the winner, and the losing branch inherits an
+`inactive: true` in its own directory after it catches up with trunk. But a control run with no
+decision recorded at all resolves identically — that branch's directory is already on trunk,
+carried in by the winner's landing, so the trunk test ended it regardless of the flag. The leak is
+textual, not behavioural.
+
+The reason to host the field in the winner is different and more solid: an edit under
+`changesets/theirs/` is outside your changeset directory, so `change archive` counts it as
+implementation drift and refuses to advance, and your landing carries a path belonging to someone
+else's review. An edit under `changesets/mine/` is exempt from that rule by construction.
+
+### The property this accepts, which needs documenting
+
+If someone merges your unlanded changeset branch and lands it, **your changeset reads as landed on
+your own branch** — your directory is in trunk's tree, so it stops being a candidate. Confirmed
+with and without any recorded decision. It is defensible (your commits are in trunk) and it is
+surprising from the author's seat. The remedy is `change init` for the follow-up work, or an
+explicit `change abandon` of the original; it should be in the README troubleshooting rather than
+discovered.

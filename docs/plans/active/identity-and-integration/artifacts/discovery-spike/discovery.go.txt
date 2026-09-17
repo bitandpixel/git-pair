@@ -532,3 +532,62 @@ func commitSet(ctx context.Context, repo *git.Repo, revrange string) (map[string
 	}
 	return set, nil
 }
+
+// Choice is the persisted decision: a changeset names the other changeset directories it
+// is willing to share a branch with, and those stop being candidates.
+//
+// Placement matters. If the flag lives in the *losing* changeset ("inactive: true" in
+// changesets/theirs/CHANGESET.yaml), then landing the winner publishes that edit inside the
+// loser's own directory, and the loser's authors lose their changeset on their own branch.
+// If it lives in the winner ("ignores: theirs"), the directive stops mattering once the
+// winner lands, because the winner is no longer a candidate anywhere.
+type Choice struct {
+	IDs     []string // changesets this candidate declares it is working alongside
+	Wins    bool
+	InLoser bool
+}
+
+// Candidates applies the tree rule plus the persisted decision.
+func Candidates(ctx context.Context, repo *git.Repo, head, trunk string) ([]string, error) {
+	here, err := treeDirs(ctx, repo, head)
+	if err != nil {
+		return nil, err
+	}
+	trunkDirs, err := treeDirs(ctx, repo, trunk)
+	if err != nil {
+		return nil, err
+	}
+	var live []string
+	for id := range here {
+		if !trunkDirs[id] {
+			live = append(live, id)
+		}
+	}
+	sort.Strings(live)
+
+	// The decision, read from the candidates that are actually in play.
+	drop := map[string]bool{}
+	for _, id := range live {
+		out, err := repo.Git(ctx, "show", head+":changesets/"+id+"/CHANGESET.yaml")
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(out, "\n") {
+			if v, ok := strings.CutPrefix(strings.TrimSpace(line), "ignores:"); ok {
+				for _, name := range strings.Fields(strings.TrimSpace(v)) {
+					drop[name] = true
+				}
+			}
+			if strings.TrimSpace(line) == "inactive: true" {
+				drop[id] = true
+			}
+		}
+	}
+	var out []string
+	for _, id := range live {
+		if !drop[id] {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
