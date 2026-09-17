@@ -402,7 +402,7 @@ Requirements:
 -   `ABOUT.md` should exist,
 -   run the surviving-review-additions diagnostic described below,
 -   fail non-interactively by default if surviving review additions are detected,
--   create a GitPR lifecycle marker commit only if validation succeeds or an explicit override is supplied,
+-   create a review marker commit only if validation succeeds or an explicit override is supplied,
 -   make the branch discoverable by `git pair review queue`.
 
 Suggested commit:
@@ -414,8 +414,8 @@ git-pair: ready booking-transaction
 Include machine-readable Git trailers, e.g.:
 
 ```text
-GitPR-State: ready
-GitPR-Changeset: booking-transaction
+Review-State: ready
+Review-Changeset: booking-transaction
 ```
 
 Readiness applies to the exact implementation state represented by the marker.
@@ -497,7 +497,7 @@ Requirements:
 -   exit successfully when the effective state moves from `ready` to `blocked`, `feedback`, `approved`, or `closed`,
 -   report immediately, without waiting, when the changeset is already in one of those states,
 -   exit non-zero when the changeset is `working`: the author is not waiting on anyone,
--   poll local GitPR state by default,
+-   poll local review state by default,
 -   with `--fetch`, run `git fetch` against the configured remotes before each check, so a review submitted in another clone becomes visible through `refs/remotes/...`,
 -   `--interval` sets the polling interval (default 10s),
 -   `--timeout` gives up after a duration instead of waiting forever,
@@ -642,8 +642,8 @@ Example:
 ```text
 review: booking-transaction
 
-GitPR-Outcome: block
-GitPR-Changeset: booking-transaction
+Review-Outcome: block
+Review-Changeset: booking-transaction
 ```
 
 or:
@@ -651,8 +651,8 @@ or:
 ```text
 review: approve booking-transaction
 
-GitPR-Outcome: approve
-GitPR-Changeset: booking-transaction
+Review-Outcome: approve
+Review-Changeset: booking-transaction
 ```
 
 Immediately after successful review submission, update the changeset's review archive ref to the resulting exact `HEAD`.
@@ -683,7 +683,7 @@ Indexing semantics:
 -2  second-most-recent review
 ```
 
-Only commits explicitly identified as GitPR review submissions count as reviews.
+Only commits explicitly identified as review marker commits count as reviews.
 
 Ordinary Git commits do not.
 
@@ -886,7 +886,7 @@ CLOSED
 
 Avoid maintaining a fragile mutable state variable where possible.
 
-Prefer deriving effective state from GitPR lifecycle commits and repository state.
+Prefer deriving effective state from review marker commits and repository state.
 
 Important safety property:
 
@@ -1519,7 +1519,7 @@ Stack relationships only influence the configured base ref.
 
 # 22. Agent Contract
 
-Agents should interact with `git-pair` through stable non-interactive commands rather than manually interpreting GitPR internals.
+Agents should interact with `git-pair` through stable non-interactive commands rather than manually interpreting the marker and trailer format.
 
 Primary agent commands:
 
@@ -1560,7 +1560,7 @@ Approval remains a reviewer action.
 ## Block
 
 ```text
-GitPR-Outcome: block
+Review-Outcome: block
 ```
 
 Meaning:
@@ -1572,7 +1572,7 @@ Agent should address the review and return the changeset to `ready`.
 ## Feedback
 
 ```text
-GitPR-Outcome: feedback
+Review-Outcome: feedback
 ```
 
 Meaning:
@@ -1584,7 +1584,7 @@ Integration is permitted once other requirements pass.
 ## Approve
 
 ```text
-GitPR-Outcome: approve
+Review-Outcome: approve
 ```
 
 Meaning:
@@ -1617,7 +1617,7 @@ git pair review queue --json
 
 `git-pair` itself does not need to implement notifications in MVP.
 
-The author's side of notification is `git pair change wait` (§9.4): it polls GitPR state, and with `--fetch` it polls through ordinary `git fetch`, so a review pushed from another clone reaches the author without a forge integration, a webhook, or a long-lived service. Waiting is a command an author or agent runs, not a daemon `git-pair` operates.
+The author's side of notification is `git pair change wait` (§9.4): it polls local review state, and with `--fetch` it polls through ordinary `git fetch`, so a review pushed from another clone reaches the author without a forge integration, a webhook, or a long-lived service. Waiting is a command an author or agent runs, not a daemon `git-pair` operates.
 
 ---
 
@@ -1640,7 +1640,7 @@ Detailed code review does not need to occur in the forge.
 The desired integration model is:
 
 ```text
-local GitPR review
+local review state
     ↓
 push normal branch/review history
     ↓

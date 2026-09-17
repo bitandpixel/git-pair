@@ -140,12 +140,12 @@ func TestFixtureTrailersAndMarkers(t *testing.T) {
 	if got := f.Subject(ready); got != "git-pair: ready booking" {
 		t.Errorf("ready subject = %q", got)
 	}
-	if got := f.Trailers(ready)["GitPR-State"]; got != "ready" {
-		t.Errorf("ready marker GitPR-State = %q, want ready", got)
+	if got := f.Trailers(ready)["Review-State"]; got != "ready" {
+		t.Errorf("ready marker Review-State = %q, want ready", got)
 	}
 	review := f.CommitReviewMarker("booking", "approve")
 	trailers := f.Trailers(review)
-	if trailers["GitPR-Outcome"] != "approve" || trailers["GitPR-Changeset"] != "booking" {
+	if trailers["Review-Outcome"] != "approve" || trailers["Review-Changeset"] != "booking" {
 		t.Errorf("review trailers = %v", trailers)
 	}
 	if got := f.Subject(review); got != "review: approve booking" {

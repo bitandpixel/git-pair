@@ -167,7 +167,7 @@ func TestDeriveNewestMarkerWins(t *testing.T) {
 }
 
 func TestDeriveMalformedMarkerIsImplementation(t *testing.T) {
-	// The plan's risk table: a commit carrying GitPR-* trailers that git-pair
+	// The plan's risk table: a commit carrying Review-* trailers that git-pair
 	// cannot interpret must be read as an implementation commit, never as a
 	// marker, and never silently honoured.
 	got := derive([]Event{impl("c1"), ready("c2"), malformed("c3")})
@@ -239,26 +239,26 @@ func TestReviewIndex(t *testing.T) {
 
 func TestParseTrailers(t *testing.T) {
 	block := strings.Join([]string{
-		"GitPR-Outcome: block",
-		"GitPR-Changeset: booking",
-		"GitPR-Outcome: approve",
+		"Review-Outcome: block",
+		"Review-Changeset: booking",
+		"Review-Outcome: approve",
 		"Reviewed-by: someone",
 		"not a trailer",
 		"",
 	}, "\n")
 
 	got := parseTrailers(block)
-	if got["GitPR-Outcome"] != "block" {
-		t.Errorf("GitPR-Outcome = %q, want the first value block: a duplicated key must not be smuggled past a check", got["GitPR-Outcome"])
+	if got["Review-Outcome"] != "block" {
+		t.Errorf("Review-Outcome = %q, want the first value block: a duplicated key must not be smuggled past a check", got["Review-Outcome"])
 	}
-	if got["GitPR-Changeset"] != "booking" {
-		t.Errorf("GitPR-Changeset = %q", got["GitPR-Changeset"])
+	if got["Review-Changeset"] != "booking" {
+		t.Errorf("Review-Changeset = %q", got["Review-Changeset"])
 	}
 	if _, ok := got["Reviewed-by"]; ok {
-		t.Errorf("non-GitPR trailer leaked in: %v", got)
+		t.Errorf("non-review trailer leaked in: %v", got)
 	}
 	if len(got) != 2 {
-		t.Errorf("parseTrailers = %v, want only the two GitPR keys", got)
+		t.Errorf("parseTrailers = %v, want only the two Review-* keys", got)
 	}
 }
 
@@ -271,14 +271,14 @@ func TestParseEventClassifiesMarkers(t *testing.T) {
 		wantUnrecog bool
 	}{
 		{"plain commit", []string{"c1", "c1", "0", "author", "implement stuff", ""}, KindImplementation, "", false},
-		{"ready marker", []string{"c1", "c1", "0", "author", "git-pair: ready booking", "GitPR-State: ready\nGitPR-Changeset: booking\n"}, KindReady, "", false},
-		{"close marker", []string{"c1", "c1", "0", "author", "git-pair: close booking", "GitPR-State: closed\nGitPR-Changeset: booking\n"}, KindClosed, "", false},
-		{"review block", []string{"c1", "c1", "0", "author", "review: block booking", "GitPR-Outcome: block\nGitPR-Changeset: booking\n"}, KindReview, model.OutcomeBlock, false},
-		{"wrong changeset", []string{"c1", "c1", "0", "author", "git-pair: ready other", "GitPR-State: ready\nGitPR-Changeset: other\n"}, KindImplementation, "", true},
-		{"missing changeset trailer", []string{"c1", "c1", "0", "author", "git-pair: ready booking", "GitPR-State: ready\n"}, KindImplementation, "", true},
-		{"unknown state", []string{"c1", "c1", "0", "author", "git-pair: ready booking", "GitPR-State: READY\nGitPR-Changeset: booking\n"}, KindImplementation, "", true},
-		{"unknown outcome", []string{"c1", "c1", "0", "author", "review: approve booking", "GitPR-Outcome: approved\nGitPR-Changeset: booking\n"}, KindImplementation, "", true},
-		{"changeset scaffold commit", []string{"c1", "c1", "0", "author", "git-pair: initialize changeset booking", "GitPR-Changeset: booking\n"}, KindImplementation, "", false},
+		{"ready marker", []string{"c1", "c1", "0", "author", "git-pair: ready booking", "Review-State: ready\nReview-Changeset: booking\n"}, KindReady, "", false},
+		{"close marker", []string{"c1", "c1", "0", "author", "git-pair: close booking", "Review-State: closed\nReview-Changeset: booking\n"}, KindClosed, "", false},
+		{"review block", []string{"c1", "c1", "0", "author", "review: block booking", "Review-Outcome: block\nReview-Changeset: booking\n"}, KindReview, model.OutcomeBlock, false},
+		{"wrong changeset", []string{"c1", "c1", "0", "author", "git-pair: ready other", "Review-State: ready\nReview-Changeset: other\n"}, KindImplementation, "", true},
+		{"missing changeset trailer", []string{"c1", "c1", "0", "author", "git-pair: ready booking", "Review-State: ready\n"}, KindImplementation, "", true},
+		{"unknown state", []string{"c1", "c1", "0", "author", "git-pair: ready booking", "Review-State: READY\nReview-Changeset: booking\n"}, KindImplementation, "", true},
+		{"unknown outcome", []string{"c1", "c1", "0", "author", "review: approve booking", "Review-Outcome: approved\nReview-Changeset: booking\n"}, KindImplementation, "", true},
+		{"changeset scaffold commit", []string{"c1", "c1", "0", "author", "git-pair: initialize changeset booking", "Review-Changeset: booking\n"}, KindImplementation, "", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

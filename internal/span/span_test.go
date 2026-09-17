@@ -220,7 +220,7 @@ func TestResolveWithoutReviews(t *testing.T) {
 	}
 }
 
-// Only GitPR review submissions may anchor a review-relative span: an ordinary
+// Only review marker commits may anchor a review-relative span: an ordinary
 // commit whose subject looks like a review must not become a span boundary
 // (PRD §10.5).
 func TestResolveIgnoresOrdinaryCommits(t *testing.T) {

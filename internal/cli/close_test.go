@@ -64,11 +64,11 @@ func TestReviewCloseArchivesAndMarksClosed(t *testing.T) {
 		t.Errorf("subject = %q, want %q", got, "git-pair: close "+slug)
 	}
 	trailers := f.Trailers(head)
-	if trailers["GitPR-State"] != "closed" {
-		t.Errorf("GitPR-State = %q, want closed", trailers["GitPR-State"])
+	if trailers["Review-State"] != "closed" {
+		t.Errorf("Review-State = %q, want closed", trailers["Review-State"])
 	}
-	if trailers["GitPR-Changeset"] != slug {
-		t.Errorf("GitPR-Changeset = %q, want %q", trailers["GitPR-Changeset"], slug)
+	if trailers["Review-Changeset"] != slug {
+		t.Errorf("Review-Changeset = %q, want %q", trailers["Review-Changeset"], slug)
 	}
 
 	// The immutable archive ref names the archived commit and points at it exactly.
@@ -88,7 +88,7 @@ func TestReviewCloseArchivesAndMarksClosed(t *testing.T) {
 	}
 
 	// The close marker is the commit that closes the changeset (plan M4).
-	if got := f.Trailers(head)["GitPR-Changeset"]; got != slug {
+	if got := f.Trailers(head)["Review-Changeset"]; got != slug {
 		t.Errorf("close marker changeset = %q", got)
 	}
 	if got := runIn(t, f.Dir(), "status", "--json").json(t); got["state"] != "CLOSED" {

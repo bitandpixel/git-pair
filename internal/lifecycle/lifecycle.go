@@ -1,7 +1,7 @@
 // Package lifecycle derives changeset state from git history.
 //
 // There is no mutable state file. Lifecycle markers are ordinary commits
-// carrying GitPR-* trailers, so "an implementation commit invalidates the
+// carrying Review-* trailers, so "an implementation commit invalidates the
 // previous marker" is just commit ordering.
 package lifecycle
 
@@ -49,7 +49,7 @@ type Event struct {
 	Outcome model.Outcome
 	// Author is the commit author name, useful when explaining a marker.
 	Author string
-	// UnrecognisedMarker is true when the commit carries GitPR-* trailers but
+	// UnrecognisedMarker is true when the commit carries Review-* trailers but
 	// not a complete, valid marker for this changeset. Such a commit is
 	// treated as an implementation commit — the conservative reading, since it
 	// invalidates any approval rather than silently honouring a broken marker.
@@ -77,7 +77,7 @@ type Summary struct {
 	Stale bool
 	// Trailing counts the non-marker commits after the newest marker.
 	Trailing int
-	// TrailingUnrecognised counts the trailing commits that carry GitPR-*
+	// TrailingUnrecognised counts the trailing commits that carry Review-*
 	// trailers git-pair could not interpret. They always invalidate a marker:
 	// a newer git-pair may read them fine, and guessing from the tree would be a
 	// guess about someone else's protocol.
@@ -293,7 +293,7 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 
 	if s.TrailingUnrecognised > 0 {
 		// The tree cannot speak for a trailer set git-pair cannot read.
-		s.Reason = fmt.Sprintf("%d unrecognised GitPR marker(s) after %s",
+		s.Reason = fmt.Sprintf("%d unrecognised review marker(s) after %s",
 			s.TrailingUnrecognised, markerLabel(marker))
 		return s, nil
 	}
@@ -347,7 +347,7 @@ func parseTrailers(block string) map[string]string {
 			continue
 		}
 		key = strings.TrimSpace(key)
-		if !strings.HasPrefix(key, "GitPR-") {
+		if !strings.HasPrefix(key, "Review-") {
 			continue
 		}
 		if _, seen := out[key]; seen {

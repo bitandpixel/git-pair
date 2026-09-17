@@ -103,7 +103,7 @@ func newRootCommand(a *app) *cobra.Command {
 refs. It does not replace git, your editor, your difftool, or your forge.
 
 Review state lives in the repository: a changeset directory holds ABOUT.md and
-review threads, lifecycle markers are commits carrying GitPR-* trailers, and
+review threads, lifecycle markers are commits carrying Review-* trailers, and
 refs/reviews/* keeps the complete unsquashed history reachable.
 
 Author commands:   git pair change init | ready

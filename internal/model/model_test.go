@@ -83,9 +83,9 @@ func TestOutcomeValid(t *testing.T) {
 // spelling is pinned here.
 func TestTrailerVocabulary(t *testing.T) {
 	tests := []struct{ got, want string }{
-		{model.TrailerOutcome, "GitPR-Outcome"},
-		{model.TrailerState, "GitPR-State"},
-		{model.TrailerChangeset, "GitPR-Changeset"},
+		{model.TrailerOutcome, "Review-Outcome"},
+		{model.TrailerState, "Review-State"},
+		{model.TrailerChangeset, "Review-Changeset"},
 		{model.StateValueReady, "ready"},
 		{model.StateValueClosed, "closed"},
 	}

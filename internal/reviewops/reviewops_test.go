@@ -82,11 +82,11 @@ func TestSubmitCreatesStandardizedReviewCommitAndMovesRef(t *testing.T) {
 		t.Errorf("subject = %q, want %q (PRD §10.4)", got, "review: block "+slug)
 	}
 	trailers := e.f.Trailers(result.Commit)
-	if trailers["GitPR-Outcome"] != "block" {
-		t.Errorf("GitPR-Outcome = %q, want block", trailers["GitPR-Outcome"])
+	if trailers["Review-Outcome"] != "block" {
+		t.Errorf("Review-Outcome = %q, want block", trailers["Review-Outcome"])
 	}
-	if trailers["GitPR-Changeset"] != slug {
-		t.Errorf("GitPR-Changeset = %q, want %q", trailers["GitPR-Changeset"], slug)
+	if trailers["Review-Changeset"] != slug {
+		t.Errorf("Review-Changeset = %q, want %q", trailers["Review-Changeset"], slug)
 	}
 	if got := e.f.RefSHA("refs/reviews/" + slug); got != result.Commit {
 		t.Errorf("refs/reviews/%s points at %s, want the review commit %s", slug, got, result.Commit)
@@ -152,10 +152,10 @@ func TestSubmitRecordsBodyAboveTrailers(t *testing.T) {
 	if !strings.Contains(message, body) {
 		t.Errorf("message = %q, want it to contain the body %q", message, body)
 	}
-	if !strings.Contains(message, "GitPR-Outcome: feedback") {
+	if !strings.Contains(message, "Review-Outcome: feedback") {
 		t.Errorf("message = %q, want the outcome trailer", message)
 	}
-	if strings.Index(message, body) > strings.Index(message, "GitPR-Outcome:") {
+	if strings.Index(message, body) > strings.Index(message, "Review-Outcome:") {
 		t.Errorf("message = %q, want the body before the trailer block", message)
 	}
 	if got := e.summary(t).State; got != model.StateFeedback {

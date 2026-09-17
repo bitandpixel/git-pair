@@ -170,7 +170,7 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	}
 	sha, err := marker.CommitPaths(ctx, repo, marker.Message{
 		Subject:  fmt.Sprintf("git-pair: initialize changeset %s", cs.Slug),
-		Trailers: []string{"GitPR-Changeset=" + cs.Slug},
+		Trailers: []string{"Review-Changeset=" + cs.Slug},
 	}, []string{cs.Dir})
 	if err != nil {
 		if isNothingToCommit(err) {

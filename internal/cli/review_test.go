@@ -29,11 +29,11 @@ func TestReviewSubmitWritesReviewCommitAndMovesRef(t *testing.T) {
 		t.Errorf("subject = %q, want %q (PRD §10.4)", got, "review: block "+slug)
 	}
 	trailers := f.Trailers(head)
-	if trailers["GitPR-Outcome"] != "block" {
-		t.Errorf("GitPR-Outcome = %q, want block", trailers["GitPR-Outcome"])
+	if trailers["Review-Outcome"] != "block" {
+		t.Errorf("Review-Outcome = %q, want block", trailers["Review-Outcome"])
 	}
-	if trailers["GitPR-Changeset"] != slug {
-		t.Errorf("GitPR-Changeset = %q, want %q", trailers["GitPR-Changeset"], slug)
+	if trailers["Review-Changeset"] != slug {
+		t.Errorf("Review-Changeset = %q, want %q", trailers["Review-Changeset"], slug)
 	}
 	// PRD §10.4: "Immediately after successful review submission, update the
 	// changeset's review archive ref to the resulting exact HEAD."
@@ -80,8 +80,8 @@ func TestReviewSubmitApproveOnCleanTreeCreatesEmptyReviewCommit(t *testing.T) {
 	if got := f.Subject(head); got != "review: approve booking" {
 		t.Errorf("subject = %q, want %q", got, "review: approve booking")
 	}
-	if got := f.Trailers(head)["GitPR-Outcome"]; got != "approve" {
-		t.Errorf("GitPR-Outcome = %q, want approve", got)
+	if got := f.Trailers(head)["Review-Outcome"]; got != "approve" {
+		t.Errorf("Review-Outcome = %q, want approve", got)
 	}
 	if got := f.RefSHA(reviewRef("booking")); got != head {
 		t.Errorf("%s = %s, want the empty approval %s", reviewRef("booking"), got, head)
@@ -137,7 +137,7 @@ func TestReviewSubmitNoStageLeavesEditsOut(t *testing.T) {
 
 // --- review history (PRD §10.5) ---------------------------------------------
 
-// "Only commits explicitly identified as GitPR review submissions count as reviews.
+// "Only commits explicitly identified as review marker commits count as reviews.
 // Ordinary Git commits do not." The index is chronological from 0.
 func TestReviewHistoryListsOnlyReviewSubmissionsChronologically(t *testing.T) {
 	f, slug := newChangeset(t, "booking", "main")

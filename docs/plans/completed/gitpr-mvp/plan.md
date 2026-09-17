@@ -1,5 +1,14 @@
 # gitpr MVP — Technical Plan
 
+
+> **Renamed after archiving (2026-09-17).** `gitpr` in this document is today's **`git-pair`** — binary
+> `git-pair`, invoked `git pair …`, module `gitpair` — and the marker trailers it specifies,
+> `GitPR-State` / `GitPR-Outcome` / `GitPR-Changeset`, are today's `Review-State` / `Review-Outcome` /
+> `Review-Changeset`. This plan keeps the names the work was actually done under, and so do the audit and
+> research files it links: they cite commit SHAs as evidence, and rewriting them would rewrite the record.
+> The directory name `docs/plans/completed/gitpr-mvp/` stays for the same reason — `internal/survival` and
+> the audit artifacts cite that path. The living specification is `README.md` and `PRD.md`.
+
 ## Goal
 
 Ship a working `gitpr` CLI that implements the PRD's review protocol: changeset scaffolding,

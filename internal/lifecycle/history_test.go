@@ -145,7 +145,7 @@ func TestSummarizeImplementationAfterApproveIsWorking(t *testing.T) {
 	}
 }
 
-// PRD §10.5: "Only commits explicitly identified as GitPR review submissions
+// PRD §10.5: "Only commits explicitly identified as review marker commits
 // count as reviews. Ordinary Git commits do not."
 func TestSummarizeIgnoresOrdinaryCommitsAsReviews(t *testing.T) {
 	f := gittest.New(t)
@@ -156,7 +156,7 @@ func TestSummarizeIgnoresOrdinaryCommitsAsReviews(t *testing.T) {
 	f.CommitChangeset(slug, base)
 	f.Commit("review: looks fine to me", gittest.WithFile("a.txt", "a\n"))
 	f.Commit("review: block booking", gittest.WithFile("b.txt", "b\n"))
-	f.Commit("GitPR-Outcome: block", gittest.WithFile("c.txt", "c\n"))
+	f.Commit("Review-Outcome: block", gittest.WithFile("c.txt", "c\n"))
 
 	got := summarize(t, f, slug, base, "HEAD")
 	if len(got.Reviews) != 0 {
@@ -168,8 +168,8 @@ func TestSummarizeIgnoresOrdinaryCommitsAsReviews(t *testing.T) {
 }
 
 // The plan's risk table: "Accept a marker only with both expected trailers
-// (GitPR-Changeset matching); malformed ⇒ warning line, not a state change."
-// Each of these commits carries GitPR-* trailers that must not be honoured.
+// (Review-Changeset matching); malformed ⇒ warning line, not a state change."
+// Each of these commits carries Review-* trailers that must not be honoured.
 func TestSummarizeMalformedAndMismatchedTrailersAreImplementation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -182,32 +182,32 @@ func TestSummarizeMalformedAndMismatchedTrailersAreImplementation(t *testing.T) 
 	}{
 		{
 			name:     "ready marker for a different changeset",
-			message:  "git-pair: ready other-changeset\n\nGitPR-State: ready\nGitPR-Changeset: other-changeset\n",
+			message:  "git-pair: ready other-changeset\n\nReview-State: ready\nReview-Changeset: other-changeset\n",
 			wantWarn: true,
 		},
 		{
 			name:     "ready marker with no changeset trailer",
-			message:  "git-pair: ready booking\n\nGitPR-State: ready\n",
+			message:  "git-pair: ready booking\n\nReview-State: ready\n",
 			wantWarn: true,
 		},
 		{
 			name:     "unknown state value",
-			message:  "git-pair: ready booking\n\nGitPR-State: READY\nGitPR-Changeset: booking\n",
+			message:  "git-pair: ready booking\n\nReview-State: READY\nReview-Changeset: booking\n",
 			wantWarn: true,
 		},
 		{
 			name:     "unknown outcome value",
-			message:  "review: approve booking\n\nGitPR-Outcome: approved\nGitPR-Changeset: booking\n",
+			message:  "review: approve booking\n\nReview-Outcome: approved\nReview-Changeset: booking\n",
 			wantWarn: true,
 		},
 		{
 			name:     "review marker with no changeset trailer",
-			message:  "review: block booking\n\nGitPR-Outcome: block\n",
+			message:  "review: block booking\n\nReview-Outcome: block\n",
 			wantWarn: true,
 		},
 		{
 			name:     "changeset trailer line without a colon",
-			message:  "review: block booking\n\nGitPR-Outcome: block\nGitPR-Changeset booking\n",
+			message:  "review: block booking\n\nReview-Outcome: block\nReview-Changeset booking\n",
 			wantWarn: false,
 		},
 	}

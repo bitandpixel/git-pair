@@ -202,7 +202,7 @@ Exactly one outcome is required:
   --feedback   non-blocking observations; integration is still permitted
   --approve    the reviewer accepts the current implementation
 
-The commit carries GitPR-Outcome and GitPR-Changeset trailers, and
+The commit carries Review-Outcome and Review-Changeset trailers, and
 refs/reviews/<changeset> is moved to the resulting HEAD in the same operation so
 the full unsquashed chain stays reachable.
 
@@ -323,7 +323,7 @@ func newReviewHistoryCommand(a *app) *cobra.Command {
 		Short: "List review submissions for the current changeset",
 		Long: `List every review submission in chronological order.
 
-Only commits carrying a valid GitPR-Outcome trailer count; ordinary commits do
+Only commits carrying a valid Review-Outcome trailer count; ordinary commits do
 not appear. Indexes are chronological, so 0 is the first review and -1 is the
 most recent, matching ` + "`git pair diff --since-review`" + `.`,
 		Example: `  git pair review history

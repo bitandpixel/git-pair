@@ -167,7 +167,7 @@ func TestExitCodeGitFailure(t *testing.T) {
 	if res.code != exitGit {
 		t.Errorf("review submit with a failing git exited %d, want %d\nstderr: %s", res.code, exitGit, res.stderr)
 	}
-	if got := f.Trailers(f.Head())["GitPR-Outcome"]; got != "" {
+	if got := f.Trailers(f.Head())["Review-Outcome"]; got != "" {
 		t.Errorf("a failed submission wrote review trailers: %v", got)
 	}
 	if f.HasRef(reviewRef(slug)) {

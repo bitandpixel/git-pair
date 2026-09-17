@@ -23,7 +23,7 @@ func newStatusCommand(a *app) *cobra.Command {
 		Long: `Report the state derived from git history for the changeset on this branch.
 
 State is never stored in a file. Lifecycle markers are commits carrying
-GitPR-* trailers, so an implementation commit after a ready or review marker
+Review-* trailers, so an implementation commit after a ready or review marker
 returns the changeset to WORKING automatically.
 
 With --json the output is a stable contract for agents and automation.`,
@@ -171,7 +171,7 @@ func printStatus(a *app, v *statusView) {
 		a.printf("  points at: %s\n", j.ReviewCommit)
 	}
 	if len(j.Unrecognised) > 0 {
-		a.printf("\nUnrecognised GitPR markers (treated as implementation commits):\n")
+		a.printf("\nUnrecognised review markers (treated as implementation commits):\n")
 		for _, u := range j.Unrecognised {
 			a.printf("  %s\n", u)
 		}

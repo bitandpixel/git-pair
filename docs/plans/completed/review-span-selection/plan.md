@@ -6,6 +6,15 @@ ring) and the rewrite of Scenario A. Two places are knowingly superseded rather 
 §30 still describe `v` as a two-state toggle, which §8.1 replaces, and they stay as received so the
 handoff remains legible against the decision log.
 
+
+> **Renamed after archiving (2026-09-17).** `gitpr` in this document is today's **`git-pair`** — binary
+> `git-pair`, invoked `git pair …`, module `gitpair` — and the marker trailers it specifies,
+> `GitPR-State` / `GitPR-Outcome` / `GitPR-Changeset`, are today's `Review-State` / `Review-Outcome` /
+> `Review-Changeset`. This plan keeps the names the work was actually done under, and so do the audit and
+> research files it links: they cite commit SHAs as evidence, and rewriting them would rewrite the record.
+> The directory name `docs/plans/completed/gitpr-mvp/` stays for the same reason — `internal/survival` and
+> the audit artifacts cite that path. The living specification is `README.md` and `PRD.md`.
+
 ## Goal
 
 A review span becomes a pair of explicit checkpoints, `BASE → HEAD`, resolvable through review

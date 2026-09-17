@@ -31,17 +31,17 @@ git add -A && git commit -qm "initial implementation"
 bar "1. trailer placeholders in git log --format"
 git commit -q --allow-empty -m "review: booking-transaction
 
-GitPR-Outcome: block
-GitPR-Changeset: booking-transaction"
+Review-Outcome: block
+Review-Changeset: booking-transaction"
 git log -1 --format='SUBJECT=%s
-OUTCOME=[%(trailers:key=GitPR-Outcome,only,unfold)]
+OUTCOME=[%(trailers:key=Review-Outcome,only,unfold)]
 ALL=[%(trailers:only,unfold)]'
 echo "--- empty commit created OK: $(git rev-list --count HEAD) commits"
 
 bar "2. lifecycle enumeration over base..HEAD (two-dot)"
 git switch -qc booking-transaction
 echo "// touched" >> src/service.ts && git commit -qam "implementation: touch service"
-git log --reverse --format='%h|%s|%(trailers:key=GitPR-Outcome,only,unfold)' main..HEAD
+git log --reverse --format='%h|%s|%(trailers:key=Review-Outcome,only,unfold)' main..HEAD
 
 bar "3. three-dot diff span (changeset base...HEAD)"
 git diff --stat main...HEAD
@@ -61,8 +61,8 @@ printf '# About\n\n## Validation\n\n- unit tests\n' > changesets/booking-transac
 sed -i 's|return db.write(() => debit(userId));|// What happens if these execute concurrently?\n  return db.write(() => debit(userId));|' src/service.ts
 git add -A && git commit -qm "review: booking-transaction
 
-GitPR-Outcome: block
-GitPR-Changeset: booking-transaction"
+Review-Outcome: block
+Review-Changeset: booking-transaction"
 R2=$(git rev-parse HEAD)
 git --no-pager diff --no-color -U0 "${R2}^" "${R2}"
 
@@ -134,4 +134,4 @@ git for-each-ref --format='%(refname:short) %(objectname:short) %(committerdate:
 
 bar "10. interpret-trailers round-trip (for constructing commits)"
 printf 'review: approve booking-transaction\n' | \
-  git interpret-trailers --trailer 'GitPR-Outcome=approve' --trailer 'GitPR-Changeset=booking-transaction'
+  git interpret-trailers --trailer 'Review-Outcome=approve' --trailer 'Review-Changeset=booking-transaction'

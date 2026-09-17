@@ -350,19 +350,19 @@ func (f *Fixture) CommitMessage(message string, opts ...CommitOpt) string {
 
 // ReadyMessage is a ready marker commit message (PRD §9.2).
 func ReadyMessage(slug string) string {
-	return "git-pair: ready " + slug + "\n\nGitPR-State: ready\nGitPR-Changeset: " + slug + "\n"
+	return "git-pair: ready " + slug + "\n\nReview-State: ready\nReview-Changeset: " + slug + "\n"
 }
 
 // ReviewMessage is a review submission commit message (PRD §10.4). outcome is
 // "block", "feedback" or "approve".
 func ReviewMessage(slug, outcome string) string {
-	return "review: " + outcome + " " + slug + "\n\nGitPR-Outcome: " + outcome +
-		"\nGitPR-Changeset: " + slug + "\n"
+	return "review: " + outcome + " " + slug + "\n\nReview-Outcome: " + outcome +
+		"\nReview-Changeset: " + slug + "\n"
 }
 
 // CloseMessage is a close marker commit message (plan M4).
 func CloseMessage(slug string) string {
-	return "git-pair: close " + slug + "\n\nGitPR-State: closed\nGitPR-Changeset: " + slug + "\n"
+	return "git-pair: close " + slug + "\n\nReview-State: closed\nReview-Changeset: " + slug + "\n"
 }
 
 // CommitReadyMarker commits a ready marker for slug. Markers may be empty, so

@@ -68,9 +68,9 @@ func (o Outcome) State() State {
 // git-pair lifecycle marker when the keys below appear together with a changeset
 // value matching the changeset being inspected.
 const (
-	TrailerOutcome   = "GitPR-Outcome"
-	TrailerState     = "GitPR-State"
-	TrailerChangeset = "GitPR-Changeset"
+	TrailerOutcome   = "Review-Outcome"
+	TrailerState     = "Review-State"
+	TrailerChangeset = "Review-Changeset"
 
 	StateValueReady  = "ready"
 	StateValueClosed = "closed"

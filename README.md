@@ -3,7 +3,7 @@
 `git-pair` is a local-first peer-review tool for human-plus-agent pairs. It puts a thin
 review protocol on top of ordinary git commits, files, refs, editors and difftools rather
 than replacing any of them: a changeset directory holds the change description and review
-threads, lifecycle transitions are commits carrying `GitPR-*` trailers, review-relative
+threads, lifecycle transitions are commits carrying `Review-*` trailers, review-relative
 diff spans answer "what happened since my last review", and `refs/reviews/*` keeps the
 complete unsquashed history reachable so a branch can be squash-merged without losing the
 review conversation. All review state lives inside the repository, so no code path talks
@@ -94,7 +94,7 @@ Review submitted: booking-transaction
 ```
 
 The review is an ordinary commit: `review: block booking-transaction` followed by a blank
-line and the `GitPR-Outcome: block` / `GitPR-Changeset: booking-transaction` trailers.
+line and the `Review-Outcome: block` / `Review-Changeset: booking-transaction` trailers.
 
 The author waits for that submission and reads it. `change wait` blocks until a review makes
 the changeset actionable and names the commit; `change feedback` shows the submission itself —
@@ -230,11 +230,11 @@ variables:
 
 | Marker | Subject | Trailers |
 | --- | --- | --- |
-| ready | `git-pair: ready <slug>` | `GitPR-State: ready`, `GitPR-Changeset: <slug>` |
-| review | `review: <outcome> <slug>` | `GitPR-Outcome: <outcome>`, `GitPR-Changeset: <slug>` |
-| close | `git-pair: close <slug>` | `GitPR-State: closed`, `GitPR-Changeset: <slug>` |
+| ready | `git-pair: ready <slug>` | `Review-State: ready`, `Review-Changeset: <slug>` |
+| review | `review: <outcome> <slug>` | `Review-Outcome: <outcome>`, `Review-Changeset: <slug>` |
+| close | `git-pair: close <slug>` | `Review-State: closed`, `Review-Changeset: <slug>` |
 
-A commit counts as a marker only when its trailer block parses and `GitPR-Changeset` matches
+A commit counts as a marker only when its trailer block parses and `Review-Changeset` matches
 the changeset being inspected; anything else is an ordinary commit.
 
 **A review is corrected by submitting again.** There is no `review undo`. The newest
@@ -352,7 +352,7 @@ output for it; elsewhere it is accepted and ignored.
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), then moves the review ref |
-| `review history` | — | only GitPR review submissions, indexed from `0` |
+| `review history` | — | only review marker commits, indexed from `0` |
 | `review queue` | — | every changeset in this repo whose derived state is `READY`, longest wait first |
 | `review close` | `--allow-surviving-review-additions` | archives and closes; never merges, pushes or squashes |
 | `status` | — | derived state for the current branch's changeset |
@@ -804,7 +804,7 @@ its changeset and a detached HEAD has no name.
 A missing entry in `git pair review queue` is usually not a queue bug: membership is derived
 state, and a code change after the ready marker returns the changeset to `WORKING` (a commit
 touching only `ABOUT.md` or a thread leaves it `READY`).
-A hand-written ready marker counts only if `GitPR-State: ready` and `GitPR-Changeset: <slug>`
+A hand-written ready marker counts only if `Review-State: ready` and `Review-Changeset: <slug>`
 sit in a real trailer block, separated from the subject by a blank line and from each other by
 no blank line. `changeset <cs> is already closed` and `changeset <cs> is closed` (both exit 1)
 are the refusals for re-closing and for submitting after closing; archival stays

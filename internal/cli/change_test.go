@@ -171,11 +171,11 @@ func TestChangeReadyCreatesMarkerAndEnqueuesChangeset(t *testing.T) {
 		t.Errorf("subject = %q, want %q (PRD §9.2)", got, "git-pair: ready "+slug)
 	}
 	trailers := f.Trailers(head)
-	if trailers["GitPR-State"] != "ready" {
-		t.Errorf("GitPR-State = %q, want ready", trailers["GitPR-State"])
+	if trailers["Review-State"] != "ready" {
+		t.Errorf("Review-State = %q, want ready", trailers["Review-State"])
 	}
-	if trailers["GitPR-Changeset"] != slug {
-		t.Errorf("GitPR-Changeset = %q, want %q", trailers["GitPR-Changeset"], slug)
+	if trailers["Review-Changeset"] != slug {
+		t.Errorf("Review-Changeset = %q, want %q", trailers["Review-Changeset"], slug)
 	}
 	if got := f.ParentCount(head); got != 1 {
 		t.Errorf("ready marker has %d parents, want 1", got)

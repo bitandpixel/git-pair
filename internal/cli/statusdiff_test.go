@@ -133,13 +133,13 @@ func TestStatusImplementationCommitAfterApproveIsWorking(t *testing.T) {
 	}
 }
 
-// A hand-written GitPR-* trailer must not become a lifecycle event (plan risk table).
+// A hand-written Review-* trailer must not become a lifecycle event (plan risk table).
 func TestStatusReportsUnrecognisedMarkers(t *testing.T) {
 	f, _ := newChangeset(t, "booking", "main")
 	ready(t, f)
 	// A ready marker for a different changeset: it must not make this one ready, and
 	// it must invalidate the real ready marker by being a newer commit.
-	f.CommitMessage("git-pair: ready other-changeset\n\nGitPR-State: ready\nGitPR-Changeset: other-changeset\n",
+	f.CommitMessage("git-pair: ready other-changeset\n\nReview-State: ready\nReview-Changeset: other-changeset\n",
 		gittest.WithEmpty())
 
 	out := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status", "--json").json(t)
