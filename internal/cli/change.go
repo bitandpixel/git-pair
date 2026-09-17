@@ -482,7 +482,8 @@ func printUnready(a *app, s *session, sha string) error {
 // --- change complete --------------------------------------------------------
 
 type completeOptions struct {
-	allowSurviving bool
+	allowSurviving  bool
+	allowUnreviewed bool
 }
 
 func newChangeCompleteCommand(a *app) *cobra.Command {
@@ -510,6 +511,7 @@ Re-running the command at the same HEAD changes nothing: archive refs are neithe
 moved nor duplicated. It never merges, pushes, or squashes.`,
 		Example: `  git pair change complete
   git pair change complete --allow-surviving-review-additions
+  git pair change complete --allow-unreviewed-changes
   git pair change complete --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -518,6 +520,8 @@ moved nor duplicated. It never merges, pushes, or squashes.`,
 	}
 	cmd.Flags().BoolVar(&opts.allowSurviving, "allow-surviving-review-additions", false,
 		"acknowledge surviving review additions and complete anyway")
+	cmd.Flags().BoolVar(&opts.allowUnreviewed, "allow-unreviewed-changes", false,
+		"acknowledge that HEAD carries content beyond the reviewed marker and complete anyway")
 	return cmd
 }
 
@@ -542,9 +546,11 @@ func runChangeComplete(ctx context.Context, a *app, opts *completeOptions) error
 	if err != nil {
 		return err
 	}
-	switch reviewed.State {
-	case model.StateApproved, model.StateFeedback:
-		// Integration is permitted.
+	switch {
+	case reviewed.State == model.StateApproved || reviewed.State == model.StateFeedback:
+		// Integration is permitted at this head.
+	case opts.allowUnreviewed && driftOverWhichToProceed(reviewed):
+		// Acknowledged in the output, not hidden: the archive still names this head.
 	default:
 		return fmt.Errorf("cannot complete %s: latest outcome is %s (%s); completion needs an approve or feedback at HEAD",
 			s.cs.Slug, reviewed.State, reviewed.Reason)
@@ -578,24 +584,35 @@ func runChangeComplete(ctx context.Context, a *app, opts *completeOptions) error
 	if err != nil {
 		return err
 	}
-	return printComplete(a, s, reviewed.State, head, archiveRef, created, report, opts.allowSurviving)
+	return printComplete(a, s, reviewed, head, archiveRef, created, report, opts.allowSurviving)
 }
 
-func printComplete(a *app, s *session, state model.State, head, archiveRef string, created bool,
+// driftOverWhichToProceed reports the one refusal an author may acknowledge: the newest
+// marker is an approve or feedback, and content outside changesets/<slug>/ has arrived on
+// top of it — a README typo fixed after the approval is the case this is for. A block is
+// not drift, and neither is `change unready`: there the newest marker is the withdrawal,
+// so no flag talks the changeset back into a reviewable state.
+func driftOverWhichToProceed(s lifecycle.Summary) bool {
+	m := s.Marker
+	return m != nil && m.Kind == lifecycle.KindReview && m.Outcome.PermitsIntegration() && len(s.Drifted) > 0
+}
+
+func printComplete(a *app, s *session, reviewed lifecycle.Summary, head, archiveRef string, created bool,
 	report *survival.Report, acknowledged bool) error {
 	if a.json {
 		out := map[string]any{
-			"changeset":                  s.cs.Slug,
-			"state":                      string(state),
-			"head":                       head,
-			"short":                      short(head),
-			"base":                       s.cs.Base,
-			"review_ref":                 reviewref.Head(s.cs.Slug),
-			"archive_ref":                archiveRef,
-			"archive_created":            created,
-			"squash_safe":                true,
-			"acknowledged_survivors":     0,
-			"surviving_review_artifacts": 0,
+			"changeset":                     s.cs.Slug,
+			"state":                         string(reviewed.State),
+			"acknowledged_unreviewed_paths": len(reviewed.Drifted),
+			"head":                          head,
+			"short":                         short(head),
+			"base":                          s.cs.Base,
+			"review_ref":                    reviewref.Head(s.cs.Slug),
+			"archive_ref":                   archiveRef,
+			"archive_created":               created,
+			"squash_safe":                   true,
+			"acknowledged_survivors":        0,
+			"surviving_review_artifacts":    0,
 		}
 		if report != nil {
 			out["acknowledged_survivors"] = len(report.Code)
@@ -606,6 +623,12 @@ func printComplete(a *app, s *session, state model.State, head, archiveRef strin
 	if acknowledged && report != nil && !report.Clean() {
 		a.printf("Acknowledged %d surviving review addition(s) from review %s.\n\n",
 			len(report.Code), report.ReviewShort)
+	}
+	if len(reviewed.Drifted) > 0 {
+		// The archive names this head, so the author is told plainly that it carries
+		// content the review did not see.
+		a.printf("Acknowledged %d path(s) outside changesets/%s/: %s.\n\n",
+			len(reviewed.Drifted), s.cs.Slug, strings.TrimSuffix(reviewed.Reason, "."))
 	}
 	a.printf("Completed changeset %s\n\n", s.cs.Slug)
 	a.printf("Review archive:\n  %s\n\n", archiveRef)

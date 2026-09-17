@@ -216,12 +216,20 @@ BLOCKED through an author's fix commit. `mise run check`, `e2e-29.sh` and `pty-w
 - [x] Document in PRD §9.5 and README's agent contract that the archive names a head that was
   reviewed. Done with M2's rewrite of §12 and the derived-state section; §9.5's own wording checked
   against the new behaviour.
-- [ ] An escape hatch for the author who committed something outside the changeset directory after
-  approval and does not want a second review — a README typo is the canonical case. Name it against
-  `--allow-surviving-review-additions` rather than inventing a style; the flag prints what it is
-  archiving over.
-- [ ] Mutation-check the guard: reverse the diff range, typo the exclusion pathspec, point the check
-  at the movable ref instead of the newest marker. Each has to turn a test red.
+- [x] An escape hatch for the author who committed something outside the changeset directory after
+  approval and does not want a second review — a README typo is the canonical case.
+  `--allow-unreviewed-changes`, named beside `--allow-surviving-review-additions`; it fires only
+  when the newest marker is an approve or feedback and `Drifted` is non-empty, so it cannot walk
+  past a `block` or a `change unready`, which have a different marker underneath. The count reaches
+  `--json` as `acknowledged_unreviewed_paths`.
+- [x] Mutation-check the guard. Two notes from running it:
+  - reversing the diff range is not a mutation — `git diff --name-only A B` reports the same path
+    set as `B A`, so the comparison is symmetric and no test can see the swap;
+  - comparing against the wrong end (`marker.SHA` instead of `headRef`) and pointing the exclusion
+    at a misspelled directory both turn tests red, as does dropping the marker-kind or drift
+    condition from the hatch.
+  - the harness for this must run against a committed tree: an early version reverted each mutation
+    with `git checkout -- <file>` and destroyed the uncommitted milestone it was meant to verify.
 
 #### Verification
 

@@ -539,7 +539,10 @@ Responsibilities:
    HEAD, ignoring `changesets/<changeset>/`, and drift refuses the completion (§12) — this is the
    only point in the lifecycle where a commit can stop an operation,
 3. run the surviving-review-additions diagnostic,
-4. require explicit acknowledgement if surviving additions remain,
+4. require explicit acknowledgement if surviving additions remain, or if content outside
+   `changesets/<changeset>/` has arrived on top of the marker that permits integration —
+   `--allow-unreviewed-changes` covers the second case, and nothing covers a `block` or a
+   `change unready`,
 5. ensure the complete current branch history is anchored under `refs/reviews/`,
 6. write the immutable archive ref `refs/reviews/archive/<changeset>/<short-head>` at HEAD, created
    only if absent and never moved,
@@ -559,15 +562,17 @@ Safe to squash/merge.
 Review history stays reachable at refs/reviews/booking-transaction
 ```
 
-If surviving review additions remain, completing must fail unless explicitly overridden:
+If surviving review additions remain, completing must fail unless explicitly overridden, and so
+must a head whose content moved past the review that permits it:
 
 ```bash
 git pair change complete --allow-surviving-review-additions
+git pair change complete --allow-unreviewed-changes
 ```
 
 `--json` prints `changeset`, `state`, `head`, `short`, `base`, `review_ref`, `archive_ref`,
-`archive_created`, `squash_safe`, `acknowledged_survivors` and `surviving_review_artifacts`. `state`
-is the derived state, which completion does not change.
+`archive_created`, `squash_safe`, `acknowledged_survivors`, `acknowledged_unreviewed_paths` and
+`surviving_review_artifacts`. `state` is the derived state, which completion does not change.
 
 Running the command again at the same HEAD succeeds and changes nothing: the operation is "this head
 is archived", and an archive ref is never moved or duplicated (§13).

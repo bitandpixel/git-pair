@@ -313,17 +313,18 @@ func TestChangeCompleteJSONContract(t *testing.T) {
 		mustSucceed(t, "change", "complete", "--json").json(t)
 
 	want := map[string]any{
-		"changeset":                  slug,
-		"state":                      "APPROVED",
-		"head":                       approve,
-		"short":                      f.Short(approve),
-		"base":                       "main",
-		"review_ref":                 reviewRef(slug),
-		"archive_ref":                archivePattern(slug) + "/" + f.Short(approve),
-		"archive_created":            true,
-		"squash_safe":                true,
-		"acknowledged_survivors":     float64(0),
-		"surviving_review_artifacts": float64(0),
+		"changeset":                     slug,
+		"state":                         "APPROVED",
+		"head":                          approve,
+		"short":                         f.Short(approve),
+		"base":                          "main",
+		"review_ref":                    reviewRef(slug),
+		"archive_ref":                   archivePattern(slug) + "/" + f.Short(approve),
+		"archive_created":               true,
+		"squash_safe":                   true,
+		"acknowledged_survivors":        float64(0),
+		"acknowledged_unreviewed_paths": float64(0),
+		"surviving_review_artifacts":    float64(0),
 	}
 	for key, w := range want {
 		if got := out[key]; got != w {
@@ -369,4 +370,71 @@ func TestStatusReportsTheArchiveRefOnlyAtTheCompletedHead(t *testing.T) {
 	if !strings.Contains(after["next_action"].(string), "the head moved since the review") {
 		t.Errorf("next_action = %v, want the drift named rather than a command that would refuse", after["next_action"])
 	}
+}
+
+// The drift the flag exists for: content outside the changeset directory arrived on top of
+// an approval, and the owner decides it is not worth a second review. The acknowledgement is
+// printed and counted, because the archive still names this head.
+func TestChangeCompleteAcknowledgesUnreviewedChanges(t *testing.T) {
+	f, slug, _, _ := approvedChangeset(t)
+	f.Commit("author: fix a typo in the readme", gittest.WithFile("README.md", "# booking\n\nFixed a typo.\n"))
+
+	refused := runIn(t, f.Dir(), "change", "complete")
+	if refused.code != exitRefusal {
+		t.Fatalf("completing drifted work exited %d, want %d", refused.code, exitRefusal)
+	}
+
+	res := runIn(t, f.Dir(), "change", "complete", "--allow-unreviewed-changes", "--json")
+	res.mustSucceed(t, "change", "complete", "--allow-unreviewed-changes")
+	out := res.json(t)
+	if out["acknowledged_unreviewed_paths"] != float64(1) {
+		t.Errorf("acknowledged_unreviewed_paths = %v, want 1", out["acknowledged_unreviewed_paths"])
+	}
+	head := f.Head()
+	if out["head"] != head {
+		t.Errorf("head = %v, want the drifted head %s", out["head"], head)
+	}
+	if got := f.RefSHA(archivePattern(slug) + "/" + f.Short(head)); got != head {
+		t.Errorf("the archive points at %s, want the head that was acknowledged", got)
+	}
+
+	human := runIn(t, f.Dir(), "change", "complete", "--allow-unreviewed-changes")
+	human.mustSucceed(t, "change", "complete", "--allow-unreviewed-changes")
+	mustContain(t, human.stdout, "Acknowledged 1 path(s) outside changesets/",
+		"the human output must say what was completed over")
+}
+
+// `change unready` is a decision, not drift. With the newest marker being the withdrawal, no
+// flag talks the changeset back into a state where completion applies, or the explicit act
+// would be outranked by an implicit one.
+func TestChangeCompleteDriftFlagCannotUndoAWithdrawal(t *testing.T) {
+	f, _, _, _ := approvedChangeset(t)
+	runIn(t, f.Dir(), "change", "unready").mustSucceed(t, "change", "unready")
+	f.Commit("author: keep going", gittest.WithFile("service.go", "package main\n\nfunc Lock() { retry() }\n"))
+
+	res := runIn(t, f.Dir(), "change", "complete", "--allow-unreviewed-changes")
+	if res.code != exitRefusal {
+		t.Errorf("completing a withdrawn changeset exited %d, want %d\nstderr: %s",
+			res.code, exitRefusal, res.stderr)
+	}
+	// The reason names the withdrawal as the newest marker: "code changed since unready
+	// <sha>" — the thing standing between this head and a reviewable state is the act.
+	mustContain(t, res.stderr, "since unready", "the refusal must name the withdrawal as the newest marker")
+}
+
+// The flag covers drift over an approval, never a reviewer's block: that is a verdict to
+// answer, not a detail to acknowledge.
+func TestChangeCompleteDriftFlagDoesNotOverrideABlock(t *testing.T) {
+	f, _ := newChangeset(t, "booking-transaction", "main")
+	ready(t, f)
+	f.Write("service.go", "package main\n\n// Please use a transaction here\nfunc Lock() {}\n")
+	submit(t, f, "block")
+	f.Commit("author: unrelated work", gittest.WithFile("handler.go", "package main\n\nfunc Serve() { log() }\n"))
+
+	res := runIn(t, f.Dir(), "change", "complete", "--allow-unreviewed-changes")
+	if res.code != exitRefusal {
+		t.Errorf("completing a blocked changeset exited %d, want %d\nstderr: %s",
+			res.code, exitRefusal, res.stderr)
+	}
+	mustContain(t, res.stderr, "block", "the refusal must name the outcome that withholds integration")
 }

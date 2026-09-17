@@ -385,14 +385,16 @@ Every command accepts the persistent `--json` flag, but only `status`, `change r
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), then moves the review ref |
 | `review history` | — | only review marker commits, indexed from `0` |
 | `review queue` | — | every changeset in this repo whose derived state is `READY`, longest wait first |
-| `change complete` | `--allow-surviving-review-additions` | archives the reviewed `HEAD` and reports squash-safety; commits nothing; never merges, pushes or squashes |
+| `change complete` | `--allow-surviving-review-additions`, `--allow-unreviewed-changes` | archives the reviewed `HEAD` and reports squash-safety; commits nothing; never merges, pushes or squashes |
 | `status` | — | derived state for the current branch's changeset |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
 commits, no blocking surviving additions. `change complete` checks: clean tree, newest
 review at `HEAD` is `approve` or `feedback` and still describes what `HEAD` carries (the tree is
-compared, ignoring `changesets/<cs>/`), no blocking surviving additions. `change unready` checks
+compared, ignoring `changesets/<cs>/`), no blocking surviving additions. The last two can be
+acknowledged with `--allow-surviving-review-additions` and `--allow-unreviewed-changes`; a block
+or a withdrawal cannot. `change unready` checks
 only for a clean tree, since the marker it writes is empty. `change init` warns
 without failing
 if the base does not resolve, and commits only the changeset directory (`git commit --only`),
@@ -502,11 +504,14 @@ is none)
 
 `git pair change complete --json` — `head` is the archived commit and `state` is the derived
 state, which completion does not change; `archive_created` is false when this head was already
-archived, which is a success rather than a refusal.
+archived, which is a success rather than a refusal. `acknowledged_unreviewed_paths` counts what
+`--allow-unreviewed-changes` covered, so a completion over drift reports `WORKING` with a
+non-zero count beside it rather than looking like an ordinary approval.
 
 ```json
 {
   "acknowledged_survivors": 0,
+  "acknowledged_unreviewed_paths": 0,
   "archive_created": true,
   "archive_ref": "refs/reviews/archive/feat/941266b",
   "base": "main",
@@ -837,7 +842,16 @@ git pair change complete --allow-surviving-review-additions
 ```
 
 Only the most recent review counts, and only additions outside `changesets/<changeset>/`
-block; surviving `ABOUT.md` and thread text is listed as non-blocking.
+block; surviving `ABOUT.md` and thread text is listed as non-blocking. A second hatch covers the
+case the tree check cannot resolve on its own — content outside `changesets/<changeset>/` that
+arrived after the approval and is not worth a second review, such as a README typo:
+
+```bash
+git pair change complete --allow-unreviewed-changes
+```
+
+The output names how many paths it completed over, and the archive still points at that `HEAD`.
+Neither hatch overrides a `block` or a `change unready`.
 
 ```opening an editor needs a terminal```, ``` `git pair review open` needs a terminal ``` and
 ``` `git pair review reopen` needs a terminal ``` (exit 2) — both stdin and stdout must be

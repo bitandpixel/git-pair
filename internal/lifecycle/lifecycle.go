@@ -79,6 +79,10 @@ type Summary struct {
 	Stale bool
 	// Trailing counts the non-marker commits after the newest marker.
 	Trailing int
+	// Drifted lists the paths outside changesets/<slug>/ that differ between the newest
+	// marker and headRef. Only ReconcileStaleness fills it in, so it is empty for every
+	// caller that asks the marker question and not the tree question.
+	Drifted []string
 	// TrailingUnrecognised counts the trailing commits that carry Review-*
 	// trailers git-pair could not interpret. They always invalidate a marker:
 	// a newer git-pair may read them fine, and guessing from the tree would be a
@@ -340,6 +344,7 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 	}
 	if len(changed) > 0 {
 		s.State = model.StateWorking
+		s.Drifted = changed
 		s.Reason = fmt.Sprintf("code changed since %s", markerLabel(marker))
 		return s, nil
 	}
