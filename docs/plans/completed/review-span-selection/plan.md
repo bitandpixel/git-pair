@@ -391,6 +391,15 @@ the only rule, and `V` is the way to a span you can review.
 
 ## Naming that changed after this plan was archived
 
+A second spelling of the same span was removed. The picker's `Selected:` preview showed the pending
+pair twice — `changeset base → working tree` from the checkpoints, then `main...current` from the
+resolved span — and two vocabularies side by side read as two spans. The preview now says the one span
+string the header, the status line, `gitpr diff`'s stderr and `status --json` all say. The endpoint
+words survive for the case where they are the most specific thing available: when git cannot resolve
+the pair, there is no span to name, and the line shows what was chosen (`changeset base → nonsense`).
+The choices are not otherwise hidden — the columns mark them with `*`, and a drill names the end it is
+choosing for. Test: `TestSelectedLineNamesTheSpanTheRestOfTheAppNames`.
+
 On the owner's request (2026-09-17, branch `gitpr/span-labels`) the endpoint vocabulary moved, so a
 reader of everything above should translate as they go:
 

@@ -724,25 +724,37 @@ func (m reviewModel) rowWithDetail(label, detail string, width int) string {
 	return padRight(label, width-len(detail)) + detail
 }
 
+// selectedBlock is the picker's preview of the pending pair. It names the pair with the one span
+// string the rest of the app uses -- the header, the status line after `Enter`, `gitpr diff`'s stderr,
+// `status --json` -- because two vocabularies for one thing read as two things: "changeset base →
+// working tree" and "main...current" side by side invite the reviewer to wonder whether they are
+// looking at two spans. The endpoint spellings survive for the case where they are the most specific
+// thing available, which is when git cannot resolve the pair at all and there is no span to name.
+// The choices themselves are not lost: the columns mark them, and a drill names the end it is choosing
+// for.
 func (m reviewModel) selectedBlock() string {
-	b := strings.Builder{}
+	var b strings.Builder
 	b.WriteString(styleDim.Render("Selected:") + "\n")
-	b.WriteString(clip("  "+m.pick.base.String()+" \u2192 "+m.pick.head.String(), m.width) + "\n")
+	endpoint := "  " + m.pick.base.String() + " \u2192 " + m.pick.head.String()
 
 	if msg := m.pick.err; msg != "" {
+		b.WriteString(clip(endpoint, m.width) + "\n")
 		b.WriteString(clip(styleErr.Render("  "+msg), m.width) + "\n")
 		return b.String()
 	}
 	sp, err := m.resolveSelector(span.Selector{Base: m.pick.base, Head: m.pick.head})
 	if err != nil {
+		b.WriteString(clip(endpoint, m.width) + "\n")
 		b.WriteString(clip(styleErr.Render("  "+err.Error()), m.width) + "\n")
 		return b.String()
 	}
+	// The span leads and the mode follows. Everywhere else the span is what a line starts with, and
+	// if the row is clipped it is the mode that should be lost, not the answer to "which span".
 	mode := styleSpan.Render("LIVE") + styleDim.Render(" \u00b7 editable")
 	if sp.Historical() {
 		mode = styleSpan.Render("HISTORICAL") + styleDim.Render(" \u00b7 read-only")
 	}
-	b.WriteString(clip("  "+mode+styleDim.Render("  "+sp.Label), m.width) + "\n")
+	b.WriteString(clip("  "+styleSpan.Render(sp.Label)+"  "+mode, m.width) + "\n")
 	return b.String()
 }
 

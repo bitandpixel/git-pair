@@ -687,8 +687,10 @@ read-only half is about the screen, where the mistakes would be made.
 
 `V` opens the span picker, where both ends are chosen before either takes effect: `Tab` moves between
 the BASE and HEAD columns, `j`/`k` move, `Space` sets the end under the cursor, and `Enter` applies
-the pair — with the lines under the columns saying what that pair resolves to, and whether the screen
-would go read-only, before you commit to it. `u` and `f` are the unreviewed and full-changeset
+the pair — with the lines under the columns saying what that pair resolves to, in the same words the
+header and the status line use (`main...current`, not a second spelling of the same span), and whether
+the screen would go read-only, before you commit to it. When git cannot resolve the pair there is no
+span to name, and the line shows what you chose instead (`changeset base → nonsense`). `u` and `f` are the unreviewed and full-changeset
 presets; `Esc` leaves the span exactly as it was. Each column lists the review submissions — the newest
 as `Last Review`, then `Review -2` and `Review -3`, older ones by the index you would type — then
 `Commit…` and `Ref…`; only the base offers the changeset base, and only the head offers `Current`

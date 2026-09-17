@@ -934,3 +934,75 @@ func mustPicker(t *testing.T) reviewModel {
 	m, _ := pickerFixture(t, 1)
 	return m
 }
+
+// One span, one string. The picker used to name the pending pair twice -- "changeset base → working
+// tree" above "main...current" -- which reads as two spans described slightly differently rather than
+// one span described once. The preview now says what the header, the status line and `status --json`
+// say, and keeps the endpoint words only where there is no span to name.
+func TestSelectedLineNamesTheSpanTheRestOfTheAppNames(t *testing.T) {
+	m, _ := pickerFixture(t, 1)
+	view := open(t, m).selectedBlock()
+	if !strings.Contains(view, "main...current") {
+		t.Fatalf("the preview does not use the span string the rest of the app uses:\n%s", view)
+	}
+	for _, absent := range []string{"working tree", "changeset base", "\u2192"} {
+		if strings.Contains(view, absent) {
+			t.Errorf("the preview names the endpoints beside the span, so the screen shows one span twice:\n%s", view)
+		}
+	}
+	if !strings.Contains(view, "LIVE") || !strings.Contains(view, "editable") {
+		t.Errorf("the preview lost what the pair would let the screen do:\n%s", view)
+	}
+
+	// The span leads the row, so a narrow terminal loses the mode rather than the answer.
+	narrow := open(t, mustPicker(t))
+	narrow.width = 24
+	if got := narrow.selectedBlock(); !strings.Contains(got, "main...current") {
+		t.Errorf("a clipped preview lost the span rather than the mode:\n%s", got)
+	}
+
+	// The unreviewed span is live -- it ends at the working tree -- and is named as the header names
+	// it: last review..current, not review -1 → working tree.
+	if err := m.sess.SetSpan(context.Background(), span.SinceReview(-1)); err != nil {
+		t.Fatalf("SetSpan: %v", err)
+	}
+	pending := m
+	pending.pick = pending.newSpanPicker() // what `V` does: the pending pair starts from the span on screen
+	view = pending.selectedBlock()
+	if !strings.Contains(view, "last review..current") {
+		t.Errorf("the preview of a live pair is not the header's span string:\n%s", view)
+	}
+	if strings.Contains(view, "\u2192") {
+		t.Errorf("the preview names the endpoints beside the span:\n%s", view)
+	}
+
+	// A historical pair likewise, with the mode that belongs to it.
+	hist := span.Selector{Base: span.ChangesetBase(), Head: span.Review(-1)}
+	if err := m.sess.SetSpan(context.Background(), hist); err != nil {
+		t.Fatalf("SetSpan(history): %v", err)
+	}
+	fromHistory := m
+	fromHistory.pick = fromHistory.newSpanPicker()
+	view = fromHistory.selectedBlock()
+	if !strings.Contains(view, "main...last review") {
+		t.Errorf("the preview of a historical pair is not the header's span string:\n%s", view)
+	}
+	if !strings.Contains(view, "HISTORICAL") || !strings.Contains(view, "read-only") {
+		t.Errorf("a historical pair does not say it is read-only:\n%s", view)
+	}
+
+	// Where git cannot resolve the pair there is no span to name, and the words the reviewer chose
+	// are the most specific thing on screen.
+	m2, _ := pickerFixture(t, 1)
+	m2 = open(t, m2)
+	m2.pick.head = span.Commit("nonsense-not-a-revision")
+	view = m2.selectedBlock()
+	if !strings.Contains(view, "nonsense-not-a-revision") {
+		t.Errorf("an unresolvable pair does not say what was chosen:\n%s", view)
+	}
+	for _, absent := range []string{"LIVE", "HISTORICAL"} {
+		if strings.Contains(view, absent) {
+			t.Errorf("an unresolvable pair was described as if it resolved: %q\n%s", absent, view)
+		}
+	}
+}
