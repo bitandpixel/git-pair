@@ -427,6 +427,17 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	if err != nil {
 		return err
 	}
+	branches := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		branches = append(branches, strings.TrimPrefix(ref.Name, "refs/heads/"))
+	}
+	// One scan for the whole queue: every branch's tree is listed, and every CHANGESET.yaml
+	// comes back in a single batch. See changeset.Claims for why this is not a loop of
+	// AtCommit calls.
+	claims, err := changeset.Claims(ctx, repo, branches)
+	if err != nil {
+		return err
+	}
 	type found struct {
 		cs       changeset.Changeset
 		branches []string
@@ -434,13 +445,13 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	var order []string
 	sets := map[string]*found{}
 	var skipped []string
-	for _, ref := range refs {
-		branch := strings.TrimPrefix(ref.Name, "refs/heads/")
-		cs, err := changeset.AtCommit(ctx, repo, branch)
-		if err != nil {
-			skipped = append(skipped, branch+" (unreadable changeset metadata: "+err.Error()+")")
+	for _, branch := range branches {
+		res := claims[branch]
+		if res.Err != nil {
+			skipped = append(skipped, branch+" (unreadable changeset metadata: "+res.Err.Error()+")")
 			continue
 		}
+		cs := res.Changeset
 		if !cs.Exists {
 			continue
 		}

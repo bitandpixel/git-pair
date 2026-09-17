@@ -6,10 +6,12 @@
 package git
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -255,6 +257,107 @@ func (r *Repo) ShowFile(ctx context.Context, rev, path string) (string, error) {
 func (r *Repo) PathExistsAt(ctx context.Context, rev, path string) bool {
 	_, err := r.Git(ctx, "rev-parse", "--verify", "--quiet", rev+":"+path)
 	return err == nil
+}
+
+// TreeEntry is one file in a revision's tree: where it sits and the object holding it.
+type TreeEntry struct {
+	Path string
+	OID  string
+}
+
+// TreeEntries lists the files under dir at rev, with their object ids.
+//
+// The oid is the point: a caller that then wants many file contents can fetch them in one
+// `cat-file --batch` instead of one `git show` per file, and can fetch the same object once
+// however many revisions refer to it.
+func (r *Repo) TreeEntries(ctx context.Context, rev, dir string) ([]TreeEntry, error) {
+	args := []string{"ls-tree", "-r", rev}
+	if dir != "" {
+		args = append(args, "--", dir)
+	}
+	out, err := r.Git(ctx, args...)
+	if err != nil {
+		if IsUnknownRevision(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var entries []TreeEntry
+	for _, line := range splitLines(out) {
+		// `<mode> <type> <oid>\t<path>`; a symlink or submodule line parses the same way
+		// and is the caller's to reject by path, which is why the type is not filtered here.
+		meta, path, ok := strings.Cut(line, "\t")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(meta)
+		if len(fields) != 3 || fields[1] != "blob" {
+			continue
+		}
+		entries = append(entries, TreeEntry{Path: path, OID: fields[2]})
+	}
+	return entries, nil
+}
+
+// CatFileBlobs reads many blobs in one git process.
+//
+// A scan that reads a file out of every changeset directory of every branch pays one spawn
+// per file through `git show`, which is B×N spawns for a scan that is logically one question.
+// Feeding the ids to a single `cat-file --batch` makes it one, and asking for each id once
+// means the same landed directory sitting on forty branches is read once.
+//
+// A missing object is simply absent from the result. A scan across revisions may legitimately
+// find a path in one tree and not another, and which absences are worth complaining about is
+// the caller's business, not this one's.
+func (r *Repo) CatFileBlobs(ctx context.Context, oids []string) (map[string]string, error) {
+	blobs := map[string]string{}
+	seen := map[string]bool{}
+	var want []string
+	for _, oid := range oids {
+		if oid == "" || seen[oid] {
+			continue
+		}
+		seen[oid] = true
+		want = append(want, oid)
+	}
+	if len(want) == 0 {
+		return blobs, nil
+	}
+	out, err := r.run(ctx, strings.Join(want, "\n")+"\n", true, "cat-file", "--batch")
+	if err != nil {
+		return nil, err
+	}
+	br := bufio.NewReaderSize(strings.NewReader(out), 64*1024)
+	for {
+		header, err := br.ReadString('\n')
+		if header == "" {
+			if err != nil {
+				break
+			}
+			continue
+		}
+		header = strings.TrimSuffix(header, "\n")
+		fields := strings.Split(header, " ")
+		if len(fields) == 2 && fields[1] == "missing" {
+			continue
+		}
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("git cat-file --batch: unexpected output line %q", header)
+		}
+		size, err := strconv.Atoi(fields[2])
+		if err != nil {
+			return nil, fmt.Errorf("git cat-file --batch: unreadable size in %q: %w", header, err)
+		}
+		content := make([]byte, size)
+		if _, err := io.ReadFull(br, content); err != nil {
+			return nil, fmt.Errorf("git cat-file --batch: truncated content for %s: %w", fields[0], err)
+		}
+		if _, err := br.ReadByte(); err != nil && !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("git cat-file --batch: unreadable separator after %s: %w", fields[0], err)
+		}
+		blobs[fields[0]] = string(content)
+	}
+	return blobs, nil
 }
 
 // LogFields returns one record per commit in revRange, oldest first.

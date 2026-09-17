@@ -227,3 +227,78 @@ func TestRecentCommitsAndRefTipsCarryWhatAPickerNeeds(t *testing.T) {
 		t.Error("RefTip carried the tag object rather than the commit")
 	}
 }
+
+// `cat-file --batch` frames many objects into one stream: `<oid> <type> <size>`, content,
+// then the next object. Parsing that by length rather than by scanning for a terminator is
+// the difference between reading a metadata file and reading a metadata file plus whatever
+// the next object happened to start with, so the framing cases are pinned here.
+func TestCatFileBlobsReadsManyObjectsInOneCall(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFiles(map[string]string{
+		"one.txt":        "single line\n",
+		"two.txt":        "id: booking\nbase: main\nbranch: booking\n",
+		"empty.txt":      "",
+		"twin-a.txt":     "same content\n",
+		"twin-b.txt":     "same content\n",
+		"no-newline.txt": "ends without a newline",
+	}))
+	repo := &git.Repo{Dir: f.Dir()}
+	ctx := context.Background()
+
+	entries, err := repo.TreeEntries(ctx, "main", "")
+	if err != nil {
+		t.Fatalf("TreeEntries: %v", err)
+	}
+	oids := map[string]string{}
+	for _, e := range entries {
+		oids[e.Path] = e.OID
+	}
+	if len(oids) != 6 {
+		t.Fatalf("TreeEntries found %d files, want 6: %v", len(oids), oids)
+	}
+	if oids["twin-a.txt"] != oids["twin-b.txt"] {
+		t.Fatal("identical contents should share one object; the batch dedupe depends on it")
+	}
+
+	// Duplicates asked for twice, and an oid that does not exist.
+	requested := []string{
+		oids["one.txt"], oids["two.txt"], oids["empty.txt"],
+		oids["twin-a.txt"], oids["twin-a.txt"], oids["no-newline.txt"],
+		"0000000000000000000000000000000000000000",
+	}
+	blobs, err := repo.CatFileBlobs(ctx, requested)
+	if err != nil {
+		t.Fatalf("CatFileBlobs: %v", err)
+	}
+	for path, want := range map[string]string{
+		"one.txt":        "single line\n",
+		"two.txt":        "id: booking\nbase: main\nbranch: booking\n",
+		"empty.txt":      "",
+		"twin-a.txt":     "same content\n",
+		"no-newline.txt": "ends without a newline",
+	} {
+		if got := blobs[oids[path]]; got != want {
+			t.Errorf("%s = %q, want %q", path, got, want)
+		}
+	}
+	if _, ok := blobs["0000000000000000000000000000000000000000"]; ok {
+		t.Error("a missing object should be absent, not an entry and not an error")
+	}
+}
+
+// An empty request must not spawn git at all: a scan that finds no changeset directories is
+// the common case, not an edge worth paying a process for.
+func TestCatFileBlobsOnNothingAsksNothing(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	repo := &git.Repo{Dir: f.Dir()}
+
+	blobs, err := repo.CatFileBlobs(context.Background(), nil)
+	if err != nil || len(blobs) != 0 {
+		t.Errorf("CatFileBlobs(nil) = %v, %v; want an empty result", blobs, err)
+	}
+	blobs, err = repo.CatFileBlobs(context.Background(), []string{"", ""})
+	if err != nil || len(blobs) != 0 {
+		t.Errorf("CatFileBlobs([\"\"]) = %v, %v; want an empty result", blobs, err)
+	}
+}

@@ -324,6 +324,114 @@ func ForBranch(repo *git.Repo, branch string) (Changeset, error) {
 	})
 }
 
+// ClaimResult is what one branch says about the changeset it carries. A branch whose
+// metadata cannot be read is a result with Err set rather than a failed scan: one branch
+// with a broken CHANGESET.yaml is not a reason to stop answering about the others.
+type ClaimResult struct {
+	Changeset Changeset
+	Err       error
+}
+
+// changesetDir reports the changeset name a tree path belongs to, and whether it is the
+// metadata file that carries the claim.
+func changesetDir(path string) (string, bool) {
+	dir, name := filepath.Split(path)
+	if name != MetadataFile {
+		return "", false
+	}
+	rest := strings.TrimSuffix(dir, "/")
+	prefix := Root + "/"
+	if !strings.HasPrefix(rest, prefix) {
+		return "", false
+	}
+	id := strings.TrimPrefix(rest, prefix)
+	if id == "" || strings.Contains(id, "/") {
+		return "", false
+	}
+	return id, true
+}
+
+// Claims resolves the changeset carried by each of the given branches, reading every
+// CHANGESET.yaml in one git process.
+//
+// Reading them one at a time costs a spawn per changeset directory, which turns "what does
+// each branch carry?" into B×N spawns — and N grows with the directories that landed
+// changesets leave behind on the deployment branch, which nothing deletes. Listing each
+// tree is still one call per branch, but the contents come back in a single
+// `cat-file --batch`, and a directory unchanged across forty branches is one object read
+// once. Revs are branch names because a claim is a statement about a branch.
+func Claims(ctx context.Context, repo *git.Repo, branches []string) (map[string]ClaimResult, error) {
+	results := map[string]ClaimResult{}
+	oidsByDir := map[string]map[string]string{}
+	var oids []string
+	for _, branch := range branches {
+		entries, err := repo.TreeEntries(ctx, branch, Root+"/")
+		if err != nil {
+			results[branch] = ClaimResult{Err: err}
+			continue
+		}
+		byDir := map[string]string{}
+		for _, e := range entries {
+			id, ok := changesetDir(e.Path)
+			if !ok {
+				continue
+			}
+			byDir[id] = e.OID
+			oids = append(oids, e.OID)
+		}
+		oidsByDir[branch] = byDir
+	}
+	blobs, err := repo.CatFileBlobs(ctx, oids)
+	if err != nil {
+		return nil, err
+	}
+	parsed := map[string]map[string]string{}
+	for oid, data := range blobs {
+		md, err := parseMetadata(data)
+		if err != nil {
+			return nil, err
+		}
+		parsed[oid] = md
+	}
+	for _, branch := range branches {
+		if _, failed := results[branch]; failed {
+			continue
+		}
+		byDir := oidsByDir[branch]
+		dirs := make([]string, 0, len(byDir))
+		for id := range byDir {
+			dirs = append(dirs, id)
+		}
+		sort.Strings(dirs)
+		cs, err := resolve(branch, dirs, func(name string) (map[string]string, error) {
+			md, ok := parsed[byDir[name]]
+			if !ok {
+				// The tree listed the file, so the object should exist. Saying which
+				// branch is unreadable is what the queue's skip note needs.
+				return nil, fmt.Errorf("%s: %s: blob %s is unreadable", branch, filepath.Join(Root, name, MetadataFile), byDir[name])
+			}
+			return md, nil
+		})
+		results[branch] = ClaimResult{Changeset: cs, Err: err}
+	}
+	return results, nil
+}
+
+// localBranches lists local branches in for-each-ref order.
+func localBranches(ctx context.Context, repo *git.Repo) ([]string, error) {
+	out, err := repo.Git(ctx, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	if err != nil {
+		return nil, err
+	}
+	var branches []string
+	for _, b := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if b != "" {
+			branches = append(branches, b)
+		}
+	}
+	return branches, nil
+}
+
 // AtCommit resolves the changeset that branch carries at its own tip, reading
 // CHANGESET.yaml out of that commit instead of the working tree.
 //
@@ -334,19 +442,12 @@ func AtCommit(ctx context.Context, repo *git.Repo, branch string) (Changeset, er
 	if branch == "" {
 		return Changeset{}, ErrDetachedHead
 	}
-	dirs, err := DirsAt(ctx, repo, branch)
+	results, err := Claims(ctx, repo, []string{branch})
 	if err != nil {
 		return Changeset{}, err
 	}
-	return resolve(branch, dirs, func(name string) (map[string]string, error) {
-		md, err := metadataAt(ctx, repo, branch, filepath.Join(Root, name))
-		if errors.Is(err, git.ErrUnknownPath) {
-			// A directory in the tree with no CHANGESET.yaml of its own: not a changeset,
-			// and no reason to fail the branch that happens to carry it.
-			return map[string]string{}, nil
-		}
-		return md, err
-	})
+	res := results[branch]
+	return res.Changeset, res.Err
 }
 
 // metadataAt reads CHANGESET.yaml for a directory out of a revision.
@@ -422,22 +523,18 @@ func RequireCurrent(ctx context.Context, repo *git.Repo) (Changeset, error) {
 // matches when the directory claims it at that branch's own tip, so a child branch that
 // merely inherited the directory from its parent is not a carrier of it.
 func BranchesForSlug(ctx context.Context, repo *git.Repo, id string) ([]string, error) {
-	out, err := repo.Git(ctx, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	branches, err := localBranches(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	results, err := Claims(ctx, repo, branches)
 	if err != nil {
 		return nil, err
 	}
 	var matches []string
-	for _, b := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
-		if b == "" {
-			continue
-		}
-		// An unreadable branch cannot claim the changeset, and one branch's broken
-		// metadata is no reason to refuse the question about every other branch.
-		cs, err := AtCommit(ctx, repo, b)
-		if err != nil {
-			continue
-		}
-		if cs.Exists && cs.Slug == id {
+	for _, b := range branches {
+		res := results[b]
+		if res.Err == nil && res.Changeset.Exists && res.Changeset.Slug == id {
 			matches = append(matches, b)
 		}
 	}

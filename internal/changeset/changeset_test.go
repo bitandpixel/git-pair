@@ -582,3 +582,41 @@ func TestWriteRecordsTheOwningBranch(t *testing.T) {
 		t.Errorf("Write for another branch error = %v, want ErrBranchTaken", err)
 	}
 }
+
+// The scan finds changesets by their metadata file rather than by listing directories and
+// then asking each one, so a directory under changesets/ that is not a changeset must be
+// stepped over without failing the branch that carries it.
+func TestClaimsStepsOverADirectoryThatIsNotAChangeset(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking-work", "main")
+	f.Write(f.ChangesetPath("notes", "README.md"), "scratch, never a changeset\n")
+	// A thread sorts after CHANGESET.yaml, so a scan that took "some file in the
+	// directory" instead of the metadata file would read this as the claim.
+	f.Write(f.ChangesetPath("booking-work", "concurrency-tests.md"), "# Concurrency tests\n")
+	f.Commit("add a stray directory and a review thread")
+
+	cs, err := changeset.AtCommit(context.Background(), fixRepo(f), "booking")
+	if err != nil {
+		t.Fatalf("AtCommit: %v", err)
+	}
+	if !cs.Exists || cs.Slug != "booking-work" {
+		t.Errorf("AtCommit = %+v, want booking-work", cs)
+	}
+
+	// One call answers for every branch, and each branch gets its own answer.
+	results, err := changeset.Claims(context.Background(), fixRepo(f), []string{"booking", "main"})
+	if err != nil {
+		t.Fatalf("Claims: %v", err)
+	}
+	if got := results["booking"].Changeset.Slug; got != "booking-work" {
+		t.Errorf("Claims[booking] = %q, want booking-work", got)
+	}
+	if results["main"].Changeset.Exists {
+		t.Errorf("Claims[main] = %+v, want no changeset", results["main"].Changeset)
+	}
+	if err := results["main"].Err; err != nil {
+		t.Errorf("Claims[main].Err = %v, want a branch with nothing rather than an error", err)
+	}
+}
