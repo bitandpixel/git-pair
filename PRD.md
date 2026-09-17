@@ -1595,9 +1595,15 @@ The TUI should be intentionally small.
 Example:
 
 ```text
-booking-transaction-tests
-base: booking-transaction
-span: unreviewed
+╭ booking-transaction-tests ───╮
+│ base  booking-transaction    │
+│ span  unreviewed ▸           │
+│ ABOUT.md                     │
+│ ▾ Threads                    │
+│     concurrency-tests.md     │
+│     locking.md               │
+│     + new thread…            │
+╰──────────────────────────────╯
 
 ▾ ◐ src/booking/  2/3
   ▾ ✓ concurrency/
@@ -1606,24 +1612,34 @@ span: unreviewed
   ○ main.ts
 
 2 / 3 reviewed
-
-ABOUT.md
-▾ Threads
-    concurrency-tests.md
-    locking.md
-    + new thread…
 ────────────────────────────────
 ```
 
-The changed files and the changeset documents form one navigable list rather than separate
-modes: `j` continues from the last file into `ABOUT.md` and the threads nested under their
-heading, and creating a thread is one of the entries in that list instead of a separate
-prompt-plus-browse flow. The heading collapses and counts what it hides — `▸ Threads (2)`
-collapsed, plain `▾ Threads` when they are on screen — so a changeset with many threads stays
-scannable. A rule separates the list from the shortcut bar. The reviewed counter separates the two
-blocks — above it the files the diff touched, below it the documents the review is made of — which
-is also what `Tab` skips between. A row that changed in the span keeps its file row as well as its
-place in the section below: the list is what the diff did, the section is the shortcut to read it.
+Two regions share the row area and the keyboard: the changeset box above, and the file tree below it,
+with the reviewed counter under the tree. The box holds what the review is made of — the span it is
+measured against, `ABOUT.md`, the thread heading, the threads nested under it, and the entry that starts
+another — so reading what the changeset says about the code and choosing the next file are motions on the
+same screen rather than modes. The heading collapses and counts what it hides — `▸ Threads (2)` collapsed,
+plain `▾ Threads` when they are on screen — so a changeset with many threads stays scannable. `Tab` moves
+the keys around the ring (tree, diff where there is room for one, box), `f` and `m` name a region instead
+of walking to the next one, and each region keeps its own cursor, so the keys return to the row they left.
+The navigation keys belong to the region holding them and mean the same thing in either: `j`/`k` a row,
+`gg`/`G` its two ends, `ctrl-d`/`ctrl-u` half a page, `ctrl-f`/`ctrl-b` a page. Each region's shortcut bar
+names the keys of that region and none of the others, which is what makes a key of the other region an
+absence a reviewer can read rather than a keystroke that vanishes. A rule separates the list from the
+shortcut bar.
+
+The box is capped at a third of the space the terminal gives and scrolls inside its own borders, so a
+changeset with forty threads is a reason to read the box rather than a reason to hide the tree behind it;
+rows that do not fit are counted in the bottom border (`3 more`), a note placed there because a note with
+a row of its own would move the layout as it came and went. The borders are also the box's focus light —
+single rules, double rules while it holds the keys — the convention the divider uses for the diff, chosen
+over styling alone so the focus survives a terminal that renders no bold. The span is the box's one
+control: `Enter` or `Space` on its row opens the span picker, since what a review is measured against is
+worth choosing, and `base` above it is a line of the frame rather than a row, since a base is only read.
+The picker commits nothing until its own `Enter`, so the row is available over a historical span as well.
+A row that changed in the span keeps its file row as well as its place in the box: the tree is what the
+diff did, the box is the shortcut to read what was said about it.
 
 The files are a tree rather than a list of paths. Each sits under its directory, a directory that
 holds nothing but one directory is folded into that row (`src/booking/` above is one row, not two),
@@ -1646,7 +1662,7 @@ with the subtree's counts. The tree is a view, so it folds over a read-only span
 a reviewer reads, and shows no marks there.
 
 On a terminal at least 100 columns and 16 rows, the list shares the screen with a preview column:
-the diff the common span made to the selected file, paged with `ctrl-f`/`ctrl-b`. It prints git's
+the diff the common span made to the selected file. It prints git's
 own output, colour included, and adds only what a fixed-width column cannot decline to do: the line
 number git itself put in the hunk header, a break where a line is too wide, and the spaces a tab
 advances to. It does not fold, group, filter, or renumber hunks, and it does not choose
@@ -1657,15 +1673,17 @@ sits against the bottom edge rather than under a short list.
 
 `p` moves the keys into that column rather than hiding it, so a diff longer than the column is read
 with the keys a diff is read with: `j`/`k`, `ctrl-d`/`ctrl-u`, `ctrl-f`/`ctrl-b`, `gg` and `G` scroll
-the file already on show, and `Enter` opens the difftool on it. `p` or `Esc` hands the keys back and
-leaves the pane where it was; `q` closes the preview, while `q` on the list still quits. While the
-pane holds the keys nothing that changes the review can happen — marking, editing, threading and
+the file already on show, and `Enter` opens the difftool on it. `p` or `Esc` hands the keys back to the
+region that had them — tree or box — and leaves the pane where it was; `tab` moves them on to the box,
+because a region you can only leave by backing out of is not a stop on a ring; `q` closes the preview,
+while `q` on the list still quits. While the pane holds the keys nothing that changes the review can happen —
+marking, editing, threading and
 submitting are keys that do not occur, which is the whole-screen preview's promise extended to a
 column that never hid its list. The frame says which column has the keys by changing what is drawn
 rather than only how it is styled: the divider becomes a double rule, the pane's file line becomes a
 title, and the shortcut bar becomes the pane's own, naming every key it reads and none it does not.
-A terminal resized below the pane's floor takes the column away and gives the keys back to the list,
-because a column that is not drawn cannot hold the keyboard.
+A terminal resized below the pane's floor takes the column away and gives the keys back to the region
+that held them before the pane, because a column that is not drawn cannot hold the keyboard.
 
 When the reviewer has edited a file without committing, the pane shows those edits below the author's,
 under a caption naming them, with counts and line numbers of their own. Git's output does not say who

@@ -907,12 +907,18 @@ while the tool is for working on it. Plain `git pair diff` runs `git diff` with
 `core.quotePath=false` and inherits your pager and colour settings; the span label goes to
 stderr so stdout stays pipeable.
 
-`git pair review open` is an orchestration screen, not an editor. The changed files and their
-marks come first, the reviewed counter under them, then the changeset documents:
+`git pair review open` is an orchestration screen, not an editor. What the review is made of is at the
+top, the changed files and their marks below it, and the reviewed counter under those:
 
 ```text
-tuishow
-base: main  span: unreviewed
+╭ tuishow ─────────────────────────────╮
+│ base  main                           │
+│ span  unreviewed ▸                   │
+│ ABOUT.md                             │
+│ ▾ Threads                            │
+│     does-the-lock-cover-the-map.md   │
+│     + new thread…                    │
+╰──────────────────────────────────────╯
 
 ▾ ○ src/
   ▾ ○ ui/
@@ -920,21 +926,21 @@ base: main  span: unreviewed
   ○ a.ts
 
 0 / 2 reviewed
-
-ABOUT.md
-▾ Threads
-    does-the-lock-cover-the-map.md
-    + new thread…
 ────────────────────────────────────────
-j/k move  tab section  h/l fold  c fold all  enter open  d diff  p preview  e edit  space reviewed
-a about  t new thread  T hide threads  v spans  V picker  s submit  q quit
+j/k move  gg/G ends  ctrl-d/u half page  ctrl-f/b page  h/l fold  c fold all  enter open  d diff
+space reviewed  e edit  a about  t new thread  T hide threads  v spans  V picker  s submit
+p preview  f files  m changeset  tab focus  q quit
 ```
 
-The screen is one navigable list in two blocks: the files the diff touched, and below the
-counter the documents the review is made of. `j` runs off the bottom of the files into the
-section below — reading the code and
-then reading what the changeset says about it is one motion, not two modes — and `Tab` toggles
-between the halves. The files are a tree, not a list of paths: each sits under its directory, a
+The screen has two regions where the keys can be: the changeset box at the top, and the file tree under
+it. `Tab` walks the ring — tree, diff where there is room for one, box — and `f` and `m` go to a named
+one from wherever the keys are. Each region keeps its own cursor, so `Tab` returns to the row it left
+rather than to the top of a list. The navigation keys belong to the region holding them and mean the
+same thing in both: `j`/`k` a row, `gg`/`G` the two ends, `ctrl-d`/`ctrl-u` half a page, `ctrl-f`/`ctrl-b`
+a page. (`ctrl-d` used to quit, which is why paging used to be `ctrl-f` and `ctrl-b` and nothing else;
+`ctrl-c` and `q` are what quit.) The shortcut bar is the bar of the region that holds the keys, which is
+how a key belonging to the other region is a key that is not offered rather than a key that quietly does
+nothing.
 directory holding nothing but one directory is folded into that row (`src/` above holds `a.ts` and
 `ui/`, so it gets its own row; a chain of single-child directories would be one row and print
 `docs/plans/active/`), and every row prints only the name the rows above it have not already said.
@@ -960,8 +966,8 @@ again. `e` opens the editor regardless of the span, so it is always one key away
 names the two keys that do reach what is under it instead. `Space`
 toggles reviewed on a file row — which stays under the cursor, since marking is not navigation — and
 on a directory row it sets every file under it, folded or not, because a fold is a way of looking at
-the list rather than a statement about what has been read; the next press clears them. The rows below
-the counter are read rather than diffed, so marking one says so. `a` opens
+the list rather than a statement about what has been read; the next press clears them. The rows in the
+box are read rather than diffed, so marking one says so. `a` opens
 `ABOUT.md` in the editor whatever the span did; `t` prompts for a new thread from anywhere;
 `T` collapses the thread list; `v`
 steps to the next span this session has been in — the span it opened on, the full and
@@ -978,6 +984,23 @@ reviewer can fill it in and come straight back to it. The thread heading counts 
 separates the whole list from the shortcut bar, so the bar reads as chrome rather than as more
 rows.
 
+The box is a box because its rows are not files, and a row of paths under a counter of files reads as a
+file. It holds the span the review is measured against, `ABOUT.md`, the thread heading, the threads, and
+the row that starts another — what a reviewer reads before choosing a file, above the files it is
+choosing between. It is capped at a third of the space the terminal gives and scrolls inside its own
+borders, so forty threads are a reason to read the box rather than a reason to hide the tree behind it;
+when rows are off screen the bottom border says how many (`3 more`), which is a note inside the border
+rather than a row of its own because a note that came and went would move the whole layout. The borders
+are also the box's focus light: single rules while the keys are elsewhere, double rules (`╔ ═ ╗`) while
+the box holds them, the same convention the divider uses for the diff and for the same reason — bold and
+faint are the one thing a terminal is not obliged to render.
+
+The span is the box's one control. Its row ends in `▸`, and `Enter` or `Space` on it opens the span
+picker, because what a review is measured against is worth choosing; `base` above it is a line of the
+frame rather than a row, because there is nothing to do with a base but read it. The picker changes
+nothing until its own `Enter`, which is why the row works over a historical span too, where `Space` on a
+file is still refused.
+
 On a wide terminal the list shares the screen with a preview. From 100 columns and 16 rows the
 session puts a column beside the list showing the diff of whatever the cursor is on — the span's
 diff, the same one `git pair diff` and the reviewed counter describe — with git's own `+N −M` in its
@@ -986,20 +1009,23 @@ a changeset of short names is not made to share the screen with whitespace, and 
 path cannot take the diff's columns — which is one thing the tree is for, since a row prints a base
 name where the flat list printed the whole path. Park the cursor on a directory and the pane shows
 what the span did to the whole subtree, git's pathspec doing the expanding, with the subtree's `+N −M`
-rather than one file's. `ctrl-f` and `ctrl-b` page through a diff too long to fit without leaving the
-list, and the note along the bottom says how much of it is left; `ctrl-d` still quits from the list,
-which is why paging there is not `ctrl-d`. Each line carries the number git gave it in its hunk header,
+rather than one file's. Each line carries the number git gave it in its hunk header,
 and a line too wide for the column is broken rather than cut, with its colour carried across the break.
 Tabs are shown as the spaces they advance to, because a tab the width maths scores as zero is a row the
 terminal wraps for you.
 
 `p` moves into the pane rather than switching it off: the keys go to the diff, and it scrolls with the
 keys the whole-screen preview uses — `j`/`k` a row, `ctrl-d`/`ctrl-u` half a page, `ctrl-f`/`ctrl-b` a
-page, `gg` the top and `G` the bottom — over the file the pane was already showing. `Enter` there opens
-the difftool on that file, which is the key the pane's own note points at. `p` or `Esc` hands the keys
-back and leaves the pane where it was, so coming back returns to the same lines; `q` closes the
+page, `gg` the top and `G` the bottom — over the file the pane was already showing. Paging a diff that
+way is the whole point: the four page keys belong to whichever region holds them, so a diff too long to
+fit is paged by moving into it rather than by borrowing the list's keys from across the screen.
+`Enter` there opens the difftool on that file, which is the key the pane's own note points at. `p` or
+`Esc` hands the keys back to the region that had them — the tree, or the box if the keys came from the
+box — and leaves the pane where it was, so coming back returns to the same lines; `q` closes the
 preview, because `q` means "finished with this" wherever it is pressed and the pane is what you were
-finishing with — quitting stays on the list, where it always was. While the diff holds the keys nothing
+finishing with — quitting stays on the list, where it always was. `tab`, `shift-tab`, `f` and `m` leave
+the pane too: the diff is a stop on the ring like the other two, and a ring you can only leave by backing
+out of it is not a ring. While the diff holds the keys nothing
 that changes the review happens: `Space`, `e`, `t`, `s` and the rest are keys that do not occur, the
 same promise the whole-screen preview makes, with the difference that here the list is still on the
 screen and the row you are not marking is one you can see. The frame says which column has the keys
