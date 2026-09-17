@@ -114,6 +114,13 @@ expect "the span is a row of the box, not a caption" -1 "$T/paint.raw" "span  ma
 expect "the file tree is below it" -1 "$T/paint.raw" "changesets/booking-transaction/"
 expect "the shortcut bar offers the span picker" -1 "$T/paint.raw" "V picker"
 expect "the shortcut bar offers quit" -1 "$T/paint.raw" "q quit"
+# The box is closed on all four sides in a real terminal, including the side nearest the diff column.
+expect "the changeset box closes on its right" -1 "$T/paint.raw" $'\u256e'
+expect "and a child sits deeper than the directory over it" -1 "$T/paint.raw" $'    \u25cb'
+expect "with the directory's own mark one step left of it" -1 "$T/paint.raw" $'  \u25be \u25cb'
+# The box grew a right side without moving the divider: the diff column still starts one space and one
+# rule to the right of the list.
+expect "and the diff column still starts at its own rule" -1 "$T/paint.raw" $'\u2502 changesets' 
 
 # --- 2. a historical span is read-only (span plan M2) ----------------------
 step "historical span: read-only, and it says so rather than eating keystrokes"
@@ -237,19 +244,29 @@ expectbytes "it gave the terminal back on quit" "$T/dumb.raw" $'\033[?1049l'
 # The pane is a wide-terminal thing. Below it `p` gives the diff the whole screen, because the
 # alternative is squeezing the list into a column nobody can read. A 60x14 terminal is the shape of
 # a half-width window on a laptop, which is where this layout earns its keep.
-step "small terminal: p takes the screen with the diff, and gives it back"
-# ctrl-c ends this one rather than q: q is the overlay's close key here, so a scenario that wants to
-# see the overlay *on screen* has to leave with the one key that always means the exit.
+step "small terminal: p takes the screen with the diff"
+# ctrl-c ends this one: q would quit the session (it does that on this screen now, like every other),
+# and a scenario that wants the overlay *on screen* has to leave with the key that only ever exits.
 ( COLS=60 ROWS=14; session overlay p,ctrl-c )
 expect "the overlay's shortcut bar is the overlay's own" 0 "$T/overlay.raw" "ctrl-f/b page"
 expect "the overlay shows git's diff" 0 "$T/overlay.raw" "@@"
 expect "the overlay carries the span the diff is measured against" 0 "$T/overlay.raw" "current"
 refuse "the list's counter is off screen while the diff has the screen" 0 "$T/overlay.raw" "reviewed"
 
-step "small terminal: q closes the overlay and hands the list back"
-( COLS=60 ROWS=14; session back p,q,q )
-expect "q paints the list again" 1 "$T/back.raw" "reviewed"
+step "small terminal: esc closes the overlay and hands the list back"
+( COLS=60 ROWS=14; session back p,esc,q )
+expect "esc paints the list again" 1 "$T/back.raw" "reviewed"
 expect "with the list's own shortcut bar, marks and all" 1 "$T/back.raw" "space reviewed"
+
+step "q quits from the diff, in either layout"
+# `q` used to mean "close the preview" where the preview had the keys, which put a second meaning on the
+# one key a reviewer never has to think about. It leaves the program now, from the overlay and from the pane.
+( COLS=60 ROWS=14; session qoverlay p,q )
+expectbytes "q in the overlay gave the terminal back" "$T/qoverlay.raw" $'\033[?1049l'
+refuse "and the list was never repainted under it" 1 "$T/qoverlay.raw" "space reviewed"
+( COLS=140 ROWS=30; session qpane p,q )
+expectbytes "q in the pane gave the terminal back" "$T/qpane.raw" $'\033[?1049l'
+refuse "and the list's bar was never repainted under it" 1 "$T/qpane.raw" "space reviewed"
 
 # Too small for even that is worth saying out loud, and with the smaller of the two asks -- 12 rows
 # would have been enough, so telling the reviewer about the pane's 16 would send them growing the
