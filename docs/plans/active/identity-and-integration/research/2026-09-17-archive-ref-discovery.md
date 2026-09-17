@@ -75,6 +75,61 @@ The guard that follows is simple and not in the requirements: **refuse to initia
 changeset on the default integration branch.** Trunk is not a changeset branch, and the
 misuse 4 describes becomes unreachable instead merely discouraged.
 
+## Amendments that were tested, not assumed
+
+Two amendments were implemented in the prototype and run against the same fixtures.
+
+**Exclude refs whose target has already landed** (a ref whose target is on the integration
+branch is history, not work in progress). This fixes two of the four failures: the
+unrecorded merge landing resolves to `uninitialized` instead of `AMBIGUOUS`, and the
+forgotten `change init` on trunk stops owning its descendants. It does not fix the other
+two: a squash-landed changeset's target is not on trunk, so it is still invisible, and a
+diverged parent still resolves to nothing.
+
+**Treat a ref target that contains HEAD as comparable** (the branch that still holds the
+work). This was an attempt to fix the diverged parent and it does not: as soon as both
+sides commit, neither contains the other, and no rule over one shared ref can attribute
+both. Finding 1 is not a bug in the rule — it is what one movable ref per changeset means.
+
+## A rule that survived all six fixtures
+
+Asking a different question resolves every fixture, including the ones the amendments
+could not: **the changesets on this revision are the `changesets/<id>/` directories
+present here and absent from the integration branch.** A directory that has reached trunk
+is landed work, so it drops out with no integration ref and no dependence on the landing
+strategy; a directory that exists only on this branch is work in progress, whichever
+branch line it is on. Archive refs are still read — to order stacked candidates by
+distance and to spot terminal records — but they are not the oracle.
+
+All six fixtures pass under it, measured rather than reasoned:
+
+| Fixture | Rules as written | Tree rule |
+| --- | --- | --- |
+| Stacked child branch | child ✓ | child ✓ |
+| Diverged parent and child | parent `uninitialized` ✗ | both branches resolve to the shared changeset ✓ |
+| Merge landing, integration unrecorded | **AMBIGUOUS** ✗ | `uninitialized` ✓ |
+| Squash landing, integration unrecorded | resolves, by accident | `uninitialized` ✓ — the same answer as the merge |
+| Forgotten `change init` on trunk | owns every descendant ✗ | `uninitialized` ✓ |
+| A clone with no archive refs at all | `uninitialized` ✗ | resolves ✓ |
+
+Its cost is also independent of how many changesets have ever existed: **8 git
+invocations against 1,802** for the same fixture with 300 archive refs. It satisfies §7
+(no branch name in the durable data) because a directory name is a changeset ID, not a
+branch; it satisfies §15 (shared with CI) because a branch and trunk are exactly what CI
+fetches; and it answers §15's independence claim honestly, because the answer is the same
+for merge and squash landings.
+
+Two consequences to decide on rather than discover later:
+
+- **Stacked candidates with no archive refs are ambiguous by distance alone** — measured,
+  two candidates and neither has one. The metadata carries the relation: under the addendum
+  a child's `base:` names the parent's archive ref, which contains the parent's ID, so the
+  parent is "the candidate named as another candidate's base". The stack order is
+  recoverable without refs — measured: a stack with an empty ref namespace resolves to the
+  child from the tree alone, at one extra blob read per candidate.
+- **`queue` has a natural enumeration again**: local branches minus trunk, two `ls-tree`
+  calls each, which is the shape the previous plan's M4 wanted.
+
 ## `base:` holding a ref (the addendum)
 
 Verified with the shipped binary rather than by reading:
@@ -148,29 +203,25 @@ Recorded so the recommendation is not read as opposition:
 
 ## Not yet answered
 
-- Whether rule 3's "nearest" should be a *signed* distance (HEAD an ancestor of the ref
-  counts as comparable, matching the branch that still holds the work) or the spec's
-  ancestor-only reading. Signed comparability would fix finding 1 at the cost of
-  permitting a shared ref across diverging branches, which is arguably what the
-  workflow already assumes.
-- Whether discovery should fall back to a reachable changeset directory when no archive
-  ref matches. The directory name is not a branch name, so this does not violate §7, and
-  it would make finding 1 recoverable.
-- What `queue` enumerates when refs, not branches, are the index of changesets — the
-  previous plan's finding (M4: an integration ref made `queue` report a landed changeset
-  as landed while an active branch was working on it) needs re-deriving against this
-  model.
+- How `queue` should order and label candidates under the tree rule, and what it reports
+  for a changeset whose directory is on a branch that has been deleted — the archive ref
+  survives, the directory does not, so the tree rule cannot see it and ref discovery can.
 - Which commands need a `--changeset` escape hatch once discovery can answer
   `uninitialized` for a branch that visibly has a changeset.
+- Whether discovery should combine the two rules (tree rule first, ref discovery as the
+  fallback that covers deleted branches) or whether one is enough.
 
 ## Decisions this note is for
 
-1. Adopt archive-ref discovery as the requirement states, with the four findings
-   accepted, or adopt it with the amendments above (signed distance, directory fallback,
-   refuse-init-on-trunk).
-2. Is `integration record` allowed to be a prerequisite for a usable repository
-   (finding 2)? If not, rule 2 or rule 4 has to change.
-3. Keep the M1 claim model as a fallback under ref discovery, or remove branch discovery
-   entirely as §7 asks.
-4. Implement discovery as a one-pass history walk (required by the cost numbers), and
-   accept that the cost is then bounded by history depth.
+1. Which rule decides "which changeset is this": the requirements' ancestor-archive-ref
+   rule as written, that rule with the landed-exclusion amendment, or the tree rule
+   (directories on this revision and not on trunk), which passed all six fixtures at about
+   1/200 of the cost.
+2. Whether archive refs are still created at `change init` under whichever rule is chosen
+   — the requirements ask for it (§11), and they are what makes a deleted branch's work
+   findable, which the tree rule cannot do on its own.
+3. Is `integration record` allowed to be a prerequisite for a usable repository (the
+   specified rule makes it one; the tree rule does not)?
+4. Implement discovery as a one-pass computation rather than per-ref ancestry calls
+   (required by the cost numbers either way), and accept that the cost is then bounded by
+   history depth for the specified rule and by tree size for the tree rule.

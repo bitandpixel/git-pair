@@ -167,3 +167,368 @@ func BaseFromArchive(ctx context.Context, repo *git.Repo, parentID string) (stri
 	}
 	return tip, nil
 }
+
+// Landed answers the same question as Active with two amendments the requirements do not
+// make: an archive ref whose target has already landed on trunk is not a candidate (a
+// landed changeset is history, not work in progress), and a ref target that *contains*
+// HEAD counts as comparable instead of being discarded (the branch that still holds the
+// work). Distance for the second case is not meaningful, so it is made negative and sorts
+// ahead of the ancestor case.
+func Landed(ctx context.Context, repo *git.Repo, head, trunk string) (Result, error) {
+	all, err := listRefs(ctx, repo)
+	if err != nil {
+		return Result{}, err
+	}
+	landed := map[string]bool{}
+	if out, err := repo.Git(ctx, "rev-list", trunk); err == nil {
+		for _, line := range strings.Split(out, "\n") {
+			if sha := strings.TrimSpace(line); sha != "" {
+				landed[sha] = true
+			}
+		}
+	}
+	var live []Candidate
+	for id, tip := range all.archive {
+		if all.integrated[id] || landed[tip] {
+			continue
+		}
+		if term, err := abandoned(ctx, repo, tip); err != nil {
+			return Result{}, err
+		} else if term {
+			continue
+		}
+		ancestor, err := isAncestor(ctx, repo, tip, head)
+		if err != nil {
+			return Result{}, err
+		}
+		descendant := false
+		if !ancestor {
+			if descendant, err = isAncestor(ctx, repo, head, tip); err != nil {
+				return Result{}, err
+			}
+		}
+		if !ancestor && !descendant {
+			continue
+		}
+		dist, err := distance(ctx, repo, tip, head)
+		if err != nil {
+			return Result{}, err
+		}
+		if descendant {
+			dist = -(dist + 1)
+		}
+		live = append(live, Candidate{ID: id, Archive: tip, Dist: dist})
+	}
+	sort.Slice(live, func(i, j int) bool {
+		if live[i].Dist != live[j].Dist {
+			return live[i].Dist < live[j].Dist
+		}
+		return live[i].ID < live[j].ID
+	})
+	if len(live) == 0 {
+		return Result{}, nil
+	}
+	if len(live) > 1 && live[0].Dist == live[1].Dist && live[0].Archive != live[1].Archive {
+		return Result{Ambiguous: live}, nil
+	}
+	return Result{Candidate: &live[0]}, nil
+}
+
+// TreeRule asks a different question: which changeset directories exist on this
+// revision and not on the integration branch? A directory on trunk is landed work
+// rather than work in progress, so it drops out without needing an integration ref,
+// without needing the branch name, and without depending on how the landing happened.
+// Archive refs are still consulted, only to order stacked candidates by distance.
+func TreeRule(ctx context.Context, repo *git.Repo, head, trunk string) (Result, error) {
+	here, err := treeDirs(ctx, repo, head)
+	if err != nil {
+		return Result{}, err
+	}
+	landed, err := treeDirs(ctx, repo, trunk)
+	if err != nil {
+		return Result{}, err
+	}
+	all, err := listRefs(ctx, repo)
+	if err != nil {
+		return Result{}, err
+	}
+	var live []Candidate
+	for id := range here {
+		if landed[id] {
+			continue // on trunk already
+		}
+		if all.integrated[id] {
+			continue
+		}
+		dist := -1
+		if tip, ok := all.archive[id]; ok {
+			if term, err := abandoned(ctx, repo, tip); err != nil {
+				return Result{}, err
+			} else if term {
+				continue
+			}
+			if ok, err := isAncestor(ctx, repo, tip, head); err != nil {
+				return Result{}, err
+			} else if ok {
+				if dist, err = distance(ctx, repo, tip, head); err != nil {
+					return Result{}, err
+				}
+			}
+		}
+		live = append(live, Candidate{ID: id, Dist: dist})
+	}
+	sort.Slice(live, func(i, j int) bool {
+		a, b := live[i].Dist, live[j].Dist
+		if a < 0 {
+			a = 1 << 30 // an unarchived candidate cannot claim to be nearer
+		}
+		if b < 0 {
+			b = 1 << 30
+		}
+		if a != b {
+			return a < b
+		}
+		return live[i].ID < live[j].ID
+	})
+	if len(live) == 0 {
+		return Result{}, nil
+	}
+	if len(live) > 1 && live[0].Dist == live[1].Dist && live[0].ID != live[1].ID {
+		return Result{Ambiguous: live}, nil
+	}
+	return Result{Candidate: &live[0]}, nil
+}
+
+func treeDirs(ctx context.Context, repo *git.Repo, rev string) (map[string]bool, error) {
+	out, err := repo.Git(ctx, "ls-tree", "--name-only", rev, "changesets/")
+	if err != nil {
+		var exit *git.Error
+		if asExit(err, &exit) && strings.Contains(exit.Stderr, "not found in tree") {
+			return map[string]bool{}, nil
+		}
+		return nil, err
+	}
+	dirs := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "changesets" {
+			continue
+		}
+		id := strings.TrimPrefix(line, "changesets/")
+		if !strings.Contains(id, "/") {
+			dirs[id] = true
+		}
+	}
+	return dirs, nil
+}
+
+// BaseNames resolves the order among stacked candidates from the metadata alone: a
+// candidate named as another candidate's base is the parent, so it is not the one this
+// branch is working on. This is what makes the tree rule answer without archive refs.
+func BaseNames(ctx context.Context, repo *git.Repo, head string, ids []string) map[string]string {
+	baseOf := map[string]string{}
+	for _, id := range ids {
+		out, err := repo.Git(ctx, "show", head+":changesets/"+id+"/CHANGESET.yaml")
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(out, "\n") {
+			if v, ok := strings.CutPrefix(strings.TrimSpace(line), "base:"); ok {
+				baseOf[id] = strings.TrimSpace(v)
+			}
+		}
+	}
+	return baseOf
+}
+
+// IsBaseOf reports whether id is named by another candidate's base, i.e. whether it is a
+// parent rather than the tip of the stack.
+func IsBaseOf(id string, baseOf map[string]string, ids []string) bool {
+	for _, other := range ids {
+		if other == id {
+			continue
+		}
+		if strings.HasSuffix(baseOf[other], "/"+id+"/archive") {
+			return true
+		}
+	}
+	return false
+}
+
+// Source says how a candidate was found. Tree hits are the work in hand; ref hits are
+// work that this branch's history contains but its working tree no longer shows.
+type Source string
+
+const (
+	FromTree Source = "tree"
+	FromRef  Source = "ref"
+)
+
+// Hit is one candidate under the combined rule.
+type Hit struct {
+	ID      string
+	Source  Source
+	Archive string
+	Dist    int // -1 when no archive ref gives a distance
+	Note    string
+}
+
+// Outcome is the combined rule's answer.
+type Outcome struct {
+	Hit       *Hit
+	Ambiguous []Hit
+	Notes     []string
+}
+
+// Combined is the rule as proposed: directories on this revision and not on the
+// integration branch decide it, and archive refs are consulted only when no directory
+// survives — for a changeset whose directory has been deleted, on a branch whose history
+// still contains it. Landed work is excluded by the same test in both ranks, which is
+// what stops a merged changeset from being resurrected by its own ref.
+func Combined(ctx context.Context, repo *git.Repo, head, trunk string) (Outcome, error) {
+	here, err := treeDirs(ctx, repo, head)
+	if err != nil {
+		return Outcome{}, err
+	}
+	trunkDirs, err := treeDirs(ctx, repo, trunk)
+	if err != nil {
+		return Outcome{}, fmt.Errorf("cannot read the integration branch %q: %w (fetch it, or set the integration branch)", trunk, err)
+	}
+	all, err := listRefs(ctx, repo)
+	if err != nil {
+		return Outcome{}, err
+	}
+
+	// Rank 0: the changeset directories this branch carries that trunk does not have.
+	var rank0 []Hit
+	var ids []string
+	for id := range here {
+		if trunkDirs[id] || all.integrated[id] {
+			continue
+		}
+		hit := Hit{ID: id, Source: FromTree, Dist: -1}
+		if tip, ok := all.archive[id]; ok {
+			hit.Archive = tip
+			term, err := abandoned(ctx, repo, tip)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if term {
+				hit.Note = "abandoned"
+			}
+			if ok, err := isAncestor(ctx, repo, tip, head); err != nil {
+				return Outcome{}, err
+			} else if ok {
+				if d, err := distance(ctx, repo, tip, head); err != nil {
+					return Outcome{}, err
+				} else {
+					hit.Dist = d
+				}
+			}
+		}
+		if hit.Note == "abandoned" {
+			continue
+		}
+		rank0 = append(rank0, hit)
+		ids = append(ids, id)
+	}
+	sortHits(rank0)
+
+	// Stacked candidates: drop the ones that are another candidate's base.
+	if len(rank0) > 1 {
+		baseOf := BaseNames(ctx, repo, head, ids)
+		var tips []Hit
+		for _, h := range rank0 {
+			if !IsBaseOf(h.ID, baseOf, ids) {
+				tips = append(tips, h)
+			}
+		}
+		if len(tips) == 1 {
+			rank0 = tips
+		} else if len(tips) > 1 {
+			rank0 = tips
+		}
+	}
+	sortHits(rank0)
+	if len(rank0) == 1 {
+		return Outcome{Hit: &rank0[0]}, nil
+	}
+	if len(rank0) > 1 && rank0[0].Dist == rank0[1].Dist && rank0[0].ID != rank0[1].ID {
+		return Outcome{Ambiguous: rank0}, nil
+	}
+
+	// Rank 1: nothing in the tree, so ask the refs about this branch's history. A ref
+	// whose changeset directory is on trunk is landed work, not this branch's business.
+	// One bounded walk, not one ancestry test per ref: the commits that belong to this
+	// line and not to trunk. On trunk itself the set is empty, so the fallback costs a
+	// listing and nothing else.
+	unique, err := commitSet(ctx, repo, head+".."+trunk)
+	if err != nil {
+		return Outcome{}, err
+	}
+	_ = unique
+	ours, err := commitSet(ctx, repo, trunk+".."+head)
+	if err != nil {
+		return Outcome{}, err
+	}
+	var rank1 []Hit
+	for id, tip := range all.archive {
+		if all.integrated[id] || trunkDirs[id] || here[id] || !ours[tip] {
+			continue
+		}
+		term, err := abandoned(ctx, repo, tip)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if term {
+			continue
+		}
+		d, err := distance(ctx, repo, tip, head)
+		if err != nil {
+			return Outcome{}, err
+		}
+		rank1 = append(rank1, Hit{
+			ID: id, Source: FromRef, Archive: tip, Dist: d,
+			Note: "changeset directory is not in the working tree",
+		})
+	}
+	sortHits(rank1)
+	if len(rank1) == 1 {
+		return Outcome{Hit: &rank1[0], Notes: []string{rank1[0].Note}}, nil
+	}
+	if len(rank1) > 1 {
+		return Outcome{Ambiguous: rank1}, nil
+	}
+	return Outcome{}, nil
+}
+
+func sortHits(hits []Hit) {
+	sort.Slice(hits, func(i, j int) bool {
+		a, b := hits[i].Dist, hits[j].Dist
+		if a < 0 {
+			a = 1 << 30
+		}
+		if b < 0 {
+			b = 1 << 30
+		}
+		if a != b {
+			return a < b
+		}
+		return hits[i].ID < hits[j].ID
+	})
+}
+
+// commitSet runs one rev-list over a rev range.
+func commitSet(ctx context.Context, repo *git.Repo, revrange string) (map[string]bool, error) {
+	out, err := repo.Git(ctx, "rev-list", revrange)
+	if err != nil {
+		return nil, err
+	}
+	set := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		if sha := strings.TrimSpace(line); sha != "" {
+			set[sha] = true
+		}
+	}
+	return set, nil
+}

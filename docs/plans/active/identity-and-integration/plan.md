@@ -107,7 +107,7 @@ Consequences recorded rather than asked separately:
   stacked changesets rather than merely recommended, and a commit's base resolves against wherever the
   parent's ref sits today.
 
-## Under review after M1
+## Under review after M1 → decided: the tree rule, with archive refs as the fallback
 
 M1 (identity, claim-based resolution) has landed as `8845a7a`/`94b88a8` (plus the batched-claim
 performance fix `2c465a9`). The archive-ref discovery requirements reverse the mechanism it chose:
@@ -127,7 +127,21 @@ stays, becomes a fallback, or goes away. Measured findings the milestone design 
   refs are never deleted;
 - the rules as written cost six `git` invocations per archive ref — 1,802 calls for one resolution at
   300 refs, about eleven seconds per read in a 20,000-commit repository — so the implementation must
-  be a one-pass history walk (ancestry and distance from one `rev-list HEAD`), not per-ref ancestry.
+  be a one-pass computation, not per-ref ancestry.
+
+A third rule beat both mechanisms in the same harness: **the changesets on a revision are the
+`changesets/<id>/` directories present there and absent from the integration branch**. It passed all
+six fixtures — including the two no amendment of the specified rule could fix — and cost 8 git
+invocations where the specified rules cost 1,802. It keeps §7 (a directory name is a changeset ID, not
+a branch), keeps §15 (a branch and trunk are what CI fetches), and gives `queue` a natural enumeration.
+Its gap is a deleted branch, where only the archive ref survives; that is the case ref discovery is
+good at, and the two rules may belong together as primary and fallback.
+
+**Decided 2026-09-17**, with the reviewer: the combined rule is adopted (directories first, refs as
+the fallback for a directory that no longer exists), `change init` still creates the archive ref at
+init per §11, M1's `branch:` claim is deleted rather than kept as a tie-breaker, and M2 is rebuilt to
+carry discovery and the namespace move together. The rule is specified, and its fallback cases
+measured, in `research/2026-09-17-combined-rule.md`.
 
 ## Milestones
 
@@ -202,16 +216,36 @@ second ID, offering no suggestion, and treating every claim as stale. Two initia
 separator arm was redundant with the character loop (kept for its message, now asserted), and one
 assertion about stale claims was vacuous because no changeset directory existed in that fixture.
 
-### M2 — One archive ref per changeset, in the git-pair namespace
+### M2 — One archive ref per changeset, in the git-pair namespace, and the rule that resolves it
 
 #### Deliverables
 
-- `refs/git-pair/changesets/<id>/archive` is the only durable ref a changeset has before integration.
+- Discovery is the combined rule: changeset directories on this revision and not on the
+  integration branch, with archive refs as the fallback for a directory that no longer exists.
+  Specified in `research/2026-09-17-combined-rule.md`.
+- `refs/git-pair/changesets/<id>/archive` is the only durable ref a changeset has before
+  integration, created at `change init` (§11).
+- The `branch:` claim from M1 is gone; `CHANGESET.yaml` is `id` + `base` again.
 - `change complete` is gone; `change archive` advances the archive over review-artifact-only commits.
 - The archive cannot move backwards.
 
 #### Tasks
 
+- [ ] `integrationBranch` resolution: `pair.integrationBranch` config → `origin/HEAD`'s target → a
+  single local `main`/`master` → refuse naming the config. Refuse rather than treat an
+  unresolvable trunk as "no trunk", which would make every directory on the branch a candidate.
+- [ ] `changeset.Resolve(ctx, repo, rev, trunk)`: rank 0 from `ls-tree` of `changesets/` in the
+  revision and in trunk; nearest archive tip, then `base:`-names-parent to break a stack, then
+  ambiguity. `ForID` stays for `--changeset` reads; `ForBranch`/`AtCommit` and the claim machinery
+  are deleted, including `StaleClaims` and the renamed-branch warning.
+- [ ] Rank 1 only when rank 0 is empty: archive refs whose target is in one `rev-list <trunk>..<rev>`
+  set, whose directory is absent from trunk, not integrated, not terminal. Reported with a note, in
+  `status` and `--json`, that the directory is missing — it is a degraded state, not a normal answer.
+- [ ] `status` says how it resolved (rank and note) so a rank-1 answer is not mistaken for a
+  directory-backed one; `queue` enumerates local branches plus archive refs with no branch, the
+  latter reported as a distinct condition rather than as active work.
+- [ ] Cost assertions: resolving on a changeset branch and on trunk stay in single-digit and
+  low-teens git invocations with 300 archive refs present, against 1,802 for the per-ref formulation.
 - [ ] `reviewref`: `Archive(id)`, `Update`, `Resolve` against the new namespace; delete the per-head
   archive writer and its exact-SHA matcher; no reader of `refs/reviews/*` remains.
 - [ ] `change archive`: succeeds when the archive is already at `HEAD`; advances when nothing outside
@@ -231,6 +265,13 @@ assertion about stale claims was vacuous because no changeset directory existed 
   README's concepts, command surface, JSON contract, troubleshooting.
 
 #### Verification
+
+The seven combined-rule fixtures from the spike, ported to product tests: a deleted directory
+resolves from the ref with a note; a landed changeset is not resurrected by its own ref; two
+unrelated directories on one branch are ambiguous; an init on trunk answers `uninitialized` for
+trunk and its descendants; a stacked child still resolves when its parent has landed; a diverged
+parent and child both resolve to the shared changeset; a clone with no archive refs resolves from
+the tree alone.
 
 Approve, then: archive == the approval commit with no further command. Commit a reply in `ABOUT.md` →
 `change archive` advances. Commit an implementation change → `change archive` refuses and names the file,
@@ -341,6 +382,10 @@ against running the fetch first.
   nearest-wins works; diverged branches lose the changeset; unrecorded merge integrations are
   ambiguous; squash integrations are invisible; a forgotten init owns its descendants) and the cost of
   the rules measured at 1,802 git invocations per resolution with 300 refs.
+- `research/2026-09-17-combined-rule.md` — the rule that was chosen, specified: rank 0 from the
+  changeset directories this revision has and trunk does not, rank 1 from archive refs on this line
+  only when rank 0 is empty. Seven measured fixtures, the cost table, and the integration-branch
+  resolution order the rule newly depends on.
 - Open, to settle during M3: whether `check` should re-verify review-addition survival (§26's last
   bullet) or leave it to `change ready`'s existing gate. Current position: leave it, because two
   implementations of one rule drift apart. Record the choice in the plan when M3 lands.
@@ -391,3 +436,5 @@ against running the fetch first.
 | 2026-09-17 | — | Four decisions settled with the reviewer, all as recommended: no CLOSED state, full namespace move, adopt the movable-archive model and retire `change complete`, identity first. `READY`, `--allow-unreviewed-changes` retirement, and the narrowed write rule recorded as consequences. |
 | 2026-09-17 | — | Reviewer corrected the §19 ambiguity claim: an empty child branch shares its parent's head but not its archive ref, because every ref-moving command commits first. Ambiguity is now an out-of-band recovery case, and M4's fixture builds the collision directly. |
 | 2026-09-17 | measurements | M1's claim resolution cost 859 extra `git show` calls per queue run (0.29s → 2.3s) and turned `status --changeset` from name matching into a full walk (0.03s → 2.3s) on a 41-branch, 40-directory fixture. Fixed before M2 by `2c465a9`: one `ls-tree` per branch plus one `cat-file --batch` over distinct object ids, back to 0.30s and 0.15s. Worth keeping because the shape is a standing cost: the directory count grows with every changeset that lands and is never garbage-collected (§35). |
+| 2026-09-17 | measurements | Archive-ref discovery prototyped (`research/2026-09-17-archive-ref-discovery.md`). The five rules as written resolve the stacked case but leave a diverged parent without a changeset, make an unrecorded merge landing ambiguous for every later branch, answer differently for squash versus merge, and let a forgotten `change init` own its descendants; measured cost 1,802 invocations per resolution at 300 refs, ~11s per read on a 20k-commit history. Two amendments measured (exclude landed refs; comparable-not-ancestor) each fixed part of it. The tree rule — directories here and not on trunk — passed all six fixtures in 8 invocations. M2 is held until the rule is chosen. |
+| 2026-09-17 | decision | Combined rule adopted after measurement: changeset directories on the revision and not on trunk decide resolution, archive refs are the fallback for a directory that no longer exists (`research/2026-09-17-combined-rule.md`). Seven fixtures in the spike pass, including the two no amendment of the specified rule could answer; cost 8 invocations on a changeset branch and 12 on trunk against 1,802 for the per-ref formulation. The `branch:` claim goes, `change init` still creates the archive ref, and M2 now carries discovery alongside the namespace move. The one new dependency is resolving the integration branch, which nothing in the product does today. |
