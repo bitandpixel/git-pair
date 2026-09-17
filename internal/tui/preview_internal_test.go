@@ -320,7 +320,7 @@ func TestTheFrameIsExactlyTheWidthOfTheTerminal(t *testing.T) {
 	}
 	m = askPreview(t, m)
 
-	rows := strings.Split(strings.TrimSuffix(joinColumns(m.listBlock(), m.previewLines(), m.listWidth()), "\n"), "\n")
+	rows := strings.Split(strings.TrimSuffix(joinColumns(m.listBlock(), m.previewLines(), m.listWidth(), false), "\n"), "\n")
 	if len(rows) < 5 {
 		t.Fatalf("the block is %d rows, want a list with a pane beside it", len(rows))
 	}

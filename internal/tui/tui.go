@@ -192,9 +192,16 @@ type reviewModel struct {
 	workingFor func(context.Context, string) Patch
 	// The preview, in whichever layout it fits. previewPath is what it shows and previewOffset
 	// where in it that pane is; patches and working hold what git already answered, so moving back
-	// to a file costs nothing. previewG is the `g` waiting for its partner in the overlay, kept
+	// to a file costs nothing. previewG is the `g` waiting for its partner in the diff, kept
 	// apart from the list's markPending so the two jumps cannot read each other's half-press.
+	//
+	// previewFocus is the pane having the keys: `p` moves them from the list to the diff so a long
+	// file can be read with the same keys the overlay uses, and `p` or esc gives them back while `q`
+	// closes the preview. It is a flag rather than a mode because the list stays on the screen the
+	// whole time — which is also why nothing reads the flag directly: previewHasFocus is the only
+	// answer, since a terminal that shrank can take the pane away from under it.
 	previewOn     bool
+	previewFocus  bool
 	previewPath   string
 	previewOffset int
 	previewG      bool
@@ -404,7 +411,14 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The overlay reads and dismisses. It dispatches before the gate below for the same reason
 		// the picker does: the keys it does not read are keys that do not happen, so nothing that
 		// changes the review is reachable while the list is off the screen.
-		return m.handlePreviewKey(key)
+		return m.handleDiffKey(key)
+	}
+	// A focused pane reads its keys the same way, for the same reason, and is dispatched before the
+	// gate for the same one. The difference is that its list never left the screen: the reviewer can
+	// see the row they are not marking, which is what makes the shortcut bar's silence about `space`
+	// an explanation rather than a missing key.
+	if m.previewHasFocus() {
+		return m.handleDiffKey(key)
 	}
 	m.refresh()
 
@@ -999,9 +1013,17 @@ func (m reviewModel) runExternal(cmd *exec.Cmd, label, note string) (tea.Model, 
 var (
 	styleSelected = lipgloss.NewStyle().Reverse(true)
 	styleDim      = lipgloss.NewStyle().Faint(true)
-	styleErr      = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	styleMark     = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	styleSpan     = lipgloss.NewStyle().Bold(true)
+	// styleActive marks the column that has the keys: the divider becomes a double rule and the pane's
+	// file line stops being a caption over the diff and becomes its title. Bold rather than coloured,
+	// because a colour is the one thing this terminal is not obliged to render.
+	styleActive = lipgloss.NewStyle().Bold(true)
+	// styleIdle is the list's cursor while the pane has the keys. The row is still where the reviewer
+	// left it, and marking it the way the active column marks its own would put two cursors on the
+	// screen, so this is the same highlight with the intensity turned down.
+	styleIdle = lipgloss.NewStyle().Reverse(true).Faint(true)
+	styleErr  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	styleMark = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	styleSpan = lipgloss.NewStyle().Bold(true)
 	// stylePartial is a directory whose files do not all agree: green is a subtree read, faint is
 	// one untouched, and this is the part way through, where the row counts what is left instead of
 	// claiming the mark.
@@ -1026,7 +1048,7 @@ func (m reviewModel) View() string {
 		b.WriteString(strings.Join(append(m.previewLines(), m.rule()), "\n") + "\n")
 	default:
 		if m.paneWidth() > 0 {
-			b.WriteString(joinColumns(m.listBlock(), m.previewLines(), m.listWidth()))
+			b.WriteString(joinColumns(m.listBlock(), m.previewLines(), m.listWidth(), m.previewHasFocus()))
 		} else {
 			b.WriteString(m.listBlock())
 		}
@@ -1210,6 +1232,13 @@ func (m reviewModel) helpText() string {
 		return helpSpan(m.pick.list != nil, m.pick.nav)
 	case modePreview:
 		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  p q esc enter close"
+	}
+	if m.previewHasFocus() {
+		// The pane has the keys, so this is the whole set rather than a selection: what it reads, and
+		// the keys that give them back. Nothing that changes the review is here because nothing that
+		// changes the review happens — and, unlike the read-only bar, nothing is missing for a reason
+		// the reviewer has to infer.
+		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  enter diff  p esc list  q close preview"
 	}
 	threadsHint := "T show threads"
 	if m.threadsOpen {
@@ -1675,6 +1704,14 @@ func (m reviewModel) previewBodyRows() int {
 	return rows
 }
 
+// previewHasFocus is whether the diff has the keys: a pane is on screen and the reviewer moved into
+// it. Nothing decides a keystroke from the flag alone, because a terminal resized under the session
+// takes the pane away while the flag is still set — and a keyboard held by a column that is no longer
+// drawn is a session that reads nothing at all.
+func (m reviewModel) previewHasFocus() bool {
+	return m.previewFocus && m.paneWidth() > 0
+}
+
 // previewShowing is whether a diff is on the screen right now, in either layout. Fetching, key
 // handling and the frame all ask this rather than paneWidth, because the overlay has no pane to
 // measure -- and because a fetch keyed to a column that is not drawn is a git call for nothing.
@@ -1824,6 +1861,9 @@ func (m *reviewModel) forgetPatches() {
 // rather than giving up the preview. Below even that it says so with the number the terminal is short
 // by, and with the smaller of the two asks, because that is the one worth growing to.
 //
+// `p` with the pane already open does not close it: it moves into it, so the diff can be read with the
+// keys a diff is read with. Taking a pane off a wide terminal is `q`'s, pressed from inside it.
+//
 // It decides what is on show and fetches nothing. Update asks the preview what it needs after every
 // key, so a handler that fetched as well would ask git twice for the same file -- which is exactly
 // what this function did until the overlay's tests noticed two batches arriving for one keystroke.
@@ -1831,8 +1871,12 @@ func (m reviewModel) togglePreview() (tea.Model, tea.Cmd) {
 	if m.mode == modePreview {
 		return m.closePreview()
 	}
+	if m.previewHasFocus() {
+		return m.leavePreview()
+	}
 	if m.previewOn && m.paneWidth() > 0 {
-		m.previewOn = false
+		m.previewFocus = true
+		m.clamp()
 		m.setStatus("", false)
 		return m, nil
 	}
@@ -1845,7 +1889,7 @@ func (m reviewModel) togglePreview() (tea.Model, tea.Cmd) {
 		m.setStatus(reason, false)
 		return m, nil
 	}
-	m.previewOn = true
+	m.previewOn, m.previewFocus = true, false
 	m.mode = modePreview
 	m.previewG = false
 	m.setStatus("", false)
@@ -1861,17 +1905,51 @@ func (m reviewModel) closePreview() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handlePreviewKey is everything the overlay reads: the diff scrolls with the vim primitives, and any
-// of q, esc, enter -- or `p`, which opened it -- goes back to the list. Nothing else reaches through.
-// That is what a mode buys over a flag: a reviewer who cannot see the list must not be able to mark a
-// file in it, submit a review whose outcome they cannot see, or open an editor over a diff they are
-// reading, and the way to guarantee that is keys that do not happen rather than a list of exemptions.
+// leavePreview gives the keys back to the list. The overlay goes away; the pane stays where it is,
+// including where it is in the file, so `p` twice returns to the same lines rather than to its top.
+func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
+	if m.mode == modePreview {
+		return m.closePreview()
+	}
+	m.previewFocus = false
+	m.previewG = false
+	m.clamp()
+	m.setStatus("", false)
+	return m, nil
+}
+
+// dismissPreview takes the diff off the screen: the overlay closes, and in the pane layout the preview
+// closes with it, because `q` means "finished with this" wherever it is pressed and the only thing left
+// to finish with is the pane. Quitting stays where the session put it, in the list.
+func (m reviewModel) dismissPreview() (tea.Model, tea.Cmd) {
+	if m.mode == modePreview {
+		return m.closePreview()
+	}
+	m.previewFocus, m.previewOn = false, false
+	m.previewG = false
+	m.clamp()
+	m.setStatus("", false)
+	return m, nil
+}
+
+// handleDiffKey is everything the diff reads, in either layout: it scrolls with the vim primitives, and
+// the keys that gave it the screen -- or the keys -- give it back. What that means is the layout's: the
+// overlay closes, the pane hands the keys to the list, and `q` closes the preview instead of quitting
+// the session.
 //
-// Keys do mean different things here than in the list -- q closes rather than quits, enter closes
-// rather than opens the difftool, ctrl-d scrolls rather than quits -- and that is the point of a mode:
-// the shortcut bar names each of these keys while this screen is up, so no meaning travels with a
-// keystroke alone.
-func (m reviewModel) handlePreviewKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+// Nothing else reaches through. That is what a mode buys over a flag, and a focus buys over a pane that
+// is merely drawn: a reviewer must not be able to mark a file they are not looking at, submit a review
+// whose outcome they cannot see, or open an editor over a diff they are reading, and the way to
+// guarantee that is keys that do not happen rather than a list of exemptions. The overlay could make
+// that claim by hiding the list; the pane makes it by holding the keyboard, which is the half the
+// reviewer can still see -- so the shortcut bar names every key this reads and none of the ones it does
+// not, and the list's own cursor goes faint until the keys come back.
+//
+// Keys do mean different things here than in the list -- q closes rather than quits, enter opens the
+// file being read rather than the one under the cursor, ctrl-d scrolls rather than quits -- and that
+// is the point: the shortcut bar names each of these keys while this screen is up, so no meaning
+// travels with a keystroke alone.
+func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key.Type == tea.KeyCtrlC {
 		m.quitting = true
 		return m, tea.Quit
@@ -1885,12 +1963,25 @@ func (m reviewModel) handlePreviewKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	pressedG := m.previewG
 	m.previewG = false
+	overlay := m.mode == modePreview
 
 	switch {
-	case key.Type == tea.KeyEsc, key.Type == tea.KeyEnter,
-		key.Type == tea.KeyRunes && firstRune(key) == 'q',
-		key.Type == tea.KeyRunes && firstRune(key) == 'p':
-		return m.closePreview()
+	case key.Type == tea.KeyEsc, key.Type == tea.KeyRunes && firstRune(key) == 'p':
+		return m.leavePreview()
+	case key.Type == tea.KeyRunes && firstRune(key) == 'q':
+		return m.dismissPreview()
+	case key.Type == tea.KeyEnter:
+		// Over the overlay enter closes: the screen is the diff already, and the difftool was what `p`
+		// was asked for. In the pane it is the key the pane's own note points at, and it opens the file
+		// being read -- the one the pane is named after, not whichever row the list's cursor sits on.
+		if overlay {
+			return m.closePreview()
+		}
+		if m.previewPath == "" {
+			m.setStatus("nothing to open: the preview has no file on show", false)
+			return m, nil
+		}
+		return m.openDiff(m.previewPath)
 	case key.Type == tea.KeyDown, key.Type == tea.KeyRunes && firstRune(key) == 'j':
 		return m.scrollPreview(1, 1)
 	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
@@ -1952,9 +2043,9 @@ func (m reviewModel) scrollPreview(dir, step int) (tea.Model, tea.Cmd) {
 }
 
 // pagePreview scrolls the pane by half a page, which keeps a line or two of context on screen at the
-// break. In the list ctrl-d is quit, so paging there is ctrl-f and ctrl-b as in a pager; the overlay
-// has ctrl-d and ctrl-u too, which is what a screen that is nothing but a diff is for, and its
-// shortcut bar says so.
+// break. In the list ctrl-d is quit, so paging there is ctrl-f and ctrl-b as in a pager; once the pane
+// has the keys -- and in the overlay, which is a screen that is nothing but a diff -- ctrl-d and ctrl-u
+// page it too, and the shortcut bar says so either way.
 func (m reviewModel) pagePreview(dir int) (tea.Model, tea.Cmd) {
 	if !m.previewShowing() || m.previewPath == "" {
 		return m, nil
@@ -1984,7 +2075,11 @@ func (m reviewModel) previewLines() []string {
 	if cached && patch.Added >= 0 {
 		header = fmt.Sprintf("%s  +%d \u2212%d", header, patch.Added, patch.Deleted)
 	}
-	out := []string{styleDim.Render(clip(header, width))}
+	title := styleDim.Render
+	if m.previewHasFocus() {
+		title = styleActive.Render
+	}
+	out := []string{title(clip(header, width))}
 
 	switch {
 	case !cached:
@@ -2050,7 +2145,14 @@ func rowsMore(n int) string {
 // joinColumns places the preview beside the list. Each list row is padded to the list's column
 // so the divider falls in the same place on every row; the list is clipped to that width, so
 // nothing here can wrap and shift it.
-func joinColumns(left string, right []string, listWidth int) string {
+//
+// The divider is also what says which column has the keys, because it is the one thing drawn on every
+// row of both: single and faint over the list, double and bold over a preview the reviewer moved into.
+func joinColumns(left string, right []string, listWidth int, previewFocused bool) string {
+	rule := styleDim.Render("│")
+	if previewFocused {
+		rule = styleActive.Render("║")
+	}
 	lines := strings.Split(strings.TrimSuffix(left, "\n"), "\n")
 	var b strings.Builder
 	for i, l := range lines {
@@ -2058,7 +2160,7 @@ func joinColumns(left string, right []string, listWidth int) string {
 		if i < len(right) {
 			preview = right[i]
 		}
-		b.WriteString(padRight(l, listWidth) + " " + styleDim.Render("│") + " " + preview + "\n")
+		b.WriteString(padRight(l, listWidth) + " " + rule + " " + preview + "\n")
 	}
 	return b.String()
 }
@@ -2086,6 +2188,9 @@ func clip(s string, width int) string {
 func (m reviewModel) line(r renderedRow) string {
 	text := clip(m.rowText(r.row), m.listWidth())
 	if m.cursor == r.index {
+		if m.previewHasFocus() {
+			return styleIdle.Render(text)
+		}
 		return styleSelected.Render(text)
 	}
 	return text

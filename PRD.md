@@ -1655,6 +1655,18 @@ for glancing, and reading a diff means opening it. The frame fills the terminal 
 area holds the window's height and every row is padded to its width — so the shortcut bar
 sits against the bottom edge rather than under a short list.
 
+`p` moves the keys into that column rather than hiding it, so a diff longer than the column is read
+with the keys a diff is read with: `j`/`k`, `ctrl-d`/`ctrl-u`, `ctrl-f`/`ctrl-b`, `gg` and `G` scroll
+the file already on show, and `Enter` opens the difftool on it. `p` or `Esc` hands the keys back and
+leaves the pane where it was; `q` closes the preview, while `q` on the list still quits. While the
+pane holds the keys nothing that changes the review can happen — marking, editing, threading and
+submitting are keys that do not occur, which is the whole-screen preview's promise extended to a
+column that never hid its list. The frame says which column has the keys by changing what is drawn
+rather than only how it is styled: the divider becomes a double rule, the pane's file line becomes a
+title, and the shortcut bar becomes the pane's own, naming every key it reads and none it does not.
+A terminal resized below the pane's floor takes the column away and gives the keys back to the list,
+because a column that is not drawn cannot hold the keyboard.
+
 When the reviewer has edited a file without committing, the pane shows those edits below the author's,
 under a caption naming them, with counts and line numbers of their own. Git's output does not say who
 typed a line, so the caption is what keeps the reviewer's work from reading as the author's; the
@@ -1723,10 +1735,19 @@ d        open the difftool for the selected row: for a file, or for a directory 
          already existed where the span starts — otherwise the document opens in the editor,
          with a note naming the reason
 e        open the selected row in the editor, whatever the span did
-p        show/hide the diff preview column (wide terminals)
+p        move the keys into the diff preview column, or back out of it (wide terminals);
+         where the terminal is too narrow for a second column it takes the screen for the
+         diff instead, since there is no column to move into
 ctrl-f   page the preview down
 ctrl-b   page the preview up
 Space    toggle reviewed for a file row, or for every file under a directory row
+
+In the preview column, after p:
+j/k      scroll the diff a row; ctrl-d/ctrl-u half a page, ctrl-f/ctrl-b a page,
+         gg the top, G the bottom
+Enter    open the difftool on the file the pane is showing
+p, Esc   hand the keys back to the list, leaving the pane where it is in the file
+q        close the preview — from the list, q quits
 
 a        open ABOUT.md
 t        create a review thread
@@ -2457,7 +2478,8 @@ Enter    activate the selected row: diff a file, diff or read a changeset docume
          (whichever gives a real comparison), collapse the thread list, create a thread
 d        open the difftool for the selected row, falling back to the editor with a note
 e        edit the selected file or document
-p        show/hide the diff preview column
+p        move the keys into the diff preview column, or back out of it; where there is no
+         second column, it takes the screen for the diff
 ctrl-f   page the preview down
 ctrl-b   page the preview up
 Space    mark file reviewed/unreviewed
