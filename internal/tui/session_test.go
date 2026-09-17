@@ -124,6 +124,28 @@ func TestSessionListsChangedFilesForFullChangeset(t *testing.T) {
 	}
 }
 
+// The full changeset is the default span, but it is a default a caller applies — `spanOptions`
+// with no flags resolves to it, and the picker seeds the same pair. A selector that names no head
+// is a caller that forgot to choose, and reading that as "the whole changeset" would open a screen
+// reviewing something nobody asked for, which is worse than an error.
+func TestSessionRefusesASelectorThatNamesNoHead(t *testing.T) {
+	e := newEnv(t)
+	summary, err := lifecycle.SummarizeHEAD(context.Background(), e.repo, e.cs.Slug, e.cs.Base)
+	if err != nil {
+		t.Fatalf("SummarizeHEAD: %v", err)
+	}
+
+	_, err = tui.NewSession(context.Background(), tui.Options{
+		Repo: e.repo, Changeset: e.cs, Summary: summary, Span: span.Selector{},
+	})
+	if err == nil {
+		t.Fatal("an empty selector opened a session; the full changeset must be chosen, not defaulted into by a zero value")
+	}
+	if !strings.Contains(err.Error(), "head") {
+		t.Errorf("error = %q, want it to name the end that is missing", err)
+	}
+}
+
 func TestSessionToggleMarksFilesReviewed(t *testing.T) {
 	e := newEnv(t)
 	sess := e.session(t, span.Full())
