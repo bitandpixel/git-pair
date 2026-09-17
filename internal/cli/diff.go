@@ -59,7 +59,8 @@ settings apply.`,
 	opts.register(cmd)
 	opts.registerHead(cmd)
 	cmd.Flags().BoolVar(&opts.stat, "stat", false, "show diffstat instead of the patch")
-	cmd.Flags().BoolVar(&opts.tool, "tool", false, "launch the configured difftool; it compares the span start against the working tree, so edits persist")
+	cmd.Flags().BoolVar(&opts.tool, "tool", false,
+		"launch the configured difftool: a live span compares its start against the working tree, so edits persist; a historical span compares its two pinned revisions")
 	return cmd
 }
 
