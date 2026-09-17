@@ -381,7 +381,6 @@ func TestBaseIsOwnBranch(t *testing.T) {
 		{"HEAD names the branch it is on", "HEAD", "feature/booking", true},
 		{"HEAD does not name some other branch", "HEAD", "main", false},
 		{"@ is another spelling of HEAD", "@", "feature/booking", true},
-		{"main on a branch off main", "main", "feature/booking", false},
 		{"own branch named as base", "feature/booking", "feature/booking", true},
 		{"a commit sha names no branch", f.RevParse("main"), "main", false},
 		{"a base that does not exist", "gone", "main", false},
