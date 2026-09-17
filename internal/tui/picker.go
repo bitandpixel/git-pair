@@ -624,7 +624,9 @@ func (m reviewModel) pickerBlock() string {
 	var b strings.Builder
 	b.WriteString(styleSpan.Render("Span picker") + "\n")
 	b.WriteString("\n")
-	b.WriteString(joinColumns(leftText, strings.Split(strings.TrimSuffix(rightText, "\n"), "\n"), left))
+	// The double rule belongs to the preview and what it means there; the picker's keys belong to the
+	// picker, not to either of its columns, so its divider stays a divider.
+	b.WriteString(joinColumns(leftText, strings.Split(strings.TrimSuffix(rightText, "\n"), "\n"), left, false))
 	b.WriteString(m.selectedBlock())
 	return b.String()
 }

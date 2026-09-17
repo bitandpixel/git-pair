@@ -772,14 +772,34 @@ a changeset of short names is not made to share the screen with whitespace, and 
 path cannot take the diff's columns — which is one thing the tree is for, since a row prints a base
 name where the flat list printed the whole path. Park the cursor on a directory and the pane shows
 what the span did to the whole subtree, git's pathspec doing the expanding, with the subtree's `+N −M`
-rather than one file's. `ctrl-f` and `ctrl-b` page through a diff too long to fit, and the note along the bottom says how
-much of it is left; `ctrl-d` still quits, which is why paging is not `ctrl-d`. Each line carries the
-number git gave it in its hunk header, and a line too wide for the column is broken rather than cut,
-with its colour carried across the break. Tabs are shown as the spaces they advance to, because a tab
-the width maths scores as zero is a row the terminal wraps for you. `p` switches the pane off.
+rather than one file's. `ctrl-f` and `ctrl-b` page through a diff too long to fit without leaving the
+list, and the note along the bottom says how much of it is left; `ctrl-d` still quits from the list,
+which is why paging there is not `ctrl-d`. Each line carries the number git gave it in its hunk header,
+and a line too wide for the column is broken rather than cut, with its colour carried across the break.
+Tabs are shown as the spaces they advance to, because a tab the width maths scores as zero is a row the
+terminal wraps for you.
+
+`p` moves into the pane rather than switching it off: the keys go to the diff, and it scrolls with the
+keys the whole-screen preview uses — `j`/`k` a row, `ctrl-d`/`ctrl-u` half a page, `ctrl-f`/`ctrl-b` a
+page, `gg` the top and `G` the bottom — over the file the pane was already showing. `Enter` there opens
+the difftool on that file, which is the key the pane's own note points at. `p` or `Esc` hands the keys
+back and leaves the pane where it was, so coming back returns to the same lines; `q` closes the
+preview, because `q` means "finished with this" wherever it is pressed and the pane is what you were
+finishing with — quitting stays on the list, where it always was. While the diff holds the keys nothing
+that changes the review happens: `Space`, `e`, `t`, `s` and the rest are keys that do not occur, the
+same promise the whole-screen preview makes, with the difference that here the list is still on the
+screen and the row you are not marking is one you can see. The frame says which column has the keys
+three ways: the divider becomes a double rule (`║` instead of `│`), the pane's file line stops being a
+caption and becomes a title, and the list's cursor loses its reverse video so the screen never carries
+two cursors. The first two are glyphs and text, so they survive a terminal that renders no styling at
+all. The shortcut bar becomes the pane's own, which names every key the pane reads and none of the ones
+it does not.
 
 Below those dimensions there is no room for two columns, and the person who pressed `p` wanted the
-diff — so `p` gives the diff the whole screen. Same git bytes, same numbers, same wrapping, full
+diff — so `p` gives the diff the whole screen. This is the one place `p` still means toggle: with no
+second column to move into, taking the screen and taking the keys are the same act. A terminal dragged
+below those dimensions while the pane has the keys loses both — a column that is not drawn cannot hold
+the keyboard, and the list takes the keys back. Same git bytes, same numbers, same wrapping, full
 width, with the file and the span it is measured against on the line above it (the span is named in
 the list otherwise, and the list is gone). It scrolls with `j`/`k`, `ctrl-d`/`ctrl-u` for half a page,
 `ctrl-f`/`ctrl-b` for a page, `gg` for the top and `G` for the bottom, and gives the list back on `q`,
