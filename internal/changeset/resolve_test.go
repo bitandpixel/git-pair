@@ -14,7 +14,7 @@ import (
 
 // The rule under test: the changesets on a revision are the `changesets/<id>/` directories in
 // its tree that the integration branch's tree does not have. These fixtures come from the
-// measurements in docs/plans/active/identity-and-integration/research/, where each one is the
+// measurements in docs/plans/completed/identity-and-integration/research/, where each one is the
 // answer a different formulation of the rule got wrong.
 
 // repo is the package's convention for a handle on a fixture's repository.
