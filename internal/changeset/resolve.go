@@ -434,7 +434,7 @@ func (r Resolution) WithIgnores(id string, ignores []string) Resolution {
 	return choose(res)
 }
 
-// reviewTips maps changeset id to the commit its movable review ref points at, in one call.
+// reviewTips maps changeset id to the commit its archive ref points at, in one call.
 func reviewTips(ctx context.Context, repo *git.Repo) (map[string]string, error) {
 	entries, err := reviewref.List(ctx, repo)
 	if err != nil {
@@ -442,7 +442,7 @@ func reviewTips(ctx context.Context, repo *git.Repo) (map[string]string, error) 
 	}
 	tips := map[string]string{}
 	for _, e := range entries {
-		tips[e.Slug] = e.SHA
+		tips[e.ID] = e.SHA
 	}
 	return tips, nil
 }
@@ -492,7 +492,7 @@ func parentID(base string) string {
 	if base == "" {
 		return ""
 	}
-	if id, ok := reviewref.ArchivedChangesetID(base); ok {
+	if id, ok := reviewref.ChangesetID(base); ok {
 		return id
 	}
 	return strings.TrimPrefix(base, "refs/heads/")

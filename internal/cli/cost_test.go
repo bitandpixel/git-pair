@@ -24,7 +24,7 @@ func TestReviewQueueCostFollowsBranchesNotExistingChangesets(t *testing.T) {
 
 	base := f.Head()
 	for i := 0; i < 300; i++ {
-		f.MustGit("update-ref", fmt.Sprintf("refs/reviews/cs-%03d", i), base)
+		f.MustGit("update-ref", fmt.Sprintf("refs/git-pair/changesets/cs-%03d/archive", i), base)
 	}
 
 	before = count()

@@ -4,7 +4,7 @@
 review protocol on top of ordinary git commits, files, refs, editors and difftools rather
 than replacing any of them: a changeset directory holds the change description and review
 threads, lifecycle transitions are commits carrying `Review-*` trailers, review-relative
-diff spans answer "what happened since my last review", and `refs/reviews/*` keeps the
+diff spans answer "what happened since my last review", and `refs/git-pair/changesets/*` keeps the
 complete unsquashed history reachable so a branch can be squash-merged without losing the
 review conversation. All review state lives inside the repository, so no code path talks
 to a forge.
@@ -90,7 +90,7 @@ Review submitted: booking-transaction
   files:   2 changed
            changesets/booking-transaction/concurrency-tests.md
            src/service.ts
-  ref:     refs/reviews/booking-transaction -> 332887c
+  ref:     refs/git-pair/changesets/booking-transaction/archive -> 332887c
   next:    author: `git pair change feedback`, address it, then `git pair change ready`
 ```
 
@@ -188,7 +188,7 @@ Review submitted: booking-transaction
   outcome: approve
   commit:  0eaad3b
   files:   none (recorded as an empty review commit)
-  ref:     refs/reviews/booking-transaction -> 0eaad3b
+  ref:     refs/git-pair/changesets/booking-transaction/archive -> 0eaad3b
   next:    author: `git pair change archive` before squash/merge
 ```
 
@@ -200,10 +200,10 @@ the owner's call. The approval already left the archive current, so this says so
 $ git pair change archive
 Changeset booking-transaction is already archived at 0eaad3b
 
-refs/reviews/booking-transaction already points there; nothing moved.
+refs/git-pair/changesets/booking-transaction/archive already points there; nothing moved.
 
 Safe to squash/merge.
-Review history stays reachable at refs/reviews/booking-transaction
+Review history stays reachable at refs/git-pair/changesets/booking-transaction/archive
 ```
 
 An archive ref moves forward and never backwards, so replying in a thread or rewriting `ABOUT.md`
@@ -213,7 +213,7 @@ after the approval does not strand the archive short of `HEAD`:
 $ git pair change archive
 Archived changeset booking-transaction at 4f2b8c1
 
-refs/reviews/booking-transaction: 0eaad3b → 4f2b8c1
+refs/git-pair/changesets/booking-transaction/archive: 0eaad3b → 4f2b8c1
 ```
 
 Deleting the branch loses nothing:
@@ -222,7 +222,7 @@ Deleting the branch loses nothing:
 $ git switch main && git branch -D booking-transaction
 Deleted branch booking-transaction (was 4f2b8c1).
 
-$ git rev-list --count refs/reviews/booking-transaction
+$ git rev-list --count refs/git-pair/changesets/booking-transaction/archive
 10
 ```
 
@@ -397,15 +397,24 @@ The same range applies to source, `ABOUT.md` and
 threads, and the resolved span is always printed to stderr:
 `git pair diff: last review..current`.
 
-**The archive ref.** A changeset has one durable ref, `refs/reviews/<changeset>`. `change ready`
-writes it at the ready marker, and every submission moves it to the exact resulting `HEAD`, in the
-same operation that creates the commit, keeping the whole implementation/review/fix chain reachable
-from garbage collection. The handoff is where the history starts being worth keeping, so an
+**The archive ref.** A changeset has one durable ref,
+`refs/git-pair/changesets/<changeset>/archive`, named by the changeset id rather than by any
+branch — which is what keeps the work findable after the branch is deleted. `change ready` writes it
+at the ready marker, and every submission moves it to the exact resulting `HEAD`, in the same
+operation that creates the commit, keeping the whole implementation/review/fix chain reachable from
+garbage collection. The handoff is where the history starts being worth keeping, so an
 offered-but-never-reviewed changeset is written too. `change archive` advances it over review
 artifacts, and `change abandon` moves it to the terminal marker. It moves forward and never
 backwards: the command refuses a `HEAD` behind the current tip rather than dropping the chain from
 the only ref that keeps it reachable. It is not a guarantee against `git push --delete`; it keeps
 Git from pruning what git-pair still needs.
+
+The ref is a child of `refs/git-pair/changesets/<changeset>` rather than that path itself, because a
+git ref cannot be both a leaf and a namespace — git refuses the leaf once a child exists — and a
+changeset's refs are a namespace: `integration`, the record of the work landing, is reserved beside
+`archive`. Nothing reads the `refs/reviews/*` layout an earlier version used, so a repository
+upgraded from one reports no archive for changesets archived before the move; their commits stay
+reachable from their branches, and archiving again writes the new ref.
 
 **Surviving review additions.** Review lines left untouched disappear from a `review..HEAD`
 diff, so `change ready` and `change archive` re-derive them with
@@ -510,7 +519,7 @@ done.
   "head": "8065dae",
   "head_full": "8065dae53c0475596bfc174927075895d9fb8b76",
   "latest_review": null,
-  "archive_ref": "refs/reviews/booking-transaction",
+  "archive_ref": "refs/git-pair/changesets/booking-transaction/archive",
   "archive_commit": "8065dae",
   "uncommitted": false,
   "abandoned": false,
@@ -538,7 +547,7 @@ neither is work a reviewer can act on.
       "head": "af740a30d9cee930b85324aedfbc0aa4b33c1408",
       "ready_commit": "af740a30d9cee930b85324aedfbc0aa4b33c1408",
       "ready_age": "0s",
-      "archive_ref": "refs/reviews/booking-transaction"
+      "archive_ref": "refs/git-pair/changesets/booking-transaction/archive"
     }
   ],
   "skipped": ["untracked-work (cannot resolve changeset base \"other\": unknown revision: other)"]
@@ -578,7 +587,7 @@ is none)
   "next_action": "author: `git pair change archive` before squash/merge",
   "outcome": "approve",
   "previous_review": "",
-  "archive_ref": "refs/reviews/feat",
+  "archive_ref": "refs/git-pair/changesets/feat/archive",
   "short": "941266b"
 }
 ```
@@ -595,7 +604,7 @@ count beside it rather than looking like an ordinary approval.
   "acknowledged_survivors": 0,
   "acknowledged_unreviewed_paths": 0,
   "archive_advanced": true,
-  "archive_ref": "refs/reviews/feat",
+  "archive_ref": "refs/git-pair/changesets/feat/archive",
   "archive_was": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
   "base": "main",
   "changeset": "feat",

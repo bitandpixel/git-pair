@@ -198,7 +198,7 @@ func TestDetectorCatchesInjectedViolations(t *testing.T) {
 		`// Benign lookalikes: none of these may be reported.`,
 		`func (r *repo) base()   { r.Git("merge-base", "main", "HEAD") } // OK: merge-base is not merge`,
 		`func (r *repo) ok1()    { r.Git("commit", "--allow-empty", "-m", "restore ideas") } // OK`,
-		`func (r *repo) ok2()    { r.Git("for-each-ref", "refs/reviews") } // OK`,
+		`func (r *repo) ok2()    { r.Git("for-each-ref", "refs/git-pair/changesets") } // OK`,
 		`func (r *repo) ok3()    { r.Git("symbolic-ref", "--short", "HEAD") } // OK`,
 		"func (r *repo) prose()  { fmt.Errorf(\"run `git switch -c <branch>` first\") } // OK: help text, not an exec",
 		`func (r *repo) keys() map[string]any { return map[string]any{"branch": "main", "checkout": false} } // OK: --json keys`,

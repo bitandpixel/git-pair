@@ -269,7 +269,7 @@ func TestChangeArchiveDoesNotMergePushOrSquash(t *testing.T) {
 		t.Errorf("the archive ref reaches %d commits, want the unsquashed chain", got)
 	}
 	// One durable ref per changeset: nothing else was written under it.
-	for _, ref := range f.RefNames("refs/reviews") {
+	for _, ref := range f.RefNames("refs/git-pair/changesets") {
 		if ref != archiveRef(slug) {
 			t.Errorf("unexpected ref created by change archive: %s", ref)
 		}

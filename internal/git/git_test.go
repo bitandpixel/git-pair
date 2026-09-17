@@ -38,7 +38,7 @@ func TestUnknownRefReportsExit1WithNoStderr(t *testing.T) {
 	_, repo := openFixture(t)
 	ctx := context.Background()
 
-	stdout, err := repo.Git(ctx, "rev-parse", "--verify", "--quiet", "refs/reviews/absent")
+	stdout, err := repo.Git(ctx, "rev-parse", "--verify", "--quiet", "refs/git-pair/changesets/absent/archive")
 	if err == nil {
 		t.Fatalf("rev-parse --verify --quiet on an unknown ref succeeded with stdout %q", stdout)
 	}
@@ -67,7 +67,7 @@ func TestRevParseMapsUnknownRefToSentinel(t *testing.T) {
 	_, repo := openFixture(t)
 	ctx := context.Background()
 
-	sha, err := repo.RevParse(ctx, "refs/reviews/absent")
+	sha, err := repo.RevParse(ctx, "refs/git-pair/changesets/absent/archive")
 	if sha != "" {
 		t.Errorf("sha = %q, want empty", sha)
 	}
@@ -80,7 +80,7 @@ func TestRevParseMapsUnknownRefToSentinel(t *testing.T) {
 
 	// Same for a revision that is unresolvable because it is out of range, and for a
 	// ref-shaped name that was never created.
-	for _, rev := range []string{"HEAD~99", "refs/reviews/archive/nope/abc1234", "nope"} {
+	for _, rev := range []string{"HEAD~99", "refs/git-pair/changesets/nope/archive", "nope"} {
 		if _, err := repo.RevParse(ctx, rev); !errors.Is(err, git.ErrUnknownRevision) {
 			t.Errorf("RevParse(%q) = %v, want ErrUnknownRevision", rev, err)
 		}
@@ -98,7 +98,7 @@ func TestUnknownRefIsAbsenceForEveryReader(t *testing.T) {
 	f, repo := openFixture(t)
 	ctx := context.Background()
 	head := f.Head()
-	const ref = "refs/reviews/booking-transaction"
+	const ref = "refs/git-pair/changesets/booking-transaction/archive"
 
 	if _, err := repo.ResolveRef(ctx, ref); !errors.Is(err, git.ErrUnknownRevision) {
 		t.Errorf("ResolveRef on an absent ref = %v, want ErrUnknownRevision", err)

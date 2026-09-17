@@ -108,7 +108,7 @@ func TestReviewSubmitOutcomeArguments(t *testing.T) {
 	if res.code != exitUsage {
 		t.Errorf("submit with two outcomes exited %d, want %d\nstderr: %s", res.code, exitUsage, res.stderr)
 	}
-	if f.RefNames("refs/reviews") != nil {
+	if f.RefNames("refs/git-pair/changesets") != nil {
 		t.Error("a refused submission moved a review ref")
 	}
 }

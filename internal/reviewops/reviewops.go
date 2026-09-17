@@ -28,7 +28,7 @@ type Result struct {
 // normal for an approval on a clean tree.
 func (r Result) Empty() bool { return len(r.Files) == 0 }
 
-// Submit records a review submission and anchors it in refs/reviews/.
+// Submit records a review submission and moves the changeset's archive ref onto it.
 //
 // stageAll controls whether the working tree is swept in first. It defaults to
 // true because a review submission normally *is* everything the reviewer just

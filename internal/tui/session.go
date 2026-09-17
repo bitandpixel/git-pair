@@ -19,6 +19,7 @@ import (
 	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/reviewmark"
+	"gitpair/internal/reviewref"
 	"gitpair/internal/span"
 )
 
@@ -92,7 +93,7 @@ type Session struct {
 func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	s := &Session{
 		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span,
-		archiveRef: "refs/reviews/" + opts.Changeset.Slug,
+		archiveRef: reviewref.Archive(opts.Changeset.Slug),
 	}
 	if err := s.Rescan(ctx); err != nil {
 		return nil, err

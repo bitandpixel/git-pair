@@ -156,15 +156,15 @@ func TestFixtureTrailersAndMarkers(t *testing.T) {
 func TestFixtureRefsAndReachability(t *testing.T) {
 	f := gittest.New(t)
 	seed := f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
-	f.MustGit("update-ref", "refs/reviews/booking", seed)
+	f.MustGit("update-ref", "refs/git-pair/changesets/booking/archive", seed)
 
-	if !f.HasRef("refs/reviews/booking") {
+	if !f.HasRef("refs/git-pair/changesets/booking/archive") {
 		t.Fatal("ref created by update-ref is not visible")
 	}
-	if got := f.RefSHA("refs/reviews/booking"); got != seed {
+	if got := f.RefSHA("refs/git-pair/changesets/booking/archive"); got != seed {
 		t.Errorf("RefSHA = %s, want %s", got, seed)
 	}
-	if got := f.RefNames("refs/reviews"); len(got) != 1 || got[0] != "refs/reviews/booking" {
+	if got := f.RefNames("refs/git-pair/changesets"); len(got) != 1 || got[0] != "refs/git-pair/changesets/booking/archive" {
 		t.Errorf("RefNames = %v", got)
 	}
 	if !f.ReachableFrom(seed, seed) {

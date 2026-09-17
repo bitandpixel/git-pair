@@ -76,7 +76,7 @@ func TestChangeInitAdoptsTheDirectoryItInherits(t *testing.T) {
 func TestChangeInitRefusesAnIDItsRefsAlreadyUse(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
-	f.MustGit("update-ref", "refs/reviews/booking-transaction-v2", f.Head())
+	f.MustGit("update-ref", "refs/git-pair/changesets/booking-transaction-v2/archive", f.Head())
 
 	runIn(t, f.Dir(), "change", "init", "--id", "booking-transaction", "--base", "main").
 		mustSucceed(t, "change", "init")

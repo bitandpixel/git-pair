@@ -111,7 +111,7 @@ refs. It does not replace git, your editor, your difftool, or your forge.
 
 Review state lives in the repository: a changeset directory holds ABOUT.md and
 review threads, lifecycle markers are commits carrying Review-* trailers, and
-refs/reviews/* keeps the complete unsquashed history reachable.
+refs/git-pair/changesets/* keeps the complete unsquashed history reachable.
 
 Author commands:   git pair change init | use | ready | unready | abandon | archive
 Reviewer commands: git pair review open | about | thread | submit | history | queue

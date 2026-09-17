@@ -116,8 +116,8 @@ func TestSessionListsChangedFilesForFullChangeset(t *testing.T) {
 	if !strings.Contains(header.SpanLabel, "main") {
 		t.Errorf("Header.SpanLabel = %q, want it to name the resolved span", header.SpanLabel)
 	}
-	if sess.ArchiveRef() != "refs/reviews/"+slug {
-		t.Errorf("ArchiveRef() = %q, want refs/reviews/%s", sess.ArchiveRef(), slug)
+	if sess.ArchiveRef() != "refs/git-pair/changesets/"+slug+"/archive" {
+		t.Errorf("ArchiveRef() = %q, want refs/git-pair/changesets/%s/archive", sess.ArchiveRef(), slug)
 	}
 	if sess.AboutPath() != "changesets/"+slug+"/ABOUT.md" {
 		t.Errorf("AboutPath() = %q", sess.AboutPath())

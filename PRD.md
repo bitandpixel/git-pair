@@ -527,7 +527,7 @@ Requirements:
 -   run the surviving-review-additions diagnostic described below,
 -   fail non-interactively by default if surviving review additions are detected,
 -   create a review marker commit only if validation succeeds or an explicit override is supplied,
--   anchor the ready marker in `refs/reviews/<changeset>`, so the offered history is reachable
+-   anchor the ready marker in `refs/git-pair/changesets/<changeset>/archive`, so the offered history is reachable
     without the branch (§13),
 -   make the branch discoverable by `git pair review queue`.
 
@@ -693,10 +693,10 @@ Example output:
 ```text
 Archived changeset booking-transaction at 91bf204
 
-refs/reviews/booking-transaction: 6c1d0aa → 91bf204
+refs/git-pair/changesets/booking-transaction/archive: 6c1d0aa → 91bf204
 
 Safe to squash/merge.
-Review history stays reachable at refs/reviews/booking-transaction
+Review history stays reachable at refs/git-pair/changesets/booking-transaction/archive
 ```
 
 If surviving review additions remain, archiving must fail unless explicitly overridden, and so
@@ -1117,7 +1117,7 @@ Latest review:
   commit: 91bf204
 
 Review archive:
-  refs/reviews/booking-transaction
+  refs/git-pair/changesets/booking-transaction/archive
     points at: 91bf204
 
 Uncommitted changes: no
@@ -1145,7 +1145,7 @@ Potential JSON:
         "outcome": "block",
         "commit": "91bf204"
     },
-    "archive_ref": "refs/reviews/booking-transaction",
+    "archive_ref": "refs/git-pair/changesets/booking-transaction/archive",
     "archive_commit": "91bf204"
 }
 ```
@@ -1201,7 +1201,7 @@ leaving the offer standing while they keep implementing.
 
 State comes from the commits on the branch. There is one fallback, and it is not a second
 source: where a changeset has no branch — deleted after the work landed, or after it was
-abandoned — the archive ref at `refs/reviews/<changeset>` is what remains, and
+abandoned — the archive ref at `refs/git-pair/changesets/<changeset>/archive` is what remains, and
 deriving from it can only report what the branch last recorded before it disappeared (§13). Nothing
 reads a ref to decide that a changeset is ready, and no command moves state by moving a ref.
 
@@ -1219,10 +1219,10 @@ Five states, six markers: `working` is written by `change unready` (§9.6) and i
 changeset with no marker derives; `abandoned` (§9.7) is the seventh and names no state — an abandoned
 changeset reports `WORKING`, and the ending is reported beside it as `abandoned_commit`.
 
-There is no state for a completed changeset. `complete` archives a head in `refs/reviews/` and records
-no commit, and the changeset is finished when that archived history is merged into the deployment
-branch. State is derived from a changeset's own commits, so git-pair does not derive the merge:
-`git pair status` reports the archive ref for as long as HEAD is the archived commit.
+There is no state for an archived changeset. `change archive` moves a ref and records no commit,
+and the changeset is finished when that archived history is merged into the deployment branch.
+State is derived from a changeset's own commits, so git-pair does not derive the merge: `git pair
+status` reports where the archive stands, beside the state rather than as another value of it.
 
 Avoid maintaining a fragile mutable state variable where possible.
 
@@ -1257,18 +1257,25 @@ tree (§9.5).
 A changeset has one durable ref:
 
 ```text
-refs/reviews/<changeset>
+refs/git-pair/changesets/<changeset>/archive
 ```
 
 Example:
 
 ```text
-refs/reviews/booking-transaction
+refs/git-pair/changesets/booking-transaction/archive
 ```
 
 It holds the complete unsquashed implementation/review/fix chain, which is what keeps that history
 reachable through garbage collection, a squash merge, and `git branch -D`. The changeset names it,
 not the branch, so the work stays findable after the branch is gone.
+
+Nothing lives at `refs/git-pair/changesets/<changeset>` itself. A git ref cannot be a leaf and a
+namespace at once — git enforces that by refusing to create the leaf once a child exists — so every
+ref a changeset owns is a child of that path. `archive` is one, and it is the only one git-pair
+writes today. `integration`, the record of the work landing, is reserved beside it for the command
+that will write it; a changeset whose namespace holds only an integration record is not archived,
+and reads that way.
 
 The ref is written by `change ready` as well as by `review submit`, because the history worth saving
 begins at the first handoff rather than at the first response: a changeset that was offered and never
@@ -2020,7 +2027,7 @@ clean main history
 while:
 
 ```text
-refs/reviews/*
+refs/git-pair/changesets/*
 ```
 
 preserves the detailed human–agent development/review history.
@@ -2100,7 +2107,7 @@ git pair review queue --global
 
 -   pre-push hooks,
 -   server-side validation,
--   automatic pushing of `refs/reviews/*`,
+-   automatic pushing of `refs/git-pair/changesets/*`,
 -   protection against destructive rewrites before archival.
 
 ## Forge projection

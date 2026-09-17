@@ -16,7 +16,7 @@ import (
 )
 
 // Submitting is the end of the session, not a status line inside it: the review
-// is committed and refs/reviews/<cs> has moved, so the list on screen now
+// is committed and the changeset's archive ref has moved, so the list on screen now
 // describes a span that no longer means what it did, and a second `s` would
 // submit the same state twice.
 func TestSubmitKeyEndsTheSession(t *testing.T) {

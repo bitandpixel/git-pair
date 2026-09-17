@@ -89,11 +89,11 @@ func TestSubmitCreatesStandardizedReviewCommitAndMovesRef(t *testing.T) {
 	if trailers["Review-Changeset"] != slug {
 		t.Errorf("Review-Changeset = %q, want %q", trailers["Review-Changeset"], slug)
 	}
-	if got := e.f.RefSHA("refs/reviews/" + slug); got != result.Commit {
-		t.Errorf("refs/reviews/%s points at %s, want the review commit %s", slug, got, result.Commit)
+	if got := e.f.RefSHA("refs/git-pair/changesets/" + slug + "/archive"); got != result.Commit {
+		t.Errorf("refs/git-pair/changesets/%s/archive points at %s, want the review commit %s", slug, got, result.Commit)
 	}
-	if result.Ref != "refs/reviews/"+slug {
-		t.Errorf("Ref = %q, want refs/reviews/%s", result.Ref, slug)
+	if result.Ref != "refs/git-pair/changesets/"+slug+"/archive" {
+		t.Errorf("Ref = %q, want refs/git-pair/changesets/%s/archive", result.Ref, slug)
 	}
 	// The reviewer's direct edit is part of the review (PRD §20).
 	if len(result.Files) != 1 || result.Files[0] != "service.go" {
@@ -129,7 +129,7 @@ func TestSubmitApproveOnCleanTreeCreatesEmptyReviewCommit(t *testing.T) {
 	if got := e.f.Subject(result.Commit); got != "review: approve "+slug {
 		t.Errorf("subject = %q", got)
 	}
-	if got := e.f.RefSHA("refs/reviews/" + slug); got != result.Commit {
+	if got := e.f.RefSHA("refs/git-pair/changesets/" + slug + "/archive"); got != result.Commit {
 		t.Errorf("review ref = %s, want the empty approval %s", got, result.Commit)
 	}
 	// The empty approval is still a lifecycle marker: the effective state is APPROVED.
@@ -180,7 +180,7 @@ func TestSubmitRejectsInvalidOutcome(t *testing.T) {
 func TestSubmitAdvancesTheArchiveItWasGiven(t *testing.T) {
 	e := newEnv(t)
 	head := e.f.Head()
-	ref := "refs/reviews/" + slug
+	ref := "refs/git-pair/changesets/" + slug + "/archive"
 	if _, err := reviewref.Update(context.Background(), e.repo, e.cs.Slug, head); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -244,10 +244,10 @@ func TestSubmitKeepsEarlierReviewsReachable(t *testing.T) {
 	if !e.f.ReachableFrom(first.Commit, second.Commit) {
 		t.Error("the first review is not an ancestor of the second")
 	}
-	if got := e.f.RefSHA("refs/reviews/" + slug); got != second.Commit {
+	if got := e.f.RefSHA("refs/git-pair/changesets/" + slug + "/archive"); got != second.Commit {
 		t.Errorf("review ref = %s, want the newest review %s", got, second.Commit)
 	}
-	if !e.f.ReachableFrom(first.Commit, "refs/reviews/"+slug) {
+	if !e.f.ReachableFrom(first.Commit, "refs/git-pair/changesets/"+slug+"/archive") {
 		t.Error("the first review is not reachable from the review ref (PRD §13)")
 	}
 }

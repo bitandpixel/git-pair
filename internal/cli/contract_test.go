@@ -159,7 +159,7 @@ func TestExitCodeGitFailure(t *testing.T) {
 	if f.Head() != head {
 		t.Errorf("HEAD moved to %s despite git failing", f.Head())
 	}
-	if refs := f.RefNames("refs/reviews"); len(refs) != 0 {
+	if refs := f.RefNames("refs/git-pair/changesets"); len(refs) != 0 {
 		t.Errorf("a failed submission moved review refs: %v", refs)
 	}
 

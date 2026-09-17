@@ -60,7 +60,7 @@ $G review thread "concurrency tests" </dev/null; check "review thread (no tty re
 [ -f changesets/booking-transaction/concurrency-tests.md ] && echo "  ok: thread file created" || { echo "  FAIL: thread not created"; FAILED=1; }
 $G review submit --block; check "review submit --block" 0 $?
 $G review history; check "review history" 0 $?
-git for-each-ref --format='  %(refname) -> %(objectname:short)' refs/reviews
+git for-each-ref --format='  %(refname) -> %(objectname:short)' refs/git-pair/changesets
 
 step "author: ready must fail on surviving review additions"
 $G change ready; check "change ready blocked" 1 $?
@@ -101,7 +101,7 @@ step "author: archive: advance the archive and check squash-safety"
 HEAD_BEFORE=$(git rev-parse HEAD)
 $G change archive; check "change archive" 0 $?
 [ "$(git rev-parse HEAD)" = "$HEAD_BEFORE" ] && echo "  ok: archiving recorded no commit" || { echo "  FAIL: archiving created a commit"; FAILED=1; }
-ARCHIVE=refs/reviews/booking-transaction
+ARCHIVE=refs/git-pair/changesets/booking-transaction/archive
 [ "$(git rev-parse "$ARCHIVE")" = "$HEAD_BEFORE" ] && echo "  ok: the archive names the archived head" || { echo "  FAIL: the archive does not point at HEAD"; FAILED=1; }
 BEFORE=$(git rev-list --count "$ARCHIVE")
 git switch -q main

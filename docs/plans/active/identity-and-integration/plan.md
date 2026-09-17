@@ -331,8 +331,16 @@ move is the mechanical rename it should be.
 - [x] README troubleshooting gains the consequence the tree rule accepts: if someone merges your
   unlanded changeset and lands it, your changeset reads as landed on your own branch, because your
   directory is in trunk's tree. Measured, not inferred.
-- [ ] `reviewref`: `Archive(id)`, `Update`, `Resolve` against the new namespace; delete the per-head
+- [x] `reviewref`: `Archive(id)`, `Update`, `Resolve` against the new namespace; delete the per-head
   archive writer and its exact-SHA matcher; no reader of `refs/reviews/*` remains.
+  - *Amended while implementing:* the per-head writer and the exact-SHA matcher went with
+    `change archive` rather than with the move, because keeping them would have meant writing
+    `refs/git-pair/changesets/<id>/archive` **and** a per-head copy under it — and a per-head child
+    under a changeset's namespace is what made the leaf/namespace collision unresolvable in the first
+    place. Once the archive is one movable ref the move is mechanical, which is the order the
+    milestone ended up in. `Slug` became `ChangesetID`, since a namespaced child names a changeset id
+    and the old name implied a branch-shaped thing; `Entry.Slug` became `Entry.ID`. The broad
+    `slug`→`id` rename in the rest of the codebase is still open.
 - [x] `change archive`: succeeds when the archive is already at `HEAD`; advances when nothing outside
   `changesets/<id>/` changed between the archive and `HEAD`; otherwise refuses naming the paths and says
   a review cycle is required. Reuses `PathsChanged` and the drift machinery from the anchored-lifecycle
@@ -445,6 +453,15 @@ Landed so far:
   changeset whose abandon marker the archive happens to name can tell an agent the work is done.
 - `change archive` refuses an abandoned changeset before the review gate, which would also have
   refused it for the wrong reason.
+- The durable refs moved to `refs/git-pair/changesets/<id>/archive`. The leaf could not go with it:
+  a ref cannot be a leaf and a namespace at once, so the archive had to become a child, and that is
+  also what leaves room for the `integration` record beside it (M4) — the layout reserves the child
+  and nothing writes it yet. Two consequences worth naming: `Taken` now counts any child of the
+  namespace, so an id whose changeset has an integration record and no archive is still somebody
+  else's name; and `List` skips non-archive children, because a namespace holding only an
+  integration record is not an archived changeset. Nothing reads the retired `refs/reviews/*`
+  layout, and the README says so, because upgrading leaves stranded refs there and a silent
+  "no archive" answer would read as a state bug.
 
 #### Verification
 

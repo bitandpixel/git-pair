@@ -200,7 +200,8 @@ Exactly one outcome is required:
   --approve    the reviewer accepts the current implementation
 
 The commit carries Review-Outcome and Review-Changeset trailers, and
-refs/reviews/<changeset> is moved to the resulting HEAD in the same operation so
+refs/git-pair/changesets/<changeset>/archive is moved to the resulting HEAD in the same
+operation so
 the full unsquashed chain stays reachable.
 
 Source edits, inline comments, ABOUT.md edits, and thread files all become part
