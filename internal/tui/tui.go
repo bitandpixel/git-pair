@@ -1276,6 +1276,21 @@ func (m reviewModel) boxLine(f boxFrame, text string, cursor bool) string {
 	return f.vertical + " " + padRight(clip(text, inner), inner) + " " + f.vertical
 }
 
+// treeSpine is the rule that belongs to the file tree rather than to the screen: one above the tree,
+// one below it. Both are drawn whatever else is on the screen, and both are the tree's focus light --
+// single rules while another region holds the keys, double while the tree holds them -- the convention
+// the box's borders and the pane's divider already use, chosen over styling alone so it survives a
+// terminal that renders no bold. Two horizontal rules rather than a frame, because a frame's two cells
+// each side are columns, and the narrow terminal that needs the region marked most is the one with no
+// columns to give.
+func (m reviewModel) treeSpine() string {
+	rule, paint := "\u2500", styleDim.Render
+	if m.focus == focusFiles {
+		rule, paint = "\u2550", styleActive.Render
+	}
+	return paint(strings.Repeat(rule, m.listWidth()))
+}
+
 // listBlock is the list column on its own: the changeset box, the file tree, and the reviewed counter.
 // It is apart from View because the preview is drawn beside exactly this block, row for row, and it is
 // padded to the column's height so the two columns end on the same line whatever the window is showing.
@@ -1284,7 +1299,10 @@ func (m reviewModel) listBlock() string {
 	files, section := m.window()
 
 	lines := m.boxLines(section)
-	lines = append(lines, "")
+	// The row that used to separate the box from the tree is the tree's own top spine, and the tree
+	// gets a matching one under its last row: a reviewer on a narrow terminal has rows to spend and
+	// no columns to spare, which is the opposite trade to a frame.
+	lines = append(lines, m.treeSpine())
 	if total == 0 {
 		lines = append(lines, styleDim.Render("(no changed files in this span)"))
 	}
@@ -1294,7 +1312,7 @@ func (m reviewModel) listBlock() string {
 	if m.scroll > 0 {
 		lines = append(lines, styleDim.Render(fmt.Sprintf("  (hidden above: %d)", m.scroll)))
 	}
-	lines = append(lines, "", m.counterLine(reviewed, total))
+	lines = append(lines, m.treeSpine(), m.counterLine(reviewed, total))
 	for len(lines) < m.listColumnRows() {
 		lines = append(lines, "")
 	}
