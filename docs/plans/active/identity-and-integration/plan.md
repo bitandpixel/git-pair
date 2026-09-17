@@ -106,8 +106,17 @@ Consequences recorded rather than asked separately:
   a branch typed that way is stored at `refs/heads/refs/...`. Costs: fetched refs become required for
   stacked changesets rather than merely recommended, and a commit's base resolves against wherever the
   parent's ref sits today.
+- **The integration branch comes from a flag or from git, never from configuration.**
+  `--integration <ref>` on the commands that resolve; otherwise `refs/remotes/origin/HEAD`, then a
+  unique `origin/main`/`origin/master`, then a local `main`/`master`; otherwise refuse, naming the
+  flag and `git remote set-head origin --auto`. Rejected: `pair.integrationBranch` config — the
+  product reads no git config today, the requirements externalise the ref at the call site
+  (`integration record --target origin/main`), and config is machine-local, which is the reason this
+  plan rejected git config as a home for the `branch:` claim. Measured: `git clone` records
+  `origin/HEAD` for a valid remote HEAD, and the CI shape (`init` + `remote add` + `fetch <branch>`)
+  does not — one flag or `git remote set-head origin --auto` covers it.
 
-## Under review after M1 → decided: the tree rule, with archive refs as the fallback
+## Under review after M1 → decided: the tree rule alone
 
 M1 (identity, claim-based resolution) has landed as `8845a7a`/`94b88a8` (plus the batched-claim
 performance fix `2c465a9`). The archive-ref discovery requirements reverse the mechanism it chose:
@@ -141,7 +150,8 @@ good at, and the two rules may belong together as primary and fallback.
 the fallback for a directory that no longer exists), `change init` still creates the archive ref at
 init per §11, M1's `branch:` claim is deleted rather than kept as a tie-breaker, and M2 is rebuilt to
 carry discovery and the namespace move together. The rule is specified, and its fallback cases
-measured, in `research/2026-09-17-combined-rule.md`.
+measured, in `research/2026-09-17-combined-rule.md`. (Amended the same day: the fallback was
+dropped and ambiguity became a recorded decision — see the amendment at the end of that note.)
 
 ## Milestones
 
@@ -233,9 +243,11 @@ assertion about stale claims was vacuous because no changeset directory existed 
 
 #### Tasks
 
-- [ ] `integrationBranch` resolution: `pair.integrationBranch` config → `origin/HEAD`'s target → a
-  single local `main`/`master` → refuse naming the config. Refuse rather than treat an
-  unresolvable trunk as "no trunk", which would make every directory on the branch a candidate.
+- [ ] Integration-branch resolution: `--integration <ref>` on the resolving commands, else
+  `refs/remotes/origin/HEAD`, else a unique `origin/main`/`origin/master`, else a local
+  `main`/`master`, else refuse naming the flag and `git remote set-head origin --auto`. No config
+  key. Refuse rather than treat an unresolvable trunk as "no trunk", which would make every
+  directory on the branch a candidate.
 - [ ] `changeset.Resolve(ctx, repo, rev, trunk)`: rank 0 from `ls-tree` of `changesets/` in the
   revision and in trunk; nearest archive tip, then `base:`-names-parent to break a stack, then
   ambiguity. `ForID` stays for `--changeset` reads; `ForBranch`/`AtCommit` and the claim machinery
@@ -452,3 +464,4 @@ against running the fetch first.
 | 2026-09-17 | measurements | Archive-ref discovery prototyped (`research/2026-09-17-archive-ref-discovery.md`). The five rules as written resolve the stacked case but leave a diverged parent without a changeset, make an unrecorded merge landing ambiguous for every later branch, answer differently for squash versus merge, and let a forgotten `change init` own its descendants; measured cost 1,802 invocations per resolution at 300 refs, ~11s per read on a 20k-commit history. Two amendments measured (exclude landed refs; comparable-not-ancestor) each fixed part of it. The tree rule — directories here and not on trunk — passed all six fixtures in 8 invocations. M2 is held until the rule is chosen. |
 | 2026-09-17 | decision | Combined rule adopted after measurement: changeset directories on the revision and not on trunk decide resolution, archive refs are the fallback for a directory that no longer exists (`research/2026-09-17-combined-rule.md`). Seven fixtures in the spike pass, including the two no amendment of the specified rule could answer; cost 8 invocations on a changeset branch and 12 on trunk against 1,802 for the per-ref formulation. The `branch:` claim goes, `change init` still creates the archive ref, and M2 now carries discovery alongside the namespace move. The one new dependency is resolving the integration branch, which nothing in the product does today. |
 | 2026-09-17 | decision | Rank 1 (the archive-ref fallback) removed after the reviewer read its purpose correctly: two of the three justifications were false (a PR checkout has the tree; a rebase that drops the init commit also detaches the archive ref), leaving only a committed deletion of `changesets/<id>/`, where the loss is one confusing message. Resolution is the tree rule alone. Two findings from that probe: merging an unlanded sibling branch makes the branch ambiguous (`[mine@4 theirs@4]`, a case the claim model could not reach), answered by `change use <id>` recording `ignores:` in the chosen changeset rather than the losing one; and landing someone else's merge of your unlanded changeset makes yours read as landed on your own branch, measured with and without any recorded decision — a control run showed the flag was never the cause. |
+| 2026-09-17 | decision | The integration branch is a flag or git's own answer, not configuration: `--integration <ref>`, else `refs/remotes/origin/HEAD`, else a unique `origin/main`/`origin/master`, else refuse naming the flag and `git remote set-head origin --auto`. The `pair.integrationBranch` key I had proposed was an invention — the product reads no git config today, the requirements already pass `--target origin/main` at the call site, and machine-local config is what this plan rejected for the `branch:` claim. Measured: `git clone` records `origin/HEAD` when the remote HEAD names an existing branch (path and `file://`); the CI `init`+`remote add`+`fetch <branch>` shape does not; `git remote set-head --auto` fixes it; git refuses to guess when the remote HEAD dangles. |

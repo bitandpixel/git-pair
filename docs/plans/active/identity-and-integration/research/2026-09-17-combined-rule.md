@@ -90,20 +90,40 @@ directory, and the ref rule alone gets four fixtures wrong.
 
 ## The integration branch
 
-The rule needs `T`, and there is no concept of it in the code yet. Proposed resolution order,
-recorded as a decision rather than left to the implementation:
+The rule needs `T`, and there is no concept of it in the code yet — the only branch logic in
+the product is `symbolic-ref --short HEAD`. **Decided: a flag plus git's own answer, and no
+config key.**
 
-1. `pair.integrationBranch` config, if set.
-2. The ref `origin/HEAD` points at, when a remote exists and that ref is present.
-3. A local `main`, else a local `master`, if exactly one exists.
-4. Otherwise **refuse**, naming the config to set. Not "assume no trunk": an unresolvable
-   trunk would make every directory on the branch a candidate, and a wrong "you are working on
-   three changesets" is worse than an error telling you to fetch.
+1. `--integration <ref>` on the commands that resolve (`status`, `queue`, `diff`, `review`,
+   `check`), used verbatim. This is the requirements' own idiom: `integration record` already
+   takes `--target origin/main` from the CI adapter rather than storing which branch is
+   integration.
+2. `refs/remotes/origin/HEAD`, when present.
+3. A unique `origin/main` or `origin/master`; a local `main`/`master` when there is no remote.
+4. Otherwise **refuse**, naming both fixes: the flag, and `git remote set-head origin --auto`.
+   Not "assume no trunk" — with no trunk, every directory on the branch is a candidate, and a
+   confident "you are working on three changesets" is worse than an error.
 
-Preferring the remote-tracking ref over the local branch is deliberate: what counts as landed
-is what has been *published*, and a local trunk that is a week stale would otherwise keep
-landed changesets looking active. Measured consequence, not a preference test: with the local
-branch as `T`, a changeset merged upstream and not yet fetched resolves as active.
+Measured, because the whole proposal leans on this:
+
+| Setup | `refs/remotes/origin/HEAD` |
+| --- | --- |
+| `git clone` of a remote whose HEAD names an existing branch (path and `file://` transports) | set, e.g. `origin/trunk` |
+| CI shape: `git init` + `git remote add` + `git fetch origin <branch>` | **not set** |
+| …then `git remote set-head origin --auto` | set |
+| Remote HEAD names a branch that does not exist | git declines to guess (`Cannot determine remote HEAD`) |
+
+So a human clone needs no configuration at all, and a runner needs one flag or one extra
+command. Preferring the remote-tracking ref over any local branch is deliberate: what counts
+as landed is what has been published, and a local trunk a week stale keeps landed changesets
+looking active.
+
+No config key, for three reasons. The product reads no git config today, and that is easier to
+keep true than to claw back. The requirements never propose one; they externalise the ref at
+the call site. And the argument for rejecting git config as the home of the `branch:` claim was
+that it is machine-local — the same argument applies here, where it is worse: two clones of one
+repository could disagree about what has landed, which is exactly the disagreement this rule
+exists to remove.
 
 Open sub-question worth an explicit call during M2: whether `change init` should refuse to run
 on the integration branch. The rule already makes a stray init on trunk inert — measured, it
