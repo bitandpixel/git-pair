@@ -252,6 +252,9 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 	if err != nil {
 		return err
 	}
+	if err := a.refuseIfAbandoned(ctx, s); err != nil {
+		return err
+	}
 	result, err := reviewops.Submit(ctx, s.repo, s.cs, outcome, opts.message, !opts.noStage)
 	if err != nil {
 		return err
@@ -540,6 +543,12 @@ func classifyOrphan(ctx context.Context, repo *git.Repo, head, slug string) (str
 		return "", err
 	}
 	if base == "" {
+		return "", nil
+	}
+	// An abandoned changeset ended on purpose, and the anchor carries the ending. That
+	// is the whole answer: nothing is pending, and the diff would only report that the
+	// work is not in its base, which is what abandoning means (PRD §9.7).
+	if summary, err := lifecycle.Summarize(ctx, repo, slug, base, anchor); err == nil && summary.Abandoned != nil {
 		return "", nil
 	}
 	// The anchor is a commit that survives the branch, so it can be compared with

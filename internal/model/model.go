@@ -83,4 +83,10 @@ const (
 	// is what a changeset with no marker derives anyway, so the value exists to let an
 	// author say so on purpose rather than leaving a reviewer to infer it from a diff.
 	StateValueWorking = "working"
+	// StateValueAbandoned is written by `change abandon`. Like `working` it is not a
+	// sixth lifecycle state: `abandoned` is a fact recorded beside the state
+	// (Summary.Abandoned), not a value an agent branches `state` on. A changeset that
+	// can never move again has to be recognisable without learning a new state name,
+	// and every consumer that switches on `state` would have to learn one.
+	StateValueAbandoned = "abandoned"
 )

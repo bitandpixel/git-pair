@@ -27,6 +27,10 @@ const (
 	// KindUnready is `change unready`: a marker that ends readiness on purpose
 	// instead of leaving it to be inferred from a later commit.
 	KindUnready
+	// KindAbandoned is `change abandon`: the terminal record. It is a marker, so it
+	// holds the newest-marker rule the same way the others do, but it names no state —
+	// see Summary.Abandoned for why.
+	KindAbandoned
 )
 
 func (k Kind) String() string {
@@ -37,6 +41,8 @@ func (k Kind) String() string {
 		return "review"
 	case KindUnready:
 		return "unready"
+	case KindAbandoned:
+		return "abandoned"
 	}
 	return "implementation"
 }
@@ -69,7 +75,12 @@ type Summary struct {
 	Marker *Event
 	// LatestReview is the newest review submission, or nil.
 	LatestReview *Event
-	State        model.State
+	// Abandoned is the newest `change abandon` marker in the range, or nil. It is a
+	// fact reported beside the state rather than a state value: an abandoned changeset
+	// reports WORKING, and anything that advises a next step or decides whether an
+	// operation may record a marker has to look here (PRD §9.7).
+	Abandoned *Event
+	State     model.State
 	// Reason explains State in one line, for humans and `status --json`.
 	Reason string
 	// Stale is true when commits other than the newest marker follow it. Most callers
@@ -192,6 +203,8 @@ func parseEvent(slug string, rec []string) Event {
 			e.Kind = KindReady
 		case state == model.StateValueWorking:
 			e.Kind = KindUnready
+		case state == model.StateValueAbandoned:
+			e.Kind = KindAbandoned
 		default:
 			// `Review-State: closed` was read here until completion became an
 			// archival ref instead of a commit. It now falls through to the
@@ -205,9 +218,14 @@ func parseEvent(slug string, rec []string) Event {
 
 func derive(events []Event) Summary {
 	s := Summary{Events: events, State: model.StateWorking}
-	for _, e := range events {
+	for i, e := range events {
 		if e.Kind == KindReview {
 			s.Reviews = append(s.Reviews, e)
+		}
+		if e.Kind == KindAbandoned {
+			// The terminal record, newest wins. It is reported beside the state rather
+			// than as one, so `state` keeps its five values.
+			s.Abandoned = &s.Events[i]
 		}
 		if e.UnrecognisedMarker {
 			s.Unrecognised = append(s.Unrecognised, e)
@@ -275,6 +293,8 @@ func markerLabel(m Event) string {
 		return fmt.Sprintf("review %s (%s)", m.Short, m.Outcome)
 	case KindUnready:
 		return "unready " + m.Short
+	case KindAbandoned:
+		return "abandoned " + m.Short
 	}
 	return m.Short
 }
@@ -288,6 +308,8 @@ func markerReason(m Event) string {
 		return fmt.Sprintf("review %s (%s) is the newest commit", m.Short, m.Outcome)
 	case KindUnready:
 		return "marked unready by " + m.Short
+	case KindAbandoned:
+		return "abandoned by " + m.Short
 	}
 	return m.Subject
 }
@@ -372,6 +394,12 @@ func (e Event) State() model.State {
 		// Retiring readiness lands on the state a changeset with no marker would
 		// derive anyway. Naming it here keeps the answer from depending on the
 		// fallback below, which is the answer for an implementation commit.
+		return model.StateWorking
+	case KindAbandoned:
+		// The terminal record names no state of its own. WORKING is what it falls back
+		// to, and it is not a lie: the changeset is not in review and nothing is owed
+		// on it. What makes it recognisable is Summary.Abandoned, which every surface
+		// that advises a next step has to consult (PRD §9.7).
 		return model.StateWorking
 	}
 	return model.StateWorking

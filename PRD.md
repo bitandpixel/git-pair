@@ -633,6 +633,40 @@ what keeps the gate back into `READY` reachable: surviving review additions (§1
 `--json` prints `changeset`, `branch`, `base`, `state`, `was`, `recorded`, `unready_commit` and
 `review_queue_visible`.
 
+## 9.7 `git pair change abandon`
+
+Records that the changeset will not be taken forward, and anchors the record so it outlives the branch.
+
+Two endings exist, and only one of them is git-pair's to record. Completion (§9.5) means *merged*,
+which the deployment branch knows and git-pair deliberately does not derive. Abandoning means *not
+coming back*, which the author knows the moment they decide it — and without a command for it, the
+only way to say so is to delete the branch, which destroys the history that explains why.
+
+Checks, in order:
+
+1. the changeset exists on the checked-out branch — a changeset whose branch is already gone cannot
+   be abandoned, because abandoning is a decision about work that is still there, and post-merge
+   bookkeeping is not a lifecycle act (§10.6 classifies a leftover directory on its own),
+2. clean working tree — the marker is a commit,
+3. the changeset has not already ended, in which case the command succeeds and records nothing.
+
+Writes `git-pair: abandon <slug>` carrying `Review-State: abandoned` and `Review-Changeset: <slug>`, then
+moves `refs/reviews/<changeset>` (§13) to that commit. The ref move is the point of the operation: a
+terminal record on a branch that gets deleted is a record that disappears with it.
+
+`abandoned` is not a sixth state. The changeset reports `WORKING`, which already means "not in
+review, nothing owed", and the ending is reported beside the state as `abandoned` and
+`abandoned_commit` in `status --json`. Splitting it this way keeps `state` — the field agents branch
+on — at its five values, while still making a changeset that can never move again recognisable.
+
+The ending closes the changeset, which is the difference from `change unready` (§9.6), which only
+withdraws an offer for now. `change ready`, `change unready` and `review submit` refuse against an
+abandoned changeset, and the check consults both places the record can live: the branch chain and the
+anchor. Whichever survives is enough, which is also what stops a newly created branch from restarting
+a changeset whose name already ended.
+
+`--json` prints `changeset`, `branch`, `state`, `was`, `recorded`, `abandoned_commit` and `review_ref`.
+
 ---
 
 # 10. Reviewer Commands
@@ -968,11 +1002,20 @@ review feedback / approve
 complete (archival, owner's decision — not a state)
 ```
 
+Any point above can also end: `git pair change abandon` (§9.7) records a terminal marker, and the
+commands that move state refuse against the changeset afterwards.
+
 The author's side of that loop is `git pair change ready`, then `git pair change wait` to learn that a reviewer has acted, then `git pair change feedback` to read the submission before addressing it, then `git pair change complete` (§9.5) to archive the reviewed head.
 
 Readiness also ends on purpose. `git pair change unready` (§9.6) writes a `working` marker and takes
 the changeset back out of the queue, which is how an author says "not finished after all" instead of
 leaving the offer standing while they keep implementing.
+
+State comes from the branch. There is one fallback, and it is not a second source: where a changeset
+has no branch — deleted after the work landed, or after it was abandoned — the anchor at
+`refs/reviews/<changeset>` is what remains, and deriving from it can only report what the branch last
+claimed before it disappeared (§13). Nothing reads a ref to decide that a changeset is ready, and no
+command moves state by moving a ref.
 
 Possible effective states:
 
@@ -985,7 +1028,8 @@ APPROVED
 ```
 
 Five states, six markers: `working` is written by `change unready` (§9.6) and is the same state a
-changeset with no marker derives.
+changeset with no marker derives; `abandoned` (§9.7) is the seventh and names no state — an abandoned
+changeset reports `WORKING`, and the ending is reported beside it as `abandoned_commit`.
 
 There is no state for a completed changeset. `complete` archives a head in `refs/reviews/` and records
 no commit, and the changeset is finished when that archived history is merged into the deployment
@@ -1043,6 +1087,12 @@ begins at the first handoff rather than at the first response: a changeset that 
 reviewed, or whose branch exists only in the reflog, otherwise has nothing holding its marker alive.
 As with every review ref it is a warning rather than a guarantee — nothing here stops a later
 `git push --delete`.
+
+`change abandon` (§9.7) also moves this ref, to its terminal marker. That is what lets an ending
+survive `git branch -D`: the branch is the thing that gets deleted, and the queue and `status` can
+still read how the changeset ended from the anchor. Where a changeset has no branch, the ref is the
+last readable copy of what the branch claimed — a fallback for reading history, never a source of
+state (§12).
 
 Completing a changeset (§9.5) writes an immutable archival ref alongside it:
 

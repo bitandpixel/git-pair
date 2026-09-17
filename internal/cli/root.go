@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"gitpair/internal/changeset"
 	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
+	"gitpair/internal/reviewref"
 )
 
 // Version is stamped by the build.
@@ -213,10 +215,34 @@ func resolveNamed(ctx context.Context, repo *git.Repo, slug string) (changeset.C
 		return changeset.Changeset{}, lifecycle.Summary{}, "", err
 	}
 	if len(branches) == 0 {
-		// A slug the repository has never heard of is a usage problem, in the same
-		// family as `no changeset for this branch`: retrying unchanged will fail again.
-		return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
-			fmt.Errorf("no branch carries changeset %q; `git pair review queue` lists what this repository has", slug)}
+		// No branch carries the slug. The anchor is the last place its history can be
+		// read, and for a changeset that ended or landed that is exactly what a reader is
+		// asking about. Deriving from the anchor can only report what the branch claimed
+		// before it disappeared, which is why it is a fallback and not a second source of
+		// state (PRD §12).
+		anchor, err := reviewref.Resolve(ctx, repo, slug)
+		if errors.Is(err, reviewref.ErrNoReviewRef) {
+			return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
+				fmt.Errorf("no branch carries changeset %q; `git pair review queue` lists what this repository has", slug)}
+		}
+		if err != nil {
+			return changeset.Changeset{}, lifecycle.Summary{}, "", err
+		}
+		base, err := changeset.BaseAt(ctx, repo, anchor, slug)
+		if err != nil {
+			if errors.Is(err, git.ErrUnknownPath) {
+				return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
+					fmt.Errorf("changeset %q is anchored at %s but carries no %s", slug, short(anchor), changeset.MetadataFile)}
+			}
+			return changeset.Changeset{}, lifecycle.Summary{}, "", err
+		}
+		cs := changeset.Changeset{Slug: slug, Dir: filepath.Join(changeset.Root, slug), Base: base, Exists: true}
+		summary, err := lifecycle.Summarize(ctx, repo, slug, base, anchor)
+		if err != nil {
+			return changeset.Changeset{}, lifecycle.Summary{}, "", err
+		}
+		// cs.Branch stays empty: there is no branch, and a reader must be able to tell.
+		return cs, summary, anchor, nil
 	}
 	var (
 		best    changeset.Changeset

@@ -338,21 +338,29 @@ ABOUT.md.
 
 #### Tasks
 
-- The terminal marker is an ordinary marker commit on the changeset's branch, followed by
+- [x] The terminal marker is an ordinary marker commit on the changeset's branch, followed by
   `reviewref.Update` to that head. Requiring the branch is not a limitation but the point: abandoning
   is a decision made while the work is still there, and anchoring the marker is what keeps it
   reachable once `git branch -D` runs. This keeps M6 inside the existing commit and ref primitives.
-- Derivation gains a fallback, not an overlay: with a branch, state comes from the branch as it does
-  now; without one, state comes from the anchor chain, which can only report what the branch last
-  claimed before it disappeared. Say that in PRD §12 next to "state comes from the branch", or the
-  two rules read as a contradiction.
-- The write gate checks the anchor chain before `ready`, `unready` and `submit` record anything, so a
-  terminal changeset cannot be reopened by a command that does not look at where its state came from.
-- Abandoning a changeset whose branch is already gone is refused, with a reason pointing at the
-  landed classification in M5: post-merge bookkeeping is not a lifecycle act.
-- Out of scope and stated as such: removing `changesets/<slug>/` from the deployment branch. That is
-  a commit on `main`, which git-pair does not make. `052e529` is the manual form, and the queue
+- [x] Derivation gains a fallback, not an overlay: with a branch, state comes from the branch as it
+  does now; without one, state comes from the anchor chain, which can only report what the branch
+  last claimed before it disappeared. In PRD §12 next to "state comes from the branch", and
+  `resolveNamed` implements it: no branch → read `CHANGESET.yaml` and history from the anchor, with
+  `branch` reported empty so a reader can tell.
+- [x] The write gate checks both chains before `ready`, `unready` and `submit` record anything. The
+  branch is the primary source and the anchor the fallback, not the reverse — a test deletes the
+  review ref and asserts the refusal still happens, because otherwise the anchor's copy of the record
+  hides a gate that only ever consulted the ref.
+- [x] Abandoning a changeset whose branch is already gone is refused, with a reason pointing at the
+  landed classification in M5: post-merge bookkeeping is not a lifecycle act. It falls out of the
+  write path — writes have no `--changeset`, so there is no way to address a branchless slug — and
+  `change ready` on a recreated slug refuses naming the terminal marker instead.
+- [x] Out of scope and stated as such: removing `changesets/<slug>/` from the deployment branch. That
+  is a commit on `main`, which git-pair does not make. `052e529` is the manual form, and the queue
   classification in M5 is what makes the leftover directory harmless until a landing command exists.
+- [x] Settled the name: `change abandon`, and `Review-State: abandoned`. Not a sixth state — reported
+  as `abandoned`/`abandoned_commit` beside `state` (see PRD §9.7 for the argument, which is the same
+  one that kept `working` from becoming a state in M1).
 
 #### Verification
 

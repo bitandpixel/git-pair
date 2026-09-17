@@ -31,7 +31,8 @@ func newChangeCommand(a *app) *cobra.Command {
 		RunE: groupUsage("change"),
 	}
 	cmd.AddCommand(newChangeInitCommand(a), newChangeReadyCommand(a), newChangeUnreadyCommand(a),
-		newChangeFeedbackCommand(a), newChangeWaitCommand(a), newChangeCompleteCommand(a))
+		newChangeAbandonCommand(a), newChangeFeedbackCommand(a), newChangeWaitCommand(a),
+		newChangeCompleteCommand(a))
 	return cmd
 }
 
@@ -294,6 +295,9 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 		return fmt.Errorf("cannot mark %s ready: base %q is this branch itself, so the changeset can never contain commits. Set `base` in %s to an ancestor of %s, or move the work to its own branch",
 			s.cs.Slug, s.cs.Base, s.cs.MetadataPath(), s.cs.Branch)
 	}
+	if err := a.refuseIfAbandoned(ctx, s); err != nil {
+		return err
+	}
 
 	report, err := survivalCheck(ctx, s)
 	if err != nil {
@@ -432,6 +436,9 @@ func runChangeUnready(ctx context.Context, a *app) error {
 	if !s.clean {
 		return fmt.Errorf("working tree must be clean before taking %s out of review; commit or stash your changes first", s.cs.Slug)
 	}
+	if err := a.refuseIfAbandoned(ctx, s); err != nil {
+		return err
+	}
 	if !inReview(s.summary.State) {
 		return printUnready(a, s, "")
 	}
@@ -485,6 +492,131 @@ func printUnready(a *app, s *session, sha string) error {
 	a.printf("  was:     %s\n", s.summary.State)
 	a.printf("  queue:   `git pair review queue` no longer lists this changeset\n")
 	a.printf("  next:    `git pair change ready` puts it back once the work is done\n")
+	return nil
+}
+
+// --- change abandon ---------------------------------------------------------
+
+func newChangeAbandonCommand(a *app) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "abandon",
+		Short: "End the current changeset and keep its history reachable",
+		Long: `Record that this changeset will not be taken forward, and anchor the record.
+
+Abandoning is a decision about work that is still here, which is why the command needs the branch:
+the terminal marker is an ordinary commit on it, and the movable ref moves to that commit, which is
+what keeps the whole chain reachable after ` + "`git branch -D`" + `. Once the ref holds the marker,
+` + "`git pair review queue`" + ` can stay silent about the changeset even with no branch left — it can
+read the ending from the anchor.
+
+Unlike ` + "`change unready`" + `, which withdraws an offer for now, this one closes the changeset:
+` + "`change ready`" + `, ` + "`change unready`" + ` and ` + "`review submit`" + ` refuse against it
+afterwards, whether they meet it on the branch or on the anchor. That is also what stops a new branch
+reusing the name of a changeset that ended.
+
+The state stays WORKING and no state value is added: the ending is reported as
+` + "`abandoned_commit`" + ` in ` + "`status --json`" + `, beside the state rather than inside it.
+
+Re-running the command changes nothing and succeeds. Abandoning work whose branch is already gone
+refuses: post-merge bookkeeping is not a lifecycle act.`,
+		Example: `  git pair change abandon
+  git pair change abandon --json`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChangeAbandon(cmd.Context(), a)
+		},
+	}
+	return cmd
+}
+
+func runChangeAbandon(ctx context.Context, a *app) error {
+	s, err := a.load(ctx)
+	if err != nil {
+		return err
+	}
+	if !s.clean {
+		return fmt.Errorf("working tree must be clean before abandoning %s; commit or stash your changes first", s.cs.Slug)
+	}
+	at, err := terminalRecord(ctx, s.repo, s.cs.Slug, s.cs.Base, s.summary)
+	if err != nil {
+		return err
+	}
+	if at != nil {
+		// Already ended. Like `change unready` on a changeset that was never offered,
+		// the wanted state already holds, so a script can abandon unconditionally.
+		return printAbandoned(a, s, at, "")
+	}
+
+	sha, err := marker.Commit(ctx, s.repo, marker.AbandonedMessage(s.cs.Slug))
+	if err != nil {
+		return fmt.Errorf("creating abandon marker: %w", err)
+	}
+	// The ref is the point of the whole operation: a terminal record on a branch that
+	// gets deleted is a record that disappears with it.
+	if _, err := reviewref.Update(ctx, s.repo, s.cs.Slug, sha); err != nil {
+		return fmt.Errorf("anchoring the abandon marker: %w", err)
+	}
+	return printAbandoned(a, s, &lifecycle.Event{SHA: sha, Short: short(sha), Kind: lifecycle.KindAbandoned}, sha)
+}
+
+// printAbandoned reports the ending. An empty sha means the changeset was already
+// abandoned, and the marker named by `at` is the one that says so.
+func printAbandoned(a *app, s *session, at *lifecycle.Event, sha string) error {
+	if a.json {
+		return a.emitJSON(map[string]any{
+			"changeset":        s.cs.Slug,
+			"branch":           s.cs.Branch,
+			"state":            string(model.StateWorking),
+			"was":              string(s.summary.State),
+			"recorded":         sha != "",
+			"abandoned_commit": at.SHA,
+			"review_ref":       reviewref.Head(s.cs.Slug),
+		})
+	}
+	if sha == "" {
+		a.printf("Changeset %s is already abandoned by %s.\n", s.cs.Slug, at.Short)
+		return nil
+	}
+	a.printf("Abandoned changeset %s\n\n", s.cs.Slug)
+	a.printf("Terminal marker: %s\n", sha)
+	a.printf("Review history stays reachable at %s\n", reviewref.Head(s.cs.Slug))
+	return nil
+}
+
+// terminalRecord returns the newest abandon marker for a changeset, looking at the
+// branch chain it was derived from and then at the anchor. Both have to be consulted:
+// the branch is the thing that gets deleted, and a slug recreated after `git branch -D`
+// carries no markers at all, so only the anchor still says the work ended.
+func terminalRecord(ctx context.Context, repo *git.Repo, slug, base string, derived lifecycle.Summary) (*lifecycle.Event, error) {
+	if derived.Abandoned != nil {
+		return derived.Abandoned, nil
+	}
+	anchor, err := reviewref.Resolve(ctx, repo, slug)
+	if errors.Is(err, reviewref.ErrNoReviewRef) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	summary, err := lifecycle.Summarize(ctx, repo, slug, base, anchor)
+	if err != nil {
+		return nil, err
+	}
+	return summary.Abandoned, nil
+}
+
+// refuseIfAbandoned is the write gate: nothing records a marker onto a changeset that
+// has ended. Exit 1 rather than 2 — the repository says no, and re-running after undoing
+// the abandonment (there is no such command; the marker is history) is not a retry.
+func (a *app) refuseIfAbandoned(ctx context.Context, s *session) error {
+	at, err := terminalRecord(ctx, s.repo, s.cs.Slug, s.cs.Base, s.summary)
+	if err != nil {
+		return err
+	}
+	if at != nil {
+		return fmt.Errorf("changeset %s was abandoned by %s; git-pair records nothing further for it",
+			s.cs.Slug, at.Short)
+	}
 	return nil
 }
 

@@ -69,6 +69,17 @@ func ReadyMessage(slug string) Message {
 }
 
 // UnreadyMessage describes a retraction of a ready marker for slug.
+// AbandonedMessage is the terminal marker written by `change abandon` (PRD §9.7).
+func AbandonedMessage(slug string) Message {
+	return Message{
+		Subject: fmt.Sprintf("git-pair: abandon %s", slug),
+		Trailers: []string{
+			"Review-State=" + model.StateValueAbandoned,
+			"Review-Changeset=" + slug,
+		},
+	}
+}
+
 func UnreadyMessage(slug string) Message {
 	return Message{
 		Subject: fmt.Sprintf("git-pair: unready %s", slug),

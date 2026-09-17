@@ -54,22 +54,24 @@ type latestReviewJSON struct {
 }
 
 type statusJSON struct {
-	Changeset    string            `json:"changeset"`
-	Branch       string            `json:"branch"`
-	Base         string            `json:"base"`
-	State        string            `json:"state"`
-	Head         string            `json:"head"`
-	HeadFull     string            `json:"head_full"`
-	LatestReview *latestReviewJSON `json:"latest_review"`
-	ReviewRef    string            `json:"review_ref"`
-	ReviewCommit string            `json:"review_commit"`
-	ArchiveRef   string            `json:"archive_ref"`
-	Uncommitted  *bool             `json:"uncommitted"`
-	Reviews      int               `json:"reviews"`
-	Reason       string            `json:"reason"`
-	Span         string            `json:"span"`
-	NextAction   string            `json:"next_action"`
-	Unrecognised []string          `json:"unrecognised_markers,omitempty"`
+	Changeset       string            `json:"changeset"`
+	Branch          string            `json:"branch"`
+	Base            string            `json:"base"`
+	State           string            `json:"state"`
+	Head            string            `json:"head"`
+	HeadFull        string            `json:"head_full"`
+	LatestReview    *latestReviewJSON `json:"latest_review"`
+	ReviewRef       string            `json:"review_ref"`
+	ReviewCommit    string            `json:"review_commit"`
+	ArchiveRef      string            `json:"archive_ref"`
+	Uncommitted     *bool             `json:"uncommitted"`
+	Abandoned       bool              `json:"abandoned"`
+	AbandonedCommit string            `json:"abandoned_commit,omitempty"`
+	Reviews         int               `json:"reviews"`
+	Reason          string            `json:"reason"`
+	Span            string            `json:"span"`
+	NextAction      string            `json:"next_action"`
+	Unrecognised    []string          `json:"unrecognised_markers,omitempty"`
 }
 
 func runStatus(ctx context.Context, a *app, slug string) error {
@@ -112,6 +114,10 @@ func buildStatus(ctx context.Context, s *session) (*statusView, error) {
 	}
 	for _, e := range s.summary.Unrecognised {
 		view.json.Unrecognised = append(view.json.Unrecognised, e.Short+" "+e.Subject)
+	}
+	if at := s.summary.Abandoned; at != nil {
+		view.json.Abandoned = true
+		view.json.AbandonedCommit = at.SHA
 	}
 	if r := s.summary.LatestReview; r != nil {
 		view.json.LatestReview = &latestReviewJSON{
@@ -180,7 +186,13 @@ func uncommitted(s *session) *bool {
 func printStatus(a *app, v *statusView) {
 	j := v.json
 	a.printf("Changeset: %s\n", j.Changeset)
-	a.printf("Branch: %s\n", j.Branch)
+	if j.Branch != "" {
+		a.printf("Branch: %s\n", j.Branch)
+	} else {
+		// A changeset read from its anchor has no branch to name; saying "Branch:" with
+		// nothing after it would read as a bug rather than as an absence.
+		a.printf("Branch: none (read from the review anchor)\n")
+	}
 	a.printf("Base: %s\n", j.Base)
 	a.printf("State: %s\n", j.State)
 	a.printf("Head: %s\n", j.Head)
@@ -189,6 +201,9 @@ func printStatus(a *app, v *statusView) {
 	}
 	if j.Reason != "" {
 		a.printf("Reason: %s\n", j.Reason)
+	}
+	if j.Abandoned {
+		a.printf("\nTerminal:\n  abandoned by %s (`git pair change abandon`)\n", short(j.AbandonedCommit))
 	}
 	if j.LatestReview != nil {
 		a.printf("\nLatest review:\n")
@@ -260,6 +275,12 @@ func archiveRefAtHead(ctx context.Context, repo *git.Repo, slug, head string) (s
 // nextAction tells an agent what to run next, so it does not have to re-derive
 // the lifecycle from the state name.
 func nextAction(s lifecycle.Summary) string {
+	if s.Abandoned != nil {
+		// The state is WORKING, which would otherwise read as "keep going". Nothing is
+		// owed on an abandoned changeset, and `change ready` refuses it, so the honest
+		// next step is none. (PRD §9.7)
+		return "abandoned: nothing further is recorded; `git pair review history --changeset <slug>` reads what happened"
+	}
 	switch s.State {
 	case model.StateWorking:
 		return "implement, commit, then `git pair change ready`"

@@ -238,6 +238,7 @@ supplies authorship and order. Both are plain Markdown with no schema.
 | ready | `git-pair: ready <slug>` | `Review-State: ready`, `Review-Changeset: <slug>` |
 | review | `review: <outcome> <slug>` | `Review-Outcome: <outcome>`, `Review-Changeset: <slug>` |
 | unready | `git-pair: unready <slug>` | `Review-State: working`, `Review-Changeset: <slug>` |
+| abandon | `git-pair: abandon <slug>` | `Review-State: abandoned`, `Review-Changeset: <slug>` |
 
 A commit counts as a marker only when its trailer block parses and `Review-Changeset` matches
 the changeset being inspected; anything else is an ordinary commit.
@@ -258,6 +259,18 @@ archived history is merged into the deployment branch — ordinary git, which gi
 nor derives. A completed changeset therefore still reports `APPROVED` (or `FEEDBACK`), with
 `archive_ref` naming the archived commit for as long as `HEAD` is that commit. Ownership follows the
 same split: the reviewer approves the code, the owner decides it is what gets taken forward.
+
+**A changeset can end.** `git pair change abandon` commits `Review-State: abandoned` and moves the
+movable ref to it, which is what keeps the whole chain reachable after the branch is deleted. It is
+not a sixth state: the changeset reports `WORKING`, because `WORKING` already means "not in review,
+nothing owed", and `abandoned_commit` in `status --json` carries the ending beside it. That split is
+deliberate — `state` is the field agents branch on, and a changeset that can never move again has to
+be recognisable there without teaching every consumer a new state name, so the fact lives in its own
+field instead. The ending is durable in both places it can be read from: the branch, and the anchor.
+`change ready`, `change unready` and `review submit` refuse against an abandoned changeset whichever
+they meet first, which is also what stops a new branch reusing the name of one that ended. Unlike
+`change unready`, which withdraws an offer for now, this one closes the changeset, and re-running it
+records nothing.
 
 **A review is corrected by submitting again.** There is no `review undo`. The newest
 submission decides the state, earlier ones stay in `git pair review history`, and the summary of
@@ -379,6 +392,7 @@ Every command accepts the persistent `--json` flag, but only `status`, `change r
 | `change init` | `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is `main`, else `master`, else a usage error |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` only when it is in review, otherwise succeeds and records nothing |
+| `change abandon` | none | records the terminal `Review-State: abandoned` and anchors it; `change ready`, `change unready` and `review submit` refuse against it afterwards; idempotent |
 | `change feedback` | `--stat`, `--name-only`, `--changeset <slug>` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
 | `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
 | `review open` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref` | TUI; needs a terminal; full changeset unless a span flag says otherwise; a `--head-*` flag opens a historical span, which is read-only |
@@ -431,7 +445,10 @@ Output is indented two spaces, and empty lists may serialise as `null` rather th
 becomes `{"index": 0, "outcome": "block", "commit": "332887c"}`; `unrecognised_markers` (a
 list of `<sha> <subject>`) appears only when non-empty. Read another changeset with `--changeset`
 and two fields report that they cannot answer — `uncommitted` is `null` and `span` is `""` — because
-both describe the checkout rather than the commit, and `next_action` names the branch to switch to. `review_ref` and `review_commit` describe
+both describe the checkout rather than the commit, and `next_action` names the branch to switch to.
+`abandoned` is true once `change abandon` has ended the changeset, with `abandoned_commit` naming the
+terminal marker; `state` stays `WORKING`, because the ending is a fact beside the state rather than a
+sixth state value. `review_ref` and `review_commit` describe
 the movable anchor and stay `""` until something writes it — `change ready`, or a review
 submission — because the ref's name is derivable from the changeset and its existence is the only
 fact worth reporting. Once the changeset is completed,
@@ -452,6 +469,7 @@ ancestor never looks like a finished changeset.
   "review_commit": "8065dae",
   "archive_ref": "",
   "uncommitted": false,
+  "abandoned": false,
   "reviews": 0,
   "reason": "marked ready by 8065dae",
   "span": "main...current",
@@ -605,8 +623,9 @@ git pair change ready               # again
 git pair change complete            # once approved: archive the reviewed head
 ```
 
-Never prompt: `change init`, `change ready`, `change unready`, `change feedback`, `change wait`,
-`change complete`, `status`, `diff`, `review submit`, `review history`, `review queue`. They report
+Never prompt: `change init`, `change ready`, `change unready`, `change abandon`, `change feedback`,
+`change wait`, `change complete`, `status`, `diff`, `review submit`, `review history`,
+`review queue`. They report
 and exit instead of asking, even with a terminal attached.
 
 Refuse with exit 2 when stdin or stdout is a pipe or a regular file, because launching an
