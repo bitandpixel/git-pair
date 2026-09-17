@@ -384,11 +384,15 @@ func newReviewQueueCommand(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "queue",
 		Short: "List changesets ready for human review",
-		Long: `List every changeset in this repository whose derived state is READY.
+		Long: `List every changeset in this repository whose branch is READY.
 
 Readiness comes from commit history, not a queue file: a changeset is listed
-while its branch head is a ready marker with no implementation commit after it.
+while its branch carries a ready marker that no review submission has answered.
 Entries are ordered longest-waiting first.
+
+Branches are read from the repository, not from the checked-out directory, so the
+queue says the same thing on main as it does on the changeset's own branch. A
+changeset whose content has landed in its base is not listed, and says nothing.
 
 --json is the stable contract for notifications, dashboards, and agent
 supervisors.`,
@@ -406,32 +410,78 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	if err != nil {
 		return err
 	}
-	sets, err := changeset.List(repo)
+	// Branches, not directories. Only a branch can be reviewed, so only a branch
+	// can be queued; a changeset directory whose branch is gone is a record rather
+	// than work, and the record gets one honest line instead of a warning per slug.
+	refs, err := repo.ForEachRef(ctx, "refs/heads")
 	if err != nil {
 		return err
 	}
-	var entries []queueEntry
+	type found struct {
+		cs       changeset.Changeset
+		branches []string
+	}
+	var order []string
+	sets := map[string]*found{}
 	var skipped []string
-	for _, cs := range sets {
-		branches, err := changeset.BranchesForSlug(ctx, repo, cs.Slug)
+	for _, ref := range refs {
+		branch := strings.TrimPrefix(ref.Name, "refs/heads/")
+		cs, err := changeset.AtCommit(ctx, repo, branch)
 		if err != nil {
-			return err
-		}
-		if len(branches) == 0 {
-			skipped = append(skipped, cs.Slug+" (no branch matches this changeset directory)")
+			skipped = append(skipped, branch+" (unreadable changeset metadata: "+err.Error()+")")
 			continue
 		}
+		if !cs.Exists {
+			continue
+		}
+		f := sets[cs.Slug]
+		if f == nil {
+			f = &found{cs: cs}
+			sets[cs.Slug] = f
+			order = append(order, cs.Slug)
+		}
+		f.branches = append(f.branches, branch)
+	}
+
+	var entries []queueEntry
+	for _, slug := range order {
+		f := sets[slug]
 		// A slug can match more than one branch; the one whose head carries the
 		// newest ready marker wins.
-		best, _, err := readyEntry(ctx, repo, cs, branches)
+		best, _, err := readyEntry(ctx, repo, f.cs, f.branches)
 		if err != nil {
-			skipped = append(skipped, cs.Slug+" ("+err.Error()+")")
+			skipped = append(skipped, slug+" ("+err.Error()+")")
 			continue
 		}
 		if best != nil {
 			entries = append(entries, *best)
 		}
 	}
+
+	// Directories no branch accounts for. Read from HEAD's tree, not the working
+	// tree, so the answer does not depend on what happens to be checked out.
+	head, err := repo.Head(ctx)
+	if err != nil && !git.IsUnknownRevision(err) {
+		return err
+	}
+	dirs, err := changeset.DirsAt(ctx, repo, head)
+	if err != nil {
+		return err
+	}
+	for _, slug := range dirs {
+		if _, ok := sets[slug]; ok {
+			continue
+		}
+		note, err := classifyOrphan(ctx, repo, head, slug)
+		if err != nil {
+			skipped = append(skipped, slug+" ("+err.Error()+")")
+			continue
+		}
+		if note != "" {
+			skipped = append(skipped, note)
+		}
+	}
+
 	sort.SliceStable(entries, func(i, j int) bool {
 		return ageLess(entries[i].ReadyAge, entries[j].ReadyAge)
 	})
@@ -457,6 +507,47 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	}
 	printSkipped(a, skipped)
 	return nil
+}
+
+// classifyOrphan decides what to say about a changeset directory with no branch
+// behind it, and returns "" when the honest answer is nothing. Every one of them
+// used to print `note: skipped <slug> (no branch matches this changeset directory)`,
+// which gave the same warning to two opposite situations: work that was reviewed,
+// merged, and had its branch deleted — nothing left for a reviewer to do — and work
+// whose branch really did go missing.
+func classifyOrphan(ctx context.Context, repo *git.Repo, head, slug string) (string, error) {
+	anchor, err := reviewref.Resolve(ctx, repo, slug)
+	if errors.Is(err, reviewref.ErrNoReviewRef) {
+		// Never anchored means never offered: the directory is a leftover, and the
+		// queue has nothing to offer either.
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	base, err := changeset.BaseAt(ctx, repo, head, slug)
+	if err != nil {
+		if errors.Is(err, git.ErrUnknownPath) {
+			return "", nil
+		}
+		return "", err
+	}
+	if base == "" {
+		return "", nil
+	}
+	// The anchor is a commit that survives the branch, so it can be compared with
+	// the base without touching the working tree: identical changeset content on
+	// both sides is what a merge leaves behind.
+	dir := filepath.Join(changeset.Root, slug)
+	changed, err := repo.PathsChanged(ctx, base, anchor, dir)
+	if err != nil {
+		return "", err
+	}
+	if len(changed) == 0 {
+		return "", nil
+	}
+	return fmt.Sprintf("%s (anchored at %s, whose %s is not in %s and no branch carries it)",
+		slug, short(anchor), dir, base), nil
 }
 
 func printSkipped(a *app, skipped []string) {

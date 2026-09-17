@@ -126,6 +126,83 @@ func ForBranch(repo *git.Repo, branch string) (Changeset, error) {
 	return c, nil
 }
 
+// AtCommit resolves the changeset that branch carries at its own tip, reading
+// CHANGESET.yaml out of that commit instead of the working tree.
+//
+// `review queue` looks at every branch in the repository from one checkout, and the
+// tree that happens to be checked out says nothing about the others: the changeset
+// directory of the branch being inspected is usually not on disk at all.
+func AtCommit(ctx context.Context, repo *git.Repo, branch string) (Changeset, error) {
+	if branch == "" {
+		return Changeset{}, ErrDetachedHead
+	}
+	slug, err := SlugFromBranch(branch)
+	if err != nil {
+		return Changeset{}, err
+	}
+	c := Changeset{Slug: slug, Branch: branch, Dir: filepath.Join(Root, slug)}
+	md, err := metadataAt(ctx, repo, branch, c.Dir)
+	if err != nil {
+		if errors.Is(err, git.ErrUnknownPath) {
+			// No CHANGESET.yaml at this commit: this branch carries no changeset,
+			// which is the common case, not a failure.
+			return c, nil
+		}
+		return c, err
+	}
+	c.Exists = true
+	c.Base = md["base"]
+	return c, nil
+}
+
+// metadataAt reads CHANGESET.yaml for a directory out of a revision.
+func metadataAt(ctx context.Context, repo *git.Repo, rev, dir string) (map[string]string, error) {
+	data, err := repo.ShowFile(ctx, rev, filepath.ToSlash(filepath.Join(dir, MetadataFile)))
+	if err != nil {
+		return nil, err
+	}
+	return parseMetadata(data)
+}
+
+// BaseAt reads the base a changeset directory recorded at a revision, for callers
+// that have the slug and a commit but no branch to hang them on.
+func BaseAt(ctx context.Context, repo *git.Repo, rev, slug string) (string, error) {
+	md, err := metadataAt(ctx, repo, rev, filepath.Join(Root, slug))
+	if err != nil {
+		return "", err
+	}
+	return md["base"], nil
+}
+
+// DirsAt lists the changeset directories present in a revision's tree. Like
+// AtCommit it never consults the working tree, so a changeset that was merged and
+// whose branch has gone is still visible as the directory it left behind.
+func DirsAt(ctx context.Context, repo *git.Repo, rev string) ([]string, error) {
+	out, err := repo.Git(ctx, "ls-tree", "-d", "--name-only", rev, "--", Root+"/")
+	if err != nil {
+		if git.IsUnknownRevision(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	prefix := Root + "/"
+	var out2 []string
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "/"))
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		if name := strings.TrimPrefix(line, prefix); name != "" && !strings.Contains(name, "/") {
+			out2 = append(out2, name)
+		}
+	}
+	sort.Strings(out2)
+	return out2, nil
+}
+
 // Current resolves the changeset for the checked-out branch.
 func Current(ctx context.Context, repo *git.Repo) (Changeset, error) {
 	branch, err := repo.CurrentBranch(ctx)
@@ -145,45 +222,6 @@ func RequireCurrent(ctx context.Context, repo *git.Repo) (Changeset, error) {
 		return c, fmt.Errorf("%w: %s (run `git pair change init --base <ref>`)", ErrNoChangeset, c.Dir)
 	}
 	return c, nil
-}
-
-// List returns every changeset directory present in the working tree, sorted.
-func List(repo *git.Repo) ([]Changeset, error) {
-	entries, err := os.ReadDir(filepath.Join(repo.Dir, Root))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var out []Changeset
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		mdPath := filepath.Join(repo.Dir, Root, e.Name(), MetadataFile)
-		// CHANGESET.yaml is what makes a directory under changesets/ a changeset.
-		// Without this check readMetadata's empty-map-on-missing-file behaviour
-		// would report any stray directory (notes, scratch files) as a changeset
-		// and make `review queue` complain about it.
-		if info, err := os.Stat(mdPath); err != nil || info.IsDir() {
-			continue
-		}
-		md, err := readMetadata(mdPath)
-		if err != nil {
-			// Unreadable metadata is not a changeset we can reason about; skip
-			// it rather than fail the whole listing.
-			continue
-		}
-		out = append(out, Changeset{
-			Slug:   e.Name(),
-			Dir:    filepath.Join(Root, e.Name()),
-			Base:   md["base"],
-			Exists: true,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
-	return out, nil
 }
 
 // BranchesForSlug returns local branches whose slug matches the changeset name.
@@ -217,8 +255,14 @@ func readMetadata(path string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
+	return parseMetadata(string(data))
+}
+
+// parseMetadata is the format, readMetadata and AtCommit are the places it comes
+// from: the working tree and a commit respectively.
+func parseMetadata(data string) (map[string]string, error) {
 	md := map[string]string{}
-	for _, line := range strings.Split(string(data), "\n") {
+	for _, line := range strings.Split(data, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue

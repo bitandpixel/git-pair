@@ -277,7 +277,7 @@ func TestForBranchDetachedHeadAndMissingDirectory(t *testing.T) {
 	}
 }
 
-func TestListAndThreads(t *testing.T) {
+func TestDirsAtAndThreads(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
 	repo := &git.Repo{Dir: f.Dir()}
@@ -288,23 +288,30 @@ func TestListAndThreads(t *testing.T) {
 			t.Fatalf("Write %s: %v", slug, err)
 		}
 	}
-	// A stray directory with no metadata is not a changeset and must be skipped
-	// rather than fail the whole listing.
+	// A stray directory with no metadata. `List` used to filter these out so the queue
+	// could ignore them; the queue classifies them now (see
+	// TestReviewQueueIgnoresDirectoriesThatWereNeverOffered), so this primitive is a
+	// tree listing and nothing more. It has to hold a file: git does not track empty
+	// directories, so an empty one is not in any commit to list.
 	if err := os.MkdirAll(filepath.Join(f.Dir(), "changesets", "not-a-changeset"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	f.Write(filepath.Join("changesets", "not-a-changeset", "NOTES.md"), "scratch\n")
+	f.Commit("add the changeset directories")
 
-	list, err := changeset.List(repo)
+	names, err := changeset.DirsAt(context.Background(), repo, "HEAD")
 	if err != nil {
-		t.Fatalf("List: %v", err)
+		t.Fatalf("DirsAt: %v", err)
 	}
-	names := make([]string, 0, len(list))
-	for _, cs := range list {
-		names = append(names, cs.Slug)
+	want := []string{"booking-transaction", "booking-ui", "not-a-changeset"}
+	if len(names) != len(want) {
+		t.Fatalf("DirsAt = %v, want %v sorted", names, want)
 	}
-	want := []string{"booking-transaction", "booking-ui"}
-	if len(names) != 2 || names[0] != want[0] || names[1] != want[1] {
-		t.Errorf("List() = %v, want %v sorted and without the metadata-less directory", names, want)
+	for i := range want {
+		if names[i] != want[i] {
+			t.Errorf("DirsAt = %v, want %v sorted", names, want)
+			break
+		}
 	}
 
 	cs := changeset.Changeset{Slug: "booking-transaction", Dir: filepath.Join("changesets", "booking-transaction")}

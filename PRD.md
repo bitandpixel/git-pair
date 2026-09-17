@@ -805,6 +805,17 @@ Shows changesets currently ready for human review.
 
 Default scope: current repository.
 
+Scope is the repository, not the checkout: the queue enumerates local branches, reads each one's
+`CHANGESET.yaml` and history from that commit, and reports the ones whose derived state is `READY`.
+Running it on the deployment branch is therefore meaningful, and the working tree it happens to have
+checked out changes nothing.
+
+A changeset directory whose branch is gone is classified rather than skipped. If the anchor and the
+base carry the same `changesets/<changeset>/` content, the work landed, and the queue says nothing;
+a directory with no anchor was never offered, and also says nothing. Anything else — anchored work
+that is not in its base — is named in `skipped`, because that line is the only surviving record of
+the work.
+
 Example:
 
 ```text

@@ -287,14 +287,23 @@ deleting the branch afterwards still leaves `git pair review history <slug>` wor
 
 #### Tasks
 
-- New primitive: read `CHANGESET.yaml` from a commit (`git show <ref>:changesets/<slug>/CHANGESET.yaml`)
-  alongside `changeset.ForBranch`, so a branch can be examined without checking it out.
-- Rebuild `runReviewQueue` (`internal/cli/review.go:404`) as: one `for-each-ref refs/heads`, resolve
-  each branch's changeset at the branch's commit, derive `base..branch`, print the READY ones. The
-  `os.ReadDir` scan and the per-changeset `for-each-ref` go away.
-- Classify a changeset directory that has no branch instead of skipping it: compare its subtree
-  between `base` and the anchor (see the research note) and call it landed, or say nothing when it
-  is terminal. The skip note becomes reserved for directories that genuinely cannot be explained.
+- [x] New primitive: read `CHANGESET.yaml` from a commit (`git show <ref>:changesets/<slug>/CHANGESET.yaml`)
+  alongside `changeset.ForBranch`, so a branch can be examined without checking it out. `AtCommit`,
+  plus `BaseAt` for callers holding a slug and a commit and no branch, and `DirsAt` for the
+  directories a revision carries. `git.ShowFile` already existed and already distinguishes a missing
+  path, so the new code adds no git verb. `changeset.List`, the `os.ReadDir` scan, is gone: leaving
+  it in place invites the queue back to reading the checkout.
+- [x] Rebuild `runReviewQueue` as: one `for-each-ref refs/heads`, resolve each branch's changeset at
+  the branch's commit, derive `base..branch`, print the READY ones. The `os.ReadDir` scan and the
+  per-changeset `for-each-ref` go away.
+- [x] Classify a changeset directory that has no branch instead of skipping it: compare its subtree
+  between `base` and the anchor and stay silent when they agree (landed) or when nothing anchored it
+  (never offered). The skip note is now only for directories that genuinely cannot be explained.
+  "or say nothing when it is terminal" waits for M6, which is what creates a terminal record.
+  Mutation-checked: a landed check that never fires, one that compares the whole tree, a
+  never-anchored directory that stops being silent, and an already-branch-owned directory that gets
+  classified as an orphan each turn a test red. The last two needed tests first — one had left the
+  branch in place, so it never reached the classification it claimed to cover.
 - `--changeset` for `status`, `review history`, `review show`, `diff` and `change complete`,
   resolving by slug. Marker-writing commands (`change ready`, `change unready`) accept it only when
   a branch matches, and refuse otherwise with the reason, because a ready marker asserts something

@@ -295,10 +295,20 @@ const EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 // The exclusion is on the *result*, which is what makes a rename out of an
 // excluded directory show up: the deletion is excluded, the new path is not.
 func (r *Repo) PathsChangedOutside(ctx context.Context, from, to string, exclude ...string) ([]string, error) {
-	args := []string{"diff", "--name-only", from, to, "--", "."}
+	spec := []string{"."}
 	for _, dir := range exclude {
-		args = append(args, ":(exclude)"+filepath.ToSlash(dir)+"/")
+		spec = append(spec, ":(exclude)"+filepath.ToSlash(dir)+"/")
 	}
+	return r.PathsChanged(ctx, from, to, spec...)
+}
+
+// PathsChanged lists the paths that differ between two revisions under the given
+// pathspecs. It is the one place a diff becomes a list, so the exclusion in
+// PathsChangedOutside and the single-directory comparison used to recognise a
+// landed changeset cannot drift apart.
+func (r *Repo) PathsChanged(ctx context.Context, from, to string, pathspec ...string) ([]string, error) {
+	args := []string{"diff", "--name-only", from, to, "--"}
+	args = append(args, pathspec...)
 	out, err := r.Git(ctx, args...)
 	if err != nil {
 		return nil, err

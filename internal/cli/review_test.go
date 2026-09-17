@@ -247,6 +247,12 @@ func TestReviewQueueReportsReadyChangesetFields(t *testing.T) {
 	mustContain(t, human.stdout, "READY FOR REVIEW", "human output")
 	mustContain(t, human.stdout, slug, "human output must name the changeset")
 	mustContain(t, human.stdout, "base: main", "human output must show the base (PRD §10.6)")
+
+	// A changeset a branch owns is not an orphan, and the directory it left in the
+	// tree must not be classified a second time as one.
+	if skipped := res.json(t)["skipped"]; skipped != nil {
+		t.Errorf("skipped = %v, want nothing said about a changeset the queue just listed", skipped)
+	}
 }
 
 // Queue membership follows the markers, not the working branch: `change ready` puts a
@@ -331,8 +337,8 @@ func TestReviewQueueOrdersLongestWaitingFirst(t *testing.T) {
 	f.CreateBranch("aaa-older")
 	f.CommitChangeset("aaa-older", "main")
 	f.Commit("implement aaa", gittest.WithFile("aaa.go", "package main\n\nfunc A() {}\n"))
-	// Branched from aaa-older so both changeset directories exist in one working
-	// tree, which is what `review queue` enumerates.
+	// Branched from aaa-older so the two changesets are stacked, which is the
+	// ordinary way to end up with two of them at once.
 	f.CreateBranch("zzz-newer", "aaa-older")
 	f.CommitChangeset("zzz-newer", "main")
 	f.Commit("implement zzz", gittest.WithFile("zzz.go", "package main\n\nfunc Z() {}\n"))
@@ -354,6 +360,126 @@ func TestReviewQueueOrdersLongestWaitingFirst(t *testing.T) {
 	second := rows[1].(map[string]any)["changeset"]
 	if first != "aaa-older" || second != "zzz-newer" {
 		t.Errorf("queue order = [%v %v], want the 3h-old changeset before the 1m-old one", first, second)
+	}
+}
+
+// The queue is a property of the repository, not of the checkout. It used to enumerate
+// the changesets/ directory on disk, which made it useless exactly when an agent most
+// wants it: run from main, it either said nothing or complained about directories whose
+// branches had been deleted.
+func TestReviewQueueReadsBranchesNotTheWorkingTree(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("aaa-one")
+	f.CommitChangeset("aaa-one", "main")
+	f.Commit("implement aaa", gittest.WithFile("aaa.go", "package main\n\nfunc A() {}\n"))
+	f.CreateBranch("zzz-two", "aaa-one")
+	f.CommitChangeset("zzz-two", "main")
+	f.Commit("implement zzz", gittest.WithFile("zzz.go", "package main\n\nfunc Z() {}\n"))
+
+	f.SwitchTo("aaa-one")
+	ready(t, f)
+	f.SwitchTo("zzz-two")
+	ready(t, f)
+
+	// Neither changeset directory exists here.
+	f.SwitchTo("main")
+	if f.HasWorktreeFile(filepath.Join("changesets", "aaa-one", "CHANGESET.yaml")) {
+		t.Fatal("the fixture left a changeset directory on main")
+	}
+
+	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	rows := res.jsonList(t, "ready_for_review")
+	if len(rows) != 2 {
+		t.Fatalf("ready_for_review = %v, want both changesets listed from main:\n%s", rows, res.stdout)
+	}
+	for _, want := range []string{"aaa-one", "zzz-two"} {
+		if !queueListsChangeset(t, res, want) {
+			t.Errorf("%s missing from the queue run on main", want)
+		}
+	}
+}
+
+// A squash-merged changeset whose branch has been deleted is the single most common
+// thing the old queue got wrong: it either stayed listed as READY forever or became a
+// permanent `note: skipped ... (no branch matches this changeset directory)`. Both are
+// wrong, because there is nothing left for a reviewer to do. The anchor outlives the
+// branch, so the comparison that proves the work landed can still be made.
+func TestReviewQueueIsSilentAboutChangesetsThatLanded(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	ready(t, f)
+
+	// Land it the way a squash merge would: the changeset's content, verbatim, on main.
+	f.SwitchTo("main")
+	f.MustGit("checkout", "booking", "--", filepath.Join("changesets", slug))
+	f.Commit("land the booking change")
+	f.ForceDeleteBranch("booking")
+
+	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	if queueListsChangeset(t, res, slug) {
+		t.Errorf("a landed changeset is still in the queue:\n%s", res.stdout)
+	}
+	if skipped := res.json(t)["skipped"]; skipped != nil {
+		t.Errorf("skipped = %v, want nothing said about a changeset that has landed", skipped)
+	}
+	human := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	if strings.Contains(human.stdout+human.stderr, "skipped") {
+		t.Errorf("the queue complained about a landed changeset:\n%s\n%s", human.stdout, human.stderr)
+	}
+}
+
+// A directory under changesets/ that was never anchored was never offered for review,
+// so the queue has nothing to say about it. This is the case the old code reported as a
+// skip note for every stray directory, and it is the reason the primitive that lists
+// directories does not have to know what a changeset is.
+func TestReviewQueueIgnoresDirectoriesThatWereNeverOffered(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+
+	// The directory reaches main without any marker or anchor behind it: a notes
+	// directory, or scaffolding committed by hand. The branch goes too, which is what
+	// leaves the directory for the queue to explain.
+	f.SwitchTo("main")
+	f.ForceDeleteBranch("booking")
+	f.Commit("note the plan", gittest.WithFiles(map[string]string{
+		"changesets/" + slug + "/CHANGESET.yaml": "base: main\n",
+		"changesets/" + slug + "/ABOUT.md":       "# booking\n\nWritten down, never offered.\n",
+	}))
+
+	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	if queueListsChangeset(t, res, slug) {
+		t.Errorf("a changeset with no marker is not ready:\n%s", res.stdout)
+	}
+	if skipped := res.json(t)["skipped"]; skipped != nil {
+		t.Errorf("skipped = %v, want silence about a directory that was never offered", skipped)
+	}
+}
+
+// The other side of the same directory: anchored work whose content is *not* in its
+// base, with no branch left to review it. Silence here would hide the only surviving
+// record of the work, so it gets one line, naming what it is anchored to and what it
+// is missing from.
+func TestReviewQueueNamesAnchoredWorkThatNeverLanded(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	ready(t, f)
+
+	f.SwitchTo("main")
+	f.Write(filepath.Join("changesets", slug, "CHANGESET.yaml"), "base: main\n")
+	f.Write(filepath.Join("changesets", slug, "ABOUT.md"), "# booking\n\nA different description than the anchored one.\n")
+	f.Commit("note the booking change")
+	f.ForceDeleteBranch("booking")
+
+	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	if queueListsChangeset(t, res, slug) {
+		t.Errorf("work with no branch behind it is not reviewable:\n%s", res.stdout)
+	}
+	skipped, ok := res.json(t)["skipped"].([]any)
+	if !ok || len(skipped) != 1 {
+		t.Fatalf("skipped = %v, want one note naming the unmerged anchor", res.json(t)["skipped"])
+	}
+	note := skipped[0].(string)
+	for _, want := range []string{slug, "not in main"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("skipped note %q does not mention %q", note, want)
+		}
 	}
 }
 

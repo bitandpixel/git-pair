@@ -387,7 +387,7 @@ Every command accepts the persistent `--json` flag, but only `status`, `change r
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), then moves the review ref |
 | `review history` | — | only review marker commits, indexed from `0` |
-| `review queue` | — | every changeset in this repo whose derived state is `READY`, longest wait first |
+| `review queue` | — | every branch in this repo whose changeset is `READY`, longest wait first; read from the repository, not the checkout |
 | `change complete` | `--allow-surviving-review-additions`, `--allow-unreviewed-changes` | archives the reviewed `HEAD` and reports squash-safety; commits nothing; never merges, pushes or squashes |
 | `status` | — | derived state for the current branch's changeset |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
@@ -449,8 +449,11 @@ ancestor never looks like a finished changeset.
 }
 ```
 
-`git pair review queue --json` — `head` and `ready_commit` are full SHAs, and `skipped` names
-changeset directories the queue could not classify (`null` when empty).
+`git pair review queue --json` — `head` and `ready_commit` are full SHAs. `skipped` names changesets
+the queue cannot explain (`null` when empty): a branch whose metadata cannot be read, or a changeset
+directory whose branch is gone, its anchor survives, and its content is not in its base. A changeset
+that has landed in its base, and a directory that was never offered for review, are both silent —
+neither is work a reviewer can act on.
 
 ```json
 {
@@ -885,7 +888,10 @@ A missing entry in `git pair review queue` is usually not a queue bug: membershi
 state, and only a command moves it — `change ready`, `change unready`, or a review submission. A
 code change after the ready marker leaves the changeset in the queue, naming the commits in its
 reason; what that drift does stop is `change complete`, which refuses to archive a head whose
-reviewed content has moved.
+reviewed content has moved. A changeset whose content has landed in its base is not listed, and
+says nothing: the branch may already be gone, and the queue asks what a reviewer can act on. The
+tree is not consulted — the queue reads branches and their commits, so it answers the same way from
+`main` as from the changeset's own branch.
 A hand-written ready marker counts only if `Review-State: ready` and `Review-Changeset: <slug>`
 sit in a real trailer block, separated from the subject by a blank line and from each other by
 no blank line. `cannot complete <cs>: latest outcome is BLOCKED` (exit 1) is the refusal for a
