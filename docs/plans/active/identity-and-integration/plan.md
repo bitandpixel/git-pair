@@ -98,6 +98,36 @@ Consequences recorded rather than asked separately:
   update refuses a non-ancestor target, which is the invariant §23's freeze depends on.
 - **§26's "review-addition validations" bullet stays with `change ready`.** That gate already exists;
   duplicating it in `check` would create two places to disagree about the same rule.
+- **A stacked changeset's base is the parent's archive ref, written in the existing `base:` key** —
+  `base: refs/git-pair/changesets/booking/archive` — rather than in a new `base_changeset:` key
+  (reviewer addendum). Rejected: a second metadata key, which needs "exactly one of" validation and
+  gives the metadata two ways to say the same thing. Verified with the shipped binary: the span
+  machinery takes a ref-shaped base unchanged, and the value cannot collide with a branch name because
+  a branch typed that way is stored at `refs/heads/refs/...`. Costs: fetched refs become required for
+  stacked changesets rather than merely recommended, and a commit's base resolves against wherever the
+  parent's ref sits today.
+
+## Under review after M1
+
+M1 (identity, claim-based resolution) has landed as `8845a7a`/`94b88a8` (plus the batched-claim
+performance fix `2c465a9`). The archive-ref discovery requirements reverse the mechanism it chose:
+resolution by branch claim versus resolution by ancestor archive ref. `change archive`-shaped M2 is
+**not to be built** until the four decisions at the end of
+`research/2026-09-17-archive-ref-discovery.md` are made, because they decide whether the claim model
+stays, becomes a fallback, or goes away. Measured findings the milestone design has to answer
+(prototype in `artifacts/discovery-spike/`, six fixtures, all reproduced):
+
+- a shared movable ref does not describe two diverged branches: whichever moved it last owns it, and
+  the other branch reports `uninitialized` while its directory and markers are intact;
+- a merge-commit landing with unrecorded integration makes every later branch **AMBIGUOUS**, so
+  `integration record` becomes a prerequisite for a usable repository;
+- squash integrations are invisible to discovery, so the answer depends on integration strategy —
+  which §15 says it does not;
+- a forgotten `change init` owns trunk and every descendant branch until someone abandons it, and
+  refs are never deleted;
+- the rules as written cost six `git` invocations per archive ref — 1,802 calls for one resolution at
+  300 refs, about eleven seconds per read in a 20,000-commit repository — so the implementation must
+  be a one-pass history walk (ancestry and distance from one `rev-list HEAD`), not per-ref ancestry.
 
 ## Milestones
 
@@ -306,6 +336,11 @@ against running the fetch first.
 - `research/2026-09-17-ref-namespace-reality.md` — done before planning. Migration set is empty; the
   four git primitives the spec leans on behave as required, including the two failures git enforces for
   us (create-only refs, leaf-vs-namespace).
+- `research/2026-09-17-archive-ref-discovery.md` + `artifacts/discovery-spike/` — does archive-ref
+  discovery work? Prototype of the five rules against real git: six fixtures reproduced (stacked
+  nearest-wins works; diverged branches lose the changeset; unrecorded merge integrations are
+  ambiguous; squash integrations are invisible; a forgotten init owns its descendants) and the cost of
+  the rules measured at 1,802 git invocations per resolution with 300 refs.
 - Open, to settle during M3: whether `check` should re-verify review-addition survival (§26's last
   bullet) or leave it to `change ready`'s existing gate. Current position: leave it, because two
   implementations of one rule drift apart. Record the choice in the plan when M3 lands.

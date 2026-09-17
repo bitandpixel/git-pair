@@ -1,0 +1,253 @@
+package discovery_test
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+
+	"gitpair/internal/discovery"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
+)
+
+func repo(f *gittest.Fixture) *git.Repo { return &git.Repo{Dir: f.Dir()} }
+
+func archive(f *gittest.Fixture, id, sha string) {
+	f.MustGit("update-ref", "refs/git-pair/changesets/"+id+"/archive", sha)
+}
+
+func integrate(f *gittest.Fixture, id, sha string) {
+	f.MustGit("update-ref", "refs/git-pair/changesets/"+id+"/integration", sha)
+}
+
+func active(t *testing.T, f *gittest.Fixture) discovery.Result {
+	t.Helper()
+	res, err := discovery.Active(context.Background(), repo(f), "HEAD")
+	if err != nil {
+		t.Fatalf("Active: %v", err)
+	}
+	return res
+}
+
+// The rule working as intended: a stacked changeset's init commit sits between its parent's
+// archive tip and HEAD, so the nearer one is chosen.
+func TestStackedPicksTheNearestArchive(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+
+	f.CreateBranch("booking")
+	parent := f.Commit("implement booking", gittest.WithFile("booking.txt", "1\n"))
+	archive(f, "booking", parent)
+
+	f.CreateBranch("booking-tests")
+	child := f.Commit("add booking tests", gittest.WithFile("booking_test.txt", "1\n"))
+	archive(f, "booking-tests", child)
+	f.Commit("more tests", gittest.WithFile("b.txt", "b\n"))
+
+	got := active(t, f)
+	if got.Candidate == nil || got.Candidate.ID != "booking-tests" {
+		t.Fatalf("active = %+v, want booking-tests (nearest archive tip)", got.Candidate)
+	}
+
+	f.SwitchTo("booking")
+	got = active(t, f)
+	if got.Candidate == nil || got.Candidate.ID != "booking" {
+		t.Errorf("on the parent branch active = %+v, want booking", got.Candidate)
+	}
+}
+
+// "A branch created from an existing changeset naturally continues that changeset" and one
+// movable archive ref cannot serve two branches that both keep working. The child's
+// `change ready` moves the shared ref off the parent's line of history, and the parent
+// then has no ancestor archive ref at all.
+func TestDivergedBranchesLoseTheirChangeset(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+
+	f.CreateBranch("booking")
+	init := f.CommitChangeset("booking", "main")
+	archive(f, "booking", init)
+
+	// The child continues the same changeset without initializing a new one.
+	f.CreateBranch("booking-experiment")
+	f.Commit("experiment on the same changeset", gittest.WithFile("experiment.txt", "x\n"))
+	// `change ready` on the child moves the one archive ref to the child's commit.
+	child := f.Head()
+	archive(f, "booking", child)
+
+	f.SwitchTo("booking")
+	got := active(t, f)
+	if got.Candidate != nil {
+		t.Errorf("parent branch resolved %s; expected it to keep its changeset", got.Candidate.ID)
+	}
+	t.Logf("parent branch after the child moved the shared ref: uninitialized (no ancestor archive ref)")
+
+	// And the directory is still sitting on the parent branch.
+	if _, err := os.Stat(filepath.Join(f.Dir(), "changesets", "booking")); err != nil {
+		t.Errorf("expected the changeset directory to still be on the parent branch: %v", err)
+	}
+}
+
+// Two changesets integrated with a merge commit are both ancestors of the branch that
+// follows, and neither is an ancestor of the other. Unless integration has been recorded,
+// discovery has no way to tell "both landed" from "two active changesets in a strange
+// shape", and rule 4 makes that a failure for every branch built afterwards.
+func TestMergeCommitIntegrationWithoutRecordIsAmbiguous(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+
+	f.CreateBranch("one")
+	one := f.Commit("work one", gittest.WithFile("one.txt", "1\n"))
+	archive(f, "one", one)
+
+	f.SwitchTo("main")
+	f.CreateBranch("two")
+	two := f.Commit("work two", gittest.WithFile("two.txt", "2\n"))
+	archive(f, "two", two)
+
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "-m", "merge one and two", "one", "two")
+
+	f.CreateBranch("three")
+	f.Commit("later work", gittest.WithFile("three.txt", "3\n"))
+
+	got := active(t, f)
+	if got.Candidate == nil && len(got.Ambiguous) == 0 {
+		t.Fatal("expected ambiguity or a candidate, got neither")
+	}
+	if len(got.Ambiguous) > 0 {
+		ids := make([]string, len(got.Ambiguous))
+		for i, c := range got.Ambiguous {
+			ids[i] = fmt.Sprintf("%s@%d", c.ID, c.Dist)
+		}
+		t.Logf("a branch off main after two merge-commit landings is AMBIGUOUS: %v", ids)
+	} else {
+		t.Logf("resolved %s at distance %d", got.Candidate.ID, got.Candidate.Dist)
+	}
+
+	// Recording integration for both makes the same question answerable.
+	integrate(f, "one", f.RevParse("main"))
+	integrate(f, "two", f.RevParse("main"))
+	if got = active(t, f); got.Candidate != nil {
+		t.Errorf("after integration was recorded, active = %s; want uninitialized", got.Candidate.ID)
+	} else if len(got.Ambiguous) > 0 {
+		t.Errorf("after integration was recorded, still ambiguous: %v", got.Ambiguous)
+	} else {
+		t.Logf("with both integration refs recorded, the same branch is cleanly uninitialized")
+	}
+}
+
+// The same two landings, done with squash instead of a merge commit: the archive targets
+// are no longer ancestors, so nothing is ambiguous. Discovery's behaviour therefore depends
+// on the integration strategy, which §15 asks git-pair to be independent of.
+func TestSquashIntegrationIsInvisibleToDiscovery(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+
+	f.CreateBranch("one")
+	one := f.Commit("work one", gittest.WithFile("one.txt", "1\n"))
+	archive(f, "one", one)
+
+	// A squash landing: one new commit on main with the same content, no ancestry.
+	f.SwitchTo("main")
+	f.Write("one.txt", "1\n")
+	f.Commit("squash: work one")
+
+	f.CreateBranch("three")
+	f.Commit("later work", gittest.WithFile("three.txt", "3\n"))
+
+	got := active(t, f)
+	if got.Candidate != nil || len(got.Ambiguous) > 0 {
+		t.Errorf("a squash-merged changeset still resolves as active: %+v %v", got.Candidate, got.Ambiguous)
+	}
+	t.Logf("squash landings leave no ancestor archive ref: discovery is strategy-dependent")
+}
+
+// Nothing deletes refs, so an initialization that was never readied or abandoned stays a
+// candidate forever — and it is an ancestor of every branch built from where it happened.
+func TestAnUnabandonedInitOwnsEveryDescendant(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+
+	// A stray `change init` on the trunk: never readied, never abandoned.
+	stray := f.Commit("git-pair: initialize changeset scratch", gittest.WithFile("scratch-note.md", "# scratch\n"))
+	archive(f, "scratch", stray)
+
+	f.CreateBranch("real-work")
+	f.Commit("actual work", gittest.WithFile("b.txt", "b\n"))
+
+	got := active(t, f)
+	if got.Candidate == nil || got.Candidate.ID != "scratch" {
+		t.Fatalf("active = %+v, want the demonstration that the stray init owns this branch", got.Candidate)
+	}
+	t.Logf("a forgotten `change init` on the trunk is the active changeset for every later branch (distance %d)", got.Candidate.Dist)
+
+	// Abandoning it releases the branches — but only once someone notices to do it.
+	f.MustGit("update-ref", "-d", "refs/git-pair/changesets/scratch/archive")
+	if got = active(t, f); got.Candidate != nil {
+		t.Errorf("after deleting the ref, active = %s; want uninitialized", got.Candidate.ID)
+	}
+}
+
+// The cost of discovery is per archive ref, not per branch or per changeset directory:
+// one ref listing, then an ancestry test, a terminal check and a distance count each.
+func TestCostPerArchiveRef(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	base := f.Head()
+	for i := 0; i < 300; i++ {
+		f.Commit(fmt.Sprintf("work %d", i), gittest.WithFile(fmt.Sprintf("f%d.txt", i), "x\n"))
+		archive(f, fmt.Sprintf("cs-%03d", i), f.Head())
+	}
+	_ = base
+	out, err := exec.Command("git", "-C", f.Dir(), "rev-list", "--count", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("HEAD history: %s commits", trim(string(out)))
+
+	spawns := measureSpawns(t, f, func() {
+		if _, err := discovery.Active(context.Background(), repo(f), "HEAD"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Logf("300 archive refs, 301-commit history: %d git invocations per discovery", spawns)
+}
+
+func trim(s string) string {
+	for len(s) > 0 && (s[len(s)-1] == '\n' || s[len(s)-1] == ' ') {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+func measureSpawns(t *testing.T, f *gittest.Fixture, fn func()) int {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "spawns.log")
+	shim := filepath.Join(dir, "git")
+	body := fmt.Sprintf("#!/bin/sh\nprintf 'x\\n' >> %s\nexec %s \"$@\"\n", shellQuote(log), gitBinary())
+	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	fn()
+	data, err := os.ReadFile(log)
+	if err != nil {
+		return -1
+	}
+	return len(data)
+}
+
+func gitBinary() string {
+	out, err := exec.Command("which", "git").Output()
+	if err != nil {
+		return "git"
+	}
+	return trim(string(out))
+}
+
+func shellQuote(s string) string { return "'" + s + "'" }

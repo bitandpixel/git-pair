@@ -1,0 +1,169 @@
+// Package discovery is a SPIKE, not shipped code. It implements the discovery rule as
+// written in the "Active Changeset Discovery and Base Resolution" requirements so the rule
+// can be exercised against real git rather than argued about:
+//
+//  1. find non-terminal archive refs whose targets are ancestors of HEAD,
+//  2. ignore INTEGRATED and ABANDONED,
+//  3. nearest archive tip to HEAD wins,
+//  4. ambiguous means fail,
+//  5. none means uninitialized.
+package discovery
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strings"
+
+	"gitpair/internal/git"
+)
+
+const Namespace = "refs/git-pair/changesets"
+
+// Candidate is one active changeset that could own HEAD.
+type Candidate struct {
+	ID      string
+	Archive string // archive tip
+	Dist    int    // commits from the archive tip to HEAD
+}
+
+// Result is what discovery says about HEAD.
+type Result struct {
+	Candidate *Candidate
+	Ambiguous []Candidate
+}
+
+type refs struct {
+	archive    map[string]string // id -> archive tip
+	integrated map[string]bool   // id -> has an integration ref
+}
+
+func listRefs(ctx context.Context, repo *git.Repo) (refs, error) {
+	out := refs{archive: map[string]string{}, integrated: map[string]bool{}}
+	entries, err := repo.ForEachRef(ctx, Namespace)
+	if err != nil {
+		return out, err
+	}
+	for _, e := range entries {
+		rest := strings.TrimPrefix(e.Name, Namespace+"/")
+		slash := strings.Index(rest, "/")
+		if slash < 0 {
+			continue
+		}
+		id, kind := rest[:slash], rest[slash+1:]
+		switch kind {
+		case "archive":
+			out.archive[id] = e.SHA
+		case "integration":
+			out.integrated[id] = true
+		}
+	}
+	return out, nil
+}
+
+// abandoned asks the archive tip itself, because `change abandon` moves the ref to its own
+// marker: the ending is the commit the ref points at, so no history walk is needed.
+func abandoned(ctx context.Context, repo *git.Repo, sha string) (bool, error) {
+	msg, err := repo.Git(ctx, "show", "-s", "--format=%B", sha)
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(msg, "\n") {
+		if strings.TrimSpace(line) == "Review-State: abandoned" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func isAncestor(ctx context.Context, repo *git.Repo, ancestor, head string) (bool, error) {
+	_, err := repo.Git(ctx, "merge-base", "--is-ancestor", ancestor, head)
+	if err == nil {
+		return true, nil
+	}
+	var exit *git.Error
+	if asExit(err, &exit) && exit.ExitCode == 1 {
+		return false, nil
+	}
+	return false, err
+}
+
+func asExit(err error, target **git.Error) bool {
+	if e, ok := err.(*git.Error); ok {
+		*target = e
+		return true
+	}
+	return false
+}
+
+func distance(ctx context.Context, repo *git.Repo, from, head string) (int, error) {
+	out, err := repo.Git(ctx, "rev-list", "--count", from+".."+head)
+	if err != nil {
+		return 0, err
+	}
+	var n int
+	for _, c := range strings.TrimSpace(out) {
+		n = n*10 + int(c-'0')
+	}
+	return n, nil
+}
+
+// Active resolves the changeset that owns head.
+func Active(ctx context.Context, repo *git.Repo, head string) (Result, error) {
+	all, err := listRefs(ctx, repo)
+	if err != nil {
+		return Result{}, err
+	}
+	var live []Candidate
+	for id, tip := range all.archive {
+		if all.integrated[id] {
+			continue // INTEGRATED
+		}
+		if term, err := abandoned(ctx, repo, tip); err != nil {
+			return Result{}, err
+		} else if term {
+			continue // ABANDONED
+		}
+		ok, err := isAncestor(ctx, repo, tip, head)
+		if err != nil {
+			return Result{}, err
+		}
+		if !ok {
+			continue
+		}
+		dist, err := distance(ctx, repo, tip, head)
+		if err != nil {
+			return Result{}, err
+		}
+		live = append(live, Candidate{ID: id, Archive: tip, Dist: dist})
+	}
+	sort.Slice(live, func(i, j int) bool {
+		if live[i].Dist != live[j].Dist {
+			return live[i].Dist < live[j].Dist
+		}
+		return live[i].ID < live[j].ID
+	})
+	if len(live) == 0 {
+		return Result{}, nil // uninitialized
+	}
+	// Rule 4: incomparable candidates are a failure, not a coin flip. Equal distance with
+	// different ids is the shape that takes; two refs at the same commit are the same tip.
+	if len(live) > 1 && live[0].Dist == live[1].Dist && live[0].Archive != live[1].Archive {
+		return Result{Ambiguous: live}, nil
+	}
+	return Result{Candidate: &live[0]}, nil
+}
+
+// BaseFromArchive resolves a stacked base from the parent's archive ref, which is the
+// requirements' alternative to naming a branch in metadata.
+func BaseFromArchive(ctx context.Context, repo *git.Repo, parentID string) (string, error) {
+	all, err := listRefs(ctx, repo)
+	if err != nil {
+		return "", err
+	}
+	tip, ok := all.archive[parentID]
+	if !ok {
+		return "", fmt.Errorf("no archive ref for changeset %s", parentID)
+	}
+	return tip, nil
+}
