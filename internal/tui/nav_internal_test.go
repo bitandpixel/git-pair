@@ -11,9 +11,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// One list, two sections: the files in the span, then what the changeset says about them.
-// `j` runs off the bottom of the files into ABOUT.md and the threads rather than into a
-// separate mode, and Tab jumps between the halves.
+// Two regions share the row area: the file tree, and the changeset box above it holding the span,
+// ABOUT.md and the threads. Each keeps its own cursor, and Tab, f and m move the keys between them --
+// which is what these tests are mostly about, along with what a region does with a key once it has it.
 
 // viewRows splits a rendered frame into rows with the padding removed, which is how tests compare
 // against what the model wrote: the frame is padded to the edges of the terminal now.
@@ -100,67 +100,164 @@ func selectedKind(t *testing.T, m reviewModel) (rowKind, row) {
 	return r.kind, r
 }
 
-func TestJRunsFromTheFilesIntoTheChangesetSection(t *testing.T) {
-	m := navModel(t)
-	m.cursor = lastIndexOfType(t, m, rowFile)
+// focusOnRow puts the keys on one row of either region, which is what a reviewer does before pressing a
+// key: they stand on a row, in the region that holds the keys. Tests that act on a row come through here
+// rather than setting m.cursor, because a cursor in the region that does not hold the keys is a cursor
+// the keys will not see.
+func focusOnRow(t *testing.T, m reviewModel, idx int) reviewModel {
+	t.Helper()
+	if idx < 0 || idx >= len(m.rows) {
+		t.Fatalf("row %d is not in the list of %d", idx, len(m.rows))
+	}
+	if idx >= m.metaStart {
+		m.metaCursor = idx
+		m.focusOn(focusMeta)
+	} else {
+		m.cursor = idx
+		m.focusOn(focusFiles)
+	}
+	m.clamp()
+	if _, _, ok := m.activeRow(); !ok {
+		t.Fatalf("row %d (%q) did not become the row the keys are on", idx, m.rows[idx].name)
+	}
+	return m
+}
 
-	want := []rowKind{rowAbout, rowThreadsHead, rowThread, rowThread, rowNewThread}
-	for i, kind := range want {
+// boxOn gives the keys to the changeset box, which is where the span, ABOUT.md and the threads are.
+func boxOn(t *testing.T, m reviewModel) reviewModel {
+	t.Helper()
+	m.focusOn(focusMeta)
+	if !m.metaHasFocus() {
+		t.Fatal("the changeset box would not take the keys")
+	}
+	return m
+}
+
+// boxIndexOf is indexOf for a row of the box, which fails loudly if the row has ended up in the tree.
+func boxIndexOf(t *testing.T, m reviewModel, kind rowKind) int {
+	t.Helper()
+	i := indexOf(t, m, kind)
+	if i < m.metaStart {
+		t.Fatalf("the %v row is at %d, above the box, which starts at %d", kind, i, m.metaStart)
+	}
+	return i
+}
+
+// activeKind is the row the keys are standing on, which is the row the keys act on.
+func activeKind(t *testing.T, m reviewModel) (rowKind, row) {
+	t.Helper()
+	r, _, ok := m.activeRow()
+	if !ok {
+		t.Fatalf("no row has the keys:\n%s", rowList(m))
+	}
+	return r.kind, r
+}
+
+// Each region has two ends, and j does not cross from one into the other: the box has a cursor of its
+// own, and a keystroke that moved both would move the reviewer off a row they were reading in the other.
+func TestJStopsAtTheEndOfTheFileTree(t *testing.T) {
+	m := navModel(t)
+	last := lastIndexOfType(t, m, rowFile)
+	m = focusOnRow(t, m, last)
+	boxAt := m.metaCursor
+
+	for range 3 {
 		m = press(m, tea.KeyDown)
-		got, row := selectedKind(t, m)
-		if got != kind {
-			t.Errorf("press %d of j: cursor on %q (kind %d), want kind %d\n%s", i+1, row.name, got, kind, rowList(m))
+		if m.cursor != last {
+			t.Errorf("j past the last row of the tree moved the cursor to %d:\n%s", m.cursor, rowList(m))
+		}
+		if m.metaCursor != boxAt {
+			t.Errorf("j in the tree moved the changeset box from %d to %d", boxAt, m.metaCursor)
+		}
+		_, row := selectedKind(t, m)
+		if !inFileBlock(row.kind) {
+			t.Errorf("the tree's last row is %q, want a file or a directory", row.name)
 		}
 		_ = m.View()
 	}
+}
 
-	// The action row is the end of the list: j past it stays there.
-	before := m.cursor
-	m = press(m, tea.KeyDown)
-	if m.cursor != before {
-		t.Errorf("cursor moved from the last row to %d:\n%s", m.cursor, rowList(m))
-	}
+// The box has the same two ends, and the same rule about the region it leaves alone.
+func TestJStopsAtTheEndOfTheChangesetBox(t *testing.T) {
+	m := navModel(t)
+	m = focusOnRow(t, m, len(m.rows)-1)
+	at, tree := m.metaCursor, m.cursor
 
-	// And k walks back out of the section into the threads it came from.
-	if got, _ := selectedKind(t, press(m, tea.KeyUp)); got != rowThread {
-		t.Errorf("k landed on kind %d, want a thread", got)
+	for range 3 {
+		m = press(m, tea.KeyDown)
+		if m.metaCursor != at {
+			t.Errorf("j past the box's last row moved it to %d, want %d", m.metaCursor, at)
+		}
+		if m.cursor != tree {
+			t.Errorf("j in the box moved the file tree from %d to %d", tree, m.cursor)
+		}
+		_ = m.View()
 	}
 }
 
-func TestTabSwitchesBetweenTheTwoSections(t *testing.T) {
+// Tab is the ring: the file tree, the diff where there is room for one, the changeset box, round again.
+// This fixture is too narrow for the pane, so the ring here has two targets -- which is the other half
+// of the rule: a region that cannot be drawn is not a region the keys can be lost in.
+func TestTabWalksTheFocusRing(t *testing.T) {
 	m := navModel(t)
-	m.cursor = 0
+	if m.paneWidth() > 0 {
+		t.Fatalf("the fixture has room for a pane, so the ring here is not the two-target one")
+	}
+	m.cursor = 2
 
-	toSection := press(m, tea.KeyTab)
-	if got, row := selectedKind(t, toSection); got != rowAbout {
-		t.Errorf("Tab from the files landed on %q (kind %d), want ABOUT.md", row.name, got)
+	toBox := press(m, tea.KeyTab)
+	if !toBox.metaHasFocus() {
+		t.Fatalf("tab left the keys with %v, want the changeset box", toBox.focus)
+	}
+	if toBox.cursor != 2 {
+		t.Errorf("tab moved the file tree's cursor from 2 to %d", toBox.cursor)
+	}
+	back := press(toBox, tea.KeyTab)
+	if back.focus != focusFiles {
+		t.Errorf("tab from the box left the keys with %v, want the file tree", back.focus)
+	}
+	if back.cursor != 2 {
+		t.Errorf("tab back landed on row %d, want the row the tree was on", back.cursor)
 	}
 
-	back := press(toSection, tea.KeyTab)
-	// The first row of the files is the top of the tree, which is a directory when the changeset
-	// reaches into one — and landing there is right: it is where the files start.
-	if got, row := selectedKind(t, back); !inFileBlock(got) {
-		t.Errorf("Tab from the changeset section landed on %q (kind %d), want the first row of the files", row.name, got)
+	// Shift-tab goes the other way round the same ring, so a terminal that sends it for the other
+	// direction does not send the reviewer the long way around.
+	if got := press(m, tea.KeyShiftTab); !got.metaHasFocus() {
+		t.Errorf("shift-tab from the tree left the keys with %v, want the box", got.focus)
 	}
-	if back.cursor != 0 {
-		t.Errorf("Tab back landed on row %d, want the first file row", back.cursor)
+	if got := press(toBox, tea.KeyShiftTab); got.focus != focusFiles {
+		t.Errorf("shift-tab from the box left the keys with %v, want the tree", got.focus)
 	}
 
-	// Shift+Tab is the same toggle, so a reviewer whose terminal sends it for the other
-	// direction still gets between the two sections.
-	if got, _ := selectedKind(t, press(toSection, tea.KeyShiftTab)); !inFileBlock(got) {
-		t.Error("shift-tab should return to the files")
+	// f and m name a region instead of walking to the next one, from wherever the keys are.
+	if got := pressRune(toBox, 'f'); got.focus != focusFiles {
+		t.Errorf("f left the keys with %v, want the file tree", got.focus)
 	}
-	if got, _ := selectedKind(t, press(m, tea.KeyShiftTab)); got != rowAbout {
-		t.Errorf("shift-tab from the files landed on kind %d, want the changeset section", got)
+	if got := pressRune(pressRune(m, 'f'), 'm'); !got.metaHasFocus() {
+		t.Errorf("m left the keys with %v, want the changeset box", got.focus)
+	}
+
+	// The box keeps the row the keys were on, so tabbing away to read a diff and back lands on the
+	// thread that was being read rather than on the top of the box.
+	at := boxIndexOf(t, m, rowThread)
+	there := press(focusOnRow(t, m, at), tea.KeyDown)
+	if there.metaCursor <= at {
+		t.Fatalf("j in the box stayed on %d rather than moving from %d", there.metaCursor, at)
+	}
+	left := press(there, tea.KeyTab)
+	if left.focus != focusFiles {
+		t.Errorf("tab left the keys with %v, want the tree", left.focus)
+	}
+	if again := press(left, tea.KeyTab); again.metaCursor != there.metaCursor {
+		t.Errorf("tab back into the box landed on %d, want the row it left, %d", again.metaCursor, there.metaCursor)
 	}
 }
 
 func TestThreadsHeadingCollapsesAndExpands(t *testing.T) {
 	m := navModel(t)
 	open := len(m.rows)
-	head := indexOf(t, m, rowThreadsHead)
-	m.cursor = head
+	head := boxIndexOf(t, m, rowThreadsHead)
+	m = focusOnRow(t, m, head)
 
 	collapsed := pressRune(m, 'T')
 	if collapsed.threadsOpen {
@@ -175,14 +272,14 @@ func TestThreadsHeadingCollapsesAndExpands(t *testing.T) {
 		}
 	}
 	// The heading stays put through its own toggle: that is the row being looked at.
-	if collapsed.cursor != head {
-		t.Errorf("collapse moved the cursor from the heading at %d to %d", head, collapsed.cursor)
+	if collapsed.metaCursor != head {
+		t.Errorf("collapse moved the box's cursor from the heading at %d to %d", head, collapsed.metaCursor)
 	}
 	if strings.Contains(collapsed.View(), "locking.md") {
-		t.Error("a collapsed section still showed its threads")
+		t.Error("a collapsed box still showed its threads")
 	}
 	if !strings.Contains(m.View(), "locking.md") {
-		t.Error("the expanded view does not show the nested threads")
+		t.Error("the expanded box does not show the nested threads")
 	}
 
 	// Enter on the heading is the same toggle, for a reviewer who never reads the hint.
@@ -193,8 +290,8 @@ func TestThreadsHeadingCollapsesAndExpands(t *testing.T) {
 	if len(expanded.rows) != open {
 		t.Errorf("re-expanding gave %d rows, want the original %d", len(expanded.rows), open)
 	}
-	if expanded.cursor != head {
-		t.Errorf("expanding moved the cursor to %d, want the heading at %d", expanded.cursor, head)
+	if expanded.metaCursor != head {
+		t.Errorf("expanding moved the box's cursor to %d, want the heading at %d", expanded.metaCursor, head)
 	}
 }
 
@@ -217,7 +314,7 @@ func TestEnterOpensWhatTheRowIsFor(t *testing.T) {
 	}
 
 	m := navModel(t)
-	m.cursor = indexOf(t, m, rowThreadsHead)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowThreadsHead))
 	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil {
 		t.Error("the heading launched a process instead of collapsing")
@@ -226,7 +323,7 @@ func TestEnterOpensWhatTheRowIsFor(t *testing.T) {
 		t.Error("Enter on the heading did not collapse it")
 	}
 
-	m.cursor = indexOf(t, m, rowNewThread)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowNewThread))
 	after, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	prompting := after.(reviewModel)
 	if prompting.mode != modePrompt || prompting.promptKind != promptThread {
@@ -237,11 +334,11 @@ func TestEnterOpensWhatTheRowIsFor(t *testing.T) {
 	// A file row hands off to the difftool and a thread row to the editor; both return a
 	// command, and only the table above distinguishes which program.
 	m = navModel(t)
-	m.cursor = indexOf(t, m, rowThread)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
 	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil {
 		t.Error("Enter on a thread opened nothing")
 	}
-	m.cursor = indexOfNameBySuffix(t, m, ".go")
+	m = focusOnRow(t, m, indexOfNameBySuffix(t, m, ".go"))
 	_, file := selectedKind(t, m)
 	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil {
 		t.Errorf("Enter on %q opened nothing", file.name)
@@ -266,7 +363,7 @@ func TestSpaceMarksFilesAndRefusesTheRest(t *testing.T) {
 		t.Fatalf("the fixture starts with %d marked files", marked())
 	}
 
-	m.cursor = indexOf(t, m, rowAbout)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowAbout))
 	m = press(m, tea.KeySpace)
 	if marked() != 0 {
 		t.Error("marking ABOUT.md marked a file")
@@ -278,13 +375,13 @@ func TestSpaceMarksFilesAndRefusesTheRest(t *testing.T) {
 		t.Error("refusing to mark a changeset row is a hint, not an error")
 	}
 
-	m.cursor = indexOf(t, m, rowThread)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
 	m = press(m, tea.KeySpace)
 	if marked() != 0 {
 		t.Error("marking a thread marked a file")
 	}
 
-	m.cursor = indexOf(t, m, rowFile)
+	m = focusOnRow(t, m, indexOf(t, m, rowFile))
 	m = press(m, tea.KeySpace)
 	if marked() != 1 {
 		t.Errorf("marking a file marked %d files", marked())
@@ -297,7 +394,7 @@ func TestNewThreadRowSitsUnderItsThreads(t *testing.T) {
 	if last.kind != rowNewThread || last.name != newThreadLabel {
 		t.Errorf("the last row is %q (kind %d), want %q", last.name, last.kind, newThreadLabel)
 	}
-	for _, r := range m.rows[indexOf(t, m, rowThreadsHead)+1:] {
+	for _, r := range m.rows[boxIndexOf(t, m, rowThreadsHead)+1:] {
 		if r.kind == rowThread && filepath.Base(r.path) != r.name {
 			t.Errorf("thread row prints %q, want the file name of %q", r.name, r.path)
 		}
@@ -307,25 +404,22 @@ func TestNewThreadRowSitsUnderItsThreads(t *testing.T) {
 	if !strings.Contains(view, threadIndent+"locking.md") {
 		t.Errorf("threads are not nested under the heading:\n%s", view)
 	}
-	// Expanded, the heading does not repeat a count that the rows below it already give.
-	if !hasRow(viewRows(view), "▾ Threads") && strings.Contains(view, "▾ Threads") {
-		if strings.Contains(view, "▾ Threads (") {
-			t.Errorf("the expanded heading still shows a count:\n%s", view)
-		} else {
-			t.Errorf("the thread heading is missing from:\n%s", view)
-		}
+	// Expanded, the heading does not repeat a count that the rows below it already give. It is a row of
+	// the box rather than a row of the frame, so it is read off the row itself.
+	if head := m.rowText(m.rows[boxIndexOf(t, m, rowThreadsHead)]); strings.Contains(ansiCodes.ReplaceAllString(head, ""), "Threads (") {
+		t.Errorf("the expanded heading still shows a count the rows under it give: %q\n%s", head, view)
 	}
 	collapsed := m
 	collapsed.threadsOpen = false
-	if got := collapsed.rowText(collapsed.rows[indexOf(t, m, rowThreadsHead)]); !strings.Contains(ansiCodes.ReplaceAllString(got, ""), "▸ Threads (2)") {
+	if got := collapsed.rowText(collapsed.rows[boxIndexOf(t, m, rowThreadsHead)]); !strings.Contains(ansiCodes.ReplaceAllString(got, ""), "▸ Threads (2)") {
 		t.Errorf("the collapsed heading reads %q, want it to count the threads it hides", got)
 	}
 }
 
 func TestRefreshKeepsTheCursorOnTheSameRow(t *testing.T) {
 	m := navModel(t)
-	m.cursor = indexOf(t, m, rowThread)
-	_, before := selectedKind(t, m)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	_, before := activeKind(t, m)
 
 	// A thread created elsewhere — in an editor, or another window — must not move the
 	// reviewer off the row they were reading.
@@ -335,7 +429,7 @@ func TestRefreshKeepsTheCursorOnTheSameRow(t *testing.T) {
 	}
 	m.refresh()
 
-	after, row := selectedKind(t, m)
+	after, row := activeKind(t, m)
 	if after != row.kind || row.path != before.path {
 		t.Errorf("refresh moved the cursor from %q to %q:\n%s", before.path, row.path, rowList(m))
 	}
@@ -405,10 +499,9 @@ func TestThreadPromptKeepsSpacesInATitle(t *testing.T) {
 	}
 }
 
-// The counter counts files, so the files and the counter are one block and the changeset
-// section sits below it: the block above answers "what did the diff touch", the one below
-// "what is the review made of". Tab then reads as skipping to the next block.
-func TestChangesetSectionRendersBelowTheCounter(t *testing.T) {
+// The box is over the tree, and the counter is under it: what the review is made of is what a reviewer
+// reads before choosing a file, and the count of files read belongs with the files it counts.
+func TestTheChangesetBoxRendersAboveTheFiles(t *testing.T) {
 	m := navModel(t)
 	lines := strings.Split(ansiCodes.ReplaceAllString(m.View(), ""), "\n")
 
@@ -416,15 +509,20 @@ func TestChangesetSectionRendersBelowTheCounter(t *testing.T) {
 	if counter < 0 {
 		t.Fatalf("no reviewed counter in:\n%s", strings.Join(lines, "\n"))
 	}
-	about := lineWithExact(lines, "ABOUT.md")
-	head := lineWithPrefix(lines, "\u25be Threads") // expanded: no count on the heading
-	if about < 0 || head < 0 {
-		t.Fatalf("ABOUT.md (%d) or the thread heading (%d) is missing from:\n%s",
-			about, head, strings.Join(lines, "\n"))
+	top := lineWithPrefix(lines, "\u256d")
+	about := lineWithPrefix(lines, "\u2502 ABOUT.md")
+	head := lineWithPrefix(lines, "\u2502 \u25be Threads") // expanded: no count on the heading
+	if top < 0 || about < 0 || head < 0 {
+		t.Fatalf("the box's top (%d), ABOUT.md (%d) or the thread heading (%d) is missing from:\n%s",
+			top, about, head, strings.Join(lines, "\n"))
 	}
-	if about < counter || head < counter {
-		t.Errorf("the changeset section is not below the counter (counter %d, ABOUT.md %d, heading %d)",
-			counter, about, head)
+	if top >= about || about > counter || head > counter {
+		t.Errorf("the box does not frame its rows above the counter (top %d, ABOUT.md %d, heading %d, counter %d)",
+			top, about, head, counter)
+	}
+	if bottom := lineWithPrefix(lines, "\u2570"); bottom < head || bottom > counter {
+		t.Errorf("the box's bottom border is at %d, which does not close the rows it frames:\n%s",
+			bottom, strings.Join(lines, "\n"))
 	}
 
 	for _, r := range m.rows {
@@ -436,8 +534,9 @@ func TestChangesetSectionRendersBelowTheCounter(t *testing.T) {
 			t.Errorf("file %q is not rendered:\n%s", r.name, strings.Join(lines, "\n"))
 			continue
 		}
-		if at > counter {
-			t.Errorf("file %q renders at %d, below the counter at %d", r.name, at, counter)
+		if at > counter || at < head {
+			t.Errorf("file %q renders at %d, outside the space between the box at %d and the counter at %d",
+				r.name, at, head, counter)
 		}
 	}
 }
@@ -502,9 +601,9 @@ func TestRuleSeparatesTheListFromTheShortcuts(t *testing.T) {
 	}
 }
 
-// `d` is the difftool for whatever the cursor is on, so a reviewer does not have to be on the
-// file block to diff a file. Rows that cannot be diffed say why instead of opening a difftool
-// with nothing in it.
+// `d` is the difftool for whatever the keys are on, so a reviewer does not have to be in the file tree
+// to diff a file -- ABOUT.md and a thread are diffable from the box. Rows that cannot be diffed say why
+// instead of opening a difftool with nothing in it.
 func TestDDiffsTheSelectedRow(t *testing.T) {
 	m := navModel(t)
 	if !strings.Contains(strings.Join(m.helpLines(), " "), "d diff") {
@@ -512,7 +611,7 @@ func TestDDiffsTheSelectedRow(t *testing.T) {
 	}
 
 	// A file row in the span: the same handoff Enter gives.
-	m.cursor = indexOfNameBySuffix(t, m, ".go")
+	m = focusOnRow(t, m, indexOfNameBySuffix(t, m, ".go"))
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	if cmd == nil {
 		t.Error("d on a file opened nothing")
@@ -527,7 +626,7 @@ func TestDDiffsTheSelectedRow(t *testing.T) {
 	if !m.inSpan[m.rows[about].path] {
 		t.Skipf("the fixture's ABOUT.md is not in the span, so this case needs a different fixture")
 	}
-	m.cursor = about
+	m = focusOnRow(t, m, about)
 	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = after.(reviewModel)
 	if cmd == nil {
@@ -540,8 +639,9 @@ func TestDDiffsTheSelectedRow(t *testing.T) {
 
 	// A thread written this session is not in the span: no empty difftool, the file instead.
 	m = navModel(t)
-	m.cursor = indexOf(t, m, rowThread)
-	thread := m.rows[m.cursor]
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	_, at, _ := m.activeRow()
+	thread := m.rows[at]
 	after, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = after.(reviewModel)
 	if cmd == nil {
@@ -552,7 +652,7 @@ func TestDDiffsTheSelectedRow(t *testing.T) {
 	}
 
 	// The heading is not a file at all.
-	m.cursor = indexOf(t, m, rowThreadsHead)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowThreadsHead))
 	after, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = after.(reviewModel)
 	if cmd != nil || !strings.Contains(m.status, "not a file") {
@@ -564,7 +664,7 @@ func TestDDiffsTheSelectedRow(t *testing.T) {
 // under the editor's own screen and gone by the time the reviewer looks again.
 func TestDiffFallbackNoteSurvivesTheEditor(t *testing.T) {
 	m := navModel(t)
-	m.cursor = indexOf(t, m, rowThread) // a thread the span does not touch
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread)) // a thread the span does not touch
 	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = after.(reviewModel)
 	if cmd == nil {
@@ -591,7 +691,7 @@ func TestDiffFallbackNoteSurvivesTheEditor(t *testing.T) {
 
 	// A diff that actually diffed has nothing to report, so the screen comes back clean.
 	m = navModel(t)
-	m.cursor = indexOfNameBySuffix(t, m, ".go")
+	m = focusOnRow(t, m, indexOfNameBySuffix(t, m, ".go"))
 	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")}); cmd == nil {
 		t.Fatal("d on a file did not hand off")
 	}
@@ -601,7 +701,7 @@ func TestDiffFallbackNoteSurvivesTheEditor(t *testing.T) {
 	}
 
 	// A handoff that failed reports the failure, and drops the note it was carrying.
-	m.cursor = indexOf(t, m, rowThread)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = updated.(reviewModel)
 	updated, _ = m.Update(externalDoneMsg{err: errors.New("no editor configured"),
@@ -675,7 +775,7 @@ func TestSessionAnswersWhetherAFileExistedAtTheSpanStart(t *testing.T) {
 // a changeset reads ABOUT.md rather than diffing it against nothing.
 func TestEnterOnADocumentFollowsTheSpan(t *testing.T) {
 	m := navModel(t)
-	m.cursor = indexOf(t, m, rowAbout)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowAbout))
 	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = after.(reviewModel)
 	if cmd == nil {

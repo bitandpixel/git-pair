@@ -323,6 +323,9 @@ func TestTheListAsItRenders(t *testing.T) {
 		"  ▾ ○ tuition/",
 		"    ○ why.go",
 		"○ main.go",
+		// The rows under the tree belong to the changeset box. They are in the same list, which is
+		// how a thread the reviewer creates turns up without anything being told to add it.
+		"span  main...current ▸",
 		"ABOUT.md",
 		"▾ Threads",
 		"    + new thread…",
@@ -531,18 +534,29 @@ func TestHFoldsUpAndLOpensDown(t *testing.T) {
 // from there would be the key doing something the screen gives no sign of doing.
 func TestFoldKeysStayInTheTree(t *testing.T) {
 	m, _ := treeModel(t)
-	m.cursor = indexOf(t, m, rowAbout)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowAbout))
+	tree, box := m.cursor, m.metaCursor
 
+	for _, key := range []rune{'h', 'l', 'c'} {
+		m = pressRune(m, key)
+		if m.cursor != tree || m.metaCursor != box {
+			t.Errorf("%c from the box moved a cursor: tree %d to %d, box %d to %d",
+				key, tree, m.cursor, box, m.metaCursor)
+		}
+		if !strings.Contains(m.status, "file tree") {
+			t.Errorf("%c from the box said %q, want it to name the region the key belongs to", key, m.status)
+		}
+	}
+
+	// The keys work again the moment the tree has them, which is what makes the refusal a
+	// boundary rather than a broken key.
+	file := indexOfNameBySuffix(t, m, ".go")
+	m = pressRune(m, 'f')
+	m = focusOnRow(t, m, file)
+	at := m.cursor
 	m = pressRune(m, 'h')
-	if kind, r := selectedKind(t, m); kind != rowAbout {
-		t.Errorf("h from ABOUT.md moved the cursor to %q, want it to stay", r.name)
-	}
-	if !strings.Contains(m.status, "under the counter") {
-		t.Errorf("h under the counter said %q, want it to say the keys belong to the tree", m.status)
-	}
-	m = pressRune(m, 'l')
-	if !strings.Contains(m.status, "under the counter") {
-		t.Errorf("l under the counter said %q, want it to say the keys belong to the tree", m.status)
+	if m.cursor == at {
+		t.Errorf("h in the tree did nothing; the cursor is still on %q", m.rows[at].name)
 	}
 }
 
