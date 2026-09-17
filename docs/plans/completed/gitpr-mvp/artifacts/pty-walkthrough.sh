@@ -118,6 +118,29 @@ expect "the picker names the newest review" 0 "$T/picker.raw" "Last Review"
 expect "the picker offers the typed-commit drill" 0 "$T/picker.raw" "Commit"
 expect "esc returns to the list" 1 "$T/picker.raw" "reviewed"
 
+# --- 3b. typing into a drill (the drill's two modes) -----------------------
+step "drill: typing filters, Tab moves, space is a character, backspace cannot leave"
+# The picker opens on Changeset Base, so one j lands on Commit… and space opens the drill. The
+# filter is then typed one letter at a time -- the space in it is a filter character here and a
+# command in the list -- then Tab hands the keys to the list, one backspace deletes a character,
+# Tab hands them back, and twenty more backspaces run out of filter. Twenty is the point: the last
+# several press against an empty filter, and the drill has to survive them, so the session ends
+# there with ctrl-c rather than with a key that would have closed it honestly.
+# Each ~0.3 gives the terminal time to paint the frame that key produced: two keys sent inside one
+# frame interval arrive as one update, and the frame in between is never written.
+BACKS=$(python3 -c "print(','.join(['backspace']*20))")
+session drill "V,j,space,~0.3,s,e,r,i,a,l,i,s,e,space,p,e,r,~0.3,tab,~0.3,backspace,~0.3,tab,~0.3,$BACKS,~0.3,x,~0.3,ctrl-c"
+expect "the drill opens over the list" 2 "$T/drill.raw" "Pick Commit"
+expect "the drill says which end the pick lands on" 2 "$T/drill.raw" "for BASE"
+expect "the typing bar names the key that navigates" 2 "$T/drill.raw" "tab navigate"
+expect "what is typed becomes the filter, space included" 16 "$T/drill.raw" "filter: serialise per"
+expect "Tab hands the keys to the list" 18 "$T/drill.raw" "tab filter"
+expect "backspace deletes one character" 20 "$T/drill.raw" "filter: serialise pe"
+# An inert key paints nothing, so "still in the drill" has to be shown by a key that changes the
+# screen without leaving it: one more letter, which the filter takes.
+expect "twenty backspaces leave the drill open" 45 "$T/drill.raw" "Pick Commit"
+expect "and the filter still takes what is typed" 45 "$T/drill.raw" "filter: x"
+
 # --- 4. v walks the spans this session has been in (span plan M3b) ---------
 step "span ring: v steps to the next span the session knows"
 # A ref-pinned base makes three stops: the span opened on, the full changeset, the unreviewed

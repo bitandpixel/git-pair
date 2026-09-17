@@ -679,7 +679,8 @@ A span can end at a commit instead of your working tree — `review open --head-
 screen stops offering anything that changes something: the counter's place is taken by
 `HISTORICAL · READ ONLY`, files lose their reviewed gutter, `+ new thread…` is gone, and the
 shortcut bar lists only what still works. Pressing a key that does not work says why, names the head
-the span is stuck on, and points at `v`, which returns you to a span you can review. The difftool
+the span is stuck on, and points at `V`, which is how you choose a span you can review — `v` walks the
+session's spans and cannot promise where it lands. The difftool
 over a historical span compares its two pinned commits rather than your working tree, so it cannot
 show you work the span does not contain. `gitpr diff` takes the same flags and just prints; the
 read-only half is about the screen, where the mistakes would be made.
@@ -697,6 +698,20 @@ revision, so history past the window is one keystroke away, and refuses an id gi
 the list is still on screen. `Ref…` groups branches, remote refs, tags and other refs under headings,
 showing `main` and `origin/main` while the checkpoint keeps `refs/heads/main` — a branch and a tag
 with the same name are two different choices, and drift has to be watched on the one you meant.
+
+Inside either drill the keys are in one of two modes, and the shortcut bar names the keys of the mode
+you are in. Typing is the default, and what you type is the filter — a space included, since `response
+0` is a thing to search for — with `Enter` picking and `Esc` stepping back to the columns. `Tab` hands
+the keys to the list: `j`/`k`, `gg`/`G`, `ctrl-d`/`ctrl-u` and `ctrl-f`/`ctrl-b`, `Space` or `Enter` to
+pick, `Tab` to give the keys back to the filter. The block after the filter is the caret, so it is
+where your typing goes; navigation mode drops it. `Backspace` deletes a character and nothing else —
+with an empty filter it does nothing, because it used to throw the whole drill away. A drill also says
+which end it is choosing for (`for BASE`), since the columns that would otherwise say it are off screen.
+A checkpoint chosen from a drill has no row of its own, so the asterisk goes on the `Commit…` or `Ref…`
+row it came from, and `V` reopens with the cursor there. A short terminal shrinks the candidate lists
+rather than the frame: the shortcut bar and the status wrap into rows first, because a frame taller than
+the terminal repaints by scrolling and what scrolls off the bottom is the bar that says how to leave.
+`Ctrl-C` leaves from any of these screens — the columns, a drill, the submit prompt.
 
 An endpoint named as a ref is pinned when you choose it, and the pin is what the screen keeps
 comparing. So when `probe` moves in another window — a fetch, someone else's push — the header still

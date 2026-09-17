@@ -579,3 +579,358 @@ func TestHeaderNamesUnreviewedOnlyForTheUnreviewedSpan(t *testing.T) {
 func headerOf(m reviewModel) string {
 	return strings.Join(m.headerLines(m.sess.Header()), "\n")
 }
+
+// --- the drill-in's two modes -------------------------------------------------
+
+// openDrill opens a Commit…/Ref… drill from whichever column is active.
+func openDrill(t *testing.T, m reviewModel, label string) reviewModel {
+	t.Helper()
+	m = open(t, m)
+	m.pick.cursor[m.pick.col] = rowIndex(t, m, m.pick.col == 0, label)
+	return pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
+}
+
+func typeText(t *testing.T, m reviewModel, s string) reviewModel {
+	t.Helper()
+	for _, r := range s {
+		if r == ' ' {
+			m = pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
+			continue
+		}
+		m = pressKey(t, m, runeKey(r))
+	}
+	return m
+}
+
+func tabKey() tea.KeyMsg  { return tea.KeyMsg{Type: tea.KeyTab} }
+func escKey() tea.KeyMsg  { return tea.KeyMsg{Type: tea.KeyEsc} }
+func backKey() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyBackspace} }
+
+// The drill belongs to the reviewer who is searching, so what you type is the filter and the
+// keys only become navigation when you ask for them. `j` has to type `j`.
+func TestDrillDefaultsToTypingAndTabHandsTheKeysToTheList(t *testing.T) {
+	m, _ := pickerFixture(t, 1)
+	m = openDrill(t, m, "Commit…")
+	if m.pick.nav {
+		t.Fatal("the drill opened in navigation mode; typing must reach the filter first")
+	}
+	m = typeText(t, m, "j")
+	if m.pick.list.filter != "j" {
+		t.Fatalf("filter = %q, want the letter typed at it", m.pick.list.filter)
+	}
+	if m.pick.list.sel != 0 {
+		t.Errorf("typing moved the cursor to %d; navigation is Tab's", m.pick.list.sel)
+	}
+	// `j` matches nothing here, so empty the filter before asking the list to move.
+	m = pressKey(t, m, backKey())
+
+	m = pressKey(t, m, tabKey())
+	if !m.pick.nav {
+		t.Fatal("Tab did not put the keys on the list")
+	}
+	m = pressKey(t, m, runeKey('j'))
+	if m.pick.list.sel != 1 {
+		t.Errorf("j in navigation mode moved to %d, want one row down", m.pick.list.sel)
+	}
+	if m.pick.list.filter != "" {
+		t.Errorf("j in navigation mode changed the filter to %q, want it left alone", m.pick.list.filter)
+	}
+	m = pressKey(t, m, tabKey())
+	if m.pick.nav {
+		t.Error("Tab again did not hand the keys back to the filter")
+	}
+}
+
+// Space is a filter character while you are typing -- "response 0" is a thing to search for --
+// and picks when the keys are on the list.
+func TestDrillSpaceTypesWhileTypingAndPicksWhenNavigating(t *testing.T) {
+	m, _ := pickerFixture(t, 1)
+	m = openDrill(t, m, "Commit…")
+	m = typeText(t, m, "response 0")
+	if got := m.pick.list.filter; got != "response 0" {
+		t.Fatalf("filter = %q, want the space kept: subjects contain them", got)
+	}
+	for _, i := range m.pick.list.visible() {
+		if !strings.Contains(m.pick.list.items[i].label, "response 0") {
+			t.Errorf("a space in the filter kept %q", m.pick.list.items[i].label)
+		}
+	}
+	if m.pick.list == nil {
+		t.Fatal("typing closed the drill")
+	}
+	if m.pick.base.Kind == span.KindCommit {
+		t.Error("space while typing picked an entry")
+	}
+
+	m = pressKey(t, m, tabKey())
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if m.pick.list != nil {
+		t.Fatalf("space in navigation mode did not pick: %v", m.pick.list)
+	}
+	if m.pick.base.Kind != span.KindCommit {
+		t.Errorf("space picked %s, want a commit", m.pick.base.Kind)
+	}
+}
+
+// A page moves by what the window shows, so the page keys and the renderer have to count rows
+// the same way. The height here is small enough that a page is a fraction of the list.
+func TestDrillNavigationMovesWithVimKeys(t *testing.T) {
+	m, f := pickerFixture(t, 1)
+	for i := range 12 {
+		f.Commit(fmt.Sprintf("work %d", i), gittest.WithFile(fmt.Sprintf("w%d.go", i), "package main\n"))
+	}
+	m.height = 12
+	m = openDrill(t, m, "Commit…")
+	m = pressKey(t, m, tabKey())
+	total := len(m.pick.list.visible())
+	if total < 10 {
+		t.Fatalf("the list has %d rows, want enough to page through", total)
+	}
+	rows := m.listRows()
+
+	m = pressKey(t, m, runeKey('G'))
+	if got := m.pick.list.sel; got != total-1 {
+		t.Errorf("G went to %d, want the last row %d", got, total-1)
+	}
+	m = pressKey(t, m, runeKey('g'))
+	m = pressKey(t, m, runeKey('g'))
+	if got := m.pick.list.sel; got != 0 {
+		t.Errorf("gg went to %d, want the top", got)
+	}
+	m = pressKey(t, m, runeKey('g'))
+	m = pressKey(t, m, runeKey('j'))
+	if got := m.pick.list.sel; got != 1 {
+		t.Errorf("a lone g then j went to %d, want one row down -- g waits for its partner", got)
+	}
+	before := m.pick.list.sel
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	if got := m.pick.list.sel; got != before+rows/2 {
+		t.Errorf("ctrl-d moved %d rows from %d, want half a page (%d)", got-before, before, rows/2)
+	}
+	before = m.pick.list.sel
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlB})
+	if got := m.pick.list.sel; got != max(0, before-rows) {
+		t.Errorf("ctrl-b went to %d from %d, want a page up", got, before)
+	}
+	m = pressKey(t, m, runeKey('g'))
+	m = pressKey(t, m, runeKey('g'))
+	before = m.pick.list.sel
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlF})
+	if got := m.pick.list.sel; got != before+rows {
+		t.Errorf("ctrl-f moved %d rows from %d, want a page (%d) -- further than the window shows "+
+			"would put the cursor off screen", got-before, before, rows)
+	}
+	before = m.pick.list.sel
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlU})
+	if got := m.pick.list.sel; got != before-rows/2 {
+		t.Errorf("ctrl-u moved %d rows from %d, want half a page back", got-before, before)
+	}
+}
+
+// Backspace deletes a character. On an empty filter it used to close the drill, so clearing one
+// mistyped keystroke dumped the reviewer out of the list they were choosing from. `esc` leaves.
+func TestDrillBackspaceEditsTheFilterAndNeverLeaves(t *testing.T) {
+	m, _ := pickerFixture(t, 1)
+	m = openDrill(t, m, "Commit…")
+
+	m = pressKey(t, m, backKey())
+	if m.pick.list == nil {
+		t.Fatal("backspace on an empty filter closed the drill")
+	}
+	m = typeText(t, m, "x")
+	m = pressKey(t, m, backKey())
+	if m.pick.list == nil {
+		t.Fatal("backspace closed the drill instead of deleting the character")
+	}
+	if m.pick.list.filter != "" {
+		t.Errorf("filter = %q, want the character deleted", m.pick.list.filter)
+	}
+
+	// Same answer with the keys on the list.
+	m = pressKey(t, m, tabKey())
+	m = pressKey(t, m, backKey())
+	if m.pick.list == nil || !m.pick.nav {
+		t.Errorf("backspace in navigation mode left the drill or its mode: list=%v nav=%v", m.pick.list, m.pick.nav)
+	}
+
+	// And esc does what backspace used to: first out of the drill, then out of the picker.
+	m = pressKey(t, m, escKey())
+	if m.pick.list != nil {
+		t.Fatal("esc did not back out of the drill")
+	}
+	if m.mode != modeSpan {
+		t.Errorf("esc left the picker entirely (mode %v), want the columns still open", m.mode)
+	}
+	m = pressKey(t, m, escKey())
+	if m.mode != modeFiles {
+		t.Errorf("a second esc did not cancel the picker (mode %v)", m.mode)
+	}
+}
+
+// The bar is the only place a mode documents its keys, so it names the keys that mode reads --
+// and does not advertise the other mode's.
+func TestDrillBarNamesTheKeysOfTheModeItIsIn(t *testing.T) {
+	typing, nav := helpSpan(true, false), helpSpan(true, true)
+	for _, want := range []string{"type to filter", "backspace delete", "enter pick", "tab navigate", "esc back"} {
+		if !strings.Contains(typing, want) {
+			t.Errorf("the typing bar omits %q: %q", want, typing)
+		}
+	}
+	// j and k type letters while typing, so promising them as movement there would be a lie.
+	for _, absent := range []string{"j k", "gg", "ctrl-d"} {
+		if strings.Contains(typing, absent) {
+			t.Errorf("the typing bar advertises %q, which it does not read: %q", absent, typing)
+		}
+	}
+	for _, want := range []string{"j k", "gg", "G", "ctrl-d/u", "ctrl-f/b", "tab filter", "esc"} {
+		if !strings.Contains(nav, want) {
+			t.Errorf("the navigation bar omits %q: %q", want, nav)
+		}
+	}
+}
+
+// While the columns are off screen, the drill's own heading is the only place that says which
+// end the pick will land on.
+func TestDrillSaysWhichEndItIsChoosing(t *testing.T) {
+	m, _ := pickerFixture(t, 1)
+	m = openDrill(t, m, "Commit…")
+	if view := m.View(); !strings.Contains(view, "for BASE") {
+		t.Errorf("the commit drill does not say it is choosing the base:\n%s", view)
+	}
+	m = pressKey(t, m, escKey())
+	m = pressKey(t, m, tabKey())
+	m = openDrillAt(t, m, "Ref…")
+	if view := m.View(); !strings.Contains(view, "for HEAD") {
+		t.Errorf("the ref drill does not say it is choosing the head:\n%s", view)
+	}
+}
+
+func openDrillAt(t *testing.T, m reviewModel, label string) reviewModel {
+	t.Helper()
+	m.pick.cursor[m.pick.col] = rowIndex(t, m, m.pick.col == 0, label)
+	return pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
+}
+
+// markedLine is the row of a column wearing the asterisk, or "" when none is.
+func markedLine(col string) string {
+	for _, l := range strings.Split(col, "\n") {
+		if strings.Contains(l, "*") {
+			return strings.TrimSpace(l)
+		}
+	}
+	return ""
+}
+
+// A checkpoint chosen from a drill has no row of its own in the column. The mark goes on the
+// drill it came from, so the column still says which end holds it -- and the cursor opens on
+// that row, since it is the one wearing the mark.
+func TestDrillChosenEndpointKeepsItsMark(t *testing.T) {
+	m, _ := pickerFixture(t, 1)
+	m = openDrill(t, m, "Commit…")
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.pick.base.Kind != span.KindCommit {
+		t.Fatalf("pending base = %s, want the commit picked", m.pick.base.Kind)
+	}
+	line := markedLine(m.columnText(true, 60))
+	if !strings.Contains(line, "Commit…") {
+		t.Errorf("the BASE column marks %q, want the mark on Commit… \u2014 a base picked from history "+
+			"otherwise leaves the column with no mark at all", line)
+	}
+	if other := markedLine(m.columnText(false, 60)); !strings.Contains(other, "Current") {
+		t.Errorf("the HEAD column marks %q, want its own pending end (Current) and nothing from BASE", other)
+	}
+	if want := rowIndex(t, m, true, "Commit…"); m.pick.cursor[0] != want {
+		t.Errorf("the BASE cursor sits on %d, want the marked row %d", m.pick.cursor[0], want)
+	}
+
+	// A ref in the head column marks Ref…, not Commit….
+	m2, f := pickerFixture(t, 1)
+	f.MustGit("branch", "feature/marked", f.Head())
+	m2 = open(t, m2)
+	m2 = pressKey(t, m2, tabKey())
+	m2 = openDrillAt(t, m2, "Ref…")
+	m2 = typeText(t, m2, "feature/marked")
+	m2 = pressKey(t, m2, tea.KeyMsg{Type: tea.KeyEnter})
+	if m2.pick.head.Kind != span.KindRef {
+		t.Fatalf("pending head = %s, want the ref picked", m2.pick.head.Kind)
+	}
+	line = markedLine(m2.columnText(false, 60))
+	if !strings.Contains(line, "Ref…") {
+		t.Errorf("the HEAD column marks %q, want the mark on Ref…", line)
+	}
+	if head := m2.columnText(false, 60); strings.Contains(head, "* Commit…") {
+		t.Errorf("a ref choice marked Commit… instead:\n%s", head)
+	}
+}
+
+// The drill's chrome grows: the bar wraps at narrower widths, a refusal adds a row, and the
+// (above:)/(below:) hints arrive when the list is longer than the window. Every one of them is a
+// row the list no longer has, and a frame taller than the terminal repaints by scrolling -- which
+// loses the shortcut bar, the one thing telling you how to leave.
+func TestDrillFramesFitTheTerminal(t *testing.T) {
+	for _, width := range []int{100, 72, 60} {
+		for _, height := range []int{30, 16, 12} {
+			m, _ := pickerFixture(t, 2)
+			m.width, m.height = width, height
+			// The columns first: their content is fixed, so only chrome can push them over.
+			assertFrameFits(t, open(t, m))
+			m = openDrill(t, m, "Commit…")
+
+			assertFrameFits(t, m)
+			for _, nav := range []bool{false, true} {
+				m.pick.nav = nav
+				assertFrameFits(t, m)
+			}
+			// With a refusal on screen, and with a status line long enough to wrap.
+			m.pick.list.err = "no commit \"nonsense\" in this repository"
+			m.status = "span main...current (2 of 4) · 3 reviewed marks no longer apply · read-only"
+			assertFrameFits(t, m)
+		}
+	}
+}
+
+// A short terminal windows the candidate columns instead of overflowing, follows the cursor, and
+// keeps the divider on every row -- an uneven column count would hang the divider over nothing.
+func TestShortTerminalWindowsTheCandidateColumns(t *testing.T) {
+	m, _ := pickerFixture(t, 4)
+	m.width, m.height = 90, 12
+	m = open(t, m)
+	total, rows := len(m.endpointsFor(true)), m.columnRows()
+	if total <= rows {
+		t.Fatalf("the fixture fits without windowing: %d candidates in %d rows", total, rows)
+	}
+	assertFrameFits(t, m)
+
+	m.pick.cursor[0] = total - 1
+	block := strings.Split(strings.TrimSuffix(m.pickerBlock(), "\n"), "\n")
+	// Three heading rows -- "Span picker", the blank, the BASE/HEAD titles -- then the window.
+	window := block[3 : 3+rows]
+	if !strings.Contains(strings.Join(window, "\n"), "Ref…") {
+		t.Errorf("the window did not follow the cursor to the last candidate:\n%s", strings.Join(window, "\n"))
+	}
+	for _, line := range window {
+		if !strings.Contains(line, "\u2502") {
+			t.Errorf("a candidate row has no divider: %q", line)
+		}
+	}
+}
+
+// Ctrl-C is the universal leave, and in this screen it used to be a dead key: the columns answered
+// Esc and q, the drill answered Esc, and neither answered the key a reviewer reaches for when they
+// want out of a screen.
+func TestCtrlCLeavesThePickerFromAnywhere(t *testing.T) {
+	m := pressKey(t, open(t, mustPicker(t)), tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !m.quitting {
+		t.Error("ctrl-c from the picker's columns did not leave")
+	}
+	drill := pressKey(t, openDrill(t, mustPicker(t), "Commit…"), tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !drill.quitting {
+		t.Error("ctrl-c from inside a drill did not leave")
+	}
+}
+
+func mustPicker(t *testing.T) reviewModel {
+	t.Helper()
+	m, _ := pickerFixture(t, 1)
+	return m
+}

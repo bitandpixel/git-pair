@@ -533,6 +533,12 @@ func (m *reviewModel) toggleThreads() {
 }
 
 func (m reviewModel) handleSubmitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Esc cancels the prompt and stays; ctrl-c leaves. It used to be swallowed here, so the key a
+	// reviewer reaches for at a prompt got no reply, and the screen looked like it was thinking.
+	if key.Type == tea.KeyCtrlC {
+		m.quitting = true
+		return m, tea.Quit
+	}
 	if key.Type == tea.KeyEsc || (key.Type == tea.KeyRunes && firstRune(key) == 'q') {
 		m.mode = modeFiles
 		m.setStatus("Review not submitted", false)
@@ -1011,7 +1017,7 @@ func (m reviewModel) helpText() string {
 	case modePrompt:
 		return "" // the thread prompt is the input line, not help
 	case modeSpan:
-		return helpSpan(m.pick.list != nil)
+		return helpSpan(m.pick.list != nil, m.pick.nav)
 	case modePreview:
 		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  p q esc enter close"
 	}

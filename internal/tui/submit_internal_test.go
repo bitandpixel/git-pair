@@ -75,7 +75,10 @@ func TestSubmitKeyEndsTheSession(t *testing.T) {
 }
 
 // Esc in submit mode is the other half: backing out must keep the session alive.
-func TestEscInSubmitModeKeepsTheSessionOpen(t *testing.T) {
+// submitModel is a session sitting on the submit prompt, which is a decision with nothing left to
+// review: the fixture is a changeset with work in it and no submission yet.
+func submitModel(t *testing.T) reviewModel {
+	t.Helper()
 	ctx := context.Background()
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("main.go", "package main\n\nfunc main() {}\n"))
@@ -97,8 +100,11 @@ func TestEscInSubmitModeKeepsTheSessionOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
+	return reviewModel{ctx: ctx, sess: sess, width: 80, height: 24, mode: modeSubmit}
+}
 
-	m := reviewModel{ctx: ctx, sess: sess, width: 80, height: 24, mode: modeSubmit}
+func TestEscInSubmitModeKeepsTheSessionOpen(t *testing.T) {
+	m := submitModel(t)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(reviewModel)
 	if m.quitting {
@@ -106,5 +112,18 @@ func TestEscInSubmitModeKeepsTheSessionOpen(t *testing.T) {
 	}
 	if m.mode != modeFiles {
 		t.Errorf("mode = %v, want the file list back", m.mode)
+	}
+}
+
+// Ctrl-C is the other key a reviewer reaches for at a prompt, and it used to do nothing here at
+// all. It leaves without submitting: the review is not committed, so the session has nothing to
+// stay open for.
+func TestCtrlCInSubmitModeLeavesWithoutSubmitting(t *testing.T) {
+	m := pressKey(t, submitModel(t), tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !m.quitting {
+		t.Error("ctrl-c at the submit prompt did not leave the session")
+	}
+	if m.submitted != "" {
+		t.Errorf("ctrl-c submitted %q, want nothing submitted", m.submitted)
 	}
 }

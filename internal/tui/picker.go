@@ -50,6 +50,12 @@ type spanPicker struct {
 	// err is a refusal the reviewer is being shown: a pair git would not resolve. The
 	// picker stays open with it, because they are mid-choice.
 	err string
+	// nav is the drill-in's own mode: false means what you type goes to the filter, true
+	// means the keys navigate the list. Tab toggles it, and each mode's shortcut bar names
+	// the keys it reads -- the same bargain the diff overlay makes.
+	nav bool
+	// gPrefix waits for the second g of `gg`, as the preview overlay's does.
+	gPrefix bool
 }
 
 type listKind int
@@ -142,6 +148,10 @@ func (m reviewModel) recentrePicker(p *spanPicker) {
 	}
 }
 
+// endpointIndex is where a column's cursor sits for a pending checkpoint: on its row, or on
+// the drill that holds it. A commit or ref chosen from history has no row of its own, and the
+// asterisk for it goes on the drill row -- so the cursor goes there too, rather than leaving
+// the mark on a row the picker is not standing on.
 func endpointIndex(items []pickerItem, want span.Checkpoint) int {
 	for i, it := range items {
 		if it.isDrill {
@@ -151,7 +161,25 @@ func endpointIndex(items []pickerItem, want span.Checkpoint) int {
 			return i
 		}
 	}
+	for i, it := range items {
+		if it.isDrill && drillHolds(it.drill, want) {
+			return i
+		}
+	}
 	return 0
+}
+
+// drillHolds says whether the end of a column came out of that drill. It is what keeps the
+// asterisk on screen: without it, a base chosen from the commit list leaves the BASE column
+// with no mark at all, and the reviewer cannot see which end the pick went to.
+func drillHolds(kind listKind, ckpt span.Checkpoint) bool {
+	switch {
+	case ckpt.Kind == span.KindCommit && kind == listCommits:
+		return true
+	case ckpt.Kind == span.KindRef && kind == listRefs:
+		return true
+	}
+	return false
 }
 
 // sameCheckpoint compares what a reviewer chose rather than what git resolved: two refs
@@ -166,6 +194,13 @@ func sameCheckpoint(a, b span.Checkpoint) bool {
 // --- keys -------------------------------------------------------------------
 
 func (m reviewModel) handleSpanKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Ctrl-C means leave, here as it does in the list and the overlay. It used to be a dead key in
+	// this screen: the columns answered Esc and q and the drill answered Esc, so reaching for the
+	// universal exit in the screen you wanted out of got no reply at all.
+	if key.Type == tea.KeyCtrlC {
+		m.quitting = true
+		return m, tea.Quit
+	}
 	if m.pick.list != nil {
 		return m.handleListKey(key)
 	}
@@ -219,6 +254,7 @@ func (m reviewModel) chooseEndpoint(it pickerItem) (tea.Model, tea.Cmd) {
 	if it.isDrill {
 		p.err = ""
 		p.list = m.openList(it.drill)
+		p.nav, p.gPrefix = false, false
 		m.pick = p
 		return m, nil
 	}
@@ -392,48 +428,130 @@ func refInFamily(name, prefix string) bool {
 	return strings.HasPrefix(name, prefix)
 }
 
+// handleListKey drives the drill-in, which has two modes because it takes typed text. Typing
+// mode is the default, and what you type is the filter -- a space included, since commit subjects
+// and ref names both contain them. Tab puts the keys on the list instead: j/k, gg/G, half and full
+// page, the navigation the rest of the screen uses. Each mode's shortcut bar names the keys that
+// mode reads, so nothing carries over by guesswork -- the bargain the diff overlay makes.
 func (m reviewModel) handleListKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	p := m.pick
 	list := p.list
 	visible := list.visible()
 
-	switch {
-	case key.Type == tea.KeyEsc:
-		p.list = nil
+	if !p.nav {
+		switch {
+		case key.Type == tea.KeyEsc:
+			return m.closeList(p)
+
+		case key.Type == tea.KeyTab, key.Type == tea.KeyShiftTab:
+			p.nav = true
+
+		case key.Type == tea.KeyEnter:
+			return m.pickFromList(list, visible)
+
+		// Arrows move in both modes -- they mean the same thing either way, so they cost nothing --
+		// while j and k have to be free to type their own letters.
+		case key.Type == tea.KeyDown:
+			list.sel++
+		case key.Type == tea.KeyUp:
+			list.sel--
+
+		case key.Type == tea.KeyBackspace:
+			// Backspace edits the filter and nothing else. An empty filter makes it inert: this
+			// key used to throw the whole drill away, so clearing one mistyped character from an
+			// empty filter dumped the reviewer back onto the columns they had just left. `esc`
+			// leaves, and it is the only key that does.
+			if list.filter != "" {
+				runes := []rune(list.filter)
+				list.filter = string(runes[:max(0, len(runes)-1)])
+				list.sel = 0
+			}
+
+		case key.Type == tea.KeySpace:
+			// Space is a filter character here, not a command: "fix typo" is a thing to search for.
+			list.filter += " "
+			list.sel = 0
+
+		case key.Type == tea.KeyRunes:
+			// Letters belong to the filter, not to navigation: a list you search is a list where
+			// `j` has to type `j`.
+			for _, r := range key.Runes {
+				if r >= ' ' && r != 127 {
+					list.filter += string(r)
+				}
+			}
+			list.sel = 0
+		}
 		m.pick = p
 		return m, nil
+	}
 
-	case key.Type == tea.KeyDown:
-		list.sel = clampIndex(list.sel+1, 0, max(0, len(visible)-1))
-	case key.Type == tea.KeyUp:
-		list.sel = clampIndex(list.sel-1, 0, max(0, len(visible)-1))
+	// Navigation mode. `g` waits for its partner, as it does in the list and the overlay.
+	if key.Type == tea.KeyRunes && firstRune(key) == 'g' && !p.gPrefix {
+		p.gPrefix = true
+		m.pick = p
+		return m, nil
+	}
+	pressedG := p.gPrefix
+	p.gPrefix = false
 
-	case key.Type == tea.KeyBackspace:
-		if list.filter == "" {
-			p.list = nil
-			m.pick = p
-			return m, nil
-		}
+	rows := m.listRows()
+	step := 0
+	switch {
+	case key.Type == tea.KeyEsc:
+		return m.closeList(p)
+	case key.Type == tea.KeyTab, key.Type == tea.KeyShiftTab:
+		p.nav = false
+	case key.Type == tea.KeyEnter, key.Type == tea.KeySpace:
+		return m.pickFromList(list, visible)
+	case key.Type == tea.KeyDown, key.Type == tea.KeyRunes && firstRune(key) == 'j':
+		step = 1
+	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
+		step = -1
+	case key.Type == tea.KeyCtrlD:
+		step = rows / 2
+	case key.Type == tea.KeyCtrlU:
+		step = -rows / 2
+	case key.Type == tea.KeyCtrlF:
+		step = rows
+	case key.Type == tea.KeyCtrlB:
+		step = -rows
+	case pressedG && key.Type == tea.KeyRunes && firstRune(key) == 'g':
+		list.sel = 0
+	case key.Type == tea.KeyRunes && firstRune(key) == 'G':
+		list.sel = max(0, len(visible)-1)
+	case key.Type == tea.KeyBackspace && list.filter != "":
 		runes := []rune(list.filter)
 		list.filter = string(runes[:max(0, len(runes)-1)])
 		list.sel = 0
-
-	case key.Type == tea.KeyEnter, key.Type == tea.KeySpace:
-		return m.pickFromList(list, visible)
-
-	case key.Type == tea.KeyRunes:
-		// Letters belong to the filter here, not to navigation: a list you search is a
-		// list where `j` has to type `j`. Arrows move.
-		for _, r := range key.Runes {
-			if r >= ' ' && r != 127 {
-				list.filter += string(r)
-			}
-		}
-		list.sel = 0
 	}
-
+	list.sel += step
+	list.sel = clampIndex(list.sel, 0, max(0, len(visible)-1))
 	m.pick = p
 	return m, nil
+}
+
+// closeList backs out of the drill-in. The columns and the pending pair are as they were -- a
+// drill that was opened and left should not have changed anything.
+func (m reviewModel) closeList(p spanPicker) (tea.Model, tea.Cmd) {
+	p.list, p.nav, p.gPrefix = nil, false, false
+	m.pick = p
+	return m, nil
+}
+
+// listRows is how many rows the drill-in has for rows. The renderer windows to it and the page keys
+// move by it, so the two have to agree -- a page that moved further than the window shows would put
+// the cursor somewhere the reviewer cannot see.
+//
+// The budget is the terminal minus everything else that draws: two rows for the heading and the blank
+// under it, three for the rows the drill can grow but does not always show (a refusal, and the two
+// "more off screen" hints), and the chrome -- the shortcut bar and the status, counted as they will
+// actually be drawn, since both wrap. Ignoring the wrapped bar was the bug: at 12 rows the frame came
+// out 14 tall, and a frame taller than the terminal repaints by scrolling, which loses the bottom row
+// -- the bar that says how to leave.
+func (m reviewModel) listRows() int {
+	used := 2 + 3 + len(m.helpLines()) + m.footerRows()
+	return max(1, m.height-used)
 }
 
 // pickFromList takes the highlighted entry, or, when the filter has emptied the list,
@@ -536,14 +654,32 @@ func (m reviewModel) columnText(base bool, width int) string {
 		render = styleSpan.Render
 	}
 
+	items := m.endpointsFor(base)
+	// A short terminal windows the candidates rather than overflowing: the frame has to fit, and
+	// the rows that can go are candidates, not the bar that says how to leave. Each column follows
+	// its own cursor, and both are drawn to the same number of rows so the divider lands on every
+	// row of the frame.
+	rows := m.columnRows()
+	start := windowStart(m.pick.cursor[col], len(items), rows)
+
 	var b strings.Builder
 	b.WriteString(clip(render(title), width) + "\n")
-	for i, it := range m.endpointsFor(base) {
+	for drawn := 0; drawn < rows; drawn++ {
+		i := start + drawn
+		if i >= len(items) {
+			b.WriteString(clip("", width) + "\n")
+			continue
+		}
+		it := items[i]
 		cursor, chosen := " ", " "
 		if m.pick.col == col && m.pick.cursor[col] == i {
 			cursor = ">"
 		}
 		if !it.isDrill && sameCheckpoint(it.ckpt, pending) {
+			chosen = "*"
+		}
+		if it.isDrill && drillHolds(it.drill, pending) {
+			// No row of its own, so the drill it came from wears the mark.
 			chosen = "*"
 		}
 		label := it.label
@@ -553,6 +689,25 @@ func (m reviewModel) columnText(base bool, width int) string {
 		b.WriteString(clip(m.rowWithDetail(cursor+chosen+" "+label, it.detail, width), width) + "\n")
 	}
 	return b.String()
+}
+
+// columnRows is what the candidate lists have to draw in. The heading is three rows -- "Span
+// picker", the blank under it, and the BASE/HEAD titles -- and the Selected block is three more
+// (its label, the pair, and what the pair means). Same arithmetic and same reason as listRows.
+// One row is the floor: below that the terminal is too small to choose in at all, and a frame
+// that overflows loses the shortcut bar.
+func (m reviewModel) columnRows() int {
+	used := 3 + 3 + len(m.helpLines()) + m.footerRows()
+	return max(1, m.height-used)
+}
+
+// windowStart is the first row of a list that has more entries than fit, keeping the cursor
+// roughly centred so the rows above and below it are both visible where there is room.
+func windowStart(cursor, total, rows int) int {
+	if total <= rows {
+		return 0
+	}
+	return clampIndex(cursor-rows/2, 0, total-rows)
 }
 
 // rowWithDetail puts the detail against the right edge of the column. A column too narrow
@@ -570,8 +725,7 @@ func (m reviewModel) rowWithDetail(label, detail string, width int) string {
 }
 
 func (m reviewModel) selectedBlock() string {
-	var b strings.Builder
-	b.WriteString("\n")
+	b := strings.Builder{}
 	b.WriteString(styleDim.Render("Selected:") + "\n")
 	b.WriteString(clip("  "+m.pick.base.String()+" \u2192 "+m.pick.head.String(), m.width) + "\n")
 
@@ -603,7 +757,19 @@ func (m reviewModel) pickerListBlock() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(clip(styleSpan.Render(title)+"  "+styleDim.Render("filter: "+list.filter+"\u2588"), m.width) + "\n")
+	// The end being chosen is named here because the columns -- the only other place that says it
+	// -- are not on screen while the drill is.
+	named := "HEAD"
+	if m.pick.col == 0 {
+		named = "BASE"
+	}
+	caret := ""
+	if !m.pick.nav {
+		// The block is the caret: it sits where your typing goes, so navigation mode drops it.
+		caret = "\u2588"
+	}
+	b.WriteString(clip(styleSpan.Render(title)+"  "+styleDim.Render("for "+named)+
+		"  "+styleDim.Render("filter: "+list.filter+caret), m.width) + "\n")
 	b.WriteString("\n")
 	if list.err != "" {
 		b.WriteString(clip(styleErr.Render(list.err), m.width) + "\n")
@@ -620,10 +786,7 @@ func (m reviewModel) pickerListBlock() string {
 		return b.String()
 	}
 
-	rows := m.height - 5
-	if rows < 3 {
-		rows = 3
-	}
+	rows := m.listRows()
 	target := 0
 	for i, idx := range lineOf {
 		if idx == list.sel {
@@ -688,11 +851,15 @@ func (m reviewModel) resolveSelector(sel span.Selector) (span.Span, error) {
 	return span.Resolve(m.ctx, m.sess.Repo(), m.sess.Header().Base, m.sess.Summary(), sel)
 }
 
-// helpSpan is the picker's own shortcut bar. Two modes, because the drill-in takes typed
-// text and so cannot keep j/k for navigation.
-func helpSpan(drilled bool) string {
+// helpSpan is the picker's own shortcut bar, and it says what the keys mean where they are being
+// pressed. The drill-in has two modes because it takes typed text, and a mode whose bar does not
+// name its keys is a mode with undocumented keys.
+func helpSpan(drilled, nav bool) string {
+	if drilled && nav {
+		return "j k line  gg top  G bottom  ctrl-d/u half  ctrl-f/b page  space/enter pick  tab filter  esc back"
+	}
 	if drilled {
-		return "type to filter  \u2191/\u2193 move  enter pick  backspace delete  esc back"
+		return "type to filter  \u2191/\u2193 move  backspace delete  enter pick  tab navigate  esc back"
 	}
 	return "tab column  j/k move  space choose  enter apply  u unreviewed  f full  esc cancel"
 }
