@@ -1634,7 +1634,11 @@ changeset with forty threads is a reason to read the box rather than a reason to
 rows that do not fit are counted in the bottom border (`3 more`), a note placed there because a note with
 a row of its own would move the layout as it came and went. The borders are also the box's focus light —
 single rules, double rules while it holds the keys — the convention the divider uses for the diff, chosen
-over styling alone so the focus survives a terminal that renders no bold. The span is the box's one
+over styling alone so the focus survives a terminal that renders no bold. The box is closed on all four
+sides in both layouts, including the side nearest the diff column: without it the rows inside read as a
+column of loose text rather than as the changeset's own block. Its cursor row is highlighted only while
+the box holds the keys, since the borders say that already and a row that looks chosen and is not is a row
+a reviewer marks by mistake. The span is the box's one
 control: `Enter` or `Space` on its row opens the span picker, since what a review is measured against is
 worth choosing, and `base` above it is a line of the frame rather than a row, since a base is only read.
 The picker commits nothing until its own `Enter`, so the row is available over a historical span as well.
@@ -1643,7 +1647,10 @@ diff did, the box is the shortcut to read what was said about it.
 
 The files are a tree rather than a list of paths. Each sits under its directory, a directory that
 holds nothing but one directory is folded into that row (`src/booking/` above is one row, not two),
-and a row prints only the name the rows above it have not already said. `h` and `l` fold and unfold
+and a row prints only the name the rows above it have not already said. Each level is indented one step
+deeper than the row above it — a directory row spends cells on its fold arrow and its mark gutter, and an
+indent the width of that prefix would land every child's mark in the column its parent's mark started at,
+which is a flat list with arrows in it. `h` and `l` fold and unfold
 the directory under the cursor — the left and right arrows do the same, and `Enter` does both, the
 way it does for the thread heading — while `c` folds the whole tree and opens it again, which is how
 a changeset of a hundred files is read for its shape before it is read for its detail. Folding moves
@@ -1671,12 +1678,14 @@ for glancing, and reading a diff means opening it. The frame fills the terminal 
 area holds the window's height and every row is padded to its width — so the shortcut bar
 sits against the bottom edge rather than under a short list.
 
-`p` moves the keys into that column rather than hiding it, so a diff longer than the column is read
+`p` moves the keys into that column and does nothing else, so a diff longer than the column is read
 with the keys a diff is read with: `j`/`k`, `ctrl-d`/`ctrl-u`, `ctrl-f`/`ctrl-b`, `gg` and `G` scroll
-the file already on show, and `Enter` opens the difftool on it. `p` or `Esc` hands the keys back to the
+the file already on show, and `Enter` opens the difftool on it. `Esc` hands the keys back to the
 region that had them — tree or box — and leaves the pane where it was; `tab` moves them on to the box,
-because a region you can only leave by backing out of is not a stop on a ring; `q` closes the preview,
-while `q` on the list still quits. While the pane holds the keys nothing that changes the review can happen —
+because a region you can only leave by backing out of is not a stop on a ring. `p` pressed where the diff
+already holds the keys does nothing, rather than meaning the opposite of what it means in the list, and
+`q` quits from the pane as it quits from everywhere else — the pane is one `p` away and the marks are on
+disk, so nothing is at stake in the difference. While the pane holds the keys nothing that changes the review can happen —
 marking, editing, threading and
 submitting are keys that do not occur, which is the whole-screen preview's promise extended to a
 column that never hid its list. The frame says which column has the keys by changing what is drawn
@@ -1740,8 +1749,9 @@ the comparison they keep. A ref that no longer resolves is not drift — there i
 Suggested bindings:
 
 ```text
-j/k      navigate the whole list
-Tab      switch between the file section and the changeset section
+j/k      navigate the region that holds the keys
+Tab      move the keys around the ring: file tree, diff where there is room for one, changeset box
+         (shift-tab the other way); f and m name a region from wherever the keys are
 h/l      fold and unfold the directory under the cursor (left and right arrows do the same);
          h from a file or a closed directory moves up to the directory holding it
 c        fold the whole tree, and open it again
@@ -1753,9 +1763,9 @@ d        open the difftool for the selected row: for a file, or for a directory 
          already existed where the span starts — otherwise the document opens in the editor,
          with a note naming the reason
 e        open the selected row in the editor, whatever the span did
-p        move the keys into the diff preview column, or back out of it (wide terminals);
-         where the terminal is too narrow for a second column it takes the screen for the
-         diff instead, since there is no column to move into
+p        move the keys into the diff preview column (wide terminals); inert where the diff already
+         has them. Where the terminal is too narrow for a second column it takes the screen for the
+         diff instead, since there is no column to move into, and is inert there too
 ctrl-f   page the preview down
 ctrl-b   page the preview up
 Space    toggle reviewed for a file row, or for every file under a directory row
@@ -1764,8 +1774,9 @@ In the preview column, after p:
 j/k      scroll the diff a row; ctrl-d/ctrl-u half a page, ctrl-f/ctrl-b a page,
          gg the top, G the bottom
 Enter    open the difftool on the file the pane is showing
-p, Esc   hand the keys back to the list, leaving the pane where it is in the file
-q        close the preview — from the list, q quits
+Esc      hand the keys back to the region that had them, leaving the pane where it is in the file
+Tab, f, m  move the keys to another region, as they do from the list
+q        quit — from here as from anywhere else
 
 a        open ABOUT.md
 t        create a review thread
@@ -1778,7 +1789,7 @@ V        open the span picker: pending base and head, applied together on enter
 r        re-pin a ref endpoint that has moved (offered by the drift banner, which is only on
          screen when there is something to re-pin)
 s        submit review (block / feedback / approve)
-q        quit
+q        quit, from whichever region holds the keys
 ```
 
 Submitting review may either occur within the TUI or through the CLI.
@@ -2490,14 +2501,14 @@ into a GitHub/GitLab PR description while keeping the repository version as the 
 Suggested defaults:
 
 ```text
-j/k      move through the list: files, then the changeset section
-Tab      switch between the two sections
+j/k      move through the region that holds the keys
+Tab      move the keys around the ring: files, diff, changeset section (f and m name one)
 Enter    activate the selected row: diff a file, diff or read a changeset document
          (whichever gives a real comparison), collapse the thread list, create a thread
 d        open the difftool for the selected row, falling back to the editor with a note
 e        edit the selected file or document
-p        move the keys into the diff preview column, or back out of it; where there is no
-         second column, it takes the screen for the diff
+p        move the keys into the diff preview column; inert where the diff already has them.
+         Where there is no second column, it takes the screen for the diff
 ctrl-f   page the preview down
 ctrl-b   page the preview up
 Space    mark file reviewed/unreviewed

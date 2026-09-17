@@ -920,10 +920,10 @@ top, the changed files and their marks below it, and the reviewed counter under 
 │     + new thread…                    │
 ╰──────────────────────────────────────╯
 
-▾ ○ src/
-  ▾ ○ ui/
-      ○ picker.ts
-  ○ a.ts
+  ▾ ○ src/
+    ▾ ○ ui/
+        ○ picker.ts
+    ○ a.ts
 
 0 / 2 reviewed
 ────────────────────────────────────────
@@ -944,6 +944,10 @@ nothing.
 directory holding nothing but one directory is folded into that row (`src/` above holds `a.ts` and
 `ui/`, so it gets its own row; a chain of single-child directories would be one row and print
 `docs/plans/active/`), and every row prints only the name the rows above it have not already said.
+Each level is indented one step deeper than the row above it, so a child starts right of its own
+directory rather than under its name — a directory row spends two cells on its fold arrow and two more on
+its mark gutter, and an indent the width of that prefix would put every child's mark in the column its
+parent's mark started at, which is a flat list with arrows in it.
 `h` and `l` fold and unfold the directory under the cursor — arrows do the same, and `Enter` does
 both, the way it does for the thread heading — and `c` folds the whole tree and opens it again,
 which is how a changeset of a hundred files gets read for shape before it gets read for detail.
@@ -978,8 +982,10 @@ whatever the session visited next, and getting to a span you can review in one k
 whose head column always offers `Current`. A stop whose commit, tag or ref has since gone is stepped
 over and named on the status line, reason included — the span stays on the ring, so a tag that comes
 back is a stop again; `s` opens a submit prompt taking `b`, `f` or `a`; `q` quits.
-A thread created from the list is written, opened in the editor, and left selected, so the
-reviewer can fill it in and come straight back to it. The thread heading counts what it hides —
+A thread created from the list is written, opened in the editor, and left selected in the box, so the
+reviewer can fill it in and come straight back to it; the preview keeps showing the file it was showing,
+because the row it reads that diff from is the file tree's cursor, which a thread has no business moving.
+The thread heading counts what it hides —
 `▸ Threads (3)` collapsed, plain `▾ Threads` once the threads are on screen — and a rule
 separates the whole list from the shortcut bar, so the bar reads as chrome rather than as more
 rows.
@@ -993,7 +999,11 @@ when rows are off screen the bottom border says how many (`3 more`), which is a 
 rather than a row of its own because a note that came and went would move the whole layout. The borders
 are also the box's focus light: single rules while the keys are elsewhere, double rules (`╔ ═ ╗`) while
 the box holds them, the same convention the divider uses for the diff and for the same reason — bold and
-faint are the one thing a terminal is not obliged to render.
+faint are the one thing a terminal is not obliged to render. The box is closed on all four sides in both
+layouts: leaving its right side open where the diff column is drawn made the rows inside it read as a
+column of loose text rather than as the changeset's own block, and a rule two cells away is not the same
+rule. Its cursor row is highlighted only while the box holds the keys — the borders already say that much,
+and a row that looks chosen and is not is a row a reviewer marks by mistake.
 
 The span is the box's one control. Its row ends in `▸`, and `Enter` or `Space` on it opens the span
 picker, because what a review is measured against is worth choosing; `base` above it is a line of the
@@ -1014,18 +1024,20 @@ and a line too wide for the column is broken rather than cut, with its colour ca
 Tabs are shown as the spaces they advance to, because a tab the width maths scores as zero is a row the
 terminal wraps for you.
 
-`p` moves into the pane rather than switching it off: the keys go to the diff, and it scrolls with the
+`p` moves into the pane and does nothing else: the keys go to the diff, and it scrolls with the
 keys the whole-screen preview uses — `j`/`k` a row, `ctrl-d`/`ctrl-u` half a page, `ctrl-f`/`ctrl-b` a
 page, `gg` the top and `G` the bottom — over the file the pane was already showing. Paging a diff that
 way is the whole point: the four page keys belong to whichever region holds them, so a diff too long to
 fit is paged by moving into it rather than by borrowing the list's keys from across the screen.
-`Enter` there opens the difftool on that file, which is the key the pane's own note points at. `p` or
-`Esc` hands the keys back to the region that had them — the tree, or the box if the keys came from the
-box — and leaves the pane where it was, so coming back returns to the same lines; `q` closes the
-preview, because `q` means "finished with this" wherever it is pressed and the pane is what you were
-finishing with — quitting stays on the list, where it always was. `tab`, `shift-tab`, `f` and `m` leave
-the pane too: the diff is a stop on the ring like the other two, and a ring you can only leave by backing
-out of it is not a ring. While the diff holds the keys nothing
+`Enter` there opens the difftool on that file, which is the key the pane's own note points at. `Esc`
+hands the keys back to the region that had them — the tree, or the box if the keys came from the box —
+and leaves the pane where it was, so coming back returns to the same lines. `p` does not do that: pressed
+where the diff already holds the keys it is the no-op its name promises, because a key that meant "the
+diff" in one region and "not the diff" in the one it just moved you to has to be remembered rather than
+read off the screen. `q` quits, as it does from every other part of the screen. `tab`, `shift-tab`, `f`
+and `m` leave the pane without quitting: the diff is a stop on the ring like the other two, and a ring
+you can only leave by backing out of it is not a ring. What `p` no longer does is hide the pane — in a
+terminal with room for two columns the diff is on screen, and the key that leaves it alone is `Esc`. While the diff holds the keys nothing
 that changes the review happens: `Space`, `e`, `t`, `s` and the rest are keys that do not occur, the
 same promise the whole-screen preview makes, with the difference that here the list is still on the
 screen and the row you are not marking is one you can see. The frame says which column has the keys
@@ -1036,17 +1048,17 @@ all. The shortcut bar becomes the pane's own, which names every key the pane rea
 it does not.
 
 Below those dimensions there is no room for two columns, and the person who pressed `p` wanted the
-diff — so `p` gives the diff the whole screen. This is the one place `p` still means toggle: with no
-second column to move into, taking the screen and taking the keys are the same act. A terminal dragged
+diff — so `p` gives the diff the whole screen, which is the same request answered as well as the window
+allows. Pressed there it is inert, since the diff already has the screen and the keys. A terminal dragged
 below those dimensions while the pane has the keys loses both — a column that is not drawn cannot hold
 the keyboard, and the list takes the keys back. Same git bytes, same numbers, same wrapping, full
 width, with the file and the span it is measured against on the line above it (the span is named in
 the list otherwise, and the list is gone). It scrolls with `j`/`k`, `ctrl-d`/`ctrl-u` for half a page,
-`ctrl-f`/`ctrl-b` for a page, `gg` for the top and `G` for the bottom, and gives the list back on `q`,
-`Esc`, `Enter` — or `p`, which opened it. Keys mean what this screen's shortcut bar says they mean
-while it is up, which is why `q` closes rather than quits (press it twice to leave) and `ctrl-d`
-pages rather than quits; nothing else reaches through, because a reviewer who cannot see the list must
-not be able to mark a file in it. Closing keeps the place: `p`, `q`, `p` returns to the same lines.
+`ctrl-f`/`ctrl-b` for a page, `gg` for the top and `G` for the bottom, and gives the list back on `Esc`
+or `Enter`. Keys mean what this screen's shortcut bar says they mean while it is up — including `q`,
+which quits here too, and `ctrl-d`, which pages rather than quits; nothing else reaches through,
+because a reviewer who cannot see the list must not be able to mark a file in it. Closing keeps the
+place: `p`, `Esc`, `p` returns to the same lines.
 Reading a historical span this way works the same — reading is what a read-only span is for. Under 40
 columns or 12 rows even this is unreadable, and the key says which way the terminal is short, naming
 the smaller of the two asks because that is the one worth growing to.
