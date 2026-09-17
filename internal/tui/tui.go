@@ -882,12 +882,14 @@ func (m reviewModel) openThreadTitle(title string) (tea.Model, tea.Cmd) {
 	if created {
 		note = "Created " + path
 	}
-	// The new file belongs in the section the reviewer was just in, so put the cursor on
-	// it instead of leaving them where the prompt started.
+	// The new file belongs in the box the reviewer was just reading, so the box's cursor goes to
+	// it. The file tree's cursor is left alone: it is the row the preview is showing, and coming
+	// back from the editor to a different diff than the one you left is the one thing a handoff
+	// should not do.
 	m.refresh()
 	for i, r := range m.rows {
 		if r.kind == rowThread && r.path == path {
-			m.cursor = i
+			m.metaCursor = i
 			break
 		}
 	}
@@ -1191,13 +1193,13 @@ func (m reviewModel) boxInner() int {
 // borders are the box's focus light, the same job the double rule does for the preview: faint when the
 // keys are elsewhere, bold when the box holds them.
 func (m reviewModel) boxLines(section []renderedRow) []string {
-	f, closeTop, closeBottom := m.boxFrame()
+	f := m.boxFrame()
 	frame := styleDim.Render
 	if m.metaHasFocus() {
 		frame = styleActive.Render
 	}
 	width := m.listWidth()
-	out := []string{frame(boxEdge(f.cornerTop, closeTop, f.edge, clip(m.sess.Header().Title, m.boxInner()), width))}
+	out := []string{frame(boxEdge(f.cornerTopLeft, f.cornerTopRight, f.edge, clip(m.sess.Header().Title, m.boxInner()), width))}
 	out = append(out, m.boxLine(f, m.baseLine(), false))
 	for _, r := range section {
 		out = append(out, m.boxLine(f, m.rowText(r.row), m.metaCursor == r.index))
@@ -1208,7 +1210,7 @@ func (m reviewModel) boxLines(section []renderedRow) []string {
 	if hidden := len(m.metaRows()) - m.metaScroll - m.metaWindow(); hidden > 0 {
 		more = fmt.Sprintf("%d more", hidden)
 	}
-	return append(out, frame(boxEdge(f.cornerBottom, closeBottom, f.edge, more, width)))
+	return append(out, frame(boxEdge(f.cornerBottomLeft, f.cornerBottomRight, f.edge, more, width)))
 }
 
 // boxFrame is the changeset box's border set, which is also the box's focus light: single rules while
@@ -1217,27 +1219,34 @@ func (m reviewModel) boxLines(section []renderedRow) []string {
 // terminal is not obliged to render, and a focus the reviewer cannot see is a focus that eats
 // keystrokes.
 type boxFrame struct {
-	cornerTop, cornerBottom, vertical, edge string
+	cornerTopLeft, cornerTopRight, cornerBottomLeft, cornerBottomRight string
+	vertical, edge                                                     string
 }
 
+// The box is closed on all four sides whatever else is on the screen. An earlier version left the right
+// side open when the preview column was drawn, on the grounds that the divider was already a rule two
+// cells away; a box with no right side is not a box, and the rows inside it read as a column of text
+// instead of as the changeset's own block.
 var (
-	frameIdle   = boxFrame{cornerTop: "\u256d", cornerBottom: "\u2570", vertical: "\u2502", edge: "\u2500"}
-	frameActive = boxFrame{cornerTop: "\u2554", cornerBottom: "\u255a", vertical: "\u2551", edge: "\u2550"}
+	frameIdle = boxFrame{
+		cornerTopLeft: "\u256d", cornerTopRight: "\u256e",
+		cornerBottomLeft: "\u2570", cornerBottomRight: "\u256f",
+		vertical: "\u2502", edge: "\u2500",
+	}
+	frameActive = boxFrame{
+		cornerTopLeft: "\u2554", cornerTopRight: "\u2557",
+		cornerBottomLeft: "\u255a", cornerBottomRight: "\u255d",
+		vertical: "\u2551", edge: "\u2550",
+	}
 )
 
-// boxFrame is the frame to draw with, and the two glyphs that close its borders at the right. Where
-// there is a preview column the box is open on that side -- the divider is already a rule one cell
-// away, and two rules that close together read as one rule drawn twice.
-func (m reviewModel) boxFrame() (f boxFrame, closeTop, closeBottom string) {
-	f = frameIdle
+// boxFrame is the frame to draw with: single rules while another region holds the keys, double while
+// the box holds them.
+func (m reviewModel) boxFrame() boxFrame {
 	if m.metaHasFocus() {
-		f = frameActive
+		return frameActive
 	}
-	closeTop, closeBottom = f.cornerTop, f.cornerBottom
-	if m.paneWidth() > 0 {
-		closeTop, closeBottom = f.edge, f.edge
-	}
-	return f, closeTop, closeBottom
+	return frameIdle
 }
 
 // boxEdge is one border of the box, with a label in it where there is one to say. The rule between the
@@ -1254,26 +1263,17 @@ func boxEdge(left, right, rule, label string, width int) string {
 	return left + body + strings.Repeat(rule, fill) + right
 }
 
-// boxLine is one row inside the box. The highlight covers the row's text rather than the row's width:
-// inside a border that spans the column, a full-width bar would read as a selection of the whole box.
+// boxLine is one row inside the box. The cursor is highlighted only while the box holds the keys: the
+// borders already say which region has them, and a row of the box wearing a highlight the keys cannot
+// reach is a row that looks chosen and is not. The highlight covers the row's text rather than the
+// row's width -- inside a border that spans the column, a full-width bar would read as a selection of
+// the whole box.
 func (m reviewModel) boxLine(f boxFrame, text string, cursor bool) string {
 	inner := m.boxInner()
-	if cursor {
+	if cursor && m.metaHasFocus() {
 		text = styleSelected.Render(text)
-		if !m.metaHasFocus() {
-			text = styleIdle.Render(text)
-		}
 	}
-	return f.vertical + " " + padRight(clip(text, inner), inner) + m.boxGap(f)
-}
-
-// boxGap closes a row of the box: the border, or the two spaces where the preview column already draws
-// a rule one cell away. The width is the same either way, which is what keeps the divider in one column.
-func (m reviewModel) boxGap(f boxFrame) string {
-	if m.paneWidth() > 0 {
-		return "  "
-	}
-	return " " + f.vertical
+	return f.vertical + " " + padRight(clip(text, inner), inner) + " " + f.vertical
 }
 
 // listBlock is the list column on its own: the changeset box, the file tree, and the reviewed counter.
@@ -1405,7 +1405,9 @@ func (m reviewModel) helpText() string {
 	case modeSpan:
 		return helpSpan(m.pick.list != nil, m.pick.nav)
 	case modePreview:
-		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  p q esc enter close"
+		// The overlay's own keys. `p` is not among them: the diff already has the screen and the keys,
+		// and `q` means what it means everywhere else. `esc` (or `enter`) is the way back to the list.
+		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  esc enter back  q quit"
 	}
 	return m.helpTextFor(m.focus)
 }
@@ -1425,8 +1427,8 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 	if target == focusPreview {
 		// The pane reads nothing that changes the review, so its bar says what its two exits are rather
 		// than pretending the rest of the screen is available.
-		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  enter diff  p esc back  " +
-			"tab cycles  f files  m changeset  q close preview"
+		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  enter diff  esc list  " +
+			"tab cycles  f files  m changeset  q quit"
 	}
 	threads := "T show threads"
 	if m.threadsOpen {
@@ -1683,8 +1685,10 @@ func (m *reviewModel) buildRows() {
 // region keeps its own cursor, so Tab returns to the row it left rather than to the top.
 
 // The two columns the file tree spends on itself: the indent one level costs, and the fold arrow a
-// directory row puts before its mark. Both are two cells, which is what makes a directory's children
-// land in the column its own mark gutter starts at.
+// directory row puts before its mark. A row is indented by one step *plus* one per level, because the
+// prefix of its parent's row is the fold arrow and the mark gutter: indenting only by depth would land
+// every child's name in exactly the column its parent's name started in, and the tree would read as a
+// flat list with arrows in it.
 const treeIndent = "  "
 
 // rowText renders one row. Only the file tree carries a reviewed mark: the artifacts below the
@@ -1696,7 +1700,7 @@ func (m reviewModel) rowText(r row) string {
 		if !m.folded[r.path] {
 			arrow = "▾ "
 		}
-		text := strings.Repeat(treeIndent, r.depth) + styleDim.Render(arrow)
+		text := strings.Repeat(treeIndent, r.depth+1) + styleDim.Render(arrow)
 		if m.sess.Span().CanMark() {
 			text += m.dirGutter(r)
 		}
@@ -1708,7 +1712,7 @@ func (m reviewModel) rowText(r row) string {
 		}
 		return text + r.name
 	case rowFile:
-		text := strings.Repeat(treeIndent, r.depth)
+		text := strings.Repeat(treeIndent, r.depth+1)
 		if m.sess.Span().CanMark() {
 			text += m.fileGutter(r)
 		}
@@ -2297,12 +2301,15 @@ func (m *reviewModel) forgetPatches() {
 // It decides what is on show and fetches nothing. Update asks the preview what it needs after every
 // key, so a handler that fetched as well would ask git twice for the same file -- which is exactly
 // what this function did until the overlay's tests noticed two batches arriving for one keystroke.
+// togglePreview is `p`: it moves the keys into the diff, and it does nothing else. It used to give
+// them back as well, which made one key mean two opposite things depending on where the keys already
+// were -- so the key had to be remembered rather than read off the screen. Esc hands the keys back,
+// and `p` pressed where the diff already has them is the no-op its name promises. In a terminal with no
+// room for a column it gives the diff the whole screen, which is the same request answered as well as
+// the window allows, and from that screen it is inert.
 func (m reviewModel) togglePreview() (tea.Model, tea.Cmd) {
-	if m.mode == modePreview {
-		return m.closePreview()
-	}
-	if m.previewHasFocus() {
-		return m.leavePreview()
+	if m.mode == modePreview || m.previewHasFocus() {
+		return m, nil
 	}
 	if m.previewOn && m.paneWidth() > 0 {
 		m.focusOn(focusPreview)
@@ -2335,8 +2342,9 @@ func (m reviewModel) closePreview() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// leavePreview gives the keys back to the region they came from. The pane stays where it is, including
-// where it is in the file, so `p` twice returns to the same lines rather than to its top.
+// leavePreview gives the keys back to the region they came from -- `esc`, and the only key that does:
+// `p` moves into the diff and no longer moves out of it. The pane stays where it is, including where it
+// is in the file, so coming back returns to the same lines rather than to its top.
 func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 	if m.mode == modePreview {
 		return m.closePreview()
@@ -2348,25 +2356,9 @@ func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// dismissPreview takes the diff off the screen: the overlay closes, and in the pane layout the preview
-// closes with it, because `q` means "finished with this" wherever it is pressed and the only thing left
-// to finish with is the pane. Quitting stays where the session put it, in the list.
-func (m reviewModel) dismissPreview() (tea.Model, tea.Cmd) {
-	if m.mode == modePreview {
-		return m.closePreview()
-	}
-	m.previewOn = false
-	m.focus = m.prevFocus
-	m.previewG = false
-	m.clamp()
-	m.setStatus("", false)
-	return m, nil
-}
-
-// handleDiffKey is everything the diff reads, in either layout: it scrolls with the vim primitives, and
-// the keys that gave it the screen -- or the keys -- give it back. What that means is the layout's: the
-// overlay closes, the pane hands the keys to the list, and `q` closes the preview instead of quitting
-// the session.
+// handleDiffKey is everything the diff reads, in either layout: it scrolls with the vim primitives,
+// `esc` gives the keys back, `tab`/`f`/`m` move them to another region, and `q` quits the session as it
+// does everywhere else. For the overlay, `esc` closes the screen as well as returning the keys.
 //
 // Nothing else reaches through. That is what a mode buys over a flag, and a focus buys over a pane that
 // is merely drawn: a reviewer must not be able to mark a file they are not looking at, submit a review
@@ -2401,7 +2393,10 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	overlay := m.mode == modePreview
 
 	switch {
-	case key.Type == tea.KeyEsc, key.Type == tea.KeyRunes && firstRune(key) == 'p':
+	// `esc` gives the keys back. `p` does not: it is the key that moves *into* the diff, and a key
+	// that meant "the diff" in one region and "not the diff" in this one had to be remembered rather
+	// than read. Pressed here it is the no-op its name promises.
+	case key.Type == tea.KeyEsc:
 		return m.leavePreview()
 	// The ring, from inside the diff. Over the overlay there is nowhere to go -- the screen is nothing
 	// but the diff, and moving the keys to a region that is not drawn is how keys get lost.
@@ -2418,7 +2413,12 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focusOn(focusMeta)
 		return m, nil
 	case key.Type == tea.KeyRunes && firstRune(key) == 'q':
-		return m.dismissPreview()
+		// `q` quits here as it does everywhere else. It used to close the preview, which made the one
+		// key with a settled meaning across the whole program -- leave -- mean something else in the
+		// one column a reviewer is most likely to be looking at. Nothing is lost by it: the pane is
+		// `p` away, the marks are on disk, and the screen that closes the overlay is `esc`.
+		m.quitting = true
+		return m, tea.Quit
 	case key.Type == tea.KeyEnter:
 		// Over the overlay enter closes: the screen is the diff already, and the difftool was what `p`
 		// was asked for. In the pane it is the key the pane's own note points at, and it opens the file

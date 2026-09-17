@@ -216,28 +216,45 @@ func TestNothingThatChangesTheReviewHappensWhileThePaneHasTheKeys(t *testing.T) 
 	}
 }
 
-func TestQFromThePaneClosesThePreviewAndNotTheSession(t *testing.T) {
+// `q` means leave, in the diff as everywhere else. It used to close the pane, which put a second
+// meaning on the one key a reviewer never has to think about -- and the pane it closed is one keystroke
+// away, on a session whose marks are already on disk.
+func TestQQuitsFromThePaneAsItDoesEverywhere(t *testing.T) {
 	m := focusPane(t, focusFixture(t, 40))
 	m = paneKey(t, m, runeKey('q'))
 
-	if m.quitting {
-		t.Error("`q` in the preview quit the session; quitting is the list's key")
+	if !m.quitting {
+		t.Errorf("`q` in the preview did not quit: mode %v, focus %v", m.mode, m.focus)
 	}
-	if m.previewOn || m.previewHasFocus() {
-		t.Errorf("`q` left the preview on screen: previewOn=%v focus=%v", m.previewOn, m.focus)
+}
+
+// `p` moves the keys into the diff, and stops there. Pressed where the diff already holds them it does
+// nothing at all -- not a hand back, not a close -- so the key means one thing read off the bar rather
+// than something that depends on where the keys already were.
+func TestPDoesNotCycleThePreviewBackOut(t *testing.T) {
+	m := focusPane(t, focusFixture(t, 40))
+	before := m.previewOffset
+	m = paneKey(t, m, runeKey('j'))
+	m = paneKey(t, m, runeKey('p'))
+
+	if m.quitting || m.mode != modeFiles || !m.previewHasFocus() {
+		t.Errorf("p in the pane gave mode %v focus %v quitting=%v, want the diff left holding the keys",
+			m.mode, m.focus, m.quitting)
 	}
-	if m.mode != modeFiles {
-		t.Errorf("`q` left the session in mode %v", m.mode)
+	if m.previewOffset <= before {
+		t.Errorf("the scroll moved from %d to %d, so the keys left the diff anyway", before, m.previewOffset)
 	}
 
-	// Closing is not forgetting: `p` puts the pane back, and puts it back unfocused, because the
-	// reviewer asked to look at it and not to be trapped in it.
-	m = paneKey(t, m, runeKey('p'))
-	if !m.previewOn || m.paneWidth() == 0 {
-		t.Error("`p` after `q` did not bring the pane back")
+	// `esc` is the way back, and it keeps the place: the pane stays on screen, still reading from the
+	// same line, so coming back with `p` returns to the same diff at the same point.
+	m = paneKey(t, m, keyMsg(tea.KeyEsc))
+	if m.previewHasFocus() || !m.previewOn || m.paneWidth() == 0 {
+		t.Fatalf("esc took the pane off the screen: focus %v, pane %d", m.focus, m.paneWidth())
 	}
-	if m.previewHasFocus() {
-		t.Error("`p` after `q` took the keys as well as showing the pane")
+	at := m.previewOffset
+	m = paneKey(t, m, runeKey('p'))
+	if m.previewOffset != at {
+		t.Errorf("`p` after `esc` reset the diff from %d to %d", at, m.previewOffset)
 	}
 }
 
@@ -357,8 +374,8 @@ func TestTheFocusedColumnSaysSo(t *testing.T) {
 	if got := ruleAt(focused, at); got != "║" {
 		t.Errorf("the divider draws %q rather than the double rule that says which column has the keys:\n%s", got, focused)
 	}
-	if !strings.Contains(focused, "q close preview") {
-		t.Errorf("the bar does not name the key that closes the preview:\n%s", focused)
+	if !strings.Contains(focused, "q quit") {
+		t.Errorf("the bar does not name the key that leaves the program:\n%s", focused)
 	}
 	// The bar is the whole set of what the pane reads: a key left on it would be a key promised and
 	// not delivered, which is the failure the read-only bar is careful about for a different reason.
@@ -373,15 +390,16 @@ func TestTheFocusedColumnSaysSo(t *testing.T) {
 // the whole screen and gives it back. Nothing about the focus applies, because there is no pane to
 // move into — which is what these assert, alongside the overlay's own keys that the overlay tests
 // already cover.
-func TestTheOverlayStillTogglesRatherThanTakingFocus(t *testing.T) {
+func TestTheOverlayStillTakesTheWholeScreenRatherThanAColumn(t *testing.T) {
 	m := openOverlay(t, overlayModel(t, 40))
 	if m.previewHasFocus() {
 		t.Error("opening the overlay set the pane's flag; the two layouts are not the same thing")
 	}
 
-	rm := paneKey(t, m, runeKey('p'))
+	// `esc` is the way out of it, and it does not leave a column behind.
+	rm := paneKey(t, m, keyMsg(tea.KeyEsc))
 	if rm.mode != modeFiles {
-		t.Errorf("`p` in the overlay did not close it (mode %v, status %q)", rm.mode, rm.status)
+		t.Errorf("`esc` in the overlay did not close it (mode %v, status %q)", rm.mode, rm.status)
 	}
 	if rm.previewHasFocus() {
 		t.Error("closing the overlay left the pane flag set")
