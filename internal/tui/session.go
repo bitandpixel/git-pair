@@ -231,26 +231,38 @@ func (s *Session) Reload(ctx context.Context) error {
 	return nil
 }
 
-// StepSpan moves to the next span this session has been in, wrapping: the span it opened
-// on, the two presets, and any span the reviewer chose with `V`. Walking the ring is what
-// makes a custom span reachable again without opening the picker, and the presets stay
-// reachable from a custom span rather than being replaced by it.
+// StepSpan moves to the next span this session has been in, wrapping: the span it opened on, the
+// two presets, and any span the reviewer chose with `V`. Walking the ring is what makes a custom
+// span reachable again without opening the picker, and the presets stay reachable from a custom span
+// rather than being replaced by it.
 //
-// From a read-only span the step goes back to the last span the reviewer could review
-// instead, because that is what `v` is for there: the screen has just refused to mark
-// something, and the message named `v` as the way out. Stepping into another read-only span
-// would break that promise, and `V` remains the way to compare two pieces of history.
-//
-// A stop that no longer resolves — the review ref it named is gone, the branch was deleted
-// — leaves the session where it was: a span is only ever replaced by a whole span that
-// works. It returns the stop's 1-based position and the number of stops.
+// It is a walk, so every stop is reachable from every other. That matters more than it sounds: the
+// step used to jump out of a read-only span unconditionally, which made the *second* historical span
+// on the ring unreachable -- `v` closed a loop between the last reviewable stop and the first
+// historical one, and the reviewer's word for it was "stuck cycling".
 func (s *Session) StepSpan(ctx context.Context) (pos, total int, err error) {
+	return s.step(ctx, false)
+}
+
+// StepOut is what `v` means when the screen has just refused the reviewer something: back to the last
+// span they could review, not whatever sits next. The refusal message names `v` as the way out, and a
+// reviewer who cannot mark a file is not walking the ring -- they are leaving. The credit for that is
+// the refusal's, spent on the next press, so a reviewer comparing two pieces of history keeps their
+// walk.
+func (s *Session) StepOut(ctx context.Context) (pos, total int, err error) {
+	return s.step(ctx, true)
+}
+
+// A stop that no longer resolves -- the review ref it named is gone, the branch was deleted -- leaves
+// the session where it was: a span is only ever replaced by a whole span that works. Both step
+// functions return the stop's 1-based position and the number of stops.
+func (s *Session) step(ctx context.Context, escaping bool) (pos, total int, err error) {
 	total = len(s.ring)
 	if total < 2 {
 		return 1, total, fmt.Errorf("this session has only been in this span so far \u2014 V chooses another")
 	}
 	target := (s.ringIdx + 1) % total
-	if s.current.Historical() {
+	if escaping && s.current.Historical() {
 		if live := s.liveStop(); live >= 0 && live != s.ringIdx {
 			target = live
 		}

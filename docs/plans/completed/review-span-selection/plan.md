@@ -356,6 +356,23 @@ Verification:
   `refs/reviews/booking` keeps its full name rather than becoming a bare `booking` beside the branch
   of that name.
 
+## Correction after archiving: `v` was cycling in place
+
+M3b's rule — "from a read-only span, `v` goes back to the last span you could review" — was applied
+to *every* step out of a historical span. Two historical spans on the ring therefore could not be
+reached from each other: the walk closed a loop between the last reviewable stop and the first
+historical one, and the second was unreachable by any number of presses. The report was "v gets stuck
+cycling through… first to last and back to first".
+
+The rule was right about the need and wrong about the trigger. A reviewer who cannot mark a file is
+leaving; a reviewer pressing `v` is walking. So the escape is now earned by a refusal: the read-only
+gate credits the next `v`, and that press alone means "get me out" (`Session.StepOut`), while every
+other press is the plain walk (`Session.StepSpan`). The tests are `TestSessionStepSpanReachesEveryStop`
+(the loop, as reported), `TestSessionStepOutGoesWhereStepSpanWouldNot`,
+`TestARefusalMakesTheNextVMeanGetMeOut` and `TestVWithoutARefusalWalksEvenFromHistory`, and the
+mutant that restores the old behaviour is caught by three of them. Wherever this document says the
+step escapes from history, read "escapes when a refusal asked it to".
+
 ## Naming that changed after this plan was archived
 
 On the owner's request (2026-09-17, branch `gitpr/span-labels`) the endpoint vocabulary moved, so a

@@ -317,3 +317,76 @@ func TestLiveSpanStillCreatesAWorkingTreeAbout(t *testing.T) {
 		t.Errorf("%s was not created for a span the reviewer can edit", about)
 	}
 }
+
+// The model's half of `v`: a refusal is what turns the next press into the way out. Without one the
+// press is an ordinary step around the ring, because a reviewer comparing two pieces of history is
+// not stuck -- and stealing their next stop is the bug these two tests exist to keep apart.
+//
+// The fixture is built so the two answers differ: the ring is [history, full, unreviewed, custom],
+// the reviewer's own reviewable span is the last of them, and the next stop around the ring is not.
+func vRing(t *testing.T) reviewModel {
+	t.Helper()
+	ctx := context.Background()
+	m, f := readonlyModel(t, historySel())
+	if err := m.sess.SetSpan(ctx, span.Full()); err != nil {
+		t.Fatalf("SetSpan(full): %v", err)
+	}
+	custom := span.Selector{Base: span.Commit(f.Parent(f.Head())), Head: span.WorkingTree()}
+	if err := m.sess.SetSpan(ctx, custom); err != nil {
+		t.Fatalf("SetSpan(custom): %v", err)
+	}
+	if err := m.sess.SetSpan(ctx, historySel()); err != nil {
+		t.Fatalf("SetSpan(history): %v", err)
+	}
+	if _, total := m.sess.SpanPosition(); total != 4 {
+		t.Fatalf("the ring holds %d stops, want history, full, unreviewed and the custom span", total)
+	}
+	return m
+}
+
+func TestARefusalMakesTheNextVMeanGetMeOut(t *testing.T) {
+	m := vRing(t)
+
+	m = pressKey(t, m, runeKey('s'))
+	if !strings.Contains(m.status, "read-only") {
+		t.Fatalf("s was not refused on a historical span; status was %q", m.status)
+	}
+	m = pressKey(t, m, runeKey('v'))
+
+	pos, _ := m.sess.SpanPosition()
+	if pos != 4 {
+		t.Errorf("v after a refusal went to stop %d, want the span the reviewer was reviewing", pos)
+	}
+	if !m.sess.Span().Live() {
+		t.Errorf("the escape landed on %s, which is read-only as well", m.sess.Span().Label)
+	}
+}
+
+func TestVWithoutARefusalWalksEvenFromHistory(t *testing.T) {
+	m := vRing(t)
+
+	m = pressKey(t, m, runeKey('v'))
+
+	pos, _ := m.sess.SpanPosition()
+	if pos != 2 {
+		t.Errorf("v with nothing refused went to stop %d, want the next stop around the ring", pos)
+	}
+	m = pressKey(t, m, runeKey('v'))
+	if pos, _ = m.sess.SpanPosition(); pos != 3 {
+		t.Errorf("the second v went to stop %d, want it to keep walking", pos)
+	}
+	// The credit is worth one keystroke. Chosen history again (what `V` does), a refusal, then a key
+	// that is not `v` -- and the next `v` is a walk again, not an escape.
+	if err := m.sess.SetSpan(context.Background(), historySel()); err != nil {
+		t.Fatalf("SetSpan(history): %v", err)
+	}
+	m = pressKey(t, m, runeKey('s'))
+	if !strings.Contains(m.status, "read-only") {
+		t.Fatalf("s was not refused on history; status was %q", m.status)
+	}
+	m = pressKey(t, m, runeKey('j'))
+	m = pressKey(t, m, runeKey('v'))
+	if pos, _ = m.sess.SpanPosition(); pos != 2 {
+		t.Errorf("v after an unrelated key went to stop %d, want the walk to continue to stop 2", pos)
+	}
+}
