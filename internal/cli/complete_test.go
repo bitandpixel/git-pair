@@ -438,3 +438,44 @@ func TestChangeCompleteDriftFlagDoesNotOverrideABlock(t *testing.T) {
 	}
 	mustContain(t, res.stderr, "block", "the refusal must name the outcome that withholds integration")
 }
+
+// A review submission may carry the reviewer's own edits. The reviewed content is the
+// marker's tree, not its parent, so those files are not drift the author has to explain —
+// and a reply in ABOUT.md afterwards must not turn them into drift.
+func TestChangeCompleteDoesNotCountTheReviewersOwnEditsAsDrift(t *testing.T) {
+	f, slug := newChangeset(t, "booking-transaction", "main")
+	ready(t, f)
+	f.CommitReviewMarker(slug, "feedback",
+		gittest.WithFile("docs/reviewer-note.md", "Please use a transaction here.\n"))
+	// The author answers in the changeset directory, which is the one place a commit is
+	// always allowed.
+	f.Commit("author: addressed the note in ABOUT.md",
+		gittest.WithFile(f.ChangesetPath(slug, "ABOUT.md"), "# booking\n\nFixed.\n"))
+
+	res := runIn(t, f.Dir(), "change", "complete", "--allow-surviving-review-additions", "--json")
+	res.mustSucceed(t, "change", "complete", "--allow-surviving-review-additions")
+	if got := res.json(t)["acknowledged_unreviewed_paths"]; got != float64(0) {
+		t.Errorf("acknowledged_unreviewed_paths = %v, want 0: the reviewer's edits are the reviewed content, not drift\nstderr: %s",
+			got, res.stderr)
+	}
+}
+
+// The hatch is for drift and nothing else. A commit whose `Review-State:` git-pair cannot
+// honour leaves the tree unable to speak for it, and that refusal survives
+// `--allow-unreviewed-changes` — otherwise the flag would archive vocabulary the tool cannot
+// interpret, which is what the unreadable-marker rule exists to prevent.
+func TestChangeCompleteDriftFlagDoesNotCoverAnUnreadableMarker(t *testing.T) {
+	f, _, _, _ := approvedChangeset(t)
+	// A commit that announces itself with `Review-State:` in vocabulary this build has
+	// retired is the realistic case: git-pair refuses to honour it, and the tree cannot
+	// speak for it either.
+	f.CommitMessage("git-pair: close booking-transaction\n\nReview-State: closed\nReview-Changeset: booking-transaction\n",
+		gittest.WithEmpty())
+
+	res := runIn(t, f.Dir(), "change", "complete", "--allow-unreviewed-changes")
+	if res.code != exitRefusal {
+		t.Fatalf("completing over an unreadable marker exited %d, want %d\nstdout: %s",
+			res.code, exitRefusal, res.stdout)
+	}
+	mustContain(t, res.stderr, "unrecognised review marker", "the refusal must name the unreadable marker")
+}

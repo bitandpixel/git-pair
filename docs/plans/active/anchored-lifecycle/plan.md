@@ -222,14 +222,19 @@ BLOCKED through an author's fix commit. `mise run check`, `e2e-29.sh` and `pty-w
   when the newest marker is an approve or feedback and `Drifted` is non-empty, so it cannot walk
   past a `block` or a `change unready`, which have a different marker underneath. The count reaches
   `--json` as `acknowledged_unreviewed_paths`.
-- [x] Mutation-check the guard. Two notes from running it:
+- [x] Mutation-check the guard. Four notes from running it:
   - reversing the diff range is not a mutation — `git diff --name-only A B` reports the same path
     set as `B A`, so the comparison is symmetric and no test can see the swap;
   - comparing against the wrong end (`marker.SHA` instead of `headRef`) and pointing the exclusion
-    at a misspelled directory both turn tests red, as does dropping the marker-kind or drift
-    condition from the hatch.
-  - the harness for this must run against a committed tree: an early version reverted each mutation
-    with `git checkout -- <file>` and destroyed the uncommitted milestone it was meant to verify.
+    at a misspelled directory both turn tests red, as does dropping the outcome or drift condition
+    from the hatch;
+  - the mutation of the baseline caught a bug. `from` was `marker.SHA + "^"`, which is right only
+    while every marker is an empty commit. A review submission that carried the reviewer's edits
+    has its own tree, and that tree — not its parent — is the content that was reviewed, so an
+    author who replied in `ABOUT.md` afterwards was refused completion over the reviewer's own
+    files. The baseline is `marker.SHA`, with a test that pins it;
+  - the harness must run against a committed tree: two versions reverted each mutation with
+    `git checkout -- <file>` and destroyed the uncommitted milestone they were meant to verify.
 
 #### Verification
 

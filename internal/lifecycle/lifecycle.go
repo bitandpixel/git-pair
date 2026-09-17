@@ -319,16 +319,12 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 	}
 	marker := *s.Marker
 
-	// The marker is an empty commit, so its parent is the state that was
-	// approved. A marker that is also a root commit has no parent; the empty
-	// tree is the honest stand-in.
-	from := marker.SHA + "^"
-	if _, err := repo.RevParse(ctx, from); err != nil {
-		if !git.IsUnknownRevision(err) {
-			return s, err
-		}
-		from = git.EmptyTree
-	}
+	// The marker's own tree is the content that was reviewed. For the empty markers
+	// git-pair writes this is indistinguishable from its parent, and for a review
+	// submission that carried the reviewer's edits it is the only right answer: the
+	// parent is the state before the reviewer spoke, so comparing from there would
+	// count their own files as drift the author has to explain.
+	from := marker.SHA
 
 	if s.TrailingUnrecognised > 0 {
 		// The tree cannot speak for a trailer set git-pair cannot read.

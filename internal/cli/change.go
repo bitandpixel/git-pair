@@ -588,13 +588,14 @@ func runChangeComplete(ctx context.Context, a *app, opts *completeOptions) error
 }
 
 // driftOverWhichToProceed reports the one refusal an author may acknowledge: the newest
-// marker is an approve or feedback, and content outside changesets/<slug>/ has arrived on
-// top of it — a README typo fixed after the approval is the case this is for. A block is
-// not drift, and neither is `change unready`: there the newest marker is the withdrawal,
-// so no flag talks the changeset back into a reviewable state.
+// marker is a review permitting integration, and content outside changesets/<slug>/ has
+// arrived on top of it — a README typo fixed after the approval is the case this is for.
+// Only `Outcome` picks the marker: non-review markers carry the zero outcome, so a `block`
+// and a `change unready` fall through without a special case, and the drift requirement
+// keeps the hatch from swallowing a marker git-pair cannot read.
 func driftOverWhichToProceed(s lifecycle.Summary) bool {
 	m := s.Marker
-	return m != nil && m.Kind == lifecycle.KindReview && m.Outcome.PermitsIntegration() && len(s.Drifted) > 0
+	return m != nil && m.Outcome.PermitsIntegration() && len(s.Drifted) > 0
 }
 
 func printComplete(a *app, s *session, reviewed lifecycle.Summary, head, archiveRef string, created bool,
