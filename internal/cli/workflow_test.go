@@ -24,8 +24,9 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 
 	metadata := filepath.Join("changesets", slug, "CHANGESET.yaml")
 	about := filepath.Join("changesets", slug, "ABOUT.md")
-	if strings.TrimSpace(f.Read(metadata)) != "base: main" {
-		t.Fatalf("CHANGESET.yaml = %q, want base: main", f.Read(metadata))
+	wantMetadata := "id: " + slug + "\nbase: main\nbranch: " + slug
+	if got := strings.TrimSpace(f.Read(metadata)); got != wantMetadata {
+		t.Fatalf("CHANGESET.yaml = %q, want %q", got, wantMetadata)
 	}
 	if !f.HasWorktreeFile(about) {
 		t.Fatal("ABOUT.md was not scaffolded")

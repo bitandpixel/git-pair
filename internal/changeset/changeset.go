@@ -35,11 +35,26 @@ var (
 	ErrAboutConflict = errors.New("ABOUT.md already has content")
 	// ErrBaseIsOwnBranch means the base is the very branch the changeset lives on.
 	ErrBaseIsOwnBranch = errors.New("self-referential changeset base")
+	// ErrIDMismatch means a CHANGESET.yaml records an `id` that is not the name of the
+	// directory holding it.
+	ErrIDMismatch = errors.New("changeset id does not match its directory")
+	// ErrClaimConflict means two changeset directories in one tree name the same branch.
+	ErrClaimConflict = errors.New("two changeset directories claim this branch")
+	// ErrBranchTaken means a changeset directory already belongs to another branch.
+	ErrBranchTaken = errors.New("changeset belongs to another branch")
 )
+
+// ID is the changeset's canonical identity: the name of its directory, which is what
+// `changesets/<id>/` and the durable refs are named after. The field carrying it is
+// called Slug for historical reasons; it is the id, and the branch name is only where
+// the default came from (PRD §4).
 
 // Changeset is one branch's review state, located in the working tree.
 type Changeset struct {
-	Slug   string // filesystem name of the changeset directory
+	// Slug is the changeset ID: the filesystem name of its directory. It is the
+	// identity refs and JSON output name, and it is not derived from the branch except
+	// as the default `change init` suggests.
+	Slug   string
 	Branch string // branch it belongs to
 	// Base is the ref the changeset's diff is measured against. For stacked
 	// branches this is another changeset's branch name.
@@ -50,7 +65,15 @@ type Changeset struct {
 	// ForBranch can return such a value, so `change init` can report what it
 	// would create.
 	Exists bool
+	// RecordedBranch is the `branch:` value in CHANGESET.yaml, which is what makes a
+	// directory belong to a branch. Empty on a changeset written before the field
+	// existed, which is resolved by name instead (see resolve).
+	RecordedBranch string
 }
+
+// ID is the changeset ID, spelled out because callers report and compare it as the
+// changeset's name rather than as a directory.
+func (c Changeset) ID() string { return c.Slug }
 
 // Path joins parts onto the changeset directory.
 func (c Changeset) Path(parts ...string) string {
@@ -101,29 +124,132 @@ func isSlugChar(r rune) bool {
 	return false
 }
 
-// ForBranch resolves the changeset belonging to branch. Exists is false when
-// the directory is missing; Base is then empty.
+// ValidateID checks an explicit changeset ID against the character rule the derived
+// default obeys, so an `--id` is either accepted exactly as typed or refused. Silently
+// normalising `booking v2` into `booking-v2` would mean the caller's identity and the
+// one on disk are different things, and the refs would be named after neither.
+func ValidateID(id string) error {
+	if id == "" {
+		return errors.New("changeset id must not be empty")
+	}
+	if id == "." || id == ".." {
+		return fmt.Errorf("changeset id %q is not a usable directory name", id)
+	}
+	if strings.ContainsAny(id, "/\\") {
+		return fmt.Errorf("changeset id %q must not contain a path separator", id)
+	}
+	if strings.TrimSpace(id) != id {
+		return fmt.Errorf("changeset id %q must not have leading or trailing whitespace", id)
+	}
+	for _, r := range id {
+		if !isSlugChar(r) {
+			return fmt.Errorf("changeset id %q contains %q: ids use letters, digits, dot, underscore and hyphen", id, string(r))
+		}
+	}
+	if strings.HasPrefix(id, "-") || strings.HasSuffix(id, "-") || strings.Contains(id, "--") {
+		return fmt.Errorf("changeset id %q must not start, end or double up on hyphens", id)
+	}
+	return nil
+}
+
+// resolve picks the changeset directory belonging to branch out of the directories
+// present in one place — a working tree or a revision — read by read.
+//
+// Ownership is a claim, not a name. The directory belongs to the branch its
+// CHANGESET.yaml records, so a changeset may be called anything while its branch is
+// called something else, which is the point of separating the two (PRD §4). The
+// directory name carries the ID and says nothing about who owns it.
+//
+// A directory recording no branch predates the field. It falls back to the old rule —
+// its name must be the branch's name normalised — which gives exactly the answer the
+// old code gave, so an in-flight changeset is not stranded. That is not a second
+// dialect of the format: a claim always wins, and a directory that does record a branch
+// is honoured even when its name would have matched. That last part is what stops a
+// child branch from appearing to own the changeset it only inherited from its parent.
+func resolve(branch string, dirs []string, read func(name string) (map[string]string, error)) (Changeset, error) {
+	if branch == "" {
+		return Changeset{}, ErrDetachedHead
+	}
+	fallback, fallbackErr := SlugFromBranch(branch)
+	var claims []Changeset
+	var inherited *Changeset
+	for _, name := range dirs {
+		md, err := read(name)
+		if err != nil {
+			return Changeset{}, err
+		}
+		if id := md["id"]; id != "" && id != name {
+			return Changeset{}, fmt.Errorf("%w: %s records id %q but sits in %q; the directory name is the id, so rename the directory or correct %s",
+				ErrIDMismatch, filepath.Join(Root, name), id, name, MetadataFile)
+		}
+		c := Changeset{
+			Slug:           name,
+			Branch:         branch,
+			Dir:            filepath.Join(Root, name),
+			Exists:         true,
+			Base:           md["base"],
+			RecordedBranch: md["branch"],
+		}
+		switch {
+		case c.RecordedBranch == branch:
+			claims = append(claims, c)
+		case c.RecordedBranch == "" && name == fallback:
+			kept := c
+			inherited = &kept
+		}
+	}
+	switch {
+	case len(claims) > 1:
+		names := make([]string, len(claims))
+		for i, c := range claims {
+			names[i] = c.Dir
+		}
+		sort.Strings(names)
+		return Changeset{}, fmt.Errorf("%w: %s; %s and %s both record branch %q (PRD §5: a changeset id is unique)",
+			ErrClaimConflict, branch, names[0], names[1], branch)
+	case len(claims) == 1:
+		return claims[0], nil
+	case inherited != nil:
+		return *inherited, nil
+	}
+	if fallbackErr != nil {
+		return Changeset{}, fallbackErr
+	}
+	return Changeset{Slug: fallback, Branch: branch, Dir: filepath.Join(Root, fallback)}, nil
+}
+
+// worktreeDirs lists the changeset directories present on disk.
+func worktreeDirs(repo *git.Repo) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(repo.Dir, Root))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	sort.Strings(dirs)
+	return dirs, nil
+}
+
+// ForBranch resolves the changeset belonging to branch. Exists is false when no
+// directory claims it; Base is then empty.
 func ForBranch(repo *git.Repo, branch string) (Changeset, error) {
 	if branch == "" {
 		return Changeset{}, ErrDetachedHead
 	}
-	slug, err := SlugFromBranch(branch)
+	dirs, err := worktreeDirs(repo)
 	if err != nil {
 		return Changeset{}, err
 	}
-	c := Changeset{Slug: slug, Branch: branch, Dir: filepath.Join(Root, slug)}
-	abs := filepath.Join(repo.Dir, c.Dir)
-	info, err := os.Stat(abs)
-	if err != nil || !info.IsDir() {
-		return c, nil
-	}
-	c.Exists = true
-	md, err := readMetadata(filepath.Join(abs, MetadataFile))
-	if err != nil {
-		return c, err
-	}
-	c.Base = md["base"]
-	return c, nil
+	return resolve(branch, dirs, func(name string) (map[string]string, error) {
+		return readMetadata(filepath.Join(repo.Dir, Root, name, MetadataFile))
+	})
 }
 
 // AtCommit resolves the changeset that branch carries at its own tip, reading
@@ -136,23 +262,19 @@ func AtCommit(ctx context.Context, repo *git.Repo, branch string) (Changeset, er
 	if branch == "" {
 		return Changeset{}, ErrDetachedHead
 	}
-	slug, err := SlugFromBranch(branch)
+	dirs, err := DirsAt(ctx, repo, branch)
 	if err != nil {
 		return Changeset{}, err
 	}
-	c := Changeset{Slug: slug, Branch: branch, Dir: filepath.Join(Root, slug)}
-	md, err := metadataAt(ctx, repo, branch, c.Dir)
-	if err != nil {
+	return resolve(branch, dirs, func(name string) (map[string]string, error) {
+		md, err := metadataAt(ctx, repo, branch, filepath.Join(Root, name))
 		if errors.Is(err, git.ErrUnknownPath) {
-			// No CHANGESET.yaml at this commit: this branch carries no changeset,
-			// which is the common case, not a failure.
-			return c, nil
+			// A directory in the tree with no CHANGESET.yaml of its own: not a changeset,
+			// and no reason to fail the branch that happens to carry it.
+			return map[string]string{}, nil
 		}
-		return c, err
-	}
-	c.Exists = true
-	c.Base = md["base"]
-	return c, nil
+		return md, err
+	})
 }
 
 // metadataAt reads CHANGESET.yaml for a directory out of a revision.
@@ -224,8 +346,10 @@ func RequireCurrent(ctx context.Context, repo *git.Repo) (Changeset, error) {
 	return c, nil
 }
 
-// BranchesForSlug returns local branches whose slug matches the changeset name.
-func BranchesForSlug(ctx context.Context, repo *git.Repo, slug string) ([]string, error) {
+// BranchesForSlug returns local branches whose changeset is the one named id. A branch
+// matches when the directory claims it at that branch's own tip, so a child branch that
+// merely inherited the directory from its parent is not a carrier of it.
+func BranchesForSlug(ctx context.Context, repo *git.Repo, id string) ([]string, error) {
 	out, err := repo.Git(ctx, "for-each-ref", "--format=%(refname:short)", "refs/heads")
 	if err != nil {
 		return nil, err
@@ -235,7 +359,13 @@ func BranchesForSlug(ctx context.Context, repo *git.Repo, slug string) ([]string
 		if b == "" {
 			continue
 		}
-		if s, err := SlugFromBranch(b); err == nil && s == slug {
+		// An unreadable branch cannot claim the changeset, and one branch's broken
+		// metadata is no reason to refuse the question about every other branch.
+		cs, err := AtCommit(ctx, repo, b)
+		if err != nil {
+			continue
+		}
+		if cs.Exists && cs.Slug == id {
 			matches = append(matches, b)
 		}
 	}
@@ -286,6 +416,9 @@ type WriteOptions struct {
 	Base string
 	// SetBase replaces an existing base value instead of reporting a conflict.
 	SetBase bool
+	// Branch is the branch the changeset belongs to, recorded as the claim that makes
+	// the directory resolvable from that branch. Empty leaves an existing claim alone.
+	Branch string
 	// About is explicit ABOUT.md content. Empty means "scaffold it".
 	About string
 	// SetAbout replaces existing ABOUT.md content instead of reporting a conflict.
@@ -308,6 +441,10 @@ func Write(repo *git.Repo, c Changeset, opts WriteOptions) (written []string, er
 		return nil, errors.New("changeset: base must not be empty")
 	}
 	base := opts.Base
+	id := filepath.Base(filepath.Clean(c.Dir))
+	if err := ValidateID(id); err != nil {
+		return nil, err
+	}
 	absDir := filepath.Join(repo.Dir, c.Dir)
 	if _, err := os.Stat(absDir); errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(absDir, 0o755); err != nil {
@@ -321,22 +458,45 @@ func Write(repo *git.Repo, c Changeset, opts WriteOptions) (written []string, er
 	if err != nil {
 		return written, err
 	}
+	if existing := md["id"]; existing != "" && existing != id {
+		return written, fmt.Errorf("%w: %s records id %q but sits in %q; the directory name is the id, so rename the directory or correct the file",
+			ErrIDMismatch, c.MetadataPath(), existing, id)
+	}
+	if recorded := md["branch"]; recorded != "" && opts.Branch != "" && recorded != opts.Branch {
+		return written, fmt.Errorf("%w: %s belongs to branch %q, not %q; use a different id with --id to start a separate changeset",
+			ErrBranchTaken, c.Dir, recorded, opts.Branch)
+	}
 	if existing, ok := md["base"]; ok && existing != "" && existing != base && !opts.SetBase {
 		return written, fmt.Errorf("%w: %s names base %q, not %q (pass --set-base to change it)",
 			ErrBaseConflict, c.MetadataPath(), existing, base)
 	}
+	branch := opts.Branch
+	if branch == "" {
+		branch = md["branch"]
+	}
+	want := "id: " + id + "\nbase: " + base + "\n"
+	if branch != "" {
+		want += "branch: " + branch + "\n"
+	}
 	_, mdStatErr := os.Stat(mdPath)
 	switch {
 	case errors.Is(mdStatErr, os.ErrNotExist):
-		if err := os.WriteFile(mdPath, []byte("base: "+base+"\n"), 0o644); err != nil {
+		if err := os.WriteFile(mdPath, []byte(want), 0o644); err != nil {
 			return written, err
 		}
 		written = append(written, c.MetadataPath())
 	case mdStatErr == nil && md["base"] != base:
-		if err := os.WriteFile(mdPath, []byte("base: "+base+"\n"), 0o644); err != nil {
+		if err := os.WriteFile(mdPath, []byte(want), 0o644); err != nil {
 			return written, err
 		}
 		written = append(written, c.MetadataPath()+" (base updated)")
+	case mdStatErr == nil && md["branch"] != branch:
+		// A changeset written before `branch:` existed gets its claim recorded the
+		// first time a command writes to it, so it stops depending on the name rule.
+		if err := os.WriteFile(mdPath, []byte(want), 0o644); err != nil {
+			return written, err
+		}
+		written = append(written, c.MetadataPath()+" (branch recorded)")
 	case mdStatErr != nil:
 		return written, mdStatErr
 	}

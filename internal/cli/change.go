@@ -128,13 +128,18 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	written, err := changeset.Write(repo, cs, changeset.WriteOptions{
 		Base:     base,
 		SetBase:  opts.setBase,
+		Branch:   branch,
 		About:    about,
 		SetAbout: opts.setAbout,
 	})
 	if err != nil {
-		// Both conflicts are "that would discard content you did not say to
-		// discard", which is an argument problem rather than a repository state.
-		if errors.Is(err, changeset.ErrBaseConflict) || errors.Is(err, changeset.ErrAboutConflict) {
+		// These are all "your arguments describe something that already exists"
+		// errors rather than repository states, so they exit 2.
+		switch {
+		case errors.Is(err, changeset.ErrBaseConflict),
+			errors.Is(err, changeset.ErrAboutConflict),
+			errors.Is(err, changeset.ErrBranchTaken),
+			errors.Is(err, changeset.ErrIDMismatch):
 			return &usageError{err}
 		}
 		return err

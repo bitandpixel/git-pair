@@ -26,8 +26,9 @@ func TestChangeInitCreatesScaffoldingFromBranchName(t *testing.T) {
 	if !f.HasWorktreeFile(filepath.Join(dir, "ABOUT.md")) {
 		t.Error("ABOUT.md was not created")
 	}
-	if got := f.Read(filepath.Join(dir, "CHANGESET.yaml")); strings.TrimSpace(got) != "base: main" {
-		t.Errorf("CHANGESET.yaml = %q, want %q (PRD §5)", got, "base: main")
+	if got, want := strings.TrimSpace(f.Read(filepath.Join(dir, "CHANGESET.yaml"))),
+		"id: feature-booking-transaction\nbase: main\nbranch: feature/booking-transaction"; got != want {
+		t.Errorf("CHANGESET.yaml = %q, want %q (PRD §5)", got, want)
 	}
 	about := f.Read(filepath.Join(dir, "ABOUT.md"))
 	for _, heading := range []string{"Summary", "What changed", "Design decisions", "Validation"} {

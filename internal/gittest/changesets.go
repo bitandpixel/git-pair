@@ -28,9 +28,14 @@ func (f *Fixture) ChangesetPath(slug string, parts ...string) string {
 
 // StageChangeset writes a changeset's CHANGESET.yaml and ABOUT.md into the
 // working tree without committing them.
+//
+// It records the branch that owns the changeset, the way `change init` does, so the
+// suite exercises claim-based resolution rather than the fallback for a changeset that
+// predates the field. A test that wants the older shape writes the metadata itself.
 func (f *Fixture) StageChangeset(slug, base string) {
 	f.t.Helper()
-	f.Write(f.ChangesetPath(slug, "CHANGESET.yaml"), "base: "+base+"\n")
+	body := "id: " + slug + "\nbase: " + base + "\nbranch: " + f.CurrentBranch() + "\n"
+	f.Write(f.ChangesetPath(slug, "CHANGESET.yaml"), body)
 	if !f.HasWorktreeFile(f.ChangesetPath(slug, "ABOUT.md")) {
 		f.Write(f.ChangesetPath(slug, "ABOUT.md"), DefaultAboutBody)
 	}
@@ -56,17 +61,36 @@ func (f *Fixture) WriteChangesetFile(slug, name, content string) {
 	f.Write(f.ChangesetPath(slug, name), content)
 }
 
-// MetadataBase returns the `base:` value recorded in a changeset's
+// MetadataBranch returns the `branch:` claim recorded in a changeset's
 // CHANGESET.yaml in the working tree.
-func (f *Fixture) MetadataBase(slug string) string {
+func (f *Fixture) MetadataBranch(slug string) string {
+	f.t.Helper()
+	return f.metadataValue(slug, "branch")
+}
+
+// MetadataID returns the `id:` recorded in a changeset's CHANGESET.yaml, which is the
+// same string as the directory name unless a test has edited it on purpose.
+func (f *Fixture) MetadataID(slug string) string {
+	f.t.Helper()
+	return f.metadataValue(slug, "id")
+}
+
+func (f *Fixture) metadataValue(slug, key string) string {
 	f.t.Helper()
 	for _, line := range strings.Split(f.ChangesetFile(slug, "CHANGESET.yaml"), "\n") {
-		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
-		if ok && strings.EqualFold(strings.TrimSpace(key), "base") {
+		k, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if ok && strings.EqualFold(strings.TrimSpace(k), key) {
 			return strings.Trim(strings.TrimSpace(value), `"'`)
 		}
 	}
 	return ""
+}
+
+// MetadataBase returns the `base:` value recorded in a changeset's
+// CHANGESET.yaml in the working tree.
+func (f *Fixture) MetadataBase(slug string) string {
+	f.t.Helper()
+	return f.metadataValue(slug, "base")
 }
 
 // Threads lists the thread file names in a changeset directory, ABOUT.md excluded.
