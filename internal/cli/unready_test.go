@@ -43,9 +43,19 @@ func TestChangeUnreadyTakesAReadyChangesetOutOfTheQueue(t *testing.T) {
 	}
 	mustContain(t, res.stdout, "Unready: "+slug, "unready must confirm the changeset it withdrew")
 
+	// The durable half of the withdrawal. `change ready` anchored the offer; if the retraction did not
+	// move the ref, the archive would go on naming an offer its author had taken back, and everything
+	// that reads the anchor would report work as offered that nobody is being asked to review.
+	if got := f.RefSHA(archiveRef(slug)); got != marker {
+		t.Errorf("the archive names %s, want the unready marker %s", shortOf(got), shortOf(marker))
+	}
+
 	status := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status", "--json").json(t)
 	if status["state"] != "WORKING" {
 		t.Errorf("state = %v, want WORKING", status["state"])
+	}
+	if status["archive_commit"] != shortOf(marker) {
+		t.Errorf("archive_commit = %v, want %s: the ref tracks the withdrawal", status["archive_commit"], shortOf(marker))
 	}
 	// The value has to be recognised as a marker. An unrecognised `Review-State: working`
 	// would read as an implementation commit, which is the same answer by accident and
@@ -63,7 +73,7 @@ func TestChangeUnreadyTakesAReadyChangesetOutOfTheQueue(t *testing.T) {
 // make every script that unready-before-working handle an error for the common case,
 // so the command succeeds and records nothing.
 func TestChangeUnreadyWithNothingToWithdrawRecordsNothing(t *testing.T) {
-	f, _ := newChangeset(t, "booking-transaction", "main")
+	f, slug := newChangeset(t, "booking-transaction", "main")
 	before := f.Head()
 	commits := f.RevListCount("HEAD")
 
@@ -79,8 +89,42 @@ func TestChangeUnreadyWithNothingToWithdrawRecordsNothing(t *testing.T) {
 	if f.Head() != before || f.RevListCount("HEAD") != commits {
 		t.Errorf("unready wrote a marker (%s -> %s) when there was nothing to withdraw", before, f.Head())
 	}
+	// Moving nothing also means creating nothing. The ref is written when a changeset is offered; a
+	// withdrawal with nothing to withdraw must not fabricate an archive for work nobody has seen.
+	if f.HasRef(archiveRef(slug)) {
+		t.Error("a no-op withdrawal created the archive ref")
+	}
 	mustContain(t, runIn(t, f.Dir(), "change", "unready").stdout, "nothing to withdraw",
 		"the human output must say why it did nothing")
+}
+
+// The defect this command used to leave behind, and the reason the ref moves with every state a
+// command records. A withdrawal that lived only on the branch was a withdrawal the durable record
+// never received: the archive went on naming the offer, and once `git branch -D` took the branch, the
+// anchor — the last readable copy of the changeset — reported work as offered that its author had
+// explicitly taken back.
+func TestChangeUnreadyWithdrawalSurvivesBranchDeletion(t *testing.T) {
+	f, slug := newChangeset(t, "booking-transaction", "main")
+	ready(t, f)
+	runIn(t, f.Dir(), "change", "unready").mustSucceed(t, "change", "unready")
+	marker := f.Head()
+
+	f.SwitchTo("main")
+	f.ForceDeleteBranch("booking-transaction")
+
+	out := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").
+		mustSucceed(t, "status", "--changeset", slug).json(t)
+	if out["state"] != "WORKING" {
+		t.Errorf("state = %v, want WORKING: the anchor holds the withdrawal, not the offer it replaced", out["state"])
+	}
+	mustContain(t, fmt.Sprint(out["reason"]), "marked unready by",
+		"and names the retraction as the newest marker rather than an offer")
+	if out["archive_commit"] != shortOf(marker) {
+		t.Errorf("archive_commit = %v, want %s", out["archive_commit"], shortOf(marker))
+	}
+	if queueListsChangeset(t, runIn(t, f.Dir(), "review", "queue", "--json"), slug) {
+		t.Error("the withdrawn changeset is in the queue with its branch deleted")
+	}
 }
 
 // A BLOCKED changeset is not in the queue either, and retracting a reviewer's block is

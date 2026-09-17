@@ -781,6 +781,13 @@ A reviewer may still submit against an unready changeset — `review submit` acc
 what keeps the gate back into `READY` reachable: surviving review additions (§19) are still enforced by
 `change ready`.
 
+The withdrawal moves the archive ref (§13.1) onto its own commit, as every state a command records
+does. That is not bookkeeping for its own sake: the branch is the thing that gets deleted, and while
+the ref stayed on the offer, a changeset read from the anchor after `git branch -D` reported work as
+offered that its author had taken back — the durable record had received the offer and never the
+retraction. The ref is not written when there is nothing to withdraw, since a ref is created by
+offering a changeset and not by declining to.
+
 `--json` prints `changeset`, `branch`, `base`, `state`, `was`, `recorded`, `unready_commit` and
 `review_queue_visible`.
 
@@ -1477,7 +1484,10 @@ begins at the first handoff rather than at the first response: a changeset that 
 reviewed, or whose branch exists only in the reflog, otherwise has nothing holding its marker alive.
 `change abandon` (§9.7) moves it to the terminal marker, which is what lets an ending survive
 `git branch -D`: the branch is the thing that gets deleted, and the queue and `status` can still read
-how the changeset ended from the ref. Where a changeset has no branch, the ref is the last readable
+how the changeset ended from the ref. `change unready` (§9.6) moves it onto the withdrawal, for the same
+reason read the other way: a retraction that exists only on the branch leaves the ref naming an offer its
+author has taken back, and the reader who arrives after the branch is gone is reading a claim that no
+longer stands. Where a changeset has no branch, the ref is the last readable
 copy of the changeset's history — a fallback for reading history, never a source of state (§12).
 
 It moves **forward and only forward**. `change archive` (§9.5) advances it over commits that are

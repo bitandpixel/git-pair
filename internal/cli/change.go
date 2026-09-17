@@ -629,6 +629,11 @@ The changeset returns to WORKING, and a later ` + "`git pair change ready`" + ` 
 queue under the same gate as the first time: review additions that still survive unchanged have to be
 resolved or acknowledged.
 
+The archive ref moves onto the withdrawal, as it does for every state a command records, so the
+retraction is still there to read after the branch is deleted. Otherwise the durable record would name
+the offer and only the offer, and a changeset read from the anchor would look like it was still waiting
+for a reviewer.
+
 The marker is written only when the changeset is actually in review — READY, APPROVED or FEEDBACK. On
 a changeset that is WORKING or BLOCKED there is nothing to withdraw, so the command succeeds without
 recording anything and a script can unready unconditionally.`,
@@ -659,6 +664,16 @@ func runChangeUnready(ctx context.Context, a *app) error {
 	sha, err := marker.Commit(ctx, s.repo, marker.UnreadyMessage(s.cs.Slug))
 	if err != nil {
 		return fmt.Errorf("creating unready marker: %w", err)
+	}
+	// The archive follows the withdrawal for the same reason it follows every other state a command
+	// records: the branch is the thing that gets deleted. A retraction that lives only on the branch
+	// is a retraction the durable record never received — the ref would keep naming the offer, and a
+	// changeset read from the anchor after `git branch -D` would report work the author had explicitly
+	// taken back as still waiting for a reviewer. `reviewref.Update` is the one path that moves the
+	// ref, and it refuses once the changeset is integrated (§13.3); `marker.Commit` had already refused
+	// before the commit, so a landed changeset gets neither a marker nor a move.
+	if _, err := reviewref.Update(ctx, s.repo, s.cs.Slug, sha); err != nil {
+		return fmt.Errorf("anchoring the unready marker: %w", err)
 	}
 	return printUnready(a, s, sha)
 }

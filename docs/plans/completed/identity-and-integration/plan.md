@@ -652,6 +652,14 @@ Every other state-writing command moves the ref, and §12's "state moves on comm
 Caught here because the e2e's record step assumed the archive tracked HEAD, and the fix is a behaviour
 change with its own test and wording — it belongs in its own commit, not inside this milestone.
 
+*Fixed after this plan was archived*, in the commit that added `TestChangeUnreadyWithdrawalSurvivesBranchDeletion`:
+`change unready` moves the ref in the same call that writes the marker. That test is the guard — it deletes
+the branch and reads the state from the anchor, which is the read that used to be wrong. Two notes for
+anyone reading the milestone's own claims: `e2e-29.sh`'s record step derives `--source` from the archive, so
+it had been quietly deriving it from the offer rather than the withdrawal; and §23's freeze test listed
+`change unready` among the commands that must not move a frozen ref, an assertion that was vacuous until the
+command moved it at all.
+
 
 #### Verification
 

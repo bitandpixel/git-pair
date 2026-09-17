@@ -432,7 +432,9 @@ at the ready marker, and every submission moves it to the exact resulting `HEAD`
 operation that creates the commit, keeping the whole chain reachable from
 garbage collection. The handoff is where the history starts being worth keeping, so an
 offered-but-never-reviewed changeset is written too. `change archive` advances it over review
-artifacts, and `change abandon` moves it to the terminal marker. It moves forward and never
+artifacts, `change abandon` moves it to the terminal marker, and `change unready` moves it onto the
+withdrawal — the branch is what gets deleted, and a retraction that lives only on the branch is a
+retraction the durable record never received. It moves forward and never
 backwards: the command refuses a `HEAD` behind the current tip rather than dropping the chain from
 the only ref that keeps it reachable. It is not a guarantee against `git push --delete`; it keeps
 Git from pruning what git-pair still needs.
@@ -481,7 +483,7 @@ landed.
 | --- | --- | --- |
 | `change init` | `--id <id>`, `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch; refuses on that branch, where a changeset could never contain anything; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
-| `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` only when it is in review, otherwise succeeds and records nothing |
+| `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` and moves the archive onto it when the changeset is in review, otherwise succeeds and records nothing |
 | `change use <id>` | none | records which changeset a branch carrying more than one is working on: writes `ignores: <other ids>` into the chosen changeset's `CHANGESET.yaml` and commits that file; refuses an id the branch does not offer and a record that would leave the branch still undecided; idempotent |
 | `change abandon` | none | records the terminal `Review-State: abandoned` and anchors it; `change ready`, `change unready` and `review submit` refuse against it afterwards; idempotent |
 | `change feedback` | `--stat`, `--name-only`, `--changeset <slug>` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |

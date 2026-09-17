@@ -116,6 +116,11 @@ git commit -qam "note an edge case after the approval"
 $G check >/dev/null 2>&1; check "check: an implementation commit after the approval fails the gate" 1 $?
 $G change ready >/dev/null; check "ready again after the implementation commit" 0 $?
 $G change unready >/dev/null; check "withdraw the offer" 0 $?
+# The ref moves with the withdrawal, so the retraction outlives the branch. Leaving the archive on the
+# offer would have the durable record claim the changeset is still waiting for a reviewer.
+[ "$(git rev-parse "$ARCHIVE")" = "$(git rev-parse HEAD)" ] \
+  && echo "  ok: the archive names the withdrawal" \
+  || { echo "  FAIL: the archive still names the offer that was withdrawn"; FAILED=1; }
 $G check >/dev/null 2>&1; check "check: a withdrawn changeset fails the gate" 1 $?
 
 step "integration: record where the work landed, and what the record freezes"
