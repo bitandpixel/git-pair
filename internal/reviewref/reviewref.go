@@ -61,6 +61,35 @@ func Taken(ctx context.Context, repo *git.Repo, id string) (bool, error) {
 	return false, nil
 }
 
+// ChangesetRoot is the ref namespace where a changeset's durable refs live: the changeset id
+// names the refs, not the branch, so the work stays findable after the branch is deleted and
+// readable by a CI job that never had the branch (`refs/git-pair/changesets/<id>/archive`).
+//
+// It is a different root from NamespaceRoot rather than a child of it on purpose: a ref cannot
+// be both `refs/reviews/<id>` and a directory holding `refs/reviews/<id>/archive`, so the
+// immutable refs cannot be added under the namespace the movable one occupies.
+const ChangesetRoot = "refs/git-pair/changesets"
+
+// ArchivedChangesetID reports the changeset id a durable archive ref names, so
+// `refs/git-pair/changesets/booking/archive` answers `booking`.
+//
+// A stacked changeset records its parent as either the parent's id or the ref that names it,
+// and both mean the same parent, so the resolution rule has to read the id out of either
+// spelling. Only this namespace is accepted: a branch is allowed to be called
+// `feature/archive`, and mistaking one for a durable ref would attribute the branch's work to
+// a changeset called `feature`.
+func ArchivedChangesetID(ref string) (string, bool) {
+	rest, ok := strings.CutPrefix(ref, ChangesetRoot+"/")
+	if !ok {
+		return "", false
+	}
+	id, ok := strings.CutSuffix(rest, "/archive")
+	if !ok || id == "" || strings.Contains(id, "/") {
+		return "", false
+	}
+	return id, true
+}
+
 // Archive returns the immutable archival ref for a changeset at a commit.
 func Archive(slug, shortSHA string) string {
 	return fmt.Sprintf("%s/%s/%s", archive, slug, shortSHA)

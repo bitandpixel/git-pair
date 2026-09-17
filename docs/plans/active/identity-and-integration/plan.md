@@ -119,8 +119,11 @@ Consequences recorded rather than asked separately:
   coded around.** Landed means "the directory is in the default branch's tree", so deleting landed
   directories from the default branch makes every branch still carrying one look active again —
   measured, including in `queue`. The rule for anyone who tidies: **prune only what carries a terminal
-  record** (an integration ref or an abandonment), which are excluded before anything else is
-  considered. Rejected alternatives, both measured: counting `CHANGESET.yaml` at any depth under
+  record** (an integration ref or an abandonment). Those are not hidden from resolution — a terminal
+  candidate is reported with its fact, and `queue` and `check` act on it (the integration ref becomes a
+  reported fact in M4, which is when the guarantee is complete) — because hiding it would leave
+  `status` on such a branch with no answer about a directory that is still in its tree. Rejected
+  alternatives, both measured: counting `CHANGESET.yaml` at any depth under
   `changesets/` would make relocating safe for ~2ms, but it defends tidying rather than deleting and
   adds a layout assumption nobody asked for; asking the history (`git log --diff-filter=A`, which does
   catch squash landings) costs ~33ms per candidate on a 20k-commit trunk and is paid by every *active*
@@ -254,19 +257,25 @@ assertion about stale claims was vacuous because no changeset directory existed 
 
 #### Tasks
 
-- [ ] Default-branch resolution, one function serving discovery **and** `change init`'s existing
+- [x] Default-branch resolution, one function serving discovery **and** `change init`'s existing
   `defaultBase` (local `main` then `master` today, `internal/cli/change.go:316`): `--default-branch
   <ref>` on the resolving commands, else `refs/remotes/origin/HEAD`, else a unique
   `origin/main`/`origin/master`, else a local `main`/`master`, else refuse naming the flag and
   `git remote set-head origin --auto`. No config key. Two resolvers would let a changeset's recorded
   base and the landed-test disagree, which is the inconsistency this rule exists to remove. Refuse
   rather than treat an unresolvable trunk as "no trunk", which makes every directory a candidate.
-- [ ] `changeset.Resolve(ctx, repo, rev, defaultBranch)`: step-0 exclusions first (an integration ref
-  or a terminal record retires a candidate before anything else is considered — and the integration ref
-  is the *only* thing that retires a landing outside the default branch), then rank 0 from `ls-tree` of
+- [ ] `changeset.Resolve(ctx, repo, rev, defaultBranch)`: candidates from `ls-tree` of
   `changesets/` in the revision and in the default branch; nearest archive tip, then `base:`-names-parent
   to break a stack, then ambiguity. `ForID` stays for `--changeset` reads; `ForBranch`/`AtCommit` and the claim machinery
   are deleted, including `StaleClaims` and the renamed-branch warning.
+  - *Amended while implementing:* a terminal candidate is **reported** (`Candidate.Terminal`) rather
+    than excluded at step 0. Excluding it makes `status` on an abandoned branch answer "no changeset
+    here" about a directory that is still in the tree — the regression M1's abandoned reporting exists
+    to avoid — and the queue and `check` already filter terminal work at their own layer. The
+    integration ref likewise becomes a reported fact beside `state` in M4, when something writes it;
+    nothing writes one today, and the landing outside the default branch that only it can retire is
+    measured in `research/2026-09-17-combined-rule.md`. Reading it as a fact keeps `Resolve` a read of
+    what is there instead of a policy about what to hide.
 - [ ] No ref fallback. Resolution is rank 0 alone; a branch whose changeset directory was deleted
   reports `uninitialized` with the normal hint. Fixture asserts exactly that, so the omission is a
   decision in the test suite rather than an oversight.
@@ -309,6 +318,21 @@ assertion about stale claims was vacuous because no changeset directory existed 
 - [ ] PRD §9.5 rewritten for `change archive`, §13 for the namespace, §12's completion paragraph;
   README's concepts, command surface, JSON contract, troubleshooting.
 
+Landed so far:
+
+- Resolution and default-branch detection, in `internal/changeset/resolve.go`. Additive: no caller
+  uses it yet, so this commit changes no output. Fixtures are the spike's ported — stacked,
+  stacked-after-parent-landed, diverged pair, checkout with no refs, sibling merge, equal distance,
+  deleted directory, on-trunk, pruning — plus the cost assertion (≤10 `git` invocations with 300
+  review refs present), counted by `gittest.SpawnRepo` through a `PATH` shim so the code under test
+  carries no instrumentation for the measurement.
+- Two defects the first version shipped with, both found by mutation testing rather than by reading
+  the code: the ordering rule was never exercised, because the `base:`-names-parent filter decided
+  the stacked case before distance was consulted; and "no review ref" was treated as *tying* with
+  any distance instead of *losing* to one, which made an unarchived candidate block a ready one.
+  The tests for both are `TestResolveNearestRefDecidesWhenNothingElseDoes` and
+  `TestResolveUnarchivedCandidateSortsLast`.
+
 #### Verification
 
 The seven tree-rule fixtures from the spike, ported to product tests: a stacked child resolves and
@@ -317,8 +341,9 @@ a clone with no archive refs resolves from the tree alone; two unrelated directo
 until `change use` records the choice, after which the branch resolves; a branch that merged an
 unlanded sibling is ambiguous; a deleted directory is `uninitialized`. Two more fixtures pin the
 pruning behaviour rather than fix it: pruning an unrecorded landed changeset from the default branch
-resurrects it on a branch that has not merged the prune, and pruning one with an integration ref does
-not.
+resurrects it on a branch that has not merged the prune. (The pair to that fixture — pruning one that
+carries an integration ref does not resurrect it — needs a writer for the integration ref, so it lands
+with M4; `internal/changeset/resolve_test.go` says so where the first one is asserted.)
 
 Approve, then: archive == the approval commit with no further command. Commit a reply in `ABOUT.md` →
 `change archive` advances. Commit an implementation change → `change archive` refuses and names the file,

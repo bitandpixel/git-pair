@@ -56,6 +56,34 @@ func TestIsArchiveAndSlug(t *testing.T) {
 	}
 }
 
+// The resolution rule reads a stacked `base:` that names the parent's durable ref, so the
+// parse has to be exact in both directions: a ref in the shape must yield the id, and a name
+// that merely ends in `/archive` must not be mistaken for one.
+func TestArchivedChangesetID(t *testing.T) {
+	tests := []struct {
+		ref  string
+		want string
+		ok   bool
+	}{
+		{"refs/git-pair/changesets/booking/archive", "booking", true},
+		{"refs/git-pair/changesets/feat-JIRA-123_Foo/archive", "feat-JIRA-123_Foo", true},
+		{"refs/git-pair/changesets/booking", "", false},
+		{"refs/git-pair/changesets/booking/integration", "", false},
+		{"refs/git-pair/changesets//archive", "", false},
+		{"refs/git-pair/changesets/a/b/archive", "", false},
+		{"refs/git-pair/changeset/booking/archive", "", false},
+		{"refs/heads/feature/archive", "", false},
+		{"refs/reviews/archive/booking/91bf204", "", false},
+		{"booking", "", false},
+	}
+	for _, tc := range tests {
+		got, ok := reviewref.ArchivedChangesetID(tc.ref)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("ArchivedChangesetID(%q) = (%q, %v), want (%q, %v)", tc.ref, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
 // PRD §10.4: "Immediately after successful review submission, update the
 // changeset's review archive ref to the resulting exact HEAD."
 func TestUpdateAndResolve(t *testing.T) {

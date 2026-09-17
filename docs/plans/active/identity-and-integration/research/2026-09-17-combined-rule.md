@@ -18,7 +18,9 @@ the fallback — precisely enough to implement, with the cases measured in
 
 ## The rule, in order
 
-**Step 0. Terminal and integrated are excluded everywhere.** A changeset with an
+**Step 0. Terminal and integrated are excluded everywhere.** *(Superseded — see "Step 0, amended
+in implementation" below: they are reported as facts and filtered by the layers that list work.)*
+A changeset with an
 `integration` ref, or whose archive ref points at a commit carrying a terminal marker
 (`Review-State: abandoned`), is not a candidate at any rank. The terminal test reads the ref
 target only — `change abandon` moves the ref onto its own marker, so no walk is needed.
@@ -137,6 +139,21 @@ Open sub-question worth an explicit call during M2: whether `change init` should
 on the integration branch. The rule already makes a stray init on trunk inert — measured, it
 answers `uninitialized` for trunk and every branch off it — so the refusal is now a clarity
 guard ("this branch is the integration branch; start your own") rather than a correctness one.
+**Called: it refuses**, on the strength of that guard alone. Nothing else about the behaviour
+changes, which is the point — the refusal exists so the mistake is named where it is made.
+
+**Step 0, amended in implementation: terminal and integrated are reported, not excluded.** The
+spec above removed them from the candidate set. Implemented that way, `status` on a branch whose
+changeset was abandoned answers "no changeset here" about a directory still sitting in its tree —
+the regression M1's abandonment reporting exists to avoid, and one the fixtures caught. A terminal
+candidate is now `Candidate.Terminal`, reported beside `state`; the layers that list work (`queue`,
+`check`) act on it. The integration ref follows the same shape in M4, when something writes one,
+so "prune only what carries a terminal record" still holds — via reported facts and filtered
+listings rather than via exclusion.
+
+**Cost, corrected after rank 1 was dropped:** the "on trunk, fallback fires" row of the table
+below (12) belonged to the fallback. The shipped rule measures 8 on a changeset branch with 300
+review refs present, and `internal/changeset/resolve_test.go` asserts ≤10.
 
 ## Cost
 
