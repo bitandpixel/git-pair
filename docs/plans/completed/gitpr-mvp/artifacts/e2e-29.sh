@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
 # End-to-end replay of the PRD §29 success workflow against a scratch repo.
 # Usage: bash docs/plans/completed/gitpr-mvp/artifacts/e2e-29.sh [/path/to/git-pair]
-#        (default: ~/.local/bin/git-pair — run `mise run build` first)
+#        (default: the name `mise run build` installs from this repository — the shared
+#        ~/.local/bin/git-pair on trunk, a branch-namespaced one anywhere else)
 set -uo pipefail
-G=${1:-$HOME/.local/bin/git-pair}
+# The default comes from this script's own path, not the working directory, and from the
+# same rule `mise run build` uses: this replay cd's into a scratch repo, and the binary
+# under test has to be the one built from *this* repository. Falling back to the shared
+# name instead would replay whatever another worktree last installed.
+ROOT=$(cd "$(dirname "$0")/../../../../.." && pwd)
+G=${1:-$HOME/.local/bin/$(sh "$ROOT/scripts/install-name.sh" "$ROOT")}
+if [ ! -x "$G" ]; then
+  printf 'no binary at %s - run `mise run build` in %s first\n' "$G" "$ROOT" >&2
+  exit 1
+fi
 T=$(mktemp -d /tmp/git-pair-e2e.XXXXXX)
 trap 'rm -rf "$T"' EXIT
 cd "$T" || exit 1
