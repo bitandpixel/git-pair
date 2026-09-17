@@ -176,6 +176,10 @@ type session struct {
 	// surfaces that can explain it (status, change ready) do not each redo the
 	// lookup and so they agree on the wording.
 	baseIsOwnBranch bool
+	// trunk is the integration branch the resolution compared against. It travels with the
+	// session because "which changeset is this?" is a comparison against trunk, and a surface
+	// that reports the answer should be able to report the other side of it.
+	trunk changeset.DefaultBranchRef
 }
 
 // loadFor resolves the session a changeset-scoped read should work from: the
@@ -198,7 +202,11 @@ func (a *app) loadNamed(ctx context.Context, slug string) (*session, error) {
 	if err != nil {
 		return nil, err
 	}
-	cs, summary, branch, err := a.resolveNamed(ctx, repo, slug)
+	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
+	if err != nil {
+		return nil, usageWrap(err)
+	}
+	cs, summary, branch, err := a.resolveNamed(ctx, repo, slug, db)
 	if err != nil {
 		return nil, usageWrap(err)
 	}
@@ -218,18 +226,14 @@ func (a *app) loadNamed(ctx context.Context, slug string) (*session, error) {
 	}
 	onBranch := current == branch
 	return &session{repo: repo, cs: cs, summary: summary, clean: onBranch,
-		onCurrentBranch: onBranch, head: head, baseIsOwnBranch: own}, nil
+		onCurrentBranch: onBranch, head: head, baseIsOwnBranch: own, trunk: db}, nil
 }
 
 // resolveNamed finds the changeset a slug names. Two branches can carry the same directory
 // (`feature/x` branched before the changeset existed, or a stack), so "the" changeset is the
 // one whose history is furthest along, and the branch that answer came from is returned so
 // callers can print it.
-func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string) (changeset.Changeset, lifecycle.Summary, string, error) {
-	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
-	if err != nil {
-		return changeset.Changeset{}, lifecycle.Summary{}, "", err
-	}
+func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db changeset.DefaultBranchRef) (changeset.Changeset, lifecycle.Summary, string, error) {
 	resolutions, err := changeset.BranchResolutions(ctx, repo, db)
 	if err != nil {
 		return changeset.Changeset{}, lifecycle.Summary{}, "", err
@@ -316,11 +320,15 @@ func (a *app) load(ctx context.Context) (*session, error) {
 	if err != nil {
 		return nil, err
 	}
-	cs, err := changeset.RequireCurrent(ctx, repo, a.defaultBranch)
+	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
 	if err != nil {
 		return nil, usageWrap(err)
 	}
-	return a.sessionFor(ctx, repo, cs)
+	cs, err := changeset.RequireCurrentOn(ctx, repo, db)
+	if err != nil {
+		return nil, usageWrap(err)
+	}
+	return a.sessionFor(ctx, repo, cs, db)
 }
 
 // loadRepo resolves the repository without requiring a changeset.
@@ -344,7 +352,7 @@ func (a *app) loadRepo(ctx context.Context) (*git.Repo, error) {
 }
 
 // sessionFor derives state for an already-resolved changeset.
-func (a *app) sessionFor(ctx context.Context, repo *git.Repo, cs changeset.Changeset) (*session, error) {
+func (a *app) sessionFor(ctx context.Context, repo *git.Repo, cs changeset.Changeset, db changeset.DefaultBranchRef) (*session, error) {
 	summary, err := lifecycle.SummarizeHEAD(ctx, repo, cs.Slug, cs.Base)
 	if err != nil {
 		return nil, err
@@ -366,7 +374,7 @@ func (a *app) sessionFor(ctx context.Context, repo *git.Repo, cs changeset.Chang
 		return nil, err
 	}
 	return &session{repo: repo, cs: cs, summary: summary, clean: clean, onCurrentBranch: true,
-		head: head, baseIsOwnBranch: own}, nil
+		head: head, baseIsOwnBranch: own, trunk: db}, nil
 }
 
 // usageWrap marks an error as a usage problem rather than a git failure.

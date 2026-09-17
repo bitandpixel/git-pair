@@ -143,6 +143,13 @@ git push -q "$REMOTE" --all
 git push -q "$REMOTE" '+refs/git-pair/changesets/*:refs/git-pair/changesets/*'
 git clone -q "$REMOTE" "$CLONE"
 git -C "$CLONE" switch -q booking-transaction
+# The clone's own status has to say what it compared against: "nothing has landed" from a CI job is
+# either a stale fetch or the wrong trunk, and a log that names neither cannot be triaged.
+status=$(cd "$CLONE" && $G status --json)
+printf '%s' "$status" | grep -q '"default_branch": "origin/main"' \
+  && printf '%s' "$status" | grep -q '"default_branch_source": "origin-head"' \
+  && echo "  ok: status names the trunk it compared against and how it knew" \
+  || { echo "  FAIL: status did not explain its comparison: $status"; FAILED=1; }
 out=$(cd "$CLONE" && $G check 2>&1); code=$?
 check "check in a clone without the durable refs fails" 1 $code
 printf '%s' "$out" | grep -q "this clone has no refs/git-pair/changesets/\* refs at all" \

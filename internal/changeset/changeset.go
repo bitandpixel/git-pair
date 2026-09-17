@@ -304,7 +304,17 @@ func DirsAt(ctx context.Context, repo *git.Repo, rev string) ([]string, error) {
 // function act on the answer: `status`, `review ready` and `change abandon` would each read
 // the diff base of whichever candidate happened to sort first.
 func Current(ctx context.Context, repo *git.Repo, defaultBranch string) (Changeset, error) {
-	res, err := ResolveCurrent(ctx, repo, defaultBranch)
+	db, err := DefaultBranch(ctx, repo, defaultBranch)
+	if err != nil {
+		return Changeset{}, err
+	}
+	return currentOn(ctx, repo, db)
+}
+
+// currentOn answers for the checked-out revision, given an integration branch somebody already
+// resolved. `status` takes that route so the branch it compared against is still in hand afterwards.
+func currentOn(ctx context.Context, repo *git.Repo, db DefaultBranchRef) (Changeset, error) {
+	res, err := ResolveCurrentOn(ctx, repo, db)
 	if err != nil {
 		return Changeset{}, err
 	}
@@ -338,7 +348,17 @@ func Current(ctx context.Context, repo *git.Repo, defaultBranch string) (Changes
 
 // RequireCurrent is Current, with ErrNoChangeset when scaffolding is missing.
 func RequireCurrent(ctx context.Context, repo *git.Repo, defaultBranch string) (Changeset, error) {
-	c, err := Current(ctx, repo, defaultBranch)
+	db, err := DefaultBranch(ctx, repo, defaultBranch)
+	if err != nil {
+		return Changeset{}, err
+	}
+	return RequireCurrentOn(ctx, repo, db)
+}
+
+// RequireCurrentOn is RequireCurrent for a caller that resolved the integration branch itself, so
+// it can report what "landed" was measured against without asking twice.
+func RequireCurrentOn(ctx context.Context, repo *git.Repo, db DefaultBranchRef) (Changeset, error) {
+	c, err := currentOn(ctx, repo, db)
 	if err != nil {
 		return c, err
 	}

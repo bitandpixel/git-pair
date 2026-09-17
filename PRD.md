@@ -1166,9 +1166,20 @@ Potential JSON:
     },
     "archive_ref": "refs/git-pair/changesets/booking-transaction/archive",
     "archive_commit": "91bf204",
+    "default_branch": "main",
+    "default_branch_commit": "9c41f0b",
+    "default_branch_source": "sole-candidate",
     "integrated": false
 }
 ```
+
+The three `default_branch` fields are the other half of the resolution. Which changeset a revision is
+working on is a comparison against the integration branch (§4), so a run that reports nothing has
+landed is doing so relative to a branch and a commit that the output would otherwise not mention — and
+a CI job's trunk can be stale, absent, or named by flag without any of that showing up in a sentence
+about the changeset. `default_branch_source` is `flag`, `origin-head` or `sole-candidate`, reported the
+same way however the branch arrived, because "how did you know?" is the question a strange answer
+raises.
 
 ## 11.2 `git pair diff`
 

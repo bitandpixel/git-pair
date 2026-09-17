@@ -276,6 +276,15 @@ func ResolveCurrent(ctx context.Context, repo *git.Repo, defaultBranchOverride s
 	if err != nil {
 		return Resolution{}, err
 	}
+	return ResolveCurrentOn(ctx, repo, db)
+}
+
+// ResolveCurrentOn is ResolveCurrent for a process that resolved the integration branch already.
+//
+// It exists so a command that reports the comparison can hold on to what it compared against, rather
+// than resolving it twice and risking two different answers in one run — which for "has this landed?"
+// would mean an output that cannot be explained from itself.
+func ResolveCurrentOn(ctx context.Context, repo *git.Repo, db DefaultBranchRef) (Resolution, error) {
 	r, err := newResolver(ctx, repo, db)
 	if err != nil {
 		return Resolution{}, err

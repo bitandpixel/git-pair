@@ -128,6 +128,14 @@ func TestStatusAndQueueWorkWithoutTheGitPairRefs(t *testing.T) {
 	if got["integrated"] != false {
 		t.Errorf("integrated = %v, want false: no record is present, and none is invented", got["integrated"])
 	}
+	// The trunk fields matter most in exactly this shape: a clone where "has this landed?" is a
+	// comparison against a ref the job fetched, and nothing else in the output says which.
+	if got["default_branch"] != "origin/main" || got["default_branch_source"] != "origin-head" {
+		t.Errorf(`default_branch = %v from %v, want origin/main from origin-head`, got["default_branch"], got["default_branch_source"])
+	}
+	if got["default_branch_commit"] != shortOf(f.RevParse("main")) {
+		t.Errorf("default_branch_commit = %v, want %s", got["default_branch_commit"], shortOf(f.RevParse("main")))
+	}
 
 	queue := runIn(t, clone, "review", "queue").mustSucceed(t, "review", "queue")
 	mustContain(t, queue.stdout, slug, "the offered changeset is in the queue with no git-pair refs fetched")
@@ -158,4 +166,36 @@ func TestOneBranchCheckoutNamesTheFetchItIsMissing(t *testing.T) {
 	mustContain(t, res.stderr, "fetch the default branch", "and names the fetch that fixes it")
 	mustContain(t, res.stderr, "--default-branch", "alongside the flag that overrides it")
 	mustNotContain(t, res.stderr, "changeset", "without blaming the changeset for a checkout problem")
+}
+
+// The three trunk fields exist because a run reporting "nothing has landed" is either working from a
+// stale fetch or from the wrong trunk, and neither is visible in a sentence about the changeset. So
+// the output names the branch, the commit it pointed at, and how the run learned it — reported the
+// same way whether the branch was named by flag or found in the checkout, since the two halves of
+// the comparison both have to be in the log for the log to explain itself.
+func TestStatusExplainsWhatLandedWasMeasuredAgainst(t *testing.T) {
+	f, _, _, _ := recordFixture(t)
+	f.SwitchTo("booking")
+
+	out := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status").json(t)
+	if out["default_branch"] != "main" {
+		t.Errorf("default_branch = %v, want main: the fixture has no remote, so a local main is the only candidate",
+			out["default_branch"])
+	}
+	if out["default_branch_source"] != "sole-candidate" {
+		t.Errorf("default_branch_source = %v, want sole-candidate", out["default_branch_source"])
+	}
+	if want := shortOf(f.RevParse("main")); out["default_branch_commit"] != want {
+		t.Errorf("default_branch_commit = %v, want %s", out["default_branch_commit"], want)
+	}
+
+	// The same branch named by hand is still the same branch, with a different provenance: the field
+	// answers how the run knew, not merely what it settled on.
+	out = runIn(t, f.Dir(), "status", "--json", "--default-branch", "main").mustSucceed(t, "status").json(t)
+	if out["default_branch"] != "main" || out["default_branch_source"] != "flag" {
+		t.Errorf("with the flag: %v from %v, want main from flag", out["default_branch"], out["default_branch_source"])
+	}
+	if want := shortOf(f.RevParse("main")); out["default_branch_commit"] != want {
+		t.Errorf("with the flag: default_branch_commit = %v, want %s", out["default_branch_commit"], want)
+	}
 }

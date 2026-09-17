@@ -53,18 +53,28 @@ type latestReviewJSON struct {
 }
 
 type statusJSON struct {
-	Changeset       string            `json:"changeset"`
-	Branch          string            `json:"branch"`
-	Base            string            `json:"base"`
-	State           string            `json:"state"`
-	Head            string            `json:"head"`
-	HeadFull        string            `json:"head_full"`
-	LatestReview    *latestReviewJSON `json:"latest_review"`
-	ArchiveRef      string            `json:"archive_ref"`
-	ArchiveCommit   string            `json:"archive_commit"`
-	Uncommitted     *bool             `json:"uncommitted"`
-	Abandoned       bool              `json:"abandoned"`
-	AbandonedCommit string            `json:"abandoned_commit,omitempty"`
+	Changeset string `json:"changeset"`
+	Branch    string `json:"branch"`
+	Base      string `json:"base"`
+	// DefaultBranch is the integration branch this run compared the revision against,
+	// DefaultBranchCommit the commit it named, DefaultBranchSource how the run learned it: `flag`,
+	// `origin-head` or `sole-candidate`. The three belong together because a run that misreports
+	// what has landed is the expensive failure of that rule, and the output has to be explainable
+	// from itself rather than from what the machine happened to fetch. Named the way `base` is,
+	// and shortened like `archive_commit`, because "landed" is measured against this branch and
+	// `base` is only where the diff starts.
+	DefaultBranch       string            `json:"default_branch"`
+	DefaultBranchCommit string            `json:"default_branch_commit,omitempty"`
+	DefaultBranchSource string            `json:"default_branch_source"`
+	State               string            `json:"state"`
+	Head                string            `json:"head"`
+	HeadFull            string            `json:"head_full"`
+	LatestReview        *latestReviewJSON `json:"latest_review"`
+	ArchiveRef          string            `json:"archive_ref"`
+	ArchiveCommit       string            `json:"archive_commit"`
+	Uncommitted         *bool             `json:"uncommitted"`
+	Abandoned           bool              `json:"abandoned"`
+	AbandonedCommit     string            `json:"abandoned_commit,omitempty"`
 	// Integrated reports the presence of an integration ref, which is the only record that a
 	// changeset landed: squash, rebase and cherry-pick destroy the ancestry that would otherwise
 	// answer it. Like `abandoned`, it sits beside `state` rather than inside it — the lifecycle
@@ -129,6 +139,14 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 	}
 	for _, e := range s.summary.Unrecognised {
 		view.json.Unrecognised = append(view.json.Unrecognised, e.Short+" "+e.Subject)
+	}
+	// The resolution that chose this changeset compared against trunk, so the run knows trunk even
+	// when nothing else in the output says so. Failing to name the commit it pointed at is not worth
+	// failing a status over — the branch and its provenance are the parts a reader acts on.
+	view.json.DefaultBranch = displayRef(s.trunk.Ref)
+	view.json.DefaultBranchSource = s.trunk.Source
+	if sha, err := s.repo.RevParse(ctx, s.trunk.Ref); err == nil {
+		view.json.DefaultBranchCommit = short(sha)
 	}
 	if at := s.summary.Abandoned; at != nil {
 		view.json.Abandoned = true

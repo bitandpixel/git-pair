@@ -550,7 +550,11 @@ is a fact beside the state, not a sixth state value. `integrated_in_default_bran
 commit is in the history of the branch git-pair calls the integration branch, and
 `integrated_default_branch` names that branch — work that retired into `release/2.x` and never reached
 the default branch must not read like a default-branch landing, and what git-pair reports is the
-containment it can derive rather than a branch name no ref stores.
+containment it can derive rather than a branch name no ref stores. `default_branch`,
+`default_branch_commit` and `default_branch_source` name the branch "landed" was measured against,
+the commit it pointed at, and how the run learned it (`flag`, `origin-head` or `sole-candidate`):
+a CI log that says nothing has landed has two causes, a stale fetch and a wrong trunk, and neither
+one is visible in a sentence about the changeset.
 `next_action` calls the changeset squash-safe only while `archive_commit`
 is `HEAD`: an archive of an ancestor is a statement about history, not a claim that the work is
 done. Once the record exists `next_action` says there is nothing further to record instead.
@@ -560,6 +564,9 @@ done. Once the record exists `next_action` says there is nothing further to reco
   "changeset": "booking-transaction",
   "branch": "booking-transaction",
   "base": "main",
+  "default_branch": "main",
+  "default_branch_commit": "9c41f0b",
+  "default_branch_source": "sole-candidate",
   "state": "READY",
   "head": "8065dae",
   "head_full": "8065dae53c0475596bfc174927075895d9fb8b76",

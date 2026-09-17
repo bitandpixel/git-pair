@@ -317,10 +317,15 @@ move is the mechanical rename it should be.
   since both escape hatches already exist. A tie is now classified as a usage error (exit 2) like
   `ErrNoChangeset`: the branch cannot answer the question, and both ways out are things the user can
   type.
-- [ ] `status --json` reports the default branch it resolved, its commit, and which source supplied
+- [x] `status --json` reports the default branch it resolved, its commit, and which source supplied
   it (`flag` / `origin-head` / `sole-candidate`), reported the same way whether the ref came from
   `--default-branch` or from detection. A CI run should be explainable from its own output rather
   than from what the machine happened to have fetched.
+  - *Landed with M5, not M2:* `default_branch`, `default_branch_commit`, `default_branch_source`. The
+    resolved ref now travels on `session`, which is why `RequireCurrentOn`/`ResolveCurrentOn` exist:
+    reporting the comparison and making it have to be the same resolution, so the two cannot disagree
+    and no second lookup is paid for. The doc comment on the `DefaultBranch*` source constants had
+    promised these fields since M2; the code never grew them.
 - [x] Cost assertions: resolving on a changeset branch and on trunk stay in single-digit git
   invocations with 300 archive refs present, against 1,802 for the per-ref formulation.
 - [x] `queue` enumerates local branches and resolves each against trunk — two `ls-tree` calls per
@@ -382,12 +387,6 @@ move is the mechanical rename it should be.
 - [x] PRD §9.5 rewritten for `change archive`, §13's second ref removed, §12's completion paragraph;
   README's concepts, command surface, JSON contract, troubleshooting. §13's namespace move stays open
   with the ref rename below.
-- [ ] `status` reports the archive as current or stale with its SHA, beside `state`.
-- [ ] Update `e2e-29.sh` and `pty-walkthrough.sh` in this commit — they are the live proof that the
-  archive survives `git branch -D`, and that proof currently runs through `change complete`.
-- [ ] PRD §9.5 rewritten for `change archive`, §13 for the namespace, §12's completion paragraph;
-  README's concepts, command surface, JSON contract, troubleshooting.
-
 Landed so far:
 
 - Resolution and default-branch detection, in `internal/changeset/resolve.go`. Additive: no caller
