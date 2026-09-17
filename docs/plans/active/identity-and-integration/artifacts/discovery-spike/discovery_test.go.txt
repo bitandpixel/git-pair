@@ -847,3 +847,92 @@ func TestControlWithoutAnyDecision(t *testing.T) {
 	t.Logf("are their commits in trunk's history? %v",
 		trim(f.MustGit("merge-base", "--is-ancestor", "theirs", "main")+" yes"[:0]+"ok"))
 }
+
+// A landing into a release branch is invisible to a baseline of `main`, so the integration
+// ref is the only thing that retires the changeset.
+func TestReleaseBranchLanding(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("release/2.x", "main")
+	f.Commit("release prep", gittest.WithFile("release.txt", "2\n"))
+
+	f.CreateBranch("hotfix", "release/2.x")
+	archive(f, "hotfix", f.CommitChangeset("hotfix", "refs/git-pair/changesets/hotfix/archive"))
+	f.Commit("fix the thing", gittest.WithFile("fix.txt", "1\n"))
+
+	f.SwitchTo("release/2.x")
+	landed := f.MustGit("merge", "--no-ff", "-m", "land hotfix in 2.x", "hotfix")
+	_ = landed
+	head := f.Head()
+
+	f.SwitchTo("hotfix")
+	got := treeRule(t, f)
+	if got.Candidate == nil || got.Candidate.ID != "hotfix" {
+		t.Fatalf("before recording: %+v, want hotfix still active", got.Candidate)
+	}
+	t.Logf("merged into release/2.x, and against a main baseline the changeset is still active")
+
+	// The recorded commit is where the content lives; check what its tree holds.
+	dirs := trim(f.MustGit("ls-tree", "--name-only", head, "changesets/"))
+	if dirs == "" {
+		t.Fatal("the recorded commit does not contain the changeset directory")
+	}
+	t.Logf("the landing commit's tree holds %q, so a record can be verified rather than believed", dirs)
+
+	integrate(f, "hotfix", head)
+	if got = treeRule(t, f); got.Candidate != nil {
+		t.Fatalf("after recording: %s, want nothing", got.Candidate.ID)
+	}
+	t.Logf("with the integration ref present, the same branch is retired")
+}
+
+// A record that claims "this commit landed the changeset" is verifiable when the content is
+// in that commit's tree. That holds for every landing strategy git-pair documents.
+func TestRecordedCommitContainsTheDirectory(t *testing.T) {
+	strategies := []struct {
+		name string
+		land func(t *testing.T, f *gittest.Fixture, branch string) string
+	}{
+		{"merge", func(t *testing.T, f *gittest.Fixture, branch string) string {
+			f.MustGit("merge", "--no-ff", "-m", "land "+branch, branch)
+			return f.Head()
+		}},
+		{"squash", func(t *testing.T, f *gittest.Fixture, branch string) string {
+			f.MustGit("merge", "--squash", branch)
+			f.MustGit("commit", "-m", "squash "+branch)
+			return f.Head()
+		}},
+		{"cherry-pick", func(t *testing.T, f *gittest.Fixture, branch string) string {
+			commits := f.CommitsAbove(f.RevParse("main"), branch)
+			for _, c := range commits {
+				f.MustGit("cherry-pick", c)
+			}
+			return f.Head()
+		}},
+	}
+	for _, s := range strategies {
+		t.Run(s.name, func(t *testing.T) {
+			f := gittest.New(t)
+			f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+			f.CreateBranch("work")
+			f.CommitChangeset("work", "main")
+			f.Commit("work", gittest.WithFile("work.txt", "1\n"))
+			f.SwitchTo("main")
+			commit := s.land(t, f, "work")
+
+			dirs := trim(f.MustGit("ls-tree", "--name-only", commit, "changesets/"))
+			if dirs == "" {
+				t.Errorf("%s landing: the recorded commit's tree has no changesets/ directory", s.name)
+			} else {
+				t.Logf("%s landing: tree holds %q", s.name, dirs)
+			}
+			// And whether the source commits are still reachable, which is what the
+			// ref-based rule cared about and the content rule does not.
+			anc := "no"
+			if err := exec.Command("git", "-C", f.Dir(), "merge-base", "--is-ancestor", "work", "main").Run(); err == nil {
+				anc = "yes"
+			}
+			t.Logf("%s landing: source commits reachable from main: %s", s.name, anc)
+		})
+	}
+}

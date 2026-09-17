@@ -250,9 +250,11 @@ assertion about stale claims was vacuous because no changeset directory existed 
   `git remote set-head origin --auto`. No config key. Two resolvers would let a changeset's recorded
   base and the landed-test disagree, which is the inconsistency this rule exists to remove. Refuse
   rather than treat an unresolvable trunk as "no trunk", which makes every directory a candidate.
-- [ ] `changeset.Resolve(ctx, repo, rev, trunk)`: rank 0 from `ls-tree` of `changesets/` in the
-  revision and in trunk; nearest archive tip, then `base:`-names-parent to break a stack, then
-  ambiguity. `ForID` stays for `--changeset` reads; `ForBranch`/`AtCommit` and the claim machinery
+- [ ] `changeset.Resolve(ctx, repo, rev, defaultBranch)`: step-0 exclusions first (an integration ref
+  or a terminal record retires a candidate before anything else is considered — and the integration ref
+  is the *only* thing that retires a landing outside the default branch), then rank 0 from `ls-tree` of
+  `changesets/` in the revision and in the default branch; nearest archive tip, then `base:`-names-parent
+  to break a stack, then ambiguity. `ForID` stays for `--changeset` reads; `ForBranch`/`AtCommit` and the claim machinery
   are deleted, including `StaleClaims` and the renamed-branch warning.
 - [ ] No ref fallback. Resolution is rank 0 alone; a branch whose changeset directory was deleted
   reports `uninitialized` with the normal hint. Fixture asserts exactly that, so the omission is a
@@ -347,6 +349,8 @@ implementation commit fails again, `change unready` fails.
 - `refs/git-pair/changesets/<id>/integration` → B, created once, never rewritten.
 - Integration-readiness and integrated-ness reported by `status`, and `check` failing once integrated.
 - The archive frozen after integration.
+- **First landing wins.** A changeset has one integration ref; a backport is refused with the existing
+  record named, because a backport is a fact about the release branch and git already records it.
 
 #### Tasks
 
@@ -360,17 +364,30 @@ implementation commit fails again, `change unready` fails.
 - [ ] Order the §21 checks so the useful failures come first: unknown source, no archive, ambiguity,
   terminal changeset, unknown integrated commit, `--target` reachability, existing integration ref.
 - [ ] Reachability via `merge-base --is-ancestor`, with a comment on the re-added helper explaining why
-  verifying a caller-named target is not the derivation the anchored-lifecycle plan removed.
+  verifying a caller-named target is not the derivation the anchored-lifecycle plan removed. Note the
+  asymmetry the fixtures showed: `--commit` need not descend from `--source` (a squash landing has no
+  ancestry between them), but it must be reachable from `--target`.
+- [ ] Verify the record rather than believing it: `changesets/<id>/` must exist in `tree(--commit)`.
+  Measured true for merge, squash and cherry-pick landings, since the directory is committed content
+  that travels with the change; it is what makes a release-branch record pointing at an unrelated
+  commit fail.
 - [ ] Create-only write (`update-ref <ref> <new> ""`) as the backstop, behind an existence check that
   prints §22's message instead of git's `fatal:`.
 - [ ] The freeze: the single archive-update path refuses once an integration ref exists, for every
   command including `change archive`.
-- [ ] `status` gains `integrated` and `integrated_commit` beside `state`; `check` fails an integrated
-  changeset with "already integrated at <sha>".
+- [ ] `status` gains `integrated`, `integrated_commit` and `integrated_target` beside `state`; the
+  target matters because a changeset that retired into `release/2.x` and never reached the default
+  branch must not look like a default-branch landing. `check` fails an integrated changeset with
+  "already integrated at <sha>" naming the target.
+- [ ] Second-record refusal prints the existing record's commit **and target**, so a backport attempt
+  explains itself: the release branch's own history is the record, and git-pair does not keep a second
+  ref per landing.
 - [ ] `integration record` runs from any branch — it addresses changesets by SHA and ref, not by
   checkout — and reports what it wrote in `--json`.
 - [ ] Tests for each failure ordering, the squash shape (approved head A, unrelated target commit B,
-  no ancestry between them, record succeeds), and the second-record refusal.
+  no ancestry between them, record succeeds), the second-record refusal, and the release-branch shape:
+  merged into `release/2.x` with a `main` baseline, the changeset stays active until recorded, and the
+  recorded commit's tree carries the directory.
 - [ ] PRD section for the command and §13's namespace; README surface, JSON contract, exit codes.
 
 #### Verification
@@ -378,6 +395,11 @@ implementation commit fails again, `change unready` fails.
 A fixture with no ancestry between A and B proves §15's independence: the record succeeds where any
 patch-ID or ancestry heuristic would have failed. Re-recording refuses loudly, `change archive` refuses
 afterwards, and the archive ref is unchanged by any later command on the branch.
+
+Measured, and the reason recording is not merely reporting: with the baseline at `main`, a changeset
+merged into `release/2.x` resolved as active until its integration ref existed, then retired. Any
+landing outside the default branch depends on this command for a correct `status`, which is a CI
+documentation requirement, not just a command surface.
 
 ### M5 — CI ergonomics: absent refs are reported, not mistaken for state
 
@@ -392,9 +414,16 @@ afterwards, and the archive ref is unchanged by any later command on the branch.
   because §24's error is about a CI job that fetched the wrong things and §18's is about a changeset that
   was never archived. Conflating them sends someone to the wrong fix.
 - [ ] Used by `integration record` and `check` where refs are load-bearing; `status` and `review queue`
-  keep working from branches and must not start failing because a CI job fetched nothing.
+  keep working without the changeset namespace and must not start failing because a CI job fetched
+  nothing. They do require the **default branch** — the tree rule compares against it — so the resolver's
+  refusal is the correct failure there, and the guidance it prints has to name the fetch rather than
+  blame the changeset.
 - [ ] README: the fetch refspec, the push config a human needs to publish refs in the first place
   (documented, not configured — git-pair runs no `push`), and the error they will see if they skip it.
+  The CI recipe also fetches the default branch, because resolution is a comparison against it.
+- [ ] README states the consequence of landing outside the default branch: such a landing is invisible to
+  resolution, so `git pair integration record` is what retires the changeset. A release-line repository
+  that treats recording as optional reporting will show landed changesets as active forever.
 - [ ] Tests: a clone without the namespace produces the fetch guidance, not a false "not ready" or a
   misleading "no archive"; after the fetch, the same command succeeds.
 
@@ -472,3 +501,4 @@ against running the fetch first.
 | 2026-09-17 | decision | Rank 1 (the archive-ref fallback) removed after the reviewer read its purpose correctly: two of the three justifications were false (a PR checkout has the tree; a rebase that drops the init commit also detaches the archive ref), leaving only a committed deletion of `changesets/<id>/`, where the loss is one confusing message. Resolution is the tree rule alone. Two findings from that probe: merging an unlanded sibling branch makes the branch ambiguous (`[mine@4 theirs@4]`, a case the claim model could not reach), answered by `change use <id>` recording `ignores:` in the chosen changeset rather than the losing one; and landing someone else's merge of your unlanded changeset makes yours read as landed on your own branch, measured with and without any recorded decision — a control run showed the flag was never the cause. |
 | 2026-09-17 | decision | The integration branch is a flag or git's own answer, not configuration: `--integration <ref>`, else `refs/remotes/origin/HEAD`, else a unique `origin/main`/`origin/master`, else refuse naming the flag and `git remote set-head origin --auto`. The `pair.integrationBranch` key I had proposed was an invention — the product reads no git config today, the requirements already pass `--target origin/main` at the call site, and machine-local config is what this plan rejected for the `branch:` claim. Measured: `git clone` records `origin/HEAD` when the remote HEAD names an existing branch (path and `file://`); the CI `init`+`remote add`+`fetch <branch>` shape does not; `git remote set-head --auto` fixes it; git refuses to guess when the remote HEAD dangles. |
 | 2026-09-17 | decision | Read-side flag named `--default-branch`, not `--integration` and not `--target`. `--target` stays on `integration record` because the two are different concepts: a backport records `--target release/2.x` while the branch defining "landed" for discovery is still `main`, and neither flag can say both. Also found: `defaultBase` (`internal/cli/change.go:316`) already guesses trunk as local `main` then `master` for `change init --base`, so it must fold into the same resolver — two resolvers would let a changeset's recorded base and the landed-test disagree. |
+| 2026-09-17 | measurements | How recording interacts with release branches, measured: merged into `release/2.x` with a `main` baseline, the changeset stayed active until its integration ref existed, then retired — so a landing outside the default branch makes `integration record` load-bearing rather than informational. The record becomes verifiable: `--commit` must be reachable from `--target`, and `changesets/<id>/` must be in `tree(--commit)`, which held for merge, squash and cherry-pick landings. Backports: first landing wins, one integration ref, the refusal names the existing commit and target. Also confirmed `git cherry-pick` fast-forwards by default, which is why reachability is a poor definition of "landed" and content is a good one. |
