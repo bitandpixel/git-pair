@@ -160,10 +160,14 @@ expect "v reports the span it stepped to" 0 "$T/ring.raw" "span "
 expect "v reports the position in the ring" 0 "$T/ring.raw" "(2 of"
 
 # --- 5. a mark survives stepping away and back (the mark round trip) -------
-step "marks: space marks a file, v away and back brings the mark to the counter"
+step "marks: space marks the first row, v away and back brings the marks to the counter"
+# The first row is a directory, and a directory's space is its whole subtree's: the changeset
+# directory holds ABOUT.md and CHANGESET.yaml, both of which this span changed, so one press marks two
+# of the three files and the counter says so. The claim being checked is that the counter still says it
+# after the span has been stepped away from and back.
 session marks space,v,v,q
-expect "the mark shows in the counter" 0 "$T/marks.raw" "1 /"
-expect "the counter is back where it was after v v" 2 "$T/marks.raw" "1 /"
+expect "the marks show in the counter" 0 "$T/marks.raw" "2 / 3 reviewed"
+expect "the counter is back where it was after v v" 2 "$T/marks.raw" "2 / 3 reviewed"
 
 # --- 6. a ref moves while the session is open (span plan M4) ---------------
 step "drift: another process moves the ref, the screen warns and r re-pins"
@@ -176,7 +180,12 @@ expect "r re-pins and reports it" 2 "$T/drift.raw" "refreshed probe"
 step "handoff: enter runs the configured difftool, and the alt screen comes back"
 git config diff.tool marker
 git config difftool.marker.cmd "touch $T/tool-ran"
-session tool enter,q
+# Four downs is the walk down the tree to src/service.ts: the cursor starts on the changeset's
+# directory row, whose Enter folds, and ABOUT.md two rows down is a document the changeset invented,
+# which opens in the editor rather than the difftool. A code file in the span is the row whose Enter
+# is the reviewer's path to the tool — and the row that has to be reached by counting, since the
+# harness types keys rather than pointing at rows.
+session tool j,j,j,j,enter,q
 expectfile "the difftool actually ran" "$T/tool-ran"
 expectbytes "the session took an alternate screen" "$T/tool.raw" $'\033[?1049h'
 expectbytes "the session left the alternate screen on quit" "$T/tool.raw" $'\033[?1049l'
