@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Spike: validate the git plumbing gitpr needs, independent of implementation language.
-# Run: bash docs/plans/active/gitpr-mvp/research/spike-git-plumbing.sh
+# Run: bash docs/plans/completed/gitpr-mvp/research/spike-git-plumbing.sh
 set -uo pipefail
 
 T=$(mktemp -d /tmp/gitpr-spike.XXXXXX)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end replay of the PRD §29 success workflow against a scratch repo.
-# Usage: bash docs/plans/active/gitpr-mvp/artifacts/e2e-29.sh /path/to/gitpr
+# Usage: bash docs/plans/completed/gitpr-mvp/artifacts/e2e-29.sh /path/to/gitpr
 set -uo pipefail
 G=${1:-/tmp/gitpr}
 T=$(mktemp -d /tmp/gitpr-e2e.XXXXXX)

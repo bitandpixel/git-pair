@@ -316,7 +316,7 @@ recent review submission is considered. Additions outside `changesets/<changeset
 additions inside it are reported as "changeset artifacts, not blocking": a thread answered by
 appending still contains every line the reviewer wrote, and `ABOUT.md` edits are normally kept,
 so blocking on those would fail almost every real changeset and push users toward reflexive use
-of the override. See `docs/plans/active/gitpr-mvp/research/git-plumbing-findings.md`.
+of the override. See `docs/plans/completed/gitpr-mvp/research/git-plumbing-findings.md`.
 
 ## Command reference
 

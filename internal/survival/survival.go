@@ -42,7 +42,7 @@ type Report struct {
 	// there is conversation surface rather than code to resolve — a thread
 	// answered by appending still contains every original line — so it is
 	// reported but never blocks. See
-	// docs/plans/active/gitpr-mvp/research/git-plumbing-findings.md.
+	// docs/plans/completed/gitpr-mvp/research/git-plumbing-findings.md.
 	Artifacts []Addition `json:"artifacts"`
 	// AddedLines is the total number of non-blank lines the review added.
 	AddedLines int `json:"added_lines"`
