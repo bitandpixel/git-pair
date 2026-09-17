@@ -669,64 +669,49 @@ func TestSessionSpanErrorSurfaces(t *testing.T) {
 	}
 }
 
-// A historical span is a look at history, and `v` must not be a dead end there: the screen
-// has just refused to mark something and named `v` as the way out, so the step has to
-// arrive at a span you can review into rather than at another read-only one.
-func TestSessionStepFromHistoricalReturnsToAReviewableSpan(t *testing.T) {
+// A historical span is not a dead end. `v` walks out of it the way it walks out of anywhere else,
+// and because the walk reaches every stop, a span you can review into is a bounded number of presses
+// away. What it deliberately does not do is jump there in one press: that was the rule that made the
+// second historical span on the ring unreachable. Getting to a reviewable span in one keystroke is
+// `V`, whose head column always offers `Current`.
+func TestSessionStepFromHistoricalWalksOutToAReviewableSpan(t *testing.T) {
 	e := newEnv(t)
 	e.f.CommitReviewMarker(slug, "feedback")
+	ctx := context.Background()
 
 	sess := e.session(t, span.Selector{Base: span.ChangesetBase(), Head: span.Review(-1)})
 	if !sess.Span().Historical() {
 		t.Fatalf("the session opened live, want a historical span")
 	}
-	ctx := context.Background()
-	history := e.f.Commit("author response", gittest.WithFile("service.go",
-		"package main\n\nfunc Lock() { transaction() }\n"))
-	if err := sess.SetSpan(ctx, span.Selector{Base: span.ChangesetBase(), Head: span.Commit(history)}); err != nil {
-		t.Fatalf("SetSpan: %v", err)
+	custom := span.Selector{Base: span.Commit(e.f.Parent(e.f.Head())), Head: span.WorkingTree()}
+	if err := sess.SetSpan(ctx, custom); err != nil {
+		t.Fatalf("SetSpan(custom): %v", err)
+	}
+	if err := sess.SetSpan(ctx, span.Selector{Base: span.ChangesetBase(), Head: span.Review(-1)}); err != nil {
+		t.Fatalf("SetSpan(history): %v", err)
+	}
+	ring := sess.SpanRing()
+	pos, total := sess.SpanPosition()
+	want := ring[pos%total].Display()
+
+	res, err := sess.StepSpan(ctx)
+	if err != nil {
+		t.Fatalf("StepSpan from history: %v", err)
+	}
+	if res.Pos != pos%total+1 {
+		t.Errorf("v from history landed on stop %d, want the next stop %d", res.Pos, pos%total+1)
+	}
+	if got := sess.Selector().Display(); got != want {
+		t.Errorf("v from history went to %s, want the ring's next stop %s \u2014 a walk, not a jump", got, want)
 	}
 
-	// StepOut, not StepSpan: the refusal is what earns the escape. See the two tests below for
-	// what a plain step does instead.
-	if _, err := sess.StepOut(ctx); err != nil {
-		t.Fatalf("StepOut: %v", err)
-	}
-	if !sess.Span().Live() {
-		t.Errorf("v from a read-only span landed on %s, which is read-only as well", sess.Span().Label)
-	}
-	if got := sess.Selector().Head; got.Kind != span.KindWorkingTree {
-		t.Errorf("the span v landed on ends at %s, want the working tree", got.Kind)
-	}
-}
-
-// What it returns to is the last span that was reviewable, not merely some reviewable span:
-// a reviewer who stepped off their own span wants their own span back.
-func TestSessionStepFromHistoricalGoesBackWhereItWasReviewing(t *testing.T) {
-	e := newEnv(t)
-	e.f.CommitReviewMarker(slug, "feedback")
-	ctx := context.Background()
-
-	// A live span that is neither preset: a fixed commit as the base, the working tree as
-	// the head. The ring also holds the two presets and a historical span, so the next stop
-	// around the ring is not this one.
-	working := e.session(t, span.Selector{Base: span.Commit(e.f.Parent(e.f.Head())), Head: span.WorkingTree()})
-	if !working.Span().Live() {
-		t.Fatalf("the session opened read-only, want a live span")
-	}
-	if err := working.SetSpan(ctx, span.Selector{Base: span.ChangesetBase(), Head: span.Review(-1)}); err != nil {
-		t.Fatalf("SetSpan: %v", err)
-	}
-	if !working.Span().Historical() {
-		t.Fatalf("the custom span did not resolve read-only, want it to")
-	}
-
-	if _, err := working.StepOut(ctx); err != nil {
-		t.Fatalf("StepSpan: %v", err)
-	}
-	if got := working.Selector().Base; got.Kind != span.KindCommit {
-		t.Errorf("v returned to a span based on %s, want the commit %s it was reviewing from",
-			got.Kind, got.Name[:7])
+	for presses := 1; !sess.Span().Live(); presses++ {
+		if presses > total {
+			t.Fatalf("v walked %d stops from history and never reached a span it could review", presses)
+		}
+		if _, err := sess.StepSpan(ctx); err != nil {
+			t.Fatalf("StepSpan: %v", err)
+		}
 	}
 }
 
@@ -883,51 +868,5 @@ func TestSessionStepSpanReachesEveryStop(t *testing.T) {
 	if len(visited) != total {
 		t.Errorf("a turn of the ring visited %d of %d stops (%v); a step that always escapes leaves stops unreachable",
 			len(visited), total, visited)
-	}
-}
-
-// What `v` does from a read-only span depends on why it was pressed. Without a refusal it is the next
-// stop around the ring; with one it is the span the reviewer was reviewing, which is not the same stop
-// and is the reason there are two functions rather than one with a bool.
-func TestSessionStepOutGoesWhereStepSpanWouldNot(t *testing.T) {
-	e := newEnv(t)
-	e.f.CommitReviewMarker(slug, "feedback")
-	ctx := context.Background()
-
-	// A custom live span to open on, the unreviewed preset to be reviewing when history is visited,
-	// and a historical span: the stop after history is the custom one, while the last reviewable stop
-	// is the preset. Two sessions, because a step is itself a visit -- the first question would set
-	// the answer to the second.
-	custom := span.Selector{Base: span.Commit(e.f.Parent(e.f.Head())), Head: span.WorkingTree()}
-	history := span.Selector{Base: span.ChangesetBase(), Head: span.Review(-1)}
-	inHistory := func() *tui.Session {
-		sess := e.session(t, custom)
-		if err := sess.SetSpan(ctx, span.SinceReview(-1)); err != nil {
-			t.Fatalf("SetSpan(unreviewed): %v", err)
-		}
-		if err := sess.SetSpan(ctx, history); err != nil {
-			t.Fatalf("SetSpan(history): %v", err)
-		}
-		return sess
-	}
-
-	stepRes, err := inHistory().StepSpan(ctx)
-	if err != nil {
-		t.Fatalf("StepSpan: %v", err)
-	}
-	if stepRes.Pos != 1 || stepRes.Total != 4 {
-		t.Errorf("v from history went to stop %d of %d, want the next stop around the ring", stepRes.Pos, stepRes.Total)
-	}
-
-	same := inHistory()
-	escaped, err := same.StepOut(ctx)
-	if err != nil {
-		t.Fatalf("StepOut: %v", err)
-	}
-	if escaped.Pos != 3 {
-		t.Errorf("the escape went to stop %d, want the unreviewed span the reviewer was on before history", escaped.Pos)
-	}
-	if !same.Span().Live() {
-		t.Errorf("the escape landed on %s, which is read-only as well", same.Span().Label)
 	}
 }

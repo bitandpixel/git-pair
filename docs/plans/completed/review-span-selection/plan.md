@@ -364,22 +364,30 @@ reached from each other: the walk closed a loop between the last reviewable stop
 historical one, and the second was unreachable by any number of presses. The report was "v gets stuck
 cycling through… first to last and back to first".
 
-The rule was right about the need and wrong about the trigger. A reviewer who cannot mark a file is
-leaving; a reviewer pressing `v` is walking. So the escape is now earned by a refusal: the read-only
-gate credits the next `v`, and that press alone means "get me out" (`Session.StepOut`), while every
-other press is the plain walk (`Session.StepSpan`). A second defect in the same corner, found while fixing the first: a stop whose endpoint had stopped
-resolving (a deleted tag, a force-pushed branch) stopped the walk *entirely* — every press failed the
-same way and `V` was the only way past. `v` now steps over such stops and names them, reason included
-(`StepResult.Skipped`, worded by `skippedNote`), and the stop stays on the ring so it returns with the
-ref. Where nothing else resolves either, the press says so and moves nothing. Tests:
-`TestStepSpanSkipsAStopThatNoLongerResolves`, `TestStepSpanNamesEveryStopItSkipped`,
-`TestStepSpanSaysSoWhenEveryOtherStopIsDead`, `TestVNamesTheStopItSkipped`.
+The rule was right about the need and wrong about the trigger. A first fix earned the escape with a
+refusal: the read-only gate credited the next `v`, and that press alone meant "get me out"
+(`Session.StepOut`) while every other press was the plain walk. That shipped, and was then removed.
+A reviewer found it predictable in the wrong direction — after a refusal on the first stop, `v` jumped
+to the fourth, past two spans they could have reviewed — and the reason was structural: a key whose
+destination depends on what happened a few keystrokes ago cannot be learned by pressing it. `v` is now
+the walk and nothing else, from every stop including a read-only one. What replaced the escape is `V`,
+which lists spans and whose head column always offers `Current`, so getting to a reviewable span is
+still one keystroke of intention — it is simply a different key from the one that walks. The refusal
+message was changed to match (`V chooses a span you can review`, not `v opens`).
 
-The tests are `TestSessionStepSpanReachesEveryStop`
-(the loop, as reported), `TestSessionStepOutGoesWhereStepSpanWouldNot`,
-`TestARefusalMakesTheNextVMeanGetMeOut` and `TestVWithoutARefusalWalksEvenFromHistory`, and the
-mutant that restores the old behaviour is caught by three of them. Wherever this document says the
-step escapes from history, read "escapes when a refusal asked it to".
+A second defect in the same corner, found while fixing the first and still there: a stop whose endpoint
+had stopped resolving (a deleted tag, a force-pushed branch) stopped the walk *entirely* — every press
+failed the same way and `V` was the only way past. `v` now steps over such stops and names them, reason
+included (`StepResult.Skipped`, worded by `skippedNote`), and the stop stays on the ring so it returns
+with the ref. Where nothing else resolves either, the press says so and moves nothing.
+
+The tests are `TestSessionStepSpanReachesEveryStop` (the loop, as reported),
+`TestSessionStepFromHistoricalWalksOutToAReviewableSpan`, and
+`TestARefusalDoesNotChangeWhereVGoes`, which is what keeps the escape from creeping back; plus
+`TestStepSpanSkipsAStopThatNoLongerResolves`, `TestStepSpanNamesEveryStopItSkipped`,
+`TestStepSpanSaysSoWhenEveryOtherStopIsDead` and `TestVNamesTheStopItSkipped` for dead stops. Wherever
+this document says the step escapes from history, read: **it does not escape at all** — the walk is
+the only rule, and `V` is the way to a span you can review.
 
 ## Naming that changed after this plan was archived
 

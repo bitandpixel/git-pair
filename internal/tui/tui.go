@@ -175,9 +175,6 @@ type reviewModel struct {
 	previewG      bool
 	patches       map[string]Patch
 	working       map[string]Patch
-	// escapeCredit is a refusal waiting to be answered: the next `v` leaves the read-only span
-	// instead of stepping around the ring with it. Only the gate sets it. See Session.StepOut.
-	escapeCredit bool
 	// pendingNote is what goes in the status line when the editor or difftool currently
 	// holding the terminal exits. Every handoff assigns it, so a note can never outlive the
 	// child it was written for.
@@ -385,11 +382,6 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handlePreviewKey(key)
 	}
 	m.refresh()
-	// A refusal buys the next `v` the escape, and nothing else does. Read here and cleared here, so
-	// the credit lasts exactly one keystroke: if the reviewer presses anything but `v` they were not
-	// on their way out.
-	refused := m.escapeCredit
-	m.escapeCredit = false
 
 	// Every action that changes something goes through one gate. Read-only-ness is a
 	// property of the span's head, not of each command, and a screen that grows a new
@@ -397,9 +389,6 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if doing, mutating := mutatingKey(key); mutating {
 		if why := m.cannot(doing); why != "" {
 			m.setStatus(why, false)
-			// The message names `v` as the way out of a span that refuses this. That promise is
-			// what escapeCredit is for -- and one refusal is the only thing that can make it.
-			m.escapeCredit = true
 			return m, nil
 		}
 	}
@@ -445,11 +434,7 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("", false)
 	case key.Type == tea.KeyRunes && firstRune(key) == 'v':
 		before := countMarked(m.sess)
-		step := m.sess.StepSpan
-		if refused {
-			step = m.sess.StepOut
-		}
-		res, err := step(m.ctx)
+		res, err := m.sess.StepSpan(m.ctx)
 		if err != nil {
 			m.setStatus(stepFailureNote(res, err), true)
 		} else {
@@ -516,7 +501,7 @@ func (m reviewModel) cannot(doing string) string {
 		return ""
 	}
 	return fmt.Sprintf("read-only: this span ends at %s, not your working tree, so you cannot %s "+
-		"\u2014 v opens a span you can review", sp.Head, doing)
+		"\u2014 V chooses a span you can review", sp.Head, doing)
 }
 
 // toggleMark marks the file under the cursor reviewed, or explains why the row it is on

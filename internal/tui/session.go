@@ -81,10 +81,6 @@ type Session struct {
 	// entered, and ringIdx is the stop it is standing on. `v` walks it; see StepSpan.
 	ring    []span.Selector
 	ringIdx int
-	// lastLive is the most recent stop on the ring that was reviewable, or -1. A read-only
-	// span is a detour, and `v` is how you leave it, so it goes back there rather than to
-	// whatever sits next.
-	lastLive int
 
 	// drift holds the ref checkpoints that have moved since this span pinned them, as of the
 	// last check. It is written on the update path only: the banner reads it, and a check
@@ -96,7 +92,7 @@ type Session struct {
 func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	s := &Session{
 		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span,
-		reviewRef: "refs/reviews/" + opts.Changeset.Slug, lastLive: -1,
+		reviewRef: "refs/reviews/" + opts.Changeset.Slug,
 	}
 	if err := s.Rescan(ctx); err != nil {
 		return nil, err
@@ -149,9 +145,6 @@ func (s *Session) SetSpan(ctx context.Context, sel span.Selector) error {
 	// has drifted yet.
 	s.setDrift(nil)
 	s.ringIdx = s.noteSpan(s.sel)
-	if sp.Live() {
-		s.lastLive = s.ringIdx
-	}
 	return nil
 }
 
@@ -231,51 +224,35 @@ func (s *Session) Reload(ctx context.Context) error {
 	return nil
 }
 
-// StepSpan moves to the next span this session has been in, wrapping: the span it opened on, the
-// two presets, and any span the reviewer chose with `V`. Walking the ring is what makes a custom
-// span reachable again without opening the picker, and the presets stay reachable from a custom span
-// rather than being replaced by it.
+// StepSpan moves to the next span this session has been in, wrapping: the span it opened on, the two
+// presets, and any span the reviewer chose with `V`. Walking the ring is what makes a custom span
+// reachable again without opening the picker, and the presets stay reachable from a custom span rather
+// than being replaced by it.
 //
-// It is a walk, so every stop is reachable from every other. That matters more than it sounds: the
-// step used to jump out of a read-only span unconditionally, which made the *second* historical span
-// on the ring unreachable -- `v` closed a loop between the last reviewable stop and the first
-// historical one, and the reviewer's word for it was "stuck cycling".
-func (s *Session) StepSpan(ctx context.Context) (StepResult, error) {
-	return s.step(ctx, false)
-}
-
-// StepOut is what `v` means when the screen has just refused the reviewer something: back to the last
-// span they could review, not whatever sits next. The refusal message names `v` as the way out, and a
-// reviewer who cannot mark a file is not walking the ring -- they are leaving. The credit for that is
-// the refusal's, spent on the next press, so a reviewer comparing two pieces of history keeps their
-// walk.
-func (s *Session) StepOut(ctx context.Context) (StepResult, error) {
-	return s.step(ctx, true)
-}
-
+// It is a walk out of every stop, including a read-only one, and that is the whole contract: the same
+// press means "next", so a reviewer can learn where a keypress lands. Two rules lived here before and
+// were removed. Escaping unconditionally out of a historical span closed a loop that made the *second*
+// historical stop unreachable ("stuck cycling"); making that escape conditional on a refusal made the
+// next `v` land somewhere different depending on what happened a few keystrokes ago, which is the same
+// unpredictability with extra steps. Reaching a span you can review is `V`'s job -- its head column
+// always offers `Current` -- and the walk reaches every live stop anyway.
+//
 // A stop that no longer resolves -- the tag it named was deleted, the review ref is gone, the branch
 // was force-pushed away -- is passed over, and reported in StepResult.Skipped. Blocking there would
 // make one dead stop a wall: the same press would fail the same way forever, with `V` the only way
-// past. Skipping it is safe because SetSpan resolves before it replaces anything, so a stop that fails
+// past. Skipping is safe because SetSpan resolves before it replaces anything, so a stop that fails
 // leaves the session exactly where it was and the next candidate is a whole span, never half of one.
 // The stop stays on the ring: a tag that comes back is a stop again.
-func (s *Session) step(ctx context.Context, escaping bool) (StepResult, error) {
+func (s *Session) StepSpan(ctx context.Context) (StepResult, error) {
 	total := len(s.ring)
 	res := StepResult{Pos: s.ringIdx + 1, Total: total}
 	if total < 2 {
 		return res, fmt.Errorf("this session has only been in this span so far \u2014 V chooses another")
 	}
 
-	first := (s.ringIdx + 1) % total
-	if escaping {
-		if live := s.liveStop(); live >= 0 && live != s.ringIdx {
-			first = live
-		}
-	}
-
 	var why error
 	for i := 0; i < total; i++ {
-		target := (first + i) % total
+		target := (s.ringIdx + 1 + i) % total
 		if target == s.ringIdx {
 			continue // where the session is standing is not somewhere to step to
 		}
@@ -310,21 +287,6 @@ type StepResult struct {
 type SkippedStop struct {
 	Selector span.Selector
 	Reason   string
-}
-
-// liveStop is a stop the reviewer can review into: the last one visited, or, for a session
-// that has only ever looked at history, any stop that names the working tree as its head —
-// which is what makes a span live, and what the two presets do.
-func (s *Session) liveStop() int {
-	if s.lastLive >= 0 {
-		return s.lastLive
-	}
-	for i, sel := range s.ring {
-		if sel.Head.Kind == span.KindWorkingTree {
-			return i
-		}
-	}
-	return -1
 }
 
 // SpanPosition is the stop the session stands on, 1-based, and how many stops there are.
@@ -403,9 +365,6 @@ func (s *Session) RefreshDrift(ctx context.Context) (moved []span.Drift, reset i
 	}
 	if s.ringIdx < len(s.ring) {
 		s.ring[s.ringIdx] = sel
-	}
-	if next.Live() {
-		s.lastLive = s.ringIdx
 	}
 	moved = s.drift
 	s.setDrift(nil)
