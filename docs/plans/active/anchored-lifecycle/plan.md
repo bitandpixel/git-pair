@@ -253,21 +253,23 @@ applied to the movable ref instead of the newest marker.
 
 #### Tasks
 
-- Call `reviewref.Update` from `runChangeReady`, next to the existing call in `reviewops.Submit` and
-  the one added in `change complete`.
-- `status` gains the relationship between the anchor and the branch head as an annotation —
-  `anchored` when they agree, `author moved since <sha>` when they do not — and nothing derives a
-  state from it. Note that `review_commit` in `--json` is the sha the movable ref points at, so its
-  documented meaning moves from "the review" to "the last anchored head"; say so in README's JSON
-  contract and check whether any consumer compares it with `latest_review.commit`.
-- Report the anchor truthfully. `ReviewRef` is `reviewref.Head(slug)`, a name derived from the slug
-  that is never checked for existence (`internal/cli/status.go:100`), so `review_ref` is never empty
-  and cannot answer "has this changeset been reviewed", and the human printer prints it under a
-  heading that says "Review archive" (`internal/cli/status.go:169`) when it is the anchor, not the
-  archive. Gate the section on the ref existing, name the anchor as the anchor, and say in README's
-  JSON contract which field an agent should test. See the research note for the captured output.
-- Reachability argument in the commit message: a ready marker always descends from the last
+- [x] Call `reviewref.Update` from `runChangeReady`, next to the existing call in `reviewops.Submit`
+  and the one in `change complete`. No re-point step: with state moving only on markers (§12), the
+  ready marker is always the newest thing on the branch when the command finishes, so ref and
+  derived state agree by construction.
+- [x] Report the anchor truthfully. `ReviewRef` was `reviewref.Head(slug)`, a name derived from the
+  slug that is never checked for existence, so `review_ref` was never empty and could not answer
+  "has this changeset been anchored at all", and the human printer printed it under a heading that
+  said "Review archive" when it is the anchor, not the archive. The section is gated on the ref
+  existing, the lines are labelled `movable:` and `archive:`, and README's JSON contract says the
+  two fields stay empty until `change ready` or a submission writes the ref.
+- [x] Reachability argument in the commit message: a ready marker always descends from the last
   submission on that branch, so an anchor only ever grows the reachable set.
+- [x] Decided against the anchor-vs-head annotation. The ref lags `HEAD` routinely now — only
+  `change ready`, a submission and `change complete` move it — so "author moved since <sha>" would
+  fire on ordinary work, re-deriving a signal from the ref that this milestone's own deliverable
+  says the ref must not carry. `reason` already names the commits since the marker, and the drift
+  that matters is the tree question M3 answers at completion.
 
 #### Verification
 
@@ -354,8 +356,8 @@ reuse hazard. Abandoning without a branch refuses, and says why.
   recorded after the branch is gone. Nothing in this repository does that today, it would add a third
   mutating verb to `internal/git` against the file's stated rule, and the case it serves is post-merge
   bookkeeping, which M5 classifies automatically and which is not a lifecycle act.
-- Still open, small: whether `status` should show the anchor-vs-head relationship as its own field
-  or as part of `reason`.
+- Settled: `status` does not report the anchor-vs-head relationship. See M4 — the ref lags `HEAD`
+  by design now, and the drift worth reporting is measured against the tree at completion.
 
 ## Risks
 

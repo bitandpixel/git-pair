@@ -404,6 +404,8 @@ Requirements:
 -   run the surviving-review-additions diagnostic described below,
 -   fail non-interactively by default if surviving review additions are detected,
 -   create a review marker commit only if validation succeeds or an explicit override is supplied,
+-   anchor the ready marker in `refs/reviews/<changeset>`, so the offered history is reachable
+    without the branch (§13),
 -   make the branch discoverable by `git pair review queue`.
 
 Suggested commit:
@@ -865,8 +867,9 @@ Latest review:
   outcome: block
   commit: 91bf204
 
-Review archive:
-  refs/reviews/booking-transaction
+Review anchors:
+  movable: refs/reviews/booking-transaction
+    points at: 91bf204
 
 Uncommitted changes: no
 ```
@@ -991,7 +994,8 @@ tree (§9.5).
 
 # 13. Review Archive Refs
 
-A review submission should update a durable local ref:
+Offering a changeset for review should anchor it in a durable local ref, and every review
+submission moves that ref to what it reviewed:
 
 ```text
 refs/reviews/<changeset>
@@ -1006,6 +1010,11 @@ refs/reviews/booking-transaction
 pointing to the exact current `HEAD`.
 
 This keeps the entire implementation/review/fix chain reachable from Git garbage collection.
+The ref is written by `change ready` as well as by a submission, because the history worth saving
+begins at the first handoff rather than at the first response: a changeset that was offered and never
+reviewed, or whose branch exists only in the reflog, otherwise has nothing holding its marker alive.
+As with every review ref it is a warning rather than a guarantee — nothing here stops a later
+`git push --delete`.
 
 Completing a changeset (§9.5) writes an immutable archival ref alongside it:
 

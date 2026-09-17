@@ -320,6 +320,15 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 	if err != nil {
 		return fmt.Errorf("creating ready marker: %w", err)
 	}
+	// Offering the changeset is the moment its commits stop being disposable. Until
+	// now only a review submission anchored them, so work that was offered and never
+	// reviewed — or work whose branch exists only in the reflog — could be pruned with
+	// its ready marker, and the history the archive is supposed to preserve would be
+	// gone before anyone read it. The move is a warning rather than a guarantee, like
+	// every review ref: nothing here stops a later `git push --delete` (PRD §13).
+	if _, err := reviewref.Update(ctx, s.repo, s.cs.Slug, sha); err != nil {
+		return fmt.Errorf("anchoring the ready marker: %w", err)
+	}
 	printReady(a, s, sha, report, opts.allowSurviving)
 	return nil
 }

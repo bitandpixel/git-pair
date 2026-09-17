@@ -348,11 +348,14 @@ The same range applies to source, `ABOUT.md` and
 threads, and the resolved span is always printed to stderr:
 `git pair diff: last review..current`.
 
-**Review refs.** Every submission moves `refs/reviews/<changeset>` to the exact resulting
-`HEAD`, in the same operation that creates the commit, keeping the whole
-implementation/review/fix chain reachable from garbage collection. `git pair change complete` also
+**Review refs.** `change ready` writes `refs/reviews/<changeset>` at the ready marker, and every
+submission moves it to the exact resulting `HEAD`, in the same operation that creates the commit,
+keeping the whole implementation/review/fix chain reachable from garbage collection. The handoff is
+where the history starts being worth keeping, so an offered-but-never-reviewed changeset is anchored
+too. `git pair change complete` also
 writes `refs/reviews/archive/<changeset>/<short-sha>` at the `HEAD` it completes, created only if
-absent and never moved, so re-running complete cannot rewrite an archive.
+absent and never moved, so re-running complete cannot rewrite an archive. Neither kind is a
+guarantee against `git push --delete`; they keep Git from pruning what git-pair still needs.
 
 **Surviving review additions.** Review lines left untouched disappear from a `review..HEAD`
 diff, so `change ready` and `change complete` re-derive them with
@@ -418,7 +421,10 @@ Output is indented two spaces, and empty lists may serialise as `null` rather th
 
 `git pair status --json`, waiting for the first review. Once a review exists `latest_review`
 becomes `{"index": 0, "outcome": "block", "commit": "332887c"}`; `unrecognised_markers` (a
-list of `<sha> <subject>`) appears only when non-empty. Once the changeset is completed,
+list of `<sha> <subject>`) appears only when non-empty. `review_ref` and `review_commit` describe
+the movable anchor and stay `""` until something writes it — `change ready`, or a review
+submission — because the ref's name is derivable from the changeset and its existence is the only
+fact worth reporting. Once the changeset is completed,
 `archive_ref` names the immutable archive ref — the `refs/reviews/archive/<cs>/*` that points
 at `HEAD` exactly. It goes back to `""` as soon as other work lands, so an archive of an
 ancestor never looks like a finished changeset.
@@ -433,7 +439,7 @@ ancestor never looks like a finished changeset.
   "head_full": "8065dae53c0475596bfc174927075895d9fb8b76",
   "latest_review": null,
   "review_ref": "refs/reviews/booking-transaction",
-  "review_commit": "",
+  "review_commit": "8065dae",
   "archive_ref": "",
   "uncommitted": false,
   "reviews": 0,

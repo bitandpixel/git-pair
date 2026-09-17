@@ -97,7 +97,6 @@ func buildStatus(ctx context.Context, s *session) (*statusView, error) {
 		Uncommitted: !s.clean,
 		Reviews:     len(s.summary.Reviews),
 		Reason:      s.summary.Reason,
-		ReviewRef:   reviewref.Head(s.cs.Slug),
 		NextAction:  nextAction(s.summary),
 	}
 	for _, e := range s.summary.Unrecognised {
@@ -112,6 +111,10 @@ func buildStatus(ctx context.Context, s *session) (*statusView, error) {
 		view.latestAge = lifecycle.Age(r.When, now())
 	}
 	if sha, err := reviewref.Resolve(ctx, s.repo, s.cs.Slug); err == nil {
+		// The name of the ref is derivable from the slug, so it is only worth
+		// reporting once the ref exists: its absence is the answer to "has this
+		// been anchored at all", which a slug-derived string could never give.
+		view.json.ReviewRef = reviewref.Head(s.cs.Slug)
 		view.json.ReviewCommit = short(sha)
 	} else if !errors.Is(err, reviewref.ErrNoReviewRef) {
 		return nil, err
@@ -166,12 +169,20 @@ func printStatus(a *app, v *statusView) {
 	} else {
 		a.printf("\nLatest review:\n  none yet\n")
 	}
-	a.printf("\nReview archive:\n  %s\n", j.ReviewRef)
-	if v.archiveRef != "" {
-		a.printf("  %s\n", v.archiveRef)
-	}
-	if j.ReviewCommit != "" {
-		a.printf("  points at: %s\n", j.ReviewCommit)
+	if j.ReviewRef != "" {
+		// The movable ref is anchored by `change ready` and moved by review
+		// submissions; the archive is written by `change complete`. Calling both
+		// "archive" made a never-reviewed changeset look archived.
+		a.printf("\nReview anchors:\n")
+		a.printf("  movable: %s\n", j.ReviewRef)
+		if j.ReviewCommit != "" {
+			a.printf("    points at: %s\n", j.ReviewCommit)
+		}
+		if v.archiveRef != "" {
+			a.printf("  archive: %s\n", v.archiveRef)
+		}
+	} else if v.archiveRef != "" {
+		a.printf("\nReview anchors:\n  archive: %s\n", v.archiveRef)
 	}
 	if len(j.Unrecognised) > 0 {
 		a.printf("\nUnrecognised review markers (treated as implementation commits):\n")
