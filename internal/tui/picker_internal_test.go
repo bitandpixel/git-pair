@@ -90,7 +90,7 @@ func TestVPickerShowsTheSpanInTheScreen(t *testing.T) {
 	m = open(t, m)
 	view := m.View()
 
-	for _, want := range []string{"Span picker", "BASE", "HEAD", "Selected:", "Changeset Base", "Working Tree", "Review -1"} {
+	for _, want := range []string{"Span picker", "BASE", "HEAD", "Selected:", "Changeset Base", "Current", "Last Review"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the picker never shows %q:\n%s", want, view)
 		}
@@ -99,16 +99,17 @@ func TestVPickerShowsTheSpanInTheScreen(t *testing.T) {
 	if got := m.pick.cursor[0]; m.endpointsFor(true)[got].label != "Changeset Base" {
 		t.Errorf("BASE cursor = %q, want it on the span in use", m.endpointsFor(true)[got].label)
 	}
-	if got := m.pick.cursor[1]; m.endpointsFor(false)[got].label != "Working Tree" {
-		t.Errorf("HEAD cursor = %q, want it on Working Tree", m.endpointsFor(false)[got].label)
+	if got := m.pick.cursor[1]; m.endpointsFor(false)[got].label != "Current" {
+		t.Errorf("HEAD cursor = %q, want it on Current", m.endpointsFor(false)[got].label)
 	}
 	if !strings.Contains(view, "LIVE") {
 		t.Error("the pending pair says nothing about what the session would become")
 	}
 }
 
-// §4: HEAD is not a checkpoint a reviewer can pick. Working Tree is the only "current"
-// target on offer, because it is the only one that can be edited.
+// §4: HEAD is not a checkpoint a reviewer can pick. "Current" is the only live target on offer,
+// because it is the only one that can be edited — and it is not spelled with git's word for a
+// commit, which is what made the old name easy to mistake for a historical point.
 func TestPickerNeverOffersHEAD(t *testing.T) {
 	m, _ := pickerFixture(t, 1)
 	for _, base := range []bool{true, false} {
@@ -118,7 +119,7 @@ func TestPickerNeverOffersHEAD(t *testing.T) {
 			}
 		}
 	}
-	if labels := columnLabels(m.endpointsFor(false)); !strings.Contains(strings.Join(labels, "|"), "Working Tree") {
+	if labels := columnLabels(m.endpointsFor(false)); !strings.Contains(strings.Join(labels, "|"), "Current") {
 		t.Error("the head column should offer the working tree, the one target that is editable")
 	}
 }
@@ -137,11 +138,11 @@ func TestPickerNamesReviewsByAliasThenIndex(t *testing.T) {
 	m, _ := pickerFixture(t, 5)
 	var got []string
 	for _, it := range m.endpointsFor(true) {
-		if strings.HasPrefix(it.label, "Review ") {
+		if strings.Contains(it.label, "Review") {
 			got = append(got, it.label)
 		}
 	}
-	want := []string{"Review -1", "Review -2", "Review -3", "Review 1", "Review 0"}
+	want := []string{"Last Review", "Review -2", "Review -3", "Review 1", "Review 0"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Errorf("review rows = %v, want %v", got, want)
 	}
@@ -149,8 +150,17 @@ func TestPickerNamesReviewsByAliasThenIndex(t *testing.T) {
 	// Choosing by alias stores the alias, so the choice means the same submission
 	// whichever end of the span it lands on.
 	for _, it := range m.endpointsFor(true) {
-		if it.label == "Review -2" && it.ckpt.Index != -2 {
-			t.Errorf("Review -2 stored index %d, want -2", it.ckpt.Index)
+		switch it.label {
+		case "Review -2":
+			if it.ckpt.Index != -2 {
+				t.Errorf("Review -2 stored index %d, want -2", it.ckpt.Index)
+			}
+		case "Last Review":
+			// The friendly row has to name the same submission "Review -1" would have: the word is
+			// display, never a different way of addressing a review.
+			if it.ckpt.Index != -1 {
+				t.Errorf("Last Review stored index %d, want -1", it.ckpt.Index)
+			}
 		}
 	}
 }
@@ -161,9 +171,9 @@ func TestSpaceIsPendingAndEnterApplies(t *testing.T) {
 
 	// Move to the HEAD column and choose the newest review.
 	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyTab})
-	m = pressKey(t, m, runeKey('j')) // Working Tree -> Review -1
-	if got := m.endpointsFor(false)[m.pick.cursor[1]].label; got != "Review -1" {
-		t.Fatalf("cursor is on %q, want Review -1", got)
+	m = pressKey(t, m, runeKey('j')) // Current -> Last Review
+	if got := m.endpointsFor(false)[m.pick.cursor[1]].label; got != "Last Review" {
+		t.Fatalf("cursor is on %q, want Last Review", got)
 	}
 	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
 
@@ -559,8 +569,8 @@ func TestHeaderNamesUnreviewedOnlyForTheUnreviewedSpan(t *testing.T) {
 	m.refresh()
 	if view := m.View(); strings.Contains(view, "span: unreviewed") {
 		t.Errorf("the header calls a span based on an older review unreviewed:\n%s", headerOf(m))
-	} else if !strings.Contains(view, "after review 0") {
-		t.Errorf("the header does not name the review the span starts after:\n%s", headerOf(m))
+	} else if !strings.Contains(view, "review -2..current") {
+		t.Errorf("the header does not name the span in the spelling that was chosen:\n%s", headerOf(m))
 	}
 }
 

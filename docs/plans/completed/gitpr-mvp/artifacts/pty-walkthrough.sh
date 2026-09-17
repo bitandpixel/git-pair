@@ -113,8 +113,8 @@ refuse "no submission was made from a historical span" 0 "$T/hist.raw" "Review s
 # --- 3. the span picker (span plan M3) --------------------------------------
 step "picker: V opens it, and it offers spans rather than a DAG"
 session picker V,esc,q
-expect "the picker lists the working tree as an endpoint" 0 "$T/picker.raw" "Working Tree"
-expect "the picker lists a review by its alias" 0 "$T/picker.raw" "Review -1"
+expect "the picker lists the live end as an endpoint" 0 "$T/picker.raw" "Current"
+expect "the picker names the newest review" 0 "$T/picker.raw" "Last Review"
 expect "the picker offers the typed-commit drill" 0 "$T/picker.raw" "Commit"
 expect "esc returns to the list" 1 "$T/picker.raw" "reviewed"
 

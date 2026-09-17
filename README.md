@@ -134,7 +134,7 @@ feedback being consumed:
 
 ```bash
 $ gitpr diff --unreviewed -- src/service.ts
-gitpr diff: 332887c..HEAD (after review 0)
+gitpr diff: last review..current
 diff --git a/src/service.ts b/src/service.ts
 index 942e6f4..82542b6 100644
 --- a/src/service.ts
@@ -266,6 +266,21 @@ command reports them.)
 | `--base-review=N` | `<Nth review>..<span end>` | start at a review rather than the changeset base |
 | `--base-commit=SHA` | `<commit>..<span end>` | "diff from here", with no need to know the merge base |
 | `--base-ref=NAME` | `<NAME @ its commit>..<span end>` | start at a branch or tag, pinned to where it pointed when you chose it |
+
+**Span labels.** The table above is git's spelling, because that is the range git is handed. What gitpr prints is a label for the same span — and in a label the working-tree end is `current`, not `HEAD`:
+`main...current`, `last review..current`, `review -2..current`, `probe@43915ed..8ab932f`. `current`
+is the live end — the newest commit *plus* your uncommitted edits — spelled that way rather than
+`HEAD` because the live/historical split of the whole screen turns on this endpoint, and `HEAD` names
+only the commit half of it and reads like a point in history. A review end keeps the spelling you
+typed: `--since-review=-2` labels itself `review -2` even though it lands on the same submission as
+`review 0`, because the alias is what you chose, what the picker listed, and what `v` shows when you
+step back onto it — two spellings of one span should not look like two spans. `last review` is the
+same idea taken to its useful end: it is the one review worth naming, and `-1` asks you to count.
+`status --json`'s `span` field carries this same string; the sha behind a review end is in
+`review history` and in `status --json`'s `latest_review`.
+
+`current` only ever appears as the head of a *live* span. A span ending at a commit is labelled with
+that commit, and the screen marks itself `HISTORICAL · READ ONLY`.
 | `--head-review=N` | `<span start>..<Nth review>` | what things looked like at review N |
 | `--head-commit=SHA` | `<span start>..<commit>` | a fixed historical range |
 | `--head-ref=NAME` | `<span start>..<NAME @ its commit>` | a range measured to where a branch pointed when you chose it |
@@ -287,7 +302,7 @@ re-derives the state on an interval and exits when it leaves `READY`; `--fetch` 
 other commit does — through the repository, with no forge integration and no daemon.
 
 Coming back to a changeset you already reviewed is common enough to have its own command:
-`gitpr review reopen` opens the TUI on the `<latest review>..HEAD` span, the same span as
+`gitpr review reopen` opens the TUI on the `<last review>..current` span, the same span as
 `review open --unreviewed`. When nothing has been committed since that submission there is
 nothing after it to show, so the session opens instead on what the submission was reviewing:
 the changeset as it stood when it was made, `merge-base(base, review)..<review>^`. The end is
@@ -299,7 +314,7 @@ the full changeset.
 
 The same range applies to source, `ABOUT.md` and
 threads, and the resolved span is always printed to stderr:
-`gitpr diff: 332887c..HEAD (after review 0)`.
+`gitpr diff: last review..current`.
 
 **Review refs.** Every submission moves `refs/reviews/<changeset>` to the exact resulting
 `HEAD`, in the same operation that creates the commit, keeping the whole
@@ -331,7 +346,7 @@ output for it; elsewhere it is accepted and ignored.
 | `change feedback` | `--stat`, `--name-only` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
 | `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`/`CLOSED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
 | `review open` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref` | TUI; needs a terminal; full changeset unless a span flag says otherwise; a `--head-*` flag opens a historical span, which is read-only |
-| `review reopen` | none | TUI on `<latest review>..HEAD`, the work that has landed since you reviewed; needs a terminal; refuses if no review exists |
+| `review reopen` | none | TUI on `<last review>..current`, the work that has landed since you reviewed; needs a terminal; refuses if no review exists |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), then moves the review ref |
@@ -384,7 +399,7 @@ reachable from `HEAD`, which is the approved commit rather than the close marker
   "uncommitted": false,
   "reviews": 0,
   "reason": "marked ready by 8065dae",
-  "span": "main...HEAD",
+  "span": "main...current",
   "next_action": "waiting for a reviewer: `gitpr review open` (author: `gitpr change wait` to block on it)"
 }
 ```
@@ -656,11 +671,11 @@ read-only half is about the screen, where the mistakes would be made.
 the BASE and HEAD columns, `j`/`k` move, `Space` sets the end under the cursor, and `Enter` applies
 the pair — with the lines under the columns saying what that pair resolves to, and whether the screen
 would go read-only, before you commit to it. `u` and `f` are the unreviewed and full-changeset
-presets; `Esc` leaves the span exactly as it was. Each column lists the review submissions — the last
-three by alias, `Review -1` to `Review -3`, older ones by index — then `Commit…` and `Ref…`; only the
-base offers the changeset base, only the head offers the working tree, and `HEAD` appears nowhere,
-because beside "Working Tree" it would be two similar-looking current targets when only one of them
-can be edited. `Commit…` is a searchable list of subjects and short ids that also takes a typed
+presets; `Esc` leaves the span exactly as it was. Each column lists the review submissions — the newest
+as `Last Review`, then `Review -2` and `Review -3`, older ones by the index you would type — then
+`Commit…` and `Ref…`; only the base offers the changeset base, and only the head offers `Current`
+(the live end, labelled `latest + edits`). `HEAD` appears nowhere in either list: beside `Current` it
+would be two similar-looking live targets when only one of them can be edited. `Commit…` is a searchable list of subjects and short ids that also takes a typed
 revision, so history past the window is one keystroke away, and refuses an id git does not know while
 the list is still on screen. `Ref…` groups branches, remote refs, tags and other refs under headings,
 showing `main` and `origin/main` while the checkpoint keeps `refs/heads/main` — a branch and a tag

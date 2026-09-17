@@ -356,6 +356,31 @@ Verification:
   `refs/reviews/booking` keeps its full name rather than becoming a bare `booking` beside the branch
   of that name.
 
+## Naming that changed after this plan was archived
+
+On the owner's request (2026-09-17, branch `gitpr/span-labels`) the endpoint vocabulary moved, so a
+reader of everything above should translate as they go:
+
+| Endpoint | Was | Now |
+| --- | --- | --- |
+| working-tree head, live span | `HEAD` | `current` |
+| newest review | `review -1`, picker row `Review -1` | `last review`, picker row `Last Review` |
+| any other review | `(after review N)` from the resolved index | the index as entered: `review -2`, `review 0` |
+
+`main...HEAD` is now `main...current`; the unreviewed span's `8ab932f..HEAD (after review 0)` is
+`last review..current`. Three consequences for reading this plan:
+
+- Wherever it says `Working Tree` for the picker's live row, that row reads `Current` (detail
+  `latest + edits`). Requirements §4's rule — `HEAD` is never a pickable checkpoint — still holds;
+  only the name of the one live target moved, and the reason for the old name (two similar-looking
+  live targets) is why the new name is not `HEAD`.
+- Wherever it quotes a label containing `HEAD` or `(after review N)`, the equivalent today is
+  `current` and the entered alias. `Unreviewed()` still means "based on the newest review" — that
+  rule and its test are untouched; only the string the header falls back to changed.
+- Labels print the index as typed, so `--since-review=-3` and `--since-review=0` on a three-review
+  changeset label differently and resolve identically. `TestSpanLabelsReadBackAsEntered` pins both
+  halves; the picker's rows still store the alias they show.
+
 ## Follow-ups the audit recommended, and where they landed
 
 - **Multi-ref drift** — `TestDriftBannerCountsEveryMovedRef` (the `(+N more)` banner, a refresh that

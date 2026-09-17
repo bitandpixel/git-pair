@@ -182,7 +182,8 @@ func TestReviewHistoryListsOnlyReviewSubmissionsChronologically(t *testing.T) {
 
 	// -1 addresses the most recent review, which `--since-review` uses.
 	span := runIn(t, f.Dir(), "diff", "--since-review=-1", "--stat").mustSucceed(t, "diff", "--since-review=-1", "--stat")
-	mustContain(t, span.stderr, "after review 2", "the span label must name the resolved review index")
+	mustContain(t, span.stderr, "last review..current",
+		"the label must name the span in the spelling that was chosen: -1 is the newest review")
 }
 
 func TestReviewHistoryWithNoReviews(t *testing.T) {

@@ -188,7 +188,7 @@ func TestDiffFullChangesetIsMergeBaseRange(t *testing.T) {
 	if got.stdout != want {
 		t.Errorf("`gitpr diff` output differs from `git diff %s HEAD`", from)
 	}
-	mustContain(t, got.stderr, "main...HEAD", "the resolved span must be named, so the range is never implicit")
+	mustContain(t, got.stderr, "main...current", "the resolved span must be named, so the range is never implicit")
 
 	stat := runIn(t, f.Dir(), "diff", "--stat").mustSucceed(t, "diff", "--stat")
 	wantStat, err := f.Git("diff", "--stat", from, "HEAD")
@@ -225,7 +225,10 @@ func TestDiffUnreviewedIsLatestReviewRange(t *testing.T) {
 	if !strings.Contains(got.stdout, "-"+comment) {
 		t.Errorf("the unreviewed span must show the deleted review comment as a removal:\n%s", got.stdout)
 	}
-	mustContain(t, got.stderr, shortOf(review), "the span label must name the review it measured from")
+	// The label names the review by the alias that addresses it rather than by sha: the sha is what
+	// `review history` and `status --json` are for, and here it would be hex where a reader wants
+	// "which review am I looking at".
+	mustContain(t, got.stderr, "last review", "the span label must name the review it measured from")
 
 	// --since-review=-1 is the same span (PRD §17.3).
 	same := runIn(t, f.Dir(), "diff", "--since-review=-1").mustSucceed(t, "diff", "--since-review=-1")

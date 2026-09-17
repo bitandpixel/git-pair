@@ -89,7 +89,10 @@ func (m reviewModel) endpointsFor(base bool) []pickerItem {
 	reviews := m.sess.Summary().Reviews
 	var items []pickerItem
 	if !base {
-		items = append(items, pickerItem{label: "Working Tree", detail: "editable", ckpt: span.WorkingTree()})
+		// Title-cased like its siblings in this list; the span label renders the same endpoint
+		// lower-case inline ("last review..current"). The detail says what the endpoint holds,
+		// because "Working Tree" named only the uncommitted half of it.
+		items = append(items, pickerItem{label: "Current", detail: "latest + edits", ckpt: span.WorkingTree()})
 	}
 	for i := len(reviews) - 1; i >= 0; i-- {
 		items = append(items, reviewItem(reviews[i], i, len(reviews)))
@@ -107,11 +110,16 @@ func (m reviewModel) endpointsFor(base bool) []pickerItem {
 
 // reviewItem names a submission the way a reviewer does: the last few by their alias from
 // the end, older ones by their index from the start. The index stored is the one shown, so
-// "Review -2" keeps meaning the same submission however the other end is set (§5).
+// "Review -2" keeps meaning the same submission however the other end is set (§5). The newest
+// is "Last Review" for the same reason the span label calls it "last review" — the reader is
+// not being asked to count backwards from a total they cannot see.
 func reviewItem(e lifecycle.Event, i, total int) pickerItem {
 	index := i - total // -1 for the newest
 	label := fmt.Sprintf("Review %d", index)
-	if index < -3 {
+	switch {
+	case index == -1:
+		label = "Last Review"
+	case index < -3:
 		index = i
 		label = fmt.Sprintf("Review %d", i)
 	}

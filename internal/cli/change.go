@@ -403,9 +403,9 @@ reviewer introduced — source edits, added comments, ABOUT.md changes, new thre
 replies to existing ones — through git's own diff plumbing, with no custom renderer.
 
 ` + "`gitpr diff --unreviewed`" + ` is the reviewer's command and answers a different question:
-` + "`<latest review>..HEAD`" + `, what changed *after* the review. Immediately after a submission
-that range is empty, because HEAD is the review commit itself, so it cannot be how an author
-reads the feedback that was just written.
+` + "`<last review>..current`" + `, what changed *after* the review. Immediately after a submission
+that span is empty, because the review commit is the newest thing on the branch, so it cannot be
+how an author reads the feedback that was just written.
 
 Exits non-zero when the changeset has no review submission yet.`,
 		Example: `  gitpr change feedback

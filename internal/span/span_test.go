@@ -94,8 +94,8 @@ func TestResolveFullChangesetSpan(t *testing.T) {
 	if !got.Live() {
 		t.Error("a span ending at the working tree is a live review")
 	}
-	if !strings.Contains(got.Label, "main") || !strings.Contains(got.Label, "HEAD") {
-		t.Errorf("Label = %q, want it to name the resolved range", got.Label)
+	if got.Label != "main...current" {
+		t.Errorf("Label = %q, want main...current", got.Label)
 	}
 	// The span must not contain the commit made on main after the fork.
 	changed := s.f.ChangedFiles(got.From, got.To)
@@ -236,5 +236,59 @@ func TestResolveIgnoresOrdinaryCommits(t *testing.T) {
 	}
 	if got.From != s.reviews[2] {
 		t.Errorf("From = %s, want the real approve commit %s", got.From, s.reviews[2])
+	}
+}
+
+// The label is what a reviewer reads all day, so it reads back what they typed. Three rules, none
+// of them about resolution: two spellings of one submission must not look like two different
+// spans; the newest submission is a fact rather than a count backwards from a total the reader
+// cannot see; and the working-tree end is not spelled `HEAD`, the one word a reader could mistake
+// for a historical point on a screen whose live/history split hangs on exactly that endpoint.
+func TestSpanLabelsReadBackAsEntered(t *testing.T) {
+	s := newScenario(t, true)
+	if len(s.reviews) != 3 {
+		t.Fatalf("fixture has %d reviews, want 3", len(s.reviews))
+	}
+	s.f.MustGit("branch", "probe", s.f.RevParse("HEAD~1"))
+	pin := s.f.RevParse("HEAD~1")[:7]
+
+	for _, tc := range []struct {
+		name string
+		sel  span.Selector
+		want string
+	}{
+		{"no flags", span.Full(), "main...current"},
+		{"newest review, entered from the end", span.SinceReview(-1), "last review..current"},
+		{"oldest review, entered from the end", span.Selector{Base: span.Review(-3), Head: span.WorkingTree()}, "review -3..current"},
+		{"oldest review, entered from the start", span.Selector{Base: span.Review(0), Head: span.WorkingTree()}, "review 0..current"},
+		{"between two submissions", span.Selector{Base: span.Review(0), Head: span.Review(1)}, "review 0..review 1"},
+		{"newest submission as the head", span.Selector{Base: span.ChangesetBase(), Head: span.Review(-1)}, "main...last review"},
+		{"a ref keeps its pin, the head is current", span.Selector{Base: span.Ref("refs/heads/probe"), Head: span.WorkingTree()}, "probe@" + pin + "..current"},
+	} {
+		got, err := s.resolve(t, tc.sel)
+		if err != nil {
+			t.Fatalf("%s: Resolve: %v", tc.name, err)
+		}
+		if got.Label != tc.want {
+			t.Errorf("%s: Label = %q, want %q", tc.name, got.Label, tc.want)
+		}
+	}
+
+	// -3 with three reviews *is* review 0. The span is one span; only the label differs, and it
+	// differs in the direction of what the reviewer actually asked for.
+	fromEnd, err := s.resolve(t, span.Selector{Base: span.Review(-3), Head: span.WorkingTree()})
+	if err != nil {
+		t.Fatalf("Resolve(-3): %v", err)
+	}
+	fromStart, err := s.resolve(t, span.Selector{Base: span.Review(0), Head: span.WorkingTree()})
+	if err != nil {
+		t.Fatalf("Resolve(0): %v", err)
+	}
+	if fromEnd.From != fromStart.From || fromEnd.To != fromStart.To {
+		t.Errorf("-3 and 0 resolved to different spans: %.8s..%.8s vs %.8s..%.8s",
+			fromEnd.From, fromEnd.To, fromStart.From, fromStart.To)
+	}
+	if fromEnd.Label == fromStart.Label {
+		t.Errorf("both spellings rendered as %q; the one the reviewer typed should survive", fromEnd.Label)
 	}
 }

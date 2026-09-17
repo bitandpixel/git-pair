@@ -110,7 +110,7 @@ func TestHistoricalSpanRefusesEverythingThatChangesSomething(t *testing.T) {
 			if !strings.Contains(got.status, "v opens") {
 				t.Errorf("status = %q, want it to name the key that gets back to a reviewable span", got.status)
 			}
-			if !strings.Contains(got.status, "review -1") {
+			if !strings.Contains(got.status, "last review") {
 				t.Errorf("status = %q, want it to name the head the span is stuck on", got.status)
 			}
 			if diff := marksOf(got.sess.Files()); len(diff) != len(before) {

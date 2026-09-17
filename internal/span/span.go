@@ -99,7 +99,7 @@ func Ref(name string) Checkpoint { return Checkpoint{Kind: KindRef, Name: name, 
 func (c Checkpoint) String() string {
 	switch c.Kind {
 	case KindReview:
-		return fmt.Sprintf("review %d", c.Index)
+		return reviewName(c)
 	case KindCommit:
 		// Chosen from a list, the name is a full sha; typed, it is whatever the reviewer
 		// wrote ("HEAD^", "v0.4.0"), which is worth more to them than a truncated hex id.
@@ -163,8 +163,8 @@ type Span struct {
 	// ChangesetBase is the changeset's base ref, kept so labels and refreshes can
 	// name the base the way the changeset does.
 	ChangesetBase string
-	// Label is the human-facing rendering: "main...HEAD", "8ab932f..HEAD (after
-	// review 1)", "main@abc1234..8ab932f".
+	// Label is the human-facing rendering: "main...current", "last review..current",
+	// "review -2..review 0", "main@abc1234..8ab932f".
 	Label string
 }
 
@@ -267,19 +267,40 @@ func (c Checkpoint) resolve(ctx context.Context, repo *git.Repo, base string, su
 // label renders a resolved span. The two shapes reviewers see every day keep the
 // wording they have always had; everything a picker can reach is spelled out.
 func label(base, head Checkpoint, changesetBase string) string {
-	switch {
-	case base.Kind == KindChangesetBase && head.Kind == KindWorkingTree:
-		return changesetBase + "...HEAD"
-	case base.Kind == KindReview && head.Kind == KindWorkingTree:
-		return fmt.Sprintf("%s..HEAD (after review %d)", base.Name, base.ResolvedIndex)
+	// Three dots only for the changeset base, because that is git's spelling of "from the merge
+	// base", which is what that endpoint is. Every other pair of endpoints is an ordinary
+	// two-dot range between two named commits.
+	if base.Kind == KindChangesetBase {
+		return changesetBase + "..." + display(head)
 	}
 	return display(base) + ".." + display(head)
+}
+
+// reviewName is what a reviewer called a submission, in the words they used. The spelling they
+// chose is the spelling they get back: `--since-review=-2` reads "review -2" even though it lands
+// on the same submission as "review 0", because the alias is what they typed, what the picker
+// listed, and what `v` shows them when they step back onto it. Two ways of naming one span
+// should not look like two different spans were chosen.
+//
+// The newest submission gets a word rather than a number: "review -1" asks the reader to do the
+// counting, while "last review" is the thing they meant.
+func reviewName(c Checkpoint) string {
+	if c.Index == -1 {
+		return "last review"
+	}
+	return fmt.Sprintf("review %d", c.Index)
 }
 
 func display(c Checkpoint) string {
 	switch c.Kind {
 	case KindWorkingTree:
-		return "HEAD"
+		// "current", not "HEAD". This endpoint is the newest commit *plus* the reviewer's own
+		// uncommitted work, and `HEAD` names only the commit — and on a screen whose live/history
+		// distinction turns on exactly this endpoint, a git word for "a commit" reads like a
+		// historical point. `main...current` also cannot be mistaken for a range you can paste.
+		return "current"
+	case KindReview:
+		return reviewName(c)
 	case KindChangesetBase:
 		// resolve names it after the changeset's base ref, which is how a reviewer names it.
 		return c.Name
