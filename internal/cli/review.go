@@ -469,6 +469,18 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	var entries []queueEntry
 	for _, slug := range order {
 		f := sets[slug]
+		// A changeset with an integration ref has landed, and a review queue has nothing to ask of
+		// it. This is the case the queue could not answer before the record existed: the landing
+		// went to a branch that is not the default one, so the directory is still absent from trunk
+		// and the tree rule still reads it as live work. It is named in the skip note rather than
+		// dropped silently, because unlike a trunk landing this branch is still here and its
+		// disappearance from the queue would otherwise be a mystery.
+		if sha, err := reviewref.ResolveIntegration(ctx, repo, slug); err == nil {
+			skipped = append(skipped, fmt.Sprintf("%s (integrated at %s)", slug, short(sha)))
+			continue
+		} else if !errors.Is(err, reviewref.ErrNotIntegrated) {
+			return err
+		}
 		// A slug can match more than one branch; the one whose head carries the
 		// newest ready marker wins.
 		best, _, err := readyEntry(ctx, repo, f.cs, f.branches)
@@ -557,6 +569,14 @@ func classifyOrphan(ctx context.Context, repo *git.Repo, head, slug string) (str
 	}
 	if base == "" {
 		return "", nil
+	}
+	// An integrated changeset landed, and the branch that carried it is gone. That is the merge
+	// case with a receipt: nothing is pending, and the diff would only say the work is not in its
+	// base — which the record already says better.
+	if sha, err := reviewref.ResolveIntegration(ctx, repo, slug); err == nil && sha != "" {
+		return "", nil
+	} else if err != nil && !errors.Is(err, reviewref.ErrNotIntegrated) {
+		return "", err
 	}
 	// An abandoned changeset ended on purpose, and the anchor carries the ending. That
 	// is the whole answer: nothing is pending, and the diff would only report that the

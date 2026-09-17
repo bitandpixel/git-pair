@@ -17,9 +17,10 @@ import (
 // conditions were merged into one message.
 func TestIntegrationReasons(t *testing.T) {
 	const (
-		slug     = "booking"
-		head     = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-		archived = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		slug      = "booking"
+		head      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		archived  = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		landedSHA = "ffffffffffffffffffffffffffffffffffffffff"
 	)
 	approve := &lifecycle.Event{SHA: head, Short: "aaaaaaa", Kind: lifecycle.KindReview, Outcome: model.OutcomeApprove}
 	feedback := &lifecycle.Event{SHA: head, Short: "aaaaaaa", Kind: lifecycle.KindReview, Outcome: model.OutcomeFeedback}
@@ -37,11 +38,15 @@ func TestIntegrationReasons(t *testing.T) {
 		archive  string
 		head     string
 		feedback bool
+		// landed is the integration record, if one exists — not a policy a caller may choose, but
+		// an input the command reads like the others.
+		landed landing
 		// n is how many reasons the case must produce, so a merged or dropped condition
 		// shows up even where the wording matches; `contains` names text the reasons must
 		// carry, and one reason may satisfy more than one entry.
 		n        int
 		contains []string
+		not      []string
 	}{
 		{
 			name:    "an approved head that is archived passes",
@@ -172,11 +177,49 @@ func TestIntegrationReasons(t *testing.T) {
 			n:        1,
 			contains: []string{"not one git-pair can classify"},
 		},
+		{
+			// Every other condition says pass, and the record still says no. A pipeline that runs
+			// this gate before integrating gets a clear answer when it re-runs after integrating.
+			name:    "an integrated changeset is not integration-ready again",
+			summary: lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
+			archive: head,
+			head:    head,
+			landed:  landing{Commit: landedSHA, BranchKnown: true, DefaultBranch: "main", InDefaultBranch: true},
+			n:       1,
+			contains: []string{
+				"changeset is already integrated at " + short(landedSHA),
+				"reachable from main",
+			},
+			// The record outranks everything else: the drift and archive questions describe work
+			// still in progress.
+			not: []string{"changed since", "does not point"},
+		},
+		{
+			name:     "a landing outside the default branch says so",
+			summary:  lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
+			archive:  head,
+			head:     head,
+			landed:   landing{Commit: landedSHA, BranchKnown: true, DefaultBranch: "main", InDefaultBranch: false},
+			n:        1,
+			contains: []string{"already integrated at", "not reachable from main"},
+		},
+		{
+			// "I cannot tell which branch is the integration branch" must not come out as "it is
+			// not in main": that would turn a fetching problem into a claim about the work.
+			name:     "an unknown default branch is not reported as an absence",
+			summary:  lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
+			archive:  head,
+			head:     head,
+			landed:   landing{Commit: landedSHA},
+			n:        1,
+			contains: []string{"already integrated at " + short(landedSHA)},
+			not:      []string{"reachable from"},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := integrationReasons(slug, tc.terminal, tc.summary, tc.archive, tc.head, tc.feedback)
+			got := integrationReasons(slug, tc.terminal, tc.summary, tc.archive, tc.head, tc.feedback, tc.landed)
 			if len(got) != tc.n {
 				t.Fatalf("reasons = %q, want %d", got, tc.n)
 			}
@@ -184,6 +227,11 @@ func TestIntegrationReasons(t *testing.T) {
 			for _, want := range tc.contains {
 				if !strings.Contains(joined, want) {
 					t.Errorf("reasons = %q, want one containing %q", got, want)
+				}
+			}
+			for _, unwanted := range tc.not {
+				if strings.Contains(joined, unwanted) {
+					t.Errorf("reasons = %q, must not claim %q", got, unwanted)
 				}
 			}
 		})
@@ -201,7 +249,7 @@ func TestIntegrationReasonsReportsEveryFailureAtOnce(t *testing.T) {
 	got := integrationReasons("booking", nil, lifecycle.Summary{
 		Marker: approve, LatestReview: approve, State: model.StateWorking,
 		Drifted: []string{"service.go"}, TrailingUnrecognised: 1,
-	}, "", head, false)
+	}, "", head, false, landing{})
 
 	if len(got) != 3 {
 		t.Fatalf("reasons = %q, want three: unreadable marker, drift, archive", got)

@@ -13,6 +13,7 @@ import (
 
 	"gitpair/internal/git"
 	"gitpair/internal/model"
+	"gitpair/internal/reviewref"
 )
 
 // Message is a constructed lifecycle commit message.
@@ -106,6 +107,9 @@ func ReviewMessage(slug string, outcome model.Outcome, body string) Message {
 // empty (an approval with no edits is a legitimate review), so empty commits are
 // always allowed here.
 func Commit(ctx context.Context, repo *git.Repo, msg Message) (string, error) {
+	if err := refuseIfIntegrated(ctx, repo, msg); err != nil {
+		return "", err
+	}
 	rendered, err := msg.Render()
 	if err != nil {
 		return "", err
@@ -119,6 +123,9 @@ func Commit(ctx context.Context, repo *git.Repo, msg Message) (string, error) {
 // CommitPaths writes a marker commit covering exactly the given paths, so
 // scaffolding commits cannot sweep unrelated staged work off the author's index.
 func CommitPaths(ctx context.Context, repo *git.Repo, msg Message, paths []string) (string, error) {
+	if err := refuseIfIntegrated(ctx, repo, msg); err != nil {
+		return "", err
+	}
 	rendered, err := msg.Render()
 	if err != nil {
 		return "", err
@@ -127,4 +134,31 @@ func CommitPaths(ctx context.Context, repo *git.Repo, msg Message, paths []strin
 		return "", err
 	}
 	return repo.Head(ctx)
+}
+
+// refuseIfIntegrated is the write gate: once a changeset's integration record exists, git-pair
+// writes no marker for it.
+//
+// The check is here rather than in each command because a marker commit and the archive move that
+// follows it are one operation. A command that committed first and then learned the ref was frozen
+// would leave a marker on the branch with nothing pointing at it — a half-write the author can only
+// undo by rewriting history. `reviewref.Update` refuses too, so a caller that reaches the ref
+// without coming through a marker still meets the rule (PRD §13, requirements §23).
+func refuseIfIntegrated(ctx context.Context, repo *git.Repo, msg Message) error {
+	id := msg.changesetID()
+	if id == "" {
+		return nil
+	}
+	return reviewref.RefuseIntegrated(ctx, repo, id)
+}
+
+// changesetID is the changeset a marker speaks about, read from the trailer that exists to answer
+// exactly that. A message naming no changeset freezes nothing.
+func (m Message) changesetID() string {
+	for _, t := range m.Trailers {
+		if key, value, ok := strings.Cut(t, "="); ok && strings.TrimSpace(key) == model.TrailerChangeset {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

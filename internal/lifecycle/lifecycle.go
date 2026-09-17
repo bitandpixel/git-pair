@@ -161,10 +161,11 @@ func SummarizeHEAD(ctx context.Context, repo *git.Repo, slug, base string) (Summ
 // marker spoke about is still at headRef. A marker whose code has been changed
 // underneath it reads as WORKING here and nowhere else.
 //
-// Completion is the only caller. It writes the archive ref that an agent is told to
-// trust when deciding what is safe to squash-merge, so that ref has to name a head
-// somebody actually reviewed (PRD §9.5). Everywhere else state moves when a git-pair
-// command records a marker, not when the author commits (PRD §12).
+// `change archive` and `check` are the callers. Both decide that a head is safe to hand on —
+// one by moving the ref an agent is told to trust, one by asserting the same thing to CI — so
+// they share the reading rather than each keeping its own idea of what drift means
+// (PRD §9.5, §11.3). Everywhere else state moves when a git-pair command records a marker, not
+// when the author commits (PRD §12).
 func SummarizeAgainstTree(ctx context.Context, repo *git.Repo, slug, base, headRef string) (Summary, error) {
 	s, err := Summarize(ctx, repo, slug, base, headRef)
 	if err != nil {
@@ -176,6 +177,22 @@ func SummarizeAgainstTree(ctx context.Context, repo *git.Repo, slug, base, headR
 // SummarizeAgainstTreeHEAD is SummarizeAgainstTree for the checked-out branch.
 func SummarizeAgainstTreeHEAD(ctx context.Context, repo *git.Repo, slug, base string) (Summary, error) {
 	return SummarizeAgainstTree(ctx, repo, slug, base, "HEAD")
+}
+
+// MarkerAt reads the Review-* trailers one commit carries.
+//
+// The range summaries answer "what happened between base and head". This answers the narrower
+// question a caller asks when it holds one commit and wants to know what that commit records —
+// the tip of an archive ref, say, which is where `change abandon` leaves the ref. It uses the same
+// trailer parsing as the range walk, so the two cannot disagree about what a marker says, and it
+// needs no base: a caller holding a SHA from a ref should not have to resolve a branch that may
+// never have been fetched.
+func MarkerAt(ctx context.Context, repo *git.Repo, rev string) (map[string]string, error) {
+	block, err := repo.Git(ctx, "log", "-1", "--format=%(trailers:only,unfold)", rev)
+	if err != nil {
+		return nil, err
+	}
+	return parseTrailers(block), nil
 }
 
 func parseEvent(slug string, rec []string) Event {

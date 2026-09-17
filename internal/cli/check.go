@@ -86,6 +86,12 @@ type checkJSON struct {
 	ArchiveCurrent bool     `json:"archive_current"`
 	Reasons        []string `json:"reasons"`
 	Policy         string   `json:"policy"`
+	// Integrated says an integration ref exists, and IntegratedAt where its commit sits. Like
+	// status's integration fields, they sit beside the verdict rather than changing what `ready`
+	// means: a changeset that has landed is not integration-ready again.
+	Integrated       bool    `json:"integrated"`
+	IntegratedCommit string  `json:"integrated_commit,omitempty"`
+	IntegratedAt     landing `json:"-"`
 }
 
 func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
@@ -108,19 +114,35 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	if err != nil && !errors.Is(err, reviewref.ErrNoArchiveRef) {
 		return err
 	}
+	// Reported beside the verdict rather than folded into it: "already integrated" is not the same
+	// fact as "not ready", and a pipeline re-running this gate after its own landing needs to tell
+	// the two apart without matching on the wording of a reason.
+	landed, err := reviewref.ResolveIntegration(ctx, s.repo, s.cs.Slug)
+	if err != nil && !errors.Is(err, reviewref.ErrNotIntegrated) {
+		return err
+	}
+	var where landing
+	if landed != "" {
+		if where, err = a.describeLanding(ctx, s.repo, landed); err != nil {
+			return err
+		}
+	}
 
 	policy := policyApproveOnly
 	if allowFeedback {
 		policy = policyApproveOrFeedback
 	}
 	out := checkJSON{
-		Changeset:      s.cs.Slug,
-		State:          string(reviewed.State),
-		Head:           s.head,
-		Archive:        archive,
-		ArchiveCurrent: archive != "" && archive == s.head,
-		Policy:         policy,
-		Reasons:        integrationReasons(s.cs.Slug, terminal, reviewed, archive, s.head, allowFeedback),
+		Changeset:        s.cs.Slug,
+		State:            string(reviewed.State),
+		Head:             s.head,
+		Archive:          archive,
+		ArchiveCurrent:   archive != "" && archive == s.head,
+		Policy:           policy,
+		Integrated:       landed != "",
+		IntegratedCommit: short(landed),
+		IntegratedAt:     where,
+		Reasons:          integrationReasons(s.cs.Slug, terminal, reviewed, archive, s.head, allowFeedback, where),
 	}
 	out.Ready = len(out.Reasons) == 0
 	if out.Reasons == nil {
@@ -162,7 +184,15 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 // moved since the marker — re-deriving it would re-litigate a decision the author already took,
 // in a command with no override flag to take it again.
 func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summary,
-	archive, head string, allowFeedback bool) []string {
+	archive, head string, allowFeedback bool, landed landing) []string {
+	if landed.Commit != "" {
+		// The other early return, and it comes first. Once the record exists the review is over:
+		// drift and archive questions below it describe a changeset still being worked on, which
+		// this one is not. It outranks the abandoned check because an integration ref is a record
+		// that was written, while an abandonment would have had to move a frozen archive to follow
+		// it — which nothing in git-pair can do.
+		return []string{fmt.Sprintf("changeset is already integrated at %s%s", short(landed.Commit), landed.reach())}
+	}
 	if terminal != nil {
 		// The one condition that stops the list. Everything below it is fixable, and
 		// nothing is fixable about an ending: an abandoned changeset will not be taken

@@ -406,11 +406,17 @@ The same range applies to source, `ABOUT.md` and
 threads, and the resolved span is always printed to stderr:
 `git pair diff: last review..current`.
 
-**The archive ref.** A changeset has one durable ref,
-`refs/git-pair/changesets/<changeset>/archive`, named by the changeset id rather than by any
-branch — which is what keeps the work findable after the branch is deleted. `change ready` writes it
+**The durable refs.** A changeset owns two refs, both named by the changeset id rather than by any
+branch — which is what keeps the work findable after the branch is deleted:
+
+```text
+refs/git-pair/changesets/<changeset>/archive        the chain: movable, forward-only
+refs/git-pair/changesets/<changeset>/integration    where it landed: written once, never moved
+```
+
+The archive holds the whole implementation/review/fix chain. `change ready` writes it
 at the ready marker, and every submission moves it to the exact resulting `HEAD`, in the same
-operation that creates the commit, keeping the whole implementation/review/fix chain reachable from
+operation that creates the commit, keeping the whole chain reachable from
 garbage collection. The handoff is where the history starts being worth keeping, so an
 offered-but-never-reviewed changeset is written too. `change archive` advances it over review
 artifacts, and `change abandon` moves it to the terminal marker. It moves forward and never
@@ -418,10 +424,18 @@ backwards: the command refuses a `HEAD` behind the current tip rather than dropp
 the only ref that keeps it reachable. It is not a guarantee against `git push --delete`; it keeps
 Git from pruning what git-pair still needs.
 
-The ref is a child of `refs/git-pair/changesets/<changeset>` rather than that path itself, because a
-git ref cannot be both a leaf and a namespace — git refuses the leaf once a child exists — and a
-changeset's refs are a namespace: `integration`, the record of the work landing, is reserved beside
-`archive`. Nothing reads the `refs/reviews/*` layout an earlier version used, so a repository
+The integration ref records where the work landed, and `git pair integration record` writes it once.
+It is explicit because the fact is not derivable: a merge preserves ancestry, while a squash, a rebase
+and a cherry-pick each destroy it, and git-pair is meant to treat all four alike. Patch IDs and
+diff-equivalence can help a human recover a lost record; they are not the protocol, and a tool that
+inferred integration from them would be confidently wrong about every squash merge. Once the record
+exists the archive freezes: no git-pair command writes another marker for that changeset or moves its
+archive, because `archive A → integration B` is a statement other people read as fact — and markers are
+refused before their commit is written, so a refused command leaves nothing behind.
+
+Both are children of `refs/git-pair/changesets/<changeset>` rather than that path itself, because a
+git ref cannot be both a leaf and a namespace — git refuses the leaf once a child exists. Nothing reads
+the `refs/reviews/*` layout an earlier version used, so a repository
 upgraded from one reports no archive for changesets archived before the move; their commits stay
 reachable from their branches, and archiving again writes the new ref.
 
@@ -469,6 +483,7 @@ landed.
 | `change archive` | `--allow-surviving-review-additions`, `--allow-unreviewed-changes` | advances the archive ref onto the reviewed `HEAD` and reports squash-safety; refuses a `HEAD` behind the archive; commits nothing; never merges, pushes or squashes |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug |
 | `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition; no `--changeset`, because it is the gate a forge runs *on* a revision |
+| `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>` | records where a changeset landed by creating its `integration` ref; the changeset is discovered from the archive ref pointing at `--source`, so a pipeline needs the two SHAs it already holds and not the changeset name; needs no checkout and writes no commit; created once, and the archive freezes afterwards |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
@@ -493,8 +508,8 @@ nothing, those reads exit 2. For a span of another branch, name its ends: `git p
 | Exit code | Meaning | Seen as |
 | --- | --- | --- |
 | 0 | success | — |
-| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot archive <cs>: latest outcome is BLOCKED`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:` |
-| 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal |
+| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot archive <cs>: latest outcome is BLOCKED`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:`; `integration record` finding no archive at `--source`, a landing that does not carry the changeset, or a record that already exists |
+| 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`/`integration`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal; more than one archive points at `--source` and none was named |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
 The split between 1 and 2 is deliberate and load-bearing for agents: exit 1 means the
@@ -513,12 +528,19 @@ and two fields report that they cannot answer — `uncommitted` is `null` and `s
 both describe the checkout rather than the commit, and `next_action` names the branch to switch to.
 `abandoned` is true once `change abandon` has ended the changeset, with `abandoned_commit` naming the
 terminal marker; `state` stays `WORKING`, because the ending is a fact beside the state rather than a
-sixth state value. `archive_ref` and `archive_commit` describe
-the changeset's one durable ref and stay `""` until something writes it — `change ready`, or a
+sixth state value. `archive_ref` and `archive_commit` describe the
+changeset's archive and stay `""` until something writes it — `change ready`, or a
 review submission — because the ref's name is derivable from the changeset and its existence is the
-only fact worth reporting. `next_action` calls the changeset squash-safe only while `archive_commit`
+only fact worth reporting. `integrated` is true once `git pair integration record` has recorded where
+the work landed, with `integrated_commit` naming that commit, and `state` is untouched by it: landing
+is a fact beside the state, not a sixth state value. `integrated_in_default_branch` says whether that
+commit is in the history of the branch git-pair calls the integration branch, and
+`integrated_default_branch` names that branch — work that retired into `release/2.x` and never reached
+the default branch must not read like a default-branch landing, and what git-pair reports is the
+containment it can derive rather than a branch name no ref stores.
+`next_action` calls the changeset squash-safe only while `archive_commit`
 is `HEAD`: an archive of an ancestor is a statement about history, not a claim that the work is
-done.
+done. Once the record exists `next_action` says there is nothing further to record instead.
 
 ```json
 {
@@ -533,6 +555,7 @@ done.
   "archive_commit": "8065dae",
   "uncommitted": false,
   "abandoned": false,
+  "integrated": false,
   "reviews": 0,
   "reason": "marked ready by 8065dae",
   "span": "main...current",
@@ -541,8 +564,10 @@ done.
 ```
 
 `git pair review queue --json` — `head` and `ready_commit` are full SHAs. `skipped` names changesets
-the queue cannot explain (`null` when empty): a branch whose metadata cannot be read, or a changeset
-directory whose branch is gone, its anchor survives, and its content is not in its base. A changeset
+the queue cannot explain (`null` when empty): a branch whose metadata cannot be read, a changeset
+directory whose branch is gone, its anchor survives, and its content is not in its base, or a changeset
+whose integration ref says it landed — that one names the commit, because the branch is usually still
+here and its disappearance from the queue would otherwise be a mystery. A changeset
 that has landed in its base, and a directory that was never offered for review, are both silent —
 neither is work a reviewer can act on.
 
@@ -644,7 +669,23 @@ comparing them built one of them; `archive_current` is the two being equal.
   "reasons": [
     "archive does not point to the current source commit: refs/git-pair/changesets/feat/archive is at 1a2b3c4, HEAD is 941266b"
   ],
-  "policy": "approve-only"
+  "policy": "approve-only",
+  "integrated": false
+}
+```
+
+`git pair integration record --json` — what the recorder wrote, with full SHAs so a pipeline can
+compare them against the revisions it built. `target` is empty when `--target` was not given, and
+then no reachability check was made.
+
+```json
+{
+  "changeset": "booking-transaction",
+  "source": "a7f3c98d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  "commit": "d91c21ed5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0c",
+  "target": "origin/main",
+  "integration_ref": "refs/git-pair/changesets/booking-transaction/integration",
+  "recorded": true
 }
 ```
 
@@ -731,6 +772,10 @@ approval on the human side of the pair is a convention you enforce. When an agen
 progress it uses `git pair change ready`, and when the work is not finished after all it withdraws the
 offer with `git pair change unready` rather than leaving a reviewer looking at a stale offer.
 
+Recording the landing is not an agent's action either: `git pair integration record` states where the
+work landed, which is a fact about the merge someone else performed. In practice the pipeline that
+merged runs it. An agent asked whether the work may land reads `git pair check` and stops there.
+
 **As a CI gate.** `check` reads the repository — commits, the archive ref, the trees — so a plain
 checkout of the branch is enough to run it:
 
@@ -752,6 +797,20 @@ stricter than `change archive` — a head that was approved, or given non-blocki
 archived, and the repository decides at the gate whether feedback alone is enough to land. And the archive condition needs
 `refs/git-pair/changesets/<id>/archive` to be present: git-pair never pushes it (§13), so a CI job
 that was not given those refs reports the archive as missing rather than the review as absent.
+
+**Recording the landing.** After the merge, the same job tells git-pair where the work ended up:
+
+```bash
+git pair integration record --source "$SOURCE_SHA" --commit "$TARGET_SHA" --target origin/main
+```
+
+`--source` is the commit the archive names — the head that was reviewed — not the merge commit, and
+the changeset is discovered from it, so the pipeline needs no name a human chose. A squash, a rebase
+and a cherry-pick are all recordable, and none of them leaves ancestry between the two SHAs: the
+record is what connects them. Recording is create-only, so a re-run refuses loudly rather than
+doubling the bookkeeping, and once the record exists the archive is frozen and `check` refuses the
+changeset as already integrated. `--target` is optional; with it, git-pair verifies the landing commit
+is reachable from the ref you name — the one assumption it will accept about where the work went.
 
 ## Configuration
 
@@ -963,6 +1022,15 @@ unaffected. Deleting that directory forgets the marks; the newest 12 commits per
 kept.
 
 ## Troubleshooting
+
+`no changeset archive points at a81c123, so integration cannot be recorded automatically` (exit 1,
+`integration record`) — three possibilities, and the message names all three because they look the same
+from here: the durable refs were never fetched (`refs/git-pair/changesets/*` is not fetched by
+default — `git fetch origin '+refs/git-pair/changesets/*:refs/git-pair/changesets/*'`), the changeset
+was never archived, or `--source` is not the commit the archive names. That last one is the usual
+mistake: `--source` is the archived head that was reviewed, not the merge commit, and the check that
+fails is `--points-at`, so an exact match is required. An abbreviated SHA is fine — it is resolved
+before discovery.
 
 `cannot resolve changeset base "main": unknown revision: main` (exit 1) — the `base` in
 `CHANGESET.yaml` is not a ref in this repository (renamed trunk, fresh clone, merged stack).

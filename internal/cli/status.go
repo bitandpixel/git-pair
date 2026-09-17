@@ -65,11 +65,26 @@ type statusJSON struct {
 	Uncommitted     *bool             `json:"uncommitted"`
 	Abandoned       bool              `json:"abandoned"`
 	AbandonedCommit string            `json:"abandoned_commit,omitempty"`
-	Reviews         int               `json:"reviews"`
-	Reason          string            `json:"reason"`
-	Span            string            `json:"span"`
-	NextAction      string            `json:"next_action"`
-	Unrecognised    []string          `json:"unrecognised_markers,omitempty"`
+	// Integrated reports the presence of an integration ref, which is the only record that a
+	// changeset landed: squash, rebase and cherry-pick destroy the ancestry that would otherwise
+	// answer it. Like `abandoned`, it sits beside `state` rather than inside it — the lifecycle
+	// states are what markers move, and landing is not a marker.
+	Integrated bool `json:"integrated"`
+	// IntegratedCommit is where the record points.
+	IntegratedCommit string `json:"integrated_commit,omitempty"`
+	// IntegratedInDefaultBranch says the recorded landing commit is in the history of the branch
+	// git-pair calls the integration branch, and IntegratedDefaultBranch names that branch. Both
+	// are derived at read time, and the pair rather than a single `integrated_target`: a ref stores
+	// an object id and no branch name, so the branch a landing reached is not something git-pair
+	// keeps. Work that retired into a release branch and never reached the default branch must not
+	// read like a default-branch landing, and a lone "main" that was never recorded would be worse.
+	IntegratedInDefaultBranch bool     `json:"integrated_in_default_branch"`
+	IntegratedDefaultBranch   string   `json:"integrated_default_branch,omitempty"`
+	Reviews                   int      `json:"reviews"`
+	Reason                    string   `json:"reason"`
+	Span                      string   `json:"span"`
+	NextAction                string   `json:"next_action"`
+	Unrecognised              []string `json:"unrecognised_markers,omitempty"`
 }
 
 func runStatus(ctx context.Context, a *app, slug string) error {
@@ -77,7 +92,7 @@ func runStatus(ctx context.Context, a *app, slug string) error {
 	if err != nil {
 		return err
 	}
-	view, err := buildStatus(ctx, s)
+	view, err := buildStatus(ctx, a, s)
 	if err != nil {
 		return err
 	}
@@ -93,9 +108,12 @@ type statusView struct {
 	json      statusJSON
 	span      span.Span
 	latestAge string
+	// integratedReach phrases where the landing commit sits, for the text surface: the JSON
+	// surface reports the same facts as fields a consumer can branch on.
+	integratedReach string
 }
 
-func buildStatus(ctx context.Context, s *session) (*statusView, error) {
+func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 	view := &statusView{}
 	view.json = statusJSON{
 		Changeset:   s.cs.Slug,
@@ -133,6 +151,19 @@ func buildStatus(ctx context.Context, s *session) (*statusView, error) {
 	} else if !errors.Is(err, reviewref.ErrNoArchiveRef) {
 		return nil, err
 	}
+	if integrated, err := reviewref.ResolveIntegration(ctx, s.repo, s.cs.Slug); err == nil {
+		view.json.Integrated = true
+		view.json.IntegratedCommit = short(integrated)
+		l, err := a.describeLanding(ctx, s.repo, integrated)
+		if err != nil {
+			return nil, err
+		}
+		view.json.IntegratedInDefaultBranch = l.InDefaultBranch
+		view.json.IntegratedDefaultBranch = l.DefaultBranch
+		view.integratedReach = l.reach()
+	} else if !errors.Is(err, reviewref.ErrNotIntegrated) {
+		return nil, err
+	}
 	// The span names the working span of this checkout — `base...current` — so it
 	// means nothing for a changeset read from another branch. Saying nothing beats
 	// printing a span that points somewhere else.
@@ -163,6 +194,13 @@ func buildStatus(ctx context.Context, s *session) (*statusView, error) {
 		// out, because a marker is a commit. The next step for a changeset you are
 		// only reading is to stand on it.
 		view.json.NextAction = fmt.Sprintf("`git switch %s` to act on it: git-pair records markers on the branch you have checked out", s.cs.Branch)
+	}
+	if view.json.Integrated {
+		// Last, because it supersedes both answers above. The archive line says this head is safe
+		// to hand on; once the record exists, handing it on has happened. `change archive` refuses
+		// to move the archive from here on, and no git-pair command is the next step: what is left
+		// of the branch's life is ordinary git.
+		view.json.NextAction = fmt.Sprintf("integrated at %s: nothing further is recorded for a changeset that has landed", view.json.IntegratedCommit)
 	}
 	return view, nil
 }
@@ -199,6 +237,9 @@ func printStatus(a *app, v *statusView) {
 	}
 	if j.Abandoned {
 		a.printf("\nTerminal:\n  abandoned by %s (`git pair change abandon`)\n", short(j.AbandonedCommit))
+	}
+	if j.Integrated {
+		a.printf("\nIntegrated:\n  %s%s (`git pair integration record`)\n", j.IntegratedCommit, v.integratedReach)
 	}
 	if j.LatestReview != nil {
 		a.printf("\nLatest review:\n")

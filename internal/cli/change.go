@@ -900,6 +900,13 @@ func runChangeArchive(ctx context.Context, a *app, opts *archiveOptions) error {
 	if err := a.refuseIfAbandoned(ctx, s); err != nil {
 		return err
 	}
+	// §13.3: an integrated changeset's archive is frozen. The check is here rather than left to
+	// `reviewref.Update` because of the already-there shortcut further down: "the archive points
+	// here already, nothing moved" is true and useless to whoever is standing on a changeset that
+	// has landed, when the thing they need to hear is that the record exists and the review is over.
+	if err := reviewref.RefuseIntegrated(ctx, s.repo, s.cs.Slug); err != nil {
+		return err
+	}
 	// Archiving is the one command that asks whether the reviewed content is still
 	// here. The archive it writes is a promise about a reviewed head — it is what an
 	// agent is told to trust before squash-merging — so an approval with fresh

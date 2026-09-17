@@ -570,41 +570,89 @@ the same `cli.Execute` that `main` passes to `os.Exit`.
 
 #### Tasks
 
-- [ ] `reviewref`: `Integration(id)`, `ResolveIntegration`, and archive-ref discovery by
+- [x] `reviewref`: `Integration(id)`, `ResolveIntegration`, and archive-ref discovery by
   `for-each-ref --points-at`, filtered to `/archive` children. Resolve `--source` through `rev-parse`
   first, so an abbreviated SHA from a CI log resolves before discovery rather than matching nothing.
-- [ ] §18 and §19 as written: no match fails saying so; more than one fails listing the candidates and
+- [x] §18 and §19 as written: no match fails saying so; more than one fails listing the candidates and
   naming `--changeset`; `--changeset` disambiguates but never substitutes for a missing archive. The
   two-refs-at-one-commit fixture is built by moving a ref by hand, since git-pair cannot create that
   state itself.
-- [ ] Order the §21 checks so the useful failures come first: unknown source, no archive, ambiguity,
+- [x] Order the §21 checks so the useful failures come first: unknown source, no archive, ambiguity,
   terminal changeset, unknown integrated commit, `--target` reachability, existing integration ref.
-- [ ] Reachability via `merge-base --is-ancestor`, with a comment on the re-added helper explaining why
+- [x] Reachability via `merge-base --is-ancestor`, with a comment on the re-added helper explaining why
   verifying a caller-named target is not the derivation the anchored-lifecycle plan removed. Note the
   asymmetry the fixtures showed: `--commit` need not descend from `--source` (a squash landing has no
   ancestry between them), but it must be reachable from `--target`.
-- [ ] Verify the record rather than believing it: `changesets/<id>/` must exist in `tree(--commit)`.
+- [x] Verify the record rather than believing it: `changesets/<id>/` must exist in `tree(--commit)`.
   Measured true for merge, squash and cherry-pick landings, since the directory is committed content
   that travels with the change; it is what makes a release-branch record pointing at an unrelated
   commit fail.
-- [ ] Create-only write (`update-ref <ref> <new> ""`) as the backstop, behind an existence check that
+- [x] Create-only write (`update-ref <ref> <new> ""`) as the backstop, behind an existence check that
   prints §22's message instead of git's `fatal:`.
-- [ ] The freeze: the single archive-update path refuses once an integration ref exists, for every
+- [x] The freeze: the single archive-update path refuses once an integration ref exists, for every
   command including `change archive`.
-- [ ] `status` gains `integrated`, `integrated_commit` and `integrated_target` beside `state`; the
-  target matters because a changeset that retired into `release/2.x` and never reached the default
-  branch must not look like a default-branch landing. `check` fails an integrated changeset with
-  "already integrated at <sha>" naming the target.
-- [ ] Second-record refusal prints the existing record's commit **and target**, so a backport attempt
-  explains itself: the release branch's own history is the record, and git-pair does not keep a second
-  ref per landing.
-- [ ] `integration record` runs from any branch — it addresses changesets by SHA and ref, not by
+- [x] `status` gains `integrated`, `integrated_commit` and integrated-ness in the default branch beside
+  `state`; the containment matters because a changeset that retired into `release/2.x` and never
+  reached the default branch must not look like a default-branch landing. `check` fails an integrated
+  changeset with "already integrated at <sha>" naming what it can.
+- [x] Second-record refusal prints the existing record's commit, so a backport attempt explains itself:
+  the release branch's own history is the record, and git-pair does not keep a second ref per landing.
+- [x] `integration record` runs from any branch — it addresses changesets by SHA and ref, not by
   checkout — and reports what it wrote in `--json`.
-- [ ] Tests for each failure ordering, the squash shape (approved head A, unrelated target commit B,
-  no ancestry between them, record succeeds), the second-record refusal, and the release-branch shape:
+- [x] Tests for each failure ordering, the squash shape (approved head A, unrelated target commit B, no
+  ancestry between them, record succeeds), the second-record refusal, and the release-branch shape:
   merged into `release/2.x` with a `main` baseline, the changeset stays active until recorded, and the
   recorded commit's tree carries the directory.
-- [ ] PRD section for the command and §13's namespace; README surface, JSON contract, exit codes.
+- [x] PRD section for the command and §13's namespace; README surface, JSON contract, exit codes.
+
+#### Decisions taken while implementing
+
+**`integrated_target` became `integrated_in_default_branch` + `integrated_default_branch`.** A git ref
+stores an object id and nothing else, so the name of the branch a landing reached cannot be recorded on
+the integration ref. The alternative was pointing the ref at an annotated tag object carrying the name,
+which puts a peel in front of every reader of the ref, contradicts §13's and §21's `integration → B`
+shape, and breaks the exact-object matching §16's discovery depends on. What the field existed for —
+distinguishing a trunk landing from a release-branch retirement — is answered by containment in the
+branch the reader is asking about, derived at read time and named for what it is. The pair also keeps
+"not in main" separate from "cannot tell which branch is main", which a single boolean would collapse
+into one misleading answer.
+
+**The terminal check reads one commit, not a range.** §21's step 5 rejects a CLOSED changeset, and
+`change abandon` moves the archive onto its own marker — after which nothing in git-pair can write
+another marker or move the ref — so the archive tip is where an ending is recorded. Reading it needs no
+base branch, which matters because the recorder runs in a CI clone that may never have fetched one.
+`lifecycle.MarkerAt` is the exported one-commit trailer read, sharing the parser the range walk uses.
+
+**The tree check uses `repo.PathExistsAt`** rather than a directory listing: one `rev-parse --verify`
+against the tree, purpose-built, instead of `ls-tree` plus a map lookup.
+
+**Markers are refused one step before the ref is.** `reviewref.Update` remains the single enforcement
+point for the archive, but `marker.Commit`/`CommitPaths` refuse first, from the `Review-Changeset`
+trailer the message already carries. A command that committed a marker and only then learned the ref was
+frozen would leave the marker on the branch with nothing pointing at it — a half-write the author could
+undo only by rewriting history. The CLI test asserts HEAD does not move across five refused commands.
+
+**`change archive` refuses before its already-there shortcut.** With the record present and the archive
+already at HEAD — the ordinary state after a landing — the shortcut would answer "nothing moved,
+success". True and useless: whoever runs it needs to hear that the changeset landed.
+
+**Ambiguity is exit 2 here too.** §19 says the recorder must fail rather than guess, and the escape hatch
+is a flag; every other command in the product reports ambiguity as a usage error for exactly that
+reason. One convention for an agent to learn beat the pull toward calling a two-archive repository a
+refusal.
+
+**`integrated` and `integrated_commit` were added to `check --json`.** A pipeline that gates before
+integrating re-runs after, and "already integrated" must not require matching the wording of a reason to
+tell apart from "not ready".
+
+#### Found during M4, not fixed here
+
+`change unready` writes its marker and does not move the archive ref, so the withdrawal is reachable only
+from the branch and disappears with `git branch -D`; the anchor still reports the changeset as offered.
+Every other state-writing command moves the ref, and §12's "state moves on commands" says it should.
+Caught here because the e2e's record step assumed the archive tracked HEAD, and the fix is a behaviour
+change with its own test and wording — it belongs in its own commit, not inside this milestone.
+
 
 #### Verification
 
@@ -616,6 +664,13 @@ Measured, and the reason recording is not merely reporting: with the baseline at
 merged into `release/2.x` resolved as active until its integration ref existed, then retired. Any
 landing outside the default branch depends on this command for a correct `status`, which is a CI
 documentation requirement, not just a command surface.
+
+Where each claim lives. The squash shape, the §18/§19 orderings, the tree verification, the second-record
+refusal and the release-branch retirement are in `internal/cli/integration_test.go`; the freeze is
+asserted across `change archive`, `change ready`, `change unready`, `review submit` and `change abandon`,
+including that none of them commits. `e2e-29.sh` replays the pipeline's own path — land on
+`release/2.x` from a `main` baseline with no ancestry between the two SHAs, record, re-record, gate,
+archive, queue — because that is the sequence a CI job runs and the exit codes are what it reads.
 
 ### M5 — CI ergonomics: absent refs are reported, not mistaken for state
 

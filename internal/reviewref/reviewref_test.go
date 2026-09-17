@@ -210,3 +210,113 @@ func TestArchiveRefKeepsChainReachableWithoutABranch(t *testing.T) {
 		t.Errorf("archive ref reaches %d commits, want the full 4-commit chain", got)
 	}
 }
+
+// The integration record is created once and never moved (requirements §22), and the archive stops
+// moving with it (§23). Both are properties of the refs rather than of any command, so they are
+// tested here: a command that forgets to check cannot get around them, and a command added later
+// inherits the rule.
+func TestIntegrationRecordIsCreatedOnce(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking", "main")
+	first := f.Commit("first", gittest.WithFile("first.md", "first\n"))
+	second := f.Commit("second", gittest.WithFile("second.md", "second\n"))
+	ctx := context.Background()
+
+	if _, err := reviewref.ResolveIntegration(ctx, repo(f), "booking"); !errors.Is(err, reviewref.ErrNotIntegrated) {
+		t.Errorf("ResolveIntegration before recording = %v, want ErrNotIntegrated", err)
+	}
+	created, err := reviewref.CreateIntegration(ctx, repo(f), "booking", first)
+	if err != nil || !created {
+		t.Fatalf("CreateIntegration = %v, %v; want it to create the record", created, err)
+	}
+	if got := f.RefSHA(reviewref.Integration("booking")); got != first {
+		t.Errorf("the record is at %s, want %s", got, first)
+	}
+	// A second landing attempt is refused by the same call rather than by a check the caller
+	// might skip: the ref keeps the first answer.
+	created, err = reviewref.CreateIntegration(ctx, repo(f), "booking", second)
+	if err != nil {
+		t.Fatalf("CreateIntegration: %v", err)
+	}
+	if created {
+		t.Error("a second record reported that it created one")
+	}
+	if got := f.RefSHA(reviewref.Integration("booking")); got != first {
+		t.Errorf("the record moved to %s; it must stay at %s", got, first)
+	}
+	if got, err := reviewref.ResolveIntegration(ctx, repo(f), "booking"); err != nil || got != first {
+		t.Errorf("ResolveIntegration = %q, %v; want %s", got, err, first)
+	}
+}
+
+func TestArchiveFreezesAfterIntegration(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking", "main")
+	archived := f.Commit("archive this", gittest.WithFile("service.go", "package service\n"))
+	ctx := context.Background()
+	if _, err := reviewref.Update(ctx, repo(f), "booking", archived); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	f.SwitchTo("main")
+	landed := f.Commit("land it", gittest.WithFile("landed.md", "landed\n"))
+	if _, err := reviewref.CreateIntegration(ctx, repo(f), "booking", landed); err != nil {
+		t.Fatalf("CreateIntegration: %v", err)
+	}
+
+	// The branch may still exist and still be worked on. Moving the archive now would silently
+	// change what the recorded mapping says it archived.
+	f.SwitchTo("booking")
+	later := f.Commit("more work after the landing", gittest.WithFile("later.md", "later\n"))
+	if _, err := reviewref.Update(ctx, repo(f), "booking", later); !errors.Is(err, reviewref.ErrArchiveFrozen) {
+		t.Errorf("Update after integration = %v, want ErrArchiveFrozen", err)
+	}
+	if got := f.RefSHA(reviewref.Archive("booking")); got != archived {
+		t.Errorf("the archive moved to %s; the frozen record says %s", got, archived)
+	}
+}
+
+// The forge knows the SHA it built and not the changeset id, so discovery is by exact object
+// (requirements §16). Two things make this more than a ref-name pattern: a child that is not an
+// archive must not count, and a commit nobody archived must produce no match rather than a guess.
+func TestArchivesAtFindsTheChangesetBehindACommit(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking", "main")
+	ctx := context.Background()
+
+	source := f.EmptyCommit("the archived head")
+	if _, err := reviewref.Update(ctx, repo(f), "booking", source); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	// A changeset with only an integration record is not a source anyone is about to integrate,
+	// and a second branch sharing the head has no archive of its own.
+	f.CreateBranch("release")
+	f.SwitchTo("release")
+	landed := f.EmptyCommit("the landing")
+	if _, err := reviewref.CreateIntegration(ctx, repo(f), "other", landed); err != nil {
+		t.Fatalf("CreateIntegration: %v", err)
+	}
+
+	got, err := reviewref.ArchivesAt(ctx, repo(f), source)
+	if err != nil {
+		t.Fatalf("ArchivesAt: %v", err)
+	}
+	if len(got) != 1 || got[0] != "booking" {
+		t.Errorf("ArchivesAt(%s) = %v, want [booking]", source[:7], got)
+	}
+	if got, err := reviewref.ArchivesAt(ctx, repo(f), landed); err != nil || len(got) != 0 {
+		t.Errorf("ArchivesAt on an unarchived head = %v, %v; want no match", got, err)
+	}
+	// Two archives at one commit is a state git-pair cannot create — it writes one archive per
+	// id, forward-only — so it is built by hand, and it is exactly the §19 case the command has to
+	// refuse rather than guess at.
+	f.MustGit("update-ref", reviewref.Archive("other"), source)
+	if got, err := reviewref.ArchivesAt(ctx, repo(f), source); err != nil || len(got) != 2 {
+		t.Errorf("ArchivesAt with two archives = %v, %v; want both candidates", got, err)
+	}
+}

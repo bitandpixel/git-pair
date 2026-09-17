@@ -117,6 +117,39 @@ $G check >/dev/null 2>&1; check "check: an implementation commit after the appro
 $G change ready >/dev/null; check "ready again after the implementation commit" 0 $?
 $G change unready >/dev/null; check "withdraw the offer" 0 $?
 $G check >/dev/null 2>&1; check "check: a withdrawn changeset fails the gate" 1 $?
+
+step "integration: record where the work landed, and what the record freezes"
+# The landing goes to a branch that is not the default one, which is the case only the record can
+# answer for: the changeset directory is still absent from trunk, so the tree rule reads the branch
+# as live work until someone says where the change went. The landing commit shares no ancestry with
+# the archived head, the way a squash leaves them.
+# `--source` is the commit the archive names — §17's invariant — not whatever HEAD happens to be.
+SOURCE=$(git rev-parse "$ARCHIVE")
+git switch -qc release/2.x main
+git checkout "$SOURCE" -- changesets/booking-transaction
+git commit -qm "booking-transaction: land the reviewed work"
+LANDING=$(git rev-parse HEAD)
+if git merge-base --is-ancestor "$SOURCE" "$LANDING"; then
+  echo "  FAIL: the fixture landing should not descend from the archived head"; FAILED=1
+fi
+$G integration record --source "$SOURCE" --commit "$LANDING" --target release/2.x >/dev/null 2>&1
+check "integration record links the archived head to a landing with no ancestry to it" 0 $?
+[ "$(git rev-parse refs/git-pair/changesets/booking-transaction/integration)" = "$LANDING" ] \
+  && echo "  ok: the integration ref names the landing" || { echo "  FAIL: the integration ref is wrong"; FAILED=1; }
+out=$($G integration record --source "$SOURCE" --commit "$LANDING" 2>&1)
+check "recording twice is refused" 1 $?
+printf '%s' "$out" | grep -q "already recorded" && echo "  ok: the refusal names the record that exists" \
+  || { echo "  FAIL: the second refusal explained nothing: $out"; FAILED=1; }
+$G check >/dev/null 2>&1; check "check: an integrated changeset is not integration-ready again" 1 $?
+$G change ready >/dev/null 2>&1; check "the archive is frozen after the record (change ready)" 1 $?
+$G change archive >/dev/null 2>&1; check "the archive is frozen after the record (change archive)" 1 $?
+[ "$(git rev-parse "$ARCHIVE")" = "$SOURCE" ] && echo "  ok: nothing moved the frozen archive" \
+  || { echo "  FAIL: the archive moved after the record"; FAILED=1; }
+git switch -q main
+$G review queue 2>&1 | grep -q "booking-transaction (integrated at" \
+  && echo "  ok: the queue says the changeset landed instead of listing it" \
+  || { echo "  FAIL: the queue did not account for the landed changeset"; FAILED=1; }
+git switch -q booking-transaction
 BEFORE=$(git rev-list --count "$ARCHIVE")
 git switch -q main
 git branch -D booking-transaction >/dev/null

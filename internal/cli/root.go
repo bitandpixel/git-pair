@@ -139,6 +139,7 @@ Gates:             git pair check`,
 		newStatusCommand(a),
 		newDiffCommand(a),
 		newCheckCommand(a),
+		newIntegrationCommand(a),
 	)
 	return root
 }
