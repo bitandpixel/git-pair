@@ -197,13 +197,6 @@ func DirectoryAt(ctx context.Context, repo *git.Repo, id string) (DirectoryState
 	return st, nil
 }
 
-// StaleClaim is a changeset directory whose recorded branch is gone, which is what a
-// renamed branch looks like to git-pair.
-type StaleClaim struct {
-	Dir    string
-	Branch string
-}
-
 // worktreeDirs lists the changeset directories present on disk.
 func worktreeDirs(repo *git.Repo) ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(repo.Dir, Root))
@@ -221,14 +214,6 @@ func worktreeDirs(repo *git.Repo) ([]string, error) {
 	}
 	sort.Strings(dirs)
 	return dirs, nil
-}
-
-// ClaimResult is what one branch says about the changeset it carries. A branch whose
-// metadata cannot be read is a result with Err set rather than a failed scan: one branch
-// with a broken CHANGESET.yaml is not a reason to stop answering about the others.
-type ClaimResult struct {
-	Changeset Changeset
-	Err       error
 }
 
 // changesetDir reports the changeset name a tree path belongs to, and whether it is the
@@ -284,9 +269,9 @@ func BaseAt(ctx context.Context, repo *git.Repo, rev, slug string) (string, erro
 	return md["base"], nil
 }
 
-// DirsAt lists the changeset directories present in a revision's tree. Like
-// AtCommit it never consults the working tree, so a changeset that was merged and
-// whose branch has gone is still visible as the directory it left behind.
+// DirsAt lists the changeset directories present in a revision's tree. It reads the tree and
+// never the working tree, so a changeset that was merged and whose branch has gone is still
+// visible as the directory it left behind.
 func DirsAt(ctx context.Context, repo *git.Repo, rev string) ([]string, error) {
 	out, err := repo.Git(ctx, "ls-tree", "-d", "--name-only", rev, "--", Root+"/")
 	if err != nil {
@@ -363,6 +348,57 @@ func RequireCurrent(ctx context.Context, repo *git.Repo, defaultBranch string) (
 	return c, nil
 }
 
+// IgnoresKey is the CHANGESET.yaml key naming the other changesets this one is merely sharing a
+// branch with, recorded by `git pair change use`.
+const IgnoresKey = "ignores"
+
+// SetIgnores records in a changeset's own CHANGESET.yaml which other changesets it is merely
+// sharing a branch with. The record lives in the chosen changeset's file and nowhere else: to
+// clear the losing candidates' records instead would write into another changeset's directory,
+// which `change archive` would rightly read as a foreign path in this changeset's landing.
+//
+// Comments, unknown keys and their order survive; the file is rewritten only when the value
+// actually changes, so running the command twice records one commit rather than two.
+func SetIgnores(repo *git.Repo, c Changeset, ids []string) (changed bool, err error) {
+	sorted := append([]string(nil), ids...)
+	sort.Strings(sorted)
+	path := filepath.Join(repo.Dir, c.Dir, MetadataFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+
+	want := ""
+	if len(sorted) > 0 {
+		want = IgnoresKey + ": " + strings.Join(sorted, " ")
+	}
+	var out []string
+	placed := false
+	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		key, _, ok := strings.Cut(line, ":")
+		if ok && strings.EqualFold(strings.TrimSpace(key), IgnoresKey) {
+			if want != "" && !placed {
+				out = append(out, want)
+				placed = true
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+	if want != "" && !placed {
+		out = append(out, want)
+	}
+
+	rewritten := strings.Join(out, "\n") + "\n"
+	if rewritten == string(data) {
+		return false, nil
+	}
+	if err := os.WriteFile(path, []byte(rewritten), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // --- metadata ---------------------------------------------------------------
 
 // readMetadata parses the deliberately tiny CHANGESET.yaml format: one
@@ -379,8 +415,8 @@ func readMetadata(path string) (map[string]string, error) {
 	return parseMetadata(string(data))
 }
 
-// parseMetadata is the format, readMetadata and AtCommit are the places it comes
-// from: the working tree and a commit respectively.
+// parseMetadata is the format; readMetadata (the working tree) and the resolver's batched blob
+// read (a revision) are the two places it comes from.
 func parseMetadata(data string) (map[string]string, error) {
 	md := map[string]string{}
 	for _, line := range strings.Split(data, "\n") {

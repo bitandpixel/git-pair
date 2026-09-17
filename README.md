@@ -241,7 +241,9 @@ answer about the same work. Nothing asks which branch is checked out, so CI, a d
 your own branch all get the same answer.
 
 When two directories survive, the nearest review ref decides, then the `base:` of a stack; when
-nothing orders them git-pair refuses, names both, and accepts `--changeset <id>`. The integration
+nothing orders them git-pair refuses, names both, and gives two ways out: `--changeset <id>` answers
+for one command, and `git pair change use <id>` records the choice in that changeset's
+`CHANGESET.yaml` and settles it for the branch. The integration
 branch is what "landed" is measured against: `--default-branch <ref>` states it (this is what CI
 passes), otherwise git's own answer — `refs/remotes/origin/HEAD`, then a sole `origin/main` or
 `origin/master`, then a local `main` or `master`. If none exists the command refuses rather than
@@ -423,6 +425,7 @@ landed.
 | `change init` | `--id <id>`, `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch; refuses on that branch, where a changeset could never contain anything; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` only when it is in review, otherwise succeeds and records nothing |
+| `change use <id>` | none | records which changeset a branch carrying more than one is working on: writes `ignores: <other ids>` into the chosen changeset's `CHANGESET.yaml` and commits that file; refuses an id the branch does not offer and a record that would leave the branch still undecided; idempotent |
 | `change abandon` | none | records the terminal `Review-State: abandoned` and anchors it; `change ready`, `change unready` and `review submit` refuse against it afterwards; idempotent |
 | `change feedback` | `--stat`, `--name-only`, `--changeset <slug>` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
 | `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
@@ -900,12 +903,18 @@ answer once with `git remote set-head origin --auto`. `change init` reports the 
 `cannot infer a base: ...; pass --base <ref>`, because the recorded base and the landed test come
 from the same resolution.
 
-`this revision contains more than one changeset: aaa and bbb; name the one you mean with
---changeset <id>` (exit 2) — the branch carries two unlanded changeset directories and nothing in
-the durable data orders them: neither owns a review ref nearer than the other, and neither names
-the other as its `base:`. That is what a branch created off a sibling looks like once it starts
-its own work. `--changeset <id>` answers for one command; `git pair change init --base <sibling>`
-at creation time is what makes the stack readable instead.
+```text
+this revision contains more than one changeset: aaa and bbb; name the one you mean with
+--changeset <id>, or record the choice with `git pair change use <id>`
+```
+
+(exit 2) — the branch carries two unlanded changeset directories and nothing in the durable data
+orders them: neither owns a review ref nearer than the other, and neither names the other as its
+`base:`. That is what a sibling merged in looks like, and what a branch created off a sibling looks
+like once it starts its own work. `git pair change use <id>` settles it for the branch, by recording
+the choice in the chosen changeset's `CHANGESET.yaml`; `--changeset <id>` answers for one command;
+and `git pair change init --base <sibling>` at creation time is what makes a stack readable without
+any record at all.
 
 `main is the integration branch, so a changeset started on it can never contain anything` (exit 2
 from `change init`) — a changeset is measured against the integration branch, so one started on it

@@ -30,7 +30,7 @@ func newChangeCommand(a *app) *cobra.Command {
 		// agent that typo'd the verb.
 		RunE: groupUsage("change"),
 	}
-	cmd.AddCommand(newChangeInitCommand(a), newChangeReadyCommand(a), newChangeUnreadyCommand(a),
+	cmd.AddCommand(newChangeInitCommand(a), newChangeUseCommand(a), newChangeReadyCommand(a), newChangeUnreadyCommand(a),
 		newChangeAbandonCommand(a), newChangeFeedbackCommand(a), newChangeWaitCommand(a),
 		newChangeCompleteCommand(a))
 	return cmd
@@ -329,6 +329,125 @@ func defaultBase(ctx context.Context, repo *git.Repo, override string) (string, 
 		return "", fmt.Errorf("cannot infer a base: %v; pass --base <ref>", err)
 	}
 	return db.LocalName(), nil
+}
+
+// --- change use -------------------------------------------------------------
+
+func newChangeUseCommand(a *app) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "use <changeset-id>",
+		Short: "Record which changeset this branch is working on",
+		Long: `Record, in the chosen changeset's CHANGESET.yaml, that the other changeset
+directories on this branch are ones it is only sharing a branch with.
+
+A branch normally carries one unlanded changeset. It carries more when a sibling's branch was
+merged into this one, or when a branch created off a sibling started its own work without naming
+that stack with ` + "`change init --base`" + `. git-pair orders what it can — the nearest review ref,
+then the base of a stack — and refuses rather than guessing between the rest, because picking one
+silently means reading the wrong diff base.
+
+This command is the answer it accepts: one record, in the file of the changeset you chose, which
+every command on this branch then reads. ` + "`--changeset <id>`" + ` answers the same question for
+one command instead of for the branch.`,
+		Example: `  git pair change use booking-transaction
+  git pair status`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChangeUse(cmd.Context(), a, args[0])
+		},
+	}
+	return cmd
+}
+
+func runChangeUse(ctx context.Context, a *app, id string) error {
+	repo, err := a.loadRepo(ctx)
+	if err != nil {
+		return err
+	}
+	if err := changeset.ValidateID(id); err != nil {
+		return &usageError{err}
+	}
+	res, err := changeset.ResolveCurrent(ctx, repo, a.defaultBranch)
+	if err != nil {
+		return usageWrap(err)
+	}
+	var names []string
+	for _, c := range res.Candidates {
+		names = append(names, c.Changeset.Slug)
+	}
+
+	// The common case is being told about a decision the rule already makes. Saying "already"
+	// is worth more than writing a record that changes nothing.
+	if res.Selected != nil && res.Selected.Changeset.Slug == id {
+		a.printf("this branch already works on %s\n", id)
+		return nil
+	}
+	if len(res.Candidates) == 0 {
+		return &usageError{fmt.Errorf("no changeset is in progress on this branch; `git pair change init` starts one")}
+	}
+	chosen := false
+	for _, n := range names {
+		if n == id {
+			chosen = true
+		}
+	}
+	if !chosen {
+		// Being on the branch is not the same as being offered: a candidate is dropped when
+		// another changeset's record says it is only sharing the branch. Saying "not a changeset
+		// here" to a directory the author can see would be a lie with no way forward, so the
+		// record that dropped it is named instead.
+		for _, c := range res.Candidates {
+			for _, ignored := range c.Ignores {
+				if ignored == id {
+					return &usageError{fmt.Errorf("%q is on this branch, but %q already claims it: %s records that it ignores %q.\n\nRemove that `ignores:` line from %s, then run `git pair change use %s` again",
+						id, c.Changeset.Slug, c.Changeset.MetadataPath(), id, c.Changeset.MetadataPath(), id)}
+				}
+			}
+		}
+		return &usageError{fmt.Errorf("%q is not a changeset this branch is working on; it carries %s", id, strings.Join(names, ", "))}
+	}
+
+	var ignores []string
+	for _, n := range names {
+		if n != id {
+			ignores = append(ignores, n)
+		}
+	}
+	// Ask the rule before writing. Another candidate may already record a choice, and a record
+	// that leaves the branch undecided is not a decision — better to say so now than to leave a
+	// commit for the author to undo.
+	if check := res.WithIgnores(id, ignores); check.Ambiguous || check.Selected == nil ||
+		check.Selected.Changeset.Slug != id {
+		return &usageError{fmt.Errorf("recording %q as this branch's changeset would still leave it undecided, because another changeset here records a choice of its own.\n\nRemove its `ignores:` line from the other changeset's %s, then run `git pair change use %s` again",
+			id, changeset.MetadataFile, id)}
+	}
+
+	cs := changeset.Changeset{Slug: id, Dir: filepath.Join(changeset.Root, id), Exists: true}
+	changed, err := changeset.SetIgnores(repo, cs, ignores)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		a.printf("%s already records this choice\n", cs.MetadataPath())
+		return nil
+	}
+	// Committed on its own, from this changeset's directory only. Leaving it uncommitted would
+	// have every later command on the branch refuse until the author remembered to commit it,
+	// and the record is a review artifact of this branch rather than a change to review.
+	sha, err := marker.CommitPaths(ctx, repo, marker.Message{
+		Subject:  fmt.Sprintf("git-pair: work on changeset %s", id),
+		Trailers: []string{"Review-Changeset=" + id},
+	}, []string{cs.MetadataPath()})
+	if err != nil {
+		if isNothingToCommit(err) {
+			a.printf("nothing to commit (%s already records this choice)\n", cs.MetadataPath())
+			return nil
+		}
+		return err
+	}
+	a.printf("recorded %s as this branch's changeset: %s now ignores %s\n", id, cs.MetadataPath(), strings.Join(ignores, ", "))
+	a.printf("committed %s\n", short(sha))
+	return nil
 }
 
 // --- change ready -----------------------------------------------------------

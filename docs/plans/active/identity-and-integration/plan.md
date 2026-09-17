@@ -279,13 +279,26 @@ assertion about stale claims was vacuous because no changeset directory existed 
 - [x] No ref fallback. Resolution is rank 0 alone; a branch whose changeset directory was deleted
   reports `uninitialized` with the normal hint. Fixture asserts exactly that, so the omission is a
   decision in the test suite rather than an oversight.
-- [ ] `change use <id>`: records which candidate this branch is working on. Refuses an id that is not
+- [x] `change use <id>`: records which candidate this branch is working on. Refuses an id that is not
   a candidate here, writes `ignores: <id> [...]` into the chosen changeset's `CHANGESET.yaml` and
   commits it. A candidate named in another candidate's `ignores:` stops being a candidate. In the
   chosen file and not the loser's, because an edit under `changesets/<other>/` is implementation
   drift to `change archive` and carries a foreign path into this changeset's landing.
-- [ ] Ambiguity message names every candidate and points at `change use` and `status --changeset`,
-  since both escape hatches already exist.
+  - *Amended while implementing:* the write is **simulated first** (`Resolution.WithIgnores`, which
+    runs the real filter against the real candidate set), and the command refuses when the record
+    would leave the branch undecided. Two records naming each other cancel out, so writing a third
+    file over a contradicting record would commit noise and leave the branch as undecided as it was.
+    The alternative — letting the newer record win — asks which of two hand-edited files is newer,
+    which git-pair cannot know reliably after a rebase, and the author can say outright which they
+    mean. A directory that is present but dropped by another changeset's record is refused by name,
+    naming the file and line to remove, because "there is no such changeset here" is a dead end in
+    front of a directory the author can see. The commit is `git-pair: work on changeset <id>` with
+    `Review-Changeset` and **no** `Review-State`: choosing which changeset a branch is about is not a
+    lifecycle event, and must not move a changeset out of review.
+- [x] Ambiguity message names every candidate and points at `change use` and `status --changeset`,
+  since both escape hatches already exist. A tie is now classified as a usage error (exit 2) like
+  `ErrNoChangeset`: the branch cannot answer the question, and both ways out are things the user can
+  type.
 - [ ] `status --json` reports the default branch it resolved, its commit, and which source supplied
   it (`flag` / `origin-head` / `sole-candidate`), reported the same way whether the ref came from
   `--default-branch` or from detection. A CI run should be explainable from its own output rather

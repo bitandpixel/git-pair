@@ -45,14 +45,15 @@ var ErrNoDefaultBranch = errors.New("cannot tell which branch is the integration
 var ErrAmbiguousChangeset = errors.New("this revision contains more than one changeset")
 
 // AmbiguityError explains a tie. The candidates are named because the reader has no other way
-// to see them — nothing has shown them yet — and an escape hatch is named because a refusal
-// without one is a dead end.
+// to see them — nothing has shown them yet — and both escape hatches are named, because a
+// refusal without one is a dead end: `--changeset` answers for one command, `change use` settles
+// it for the branch.
 func AmbiguityError(res Resolution) error {
 	ids := make([]string, 0, len(res.Candidates))
 	for _, c := range res.Candidates {
 		ids = append(ids, c.Changeset.Slug)
 	}
-	return fmt.Errorf("%w: %s; name the one you mean with --changeset <id>",
+	return fmt.Errorf("%w: %s; name the one you mean with --changeset <id>, or record the choice with `git pair change use <id>`",
 		ErrAmbiguousChangeset, strings.Join(ids, " and "))
 }
 
@@ -369,7 +370,7 @@ func candidateFor(ctx context.Context, repo *git.Repo, rev, id string, md map[st
 			Exists: true,
 		},
 		Distance: -1,
-		Ignores:  strings.Fields(md["ignores"]),
+		Ignores:  strings.Fields(md[IgnoresKey]),
 	}
 	tip, ok := tips[id]
 	if !ok {
@@ -412,6 +413,25 @@ func choose(res Resolution) Resolution {
 		}
 	}
 	return res
+}
+
+// WithIgnores reports what this resolution would say if the named candidate recorded that it is
+// merely sharing the branch with ids — the write `change use` is about to make, evaluated first.
+//
+// A decision that would leave the branch undecided is not a decision, and `change use` finds
+// that out before committing rather than leaving the author with a file to edit back. The
+// simulation runs the real filter, so a record another candidate left behind is weighed exactly
+// as the next resolution will weigh it.
+func (r Resolution) WithIgnores(id string, ignores []string) Resolution {
+	res := r
+	res.Candidates = make([]Candidate, len(r.Candidates))
+	copy(res.Candidates, r.Candidates)
+	for i := range res.Candidates {
+		if res.Candidates[i].Changeset.Slug == id {
+			res.Candidates[i].Ignores = append([]string(nil), ignores...)
+		}
+	}
+	return choose(res)
 }
 
 // reviewTips maps changeset id to the commit its movable review ref points at, in one call.

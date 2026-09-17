@@ -207,8 +207,11 @@ Where more than one directory survives, they are ordered by the durable data and
 guesswork: the one whose review ref is nearest to the revision first; a directory named as
 another's `base:` is the parent of a stack, so it is not what the revision is working on. When
 nothing orders them, the answer is **ambiguous**, and the command refuses, names every
-candidate, and accepts `--changeset <id>`. Two unrelated changesets on one branch is a state
-only the author can settle, and picking one silently would read the wrong diff base.
+candidate, and gives two ways out: `--changeset <id>` answers for one command, and
+`git pair change use <id>` (§9.8) settles it for the branch. Two unrelated changesets on one
+branch is a state only the author can settle, and picking one silently would read the wrong diff
+base and offer the wrong diff to a reviewer — which is why a tie is a refusal rather than a
+heuristic.
 
 The **integration branch** is what "landed" is measured against. A `--default-branch <ref>`
 flag states it outright — which is what CI passes, since a job that cloned with `init` and one
@@ -246,10 +249,16 @@ about it: a file whose `id` disagrees with the directory holding it is an error 
 correct, not a conflict to resolve. `base` is the ref the changeset's diff is measured
 against, and for a stacked branch it names the changeset it sits on.
 
-That is the whole file. There is no branch field, because the directory does not belong to a
-branch (§4): recording one would put per-branch state in the durable data, and the same
-commits would then answer differently depending on which branch happened to be checked out —
+Those two keys are what every changeset has. There is no branch field, because the directory does
+not belong to a branch (§4): recording one would put per-branch state in the durable data, and the
+same commits would then answer differently depending on which branch happened to be checked out —
 which is the disagreement the content rule exists to remove.
+
+A third key appears only where an author put it. `ignores: <id> [<id>...]`, written by
+`git pair change use` (§9.8), records that this changeset is the one its branch is working on and
+that the named changesets are only sharing the branch with it. It is read when the changeset that
+wrote it is a candidate, so it speaks about one branch: it is not a statement about the other
+changesets, and it cannot change what another branch resolves to.
 
 The ID does not change once the changeset has durable refs. Renaming one means moving the
 directory and every ref under it, which is not something git-pair does silently; there is
@@ -485,7 +494,8 @@ that:
    changeset that has durable refs keeps its ID for good (§5). Starting a *second* changeset on
    a branch that already carries one is allowed — that is what a stacked branch that begins its
    own work looks like — and `init` warns that the branch now holds two, because the tool has
-   two directories to order and the order is rarely what the author meant.
+   two directories to order and the order is rarely what the author meant. `git pair change use`
+   (§9.8) is how the author settles it.
 
 Deleting a changeset directory releases its ID only when the deletion is committed, since
 retiring a changeset's notes is a commit and not a local edit.
@@ -781,6 +791,49 @@ a changeset whose name already ended.
 
 ---
 
+## 9.8 `git pair change use <changeset-id>`
+
+Records which changeset a branch is working on, so that the branch stops being ambiguous.
+
+A branch normally carries one unlanded changeset. It carries more when a sibling's branch is merged
+into it, and when a branch created off a sibling starts its own work without `--base` naming that
+stack. The rule (§4) orders what it can — a review ref nearer to the revision wins, a `base:` names
+the parent of a stack — and refuses between the rest, because choosing one silently means reading
+the wrong diff base.
+
+```bash
+git pair change use booking-transaction
+```
+
+It writes one line, `ignores: <other ids>`, into the **chosen** changeset's `CHANGESET.yaml`, and
+commits that file on its own. The record belongs to the changeset that was chosen: clearing the
+others' records instead would write into another changeset's directory, which `change complete`
+(§9.5) would rightly read as a foreign path in this changeset's landing. The commit carries
+`Review-Changeset: <id>` and no `Review-State`, because recording which changeset a branch is about
+is not a lifecycle event — it must not move a changeset that is in review out of review. Like a
+ready marker it is a review artifact, so `change complete` advances over it (§9.5).
+
+Checks, in order:
+
+1. `<changeset-id>` is a usable id (§9.1), else exit 2,
+2. if the branch already resolves to that id, succeed and record nothing — the useful answer is
+   "already", and a commit that changes nothing would be noise,
+3. the id is among the candidates. A directory that is present but dropped by another changeset's
+   record is refused by name, with the file and line to edit: the author can see that directory, so
+   "there is no such changeset here" would be a dead end,
+4. the record is simulated before it is written. If writing it would leave the branch undecided —
+   another candidate already records a choice that names this one — refuse with exit 2 and name the
+   line to remove. Contradicting records stay a refusal rather than becoming a newest-commit-wins
+   rule, because which of two hand-edited files is newer is not something git-pair can know reliably,
+   and the author can say outright which one they mean.
+
+A recorded choice is data, so it travels with the branch: a branch created from this one inherits
+the record, and the record only ever drops a changeset from consideration where the two would
+otherwise be tied on that revision. An author who changes their mind edits the file — it is one
+line, and the refusal message names it.
+
+---
+
 # 10. Reviewer Commands
 
 ## 10.1 `git pair review open`
@@ -967,6 +1020,10 @@ base carry the same `changesets/<changeset>/` content, the work landed, and the 
 a directory with no anchor was never offered, and also says nothing. Anything else — anchored work
 that is not in its base — is named in `skipped`, because that line is the only surviving record of
 the work.
+
+A branch the rule cannot resolve is named there too, with its candidates and both ways out (§9.8).
+A branch that is quietly missing from the queue is indistinguishable from a branch with nothing to
+show, and the queue is where an author looks to find out why a branch is not in it.
 
 Example:
 

@@ -360,8 +360,13 @@ func (a *app) sessionFor(ctx context.Context, repo *git.Repo, cs changeset.Chang
 }
 
 // usageWrap marks an error as a usage problem rather than a git failure.
+//
+// A tie between two changesets belongs here: the command asked a question this branch cannot
+// answer, and both ways out — `--changeset <id>` for one command, `change use <id>` for the
+// branch — are things the user can type, which is what separates exit 2 from exit 1.
 func usageWrap(err error) error {
-	if errors.Is(err, changeset.ErrDetachedHead) || errors.Is(err, changeset.ErrNoChangeset) {
+	if errors.Is(err, changeset.ErrDetachedHead) || errors.Is(err, changeset.ErrNoChangeset) ||
+		errors.Is(err, changeset.ErrAmbiguousChangeset) {
 		return &usageError{err}
 	}
 	return err
