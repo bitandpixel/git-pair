@@ -32,22 +32,23 @@ func previewModel(t *testing.T) reviewModel {
 }
 
 // deliver runs whatever fetches the model asked for, which is a batch now that the pane asks git
-// about two sources per file.
+// about two sources per file -- and descends into nested batches, because Update wraps a handler's
+// command around its own fetch. A harness that unwrapped only the outer layer would quietly leave the
+// pane waiting on a diff that had already arrived, and every test written against it would be testing
+// an empty pane.
 func deliver(t *testing.T, m reviewModel, cmd tea.Cmd) reviewModel {
 	t.Helper()
 	if cmd == nil {
 		return m
 	}
-	msg := cmd()
+	return deliverMsg(t, m, cmd())
+}
+
+func deliverMsg(t *testing.T, m reviewModel, msg tea.Msg) reviewModel {
+	t.Helper()
 	if batch, ok := msg.(tea.BatchMsg); ok {
 		for _, c := range batch {
-			var sub tea.Model
-			sub, _ = m.Update(c())
-			rm, ok := sub.(reviewModel)
-			if !ok {
-				t.Fatalf("a preview answer produced %T", sub)
-			}
-			m = rm
+			m = deliverMsg(t, m, c())
 		}
 		return m
 	}
@@ -99,8 +100,10 @@ func TestPreviewFollowsTheCursor(t *testing.T) {
 	}
 }
 
-// The pane is a wide-terminal luxury. Below the threshold the session is exactly what it was
-// before the preview existed, and `p` in a narrow terminal says why nothing happened.
+// The pane is a wide-terminal luxury. Below the threshold the list keeps the whole terminal, and `p`
+// takes the screen with the diff instead of squeezing the list -- pinned in overlay_internal_test.go.
+// What is pinned here is that the pane never appears uninvited, that the two columns always add up, and
+// that a terminal too small for even the overlay says which way it is short.
 func TestPreviewOnlyAppearsWhenThereIsRoom(t *testing.T) {
 	narrow := previewModel(t)
 	narrow.width = 72
@@ -138,14 +141,18 @@ func TestPreviewOnlyAppearsWhenThereIsRoom(t *testing.T) {
 		t.Error("`p` off did not remove the pane")
 	}
 
-	// Toggling on in a terminal that cannot fit it must explain, not stay silent.
+	// Toggling in a terminal too small for even the overlay must explain, not stay silent -- and name
+	// the smaller of the two asks, since that is the one the reviewer can actually grow to.
 	crowded := previewModel(t)
-	crowded.width = 60
+	crowded.width = 30
 	crowded.previewOn = false // `p` turns it on, which is the case that cannot fit
 	updated, _ := crowded.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	crowded = updated.(reviewModel)
-	if !strings.Contains(crowded.status, fmt.Sprint(previewMinWidth)) || !strings.Contains(crowded.status, "60") {
-		t.Errorf("toggling in a 60-column terminal said %q, want the width it needs", crowded.status)
+	if crowded.mode != modeFiles {
+		t.Fatalf("a 30-column terminal opened the overlay; it cannot show a diff at that width")
+	}
+	if !strings.Contains(crowded.status, fmt.Sprint(previewOverlayMinWidth)) || !strings.Contains(crowded.status, "30") {
+		t.Errorf("toggling in a 30-column terminal said %q, want the width it needs", crowded.status)
 	}
 }
 
@@ -284,6 +291,9 @@ func TestPatchesAreFetchedOncePerFile(t *testing.T) {
 
 // A short terminal has no room for a column of diff either, and the two excuses are different:
 // a reviewer with a 140x10 window is not being told about columns.
+// A short terminal has the same excuse as a narrow one, and gets the same answer: the number it is
+// short by, from whichever layout was being tried. At 10 rows even the overlay is out -- it wants 12 --
+// so the 12 is what gets reported rather than the 16 a pane would have wanted.
 func TestPreviewNeedsRowsAsWellAsColumns(t *testing.T) {
 	short := previewModel(t)
 	short.height = 10
@@ -294,8 +304,8 @@ func TestPreviewNeedsRowsAsWellAsColumns(t *testing.T) {
 	short.previewOn = false
 	updated, _ := short.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	short = updated.(reviewModel)
-	if !strings.Contains(short.status, fmt.Sprint(previewMinHeight)) || !strings.Contains(short.status, "10") {
-		t.Errorf("toggling in a 10-row terminal said %q, want the rows it needs", short.status)
+	if !strings.Contains(short.status, fmt.Sprint(previewOverlayMinHeight)) || !strings.Contains(short.status, "10") {
+		t.Errorf("toggling in a 10-row terminal said %q, want the rows even the overlay needs", short.status)
 	}
 }
 

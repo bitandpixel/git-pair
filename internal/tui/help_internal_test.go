@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/charmbracelet/lipgloss"
+	"gitpr/internal/span"
 )
 
 // The shortcut helper is the only place the TUI names its keys, so a narrow window has to
@@ -166,5 +169,76 @@ func TestWindowRowsShrinkWhenTheHelperWraps(t *testing.T) {
 	total := len(m.rows)
 	if got := len(m.visibleRows()); got != min(total, rows) {
 		t.Errorf("visibleRows = %d, want %d (total %d, window %d)", got, min(total, rows), total, rows)
+	}
+}
+
+// The frame writes one row per line, and a line wider than the terminal is cut rather than continued.
+// A status longer than the window therefore used to lose its second half on the way to the reviewer:
+// at 30 columns, "the preview wants 40 columns; this terminal has 30" arrived as "the preview wants 40
+// columns;" and a great deal of mystery. Prose wraps like the shortcut bar does, for the same reason.
+func TestLongStatusWrapsInsteadOfBeingCut(t *testing.T) {
+	m := navModel(t)
+	m.width, m.height = 30, 24
+	m.setStatus("the preview wants 40 columns; this terminal has 30", false)
+	view := m.View()
+
+	for _, want := range []string{"the preview wants 40", "columns;", "this terminal has 30"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the status lost %q at %d columns:\n%s", want, m.width, view)
+		}
+	}
+	assertFrameFits(t, m)
+}
+
+// The drift banner is where the reviewer learns a ref moved, and the half that matters is the key that
+// clears it. Losing "[r] refresh" to a cut line leaves a warning with no way out.
+func TestDriftBannerKeepsItsKeyWhenItWraps(t *testing.T) {
+	m := navModel(t)
+	m.width, m.height = 30, 24
+	m.sess.setDrift([]span.Drift{{Name: "refs/heads/probe", Pinned: "abc1234", Current: "def5678"}})
+	view := m.View()
+
+	for _, want := range []string{"probe moved", "[r] refresh"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the banner lost %q at %d columns:\n%s", want, m.width, view)
+		}
+	}
+	assertFrameFits(t, m)
+}
+
+// assertFrameFits is the invariant behind both: a wrapped line is a row of the terminal, so chrome
+// that counts one row for a message taking three produces a frame taller than the window -- which
+// repaints by scrolling a row off the top.
+func assertFrameFits(t *testing.T, m reviewModel) {
+	t.Helper()
+	rows := strings.Split(strings.TrimSuffix(m.View(), "\n"), "\n")
+	if len(rows) > m.height {
+		t.Errorf("the frame is %d rows in a %d-row window:\n%s", len(rows), m.height, m.View())
+	}
+	for _, row := range rows {
+		if w := lipgloss.Width(row); w > m.width {
+			t.Errorf("a row is %d cells wide in a %d-column terminal: %q", w, m.width, row)
+			break
+		}
+	}
+}
+
+func TestWrapWordsKeepsWordsWhole(t *testing.T) {
+	for _, tc := range []struct {
+		text  string
+		width int
+		want  []string
+	}{
+		{"alpha beta gamma", 7, []string{"alpha", "beta", "gamma"}},
+		{"alpha beta gamma", 11, []string{"alpha beta", "gamma"}},
+		// A word that cannot fit gets the line to itself rather than being cut in half.
+		{"supercalifragilistic x", 8, []string{"supercalifragilistic", "x"}},
+		{"", 8, nil},
+		{"one two", 0, []string{"one two"}},
+	} {
+		got := wrapWords(tc.text, tc.width)
+		if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+			t.Errorf("wrapWords(%q, %d) = %q, want %q", tc.text, tc.width, got, tc.want)
+		}
 	}
 }

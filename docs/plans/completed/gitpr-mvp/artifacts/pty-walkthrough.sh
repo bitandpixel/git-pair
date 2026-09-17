@@ -160,6 +160,32 @@ unset PTY_TERM
 expectbytes "the session took the alternate screen" "$T/dumb.raw" $'\033[?1049h'
 expectbytes "it gave the terminal back on quit" "$T/dumb.raw" $'\033[?1049l'
 
+# --- 9. a terminal too narrow for the pane: the overlay --------------------
+# The pane is a wide-terminal thing. Below it `p` gives the diff the whole screen, because the
+# alternative is squeezing the list into a column nobody can read. A 60x14 terminal is the shape of
+# a half-width window on a laptop, which is where this layout earns its keep.
+step "small terminal: p takes the screen with the diff, and gives it back"
+# ctrl-c ends this one rather than q: q is the overlay's close key here, so a scenario that wants to
+# see the overlay *on screen* has to leave with the one key that always means the exit.
+( COLS=60 ROWS=14; session overlay p,ctrl-c )
+expect "the overlay's shortcut bar is the overlay's own" 0 "$T/overlay.raw" "ctrl-f/b page"
+expect "the overlay shows git's diff" 0 "$T/overlay.raw" "@@"
+expect "the overlay carries the span the diff is measured against" 0 "$T/overlay.raw" "current"
+refuse "the list's counter is off screen while the diff has the screen" 0 "$T/overlay.raw" "reviewed"
+
+step "small terminal: q closes the overlay and hands the list back"
+( COLS=60 ROWS=14; session back p,q,q )
+expect "q paints the list again" 1 "$T/back.raw" "reviewed"
+expect "with the list's own shortcut bar, marks and all" 1 "$T/back.raw" "space reviewed"
+
+# Too small for even that is worth saying out loud, and with the smaller of the two asks -- 12 rows
+# would have been enough, so telling the reviewer about the pane's 16 would send them growing the
+# wrong window.
+step "too small for even the overlay: it names the width it needs"
+( COLS=30 ROWS=24; session tiny p,q )   # rows for the status line: the bar wraps to six here
+expect "the refusal names the columns the overlay needs" 0 "$T/tiny.raw" "the preview wants 40 columns"
+expect "and the terminal it has" 0 "$T/tiny.raw" "this terminal has 30"
+
 # --- verdict ---------------------------------------------------------------
 printf '\n'
 if [ "$FAILED" = 0 ]; then echo "PTY: all checks passed"; else echo "PTY: FAILURES PRESENT"; fi

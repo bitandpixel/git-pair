@@ -34,6 +34,9 @@ const (
 	modeSubmit
 	// modeSpan is the `V` screen: a pending base and head, neither applied until Enter.
 	modeSpan
+	// modePreview is the diff over the whole screen: what `p` gives a terminal too narrow for a
+	// pane beside the list. It reads, and dismisses with q, esc or enter.
+	modePreview
 )
 
 type promptKind int
@@ -162,11 +165,14 @@ type reviewModel struct {
 	patchFor func(context.Context, string) Patch
 	// workingFor is the same seam for the reviewer's own uncommitted edits.
 	workingFor func(context.Context, string) Patch
-	// The preview pane. previewPath is what it shows and previewOffset where in it that pane is;
-	// patches and working hold what git already answered, so moving back to a file costs nothing.
+	// The preview, in whichever layout it fits. previewPath is what it shows and previewOffset
+	// where in it that pane is; patches and working hold what git already answered, so moving back
+	// to a file costs nothing. previewG is the `g` waiting for its partner in the overlay, kept
+	// apart from the list's markPending so the two jumps cannot read each other's half-press.
 	previewOn     bool
 	previewPath   string
 	previewOffset int
+	previewG      bool
 	patches       map[string]Patch
 	working       map[string]Patch
 	// pendingNote is what goes in the status line when the editor or difftool currently
@@ -369,6 +375,11 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The picker is how a reviewer gets *out* of a read-only span, so it is not
 		// subject to the gate below; it also changes nothing until Enter.
 		return m.handleSpanKey(key)
+	case modePreview:
+		// The overlay reads and dismisses. It dispatches before the gate below for the same reason
+		// the picker does: the keys it does not read are keys that do not happen, so nothing that
+		// changes the review is reachable while the list is off the screen.
+		return m.handlePreviewKey(key)
 	}
 	m.refresh()
 
@@ -812,6 +823,11 @@ func (m reviewModel) View() string {
 	switch m.mode {
 	case modeSpan:
 		b.WriteString(m.pickerBlock())
+	case modePreview:
+		// The whole screen is the diff. The rule is drawn here rather than in footer: in the list
+		// layout it belongs to the list column, and here it is the one thing between the diff and its
+		// keys.
+		b.WriteString(strings.Join(append(m.previewLines(), m.rule()), "\n") + "\n")
 	default:
 		if m.paneWidth() > 0 {
 			b.WriteString(joinColumns(m.listBlock(), m.previewLines(), m.listWidth()))
@@ -899,8 +915,10 @@ func (m reviewModel) listBlock() string {
 func (m reviewModel) footer() string {
 	var b strings.Builder
 	// The drift banner is chrome, and it is full width on purpose: in a split screen the list
-	// column is narrow, and a warning that loses its key to an ellipsis warns about nothing.
-	if line := m.driftLine(); line != "" {
+	// column is narrow, and a warning that loses its key to an ellipsis warns about nothing. Full
+	// width is not unlimited either, so it wraps -- a banner that loses "[r] refresh" to a cut line
+	// warns about nothing either.
+	for _, line := range wrapProse(m.driftLine(), m.width) {
 		b.WriteString(line + "\n")
 	}
 	switch m.mode {
@@ -915,14 +933,26 @@ func (m reviewModel) footer() string {
 			b.WriteString(styleDim.Render(line) + "\n")
 		}
 	}
-	if m.status != "" {
+	// Each line opens its own colour: the renderer skips rows that have not changed, and a style
+	// left open on a skipped row tints whatever is written under it.
+	for _, line := range wrapProse(m.status, m.width) {
 		if m.statusErr {
-			b.WriteString(styleErr.Render(m.status) + "\n")
-		} else {
-			b.WriteString(m.status + "\n")
+			line = styleErr.Render(line)
 		}
+		b.WriteString(line + "\n")
 	}
 	return b.String()
+}
+
+// footerRows counts the rows footer() spends on the drift banner and the status line. Both can wrap,
+// and a wrapped line is a row of the terminal: chrome that counts one line for a message taking three
+// is a frame taller than the window, which repaints by scrolling. The two chrome counts ask this
+// rather than counting a line each, so they cannot drift from what footer actually writes.
+func (m reviewModel) footerRows() int {
+	rows := 0
+	rows += len(wrapProse(m.driftLine(), m.width))
+	rows += len(wrapProse(m.status, m.width))
+	return rows
 }
 
 // driftLine is the warning that a named ref has moved since this span pinned it. It is a row
@@ -982,6 +1012,8 @@ func (m reviewModel) helpText() string {
 		return "" // the thread prompt is the input line, not help
 	case modeSpan:
 		return helpSpan(m.pick.list != nil)
+	case modePreview:
+		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  p q esc enter close"
 	}
 	threadsHint := "T show threads"
 	if m.threadsOpen {
@@ -1032,6 +1064,68 @@ func wrapGroups(text string, width int) []string {
 		lines = append(lines, current)
 	}
 	return lines
+}
+
+// wrapProse lays out a line the footer cannot let the terminal break: first at the group boundaries
+// (two or more spaces), then, for a group too wide for the window on its own, at word boundaries. The
+// drift banner needs both -- its halves are separated by a gap that ought to survive, and its first
+// half is a ref and two shas that have to break somewhere. Cutting a word stays worse than a line that
+// overflows, so a single word wider than the window is the one thing that can still run past the edge.
+func wrapProse(text string, width int) []string {
+	if text == "" {
+		return nil
+	}
+	var out []string
+	for _, group := range wrapGroups(text, width) {
+		if width <= 0 || lipgloss.Width(group) <= width {
+			out = append(out, group)
+			continue
+		}
+		out = append(out, wrapWords(group, width)...)
+	}
+	return out
+}
+
+// wrapWords breaks prose into lines the terminal can show in full. The frame writes one line per row
+// and a line wider than the terminal is cut rather than continued, so an explanation longer than the
+// window loses its second half: a 30-column reviewer was told "the preview wants 40 columns;" and
+// never told what they had. Unlike wrapGroups this breaks on single spaces, because a sentence has no
+// group boundaries to break on. A word wider than the width still gets a line to itself -- cutting a
+// word is worse than a line that overflows.
+func wrapWords(s string, width int) []string {
+	if s == "" {
+		return nil
+	}
+	if width <= 0 {
+		return []string{s}
+	}
+	var (
+		out   []string
+		line  []string
+		cells int
+	)
+	flush := func() {
+		if len(line) > 0 {
+			out = append(out, strings.Join(line, " "))
+			line, cells = nil, 0
+		}
+	}
+	for _, word := range strings.Fields(s) {
+		w := lipgloss.Width(word)
+		if len(line) > 0 && cells+1+w > width {
+			flush()
+		}
+		if len(line) > 0 {
+			cells++
+		}
+		line = append(line, word)
+		cells += w
+	}
+	flush()
+	if len(out) == 0 {
+		return []string{s}
+	}
+	return out
 }
 
 // --- helpers ----------------------------------------------------------------
@@ -1214,6 +1308,15 @@ func (m reviewModel) window() (files, section []renderedRow) {
 // below these dimensions there is no pane at all, and `p` says which way the terminal is short.
 // Above them the two columns are content-driven: the list takes what its own text needs, capped,
 // and the diff gets the rest.
+// The overlay has its own, lower floor, because it has no list to share the terminal with: the
+// columns it must spend are the diff's, so the minimum is the narrowest column worth reading and
+// the fewest rows that leave one row of diff after the file line, the rule and the shortcut bar.
+// TestOverlayFloorHasRoomToRead asserts the arithmetic rather than trusting it.
+const (
+	previewOverlayMinWidth  = 40
+	previewOverlayMinHeight = 12
+)
+
 const (
 	previewMinWidth  = 100
 	previewMinHeight = 16
@@ -1297,14 +1400,60 @@ func (m reviewModel) listWidth() int {
 	return list
 }
 
-// previewBodyRows is how many lines of diff fit in the pane: the window the list gets, less the
-// file it belongs to and the note about what is not on show.
+// previewBodyRows is how many lines of diff fit: in the pane, the window the list gets, less the file
+// it belongs to and the note about what is not on show; in the overlay, what the screen has left after
+// its own chrome.
 func (m reviewModel) previewBodyRows() int {
+	if m.mode == modePreview {
+		rows := m.height - m.overlayChrome()
+		if rows < 1 {
+			return 1
+		}
+		return rows
+	}
 	rows := m.windowRows() - 2
 	if rows < 1 {
 		return 1
 	}
 	return rows
+}
+
+// previewShowing is whether a diff is on the screen right now, in either layout. Fetching, key
+// handling and the frame all ask this rather than paneWidth, because the overlay has no pane to
+// measure -- and because a fetch keyed to a column that is not drawn is a git call for nothing.
+func (m reviewModel) previewShowing() bool {
+	return m.mode == modePreview || m.paneWidth() > 0
+}
+
+// previewWidth is the column the diff is drawn in: the pane's, or the whole terminal when the overlay
+// has it.
+func (m reviewModel) previewWidth() int {
+	if m.mode == modePreview {
+		return m.width
+	}
+	return m.paneWidth()
+}
+
+// overlayChrome counts the rows the overlay spends on itself rather than on the diff: the file line
+// above it, the note below it, the rule, the shortcut bar -- which in a narrow terminal wraps, and is
+// counted as the lines it actually takes -- the drift banner while one is pending, and a status line
+// when there is one. The list's header, counter and threads are not drawn here, so they are not
+// counted: that is what buys the extra rows of diff, and why the overlay is what a small terminal gets.
+func (m reviewModel) overlayChrome() int {
+	return 3 + len(m.helpLines()) + m.footerRows()
+}
+
+// overlayShortfall names why not even the overlay fits, or "" when it does. It is the smaller ask of
+// the two, so it is the excuse worth giving: telling a 10-row terminal that the preview wants 16 rows
+// hides the fact that 12 would have been enough.
+func (m reviewModel) overlayShortfall() string {
+	if m.width < previewOverlayMinWidth {
+		return fmt.Sprintf("the preview wants %d columns; this terminal has %d", previewOverlayMinWidth, m.width)
+	}
+	if m.height < previewOverlayMinHeight {
+		return fmt.Sprintf("the preview wants %d rows; this terminal has %d", previewOverlayMinHeight, m.height)
+	}
+	return ""
 }
 
 // rule is the separator above the shortcut bar, as wide as the column it separates.
@@ -1322,13 +1471,19 @@ func (m reviewModel) rule() string {
 // span toggle or a tool handoff drops the cache rather than showing a stale diff.
 func (m reviewModel) ensurePreview() (reviewModel, tea.Cmd) {
 	path := ""
-	if m.paneWidth() > 0 && !m.quitting {
+	if m.previewShowing() && !m.quitting {
 		if r, ok := m.selectedRow(); ok {
 			path = r.path
 		}
 	}
 	if path == "" {
-		m.previewPath, m.previewOffset = "", 0
+		// Only "the cursor is on something with no file to show" forgets the pane. When the preview
+		// is merely off-screen -- `p` off, or the overlay closed -- the place is kept, so coming back
+		// returns to the same lines rather than to the top of the file. Keeping an out-of-date diff is
+		// forgetPatches' job, not this one's.
+		if m.previewShowing() {
+			m.previewPath, m.previewOffset = "", 0
+		}
 		return m, nil
 	}
 	if path != m.previewPath {
@@ -1406,40 +1561,130 @@ func (m *reviewModel) forgetPatches() {
 	m.previewPath, m.previewOffset = "", 0
 }
 
-// togglePreview is `p`. When it cannot fit it says so with the number the terminal is short by,
-// rather than appearing to do nothing.
+// togglePreview is `p`. A terminal with room for two columns gets the pane beside the list. A
+// narrower one gets the same diff over the whole screen: the reviewer asked for the diff, and a pane
+// that squeezes the list into unreadability is worse than no pane -- so the layout gives up the list
+// rather than giving up the preview. Below even that it says so with the number the terminal is short
+// by, and with the smaller of the two asks, because that is the one worth growing to.
+//
+// It decides what is on show and fetches nothing. Update asks the preview what it needs after every
+// key, so a handler that fetched as well would ask git twice for the same file -- which is exactly
+// what this function did until the overlay's tests noticed two batches arriving for one keystroke.
 func (m reviewModel) togglePreview() (tea.Model, tea.Cmd) {
-	m.previewOn = !m.previewOn
-	if reason := m.previewShortfall(); m.previewOn && reason != "" {
-		m.setStatus(reason, false)
-	} else {
-		m.setStatus("", false)
+	if m.mode == modePreview {
+		return m.closePreview()
 	}
-	return m.ensurePreview()
+	if m.previewOn && m.paneWidth() > 0 {
+		m.previewOn = false
+		m.setStatus("", false)
+		return m, nil
+	}
+	if m.previewShortfall() == "" {
+		m.previewOn = true
+		m.setStatus("", false)
+		return m, nil
+	}
+	if reason := m.overlayShortfall(); reason != "" {
+		m.setStatus(reason, false)
+		return m, nil
+	}
+	m.previewOn = true
+	m.mode = modePreview
+	m.previewG = false
+	m.setStatus("", false)
+	return m, nil
 }
 
-// pagePreview scrolls the pane by half a page, which keeps a line or two of context on screen
-// at the break. It counts rendered rows, because a line wider than the column takes several of
-// them. ctrl-d is quit, so paging is ctrl-f and ctrl-b as in a pager.
-func (m reviewModel) pagePreview(dir int) (tea.Model, tea.Cmd) {
-	if m.paneWidth() == 0 || m.previewPath == "" {
+// closePreview puts the list back. The scroll position is kept, so `p` twice returns to the same place
+// in the same file rather than to its top.
+func (m reviewModel) closePreview() (tea.Model, tea.Cmd) {
+	m.mode = modeFiles
+	m.previewG = false
+	m.setStatus("", false)
+	return m, nil
+}
+
+// handlePreviewKey is everything the overlay reads: the diff scrolls with the vim primitives, and any
+// of q, esc, enter -- or `p`, which opened it -- goes back to the list. Nothing else reaches through.
+// That is what a mode buys over a flag: a reviewer who cannot see the list must not be able to mark a
+// file in it, submit a review whose outcome they cannot see, or open an editor over a diff they are
+// reading, and the way to guarantee that is keys that do not happen rather than a list of exemptions.
+//
+// Keys do mean different things here than in the list -- q closes rather than quits, enter closes
+// rather than opens the difftool, ctrl-d scrolls rather than quits -- and that is the point of a mode:
+// the shortcut bar names each of these keys while this screen is up, so no meaning travels with a
+// keystroke alone.
+func (m reviewModel) handlePreviewKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.Type == tea.KeyCtrlC {
+		m.quitting = true
+		return m, tea.Quit
+	}
+	// `g` waits for its partner, as it does in the list. The guard on previewG is what makes the
+	// pair possible at all: without it the second `g` would be read as another prefix and the jump
+	// would never happen.
+	if key.Type == tea.KeyRunes && firstRune(key) == 'g' && !m.previewG {
+		m.previewG = true
 		return m, nil
+	}
+	pressedG := m.previewG
+	m.previewG = false
+
+	switch {
+	case key.Type == tea.KeyEsc, key.Type == tea.KeyEnter,
+		key.Type == tea.KeyRunes && firstRune(key) == 'q',
+		key.Type == tea.KeyRunes && firstRune(key) == 'p':
+		return m.closePreview()
+	case key.Type == tea.KeyDown, key.Type == tea.KeyRunes && firstRune(key) == 'j':
+		return m.scrollPreview(1, 1)
+	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
+		return m.scrollPreview(-1, 1)
+	case key.Type == tea.KeyCtrlD:
+		return m.scrollPreview(1, m.previewBodyRows()/2)
+	case key.Type == tea.KeyCtrlU:
+		return m.scrollPreview(-1, m.previewBodyRows()/2)
+	case key.Type == tea.KeyCtrlF:
+		return m.scrollPreview(1, m.previewBodyRows())
+	case key.Type == tea.KeyCtrlB:
+		return m.scrollPreview(-1, m.previewBodyRows())
+	case pressedG && key.Type == tea.KeyRunes && firstRune(key) == 'g':
+		m.previewOffset = 0
+		return m, nil
+	case key.Type == tea.KeyRunes && firstRune(key) == 'G':
+		total, _ := m.previewRowsTouched()
+		return m.scrollPreview(1, total)
+	}
+	return m, nil
+}
+
+// previewRowsTouched reports how many rendered rows the file on screen has, and how many of them fit.
+// Paging, the top and the bottom all count rows rather than source lines, because a line wider than
+// the column is drawn as several rows: paging by lines would page an unpredictable distance.
+func (m reviewModel) previewRowsTouched() (total, body int) {
+	body = m.previewBodyRows()
+	if m.previewPath == "" {
+		return 0, body
 	}
 	patch, ok := m.patches[m.previewPath]
 	if !ok {
-		return m, nil
+		return 0, body
 	}
 	work, _ := m.patch(patchWorking, m.previewPath)
-	total := len(previewRows(patch, work, m.paneWidth()))
+	return len(previewRows(patch, work, m.previewWidth())), body
+}
+
+// scrollPreview moves the diff by step rows in direction dir, clamped at both ends. A reviewer at
+// either end stays there rather than watching the frame stop moving and wondering whether the key was
+// dropped.
+func (m reviewModel) scrollPreview(dir, step int) (tea.Model, tea.Cmd) {
+	total, body := m.previewRowsTouched()
 	if total == 0 {
 		return m, nil
 	}
-	step := m.previewBodyRows() / 2
 	if step < 1 {
 		step = 1
 	}
 	offset := m.previewOffset + dir*step
-	if max := total - m.previewBodyRows(); offset > max {
+	if max := total - body; offset > max {
 		offset = max
 	}
 	if offset < 0 {
@@ -1449,20 +1694,38 @@ func (m reviewModel) pagePreview(dir int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// pagePreview scrolls the pane by half a page, which keeps a line or two of context on screen at the
+// break. In the list ctrl-d is quit, so paging there is ctrl-f and ctrl-b as in a pager; the overlay
+// has ctrl-d and ctrl-u too, which is what a screen that is nothing but a diff is for, and its
+// shortcut bar says so.
+func (m reviewModel) pagePreview(dir int) (tea.Model, tea.Cmd) {
+	if !m.previewShowing() || m.previewPath == "" {
+		return m, nil
+	}
+	return m.scrollPreview(dir, m.previewBodyRows()/2)
+}
+
 // previewLines renders the pane: the file it belongs to, git's own coloured diff, and a note
 // about the part that is not on show. Everything between the first line and the note is git's
 // bytes with nothing added — PRD §3 rules out a diff renderer, and this is the alternative to
 // building one: a window onto what git printed.
 func (m reviewModel) previewLines() []string {
-	width := m.paneWidth()
+	width := m.previewWidth()
 	if width <= 0 || m.previewPath == "" {
 		return nil
 	}
 	header := m.previewPath
+	if m.mode == modePreview {
+		// The overlay hides the list, and the list is where the span is named. Reading a historical
+		// diff with nothing on screen saying it is historical is how a reviewer reaches for a mark that
+		// cannot be set, so the span travels with the file here -- and it leads the line, so that when
+		// the line has to be clipped it loses the counts at the end rather than the answer at the front.
+		header = m.spanName(m.sess.Header().SpanLabel) + "  \u00b7  " + m.previewPath
+	}
 	body := m.previewBodyRows()
 	patch, cached := m.patches[m.previewPath]
 	if cached && patch.Added >= 0 {
-		header = fmt.Sprintf("%s  +%d \u2212%d", m.previewPath, patch.Added, patch.Deleted)
+		header = fmt.Sprintf("%s  +%d \u2212%d", header, patch.Added, patch.Deleted)
 	}
 	out := []string{styleDim.Render(clip(header, width))}
 
@@ -1500,12 +1763,19 @@ func (m reviewModel) previewLines() []string {
 	}
 	out = append(out, lines[offset:end]...)
 	if end < len(lines) || offset > 0 {
-		note := fmt.Sprintf("… %s  enter opens", rowsMore(len(lines)-end))
+		// The keys the note may point at. In the pane ctrl-b/ctrl-f page it and enter opens the
+		// difftool; in the overlay the whole screen is already the diff, enter closes it, and a note
+		// that promised "enter opens" would promise the opposite of what the key now does.
+		tail, keys := "  enter opens", "  ctrl-b/ctrl-f"
+		if m.mode == modePreview {
+			tail, keys = "", ""
+		}
+		note := fmt.Sprintf("… %s%s", rowsMore(len(lines)-end), tail)
 		if offset > 0 {
-			note = fmt.Sprintf("rows %d\u2013%d of %d  ctrl-b/ctrl-f  enter opens", offset+1, end, len(lines))
+			note = fmt.Sprintf("rows %d\u2013%d of %d%s%s", offset+1, end, len(lines), keys, tail)
 		}
 		if patch.Capped {
-			note = "diff too large to read here  enter opens"
+			note = "diff too large to read here" + tail
 		}
 		out = append(out, styleDim.Render(clip(note, width)))
 	}
@@ -1579,16 +1849,8 @@ func (m reviewModel) windowRows() int {
 // itself, the "hidden above" note while scrolled, and the status line when there is one. The changeset section is part of the row
 // list, so it is not here — only the counter that separates the two blocks is.
 func (m reviewModel) chromeRows() int {
-	chrome := 7 + len(m.helpLines())
-	if len(m.sess.Drifted()) > 0 {
-		// The drift banner takes a row above the shortcut bar, and stays there until the
-		// reviewer refreshes it or moves to another span.
-		chrome++
-	}
+	chrome := 7 + len(m.helpLines()) + m.footerRows()
 	if m.scroll > 0 {
-		chrome++
-	}
-	if m.status != "" {
 		chrome++
 	}
 	return chrome

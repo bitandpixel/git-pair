@@ -636,8 +636,20 @@ path cannot take the diff's columns. `ctrl-f` and `ctrl-b` page through a diff t
 much of it is left; `ctrl-d` still quits, which is why paging is not `ctrl-d`. Each line carries the
 number git gave it in its hunk header, and a line too wide for the column is broken rather than cut,
 with its colour carried across the break. Tabs are shown as the spaces they advance to, because a tab
-the width maths scores as zero is a row the terminal wraps for you. `p` switches the pane off, and a
-terminal too small to fit it says which way it is short rather than doing nothing.
+the width maths scores as zero is a row the terminal wraps for you. `p` switches the pane off.
+
+Below those dimensions there is no room for two columns, and the person who pressed `p` wanted the
+diff — so `p` gives the diff the whole screen. Same git bytes, same numbers, same wrapping, full
+width, with the file and the span it is measured against on the line above it (the span is named in
+the list otherwise, and the list is gone). It scrolls with `j`/`k`, `ctrl-d`/`ctrl-u` for half a page,
+`ctrl-f`/`ctrl-b` for a page, `gg` for the top and `G` for the bottom, and gives the list back on `q`,
+`Esc`, `Enter` — or `p`, which opened it. Keys mean what this screen's shortcut bar says they mean
+while it is up, which is why `q` closes rather than quits (press it twice to leave) and `ctrl-d`
+pages rather than quits; nothing else reaches through, because a reviewer who cannot see the list must
+not be able to mark a file in it. Closing keeps the place: `p`, `q`, `p` returns to the same lines.
+Reading a historical span this way works the same — reading is what a read-only span is for. Under 40
+columns or 12 rows even this is unreadable, and the key says which way the terminal is short, naming
+the smaller of the two asks because that is the one worth growing to.
 
 Below the author's diff, the pane shows whatever you have edited without committing, under
 `── you · uncommitted` with counts and line numbers of its own. That caption is not decoration: git's
