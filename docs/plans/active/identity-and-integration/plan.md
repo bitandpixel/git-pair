@@ -106,8 +106,8 @@ Consequences recorded rather than asked separately:
   a branch typed that way is stored at `refs/heads/refs/...`. Costs: fetched refs become required for
   stacked changesets rather than merely recommended, and a commit's base resolves against wherever the
   parent's ref sits today.
-- **The integration branch comes from a flag or from git, never from configuration.**
-  `--integration <ref>` on the commands that resolve; otherwise `refs/remotes/origin/HEAD`, then a
+- **The default branch comes from a flag or from git, never from configuration.**
+  `--default-branch <ref>` on the commands that resolve; otherwise `refs/remotes/origin/HEAD`, then a
   unique `origin/main`/`origin/master`, then a local `main`/`master`; otherwise refuse, naming the
   flag and `git remote set-head origin --auto`. Rejected: `pair.integrationBranch` config — the
   product reads no git config today, the requirements externalise the ref at the call site
@@ -243,11 +243,13 @@ assertion about stale claims was vacuous because no changeset directory existed 
 
 #### Tasks
 
-- [ ] Integration-branch resolution: `--integration <ref>` on the resolving commands, else
-  `refs/remotes/origin/HEAD`, else a unique `origin/main`/`origin/master`, else a local
-  `main`/`master`, else refuse naming the flag and `git remote set-head origin --auto`. No config
-  key. Refuse rather than treat an unresolvable trunk as "no trunk", which would make every
-  directory on the branch a candidate.
+- [ ] Default-branch resolution, one function serving discovery **and** `change init`'s existing
+  `defaultBase` (local `main` then `master` today, `internal/cli/change.go:316`): `--default-branch
+  <ref>` on the resolving commands, else `refs/remotes/origin/HEAD`, else a unique
+  `origin/main`/`origin/master`, else a local `main`/`master`, else refuse naming the flag and
+  `git remote set-head origin --auto`. No config key. Two resolvers would let a changeset's recorded
+  base and the landed-test disagree, which is the inconsistency this rule exists to remove. Refuse
+  rather than treat an unresolvable trunk as "no trunk", which makes every directory a candidate.
 - [ ] `changeset.Resolve(ctx, repo, rev, trunk)`: rank 0 from `ls-tree` of `changesets/` in the
   revision and in trunk; nearest archive tip, then `base:`-names-parent to break a stack, then
   ambiguity. `ForID` stays for `--changeset` reads; `ForBranch`/`AtCommit` and the claim machinery
@@ -262,9 +264,9 @@ assertion about stale claims was vacuous because no changeset directory existed 
   drift to `change archive` and carries a foreign path into this changeset's landing.
 - [ ] Ambiguity message names every candidate and points at `change use` and `status --changeset`,
   since both escape hatches already exist.
-- [ ] `status --json` reports the integration branch it resolved, its commit, and which source
-  supplied it (`flag` / `origin-head` / `sole-candidate`), reported the same way whether the ref came
-  from `--integration` or from detection. A CI run should be explainable from its own output rather
+- [ ] `status --json` reports the default branch it resolved, its commit, and which source supplied
+  it (`flag` / `origin-head` / `sole-candidate`), reported the same way whether the ref came from
+  `--default-branch` or from detection. A CI run should be explainable from its own output rather
   than from what the machine happened to have fetched.
 - [ ] Cost assertions: resolving on a changeset branch and on trunk stay in single-digit git
   invocations with 300 archive refs present, against 1,802 for the per-ref formulation.
@@ -469,3 +471,4 @@ against running the fetch first.
 | 2026-09-17 | decision | Combined rule adopted after measurement: changeset directories on the revision and not on trunk decide resolution, archive refs are the fallback for a directory that no longer exists (`research/2026-09-17-combined-rule.md`). Seven fixtures in the spike pass, including the two no amendment of the specified rule could answer; cost 8 invocations on a changeset branch and 12 on trunk against 1,802 for the per-ref formulation. The `branch:` claim goes, `change init` still creates the archive ref, and M2 now carries discovery alongside the namespace move. The one new dependency is resolving the integration branch, which nothing in the product does today. |
 | 2026-09-17 | decision | Rank 1 (the archive-ref fallback) removed after the reviewer read its purpose correctly: two of the three justifications were false (a PR checkout has the tree; a rebase that drops the init commit also detaches the archive ref), leaving only a committed deletion of `changesets/<id>/`, where the loss is one confusing message. Resolution is the tree rule alone. Two findings from that probe: merging an unlanded sibling branch makes the branch ambiguous (`[mine@4 theirs@4]`, a case the claim model could not reach), answered by `change use <id>` recording `ignores:` in the chosen changeset rather than the losing one; and landing someone else's merge of your unlanded changeset makes yours read as landed on your own branch, measured with and without any recorded decision — a control run showed the flag was never the cause. |
 | 2026-09-17 | decision | The integration branch is a flag or git's own answer, not configuration: `--integration <ref>`, else `refs/remotes/origin/HEAD`, else a unique `origin/main`/`origin/master`, else refuse naming the flag and `git remote set-head origin --auto`. The `pair.integrationBranch` key I had proposed was an invention — the product reads no git config today, the requirements already pass `--target origin/main` at the call site, and machine-local config is what this plan rejected for the `branch:` claim. Measured: `git clone` records `origin/HEAD` when the remote HEAD names an existing branch (path and `file://`); the CI `init`+`remote add`+`fetch <branch>` shape does not; `git remote set-head --auto` fixes it; git refuses to guess when the remote HEAD dangles. |
+| 2026-09-17 | decision | Read-side flag named `--default-branch`, not `--integration` and not `--target`. `--target` stays on `integration record` because the two are different concepts: a backport records `--target release/2.x` while the branch defining "landed" for discovery is still `main`, and neither flag can say both. Also found: `defaultBase` (`internal/cli/change.go:316`) already guesses trunk as local `main` then `master` for `change init --base`, so it must fold into the same resolver — two resolvers would let a changeset's recorded base and the landed-test disagree. |

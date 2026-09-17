@@ -94,10 +94,18 @@ The rule needs `T`, and there is no concept of it in the code yet — the only b
 the product is `symbolic-ref --short HEAD`. **Decided: a flag plus git's own answer, and no
 config key.**
 
-1. `--integration <ref>` on the commands that resolve (`status`, `queue`, `diff`, `review`,
-   `check`), used verbatim. This is the requirements' own idiom: `integration record` already
-   takes `--target origin/main` from the CI adapter rather than storing which branch is
-   integration.
+There is already a trunk guess in the product — `defaultBase` at `internal/cli/change.go:316`,
+local `main` then `master`, no remote involvement, used as `change init --base`'s default. It has to
+become the same resolver as this one, or a changeset's recorded base and the landed-test can
+disagree. `change init --base` stays as an override of it, since a stacked parent is a different
+thing from the branch that means landed. Order of resolution:
+
+1. `--default-branch <ref>` on the commands that resolve (`status`, `queue`, `diff`, `review`,
+   `check`), used verbatim. Not `--target`, which the requirements use for `integration record`:
+   they are different concepts. `integration record --target release/2.x` states where a backport
+   landed, while the branch that defines "landed" for discovery is still `main`. One name could not
+   say both, and `--default-branch` cannot serve the record command — `integration record
+   --default-branch release/2.x` would be a false sentence.
 2. `refs/remotes/origin/HEAD`, when present.
 3. A unique `origin/main` or `origin/master`; a local `main`/`master` when there is no remote.
 4. Otherwise **refuse**, naming both fixes: the flag, and `git remote set-head origin --auto`.
