@@ -705,12 +705,12 @@ top, the changed files and their marks below it, and the reviewed counter under 
 │     does-the-lock-cover-the-map.md   │
 │     + new thread…                    │
 ╰──────────────────────────────────────╯
-
+═══════════════════════════════════════
   ▾ ○ src/
     ▾ ○ ui/
         ○ picker.ts
     ○ a.ts
-
+═══════════════════════════════════════
 0 / 2 reviewed
 ────────────────────────────────────────
 j/k move  gg/G ends  ctrl-d/u half page  ctrl-f/b page  h/l fold  c fold all  enter open  d diff
@@ -719,7 +719,11 @@ p preview  f files  m changeset  tab focus  q quit
 ```
 
 The screen has two regions where the keys can be: the changeset box at the top, and the file tree under
-it. `Tab` walks the ring — tree, diff where there is room for one, box — and `f` and `m` go to a named
+it. The tree is bounded by a rule of its own above and below, and those two rules are its focus light —
+single while the keys are in the box or the diff, double while they are in the tree, the same convention
+the box's borders and the divider use. Rules rather than a frame because a frame's two cells each side
+are columns, and the narrow terminal that needs the regions told apart most is the one with no columns to
+spare; the row between the box and the tree was blank, so the pair costs one row of the tree's window. `Tab` walks the ring — tree, diff where there is room for one, box — and `f` and `m` go to a named
 one from wherever the keys are. Each region keeps its own cursor, so `Tab` returns to the row it left
 rather than to the top of a list. The navigation keys belong to the region holding them and mean the
 same thing in both: `j`/`k` a row, `gg`/`G` the two ends, `ctrl-d`/`ctrl-u` half a page, `ctrl-f`/`ctrl-b`
