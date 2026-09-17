@@ -301,3 +301,110 @@ func TestTabMovesTheKeysOutOfThePane(t *testing.T) {
 		t.Errorf("tab in the overlay left the diff screen for mode %v, where no region is drawn", got.mode)
 	}
 }
+
+// --- the box keeps its own counsel, and closes on all four sides -------------------------------
+
+// The box's borders say which region holds the keys. Its cursor row is highlighted only when the box
+// holds them: a row in the box wearing a highlight while the tree has the keys looks chosen and is not,
+// and the reviewer marks the wrong thing on the strength of it.
+func TestTheBoxCursorIsHighlightedOnlyWhenTheBoxHasTheKeys(t *testing.T) {
+	m := newFileListModel(t)
+	m.focusOn(focusMeta)
+	lit := m.boxLine(m.boxFrame(), "ABOUT.md", true)
+
+	m.focusOn(focusFiles)
+	cold := m.boxLine(m.boxFrame(), "ABOUT.md", true)
+
+	if lit == cold {
+		t.Error("the box's cursor row is drawn the same with and without the keys, so the highlight says nothing")
+	}
+	if strings.ContainsRune(cold, '\x1b') {
+		t.Errorf("the box's cursor row is still styled while the tree holds the keys: %q", cold)
+	}
+}
+
+// The box is a box in both layouts. It used to leave its right side open where the preview column was
+// drawn, on the grounds that the divider was a rule two cells away; without that side the rows inside it
+// read as a column of loose text rather than as the changeset's own block.
+func TestTheBoxClosesOnTheRightInBothLayouts(t *testing.T) {
+	for _, width := range []int{80, 140} {
+		m := newFileListModel(t)
+		m.width = width
+		pane := m.paneWidth() > 0
+		for _, focused := range []bool{false, true} {
+			if focused {
+				m.focusOn(focusMeta)
+			} else {
+				m.focusOn(focusFiles)
+			}
+			_, section := m.window()
+			lines := m.boxLines(section)
+			top, bottom := lines[0], lines[len(lines)-1]
+			corners := []string{"\u256d", "\u256e", "\u2570", "\u256f"}
+			if focused {
+				corners = []string{"\u2554", "\u2557", "\u255a", "\u255d"}
+			}
+			if !strings.HasSuffix(top, corners[1]) {
+				t.Errorf("width %d, focused %v (pane %v): the box's top border ends %q, not its top-right corner %q",
+					width, focused, pane, top[len(top)-1:], corners[1])
+			}
+			if !strings.HasSuffix(bottom, corners[3]) {
+				t.Errorf("width %d, focused %v: the box's bottom border ends %q, not its bottom-right corner %q",
+					width, focused, bottom[len(bottom)-1:], corners[3])
+			}
+			rule := "\u2502"
+			if focused {
+				rule = "\u2551"
+			}
+			for _, row := range lines[1 : len(lines)-1] {
+				if !strings.HasSuffix(row, rule) {
+					t.Errorf("width %d, focused %v: a row of the box is not closed: %q", width, focused, row)
+				}
+			}
+		}
+	}
+}
+
+// The handoff to the editor for a new thread used to move the file tree's cursor onto the thread's own
+// row. The consequence was on the other side of the screen: the pane is the file under the tree's cursor,
+// so the reviewer came back from the editor to a different diff -- or to none.
+func TestThePreviewSurvivesANewThread(t *testing.T) {
+	m := previewModel(t)
+	focusOnRow(t, m, 0)
+	m, cmd := m.ensurePreview()
+	m = deliver(t, m, cmd)
+	if !strings.Contains(m.View(), "+added line") {
+		t.Fatalf("the fixture's pane is not showing a diff to begin with:\n%s", m.View())
+	}
+	file, cursor := m.previewPath, m.cursor
+
+	m = boxOn(t, m)
+	m = pressKey(t, m, runeKey('t'))
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a note about the lock")})
+	// Enter creates the thread and asks for the editor. The command is deliberately not run: it hands
+	// this process's terminal to $EDITOR. The handoff itself is tested where the editor is faked.
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if m.mode != modeFiles {
+		t.Fatalf("the thread prompt left mode %v", m.mode)
+	}
+	if kind, _ := activeKind(t, m); kind != rowThread {
+		t.Errorf("the new thread left the box's cursor on a %v row, want the thread itself", kind)
+	}
+	if m.cursor != cursor {
+		t.Errorf("the new thread moved the tree's cursor from %d to %d; the pane belongs to that row", cursor, m.cursor)
+	}
+	if m.previewPath != file {
+		t.Fatalf("the new thread changed the previewed file from %q to %q", file, m.previewPath)
+	}
+
+	updated, cmd := m.Update(externalDoneMsg{})
+	m = updated.(reviewModel)
+	m = deliver(t, m, cmd)
+	if m.previewPath != file {
+		t.Errorf("coming back from the editor the pane shows %q, not the %q it showed going in", m.previewPath, file)
+	}
+	if !strings.Contains(m.View(), "+added line") {
+		t.Errorf("coming back from the editor the pane has lost its diff:\n%s", m.View())
+	}
+}

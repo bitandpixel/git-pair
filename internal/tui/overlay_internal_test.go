@@ -68,7 +68,7 @@ func TestSmallTerminalGivesThePreviewTheWholeScreen(t *testing.T) {
 			t.Errorf("the overlay still draws the list's %q:\n%s", absent, view)
 		}
 	}
-	if !strings.Contains(view, "ctrl-f/b page") || !strings.Contains(view, "close") {
+	if !strings.Contains(view, "ctrl-f/b page") || !strings.Contains(view, "q quit") {
 		t.Errorf("the shortcut bar does not name the keys this screen answers:\n%s", view)
 	}
 }
@@ -168,10 +168,8 @@ func TestOverlayDismissesWithQEscAndEnter(t *testing.T) {
 		name string
 		key  tea.KeyMsg
 	}{
-		{"q", runeKey('q')},
 		{"esc", tea.KeyMsg{Type: tea.KeyEsc}},
 		{"enter", tea.KeyMsg{Type: tea.KeyEnter}},
-		{"p", runeKey('p')},
 	} {
 		m := openOverlay(t, overlayModel(t, 40))
 		before := m.cursor
@@ -284,9 +282,31 @@ func TestOverlayWorksOnAHistoricalSpan(t *testing.T) {
 	if m.previewOffset != 1 {
 		t.Errorf("a historical overlay scrolls to offset %d, want 1", m.previewOffset)
 	}
-	m = pressKey(t, m, runeKey('q'))
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.mode != modeFiles {
 		t.Errorf("closing the historical overlay left mode %v", m.mode)
+	}
+	if m.quitting {
+		t.Error("esc quit the session instead of giving the list back")
+	}
+}
+
+// `q` quits from the overlay as it does from every other part of the screen, and `p` -- whose whole
+// job is moving the keys into the diff -- does nothing where the diff already has them. Both are
+// asserted here because both were once the other thing: q closed the overlay, and p cycled it shut.
+func TestQQuitsAndPInertsOnTheOverlay(t *testing.T) {
+	m := openOverlay(t, overlayModel(t, 40))
+	again := pressKey(t, m, runeKey('p'))
+	if again.mode != modePreview || again.quitting {
+		t.Errorf("p in the overlay gave mode %v quitting=%v, want the diff screen left alone", again.mode, again.quitting)
+	}
+	if got := countMarked(again.sess); got != 0 {
+		t.Errorf("p in the overlay marked %d files", got)
+	}
+
+	m = pressKey(t, openOverlay(t, overlayModel(t, 40)), runeKey('q'))
+	if !m.quitting {
+		t.Errorf("q in the overlay did not quit (mode %v, quitting=%v)", m.mode, m.quitting)
 	}
 }
 
@@ -312,16 +332,16 @@ func TestOverlayNoteDoesNotPromiseEnter(t *testing.T) {
 	}
 }
 
-// Closing and reopening returns to the same place, because the reviewer who pressed `q` to check the
+// Closing and reopening returns to the same place, because the reviewer who pressed `esc` to check the
 // list and `p` to come back was not done reading.
 func TestOverlayKeepsItsPlaceWhenReopened(t *testing.T) {
 	m := openOverlay(t, overlayModel(t, 60))
 	for i := 0; i < 5; i++ {
 		m = pressKey(t, m, runeKey('j'))
 	}
-	m = pressKey(t, m, runeKey('q'))
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.mode != modeFiles {
-		t.Fatalf("q left mode %v", m.mode)
+		t.Fatalf("esc left mode %v", m.mode)
 	}
 	m = openOverlay(t, m)
 	if m.previewOffset != 5 {

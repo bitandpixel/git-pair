@@ -307,24 +307,22 @@ func visibleTree(m reviewModel) string {
 func TestTheListAsItRenders(t *testing.T) {
 	m, _ := treeModel(t)
 	want := strings.Join([]string{
-		"▾ ○ changesets/booking/",
-		"  ○ ABOUT.md",
-		"  ○ CHANGESET.yaml",
-		"▾ ○ docs/",
-		"  ▾ ○ plans/active/",
-		"    ○ x.md",
-		"  ○ notes.md",
-		"▾ ○ internal/",
-		"  ▾ ○ git/",
-		"    ○ git.go",
-		"  ▾ ○ tui/",
-		"    ○ session.go",
-		"    ○ tui.go",
-		"  ▾ ○ tuition/",
-		"    ○ why.go",
-		"○ main.go",
-		// The rows under the tree belong to the changeset box. They are in the same list, which is
-		// how a thread the reviewer creates turns up without anything being told to add it.
+		"  ▾ ○ changesets/booking/",
+		"    ○ ABOUT.md",
+		"    ○ CHANGESET.yaml",
+		"  ▾ ○ docs/",
+		"    ▾ ○ plans/active/",
+		"      ○ x.md",
+		"    ○ notes.md",
+		"  ▾ ○ internal/",
+		"    ▾ ○ git/",
+		"      ○ git.go",
+		"    ▾ ○ tui/",
+		"      ○ session.go",
+		"      ○ tui.go",
+		"    ▾ ○ tuition/",
+		"      ○ why.go",
+		"  ○ main.go",
 		"span  main...current ▸",
 		"ABOUT.md",
 		"▾ Threads",
@@ -694,5 +692,43 @@ func TestDiffsAndEditorsKnowWhatADirectoryIs(t *testing.T) {
 	got := updated.(reviewModel)
 	if got.status == "" || !strings.Contains(got.status, "directory") {
 		t.Errorf("e on a directory said %q, want it to name the keys that do work", got.status)
+	}
+}
+
+// A child has to start deeper than the directory above it. The indent used to be exactly the width of a
+// directory row's own prefix -- the fold arrow and the mark gutter -- which put every child's mark in the
+// column its parent's mark started in, and the tree read as a flat list with arrows in it.
+func TestAChildStartsDeeperThanTheDirectoryAboveIt(t *testing.T) {
+	m, _ := treeModel(t)
+	files, _ := m.window()
+	indentOf := func(path string) int {
+		for _, f := range files {
+			if f.path == path {
+				text := m.rowText(f.row)
+				return len(text) - len(strings.TrimLeft(text, " "))
+			}
+		}
+		t.Fatalf("the list has no row for %q", path)
+		return 0
+	}
+
+	checked := 0
+	for _, dir := range files {
+		if dir.kind != rowDir || m.folded[dir.path] {
+			continue
+		}
+		for _, child := range files {
+			if child.depth != dir.depth+1 || !isUnder(child.path, dir.path) {
+				continue
+			}
+			if above, below := indentOf(dir.path), indentOf(child.path); below <= above {
+				t.Errorf("%q starts at column %d, no deeper than %q at %d",
+					child.path, below, dir.path, above)
+			}
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("the fixture has no expanded directory with a child to measure")
 	}
 }
