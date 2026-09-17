@@ -1197,9 +1197,11 @@ booking-transaction-tests
 base: booking-transaction
 span: unreviewed
 
-○ src/booking/service.test.ts
-✓ src/booking/fixtures.ts
-○ src/booking/concurrency.test.ts
+▾ ◐ src/booking/  2/3
+  ▾ ✓ concurrency/
+      ✓ lock_test.ts
+  ✓ fixtures.ts
+  ○ main.ts
 
 2 / 3 reviewed
 
@@ -1220,6 +1222,26 @@ scannable. A rule separates the list from the shortcut bar. The reviewed counter
 blocks — above it the files the diff touched, below it the documents the review is made of — which
 is also what `Tab` skips between. A row that changed in the span keeps its file row as well as its
 place in the section below: the list is what the diff did, the section is the shortcut to read it.
+
+The files are a tree rather than a list of paths. Each sits under its directory, a directory that
+holds nothing but one directory is folded into that row (`src/booking/` above is one row, not two),
+and a row prints only the name the rows above it have not already said. `h` and `l` fold and unfold
+the directory under the cursor — the left and right arrows do the same, and `Enter` does both, the
+way it does for the thread heading — while `c` folds the whole tree and opens it again, which is how
+a changeset of a hundred files is read for its shape before it is read for its detail. Folding moves
+the cursor onto the directory when it was hiding the row the cursor was on, so no fold can leave the
+cursor somewhere the reviewer did not move it.
+
+A directory's mark is its subtree's: `✓` when every file under it is reviewed, `○` when none is, and
+between the two the count of what is left (`◐ 2/3`), because a tick there would be a claim about
+files nobody has opened. `Space` on a directory marks every file under it, folded or not — a fold is
+a way of looking at the list, not a statement about what has been read — and the next press clears
+them. This is the file-level state one level up rather than a second kind of state: nothing is stored
+about a directory, marks keep their per-file keys, and a marked directory that quits and reopens is
+the same answers it always was. `d` on a directory is git's own answer to *diff this package*: the
+pathspec expands into every file the span changed under it, and the preview pane shows that subtree
+with the subtree's counts. The tree is a view, so it folds over a read-only span like anything else
+a reviewer reads, and shows no marks there.
 
 On a terminal at least 100 columns and 16 rows, the list shares the screen with a preview column:
 the diff the common span made to the selected file, paged with `ctrl-f`/`ctrl-b`. It prints git's
@@ -1288,17 +1310,21 @@ Suggested bindings:
 ```text
 j/k      navigate the whole list
 Tab      switch between the file section and the changeset section
-Enter    activate the row: difftool for a file, the decision below for ABOUT.md or a
-         thread, collapse/expand for the Threads heading, new-thread prompt for
-         + new thread…
-d        open the difftool for the selected row: always for a file, and for a document
-         only when the span changed it and it already existed where the span starts —
-         otherwise the document opens in the editor, with a note naming the reason
+h/l      fold and unfold the directory under the cursor (left and right arrows do the same);
+         h from a file or a closed directory moves up to the directory holding it
+c        fold the whole tree, and open it again
+Enter    activate the row: difftool for a file, fold/unfold for a directory, the decision
+         below for ABOUT.md or a thread, collapse/expand for the Threads heading,
+         new-thread prompt for + new thread…
+d        open the difftool for the selected row: for a file, or for a directory every file
+         the span changed under it; and for a document only when the span changed it and it
+         already existed where the span starts — otherwise the document opens in the editor,
+         with a note naming the reason
 e        open the selected row in the editor, whatever the span did
 p        show/hide the diff preview column (wide terminals)
 ctrl-f   page the preview down
 ctrl-b   page the preview up
-Space    toggle reviewed for a file row
+Space    toggle reviewed for a file row, or for every file under a directory row
 
 a        open ABOUT.md
 t        create a review thread
@@ -1369,6 +1395,13 @@ The TUI allows each changed file to be marked:
 ○ unreviewed
 ✓ reviewed
 ```
+
+A directory row carries the same mark one level up, and `Space` on it sets every file under it. It
+is a shortcut over the file-level state rather than a new kind of state: the row shows `✓` only when
+its files all agree and counts what is left when they do not, the files a fold has hidden are marked
+with the ones on screen, and nothing is recorded about the directory itself — so marks keep their
+existing keys, and clearing every mark under a directory is remembered exactly the way clearing the
+same files one by one is.
 
 This state is **not** part of the durable review artifact.
 
