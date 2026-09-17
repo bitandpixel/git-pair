@@ -7,11 +7,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"gitpr/internal/git"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/model"
-	"gitpr/internal/reviewref"
-	"gitpr/internal/span"
+	"gitpair/internal/git"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/model"
+	"gitpair/internal/reviewref"
+	"gitpair/internal/span"
 )
 
 // --- status -----------------------------------------------------------------
@@ -27,8 +27,8 @@ GitPR-* trailers, so an implementation commit after a ready or review marker
 returns the changeset to WORKING automatically.
 
 With --json the output is a stable contract for agents and automation.`,
-		Example: `  gitpr status
-  gitpr status --json`,
+		Example: `  git pair status
+  git pair status --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStatus(cmd.Context(), a)
@@ -159,7 +159,7 @@ func printStatus(a *app, v *statusView) {
 		}
 		a.printf("  outcome: %s\n", j.LatestReview.Outcome)
 		a.printf("  commit: %s%s\n", j.LatestReview.Commit, age)
-		a.printf("  history: %d review(s) — `gitpr review history`\n", j.Reviews)
+		a.printf("  history: %d review(s) — `git pair review history`\n", j.Reviews)
 	} else {
 		a.printf("\nLatest review:\n  none yet\n")
 	}
@@ -216,15 +216,15 @@ func archiveRefFor(ctx context.Context, repo *git.Repo, slug, head string) (stri
 func nextAction(s lifecycle.Summary) string {
 	switch s.State {
 	case model.StateWorking:
-		return "implement, commit, then `gitpr change ready`"
+		return "implement, commit, then `git pair change ready`"
 	case model.StateReady:
-		return "waiting for a reviewer: `gitpr review open` (author: `gitpr change wait` to block on it)"
+		return "waiting for a reviewer: `git pair review open` (author: `git pair change wait` to block on it)"
 	case model.StateBlocked:
-		return "address the review, then `gitpr change ready` (read it with `gitpr change feedback`)"
+		return "address the review, then `git pair change ready` (read it with `git pair change feedback`)"
 	case model.StateFeedback:
-		return "optionally address feedback (read it with `gitpr change feedback`), then `gitpr review close`"
+		return "optionally address feedback (read it with `git pair change feedback`), then `git pair review close`"
 	case model.StateApproved:
-		return "run `gitpr review close` before squash/merge"
+		return "run `git pair review close` before squash/merge"
 	case model.StateClosed:
 		return "safe to squash/merge; review history is under refs/reviews/"
 	}

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"gitpr/internal/gittest"
+	"gitpair/internal/gittest"
 )
 
 // --- review submit (PRD §10.4) ----------------------------------------------
@@ -425,9 +425,9 @@ func TestReviewOpenRefusesWithoutTerminal(t *testing.T) {
 	for _, args := range [][]string{{"review", "open"}, {"review", "open", "--unreviewed"}} {
 		res := runIn(t, f.Dir(), args...)
 		if res.code != exitUsage {
-			t.Errorf("gitpr %v exited %d, want %d\nstderr: %s", args, res.code, exitUsage, res.stderr)
+			t.Errorf("git-pair %v exited %d, want %d\nstderr: %s", args, res.code, exitUsage, res.stderr)
 		}
-		mustContain(t, res.stderr, "gitpr diff", "the refusal must name the non-interactive equivalents")
+		mustContain(t, res.stderr, "git pair diff", "the refusal must name the non-interactive equivalents")
 	}
 }
 
@@ -468,7 +468,7 @@ func TestReviewReopenWithoutReviews(t *testing.T) {
 		t.Errorf("reopen with no reviews exited %d, want %d\n%s", got.code, exitUsage, got.stderr)
 	}
 	mustContain(t, got.stderr, "no review submissions", "should say why there is nothing to reopen onto")
-	mustContain(t, got.stderr, "gitpr review open", "should name the command that works")
+	mustContain(t, got.stderr, "git pair review open", "should name the command that works")
 }
 
 // The author answering a review is the whole point of the command, so the span must
@@ -508,7 +508,7 @@ func TestReviewReopenReachesTheSessionWhenNothingHasLanded(t *testing.T) {
 }
 
 // There is no `review undo`: a submission is corrected by submitting again, because
-// state is derived from commit trailers and gitpr does not rewrite history. The
+// state is derived from commit trailers and git-pair does not rewrite history. The
 // supersession has to be visible at the moment it happens.
 func TestSecondSubmissionSupersedesTheFirst(t *testing.T) {
 	f, _ := newChangeset(t, "booking", "main")

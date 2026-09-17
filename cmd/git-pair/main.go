@@ -1,4 +1,4 @@
-// Command gitpr is a local-first peer-review orchestrator for human and
+// Command git-pair is a local-first peer-review orchestrator for human and
 // coding-agent pairs. See PRD.md for the product requirements and README.md for
 // the workflow.
 package main
@@ -6,7 +6,7 @@ package main
 import (
 	"os"
 
-	"gitpr/internal/cli"
+	"gitpair/internal/cli"
 )
 
 func main() {

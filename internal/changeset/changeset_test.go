@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/git"
-	"gitpr/internal/gittest"
+	"gitpair/internal/changeset"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
 )
 
 // PRD §4: "The implementation should keep the branch-to-changeset naming rule
@@ -90,7 +90,7 @@ func TestSlugFromBranchIsStableAndInjective(t *testing.T) {
 	}
 }
 
-// PRD §7: `gitpr review thread "concurrency tests"` creates
+// PRD §7: `git pair review thread "concurrency tests"` creates
 // `changesets/<changeset>/concurrency-tests.md`.
 func TestThreadSlugAndPath(t *testing.T) {
 	tests := []struct {

@@ -40,7 +40,7 @@ import (
 //     only to real process invocations, so help text may mention git verbs freely.
 
 // gitCallMethods are the functions through which a git command line is built. Every
-// gitpr git invocation goes through one of them; internal/git.run is the shared
+// git-pair git invocation goes through one of them; internal/git.run is the shared
 // implementation the exported wrappers delegate to.
 var gitCallMethods = map[string]bool{
 	"Git":                     true, // (*git.Repo).Git
@@ -56,22 +56,22 @@ var gitCallMethods = map[string]bool{
 
 // productArgvVerbs may never appear as a git subcommand in shipped code.
 var productArgvVerbs = map[string]string{
-	"push":     "PRD §26: gitpr does not push; review history is preserved locally (PRD §13)",
-	"merge":    "PRD §26: gitpr does not merge branches",
-	"rebase":   "PRD §26: gitpr does not rewrite history",
-	"reset":    "PRD §26: gitpr does not reset the working tree or index",
-	"switch":   "gitpr never changes what is checked out; the worktree belongs to the user",
-	"checkout": "gitpr never changes what is checked out; the worktree belongs to the user",
-	"branch":   "gitpr never creates, renames or deletes a branch: a changeset is the branch already checked out (PRD §9.1)",
+	"push":     "PRD §26: git-pair does not push; review history is preserved locally (PRD §13)",
+	"merge":    "PRD §26: git-pair does not merge branches",
+	"rebase":   "PRD §26: git-pair does not rewrite history",
+	"reset":    "PRD §26: git-pair does not reset the working tree or index",
+	"switch":   "git-pair never changes what is checked out; the worktree belongs to the user",
+	"checkout": "git-pair never changes what is checked out; the worktree belongs to the user",
+	"branch":   "git-pair never creates, renames or deletes a branch: a changeset is the branch already checked out (PRD §9.1)",
 }
 
 // destructiveVerbs are forbidden even as bare strings, because a verb hidden behind a
 // spread slice would otherwise be invisible to the argv layer.
 var destructiveVerbs = map[string]string{
-	"push":   "PRD §26: gitpr does not push",
-	"merge":  "PRD §26: gitpr does not merge",
-	"rebase": "PRD §26: gitpr does not rewrite history",
-	"reset":  "PRD §26: gitpr does not reset the working tree or index",
+	"push":   "PRD §26: git-pair does not push",
+	"merge":  "PRD §26: git-pair does not merge",
+	"rebase": "PRD §26: git-pair does not rewrite history",
+	"reset":  "PRD §26: git-pair does not reset the working tree or index",
 }
 
 // forbiddenBranchFlags delete a branch when passed to `git branch`.
@@ -85,16 +85,16 @@ var branchDeletion = regexp.MustCompile(`(?i)\bgit\s+branch\s+(-[Dd]|--delete)\b
 
 // forbiddenFuncNames are wrapper names that would put a destructive verb behind an API.
 var forbiddenFuncNames = map[string]string{
-	"Push":              "gitpr must not push",
-	"Merge":             "gitpr must not merge",
-	"Rebase":            "gitpr must not rebase",
-	"Reset":             "gitpr must not reset",
-	"Squash":            "gitpr must not squash",
-	"DeleteBranch":      "gitpr must not delete branches",
-	"RemoveBranch":      "gitpr must not delete branches",
-	"CreateBranch":      "gitpr must not create branches",
-	"CheckoutBranch":    "gitpr must not switch branches",
-	"ForceDeleteBranch": "gitpr must not delete branches",
+	"Push":              "git-pair must not push",
+	"Merge":             "git-pair must not merge",
+	"Rebase":            "git-pair must not rebase",
+	"Reset":             "git-pair must not reset",
+	"Squash":            "git-pair must not squash",
+	"DeleteBranch":      "git-pair must not delete branches",
+	"RemoveBranch":      "git-pair must not delete branches",
+	"CreateBranch":      "git-pair must not create branches",
+	"CheckoutBranch":    "git-pair must not switch branches",
+	"ForceDeleteBranch": "git-pair must not delete branches",
 }
 
 // rules is one policy: which verbs are forbidden where.
@@ -318,7 +318,7 @@ func checkFile(t *testing.T, path string, argvVerbs, bareVerbs, funcNames map[st
 		if decl, ok := node.(*ast.FuncDecl); ok && decl.Name != nil {
 			if why, bad := funcNames[decl.Name.Name]; bad {
 				findings = append(findings, at(decl.Pos(),
-					"gitpr defines a wrapper named "+decl.Name.Name+" ("+why+")"))
+					"git-pair defines a wrapper named "+decl.Name.Name+" ("+why+")"))
 			}
 			return true
 		}
@@ -334,7 +334,7 @@ func checkFile(t *testing.T, path string, argvVerbs, bareVerbs, funcNames map[st
 			for _, lit := range stringLiterals(call.Args...) {
 				if shellGitVerb.MatchString(lit.value) {
 					findings = append(findings, at(call.Pos(),
-						"gitpr runs a destructive git command through a shell: "+strconv.Quote(lit.value)))
+						"git-pair runs a destructive git command through a shell: "+strconv.Quote(lit.value)))
 				}
 			}
 		}
@@ -352,7 +352,7 @@ func checkFile(t *testing.T, path string, argvVerbs, bareVerbs, funcNames map[st
 			value := unquote(basic.Value)
 			if why, bad := bareVerbs[value]; bad {
 				findings = append(findings, at(basic.Pos(),
-					"the string "+strconv.Quote(value)+" is a git subcommand gitpr must never invoke — "+why))
+					"the string "+strconv.Quote(value)+" is a git subcommand git-pair must never invoke — "+why))
 			}
 			return true
 		})
@@ -369,7 +369,7 @@ const (
 )
 
 // classify reports whether a call builds a git command line, either through one of
-// gitpr's git helpers or through exec.Command("git", ...).
+// git-pair's git helpers or through exec.Command("git", ...).
 func classify(call *ast.CallExpr) callKind {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
@@ -408,7 +408,7 @@ func checkGitArgs(call *ast.CallExpr, argvVerbs map[string]string, at func(token
 			if !bad || field == "branch" {
 				continue
 			}
-			findings = append(findings, at(call.Pos(), "gitpr invokes `git "+field+"` — "+why))
+			findings = append(findings, at(call.Pos(), "git-pair invokes `git "+field+"` — "+why))
 		}
 	}
 
@@ -417,10 +417,10 @@ func checkGitArgs(call *ast.CallExpr, argvVerbs map[string]string, at func(token
 	// verb at all (shipped code); the fixture is allowed to manage branches.
 	if _, forbidden := argvVerbs["branch"]; forbidden && seen["branch"] {
 		why := argvVerbs["branch"]
-		msg := "gitpr invokes `git branch` — " + why
+		msg := "git-pair invokes `git branch` — " + why
 		for _, arg := range args {
 			if forbiddenBranchFlags[arg.value] {
-				msg = "gitpr deletes a branch with `git branch " + arg.value + "` — " + why
+				msg = "git-pair deletes a branch with `git branch " + arg.value + "` — " + why
 				break
 			}
 		}
@@ -432,11 +432,11 @@ func checkGitArgs(call *ast.CallExpr, argvVerbs map[string]string, at func(token
 			switch arg.value {
 			case "-d", "--no-deref":
 				findings = append(findings, at(call.Pos(),
-					"gitpr deletes a ref with `git update-ref "+arg.value+"` (PRD §13 requires review refs to survive)"))
+					"git-pair deletes a ref with `git update-ref "+arg.value+"` (PRD §13 requires review refs to survive)"))
 			case "":
 				// `git update-ref <ref> ""` deletes the ref just as -d does.
 				findings = append(findings, at(call.Pos(),
-					"gitpr passes an empty new value to `git update-ref`, which deletes the ref"))
+					"git-pair passes an empty new value to `git update-ref`, which deletes the ref"))
 			}
 		}
 	}

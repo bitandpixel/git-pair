@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/git"
-	"gitpr/internal/gittest"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/span"
-	"gitpr/internal/tui"
+	"gitpair/internal/changeset"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/span"
+	"gitpair/internal/tui"
 )
 
 const slug = "booking-transaction"
@@ -173,7 +173,7 @@ func TestSessionToggleMarksFilesReviewed(t *testing.T) {
 }
 
 // PRD §16: "If the underlying diff for a file changes after it was marked reviewed
-// during the current session, gitpr should ideally reset it to unreviewed."
+// during the current session, git-pair should ideally reset it to unreviewed."
 func TestSessionResetsReviewedMarkWhenFileDiffChanges(t *testing.T) {
 	e := newEnv(t)
 	sess := e.session(t, span.Full())

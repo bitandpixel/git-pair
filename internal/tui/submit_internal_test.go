@@ -7,12 +7,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/git"
-	"gitpr/internal/gittest"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/model"
-	"gitpr/internal/span"
+	"gitpair/internal/changeset"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/model"
+	"gitpair/internal/span"
 )
 
 // Submitting is the end of the session, not a status line inside it: the review

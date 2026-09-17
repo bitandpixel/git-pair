@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/gittest"
+	"gitpair/internal/gittest"
 )
 
 // --- status (PRD §11.1) ------------------------------------------------------
@@ -139,7 +139,7 @@ func TestStatusReportsUnrecognisedMarkers(t *testing.T) {
 	ready(t, f)
 	// A ready marker for a different changeset: it must not make this one ready, and
 	// it must invalidate the real ready marker by being a newer commit.
-	f.CommitMessage("gitpr: ready other-changeset\n\nGitPR-State: ready\nGitPR-Changeset: other-changeset\n",
+	f.CommitMessage("git-pair: ready other-changeset\n\nGitPR-State: ready\nGitPR-Changeset: other-changeset\n",
 		gittest.WithEmpty())
 
 	out := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status", "--json").json(t)
@@ -169,7 +169,7 @@ func TestStatusWithoutChangesetIsUsageError(t *testing.T) {
 
 // --- diff (PRD §17) ---------------------------------------------------------
 
-// gitpr renders no diff of its own (PRD §2.1, §26): its output must be exactly git's
+// git-pair renders no diff of its own (PRD §2.1, §26): its output must be exactly git's
 // for the resolved range.
 func TestDiffFullChangesetIsMergeBaseRange(t *testing.T) {
 	f, _ := newChangeset(t, "booking", "main")
@@ -186,7 +186,7 @@ func TestDiffFullChangesetIsMergeBaseRange(t *testing.T) {
 
 	got := runIn(t, f.Dir(), "diff").mustSucceed(t, "diff")
 	if got.stdout != want {
-		t.Errorf("`gitpr diff` output differs from `git diff %s HEAD`", from)
+		t.Errorf("`git pair diff` output differs from `git diff %s HEAD`", from)
 	}
 	mustContain(t, got.stderr, "main...current", "the resolved span must be named, so the range is never implicit")
 
@@ -196,7 +196,7 @@ func TestDiffFullChangesetIsMergeBaseRange(t *testing.T) {
 		t.Fatalf("git diff --stat: %v", err)
 	}
 	if stat.stdout != wantStat {
-		t.Error("`gitpr diff --stat` output differs from git's")
+		t.Error("`git pair diff --stat` output differs from git's")
 	}
 	mustNotContain(t, got.stdout, "unrelated.go", "the full span must not include work committed to the base later")
 }
@@ -220,7 +220,7 @@ func TestDiffUnreviewedIsLatestReviewRange(t *testing.T) {
 	}
 	got := runIn(t, f.Dir(), "diff", "--unreviewed").mustSucceed(t, "diff", "--unreviewed")
 	if got.stdout != want {
-		t.Errorf("`gitpr diff --unreviewed` output differs from `git diff %s HEAD`", review)
+		t.Errorf("`git pair diff --unreviewed` output differs from `git diff %s HEAD`", review)
 	}
 	if !strings.Contains(got.stdout, "-"+comment) {
 		t.Errorf("the unreviewed span must show the deleted review comment as a removal:\n%s", got.stdout)
@@ -273,7 +273,7 @@ func TestDiffSinceReviewIndexes(t *testing.T) {
 		}
 		got := runIn(t, f.Dir(), "diff", tc.flag).mustSucceed(t, "diff", tc.flag)
 		if got.stdout != want {
-			t.Errorf("`gitpr diff %s` differs from `git diff %s HEAD`", tc.flag, tc.from)
+			t.Errorf("`git pair diff %s` differs from `git diff %s HEAD`", tc.flag, tc.from)
 		}
 	}
 
@@ -457,7 +457,7 @@ func TestDiffWithFilePath(t *testing.T) {
 	}
 	got := runIn(t, f.Dir(), "diff", "service.go").mustSucceed(t, "diff", "service.go")
 	if got.stdout != want {
-		t.Errorf("`gitpr diff service.go` differs from `git diff %s HEAD -- service.go`", from)
+		t.Errorf("`git pair diff service.go` differs from `git diff %s HEAD -- service.go`", from)
 	}
 	mustNotContain(t, got.stdout, "handler.go", "the path filter must be honoured")
 
@@ -483,7 +483,7 @@ func TestDiffSpanArgumentErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			res := runIn(t, f.Dir(), tc.args...)
 			if res.code != exitUsage {
-				t.Errorf("gitpr %v exited %d, want %d\nstderr: %s", tc.args, res.code, exitUsage, res.stderr)
+				t.Errorf("git-pair %v exited %d, want %d\nstderr: %s", tc.args, res.code, exitUsage, res.stderr)
 			}
 		})
 	}

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"gitpr/internal/reviewmark"
+	"gitpair/internal/reviewmark"
 )
 
 const commit = "9f2c1d4b8a7e6f5d4c3b2a1908f7e6d5c4b3a291"
@@ -40,8 +40,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		}
 	}
 	// Inside the git directory, so nothing about it can reach the working tree.
-	if !strings.HasPrefix(store.Dir(), filepath.Join(dir, "gitpr", "marks")) {
-		t.Errorf("store dir = %q, want it under <gitdir>/gitpr/marks", store.Dir())
+	if !strings.HasPrefix(store.Dir(), filepath.Join(dir, "git-pair", "marks")) {
+		t.Errorf("store dir = %q, want it under <gitdir>/git-pair/marks", store.Dir())
 	}
 }
 

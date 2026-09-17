@@ -1,9 +1,9 @@
-// Package cli implements the gitpr command surface.
+// Package cli implements the git-pair command surface.
 //
 // Exit codes are part of the agent-facing contract:
 //
 //	0 success
-//	1 a gitpr business rule refused the operation (surviving additions, dirty
+//	1 a git-pair business rule refused the operation (surviving additions, dirty
 //	  tree, outcome does not permit integration)
 //	2 usage error (bad flag, missing argument, no changeset)
 //	3 git itself failed
@@ -20,9 +20,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/git"
-	"gitpr/internal/lifecycle"
+	"gitpair/internal/changeset"
+	"gitpair/internal/git"
+	"gitpair/internal/lifecycle"
 )
 
 // Version is stamped by the build.
@@ -70,7 +70,7 @@ func Execute(args []string) int {
 		code = exitUsage
 	}
 	if !errors.Is(err, errSilent) {
-		fmt.Fprintf(a.stderr, "gitpr: %s\n", messageOf(err))
+		fmt.Fprintf(a.stderr, "git-pair: %s\n", messageOf(err))
 	}
 	return code
 }
@@ -85,7 +85,7 @@ func isUsageError(err error) bool {
 }
 
 // errSilent marks an error whose message has already been printed.
-var errSilent = errors.New("gitpr: output already written")
+var errSilent = errors.New("git-pair: output already written")
 
 func messageOf(err error) string {
 	msg := err.Error()
@@ -94,21 +94,21 @@ func messageOf(err error) string {
 
 func newRootCommand(a *app) *cobra.Command {
 	root := &cobra.Command{
-		Use:           "gitpr",
+		Use:           "git-pair",
 		Short:         "Local-first peer review for human and coding-agent pairs",
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Long: `gitpr adds a thin review protocol on top of ordinary git commits, files and
+		Long: `git-pair adds a thin review protocol on top of ordinary git commits, files and
 refs. It does not replace git, your editor, your difftool, or your forge.
 
 Review state lives in the repository: a changeset directory holds ABOUT.md and
 review threads, lifecycle markers are commits carrying GitPR-* trailers, and
 refs/reviews/* keeps the complete unsquashed history reachable.
 
-Author commands:   gitpr change init | ready
-Reviewer commands: gitpr review open | about | thread | submit | history | queue | close
-Inspection:        gitpr status | diff`,
+Author commands:   git pair change init | ready
+Reviewer commands: git pair review open | about | thread | submit | history | queue | close
+Inspection:        git pair status | diff`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if jsonFlag, err := cmd.Flags().GetBool("json"); err == nil {
 				a.json = jsonFlag
@@ -117,7 +117,7 @@ Inspection:        gitpr status | diff`,
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
-				return &usageError{fmt.Errorf("unknown command %q; run `gitpr --help` for the command list", args[0])}
+				return &usageError{fmt.Errorf("unknown command %q; run `git-pair --help` for the command list", args[0])}
 			}
 			return cmd.Help()
 		},
@@ -137,7 +137,7 @@ Inspection:        gitpr status | diff`,
 func groupUsage(name string) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
-			return &usageError{fmt.Errorf("unknown %s command %q; run `gitpr %s --help`", name, args[0], name)}
+			return &usageError{fmt.Errorf("unknown %s command %q; run `git-pair %s --help`", name, args[0], name)}
 		}
 		return cmd.Help()
 	}

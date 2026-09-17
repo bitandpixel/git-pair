@@ -5,18 +5,18 @@
 # start without a terminal, and a ref moved by another process only moves while something is
 # watching.
 #
-# Usage: bash docs/plans/completed/gitpr-mvp/artifacts/pty-walkthrough.sh [/path/to/gitpr]
-#        (default: ~/.local/bin/gitpr — run `mise run build` first)
+# Usage: bash docs/plans/completed/gitpr-mvp/artifacts/pty-walkthrough.sh [/path/to/git-pair]
+#        (default: ~/.local/bin/git-pair — run `mise run build` first)
 #
 # Prints "PTY: all checks passed" when every scenario painted what it should. It builds its own
 # repository in a temp directory, so it never touches the one you are standing in.
 set -uo pipefail
 
-G=${1:-$HOME/.local/bin/gitpr}
+G=${1:-$HOME/.local/bin/git-pair}
 HERE=$(cd "$(dirname "$0")" && pwd)
 DRIVER="$HERE/pty-tui.py"
 PLAIN="$HERE/pty-plain.py"
-T=$(mktemp -d /tmp/gitpr-pty.XXXXXX)
+T=$(mktemp -d /tmp/git-pair-pty.XXXXXX)
 trap 'rm -rf "$T"' EXIT
 FAILED=0
 COLS=100
@@ -49,7 +49,7 @@ expectbytes() {
   if grep -aqF -- "$3" "$2"; then ok "$1"; else fail "$1 — $(printf '%q' "$3") never reached the terminal"; fi
 }
 
-# session <name> <keys> [span flags...] — one `gitpr review open` under a pty, captured to
+# session <name> <keys> [span flags...] — one `git pair review open` under a pty, captured to
 # $T/<name>.raw. The subcommand is part of the helper so a scenario reads as the keys and the span
 # it chose, which is the only thing that differs between them.
 session() {

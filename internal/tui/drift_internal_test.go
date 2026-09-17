@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"gitpr/internal/gittest"
-	"gitpr/internal/span"
+	"gitpair/internal/gittest"
+	"gitpair/internal/span"
 )
 
 // Drift is a warning about the ground moving, not about what the reviewer just did, so it gets

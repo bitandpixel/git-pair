@@ -1,4 +1,4 @@
-// Package console resolves and launches the external programs gitpr delegates
+// Package console resolves and launches the external programs git-pair delegates
 // to: the editor, the pager-less git diff, and the configured difftool.
 //
 // Commands are built rather than run so that the plain CLI can run them
@@ -17,12 +17,12 @@ import (
 	"runtime"
 	"strings"
 
-	"gitpr/internal/git"
+	"gitpair/internal/git"
 )
 
 // EditorCommand builds the command opening path in the user's editor.
 //
-// The editor is whatever git would use, so gitpr asks git instead of searching on its own:
+// The editor is whatever git would use, so git-pair asks git instead of searching on its own:
 // GIT_EDITOR, then core.editor, then VISUAL, then EDITOR, then vi. Two things come from that
 // beyond getting the order right — an EDITOR override does not outrank core.editor in git, and
 // used to here — repo-local core.editor becomes available, which an environment lookup can
@@ -50,15 +50,15 @@ func EditorCommand(ctx context.Context, repo *git.Repo, path string) (*exec.Cmd,
 	// expansion instead treats the whole value as one program name. A value
 	// containing a literal space in the program name needs its own quoting
 	// (core.editor="/my editor.sh" --wait), exactly as it does for git.
-	cmd := exec.Command("/bin/sh", "-c", `eval exec ${GITPR_EDITOR} "$@"`, "gitpr", path)
+	cmd := exec.Command("/bin/sh", "-c", `eval exec ${GIT_PAIR_EDITOR} "$@"`, "git-pair", path)
 	cmd.Dir = repo.Dir
-	cmd.Env = append(os.Environ(), "GITPR_EDITOR="+value)
+	cmd.Env = append(os.Environ(), "GIT_PAIR_EDITOR="+value)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd, nil
 }
 
 // DiffToolCommand builds the `git difftool` invocation for a span, so review uses whatever
-// the user configured (vimdiff, meld, ...) instead of a renderer of gitpr's own.
+// the user configured (vimdiff, meld, ...) instead of a renderer of git-pair's own.
 // --no-prompt avoids a per-file confirmation for what is already an explicit, single-file
 // request.
 //
@@ -105,7 +105,7 @@ func command(repo *git.Repo, name string, args ...string) *exec.Cmd {
 }
 
 // PromptLine asks a single-line question on the terminal. It fails rather than
-// blocking when there is no terminal to read from, which keeps every gitpr
+// blocking when there is no terminal to read from, which keeps every git-pair
 // command usable from an agent.
 func PromptLine(question string) (string, error) {
 	info, err := os.Stdin.Stat()

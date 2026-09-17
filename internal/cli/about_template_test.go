@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/gittest"
+	"gitpair/internal/changeset"
+	"gitpair/internal/gittest"
 )
 
 // The nudge that an author never described the change only works if the scaffold is

@@ -9,9 +9,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"gitpr/internal/git"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/span"
+	"gitpair/internal/git"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/span"
 )
 
 // The `V` screen: choose both ends of the span before either takes effect.
@@ -725,7 +725,7 @@ func (m reviewModel) rowWithDetail(label, detail string, width int) string {
 }
 
 // selectedBlock is the picker's preview of the pending pair. It names the pair with the one span
-// string the rest of the app uses -- the header, the status line after `Enter`, `gitpr diff`'s stderr,
+// string the rest of the app uses -- the header, the status line after `Enter`, `git pair diff`'s stderr,
 // `status --json` -- because two vocabularies for one thing read as two things: "changeset base →
 // working tree" and "main...current" side by side invite the reviewer to wonder whether they are
 // looking at two spans. The endpoint spellings survive for the case where they are the most specific

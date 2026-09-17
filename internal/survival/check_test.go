@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/git"
-	"gitpr/internal/gittest"
-	"gitpr/internal/survival"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
+	"gitpair/internal/survival"
 )
 
 // Integration tests for the surviving-review-additions diagnostic (PRD §19). Each

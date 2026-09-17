@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"strings"
 
-	"gitpr/internal/git"
+	"gitpair/internal/git"
 )
 
 const (

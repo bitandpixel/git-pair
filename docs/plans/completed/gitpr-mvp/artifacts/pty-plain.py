@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Print what a gitpr pty session painted, escapes removed.
+"""Print what a git-pair pty session painted, escapes removed.
 
 Part of the review walkthrough in pty-walkthrough.sh; run that instead of this.
 

@@ -1,6 +1,6 @@
-// Package gittest builds throwaway git repositories for gitpr's tests.
+// Package gittest builds throwaway git repositories for git-pair's tests.
 //
-// The fixture deliberately does NOT import gitpr/internal/git. It shells out to
+// The fixture deliberately does NOT import gitpair/internal/git. It shells out to
 // git through its own subprocess calls, so a bug in the package under test
 // cannot hide inside the code that creates the scenario: if `git log` parsing is
 // broken, the fixtures still report what git actually stored.
@@ -345,12 +345,12 @@ func (f *Fixture) CommitMessage(message string, opts ...CommitOpt) string {
 // --- lifecycle markers ------------------------------------------------------
 //
 // These build the commit messages PRD §9.2, §10.4 and the plan's M4 specify. CLI
-// tests assert that `gitpr` writes exactly these subjects and trailers; engine
+// tests assert that `git-pair` writes exactly these subjects and trailers; engine
 // tests use them to build histories without depending on the product.
 
 // ReadyMessage is a ready marker commit message (PRD §9.2).
 func ReadyMessage(slug string) string {
-	return "gitpr: ready " + slug + "\n\nGitPR-State: ready\nGitPR-Changeset: " + slug + "\n"
+	return "git-pair: ready " + slug + "\n\nGitPR-State: ready\nGitPR-Changeset: " + slug + "\n"
 }
 
 // ReviewMessage is a review submission commit message (PRD §10.4). outcome is
@@ -362,7 +362,7 @@ func ReviewMessage(slug, outcome string) string {
 
 // CloseMessage is a close marker commit message (plan M4).
 func CloseMessage(slug string) string {
-	return "gitpr: close " + slug + "\n\nGitPR-State: closed\nGitPR-Changeset: " + slug + "\n"
+	return "git-pair: close " + slug + "\n\nGitPR-State: closed\nGitPR-Changeset: " + slug + "\n"
 }
 
 // CommitReadyMarker commits a ready marker for slug. Markers may be empty, so

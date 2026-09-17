@@ -14,8 +14,8 @@ import (
 	"sort"
 	"strings"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/git"
+	"gitpair/internal/changeset"
+	"gitpair/internal/git"
 )
 
 // Addition is one distinct line added by a review submission.
@@ -55,7 +55,7 @@ func (r Report) Clean() bool { return len(r.Code) == 0 }
 func (r Report) Total() int { return len(r.Code) + len(r.Artifacts) }
 
 // ErrMergeCommit is returned for a review submission with several parents.
-// gitpr only creates single-parent reviews; a merged review has no unambiguous
+// git-pair only creates single-parent reviews; a merged review has no unambiguous
 // set of "lines this review added".
 var ErrMergeCommit = errors.New("review submission is a merge commit")
 

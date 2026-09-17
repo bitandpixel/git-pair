@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/span"
+	"gitpair/internal/span"
 )
 
 // §23's capability matrix. The head decides everything: a span that ends at a

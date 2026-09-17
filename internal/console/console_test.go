@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/git"
-	"gitpr/internal/gittest"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
 )
 
 // resolvedEditor asks EditorCommand for an editor and reports the command line it chose.
@@ -19,7 +19,7 @@ func resolvedEditor(t *testing.T, repo *git.Repo) string {
 		t.Fatalf("EditorCommand: %v", err)
 	}
 	for _, kv := range cmd.Env {
-		if v, ok := strings.CutPrefix(kv, "GITPR_EDITOR="); ok {
+		if v, ok := strings.CutPrefix(kv, "GIT_PAIR_EDITOR="); ok {
 			return v
 		}
 	}
@@ -133,7 +133,7 @@ func TestEditorCommandLineIsSplitAndGivenTheFile(t *testing.T) {
 	}
 }
 
-// GIT_EDITOR=true is how callers tell git "there is no editor". Honouring it means gitpr does
+// GIT_EDITOR=true is how callers tell git "there is no editor". Honouring it means git-pair does
 // not invent an editor where the user explicitly removed one.
 func TestNoOpEditorIsHonoured(t *testing.T) {
 	repo := editorRepo(t, "", "GIT_EDITOR=true")

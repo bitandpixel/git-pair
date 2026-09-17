@@ -15,11 +15,11 @@ import (
 	"strconv"
 	"strings"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/git"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/reviewmark"
-	"gitpr/internal/span"
+	"gitpair/internal/changeset"
+	"gitpair/internal/git"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/reviewmark"
+	"gitpair/internal/span"
 )
 
 // Options configures a review session.

@@ -12,15 +12,15 @@ import (
 	"strings"
 	"time"
 
-	"gitpr/internal/git"
-	"gitpr/internal/model"
+	"gitpair/internal/git"
+	"gitpair/internal/model"
 )
 
 // Kind classifies a commit's role in the review lifecycle.
 type Kind int
 
 const (
-	// KindImplementation is an ordinary commit: no recognised gitpr marker.
+	// KindImplementation is an ordinary commit: no recognised git-pair marker.
 	KindImplementation Kind = iota
 	KindReady
 	KindReview
@@ -78,11 +78,11 @@ type Summary struct {
 	// Trailing counts the non-marker commits after the newest marker.
 	Trailing int
 	// TrailingUnrecognised counts the trailing commits that carry GitPR-*
-	// trailers gitpr could not interpret. They always invalidate a marker:
-	// a newer gitpr may read them fine, and guessing from the tree would be a
+	// trailers git-pair could not interpret. They always invalidate a marker:
+	// a newer git-pair may read them fine, and guessing from the tree would be a
 	// guess about someone else's protocol.
 	TrailingUnrecognised int
-	// Unrecognised lists markers gitpr could not interpret.
+	// Unrecognised lists markers git-pair could not interpret.
 	Unrecognised []Event
 }
 
@@ -197,7 +197,7 @@ func derive(events []Event) Summary {
 		if len(events) == 0 {
 			s.Reason = "no commits above the base yet"
 		} else {
-			s.Reason = "no gitpr lifecycle markers on this branch"
+			s.Reason = "no git-pair lifecycle markers on this branch"
 		}
 		return s
 	}
@@ -292,7 +292,7 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 	}
 
 	if s.TrailingUnrecognised > 0 {
-		// The tree cannot speak for a trailer set gitpr cannot read.
+		// The tree cannot speak for a trailer set git-pair cannot read.
 		s.Reason = fmt.Sprintf("%d unrecognised GitPR marker(s) after %s",
 			s.TrailingUnrecognised, markerLabel(marker))
 		return s, nil

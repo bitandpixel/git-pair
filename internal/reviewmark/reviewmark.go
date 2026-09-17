@@ -101,12 +101,12 @@ type file struct {
 // Store holds the mark sets for one changeset.
 type Store struct{ dir string }
 
-// New points a store at <gitdir>/gitpr/marks/<slug>.
+// New points a store at <gitdir>/git-pair/marks/<slug>.
 func New(gitDir, slug string) (*Store, error) {
 	if !safeName.MatchString(slug) {
 		return nil, fmt.Errorf("cannot store review marks for %q: unexpected changeset name", slug)
 	}
-	return &Store{dir: filepath.Join(gitDir, "gitpr", "marks", slug)}, nil
+	return &Store{dir: filepath.Join(gitDir, "git-pair", "marks", slug)}, nil
 }
 
 // Dir is where this changeset's mark sets live, for reporting and tests.

@@ -1,7 +1,7 @@
-// Package git wraps the git plumbing that gitpr is built on.
+// Package git wraps the git plumbing that git-pair is built on.
 //
 // Only read operations and two mutating verbs live here: `commit` and
-// `update-ref`. gitpr deliberately has no wrapper for push, merge, rebase,
+// `update-ref`. git-pair deliberately has no wrapper for push, merge, rebase,
 // reset, or branch deletion — see the source-hygiene test.
 package git
 
@@ -64,7 +64,7 @@ func Open(dir string) (*Repo, error) {
 // Git runs git with the given arguments, capturing stdout and stderr.
 //
 // core.quotePath=false keeps non-ASCII paths literal, which matters because
-// gitpr parses pathnames out of diff output.
+// git-pair parses pathnames out of diff output.
 func (r *Repo) Git(ctx context.Context, args ...string) (string, error) {
 	return r.run(ctx, "", true, args...)
 }
@@ -168,7 +168,7 @@ func (r *Repo) Head(ctx context.Context) (string, error) {
 // with *no stderr at all*, so the exit code is the only signal. Relying on the
 // message alone would turn "ref does not exist" into a generic git failure,
 // which callers like CreateRefIfAbsent must be able to distinguish.
-// GitDir is the repository's git directory, which is where gitpr keeps data that is
+// GitDir is the repository's git directory, which is where git-pair keeps data that is
 // local to this clone and deliberately outside the working tree.
 func (r *Repo) GitDir(ctx context.Context) (string, error) {
 	out, err := r.Git(ctx, "rev-parse", "--absolute-git-dir")

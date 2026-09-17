@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"gitpr/internal/survival"
+	"gitpair/internal/survival"
 )
 
 // now is the clock source, kept in one place so age reporting is testable.

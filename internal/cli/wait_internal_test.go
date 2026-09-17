@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"gitpr/internal/model"
+	"gitpair/internal/model"
 )
 
 // pollUntil carries `change wait`: it must stop promptly when the answer appears, stop

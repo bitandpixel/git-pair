@@ -9,11 +9,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/git"
-	"gitpr/internal/gittest"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/span"
+	"gitpair/internal/changeset"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/span"
 )
 
 // The picker is a two-step commitment: `Space` chooses one end, `Enter` applies both. Most

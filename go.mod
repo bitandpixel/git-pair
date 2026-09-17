@@ -1,4 +1,4 @@
-module gitpr
+module gitpair
 
 go 1.27.1
 

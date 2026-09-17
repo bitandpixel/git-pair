@@ -9,8 +9,8 @@ go = "1.27.1"
 # inside the mise-managed Go installation, and anything installed there is
 # discarded on the next Go upgrade.
 [tasks.build]
-run = "go build -o \"$HOME/.local/bin/gitpr\" ./cmd/gitpr"
-description = "Compile and install gitpr onto ~/.local/bin (already on PATH)"
+run = "go build -o \"$HOME/.local/bin/git-pair\" ./cmd/git-pair"
+description = "Compile and install git-pair onto ~/.local/bin (already on PATH)"
 
 # Just the test suite, for a fast focused loop.
 [tasks.test]

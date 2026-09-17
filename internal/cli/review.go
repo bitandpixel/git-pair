@@ -13,17 +13,17 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/console"
-	"gitpr/internal/git"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/marker"
-	"gitpr/internal/model"
-	"gitpr/internal/reviewops"
-	"gitpr/internal/reviewref"
-	"gitpr/internal/span"
-	"gitpr/internal/survival"
-	"gitpr/internal/tui"
+	"gitpair/internal/changeset"
+	"gitpair/internal/console"
+	"gitpair/internal/git"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/marker"
+	"gitpair/internal/model"
+	"gitpair/internal/reviewops"
+	"gitpair/internal/reviewref"
+	"gitpair/internal/span"
+	"gitpair/internal/survival"
+	"gitpair/internal/tui"
 )
 
 func newReviewCommand(a *app) *cobra.Command {
@@ -61,7 +61,7 @@ those processes run.
 
 Press s to submit without leaving the screen, then b (block), f (feedback) or
 a (approve); Esc cancels. The same outcomes are available from the CLI:
-  gitpr review submit --block | --feedback | --approve
+  git pair review submit --block | --feedback | --approve
 
 A span whose head is a commit rather than your working tree is a look at history.
 The screen opens read-only: no marking, no editing, no submission, and the shortcut
@@ -73,11 +73,11 @@ screen, v walks the spans this session has been in and V picks one out.
 
 A ref endpoint is pinned when the span is created. If the ref moves while you review, the
 screen keeps the pinned span and offers r to re-pin it.`,
-		Example: `  gitpr review open
-  gitpr review open --unreviewed
-  gitpr review open --since-review=-2
-  gitpr review open --since-review=-3 --head-review=-1
-  gitpr review open --base-ref=main --head-commit=abc1234`,
+		Example: `  git pair review open
+  git pair review open --unreviewed
+  git pair review open --since-review=-2
+  git pair review open --since-review=-3 --head-review=-1
+  git pair review open --base-ref=main --head-commit=abc1234`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewOpen(cmd.Context(), a, opts)
@@ -108,10 +108,10 @@ func newReviewAboutCommand(a *app) *cobra.Command {
 		Short: "Edit the changeset's ABOUT.md",
 		Long: `Open changesets/<changeset>/ABOUT.md in $VISUAL or $EDITOR.
 
-Edits made here and committed by ` + "`gitpr review submit`" + ` are high-level review
+Edits made here and committed by ` + "`git pair review submit`" + ` are high-level review
 feedback on the whole changeset. The file is the canonical description of the
 change and the reviewer edits it directly rather than using comment syntax.`,
-		Example: `  gitpr review about`,
+		Example: `  git pair review about`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := a.load(cmd.Context())
@@ -139,8 +139,8 @@ is reopened instead of creating a duplicate.
 
 Threads are ordinary Markdown with no required structure. Git history supplies
 authorship and sequencing, so a reply is just an appended section.`,
-		Example: `  gitpr review thread "concurrency tests"
-  gitpr review thread            # prompts, when attached to a terminal`,
+		Example: `  git pair review thread "concurrency tests"
+  git pair review thread            # prompts, when attached to a terminal`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewThread(cmd.Context(), a, args)
@@ -209,9 +209,9 @@ the full unsquashed chain stays reachable.
 Source edits, inline comments, ABOUT.md edits, and thread files all become part
 of the review; a review commit with no changes at all is valid, which is what
 makes a clean-tree approval work.`,
-		Example: `  gitpr review submit --block
-  gitpr review submit --feedback -m "Non-blocking: naming only"
-  gitpr review submit --approve`,
+		Example: `  git pair review submit --block
+  git pair review submit --feedback -m "Non-blocking: naming only"
+  git pair review submit --approve`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewSubmit(cmd.Context(), a, opts)
@@ -306,11 +306,11 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 func nextActionFor(o model.Outcome) string {
 	switch o {
 	case model.OutcomeBlock:
-		return "author: `gitpr change feedback`, address it, then `gitpr change ready`"
+		return "author: `git pair change feedback`, address it, then `git pair change ready`"
 	case model.OutcomeFeedback:
-		return "author: `gitpr change feedback` to read it; feedback is non-blocking, `gitpr review close` when integration is due"
+		return "author: `git pair change feedback` to read it; feedback is non-blocking, `git pair review close` when integration is due"
 	case model.OutcomeApprove:
-		return "`gitpr review close` before squash/merge"
+		return "`git pair review close` before squash/merge"
 	}
 	return ""
 }
@@ -325,10 +325,10 @@ func newReviewHistoryCommand(a *app) *cobra.Command {
 
 Only commits carrying a valid GitPR-Outcome trailer count; ordinary commits do
 not appear. Indexes are chronological, so 0 is the first review and -1 is the
-most recent, matching ` + "`gitpr diff --since-review`" + `.`,
-		Example: `  gitpr review history
-  gitpr review history --json
-  gitpr diff --since-review=-1`,
+most recent, matching ` + "`git pair diff --since-review`" + `.`,
+		Example: `  git pair review history
+  git pair review history --json
+  git pair diff --since-review=-1`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := a.load(cmd.Context())
@@ -394,8 +394,8 @@ Entries are ordered longest-waiting first.
 
 --json is the stable contract for notifications, dashboards, and agent
 supervisors.`,
-		Example: `  gitpr review queue
-  gitpr review queue --json`,
+		Example: `  git pair review queue
+  git pair review queue --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewQueue(cmd.Context(), a)
@@ -557,8 +557,8 @@ committed.
 close and approve are different things: approve is a human judgement, close is
 the archival operation. This command never merges, pushes, or squashes — it
 prints what is safe to do next.`,
-		Example: `  gitpr review close
-  gitpr review close --allow-surviving-review-additions`,
+		Example: `  git pair review close
+  git pair review close --allow-surviving-review-additions`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewClose(cmd.Context(), a, opts)
@@ -594,7 +594,7 @@ func runReviewClose(ctx context.Context, a *app, opts *closeOptions) error {
 	if report != nil && !report.Clean() && !opts.allowSurviving {
 		printSurvivalReport(a.stderr, *report,
 			fmt.Sprintf("Cannot close changeset %s.", s.cs.Slug),
-			"gitpr review close --allow-surviving-review-additions")
+			"git pair review close --allow-surviving-review-additions")
 		printArtifactSurvivals(a.stderr, *report)
 		return fmt.Errorf("cannot close %s: %d review addition(s) from %s still survive unchanged",
 			s.cs.Slug, len(report.Code), report.ReviewShort)
@@ -708,13 +708,13 @@ func newReviewReopenCommand(a *app) *cobra.Command {
 		Short: "Reopen the review session on what changed since your last review",
 		Long: `Open the review session on the span since the most recent review submission.
 
-The same span as ` + "`gitpr review open --unreviewed`" + `, under a name that says why you are
+The same span as ` + "`git pair review open --unreviewed`" + `, under a name that says why you are
 back: after the author answers a block or feedback, the work to read is what came after
 your submission, not the whole changeset a second time. ` + "`review open`" + ` keeps showing the
 whole changeset by default. For an earlier review use ` + "`review open --since-review=N`" + `.
 
-Needs a terminal; the author reads the submission itself with ` + "`gitpr change feedback`" + `.`,
-		Example: `  gitpr review reopen`,
+Needs a terminal; the author reads the submission itself with ` + "`git pair change feedback`" + `.`,
+		Example: `  git pair review reopen`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewReopen(cmd.Context(), a)
@@ -736,7 +736,7 @@ func runReviewReopen(ctx context.Context, a *app) error {
 	sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, sel)
 	if err != nil {
 		if errors.Is(err, span.ErrNoReviews) {
-			return &usageError{fmt.Errorf("%w; run `gitpr review open` for the whole changeset", err)}
+			return &usageError{fmt.Errorf("%w; run `git pair review open` for the whole changeset", err)}
 		}
 		return &usageError{err}
 	}
@@ -755,8 +755,8 @@ func runReviewReopen(ctx context.Context, a *app) error {
 func openSession(ctx context.Context, a *app, s *session, sel span.Selector, name, note string) error {
 	if !console.Interactive() {
 		return &usageError{fmt.Errorf(
-			"`gitpr review %s` needs a terminal; use `gitpr diff`, `gitpr review about`, "+
-				"`gitpr review thread`, and `gitpr review submit` instead", name)}
+			"`git pair review %s` needs a terminal; use `git pair diff`, `git pair review about`, "+
+				"`git pair review thread`, and `git pair review submit` instead", name)}
 	}
 	if note != "" {
 		a.warn("%s\n", note)

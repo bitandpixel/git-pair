@@ -1,6 +1,6 @@
-# gitpr
+# git-pair
 
-`gitpr` is a local-first peer-review tool for human-plus-agent pairs. It puts a thin
+`git-pair` is a local-first peer-review tool for human-plus-agent pairs. It puts a thin
 review protocol on top of ordinary git commits, files, refs, editors and difftools rather
 than replacing any of them: a changeset directory holds the change description and review
 threads, lifecycle transitions are commits carrying `GitPR-*` trailers, review-relative
@@ -30,11 +30,13 @@ Requires Go 1.27 and `git` on `PATH` (developed against git 2.43.0). The reposit
 toolchain in `.mise.toml`:
 
 ```bash
-mise exec -- go build -o ~/bin/gitpr ./cmd/gitpr
-mise exec -- go install ./cmd/gitpr          # into $(go env GOPATH)/bin
+mise exec -- go build -o ~/bin/git-pair ./cmd/git-pair
+mise exec -- go install ./cmd/git-pair          # into $(go env GOPATH)/bin
 ```
 
-Without mise, any Go 1.27 toolchain works. `gitpr --version` prints `gitpr version 0.1.0`.
+Without mise, any Go 1.27 toolchain works. Build it with the name `git-pair` and git picks it up as
+a subcommand, so `git pair review open` and `git-pair review open` are the same program; the docs use
+the `git pair` form throughout. `git-pair --version` prints `git-pair version 0.1.0`.
 
 ## Quickstart
 
@@ -44,13 +46,13 @@ content is the `ABOUT.md` text and the reviewer's two inline comments.
 ```bash
 $ git switch -c booking-transaction
 
-$ gitpr change init --base main
+$ git pair change init --base main
 created changesets/booking-transaction/
 created changesets/booking-transaction/CHANGESET.yaml
 created changesets/booking-transaction/ABOUT.md
 committed 9f1c2de
 
-Next: fill in changesets/booking-transaction/ABOUT.md, commit it with your implementation, then run `gitpr change ready`.
+Next: fill in changesets/booking-transaction/ABOUT.md, commit it with your implementation, then run `git pair change ready`.
 ```
 
 `CHANGESET.yaml` is one line (`base: main`); `ABOUT.md` is a scaffold with `Summary`,
@@ -58,13 +60,13 @@ Next: fill in changesets/booking-transaction/ABOUT.md, commit it with your imple
 headings. Fill it in, commit it with your implementation, then:
 
 ```bash
-$ gitpr change ready
+$ git pair change ready
 Ready: booking-transaction
   head:  8065dae
   base:  main
-  queue: `gitpr review queue` now lists this changeset
+  queue: `git pair review queue` now lists this changeset
 
-$ gitpr review queue
+$ git pair review queue
 READY FOR REVIEW
 
 booking-transaction
@@ -73,14 +75,14 @@ booking-transaction
   head: 8065dae
 ```
 
-The reviewer runs `gitpr review open` for the TUI, or works from the CLI. Here they edited
+The reviewer runs `git pair review open` for the TUI, or works from the CLI. Here they edited
 `src/service.ts` directly, added a thread, and blocked:
 
 ```bash
-$ gitpr review thread "concurrency tests"     # then edits the file in $EDITOR
+$ git pair review thread "concurrency tests"     # then edits the file in $EDITOR
 Created thread changesets/booking-transaction/concurrency-tests.md
 
-$ gitpr review submit --block
+$ git pair review submit --block
 Review submitted: booking-transaction
   outcome: block
   commit:  332887c
@@ -88,7 +90,7 @@ Review submitted: booking-transaction
            changesets/booking-transaction/concurrency-tests.md
            src/service.ts
   ref:     refs/reviews/booking-transaction -> 332887c
-  next:    author: `gitpr change feedback`, address it, then `gitpr change ready`
+  next:    author: `git pair change feedback`, address it, then `git pair change ready`
 ```
 
 The review is an ordinary commit: `review: block booking-transaction` followed by a blank
@@ -99,7 +101,7 @@ the changeset actionable and names the commit; `change feedback` shows the submi
 the thread, the `ABOUT.md` edits, and any code the reviewer touched:
 
 ```bash
-$ gitpr change wait --json
+$ git pair change wait --json
 {
   "changeset": "booking-transaction",
   "previous_state": "READY",
@@ -110,11 +112,11 @@ $ gitpr change wait --json
   "fetches": 0,
   "waited_seconds": 0,
   "timed_out": false,
-  "next_action": "`gitpr change feedback`, address it, then `gitpr change ready`"
+  "next_action": "`git pair change feedback`, address it, then `git pair change ready`"
 }
 
-$ gitpr change feedback --stat
-gitpr change feedback: review 332887c (block) on booking-transaction
+$ git pair change feedback --stat
+git pair change feedback: review 332887c (block) on booking-transaction
  changesets/booking-transaction/concurrency-tests.md | 12 ++++++++++++
  src/service.ts                                      |  1 +
  2 files changed, 13 insertions(+)
@@ -133,8 +135,8 @@ next is the review-relative span, where review lines are deleted — that is how
 feedback being consumed:
 
 ```bash
-$ gitpr diff --unreviewed -- src/service.ts
-gitpr diff: last review..current
+$ git pair diff --unreviewed -- src/service.ts
+git pair diff: last review..current
 diff --git a/src/service.ts b/src/service.ts
 index 942e6f4..82542b6 100644
 --- a/src/service.ts
@@ -150,7 +152,7 @@ Returning to `ready` is refused while review lines survive untouched. Nothing is
 and the command exits 1:
 
 ```text
-$ gitpr change ready
+$ git pair change ready
 
 Cannot mark changeset booking-transaction ready.
 
@@ -166,29 +168,29 @@ src/service.ts:11
 Review these additions before continuing.
 
 To intentionally preserve them:
-  gitpr change ready --allow-surviving-review-additions
+  git pair change ready --allow-surviving-review-additions
 
 Also still present from review 332887c (changeset artifacts, not blocking):
   changesets/booking-transaction/concurrency-tests.md:1  # concurrency tests
   changesets/booking-transaction/concurrency-tests.md:4  ## Response
   changesets/booking-transaction/concurrency-tests.md:6  Will do.
-gitpr: cannot mark changeset booking-transaction ready: 2 review addition(s) from 332887c still survive unchanged
+git-pair: cannot mark changeset booking-transaction ready: 2 review addition(s) from 332887c still survive unchanged
 ```
 
-After resolving the remaining comment `gitpr change ready` succeeds and the changeset is
-back in the queue. The reviewer re-reviews with `gitpr review reopen`, which starts on what
+After resolving the remaining comment `git pair change ready` succeeds and the changeset is
+back in the queue. The reviewer re-reviews with `git pair review reopen`, which starts on what
 changed since their submission, approves, and closes:
 
 ```bash
-$ gitpr review submit --approve
+$ git pair review submit --approve
 Review submitted: booking-transaction
   outcome: approve
   commit:  0eaad3b
   files:   none (recorded as an empty review commit)
   ref:     refs/reviews/booking-transaction -> 0eaad3b
-  next:    `gitpr review close` before squash/merge
+  next:    `git pair review close` before squash/merge
 
-$ gitpr review close
+$ git pair review close
 Closed changeset booking-transaction
 
 Review archive:
@@ -219,7 +221,7 @@ leading and trailing `-` are trimmed, case is kept, so `feature/booking-transact
 **ABOUT.md and threads.** `changesets/<changeset>/ABOUT.md` is the canonical description of
 the change: the author writes it, the reviewer edits it, and edits committed by a review
 submission are high-level feedback. Any other `.md` file in that directory is a thread;
-`gitpr review thread "concurrency tests"` creates or reopens
+`git pair review thread "concurrency tests"` creates or reopens
 `changesets/<changeset>/concurrency-tests.md`. Replies are appended sections and git history
 supplies authorship and order. Both are plain Markdown with no schema.
 
@@ -228,18 +230,18 @@ variables:
 
 | Marker | Subject | Trailers |
 | --- | --- | --- |
-| ready | `gitpr: ready <slug>` | `GitPR-State: ready`, `GitPR-Changeset: <slug>` |
+| ready | `git-pair: ready <slug>` | `GitPR-State: ready`, `GitPR-Changeset: <slug>` |
 | review | `review: <outcome> <slug>` | `GitPR-Outcome: <outcome>`, `GitPR-Changeset: <slug>` |
-| close | `gitpr: close <slug>` | `GitPR-State: closed`, `GitPR-Changeset: <slug>` |
+| close | `git-pair: close <slug>` | `GitPR-State: closed`, `GitPR-Changeset: <slug>` |
 
 A commit counts as a marker only when its trailer block parses and `GitPR-Changeset` matches
 the changeset being inspected; anything else is an ordinary commit.
 
 **A review is corrected by submitting again.** There is no `review undo`. The newest
-submission decides the state, earlier ones stay in `gitpr review history`, and the summary of
+submission decides the state, earlier ones stay in `git pair review history`, and the summary of
 a later submission names what it supersedes. Undo by rewriting history is not on the table —
-gitpr runs no `reset`, `rebase` or `push`, and a review commit may already be shared; a
-withdrawal *marker* would work but needs a trailer older gitpr builds cannot read, which
+git-pair runs no `reset`, `rebase` or `push`, and a review commit may already be shared; a
+withdrawal *marker* would work but needs a trailer older git-pair builds cannot read, which
 would leave two versions of the tool disagreeing about one branch. Moving the review ref back
 is not an undo either: state comes from commit trailers, so the submission would still count.
 
@@ -251,12 +253,12 @@ touches `ABOUT.md` or a thread does not — PRD §421 invalidates a marker on a 
 *implementation* commit, and editing the description is not one. Comparing trees rather than
 counting commits is also what keeps merges and rebases from reporting a change that never
 happened. States:
-`WORKING`, `READY`, `BLOCKED`, `FEEDBACK`, `APPROVED`, `CLOSED`. `gitpr status` prints the
+`WORKING`, `READY`, `BLOCKED`, `FEEDBACK`, `APPROVED`, `CLOSED`. `git pair status` prints the
 state plus a one-line `Reason`. There is no state file. (The TUI caches the reviewer's
 per-file marks under the git directory; those are reading progress, not state, and no
 command reports them.)
 
-**Review spans.** `gitpr diff` resolves a span and hands it to git:
+**Review spans.** `git pair diff` resolves a span and hands it to git:
 
 | Option | Range | Question |
 | --- | --- | --- |
@@ -267,7 +269,7 @@ command reports them.)
 | `--base-commit=SHA` | `<commit>..<span end>` | "diff from here", with no need to know the merge base |
 | `--base-ref=NAME` | `<NAME @ its commit>..<span end>` | start at a branch or tag, pinned to where it pointed when you chose it |
 
-**Span labels.** The table above is git's spelling, because that is the range git is handed. What gitpr prints is a label for the same span — and in a label the working-tree end is `current`, not `HEAD`:
+**Span labels.** The table above is git's spelling, because that is the range git is handed. What git-pair prints is a label for the same span — and in a label the working-tree end is `current`, not `HEAD`:
 `main...current`, `last review..current`, `review -2..current`, `probe@43915ed..8ab932f`. `current`
 is the live end — the newest commit *plus* your uncommitted edits — spelled that way rather than
 `HEAD` because the live/historical split of the whole screen turns on this endpoint, and `HEAD` names
@@ -286,23 +288,23 @@ that commit, and the screen marks itself `HISTORICAL · READ ONLY`.
 | `--head-ref=NAME` | `<span start>..<NAME @ its commit>` | a range measured to where a branch pointed when you chose it |
 
 `--since-review` with no value means `-1`, and so does `--base-review`; indexes are chronological
-(`0` first, `-1` latest) and match `gitpr review history`. `--unreviewed`, `--since-review` and the
+(`0` first, `-1` latest) and match `git pair review history`. `--unreviewed`, `--since-review` and the
 three `--base-*` flags all name the start of the span, so they are mutually exclusive — two of them
 disagreeing is a command to fix, not a precedence to remember.
 
 Those spans answer the reviewer's questions. The author's question — *what did the reviewer
-just tell me?* — is `gitpr change feedback`, which diffs the submission itself
+just tell me?* — is `git pair change feedback`, which diffs the submission itself
 (`review^..review`) and so shows the threads, the `ABOUT.md` edits and any code the reviewer
 edited in one place. Immediately after a submission the two disagree completely:
 `--unreviewed` is empty, because the submission *is* the newest commit.
 
-Waiting for that submission is a command rather than a notification. `gitpr change wait`
+Waiting for that submission is a command rather than a notification. `git pair change wait`
 re-derives the state on an interval and exits when it leaves `READY`; `--fetch` runs
 `git fetch` before each check, so a review pushed from another clone arrives the way every
 other commit does — through the repository, with no forge integration and no daemon.
 
 Coming back to a changeset you already reviewed is common enough to have its own command:
-`gitpr review reopen` opens the TUI on the `<last review>..current` span, the same span as
+`git pair review reopen` opens the TUI on the `<last review>..current` span, the same span as
 `review open --unreviewed`. When nothing has been committed since that submission there is
 nothing after it to show, so the session opens instead on what the submission was reviewing:
 the changeset as it stood when it was made, `merge-base(base, review)..<review>^`. The end is
@@ -314,11 +316,11 @@ the full changeset.
 
 The same range applies to source, `ABOUT.md` and
 threads, and the resolved span is always printed to stderr:
-`gitpr diff: last review..current`.
+`git pair diff: last review..current`.
 
 **Review refs.** Every submission moves `refs/reviews/<changeset>` to the exact resulting
 `HEAD`, in the same operation that creates the commit, keeping the whole
-implementation/review/fix chain reachable from garbage collection. `gitpr review close` also
+implementation/review/fix chain reachable from garbage collection. `git pair review close` also
 writes `refs/reviews/archive/<changeset>/<short-sha>` at the pre-close `HEAD`, created only if
 absent and never moved, so re-running close cannot rewrite an archive.
 
@@ -365,7 +367,7 @@ so work you had already staged for another commit stays on your index.
 | Exit code | Meaning | Seen as |
 | --- | --- | --- |
 | 0 | success | — |
-| 1 | a gitpr rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot close <cs>: latest outcome is BLOCKED`; `changeset <cs> is already closed`; `cannot resolve changeset base "vanished"`; submitting to a closed changeset; `change wait` timing out, or refusing a changeset that is `WORKING` |
+| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot close <cs>: latest outcome is BLOCKED`; `changeset <cs> is already closed`; `cannot resolve changeset base "vanished"`; submitting to a closed changeset; `change wait` timing out, or refusing a changeset that is `WORKING` |
 | 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`; `no changeset for this branch`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
@@ -378,7 +380,7 @@ the invocation itself was wrong, so retrying unchanged will fail again.
 Output is indented two spaces, and empty lists may serialise as `null` rather than `[]`
 (`review queue`, `review submit`'s `files`), so test for both.
 
-`gitpr status --json`, waiting for the first review. Once a review exists `latest_review`
+`git pair status --json`, waiting for the first review. Once a review exists `latest_review`
 becomes `{"index": 0, "outcome": "block", "commit": "332887c"}`; `unrecognised_markers` (a
 list of `<sha> <subject>`) appears only when non-empty. Once the changeset is closed,
 `archive_ref` names the immutable archive ref — the newest `refs/reviews/archive/<cs>/*`
@@ -400,11 +402,11 @@ reachable from `HEAD`, which is the approved commit rather than the close marker
   "reviews": 0,
   "reason": "marked ready by 8065dae",
   "span": "main...current",
-  "next_action": "waiting for a reviewer: `gitpr review open` (author: `gitpr change wait` to block on it)"
+  "next_action": "waiting for a reviewer: `git pair review open` (author: `git pair change wait` to block on it)"
 }
 ```
 
-`gitpr review queue --json` — `head` and `ready_commit` are full SHAs, and `skipped` names
+`git pair review queue --json` — `head` and `ready_commit` are full SHAs, and `skipped` names
 changeset directories the queue could not classify (`null` when empty).
 
 ```json
@@ -425,7 +427,7 @@ changeset directories the queue could not classify (`null` when empty).
 }
 ```
 
-`gitpr review history --json`
+`git pair review history --json`
 
 ```json
 {
@@ -445,7 +447,7 @@ changeset directories the queue could not classify (`null` when empty).
 }
 ```
 
-`gitpr review submit --approve --json`, on a clean tree and the first review
+`git pair review submit --approve --json`, on a clean tree and the first review
 (`previous_review` is the full SHA of the submission this one supersedes, empty when there
 is none)
 
@@ -455,7 +457,7 @@ is none)
   "commit": "941266b18686624cb624722b4e8c348bf03451a7",
   "empty": true,
   "files": null,
-  "next_action": "`gitpr review close` before squash/merge",
+  "next_action": "`git pair review close` before squash/merge",
   "outcome": "approve",
   "previous_review": "",
   "review_ref": "refs/reviews/feat",
@@ -463,7 +465,7 @@ is none)
 }
 ```
 
-`gitpr review close --json`
+`git pair review close --json`
 
 ```json
 {
@@ -479,10 +481,10 @@ is none)
 }
 ```
 
-`gitpr change ready --json` returns the `status` fields plus `ready_commit` (full SHA),
+`git pair change ready --json` returns the `status` fields plus `ready_commit` (full SHA),
 `review_queue_visible`, `acknowledged_survivors` and `surviving_review_artifacts`.
 
-`gitpr change wait --json` — states are spelled as `status` spells them. `ref` is where the
+`git pair change wait --json` — states are spelled as `status` spells them. `ref` is where the
 activity appeared: `HEAD`, or a remote-tracking branch when it was found with `--fetch` and
 has not been brought into this branch yet. `review_commit` and `review_commit_full` appear
 only when a review submission is what ended the wait. `timed_out` is the difference between
@@ -499,7 +501,7 @@ only when a review submission is what ended the wait. `timed_out` is the differe
   "fetches": 3,
   "waited_seconds": 91,
   "timed_out": false,
-  "next_action": "`gitpr change feedback`; feedback is non-blocking, `gitpr review close` when integration is due"
+  "next_action": "`git pair change feedback`; feedback is non-blocking, `git pair review close` when integration is due"
 }
 ```
 
@@ -508,16 +510,16 @@ only when a review submission is what ended the wait. `timed_out` is the differe
 The non-interactive loop from PRD §22:
 
 ```bash
-gitpr change init --base main --about "$ABOUT"   # once, on a named branch
-gitpr status --json              # read state and next_action without blocking
-gitpr diff                       # see the whole changeset
+git pair change init --base main --about "$ABOUT"   # once, on a named branch
+git pair status --json              # read state and next_action without blocking
+git pair diff                       # see the whole changeset
 # implement and commit with ordinary git
-gitpr change ready               # hand off to the reviewer
-gitpr change wait --fetch --json # block until a reviewer acts; exits 1 on --timeout
-gitpr change feedback            # read that submission: threads, ABOUT.md, code edits
+git pair change ready               # hand off to the reviewer
+git pair change wait --fetch --json # block until a reviewer acts; exits 1 on --timeout
+git pair change feedback            # read that submission: threads, ABOUT.md, code edits
 # address feedback in code, ABOUT.md and threads; commit normally
-gitpr review history --json      # enumerate review commits
-gitpr change ready               # again
+git pair review history --json      # enumerate review commits
+git pair change ready               # again
 ```
 
 Never prompt: `change init`, `change ready`, `change feedback`, `change wait`, `status`,
@@ -534,19 +536,19 @@ character device, so redirecting to `/dev/null` does not produce this refusal �
 `review about` launch the
 real editor.
 
-An agent must not approve its own work. `gitpr review submit --approve` is a reviewer action
-and nothing in gitpr checks who ran it — identity and permissions are out of scope, so keeping
+An agent must not approve its own work. `git pair review submit --approve` is a reviewer action
+and nothing in git-pair checks who ran it — identity and permissions are out of scope, so keeping
 approval on the human side of the pair is a convention you enforce. When an agent records
-progress it uses `gitpr change ready`.
+progress it uses `git pair change ready`.
 
 ## Configuration
 
-The editor is whatever git would use: gitpr asks git with `git var GIT_EDITOR`, so the
+The editor is whatever git would use: git-pair asks git with `git var GIT_EDITOR`, so the
 precedence is git's — `GIT_EDITOR`, then `core.editor`, then `VISUAL`, then `EDITOR`, then
 whatever fallback the git build was configured with. `git config core.editor vim` is therefore
 enough, including when it is set in the repository rather than globally, and a caller that
 injects `GIT_EDITOR` (a hook, another tool) is honoured the way every other git consumer
-honours it. Only when git cannot answer does gitpr fall back to `$VISUAL`, then `$EDITOR`, then
+honours it. Only when git cannot answer does git-pair fall back to `$VISUAL`, then `$EDITOR`, then
 `vi`. Automated harnesses must clear `GIT_EDITOR` along with `VISUAL`/`EDITOR`, and every editor
 probe should be wrapped in `timeout`, because an editor that takes the terminal and is never
 driven will block forever.
@@ -558,7 +560,7 @@ program path containing a literal space needs quoting inside the value
 with the repository root as its working directory and receives the absolute path of the file.
 
 Diff viewing goes through git, so git configuration decides what you see, e.g.
-`git config diff.tool vimdiff`. `gitpr diff --tool` and the TUI's `Enter` key both run
+`git config diff.tool vimdiff`. `git pair diff --tool` and the TUI's `Enter` key both run
 `git difftool --no-prompt <from> -- <paths>` — one revision, so the tool compares the span's
 start against your **working tree** instead of two blobs. That is what makes the right-hand
 buffer the real file: edits persist, and changes you made with `e` show up when you open the
@@ -575,11 +577,11 @@ When the tool closes, the session clears the screen it shares with the tool and 
 when the session ends the screen you were on comes back exactly as it was, scrollback
 included.
 The printed and `--stat` diffs stay on the committed span, because they describe review state
-while the tool is for working on it. Plain `gitpr diff` runs `git diff` with
+while the tool is for working on it. Plain `git pair diff` runs `git diff` with
 `core.quotePath=false` and inherits your pager and colour settings; the span label goes to
 stderr so stdout stays pipeable.
 
-`gitpr review open` is an orchestration screen, not an editor. The changed files and their
+`git pair review open` is an orchestration screen, not an editor. The changed files and their
 marks come first, the reviewed counter under them, then the changeset documents:
 
 ```text
@@ -634,7 +636,7 @@ rows.
 
 On a wide terminal the list shares the screen with a preview. From 100 columns and 16 rows the
 session puts a column beside the list showing the diff of whatever the cursor is on — the span's
-diff, the same one `gitpr diff` and the reviewed counter describe — with git's own `+N −M` in its
+diff, the same one `git pair diff` and the reviewed counter describe — with git's own `+N −M` in its
 header. The list takes the width its own paths need, up to 48 columns, and the diff gets the rest:
 a changeset of short names is not made to share the screen with whitespace, and one long vendored
 path cannot take the diff's columns. `ctrl-f` and `ctrl-b` page through a diff too long to fit, and the note along the bottom says how
@@ -682,7 +684,7 @@ shortcut bar lists only what still works. Pressing a key that does not work says
 the span is stuck on, and points at `V`, which is how you choose a span you can review — `v` walks the
 session's spans and cannot promise where it lands. The difftool
 over a historical span compares its two pinned commits rather than your working tree, so it cannot
-show you work the span does not contain. `gitpr diff` takes the same flags and just prints; the
+show you work the span does not contain. `git pair diff` takes the same flags and just prints; the
 read-only half is about the screen, where the mistakes would be made.
 
 `V` opens the span picker, where both ends are chosen before either takes effect: `Tab` moves between
@@ -739,7 +741,7 @@ external program runs and the repository is re-scanned afterwards, so a reviewed
 only while that file's diff within the span is unchanged.
 
 Marks also survive quitting: they are written under the repository's git directory at
-`$(git rev-parse --absolute-git-dir)/gitpr/marks/<changeset>/<commit>.json`, keyed on the commit
+`$(git rev-parse --absolute-git-dir)/git-pair/marks/<changeset>/<commit>.json`, keyed on the commit
 the review was looking at, with each file's diff key stored beside it. Reopening the same commit
 restores exactly the marks whose files still have that content, so a new commit, a rebase, or a
 different span cannot bring back a mark that no longer describes anything, and clearing every mark
@@ -752,7 +754,7 @@ kept.
 
 `cannot resolve changeset base "main": unknown revision: main` (exit 1) — the `base` in
 `CHANGESET.yaml` is not a ref in this repository (renamed trunk, fresh clone, merged stack).
-gitpr never guesses a base: edit the file, or `gitpr change init --base <ref> --set-base`.
+git-pair never guesses a base: edit the file, or `git pair change init --base <ref> --set-base`.
 From `change init` with no `--base`: `cannot infer a base: no main or master branch exists;
 pass --base <ref>` (exit 2).
 
@@ -770,19 +772,19 @@ the ref, not the commit: a branch created a moment ago shares `main`'s tip and i
 acknowledge them deliberately:
 
 ```bash
-gitpr change ready --allow-surviving-review-additions
-gitpr review close --allow-surviving-review-additions
+git pair change ready --allow-surviving-review-additions
+git pair review close --allow-surviving-review-additions
 ```
 
 Only the most recent review counts, and only additions outside `changesets/<changeset>/`
 block; surviving `ABOUT.md` and thread text is listed as non-blocking.
 
-```opening an editor needs a terminal```, ``` `gitpr review open` needs a terminal ``` and
-``` `gitpr review reopen` needs a terminal ``` (exit 2) — both stdin and stdout must be
+```opening an editor needs a terminal```, ``` `git pair review open` needs a terminal ``` and
+``` `git pair review reopen` needs a terminal ``` (exit 2) — both stdin and stdout must be
 character devices. Under an agent, a pipe or cron, edit the
-files directly and use `gitpr diff`, `gitpr status` and `gitpr review submit`.
+files directly and use `git pair diff`, `git pair status` and `git pair review submit`.
 
-`changeset has no review submissions yet; run gitpr diff for the full changeset` (exit 2) —
+`changeset has no review submissions yet; run git pair diff for the full changeset` (exit 2) —
 `--unreviewed` and `--since-review` need a review submission. Out of range:
 `no review at index 9: this changeset has 1 review(s) (valid: 0..0 or -1..-1)`.
 
@@ -799,7 +801,7 @@ instead.
 branch first` (exit 2) — the directory is named after the branch, so renaming a branch orphans
 its changeset and a detached HEAD has no name.
 
-A missing entry in `gitpr review queue` is usually not a queue bug: membership is derived
+A missing entry in `git pair review queue` is usually not a queue bug: membership is derived
 state, and a code change after the ready marker returns the changeset to `WORKING` (a commit
 touching only `ABOUT.md` or a thread leaves it `READY`).
 A hand-written ready marker counts only if `GitPR-State: ready` and `GitPR-Changeset: <slug>`

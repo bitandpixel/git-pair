@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Spike: validate the git plumbing gitpr needs, independent of implementation language.
+# Spike: validate the git plumbing git-pair needs, independent of implementation language.
 # Run: bash docs/plans/completed/gitpr-mvp/research/spike-git-plumbing.sh
 set -uo pipefail
 
-T=$(mktemp -d /tmp/gitpr-spike.XXXXXX)
+T=$(mktemp -d /tmp/git-pair-spike.XXXXXX)
 trap 'rm -rf "$T"' EXIT
 cd "$T"
 git init -q -b main .

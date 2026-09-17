@@ -7,7 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
-	"gitpr/internal/span"
+	"gitpair/internal/span"
 )
 
 // The shortcut helper is the only place the TUI names its keys, so a narrow window has to

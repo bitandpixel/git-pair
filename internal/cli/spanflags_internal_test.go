@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/span"
+	"gitpair/internal/span"
 )
 
 // The span flags are the contract between a script and a screen: the same span has to be nameable
-// with `gitpr diff --base-ref=…` and with `gitpr review open --base-ref=…`, and a bad combination
+// with `git pair diff --base-ref=…` and with `git pair review open --base-ref=…`, and a bad combination
 // has to refuse the same way from either. `review open` cannot be run in a test — it asks for a
 // terminal and refuses without one — so this checks the two places the contract actually lives:
 // the flags a command registers, and the validation a selector runs before anything opens.
@@ -28,10 +28,10 @@ func TestReviewOpenRegistersEverySpanFlagDiffDoes(t *testing.T) {
 
 	for _, name := range spanFlagNames {
 		if diff.Flags().Lookup(name) == nil {
-			t.Errorf("gitpr diff has no --%s flag", name)
+			t.Errorf("git pair diff has no --%s flag", name)
 		}
 		if open.Flags().Lookup(name) == nil {
-			t.Errorf("gitpr review open has no --%s flag: a span a script can name would be a span "+
+			t.Errorf("git pair review open has no --%s flag: a span a script can name would be a span "+
 				"the screen cannot", name)
 		}
 	}
@@ -40,7 +40,7 @@ func TestReviewOpenRegistersEverySpanFlagDiffDoes(t *testing.T) {
 	// would be accepted, ignored, and remembered as broken.
 	for _, name := range []string{"stat", "tool"} {
 		if open.Flags().Lookup(name) != nil {
-			t.Errorf("gitpr review open gained a --%s flag it does not act on", name)
+			t.Errorf("git pair review open gained a --%s flag it does not act on", name)
 		}
 	}
 }
@@ -65,7 +65,7 @@ func TestNoSpanFlagMeansTheFullChangeset(t *testing.T) {
 func TestToolFlagHelpNamesBothKindsOfSpan(t *testing.T) {
 	usage := newDiffCommand(&app{}).Flags().Lookup("tool").Usage
 	if usage == "" {
-		t.Fatal("gitpr diff has no --tool flag")
+		t.Fatal("git pair diff has no --tool flag")
 	}
 	for _, want := range []string{"working tree", "historical", "pinned"} {
 		if !strings.Contains(usage, want) {

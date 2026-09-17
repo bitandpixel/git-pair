@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/gittest"
+	"gitpair/internal/gittest"
 )
 
 // TestPRDTwentyNineGoldenWorkflow replays PRD §29 end to end through the CLI only:
@@ -18,7 +18,7 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	f.Commit("seed", gittest.WithFile("main.go", "package main\n\nfunc main() {}\n"))
 	mainBefore := f.RevParse("main")
 
-	// --- author: gitpr change init --base main ---------------------------------
+	// --- author: git pair change init --base main ---------------------------------
 	f.CreateBranch(slug)
 	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
 
@@ -39,7 +39,7 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	f.Write("service_test.go", "package main\n\nfunc TestFinalSeat() {}\n")
 	f.Commit("implement booking transaction locking")
 
-	// --- author: gitpr change ready -------------------------------------------
+	// --- author: git pair change ready -------------------------------------------
 	ready(t, f)
 
 	queue := runIn(t, f.Dir(), "review", "queue", "--json")
@@ -80,7 +80,7 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	f.Commit("author: wrap offering creation in a transaction", gittest.WithFile("service.go",
 		"package main\n\nfunc CreateOffering() { transaction() }\n\n"+blockingTwo+"\nfunc Enroll() {}\n"))
 
-	// --- author: gitpr change ready must refuse and name the survivor ----------
+	// --- author: git pair change ready must refuse and name the survivor ----------
 	res := runIn(t, f.Dir(), "change", "ready")
 	if res.code != exitRefusal {
 		t.Fatalf("change ready exited %d, want %d\nstdout: %s\nstderr: %s",
@@ -89,9 +89,9 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	mustContain(t, res.stderr, "service.go", "the refusal must name the file")
 	mustContain(t, res.stderr, blockingTwo, "the refusal must print the surviving addition")
 	mustContain(t, res.stderr, "1 addition from review", "the refusal must count the survivors")
-	mustContain(t, res.stderr, "gitpr change ready --allow-surviving-review-additions",
+	mustContain(t, res.stderr, "git pair change ready --allow-surviving-review-additions",
 		"the refusal must print the override")
-	if got := f.Subject(f.Head()); strings.HasPrefix(got, "gitpr: ready") {
+	if got := f.Subject(f.Head()); strings.HasPrefix(got, "git-pair: ready") {
 		t.Error("a ready marker was created despite the surviving addition")
 	}
 	if rows := runIn(t, f.Dir(), "review", "queue", "--json").jsonList(t, "ready_for_review"); len(rows) != 0 {
@@ -115,7 +115,7 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 
 	// The reviewer's thread text survives (answering a thread by appending keeps the
 	// question), and that alone must not block readiness (plan D3).
-	if got := f.Subject(f.Head()); got != "gitpr: ready "+slug {
+	if got := f.Subject(f.Head()); got != "git-pair: ready "+slug {
 		t.Fatalf("HEAD = %q, want the ready marker", got)
 	}
 
@@ -150,15 +150,15 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 
 	// The history is the noisy-but-honest lifecycle PRD §2.3 describes, in order.
 	want := []string{
-		"gitpr: initialize changeset " + slug,
+		"git-pair: initialize changeset " + slug,
 		"implement booking transaction locking",
-		"gitpr: ready " + slug,
+		"git-pair: ready " + slug,
 		"review: block " + slug,
 		"author: wrap offering creation in a transaction",
 		"author: synchronise both transactions before the capacity read",
-		"gitpr: ready " + slug,
+		"git-pair: ready " + slug,
 		"review: approve " + slug,
-		"gitpr: close " + slug,
+		"git-pair: close " + slug,
 	}
 	if got := f.SubjectsAbove("main", "HEAD"); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("commit sequence =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

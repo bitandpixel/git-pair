@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/git"
-	"gitpr/internal/gittest"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/model"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/model"
 )
 
 func repo(f *gittest.Fixture) *git.Repo { return &git.Repo{Dir: f.Dir()} }
@@ -174,25 +174,25 @@ func TestSummarizeMalformedAndMismatchedTrailersAreImplementation(t *testing.T) 
 	tests := []struct {
 		name    string
 		message string
-		// wantWarn is whether gitpr can see the malformed trailer at all. When a
+		// wantWarn is whether git-pair can see the malformed trailer at all. When a
 		// hand-written trailer block is not a valid trailer block, git's own
-		// `%(trailers)` expansion reports nothing, so gitpr cannot warn about it
+		// `%(trailers)` expansion reports nothing, so git-pair cannot warn about it
 		// either; what matters is that no state is established.
 		wantWarn bool
 	}{
 		{
 			name:     "ready marker for a different changeset",
-			message:  "gitpr: ready other-changeset\n\nGitPR-State: ready\nGitPR-Changeset: other-changeset\n",
+			message:  "git-pair: ready other-changeset\n\nGitPR-State: ready\nGitPR-Changeset: other-changeset\n",
 			wantWarn: true,
 		},
 		{
 			name:     "ready marker with no changeset trailer",
-			message:  "gitpr: ready booking\n\nGitPR-State: ready\n",
+			message:  "git-pair: ready booking\n\nGitPR-State: ready\n",
 			wantWarn: true,
 		},
 		{
 			name:     "unknown state value",
-			message:  "gitpr: ready booking\n\nGitPR-State: READY\nGitPR-Changeset: booking\n",
+			message:  "git-pair: ready booking\n\nGitPR-State: READY\nGitPR-Changeset: booking\n",
 			wantWarn: true,
 		},
 		{

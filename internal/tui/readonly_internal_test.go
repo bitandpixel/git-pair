@@ -7,11 +7,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/git"
-	"gitpr/internal/gittest"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/span"
+	"gitpair/internal/changeset"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/span"
 )
 
 // A span whose head is a commit is a look at history. Everything here is about the

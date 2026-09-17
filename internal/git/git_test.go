@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/git"
-	"gitpr/internal/gittest"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
 )
 
 // `git rev-parse --verify --quiet <rev>` reports an unresolvable revision by exiting 1

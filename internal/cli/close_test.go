@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/gittest"
+	"gitpair/internal/gittest"
 )
 
 // approvedChangeset drives a changeset to APPROVED on a clean tree and returns the
@@ -60,8 +60,8 @@ func TestReviewCloseArchivesAndMarksClosed(t *testing.T) {
 	if head == approve {
 		t.Fatal("close created no commit")
 	}
-	if got := f.Subject(head); got != "gitpr: close "+slug {
-		t.Errorf("subject = %q, want %q", got, "gitpr: close "+slug)
+	if got := f.Subject(head); got != "git-pair: close "+slug {
+		t.Errorf("subject = %q, want %q", got, "git-pair: close "+slug)
 	}
 	trailers := f.Trailers(head)
 	if trailers["GitPR-State"] != "closed" {
@@ -164,7 +164,7 @@ func TestReviewCloseSurvivalGate(t *testing.T) {
 	}
 	mustContain(t, res.stderr, "service.go", "the report must name the file")
 	mustContain(t, res.stderr, comment, "the report must print the surviving addition")
-	mustContain(t, res.stderr, "gitpr review close --allow-surviving-review-additions",
+	mustContain(t, res.stderr, "git pair review close --allow-surviving-review-additions",
 		"PRD §19.3 names the override")
 	if f.Head() != before {
 		t.Error("a refused close created a commit")
@@ -176,7 +176,7 @@ func TestReviewCloseSurvivalGate(t *testing.T) {
 	// The explicit acknowledgement lets the reviewer close anyway.
 	runIn(t, f.Dir(), "review", "close", "--allow-surviving-review-additions").
 		mustSucceed(t, "review", "close", "--allow-surviving-review-additions")
-	if got := f.Subject(f.Head()); got != "gitpr: close booking" {
+	if got := f.Subject(f.Head()); got != "git-pair: close booking" {
 		t.Errorf("HEAD = %q, want the close marker", got)
 	}
 }
@@ -219,7 +219,7 @@ func TestReviewCloseRefusedAfterImplementationCommitFollowsApprove(t *testing.T)
 }
 
 // PRD §10.7: "It must not merge, push, or squash by default." Observed in git state:
-// no other branch moves, no merge commit appears, and the only new refs are gitpr's
+// no other branch moves, no merge commit appears, and the only new refs are git-pair's
 // own review refs.
 func TestReviewCloseDoesNotMergePushOrSquash(t *testing.T) {
 	f, slug, _, approve := approvedChangeset(t)
@@ -243,13 +243,13 @@ func TestReviewCloseDoesNotMergePushOrSquash(t *testing.T) {
 	// none of them is a merge.
 	for _, sha := range f.RevList(reviewRef(slug)) {
 		if parents := f.ParentCount(sha); parents > 1 {
-			t.Errorf("%s has %d parents: gitpr created a merge commit", sha, parents)
+			t.Errorf("%s has %d parents: git-pair created a merge commit", sha, parents)
 		}
 	}
 	if got := f.RevListCount(reviewRef(slug)); got < 5 {
 		t.Errorf("the review ref reaches %d commits, want the unsquashed chain", got)
 	}
-	// The only refs gitpr created are the movable ref and the archive ref.
+	// The only refs git-pair created are the movable ref and the archive ref.
 	for _, ref := range f.RefNames("refs/reviews") {
 		if ref != reviewRef(slug) && ref != archivePattern(slug)+"/"+f.Short(approve) {
 			t.Errorf("unexpected ref created by close: %s", ref)

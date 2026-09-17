@@ -3,7 +3,7 @@ package model_test
 import (
 	"testing"
 
-	"gitpr/internal/model"
+	"gitpair/internal/model"
 )
 
 // PRD §23 defines which outcomes let a changeset proceed to integration. Close
@@ -78,7 +78,7 @@ func TestOutcomeValid(t *testing.T) {
 	}
 }
 
-// The trailer keys below are the whole machine-readable contract between gitpr's
+// The trailer keys below are the whole machine-readable contract between git-pair's
 // commits and any agent reading them (PRD §9.2, §10.4, §23), so their exact
 // spelling is pinned here.
 func TestTrailerVocabulary(t *testing.T) {

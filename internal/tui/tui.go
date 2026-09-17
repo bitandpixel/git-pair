@@ -16,10 +16,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"gitpr/internal/console"
-	gitmodel "gitpr/internal/model"
-	"gitpr/internal/reviewops"
-	"gitpr/internal/span"
+	"gitpair/internal/console"
+	gitmodel "gitpair/internal/model"
+	"gitpair/internal/reviewops"
+	"gitpair/internal/span"
 )
 
 // ErrQuit is returned when the reviewer leaves the session normally.

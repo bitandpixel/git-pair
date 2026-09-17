@@ -41,7 +41,7 @@ func TestChangeFeedbackShowsTheReviewItself(t *testing.T) {
 			}
 		}
 		// The human header is a note, not part of the machine-readable list.
-		if strings.Contains(got.stdout, "gitpr change feedback:") {
+		if strings.Contains(got.stdout, "git pair change feedback:") {
 			t.Errorf("the header belongs on stderr, not in --name-only output:\n%s", got.stdout)
 		}
 		if !strings.Contains(got.stderr, "(feedback)") {
@@ -121,7 +121,7 @@ func TestChangeWaitReturnsAtOnceWhenAReviewIsAlreadyIn(t *testing.T) {
 	out := got.json(t)
 	// Nothing changed while it waited, so both sides of the comparison say the same
 	// thing; an agent that re-runs the command gets the truth, not a fake transition.
-	// The spelling matches `gitpr status --json`, so one comparison works across commands.
+	// The spelling matches `git pair status --json`, so one comparison works across commands.
 	if out["previous_state"] != "BLOCKED" {
 		t.Errorf("previous_state = %v, want %q", out["previous_state"], "BLOCKED")
 	}
@@ -170,7 +170,7 @@ func TestChangeWaitTimeoutReportsWhereThingsStand(t *testing.T) {
 	}
 	// --json says everything on stdout: a timeout is data (`timed_out`), not an error
 	// message, so stderr stays quiet and only the exit code reports it.
-	if strings.Contains(got.stderr, "gitpr:") {
+	if strings.Contains(got.stderr, "git-pair:") {
 		t.Errorf("a JSON timeout should keep stderr clean:\n%s", got.stderr)
 	}
 	out := got.json(t)

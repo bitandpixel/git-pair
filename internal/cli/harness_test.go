@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/cli"
-	"gitpr/internal/gittest"
+	"gitpair/internal/changeset"
+	"gitpair/internal/cli"
+	"gitpair/internal/gittest"
 )
 
 // Exit codes are the agent-facing contract (plan: "Stable for agents"). They are
@@ -29,7 +29,7 @@ var stdio = struct {
 	stdout, stderr, stdin *os.File
 }{stdout: os.Stdout, stderr: os.Stderr, stdin: os.Stdin}
 
-// result is one `gitpr` invocation.
+// result is one `git-pair` invocation.
 type result struct {
 	code   int
 	stdout string
@@ -66,16 +66,16 @@ func (r result) jsonList(t *testing.T, key string) []any {
 func (r result) mustSucceed(t *testing.T, args ...string) result {
 	t.Helper()
 	if r.code != exitOK {
-		t.Fatalf("gitpr %s exited %d\nstdout: %s\nstderr: %s", strings.Join(args, " "), r.code, r.stdout, r.stderr)
+		t.Fatalf("git-pair %s exited %d\nstdout: %s\nstderr: %s", strings.Join(args, " "), r.code, r.stdout, r.stderr)
 	}
 	return r
 }
 
-// run executes `gitpr` with the given arguments in the current working directory.
+// run executes `git-pair` with the given arguments in the current working directory.
 //
 // The output streams are regular files, and stdin is /dev/null: console.Interactive()
 // is therefore false, so the editor/difftool-backed commands refuse instead of
-// hanging, and git's own output (which `gitpr diff` delegates to) still lands in the
+// hanging, and git's own output (which `git pair diff` delegates to) still lands in the
 // captured stdout.
 func run(t *testing.T, args ...string) result {
 	t.Helper()
@@ -176,9 +176,9 @@ func newRepo(t *testing.T) *gittest.Fixture {
 }
 
 // newChangeset builds a repository whose branch has a committed changeset directory
-// and one implementation commit, ready for `gitpr change ready`.
+// and one implementation commit, ready for `git pair change ready`.
 //
-// The scaffolding is written by the fixture rather than by `gitpr change init` so
+// The scaffolding is written by the fixture rather than by `git pair change init` so
 // that a broken init only fails the tests that exercise it. change_test.go covers
 // the product's own scaffolding.
 func newChangeset(t *testing.T, branch, base string) (*gittest.Fixture, string) {
@@ -236,5 +236,5 @@ func mustNotContain(t *testing.T, haystack, needle, what string) {
 
 func describe(t *testing.T, res result, args ...string) {
 	t.Helper()
-	t.Logf("gitpr %s -> %d\nstdout:\n%s\nstderr:\n%s", strings.Join(args, " "), res.code, res.stdout, res.stderr)
+	t.Logf("git-pair %s -> %d\nstdout:\n%s\nstderr:\n%s", strings.Join(args, " "), res.code, res.stdout, res.stderr)
 }

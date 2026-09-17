@@ -11,13 +11,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/console"
-	"gitpr/internal/git"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/marker"
-	"gitpr/internal/model"
-	"gitpr/internal/survival"
+	"gitpair/internal/changeset"
+	"gitpair/internal/console"
+	"gitpair/internal/git"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/marker"
+	"gitpair/internal/model"
+	"gitpair/internal/survival"
 )
 
 func newChangeCommand(a *app) *cobra.Command {
@@ -61,15 +61,15 @@ tree for your first implementation commit instead.
 ABOUT.md gets a scaffold with the standard review headings unless you supply
 content, which makes describe-and-initialise a single non-interactive call:
 
-  gitpr change init --base main --about "$DESCRIPTION"
-  gitpr change init --base main --about - < about.md
-  cat about.md | gitpr change init --base main
+  git pair change init --base main --about "$DESCRIPTION"
+  git pair change init --base main --about - < about.md
+  cat about.md | git pair change init --base main
 
 Existing content is never overwritten silently: replacing a populated ABOUT.md
 takes --set-about, the same way changing a base takes --set-base.`,
-		Example: `  gitpr change init --base main
-  gitpr change init --base booking-transaction   # stacked branch
-  gitpr change init --base main --about - < draft.md`,
+		Example: `  git pair change init --base main
+  git pair change init --base booking-transaction   # stacked branch
+  git pair change init --base main --about - < draft.md`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runChangeInit(cmd.Context(), a, opts)
@@ -93,7 +93,7 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		return err
 	}
 	if branch == "" {
-		return &usageError{fmt.Errorf("%w: run `git switch -c <branch>` before `gitpr change init`", changeset.ErrDetachedHead)}
+		return &usageError{fmt.Errorf("%w: run `git switch -c <branch>` before `git pair change init`", changeset.ErrDetachedHead)}
 	}
 	cs, err := changeset.ForBranch(repo, branch)
 	if err != nil {
@@ -169,7 +169,7 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		return nil
 	}
 	sha, err := marker.CommitPaths(ctx, repo, marker.Message{
-		Subject:  fmt.Sprintf("gitpr: initialize changeset %s", cs.Slug),
+		Subject:  fmt.Sprintf("git-pair: initialize changeset %s", cs.Slug),
 		Trailers: []string{"GitPR-Changeset=" + cs.Slug},
 	}, []string{cs.Dir})
 	if err != nil {
@@ -211,10 +211,10 @@ func aboutContent(opts *initOptions) (string, error) {
 
 func printInitNext(a *app, cs changeset.Changeset, described bool) {
 	if described {
-		a.printf("\nNext: implement, commit, then run `gitpr change ready`.\n")
+		a.printf("\nNext: implement, commit, then run `git pair change ready`.\n")
 		return
 	}
-	a.printf("\nNext: fill in %s, commit it with your implementation, then run `gitpr change ready`.\n", cs.AboutPath())
+	a.printf("\nNext: fill in %s, commit it with your implementation, then run `git pair change ready`.\n", cs.AboutPath())
 }
 
 func plural(n int, one, many string) string {
@@ -254,9 +254,9 @@ found and exits non-zero rather than asking questions.
 
 Any later implementation commit makes this marker stale and returns the
 changeset to WORKING.`,
-		Example: `  gitpr change ready
-  gitpr change ready --allow-surviving-review-additions
-  gitpr change ready --json`,
+		Example: `  git pair change ready
+  git pair change ready --allow-surviving-review-additions
+  git pair change ready --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runChangeReady(cmd.Context(), a, opts)
@@ -300,7 +300,7 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 	if report != nil && !report.Clean() && !opts.allowSurviving {
 		printSurvivalReport(a.stderr, *report,
 			fmt.Sprintf("Cannot mark changeset %s ready.", s.cs.Slug),
-			"gitpr change ready --allow-surviving-review-additions")
+			"git pair change ready --allow-surviving-review-additions")
 		printArtifactSurvivals(a.stderr, *report)
 		return fmt.Errorf("cannot mark changeset %s ready: %d review addition(s) from %s still survive unchanged",
 			s.cs.Slug, len(report.Code), report.ReviewShort)
@@ -348,7 +348,7 @@ func printReady(a *app, s *session, sha string, report *survival.Report, acknowl
 	a.printf("Ready: %s\n", s.cs.Slug)
 	a.printf("  head:  %s\n", short(sha))
 	a.printf("  base:  %s\n", s.cs.Base)
-	a.printf("  queue: `gitpr review queue` now lists this changeset\n")
+	a.printf("  queue: `git pair review queue` now lists this changeset\n")
 }
 
 // aboutIsTemplate reports whether ABOUT.md is byte-identical to the scaffold,
@@ -402,15 +402,15 @@ This is the author's command for consuming review feedback. It shows everything 
 reviewer introduced — source edits, added comments, ABOUT.md changes, new threads and
 replies to existing ones — through git's own diff plumbing, with no custom renderer.
 
-` + "`gitpr diff --unreviewed`" + ` is the reviewer's command and answers a different question:
+` + "`git pair diff --unreviewed`" + ` is the reviewer's command and answers a different question:
 ` + "`<last review>..current`" + `, what changed *after* the review. Immediately after a submission
 that span is empty, because the review commit is the newest thing on the branch, so it cannot be
 how an author reads the feedback that was just written.
 
 Exits non-zero when the changeset has no review submission yet.`,
-		Example: `  gitpr change feedback
-  gitpr change feedback --stat
-  gitpr change feedback --name-only`,
+		Example: `  git pair change feedback
+  git pair change feedback --stat
+  git pair change feedback --name-only`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runChangeFeedback(cmd.Context(), a, opts)
@@ -433,7 +433,7 @@ func runChangeFeedback(ctx context.Context, a *app, opts *feedbackOptions) error
 	if review == nil {
 		return &usageError{fmt.Errorf(
 			"changeset %s has no review submission yet, so there is no feedback to read; "+
-				"`gitpr change wait` blocks until a reviewer submits one", s.cs.Slug)}
+				"`git pair change wait` blocks until a reviewer submits one", s.cs.Slug)}
 	}
 	from, err := reviewParent(ctx, s.repo, review)
 	if err != nil {
@@ -444,7 +444,7 @@ func runChangeFeedback(ctx context.Context, a *app, opts *feedbackOptions) error
 		return err
 	}
 
-	a.warn("gitpr change feedback: review %s (%s) on %s\n", review.Short, review.Outcome, s.cs.Slug)
+	a.warn("git pair change feedback: review %s (%s) on %s\n", review.Short, review.Outcome, s.cs.Slug)
 	switch {
 	case len(names) == 0:
 		// A review that touches nothing is still a verdict; saying so beats an
@@ -495,9 +495,9 @@ func newChangeWaitCommand(a *app) *cobra.Command {
 Exits when the changeset stops being ready and becomes actionable — BLOCKED, FEEDBACK,
 APPROVED or CLOSED — and prints what happened. Fully non-interactive.
 
-  gitpr change ready
-  gitpr change wait --fetch --interval 30s --json
-  gitpr change feedback
+  git pair change ready
+  git pair change wait --fetch --interval 30s --json
+  git pair change feedback
 
 Without --fetch only local repository state is re-read, which is enough when the reviewer
 works in the same clone. With --fetch every round runs ` + "`git fetch`" + ` against the
@@ -507,9 +507,9 @@ ordinary refs that git fetch brings down.
 
 Exits non-zero if the changeset is not ready to begin with, since then there is nothing to
 wait for, and on timeout. Without --timeout it waits indefinitely.`,
-		Example: `  gitpr change wait
-  gitpr change wait --fetch
-  gitpr change wait --fetch --interval 30s --timeout 2h --json`,
+		Example: `  git pair change wait
+  git pair change wait --fetch
+  git pair change wait --fetch --interval 30s --timeout 2h --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runChangeWait(cmd.Context(), a, opts)
@@ -522,7 +522,7 @@ wait for, and on timeout. Without --timeout it waits indefinitely.`,
 }
 
 // waitResult is what `change wait --json` prints. States use the same spelling as
-// `gitpr status --json`, so an agent can compare what the two commands report.
+// `git pair status --json`, so an agent can compare what the two commands report.
 type waitResult struct {
 	Changeset        string `json:"changeset"`
 	PreviousState    string `json:"previous_state"`
@@ -575,7 +575,7 @@ func runChangeWait(ctx context.Context, a *app, opts *waitOptions) error {
 		return err
 	}
 	if start.State == model.StateWorking {
-		return fmt.Errorf("changeset %s is %s, not ready: `gitpr change ready` puts it in the review queue",
+		return fmt.Errorf("changeset %s is %s, not ready: `git pair change ready` puts it in the review queue",
 			s.cs.Slug, string(start.State))
 	}
 
@@ -598,7 +598,7 @@ func runChangeWait(ctx context.Context, a *app, opts *waitOptions) error {
 	}
 	began := time.Now()
 	if !a.json {
-		a.warn("gitpr: waiting for review activity on %s (every %s%s)\n",
+		a.warn("git-pair: waiting for review activity on %s (every %s%s)\n",
 			s.cs.Slug, interval, fetchNote(remotes))
 	}
 
@@ -609,7 +609,7 @@ func runChangeWait(ctx context.Context, a *app, opts *waitOptions) error {
 				if err := s.repo.Fetch(ctx, remote); err != nil {
 					// A failed fetch is not a reason to stop waiting: the next round
 					// may succeed, and the review could land locally anyway.
-					a.warn("gitpr: fetch %s failed: %s\n", remote, messageOf(err))
+					a.warn("git-pair: fetch %s failed: %s\n", remote, messageOf(err))
 				}
 			}
 			fetches++
@@ -769,7 +769,7 @@ func actionable(s model.State) bool {
 	return false
 }
 
-// stateName is the contract spelling for an agent: the state names `gitpr status --json`
+// stateName is the contract spelling for an agent: the state names `git pair status --json`
 // already prints, so a comparison between the two commands is a comparison of literals.
 func stateName(s model.State) string {
 	return string(s)
@@ -777,29 +777,29 @@ func stateName(s model.State) string {
 
 func waitNextAction(s model.State, ref string) string {
 	if s == "" {
-		return "nothing has changed yet; run `gitpr status --json` to see where things stand"
+		return "nothing has changed yet; run `git pair status --json` to see where things stand"
 	}
 	local := ref == "" || ref == "HEAD"
 	switch s {
 	case model.StateBlocked:
 		if !local {
 			return fmt.Sprintf("the review landed on %s; bring it into this branch with ordinary "+
-				"Git, then `gitpr change feedback`", ref)
+				"Git, then `git pair change feedback`", ref)
 		}
-		return "`gitpr change feedback`, address it, then `gitpr change ready`"
+		return "`git pair change feedback`, address it, then `git pair change ready`"
 	case model.StateFeedback:
 		if !local {
 			return fmt.Sprintf("the review landed on %s; bring it into this branch with ordinary "+
-				"Git, then `gitpr change feedback`", ref)
+				"Git, then `git pair change feedback`", ref)
 		}
-		return "`gitpr change feedback`; feedback is non-blocking, `gitpr review close` when integration is due"
+		return "`git pair change feedback`; feedback is non-blocking, `git pair review close` when integration is due"
 	case model.StateApproved:
-		return "`gitpr review close` before squash/merge"
+		return "`git pair review close` before squash/merge"
 	case model.StateClosed:
 		return "safe to squash/merge; review history is under refs/reviews/"
 	case model.StateReady, model.StateWorking:
 		// Only reachable on a timeout: nothing became actionable.
-		return "still waiting for review activity; run `gitpr change wait` again or check `gitpr status --json`"
+		return "still waiting for review activity; run `git pair change wait` again or check `git pair status --json`"
 	}
 	return ""
 }

@@ -9,11 +9,11 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/git"
-	"gitpr/internal/gittest"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/span"
+	"gitpair/internal/changeset"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/span"
 )
 
 // The preview is only a preview because git does the diffing. This is the one test that runs

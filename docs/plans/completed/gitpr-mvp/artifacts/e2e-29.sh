@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # End-to-end replay of the PRD §29 success workflow against a scratch repo.
-# Usage: bash docs/plans/completed/gitpr-mvp/artifacts/e2e-29.sh /path/to/gitpr
+# Usage: bash docs/plans/completed/gitpr-mvp/artifacts/e2e-29.sh [/path/to/git-pair]
+#        (default: ~/.local/bin/git-pair — run `mise run build` first)
 set -uo pipefail
-G=${1:-/tmp/gitpr}
-T=$(mktemp -d /tmp/gitpr-e2e.XXXXXX)
+G=${1:-$HOME/.local/bin/git-pair}
+T=$(mktemp -d /tmp/git-pair-e2e.XXXXXX)
 trap 'rm -rf "$T"' EXIT
 cd "$T" || exit 1
 git init -q -b main .

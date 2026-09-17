@@ -3,7 +3,7 @@ package cli_test
 import (
 	"testing"
 
-	"gitpr/internal/gittest"
+	"gitpair/internal/gittest"
 )
 
 // PRD §21: "Each stacked branch has its own independent changeset" — its own
@@ -73,7 +73,7 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 	}
 	got := runIn(t, f.Dir(), "diff").mustSucceed(t, "diff")
 	if got.stdout != want {
-		t.Errorf("`gitpr diff` differs from `git diff %s HEAD`", from)
+		t.Errorf("`git pair diff` differs from `git diff %s HEAD`", from)
 	}
 	mustNotContain(t, got.stdout, "+func Lock()", "the lower changeset's implementation must not be in the upper span")
 
@@ -143,7 +143,7 @@ func TestStackedChangesetSpanAfterBaseAdvances(t *testing.T) {
 	}
 	got := runIn(t, f.Dir(), "diff").mustSucceed(t, "diff")
 	if got.stdout != want {
-		t.Errorf("`gitpr diff` differs from `git diff %s HEAD` after the base advanced", own)
+		t.Errorf("`git pair diff` differs from `git diff %s HEAD` after the base advanced", own)
 	}
 	mustNotContain(t, got.stdout, "extra.go", "work on the base branch must not appear in this changeset's diff")
 }

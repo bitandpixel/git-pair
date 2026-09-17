@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"gitpr/internal/console"
-	"gitpr/internal/span"
+	"gitpair/internal/console"
+	"gitpair/internal/span"
 )
 
 func newDiffCommand(a *app) *cobra.Command {
@@ -34,23 +34,23 @@ Either end can be named instead, which is how you look at history:
   --head-ref=NAME        end at a ref, pinned to where it points now
 A historical span is a read-only look: it is history, and history cannot be marked,
 edited, or submitted against. A ref keeps its name and the commit it was pinned to;
-if the branch moves, gitpr can tell you and keep using the pinned commit.
+if the branch moves, git-pair can tell you and keep using the pinned commit.
 
 A review-relative span deliberately includes deletions and edits of lines the
 reviewer added, which is what makes resolution visible: a removed
 "// Please use a transaction here" is the author telling you they handled it.
 
-gitpr renders nothing itself. Output goes through git, so your pager and colour
+git-pair renders nothing itself. Output goes through git, so your pager and colour
 settings apply.`,
-		Example: `  gitpr diff
-  gitpr diff --stat
-  gitpr diff src/booking/service.ts
-  gitpr diff --unreviewed
-  gitpr diff --since-review=-3
-  gitpr diff --since-review=0 -- changesets/
-  gitpr diff --since-review=-2 --head-review=-1
-  gitpr diff --base-ref=main --head-commit=abc1234
-  gitpr diff --base-review=0 --stat`,
+		Example: `  git pair diff
+  git pair diff --stat
+  git pair diff src/booking/service.ts
+  git pair diff --unreviewed
+  git pair diff --since-review=-3
+  git pair diff --since-review=0 -- changesets/
+  git pair diff --since-review=-2 --head-review=-1
+  git pair diff --base-ref=main --head-commit=abc1234
+  git pair diff --base-review=0 --stat`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDiff(cmd.Context(), a, opts, args)
@@ -198,7 +198,7 @@ func runDiff(ctx context.Context, a *app, opts *spanOptions, paths []string) err
 	sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, so)
 	if err != nil {
 		if errors.Is(err, span.ErrNoReviews) {
-			return &usageError{fmt.Errorf("%w; run `gitpr diff` for the full changeset", err)}
+			return &usageError{fmt.Errorf("%w; run `git pair diff` for the full changeset", err)}
 		}
 		return &usageError{err}
 	}
@@ -209,7 +209,7 @@ func runDiff(ctx context.Context, a *app, opts *spanOptions, paths []string) err
 		}
 	}
 
-	a.warn("gitpr diff: %s\n", sp.Label)
+	a.warn("git pair diff: %s\n", sp.Label)
 	if opts.stat {
 		args := append([]string{"diff", "--stat", sp.From, sp.To}, pathArgs(paths)...)
 		return s.repo.GitInherit(ctx, args...)

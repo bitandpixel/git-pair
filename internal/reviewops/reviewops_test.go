@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/git"
-	"gitpr/internal/gittest"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/model"
-	"gitpr/internal/reviewops"
+	"gitpair/internal/changeset"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/model"
+	"gitpair/internal/reviewops"
 )
 
 const slug = "booking-transaction"

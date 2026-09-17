@@ -3,7 +3,7 @@ package cli_test
 import (
 	"testing"
 
-	"gitpr/internal/gittest"
+	"gitpair/internal/gittest"
 )
 
 // The exit codes are the agent-facing half of the CLI contract (plan: "Exit codes:
@@ -23,7 +23,7 @@ func TestExitCodeSuccess(t *testing.T) {
 		{"--help"},
 	} {
 		if res := runIn(t, f.Dir(), args...); res.code != exitOK {
-			t.Errorf("gitpr %v exited %d, want %d\nstderr: %s", args, res.code, exitOK, res.stderr)
+			t.Errorf("git-pair %v exited %d, want %d\nstderr: %s", args, res.code, exitOK, res.stderr)
 		}
 	}
 }
@@ -77,12 +77,12 @@ func TestExitCodeBusinessRuleRefusal(t *testing.T) {
 		for _, args := range [][]string{{"status"}, {"diff"}} {
 			res := runIn(t, f.Dir(), args...)
 			if res.code == exitGit {
-				t.Errorf("gitpr %v exited %d (git error), want %d: an absent revision is a repository fact\nstderr: %s",
+				t.Errorf("git-pair %v exited %d (git error), want %d: an absent revision is a repository fact\nstderr: %s",
 					args, res.code, exitRefusal, res.stderr)
 				continue
 			}
 			if res.code != exitRefusal {
-				t.Errorf("gitpr %v exited %d, want %d\nstderr: %s", args, res.code, exitRefusal, res.stderr)
+				t.Errorf("git-pair %v exited %d, want %d\nstderr: %s", args, res.code, exitRefusal, res.stderr)
 			}
 			mustContain(t, res.stderr, "deleted-base", "the refusal must name the revision it could not resolve")
 		}
@@ -116,7 +116,7 @@ func TestExitCodeUsageError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			res := runIn(t, f.Dir(), tc.args...)
 			if res.code != exitUsage {
-				t.Errorf("gitpr %v exited %d, want %d\nstderr: %s", tc.args, res.code, exitUsage, res.stderr)
+				t.Errorf("git-pair %v exited %d, want %d\nstderr: %s", tc.args, res.code, exitUsage, res.stderr)
 			}
 		})
 	}
@@ -128,7 +128,7 @@ func TestExitCodeUsageError(t *testing.T) {
 	for _, args := range [][]string{{"status"}, {"change", "ready"}, {"review", "submit", "--block"}} {
 		res := runIn(t, lonely.Dir(), args...)
 		if res.code != exitUsage {
-			t.Errorf("gitpr %v without a changeset exited %d, want %d\nstderr: %s",
+			t.Errorf("git-pair %v without a changeset exited %d, want %d\nstderr: %s",
 				args, res.code, exitUsage, res.stderr)
 		}
 	}
@@ -143,7 +143,7 @@ func TestExitCodeUsageError(t *testing.T) {
 }
 
 // Exit 3 is git itself failing. A failing hook is the reproducible way to make git
-// refuse a command gitpr has already accepted.
+// refuse a command git-pair has already accepted.
 func TestExitCodeGitFailure(t *testing.T) {
 	f, slug := newChangeset(t, "booking", "main")
 	hook := f.InstallHook("pre-commit", "#!/bin/sh\necho \"hook refuses\" >&2\nexit 9\n")

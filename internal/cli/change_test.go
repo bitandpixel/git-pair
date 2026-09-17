@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/gittest"
+	"gitpair/internal/gittest"
 )
 
-// PRD §9.1: `gitpr change init` creates the deterministic changeset directory, its
+// PRD §9.1: `git pair change init` creates the deterministic changeset directory, its
 // metadata and ABOUT.md, accepts --base, is idempotent, and must not destroy existing
 // changeset data.
 func TestChangeInitCreatesScaffoldingFromBranchName(t *testing.T) {
@@ -38,7 +38,7 @@ func TestChangeInitCreatesScaffoldingFromBranchName(t *testing.T) {
 	if f.Head() == head {
 		t.Error("change init did not commit the scaffolding")
 	}
-	if got := f.Subject("HEAD"); got != "gitpr: initialize changeset feature-booking-transaction" {
+	if got := f.Subject("HEAD"); got != "git-pair: initialize changeset feature-booking-transaction" {
 		t.Errorf("HEAD subject = %q, want the initialize marker", got)
 	}
 	if !f.Clean() {
@@ -156,7 +156,7 @@ func TestChangeInitRefusesDetachedHead(t *testing.T) {
 }
 
 // PRD §9.2: `change ready` creates a lifecycle marker commit with machine-readable
-// trailers and makes the changeset discoverable by `gitpr review queue`.
+// trailers and makes the changeset discoverable by `git pair review queue`.
 func TestChangeReadyCreatesMarkerAndEnqueuesChangeset(t *testing.T) {
 	f, slug := newChangeset(t, "feature/booking-transaction", "main")
 	before := f.Head()
@@ -167,8 +167,8 @@ func TestChangeReadyCreatesMarkerAndEnqueuesChangeset(t *testing.T) {
 	if head == before {
 		t.Fatal("change ready created no commit")
 	}
-	if got := f.Subject(head); got != "gitpr: ready "+slug {
-		t.Errorf("subject = %q, want %q (PRD §9.2)", got, "gitpr: ready "+slug)
+	if got := f.Subject(head); got != "git-pair: ready "+slug {
+		t.Errorf("subject = %q, want %q (PRD §9.2)", got, "git-pair: ready "+slug)
 	}
 	trailers := f.Trailers(head)
 	if trailers["GitPR-State"] != "ready" {
@@ -273,7 +273,7 @@ func TestChangeReadyBlockedBySurvivingReviewAdditions(t *testing.T) {
 	mustContain(t, report, untouched, "the report must print the surviving addition")
 	mustContain(t, report, "1 addition from review", "the report must count the surviving additions")
 	mustContain(t, report, "Cannot mark changeset "+slug+" ready", "the report must say what was refused")
-	mustContain(t, report, "gitpr change ready --allow-surviving-review-additions",
+	mustContain(t, report, "git pair change ready --allow-surviving-review-additions",
 		"PRD §19.2 prints the override an author can use")
 	if f.Head() != before {
 		t.Errorf("a ready marker was created despite the surviving addition (HEAD %s -> %s)", before, f.Head())
@@ -286,7 +286,7 @@ func TestChangeReadyBlockedBySurvivingReviewAdditions(t *testing.T) {
 	f.Commit("resolve the rest", gittest.WithFile("handler.go", "package main\n\nfunc Serve() { ctx() }\n"))
 	ready(t, f)
 
-	if got := f.Subject(f.Head()); got != "gitpr: ready "+slug {
+	if got := f.Subject(f.Head()); got != "git-pair: ready "+slug {
 		t.Errorf("HEAD = %q, want the ready marker", got)
 	}
 }
@@ -312,7 +312,7 @@ func TestChangeReadyOverrideAcknowledgesSurvivingAdditions(t *testing.T) {
 	if f.Head() == before {
 		t.Fatal("the override created no ready marker")
 	}
-	if got := f.Subject(f.Head()); got != "gitpr: ready "+slug {
+	if got := f.Subject(f.Head()); got != "git-pair: ready "+slug {
 		t.Errorf("subject = %q, want the ready marker", got)
 	}
 	mustContain(t, res.stdout+res.stderr, "surviving",
@@ -339,7 +339,7 @@ func TestChangeReadyChecksOnlyTheMostRecentReview(t *testing.T) {
 
 	ready(t, f)
 
-	if got := f.Subject(f.Head()); got != "gitpr: ready booking" {
+	if got := f.Subject(f.Head()); got != "git-pair: ready booking" {
 		t.Errorf("HEAD = %q, want the ready marker", got)
 	}
 }
@@ -362,7 +362,7 @@ func TestChangeReadyNotBlockedByChangesetArtifactSurvivals(t *testing.T) {
 
 	ready(t, f)
 
-	if got := f.Subject(f.Head()); got != "gitpr: ready booking" {
+	if got := f.Subject(f.Head()); got != "git-pair: ready booking" {
 		t.Errorf("HEAD = %q, want the ready marker", got)
 	}
 }
@@ -631,7 +631,7 @@ func TestChangeReadyRefusesASelfBasedChangeset(t *testing.T) {
 		t.Errorf("change ready on a self-based changeset exited %d, want %d\n%s", res.code, exitRefusal, res.stderr)
 	}
 	mustContain(t, res.stderr, "this branch itself", "refusal should name the problem")
-	if strings.HasPrefix(f.Subject("HEAD"), "gitpr: ready") {
+	if strings.HasPrefix(f.Subject("HEAD"), "git-pair: ready") {
 		t.Error("ready created a marker commit it should have refused to write")
 	}
 }

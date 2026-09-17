@@ -6,12 +6,12 @@ import (
 	"context"
 	"fmt"
 
-	"gitpr/internal/changeset"
-	"gitpr/internal/git"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/marker"
-	"gitpr/internal/model"
-	"gitpr/internal/reviewref"
+	"gitpair/internal/changeset"
+	"gitpair/internal/git"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/marker"
+	"gitpair/internal/model"
+	"gitpair/internal/reviewref"
 )
 
 // Result describes a completed review submission.

@@ -10,7 +10,7 @@ import (
 //
 // These mirror PRD §4/§5/§7 (the `changesets/<slug>/` directory, its
 // CHANGESET.yaml, ABOUT.md and thread files) so engine tests can build a
-// scenario without running `gitpr change init`. A broken `change init` must
+// scenario without running `git pair change init`. A broken `change init` must
 // therefore only fail the tests that exercise it. Product-written scaffolding is
 // asserted by the CLI tests in internal/cli.
 

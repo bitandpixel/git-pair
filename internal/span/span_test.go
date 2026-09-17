@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/git"
-	"gitpr/internal/gittest"
-	"gitpr/internal/lifecycle"
-	"gitpr/internal/span"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/span"
 )
 
 const slug = "booking-transaction"

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitpr/internal/git"
-	"gitpr/internal/gittest"
-	"gitpr/internal/reviewref"
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
+	"gitpair/internal/reviewref"
 )
 
 func repo(f *gittest.Fixture) *git.Repo { return &git.Repo{Dir: f.Dir()} }
@@ -160,7 +160,7 @@ func TestListExcludesArchives(t *testing.T) {
 	if _, _, err := reviewref.ArchiveCommit(ctx, repo(f), "booking", head); err != nil {
 		t.Fatalf("ArchiveCommit: %v", err)
 	}
-	// A ref gitpr would never create must not be mistaken for a changeset ref.
+	// A ref git-pair would never create must not be mistaken for a changeset ref.
 	f.MustGit("update-ref", "refs/reviews/archive/stray/abc123", head)
 
 	entries, err := reviewref.List(ctx, repo(f))
@@ -177,7 +177,7 @@ func TestListExcludesArchives(t *testing.T) {
 }
 
 // The archival ref must keep the whole chain reachable on its own, which is the
-// property `gitpr review close` relies on. The CLI test replays this through the
+// property `git pair review close` relies on. The CLI test replays this through the
 // product; this pins the ref primitive.
 func TestArchiveRefKeepsChainReachableWithoutABranch(t *testing.T) {
 	f := gittest.New(t)

@@ -1,8 +1,8 @@
-# gitpr MVP Requirements
+# git-pair MVP Requirements
 
 ## 1. Overview
 
-`gitpr` is a local-first peer-review orchestration tool designed primarily for human–coding-agent workflows.
+`git-pair` is a local-first peer-review orchestration tool designed primarily for human–coding-agent workflows.
 
 It does **not** replace Git, editors, difftools, GitHub/GitLab, CI/CD, or coding agents. Instead, it adds a thin review protocol and review-oriented UX on top of ordinary Git commits, files, refs, editors, and difftools.
 
@@ -26,7 +26,7 @@ The Git commit boundary provides the primary semantics. A commit identified as a
 
 ## 2.1 Orchestration, not replacement
 
-`gitpr` should delegate existing functionality wherever possible.
+`git-pair` should delegate existing functionality wherever possible.
 
 It should use:
 
@@ -35,7 +35,7 @@ It should use:
 -   configured Git difftools for code review.
 -   GitHub, GitLab, Forgejo, etc. only as optional remote/CI/merge systems.
 
-`gitpr` should not implement its own source-code editor or full diff renderer for the MVP.
+`git-pair` should not implement its own source-code editor or full diff renderer for the MVP.
 
 ## 2.2 Forge independence
 
@@ -125,7 +125,7 @@ MVP assumes one author/agent and one human reviewer.
 
 ## Review submission
 
-A Git commit produced through `gitpr review submit`.
+A Git commit produced through `git pair review submit`.
 
 A review submission establishes a durable review boundary.
 
@@ -318,8 +318,8 @@ Git history provides authorship and sequencing, so the document format should re
 The CLI has two primary subdomains:
 
 ```text
-gitpr change ...
-gitpr review ...
+git pair change ...
+git pair review ...
 ```
 
 Shared inspection commands remain top-level.
@@ -327,7 +327,7 @@ Shared inspection commands remain top-level.
 Target MVP structure:
 
 ```text
-gitpr
+git-pair
 ├── change
 │   ├── init
 │   ├── ready
@@ -351,14 +351,14 @@ gitpr
 
 # 9. Author Commands
 
-## 9.1 `gitpr change init`
+## 9.1 `git pair change init`
 
 Initializes review scaffolding for the current branch.
 
 Example:
 
 ```bash
-gitpr change init --base main
+git pair change init --base main
 ```
 
 Creates:
@@ -388,10 +388,10 @@ Requirements:
 For a stacked branch:
 
 ```bash
-gitpr change init --base booking-transaction
+git pair change init --base booking-transaction
 ```
 
-## 9.2 `gitpr change ready`
+## 9.2 `git pair change ready`
 
 Signals that the current implementation is ready for human review.
 
@@ -403,12 +403,12 @@ Requirements:
 -   run the surviving-review-additions diagnostic described below,
 -   fail non-interactively by default if surviving review additions are detected,
 -   create a GitPR lifecycle marker commit only if validation succeeds or an explicit override is supplied,
--   make the branch discoverable by `gitpr review queue`.
+-   make the branch discoverable by `git pair review queue`.
 
 Suggested commit:
 
 ```text
-gitpr: ready booking-transaction
+git-pair: ready booking-transaction
 ```
 
 Include machine-readable Git trailers, e.g.:
@@ -424,7 +424,7 @@ Any later implementation commit makes the previous ready marker stale and return
 
 ### Surviving review additions
 
-Before marking the changeset ready, `gitpr` must inspect additions introduced by the most recent review submission.
+Before marking the changeset ready, `git-pair` must inspect additions introduced by the most recent review submission.
 
 If any such additions still survive unchanged at current `HEAD`, the command must:
 
@@ -448,7 +448,7 @@ src/booking/service.test.ts:131
 Review these additions before marking the change ready.
 
 To intentionally preserve them:
-  gitpr change ready --allow-surviving-review-additions
+  git pair change ready --allow-surviving-review-additions
 ```
 
 The command must remain fully non-interactive.
@@ -456,19 +456,19 @@ The command must remain fully non-interactive.
 The explicit override is:
 
 ```bash
-gitpr change ready --allow-surviving-review-additions
+git pair change ready --allow-surviving-review-additions
 ```
 
 This is intended for cases where review-added code or comments are deliberately retained.
 
 The check applies only to additions from the **most recent review submission**, not all historical review additions.
 
-## 9.3 `gitpr change feedback`
+## 9.3 `git pair change feedback`
 
 Shows what the most recent review submission told the author, by showing the submission itself.
 
 ```bash
-gitpr change feedback
+git pair change feedback
 ```
 
 Requirements:
@@ -480,16 +480,16 @@ Requirements:
 
 This is the author's answer to "what did the reviewer just tell me?".
 
-`gitpr diff --unreviewed` (§17.2) answers a different question — "what has changed after the review I last read?" — and is the reviewer's command. It is usually empty right after a submission, because the submission is then the newest commit on the branch. An author who has just been told a review exists reads it with `gitpr change feedback`, not with `gitpr diff --unreviewed`.
+`git pair diff --unreviewed` (§17.2) answers a different question — "what has changed after the review I last read?" — and is the reviewer's command. It is usually empty right after a submission, because the submission is then the newest commit on the branch. An author who has just been told a review exists reads it with `git pair change feedback`, not with `git pair diff --unreviewed`.
 
-## 9.4 `gitpr change wait`
+## 9.4 `git pair change wait`
 
 Blocks until a reviewer makes the changeset actionable.
 
 ```bash
-gitpr change wait
-gitpr change wait --fetch --interval 30s
-gitpr change wait --fetch --timeout 2h --json
+git pair change wait
+git pair change wait --fetch --interval 30s
+git pair change wait --fetch --timeout 2h --json
 ```
 
 Requirements:
@@ -501,7 +501,7 @@ Requirements:
 -   with `--fetch`, run `git fetch` against the configured remotes before each check, so a review submitted in another clone becomes visible through `refs/remotes/...`,
 -   `--interval` sets the polling interval (default 10s),
 -   `--timeout` gives up after a duration instead of waiting forever,
--   `--json` prints `previous_state`, `state`, `review_commit`, `ref`, `fetches`, `waited_seconds`, `timed_out` and `next_action`, with state names spelled as `gitpr status --json` spells them,
+-   `--json` prints `previous_state`, `state`, `review_commit`, `ref`, `fetches`, `waited_seconds`, `timed_out` and `next_action`, with state names spelled as `git pair status --json` spells them,
 -   a wait that ends because of `--timeout` exits non-zero,
 -   waiting never writes to the repository: no commits, no refs, no index changes.
 
@@ -512,17 +512,17 @@ The command is non-interactive and must be safe for an agent to run unattended.
 The author-side loop is therefore:
 
 ```bash
-gitpr change ready
+git pair change ready
 git push origin my-feature
-gitpr change wait --fetch --json   # exits when a reviewer has acted
-gitpr change feedback               # read what they said
+git pair change wait --fetch --json   # exits when a reviewer has acted
+git pair change feedback               # read what they said
 ```
 
 ---
 
 # 10. Reviewer Commands
 
-## 10.1 `gitpr review open`
+## 10.1 `git pair review open`
 
 Launches the interactive review TUI.
 
@@ -539,7 +539,7 @@ Responsibilities:
 
 The TUI is an orchestration interface rather than a source editor.
 
-## 10.2 `gitpr review about`
+## 10.2 `git pair review about`
 
 Opens:
 
@@ -557,26 +557,26 @@ Editor resolution should follow git's, which means asking git rather than guessi
 4. `$EDITOR`
 5. the fallback the git build itself would use
 
-`git var GIT_EDITOR` answers all five, so gitpr asks for it and consults 3–5 only when git
+`git var GIT_EDITOR` answers all five, so git-pair asks for it and consults 3–5 only when git
 cannot answer. The value is a command line, so `code --wait` is a program plus its flags, as git
 treats it.
 
 Example:
 
 ```bash
-gitpr review about
+git pair review about
 ```
 
 The TUI should temporarily relinquish terminal control while the editor runs and resume/redraw after it exits.
 
-## 10.3 `gitpr review thread`
+## 10.3 `git pair review thread`
 
 Creates or opens a focused review-thread Markdown file.
 
 Example:
 
 ```bash
-gitpr review thread "concurrency tests"
+git pair review thread "concurrency tests"
 ```
 
 could create/open:
@@ -595,16 +595,16 @@ Requirements:
 
 Thread files should remain ordinary Markdown.
 
-## 10.4 `gitpr review submit`
+## 10.4 `git pair review submit`
 
 Completes the current human review iteration.
 
 Supported outcomes:
 
 ```bash
-gitpr review submit --block
-gitpr review submit --feedback
-gitpr review submit --approve
+git pair review submit --block
+git pair review submit --feedback
+git pair review submit --approve
 ```
 
 ### `--block`
@@ -657,7 +657,7 @@ GitPR-Changeset: booking-transaction
 
 Immediately after successful review submission, update the changeset's review archive ref to the resulting exact `HEAD`.
 
-## 10.5 `gitpr review history`
+## 10.5 `git pair review history`
 
 Displays all review submissions for the current changeset.
 
@@ -687,7 +687,7 @@ Only commits explicitly identified as GitPR review submissions count as reviews.
 
 Ordinary Git commits do not.
 
-## 10.6 `gitpr review queue`
+## 10.6 `git pair review queue`
 
 Shows changesets currently ready for human review.
 
@@ -712,29 +712,29 @@ waitlist-rebooking
 Future/global support should allow:
 
 ```bash
-gitpr review queue --global
-gitpr review queue --json
+git pair review queue --global
+git pair review queue --json
 ```
 
 A global repository registry may eventually live in:
 
 ```text
-~/.config/gitpr/config.toml
+~/.config/git-pair/config.toml
 ```
 
 with commands such as:
 
 ```bash
-gitpr repo add ~/dev/cadence
-gitpr repo remove ~/dev/cadence
-gitpr repo list
+git-pair repo add ~/dev/cadence
+git-pair repo remove ~/dev/cadence
+git-pair repo list
 ```
 
 Global repository management is useful but may be deferred if needed.
 
 The queue command should have a stable machine-readable form suitable for automation and notifications.
 
-## 10.7 `gitpr review close`
+## 10.7 `git pair review close`
 
 Finalizes the review lifecycle before squash/merge.
 
@@ -765,7 +765,7 @@ Safe to squash/merge.
 If surviving review additions remain, closing must fail unless explicitly overridden:
 
 ```bash
-gitpr review close --allow-surviving-review-additions
+git pair review close --allow-surviving-review-additions
 ```
 
 `approve` and `close` are intentionally separate concepts:
@@ -782,7 +782,7 @@ close
 
 # 11. Top-Level Commands
 
-## 11.1 `gitpr status`
+## 11.1 `git pair status`
 
 Displays the effective state of the current changeset.
 
@@ -808,7 +808,7 @@ Uncommitted changes: no
 Provide:
 
 ```bash
-gitpr status --json
+git pair status --json
 ```
 
 for agent/automation use.
@@ -831,7 +831,7 @@ Potential JSON:
 }
 ```
 
-## 11.2 `gitpr diff`
+## 11.2 `git pair diff`
 
 Displays or launches the configured diff for the selected logical review span.
 
@@ -840,12 +840,12 @@ The command should understand changeset base metadata and review boundaries.
 It should support file-specific invocation:
 
 ```bash
-gitpr diff src/booking/service.ts
+git pair diff src/booking/service.ts
 ```
 
 and span options described below.
 
-`gitpr diff` and its span options serve review. An author who wants to read a review that was just submitted uses `gitpr change feedback` (§9.3) instead.
+`git pair diff` and its span options serve review. An author who wants to read a review that was just submitted uses `git pair change feedback` (§9.3) instead.
 
 ---
 
@@ -871,7 +871,7 @@ review feedback / approve
 close
 ```
 
-The author's side of that loop is `gitpr change ready`, then `gitpr change wait` to learn that a reviewer has acted, then `gitpr change feedback` to read the submission before addressing it.
+The author's side of that loop is `git pair change ready`, then `git pair change wait` to learn that a reviewer has acted, then `git pair change feedback` to read the submission before addressing it.
 
 Possible effective states:
 
@@ -1079,12 +1079,12 @@ Submitting review may either occur within the TUI or through the CLI.
 
 # 15. External Editor/Difftool Behavior
 
-`gitpr` should not render or edit source code itself.
+`git-pair` should not render or edit source code itself.
 
 When launching an external process:
 
 ```text
-gitpr TUI
+git-pair TUI
     ↓
 suspend/release terminal
     ↓
@@ -1133,7 +1133,7 @@ This state is **not** part of the durable review artifact.
 
 For MVP it may be in-memory only.
 
-If the underlying diff for a file changes after it was marked reviewed during the current session, `gitpr` should ideally reset it to unreviewed:
+If the underlying diff for a file changes after it was marked reviewed during the current session, `git-pair` should ideally reset it to unreviewed:
 
 ```text
 ✓ reviewed
@@ -1163,8 +1163,8 @@ The span model should remain simple and use ordinary Git commit ranges.
 Default:
 
 ```bash
-gitpr diff
-gitpr review open
+git pair diff
+git pair review open
 ```
 
 means:
@@ -1184,8 +1184,8 @@ base: ...
 Example:
 
 ```bash
-gitpr diff --unreviewed
-gitpr review open --unreviewed
+git pair diff --unreviewed
+git pair review open --unreviewed
 ```
 
 Means:
@@ -1198,7 +1198,7 @@ It answers:
 
 > What has happened since I submitted my most recent review?
 
-That is the reviewer's question. The author's question — "what did the reviewer just tell me?" — is answered by `gitpr change feedback` (§9.3), which shows the submission itself rather than what came after it. Immediately after a submission the two differ completely: `--unreviewed` is empty, because the submission is the newest commit.
+That is the reviewer's question. The author's question — "what did the reviewer just tell me?" — is answered by `git pair change feedback` (§9.3), which shows the submission itself rather than what came after it. Immediately after a submission the two differ completely: `--unreviewed` is empty, because the submission is the newest commit.
 
 This deliberately includes the removal or modification of review-added lines.
 
@@ -1236,10 +1236,10 @@ the surviving original comment plus agent-added response naturally represents an
 Examples:
 
 ```bash
-gitpr diff --since-review
-gitpr diff --since-review=-1
-gitpr diff --since-review=-3
-gitpr diff --since-review=0
+git pair diff --since-review
+git pair diff --since-review=-1
+git pair diff --since-review=-3
+git pair diff --since-review=0
 ```
 
 Semantics:
@@ -1258,7 +1258,7 @@ Semantics:
     first review commit .. HEAD
 ```
 
-Indexes correspond to `gitpr review history`.
+Indexes correspond to `git pair review history`.
 
 ## 17.4 Head checkpoints
 
@@ -1291,7 +1291,7 @@ branch mid-review would silently change what the already-reviewed files meant. A
 checkpoint takes an explicit refresh, which recomputes the span; reviewed marks are keyed on
 commits, so a mark that no longer applies simply does not come back.
 
-`gitpr diff` and `gitpr review open` accept both ends of a span: `--base-review`, `--base-commit` and
+`git pair diff` and `git pair review open` accept both ends of a span: `--base-review`, `--base-commit` and
 `--base-ref` name the start, `--head-review`, `--head-commit` and `--head-ref` the end. `review open`
 opens read-only when one of the head flags names the head; naming only the base leaves the span live,
 including when that base is a ref pinned at selection.
@@ -1381,7 +1381,7 @@ foo();
 
 If the author leaves this untouched, it disappears from the `review.commit..HEAD` diff because nothing changed.
 
-To prevent forgotten feedback, `gitpr` must implement a Git-native diagnostic.
+To prevent forgotten feedback, `git-pair` must implement a Git-native diagnostic.
 
 ## 19.1 Definition
 
@@ -1396,7 +1396,7 @@ Examples may include:
 
 The diagnostic should operate on additions from the latest review commit only.
 
-## 19.2 `gitpr change ready`
+## 19.2 `git pair change ready`
 
 Before allowing the author to mark the changeset ready, run the surviving-review-additions check.
 
@@ -1425,21 +1425,21 @@ Review these additions before marking the change ready.
 The author may explicitly override:
 
 ```bash
-gitpr change ready --allow-surviving-review-additions
+git pair change ready --allow-surviving-review-additions
 ```
 
 The command must remain fully non-interactive.
 
 This forces an agent to consciously inspect surviving review material rather than accidentally returning unchanged feedback to the reviewer.
 
-## 19.3 `gitpr review close`
+## 19.3 `git pair review close`
 
 The same diagnostic must run before closing a changeset.
 
-If surviving additions remain, `gitpr review close` must fail unless the reviewer explicitly overrides:
+If surviving additions remain, `git pair review close` must fail unless the reviewer explicitly overrides:
 
 ```bash
-gitpr review close --allow-surviving-review-additions
+git pair review close --allow-surviving-review-additions
 ```
 
 This provides a final safety check before archival and squash/merge.
@@ -1519,17 +1519,17 @@ Stack relationships only influence the configured base ref.
 
 # 22. Agent Contract
 
-Agents should interact with `gitpr` through stable non-interactive commands rather than manually interpreting GitPR internals.
+Agents should interact with `git-pair` through stable non-interactive commands rather than manually interpreting GitPR internals.
 
 Primary agent commands:
 
 ```bash
-gitpr change init --base <ref>
-gitpr status --json
-gitpr diff
-gitpr change ready
-gitpr change wait --json
-gitpr change feedback
+git pair change init --base <ref>
+git pair status --json
+git pair diff
+git pair change ready
+git pair change wait --json
+git pair change feedback
 ```
 
 Agent behavior:
@@ -1538,16 +1538,16 @@ Agent behavior:
 2. maintain `ABOUT.md`,
 3. implement normally,
 4. commit implementation using ordinary Git,
-5. run `gitpr change ready`,
+5. run `git pair change ready`,
 6. if surviving review additions cause failure, inspect and consciously resolve or explicitly retain them,
-7. run `gitpr change wait` — with `--fetch` when the reviewer works in another clone — until it reports an actionable state,
-8. read the submission with `gitpr change feedback`: threads, `ABOUT.md` edits and any code the reviewer edited directly,
+7. run `git pair change wait` — with `--fetch` when the reviewer works in another clone — until it reports an actionable state,
+8. read the submission with `git pair change feedback`: threads, `ABOUT.md` edits and any code the reviewer edited directly,
 9. address blocking feedback,
 10. update code and discussion documents as appropriate,
 11. commit implementation changes normally,
-12. run `gitpr change ready` again.
+12. run `git pair change ready` again.
 
-`gitpr status --json` remains the way to check state without blocking. `gitpr diff --unreviewed` is the reviewer's span command; an author consuming a newly submitted review uses `gitpr change feedback`.
+`git pair status --json` remains the way to check state without blocking. `git pair diff --unreviewed` is the reviewer's span command; an author consuming a newly submitted review uses `git pair change feedback`.
 
 An agent must **not approve its own work**.
 
@@ -1599,7 +1599,7 @@ Any implementation commit after an approval invalidates approval for the new HEA
 
 # 24. Queue and Notifications
 
-`gitpr review queue` provides a deterministic query for actionable review work.
+`git pair review queue` provides a deterministic query for actionable review work.
 
 This enables future automation such as:
 
@@ -1612,12 +1612,12 @@ This enables future automation such as:
 The machine-readable interface should be sufficient for external automation:
 
 ```bash
-gitpr review queue --json
+git pair review queue --json
 ```
 
-`gitpr` itself does not need to implement notifications in MVP.
+`git-pair` itself does not need to implement notifications in MVP.
 
-The author's side of notification is `gitpr change wait` (§9.4): it polls GitPR state, and with `--fetch` it polls through ordinary `git fetch`, so a review pushed from another clone reaches the author without a forge integration, a webhook, or a long-lived service. Waiting is a command an author or agent runs, not a daemon `gitpr` operates.
+The author's side of notification is `git pair change wait` (§9.4): it polls GitPR state, and with `--fetch` it polls through ordinary `git fetch`, so a review pushed from another clone reaches the author without a forge integration, a webhook, or a long-lived service. Waiting is a command an author or agent runs, not a daemon `git-pair` operates.
 
 ---
 
@@ -1715,7 +1715,7 @@ A review UI inspired by `vimdiff` with:
 Possible future selectors:
 
 ```bash
-gitpr diff --since-review=-1 --reviewer=david
+git pair diff --since-review=-1 --reviewer=david
 ```
 
 and reviewer-specific queues.
@@ -1727,7 +1727,7 @@ Do not design the MVP around this yet.
 Repository registry and:
 
 ```bash
-gitpr review queue --global
+git pair review queue --global
 ```
 
 ## Remote archive enforcement
@@ -1791,7 +1791,7 @@ The MVP is successful if the following workflow works cleanly:
 ```bash
 git switch -c booking-transaction
 
-gitpr change init --base main
+git pair change init --base main
 ```
 
 Agent:
@@ -1802,14 +1802,14 @@ Agent:
 -   runs:
 
 ```bash
-gitpr change ready
+git pair change ready
 ```
 
 Human:
 
 ```bash
-gitpr review queue
-gitpr review open
+git pair review queue
+git pair review open
 ```
 
 Within the review:
@@ -1825,7 +1825,7 @@ Within the review:
 Then:
 
 ```bash
-gitpr review submit --block
+git pair review submit --block
 ```
 
 Agent:
@@ -1833,7 +1833,7 @@ Agent:
 -   waits for the review:
 
 ```bash
-gitpr change wait --fetch --json
+git pair change wait --fetch --json
 ```
 
 which exits once the submission makes the changeset actionable and names the review commit,
@@ -1841,7 +1841,7 @@ which exits once the submission makes the changeset actionable and names the rev
 -   reads what the reviewer said:
 
 ```bash
-gitpr change feedback
+git pair change feedback
 ```
 
 which shows the submission itself: the threads, the `ABOUT.md` edits, and the code the reviewer edited directly,
@@ -1853,7 +1853,7 @@ which shows the submission itself: the threads, the `ABOUT.md` edits, and the co
 If any additions from the review submission still survive unchanged:
 
 ```bash
-gitpr change ready
+git pair change ready
 ```
 
 must fail and show them.
@@ -1861,13 +1861,13 @@ must fail and show them.
 The agent must consciously resolve them or explicitly acknowledge them with:
 
 ```bash
-gitpr change ready --allow-surviving-review-additions
+git pair change ready --allow-surviving-review-additions
 ```
 
 Once ready again, the human runs:
 
 ```bash
-gitpr review open --unreviewed
+git pair review open --unreviewed
 ```
 
 and sees the changes made after the prior review submission, including explicit deletion or modification of prior inline review feedback.
@@ -1875,11 +1875,11 @@ and sees the changes made after the prior review submission, including explicit 
 Human approves:
 
 ```bash
-gitpr review submit --approve
-gitpr review close
+git pair review submit --approve
+git pair review close
 ```
 
-`gitpr review close` runs the same surviving-review-additions safety check before finalization.
+`git pair review close` runs the same surviving-review-additions safety check before finalization.
 
 At this point:
 
@@ -1892,7 +1892,7 @@ At this point:
 
 # 30. Product Thesis
 
-`gitpr` treats Git itself as the protocol for agent-era peer review.
+`git-pair` treats Git itself as the protocol for agent-era peer review.
 
 The codebase contains the review context. Git commits establish review boundaries. Markdown provides natural high-level conversation. Existing editors and difftools remain the code-review surface. Dedicated refs preserve the complete review history without forcing that noise into `main`.
 

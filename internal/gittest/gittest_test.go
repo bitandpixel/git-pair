@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"gitpr/internal/gittest"
+	"gitpair/internal/gittest"
 )
 
 // The fixture is test infrastructure: if it silently inherits the developer's
@@ -137,7 +137,7 @@ func TestFixtureTrailersAndMarkers(t *testing.T) {
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
 
 	ready := f.CommitReadyMarker("booking")
-	if got := f.Subject(ready); got != "gitpr: ready booking" {
+	if got := f.Subject(ready); got != "git-pair: ready booking" {
 		t.Errorf("ready subject = %q", got)
 	}
 	if got := f.Trailers(ready)["GitPR-State"]; got != "ready" {

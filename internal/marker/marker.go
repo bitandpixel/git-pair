@@ -1,4 +1,4 @@
-// Package marker writes the lifecycle commits gitpr derives state from.
+// Package marker writes the lifecycle commits git-pair derives state from.
 //
 // Markers are ordinary commits with GitPR-* trailers, so `git log` alone can
 // reconstruct the whole review lifecycle. Subjects are stable strings for
@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"strings"
 
-	"gitpr/internal/git"
-	"gitpr/internal/model"
+	"gitpair/internal/git"
+	"gitpair/internal/model"
 )
 
 // Message is a constructed lifecycle commit message.
@@ -60,7 +60,7 @@ func (m Message) Render() (string, error) {
 // ReadyMessage describes a ready marker for slug.
 func ReadyMessage(slug string) Message {
 	return Message{
-		Subject: fmt.Sprintf("gitpr: ready %s", slug),
+		Subject: fmt.Sprintf("git-pair: ready %s", slug),
 		Trailers: []string{
 			"GitPR-State=" + model.StateValueReady,
 			"GitPR-Changeset=" + slug,
@@ -83,7 +83,7 @@ func ReviewMessage(slug string, outcome model.Outcome, body string) Message {
 // CloseMessage describes the final lifecycle marker for a changeset.
 func CloseMessage(slug, archiveRef string) Message {
 	return Message{
-		Subject: fmt.Sprintf("gitpr: close %s", slug),
+		Subject: fmt.Sprintf("git-pair: close %s", slug),
 		Body:    "Review archive: " + archiveRef,
 		Trailers: []string{
 			"GitPR-State=" + model.StateValueClosed,

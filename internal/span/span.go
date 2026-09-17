@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"strings"
 
-	"gitpr/internal/git"
-	"gitpr/internal/lifecycle"
+	"gitpair/internal/git"
+	"gitpair/internal/lifecycle"
 )
 
 // CheckpointKind says what sort of thing an end of the span names.

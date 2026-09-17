@@ -65,7 +65,7 @@ func (o Outcome) State() State {
 }
 
 // Trailer keys written into lifecycle commits. A commit is only treated as a
-// gitpr lifecycle marker when the keys below appear together with a changeset
+// git-pair lifecycle marker when the keys below appear together with a changeset
 // value matching the changeset being inspected.
 const (
 	TrailerOutcome   = "GitPR-Outcome"

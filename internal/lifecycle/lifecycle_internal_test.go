@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"gitpr/internal/model"
+	"gitpair/internal/model"
 )
 
 // These tests drive state derivation over synthesised histories, which is where
@@ -17,7 +17,7 @@ func impl(sha string) Event {
 }
 
 func ready(sha string) Event {
-	e := Event{SHA: sha, Short: short(sha), Subject: "gitpr: ready booking", Kind: KindReady}
+	e := Event{SHA: sha, Short: short(sha), Subject: "git-pair: ready booking", Kind: KindReady}
 	return e
 }
 
@@ -29,7 +29,7 @@ func review(sha string, outcome model.Outcome) Event {
 }
 
 func closed(sha string) Event {
-	return Event{SHA: sha, Short: short(sha), Subject: "gitpr: close booking", Kind: KindClosed}
+	return Event{SHA: sha, Short: short(sha), Subject: "git-pair: close booking", Kind: KindClosed}
 }
 
 func malformed(sha string) Event {
@@ -167,7 +167,7 @@ func TestDeriveNewestMarkerWins(t *testing.T) {
 }
 
 func TestDeriveMalformedMarkerIsImplementation(t *testing.T) {
-	// The plan's risk table: a commit carrying GitPR-* trailers that gitpr
+	// The plan's risk table: a commit carrying GitPR-* trailers that git-pair
 	// cannot interpret must be read as an implementation commit, never as a
 	// marker, and never silently honoured.
 	got := derive([]Event{impl("c1"), ready("c2"), malformed("c3")})
@@ -271,14 +271,14 @@ func TestParseEventClassifiesMarkers(t *testing.T) {
 		wantUnrecog bool
 	}{
 		{"plain commit", []string{"c1", "c1", "0", "author", "implement stuff", ""}, KindImplementation, "", false},
-		{"ready marker", []string{"c1", "c1", "0", "author", "gitpr: ready booking", "GitPR-State: ready\nGitPR-Changeset: booking\n"}, KindReady, "", false},
-		{"close marker", []string{"c1", "c1", "0", "author", "gitpr: close booking", "GitPR-State: closed\nGitPR-Changeset: booking\n"}, KindClosed, "", false},
+		{"ready marker", []string{"c1", "c1", "0", "author", "git-pair: ready booking", "GitPR-State: ready\nGitPR-Changeset: booking\n"}, KindReady, "", false},
+		{"close marker", []string{"c1", "c1", "0", "author", "git-pair: close booking", "GitPR-State: closed\nGitPR-Changeset: booking\n"}, KindClosed, "", false},
 		{"review block", []string{"c1", "c1", "0", "author", "review: block booking", "GitPR-Outcome: block\nGitPR-Changeset: booking\n"}, KindReview, model.OutcomeBlock, false},
-		{"wrong changeset", []string{"c1", "c1", "0", "author", "gitpr: ready other", "GitPR-State: ready\nGitPR-Changeset: other\n"}, KindImplementation, "", true},
-		{"missing changeset trailer", []string{"c1", "c1", "0", "author", "gitpr: ready booking", "GitPR-State: ready\n"}, KindImplementation, "", true},
-		{"unknown state", []string{"c1", "c1", "0", "author", "gitpr: ready booking", "GitPR-State: READY\nGitPR-Changeset: booking\n"}, KindImplementation, "", true},
+		{"wrong changeset", []string{"c1", "c1", "0", "author", "git-pair: ready other", "GitPR-State: ready\nGitPR-Changeset: other\n"}, KindImplementation, "", true},
+		{"missing changeset trailer", []string{"c1", "c1", "0", "author", "git-pair: ready booking", "GitPR-State: ready\n"}, KindImplementation, "", true},
+		{"unknown state", []string{"c1", "c1", "0", "author", "git-pair: ready booking", "GitPR-State: READY\nGitPR-Changeset: booking\n"}, KindImplementation, "", true},
 		{"unknown outcome", []string{"c1", "c1", "0", "author", "review: approve booking", "GitPR-Outcome: approved\nGitPR-Changeset: booking\n"}, KindImplementation, "", true},
-		{"changeset scaffold commit", []string{"c1", "c1", "0", "author", "gitpr: initialize changeset booking", "GitPR-Changeset: booking\n"}, KindImplementation, "", false},
+		{"changeset scaffold commit", []string{"c1", "c1", "0", "author", "git-pair: initialize changeset booking", "GitPR-Changeset: booking\n"}, KindImplementation, "", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

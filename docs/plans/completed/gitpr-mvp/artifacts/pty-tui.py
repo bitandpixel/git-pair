@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive a gitpr TUI session through a real pty and capture what it painted.
+"""Drive a git-pair TUI session through a real pty and capture what it painted.
 
 Part of the review walkthrough in pty-walkthrough.sh; run that instead of this. It exists because
 the TUI's screen is not reachable from a Go test: `review open` refuses to start without a

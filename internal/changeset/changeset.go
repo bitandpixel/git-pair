@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"gitpr/internal/git"
+	"gitpair/internal/git"
 )
 
 // Root is the repository directory holding every changeset directory.
@@ -27,7 +27,7 @@ const (
 var (
 	// ErrNoChangeset means the current branch has no changeset directory.
 	ErrNoChangeset = errors.New("no changeset for this branch")
-	// ErrDetachedHead means gitpr was run where no branch is checked out.
+	// ErrDetachedHead means git-pair was run where no branch is checked out.
 	ErrDetachedHead = errors.New("HEAD is detached; check out a branch first")
 	// ErrBaseConflict means CHANGESET.yaml already names a different base.
 	ErrBaseConflict = errors.New("base already set to a different value")
@@ -142,7 +142,7 @@ func RequireCurrent(ctx context.Context, repo *git.Repo) (Changeset, error) {
 		return c, err
 	}
 	if !c.Exists {
-		return c, fmt.Errorf("%w: %s (run `gitpr change init --base <ref>`)", ErrNoChangeset, c.Dir)
+		return c, fmt.Errorf("%w: %s (run `git pair change init --base <ref>`)", ErrNoChangeset, c.Dir)
 	}
 	return c, nil
 }
