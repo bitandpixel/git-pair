@@ -22,9 +22,15 @@ fixed in `9b5a877` (marks across a span round trip), `d0ceee7` (the header's spa
 (the read-only `ABOUT.md` write), each with a test that fails without the fix. See *Known gaps*.
 
 The plan was archived to `docs/plans/completed/review-span-selection/` when the audit closed. Evidence
-marked *pty* below means it was run by hand in a terminal; those scripts are not in this repository, so
-that class of evidence is not reproducible from a checkout. Everything else in the column names a test
-that is.
+marked *pty* below means it was run in a real terminal. Those hand runs are scripted now:
+`docs/plans/completed/gitpr-mvp/artifacts/pty-walkthrough.sh` drives the installed binary through a
+pty and checks the read-only historical screen, the `V` picker's endpoints, the `v` ring's position
+note, the drift banner and `r` with a ref moved by another process, a mark surviving `v` away and
+back, and the difftool handoff keeping the alternate screen. It builds its own repository, prints
+`PTY: all checks passed`, and was checked against four mutants — a screen that stops declaring
+itself read-only, a banner that never appears, marks that are not restored, and a session that does
+not take the alternate screen — each of which turns the scenario that covers it red. Everything the
+Evidence column otherwise names is a test.
 
 The audit's own verification claims are checkable against the tree: milestone commits, test names and
 suite counts are listed below and were re-counted by a second, independent pass.
@@ -349,6 +355,24 @@ Verification:
   age. `refs/heads/main` displays as `main`, `refs/remotes/origin/main` keeps its remote, and
   `refs/reviews/booking` keeps its full name rather than becoming a bare `booking` beside the branch
   of that name.
+
+## Follow-ups the audit recommended, and where they landed
+
+- **Multi-ref drift** — `TestDriftBannerCountsEveryMovedRef` (the `(+N more)` banner, a refresh that
+  re-pins both endpoints, and the span staying read-only across it) and
+  `TestRReportsTheMarksAMovedRefInvalidated` (the note counts the marks the refresh invalidated).
+- **`review open`'s span flags without a terminal** —
+  `TestReviewOpenRegistersEverySpanFlagDiffDoes` (both commands register all eight, and `diff`'s
+  `--stat`/`--tool` have not leaked onto `review open`) and
+  `TestSpanFlagsRefuseTwoEndpointsOnOneEnd` (the mutual exclusion is a count over every spelling of
+  one end, base and head alike).
+- **The default span at the level the session sees** — `TestNoSpanFlagMeansTheFullChangeset` (no
+  flags resolves to the full changeset, in the one function that applies the default) and
+  `TestSessionRefusesASelectorThatNamesNoHead` (a selector with no head is refused: the full
+  changeset is chosen, never defaulted into by a zero value).
+- **`--tool`'s help** — it now says a live span compares its start against the working tree and a
+  historical one compares its two pins, pinned by `TestToolFlagHelpNamesBothKindsOfSpan`.
+- **The hand-run evidence** — scripted, as above.
 
 ## Known gaps (found by the audit, then fixed)
 
