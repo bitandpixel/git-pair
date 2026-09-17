@@ -304,10 +304,20 @@ deleting the branch afterwards still leaves `git pair review history <slug>` wor
   never-anchored directory that stops being silent, and an already-branch-owned directory that gets
   classified as an orphan each turn a test red. The last two needed tests first — one had left the
   branch in place, so it never reached the classification it claimed to cover.
-- `--changeset` for `status`, `review history`, `review show`, `diff` and `change complete`,
-  resolving by slug. Marker-writing commands (`change ready`, `change unready`) accept it only when
-  a branch matches, and refuse otherwise with the reason, because a ready marker asserts something
-  about a branch head and a commit written while another branch is checked out would land there.
+- [x] `--changeset` for `status`, `review history` and `change feedback`, resolving by slug from
+  whichever branch carries it. Two changes to the sketch, both recorded in PRD §11.1:
+  - the marker-writing commands do not accept it at all, not even "when a branch matches". A marker
+    is a commit, and the commit primitive writes at `HEAD`, so `change ready --changeset other` from
+    branch A would put the marker on A while reporting it described `other`. Refusing with a reason
+    is the only honest option short of plumbing that can commit onto another branch, which PRD §26
+    rules out anyway. `TestMarkerCommandsDoNotTakeAChangesetFlag` pins the flag's absence on
+    `change ready`, `change unready`, `change complete` and `review submit`.
+  - `diff` keeps a single head. `span.Resolve` calls `repo.Head` itself, and threading a head ref
+    through it would touch the picker and `review open` for a capability that already exists: name
+    the ends, `git pair diff --base-ref=main --head-ref=booking`.
+  - For a changeset read from elsewhere, `uncommitted` is `null` and `span` is `""`: both describe
+    the checkout, not the commit, and `false` would be a claim about a tree that belongs to another
+    branch. `next_action` names the branch to switch to.
 
 #### Verification
 
@@ -367,6 +377,9 @@ reuse hazard. Abandoning without a branch refuses, and says why.
   bookkeeping, which M5 classifies automatically and which is not a lifecycle act.
 - Settled: `status` does not report the anchor-vs-head relationship. See M4 — the ref lags `HEAD`
   by design now, and the drift worth reporting is measured against the tree at completion.
+- Decided in M5: `--changeset` belongs to reads only, and `diff` does not take it. The reason for
+  each is in the M5 tasks and PRD §11.1 — a marker is a commit and a commit lands at `HEAD`; a span
+  already has two ends you can name.
 
 ## Risks
 

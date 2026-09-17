@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -147,15 +148,119 @@ func groupUsage(name string) func(*cobra.Command, []string) error {
 
 // session is everything a command needs about the current changeset.
 type session struct {
-	repo    *git.Repo
-	cs      changeset.Changeset
-	summary lifecycle.Summary
-	clean   bool
-	head    string
+	repo            *git.Repo
+	cs              changeset.Changeset
+	summary         lifecycle.Summary
+	clean           bool
+	onCurrentBranch bool
+	head            string
 	// baseIsOwnBranch records the unrecoverable base configuration, so the
 	// surfaces that can explain it (status, change ready) do not each redo the
 	// lookup and so they agree on the wording.
 	baseIsOwnBranch bool
+}
+
+// loadFor resolves the session a changeset-scoped read should work from: the
+// checked-out changeset, or the one named by `--changeset`.
+func (a *app) loadFor(ctx context.Context, slug string) (*session, error) {
+	if slug == "" {
+		return a.load(ctx)
+	}
+	return a.loadNamed(ctx, slug)
+}
+
+// loadNamed resolves a changeset by slug, from whichever branch carries it.
+//
+// Reads may look anywhere in the repository, because reading a commit damages
+// nothing. Every command that writes stays on the checked-out branch, because a
+// marker is a commit and a commit lands wherever HEAD is — which is why `change
+// ready` and `change unready` take no such flag.
+func (a *app) loadNamed(ctx context.Context, slug string) (*session, error) {
+	repo, err := a.loadRepo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cs, summary, branch, err := resolveNamed(ctx, repo, slug)
+	if err != nil {
+		return nil, usageWrap(err)
+	}
+	head, err := repo.RevParse(ctx, branch)
+	if err != nil {
+		return nil, err
+	}
+	own, err := changeset.BaseIsOwnBranch(ctx, repo, cs.Base, branch)
+	if err != nil {
+		return nil, err
+	}
+	// The working tree belongs to whichever branch is checked out, so a changeset
+	// read from elsewhere has no opinion about it.
+	current, err := repo.CurrentBranch(ctx)
+	if err != nil {
+		current = ""
+	}
+	onBranch := current == branch
+	return &session{repo: repo, cs: cs, summary: summary, clean: onBranch,
+		onCurrentBranch: onBranch, head: head, baseIsOwnBranch: own}, nil
+}
+
+// resolveNamed finds the changeset a slug names. Two branches can slug to the same
+// directory (`feature/x` and `feature-x`), so "the" changeset is the one whose
+// history is furthest along, and the branch that answer came from is returned so
+// callers can print it.
+func resolveNamed(ctx context.Context, repo *git.Repo, slug string) (changeset.Changeset, lifecycle.Summary, string, error) {
+	branches, err := changeset.BranchesForSlug(ctx, repo, slug)
+	if err != nil {
+		return changeset.Changeset{}, lifecycle.Summary{}, "", err
+	}
+	if len(branches) == 0 {
+		// A slug the repository has never heard of is a usage problem, in the same
+		// family as `no changeset for this branch`: retrying unchanged will fail again.
+		return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
+			fmt.Errorf("no branch carries changeset %q; `git pair review queue` lists what this repository has", slug)}
+	}
+	var (
+		best    changeset.Changeset
+		bestSum lifecycle.Summary
+		name    string
+		bestAt  time.Time
+		first   error
+	)
+	for _, branch := range branches {
+		cs, err := changeset.AtCommit(ctx, repo, branch)
+		if err != nil {
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		if !cs.Exists {
+			if first == nil {
+				first = fmt.Errorf("branch %s carries no %s", branch, cs.MetadataPath())
+			}
+			continue
+		}
+		summary, err := lifecycle.Summarize(ctx, repo, cs.Slug, cs.Base, branch)
+		if err != nil {
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		at := time.Time{}
+		if summary.Marker != nil {
+			at = summary.Marker.When
+		}
+		if name == "" || at.After(bestAt) {
+			best, bestSum, name, bestAt = cs, summary, branch, at
+		}
+	}
+	if name == "" {
+		if first == nil {
+			first = fmt.Errorf("no branch carries changeset %q", slug)
+		}
+		return changeset.Changeset{}, lifecycle.Summary{}, "", first
+	}
+	return best, bestSum, name, nil
 }
 
 // load resolves the repository and the current branch's changeset, requiring
@@ -214,7 +319,8 @@ func (a *app) sessionFor(ctx context.Context, repo *git.Repo, cs changeset.Chang
 	if err != nil {
 		return nil, err
 	}
-	return &session{repo: repo, cs: cs, summary: summary, clean: clean, head: head, baseIsOwnBranch: own}, nil
+	return &session{repo: repo, cs: cs, summary: summary, clean: clean, onCurrentBranch: true,
+		head: head, baseIsOwnBranch: own}, nil
 }
 
 // usageWrap marks an error as a usage problem rather than a git failure.

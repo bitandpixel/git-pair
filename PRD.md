@@ -474,6 +474,9 @@ The check applies only to additions from the **most recent review submission**, 
 
 Shows what the most recent review submission told the author, by showing the submission itself.
 
+Accepts `--changeset <slug>`, which reads the changeset from whichever branch carries it (see
+§11.1 for why only reads may do this).
+
 ```bash
 git pair change feedback
 ```
@@ -771,6 +774,9 @@ Immediately after successful review submission, update the changeset's review ar
 
 ## 10.5 `git pair review history`
 
+Accepts `--changeset <slug>`, which reads the changeset from whichever branch carries it (see
+§11.1 for why only reads may do this).
+
 Displays all review submissions for the current changeset.
 
 Example:
@@ -863,7 +869,18 @@ The queue command should have a stable machine-readable form suitable for automa
 
 ## 11.1 `git pair status`
 
-Displays the effective state of the current changeset.
+Displays the state derived for a changeset: the checked-out branch's by default, or the one named
+by `--changeset <slug>`.
+
+Reads may name any changeset, because reading a commit damages nothing: the slug resolves to
+whichever branch carries it, and the state is derived from that commit. Nothing that records a
+marker accepts the flag. A marker is a commit, and a commit lands wherever `HEAD` points, so
+`change ready --changeset other` would write onto the branch you are standing on while claiming to
+describe a different one. Fields that describe the checkout rather than the commit — `uncommitted`,
+`span` — report that they cannot answer (`null`, `""`) for a changeset read from elsewhere.
+
+A span of another branch is reachable by naming its ends, which `diff` already does: `git pair diff
+--base-ref=main --head-ref=booking`.
 
 Example:
 

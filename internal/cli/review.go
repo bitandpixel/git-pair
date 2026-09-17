@@ -316,20 +316,24 @@ func nextActionFor(o model.Outcome) string {
 // --- review history ---------------------------------------------------------
 
 func newReviewHistoryCommand(a *app) *cobra.Command {
-	return &cobra.Command{
+	var changesetSlug string
+	cmd := &cobra.Command{
 		Use:   "history",
-		Short: "List review submissions for the current changeset",
+		Short: "List review submissions for a changeset",
 		Long: `List every review submission in chronological order.
 
 Only commits carrying a valid Review-Outcome trailer count; ordinary commits do
 not appear. Indexes are chronological, so 0 is the first review and -1 is the
-most recent, matching ` + "`git pair diff --since-review`" + `.`,
+most recent, matching ` + "`git pair diff --since-review`" + `.
+
+--changeset reads another changeset by slug, from whichever branch carries it.`,
 		Example: `  git pair review history
   git pair review history --json
+  git pair review history --changeset booking-transaction
   git pair diff --since-review=-1`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := a.load(cmd.Context())
+			s, err := a.loadFor(cmd.Context(), changesetSlug)
 			if err != nil {
 				return err
 			}
@@ -365,6 +369,9 @@ most recent, matching ` + "`git pair diff --since-review`" + `.`,
 			return w.Flush()
 		},
 	}
+	cmd.Flags().StringVar(&changesetSlug, "changeset", "",
+		"read the changeset with this slug, from whichever branch carries it")
+	return cmd
 }
 
 // --- review queue -----------------------------------------------------------

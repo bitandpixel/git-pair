@@ -653,8 +653,9 @@ func printComplete(a *app, s *session, reviewed lifecycle.Summary, head, archive
 // --- change feedback --------------------------------------------------------
 
 type feedbackOptions struct {
-	stat     bool
-	nameOnly bool
+	stat      bool
+	nameOnly  bool
+	changeset string
 }
 
 func newChangeFeedbackCommand(a *app) *cobra.Command {
@@ -676,7 +677,8 @@ how an author reads the feedback that was just written.
 Exits non-zero when the changeset has no review submission yet.`,
 		Example: `  git pair change feedback
   git pair change feedback --stat
-  git pair change feedback --name-only`,
+  git pair change feedback --name-only
+  git pair change feedback --changeset booking-transaction`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runChangeFeedback(cmd.Context(), a, opts)
@@ -684,11 +686,13 @@ Exits non-zero when the changeset has no review submission yet.`,
 	}
 	cmd.Flags().BoolVar(&opts.stat, "stat", false, "show a diffstat instead of the full diff")
 	cmd.Flags().BoolVar(&opts.nameOnly, "name-only", false, "list only the files the review changed")
+	cmd.Flags().StringVar(&opts.changeset, "changeset", "",
+		"read the changeset with this slug, from whichever branch carries it")
 	return cmd
 }
 
 func runChangeFeedback(ctx context.Context, a *app, opts *feedbackOptions) error {
-	s, err := a.load(ctx)
+	s, err := a.loadFor(ctx, opts.changeset)
 	if err != nil {
 		return err
 	}

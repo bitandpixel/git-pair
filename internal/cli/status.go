@@ -17,23 +17,34 @@ import (
 // --- status -----------------------------------------------------------------
 
 func newStatusCommand(a *app) *cobra.Command {
-	return &cobra.Command{
+	var changesetSlug string
+	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show the effective state of the current changeset",
-		Long: `Report the state derived from git history for the changeset on this branch.
+		Short: "Show the effective state of a changeset",
+		Long: `Report the state derived from git history for a changeset.
 
 State is never stored in a file. Lifecycle markers are commits carrying
-Review-* trailers, so an implementation commit after a ready or review marker
-returns the changeset to WORKING automatically.
+Review-* trailers, and state moves when a git-pair command records one:
+` + "`change ready`" + ` offers the changeset, ` + "`change unready`" + ` withdraws it, and a
+review submission answers it. Ordinary commits do not change state; they are named
+in the reason, and they are what ` + "`change complete`" + ` refuses to archive over.
+
+--changeset reads another changeset by slug, from whichever branch carries it, so
+you can ask about work you do not have checked out. Reads are the only commands
+that do: a marker is a commit, and a commit lands on the branch you are standing on.
 
 With --json the output is a stable contract for agents and automation.`,
 		Example: `  git pair status
-  git pair status --json`,
+  git pair status --json
+  git pair status --changeset booking-transaction`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStatus(cmd.Context(), a)
+			return runStatus(cmd.Context(), a, changesetSlug)
 		},
 	}
+	cmd.Flags().StringVar(&changesetSlug, "changeset", "",
+		"read the changeset with this slug, from whichever branch carries it")
+	return cmd
 }
 
 type latestReviewJSON struct {
@@ -53,7 +64,7 @@ type statusJSON struct {
 	ReviewRef    string            `json:"review_ref"`
 	ReviewCommit string            `json:"review_commit"`
 	ArchiveRef   string            `json:"archive_ref"`
-	Uncommitted  bool              `json:"uncommitted"`
+	Uncommitted  *bool             `json:"uncommitted"`
 	Reviews      int               `json:"reviews"`
 	Reason       string            `json:"reason"`
 	Span         string            `json:"span"`
@@ -61,8 +72,8 @@ type statusJSON struct {
 	Unrecognised []string          `json:"unrecognised_markers,omitempty"`
 }
 
-func runStatus(ctx context.Context, a *app) error {
-	s, err := a.load(ctx)
+func runStatus(ctx context.Context, a *app, slug string) error {
+	s, err := a.loadFor(ctx, slug)
 	if err != nil {
 		return err
 	}
@@ -94,7 +105,7 @@ func buildStatus(ctx context.Context, s *session) (*statusView, error) {
 		State:       string(s.summary.State),
 		Head:        short(s.head),
 		HeadFull:    s.head,
-		Uncommitted: !s.clean,
+		Uncommitted: uncommitted(s),
 		Reviews:     len(s.summary.Reviews),
 		Reason:      s.summary.Reason,
 		NextAction:  nextAction(s.summary),
@@ -119,9 +130,14 @@ func buildStatus(ctx context.Context, s *session) (*statusView, error) {
 	} else if !errors.Is(err, reviewref.ErrNoReviewRef) {
 		return nil, err
 	}
-	if sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, span.Full()); err == nil {
-		view.json.Span = sp.Label
-		view.span = sp
+	// The span names the working span of this checkout — `base...current` — so it
+	// means nothing for a changeset read from another branch. Saying nothing beats
+	// printing a span that points somewhere else.
+	if s.onCurrentBranch {
+		if sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, span.Full()); err == nil {
+			view.json.Span = sp.Label
+			view.span = sp
+		}
 	}
 	if s.baseIsOwnBranch {
 		// "no commits above the base yet" is technically true and useless here:
@@ -141,7 +157,24 @@ func buildStatus(ctx context.Context, s *session) (*statusView, error) {
 		view.json.ArchiveRef = ref
 		view.json.NextAction = archivedNextAction(ref)
 	}
+	if !s.onCurrentBranch {
+		// Every command that records something writes to the branch that is checked
+		// out, because a marker is a commit. The next step for a changeset you are
+		// only reading is to stand on it.
+		view.json.NextAction = fmt.Sprintf("`git switch %s` to act on it: git-pair records markers on the branch you have checked out", s.cs.Branch)
+	}
 	return view, nil
+}
+
+// uncommitted reports the working tree only when the session describes the checked-out
+// branch. For a changeset read from elsewhere the tree holds someone else's work, and
+// `false` would be a lie while `true` would be about the wrong thing.
+func uncommitted(s *session) *bool {
+	if !s.onCurrentBranch {
+		return nil
+	}
+	v := !s.clean
+	return &v
 }
 
 func printStatus(a *app, v *statusView) {
@@ -190,7 +223,9 @@ func printStatus(a *app, v *statusView) {
 			a.printf("  %s\n", u)
 		}
 	}
-	a.printf("\nUncommitted changes: %s\n", yesNo(j.Uncommitted))
+	if j.Uncommitted != nil {
+		a.printf("\nUncommitted changes: %s\n", yesNo(*j.Uncommitted))
+	}
 	if j.NextAction != "" {
 		a.printf("Next: %s\n", j.NextAction)
 	}

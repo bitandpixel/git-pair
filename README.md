@@ -379,17 +379,17 @@ Every command accepts the persistent `--json` flag, but only `status`, `change r
 | `change init` | `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is `main`, else `master`, else a usage error |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` only when it is in review, otherwise succeeds and records nothing |
-| `change feedback` | `--stat`, `--name-only` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
+| `change feedback` | `--stat`, `--name-only`, `--changeset <slug>` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
 | `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
 | `review open` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref` | TUI; needs a terminal; full changeset unless a span flag says otherwise; a `--head-*` flag opens a historical span, which is read-only |
 | `review reopen` | none | TUI on `<last review>..current`, the work that has landed since you reviewed; needs a terminal; refuses if no review exists |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), then moves the review ref |
-| `review history` | — | only review marker commits, indexed from `0` |
+| `review history` | `--changeset <slug>` | only review marker commits, indexed from `0` |
 | `review queue` | — | every branch in this repo whose changeset is `READY`, longest wait first; read from the repository, not the checkout |
 | `change complete` | `--allow-surviving-review-additions`, `--allow-unreviewed-changes` | archives the reviewed `HEAD` and reports squash-safety; commits nothing; never merges, pushes or squashes |
-| `status` | — | derived state for the current branch's changeset |
+| `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
@@ -403,11 +403,19 @@ without failing
 if the base does not resolve, and commits only the changeset directory (`git commit --only`),
 so work you had already staged for another commit stays on your index.
 
+**Reading any changeset, writing one.** `status`, `review history` and `change feedback` accept
+`--changeset <slug>` and resolve it from whichever branch carries that changeset, so you can ask
+about work you do not have checked out. Nothing that records a marker takes the flag: a marker is a
+commit, and a commit lands wherever `HEAD` is, so `change ready --changeset other` would write onto
+the branch you are standing on while claiming to describe a different one. When the slug names
+nothing, those reads exit 2. For a span of another branch, name its ends: `git pair diff
+--base-ref=main --head-ref=booking`.
+
 | Exit code | Meaning | Seen as |
 | --- | --- | --- |
 | 0 | success | — |
 | 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot complete <cs>: latest outcome is BLOCKED`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING` |
-| 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`; `no changeset for this branch`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal |
+| 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
 The split between 1 and 2 is deliberate and load-bearing for agents: exit 1 means the
@@ -421,7 +429,9 @@ Output is indented two spaces, and empty lists may serialise as `null` rather th
 
 `git pair status --json`, waiting for the first review. Once a review exists `latest_review`
 becomes `{"index": 0, "outcome": "block", "commit": "332887c"}`; `unrecognised_markers` (a
-list of `<sha> <subject>`) appears only when non-empty. `review_ref` and `review_commit` describe
+list of `<sha> <subject>`) appears only when non-empty. Read another changeset with `--changeset`
+and two fields report that they cannot answer — `uncommitted` is `null` and `span` is `""` — because
+both describe the checkout rather than the commit, and `next_action` names the branch to switch to. `review_ref` and `review_commit` describe
 the movable anchor and stay `""` until something writes it — `change ready`, or a review
 submission — because the ref's name is derivable from the changeset and its existence is the only
 fact worth reporting. Once the changeset is completed,
