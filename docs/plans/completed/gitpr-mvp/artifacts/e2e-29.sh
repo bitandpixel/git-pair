@@ -26,6 +26,11 @@ step "author: branch, init, implement"
 git switch -qc booking-transaction
 $G change init --base main; check "change init" 0 $?
 $G change init --base main >/dev/null; check "change init idempotent" 0 $?
+# A second init naming a different base is a conflict, not an edit: the changeset keeps the base it
+# was created with until someone says --set-base. TestChangeInitBaseConflict covers this in Go;
+# these two lines cover it against an installed binary, which is what the M1 row claims.
+$G change init --base trunk >/dev/null 2>&1; check "change init refuses to move an existing base" 2 $?
+grep -q '^base: main$' changesets/booking-transaction/CHANGESET.yaml && echo "  ok: the refused init left the base alone" || { echo "  FAIL: a refused init rewrote the base"; FAILED=1; }
 [ -f changesets/booking-transaction/CHANGESET.yaml ] && echo "  ok: CHANGESET.yaml exists" || { echo "  FAIL: no CHANGESET.yaml"; FAILED=1; }
 printf '# booking-transaction\n\n## Summary\n\nTransactional locking around offering creation and enrollment.\n\n## What changed\n\n- business-scoped locking\n\n## Design decisions\n\nAdmin scheduling serializes at business level.\n\n## Validation\n\n- unit tests\n\n## Known limitations\n\n## Open questions\n' > changesets/booking-transaction/ABOUT.md
 git add -A && git commit -qm "implement transactional locking"
