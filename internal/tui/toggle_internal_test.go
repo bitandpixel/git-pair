@@ -87,12 +87,12 @@ func TestSpaceMarksTheFileAndLeavesTheCursorOnIt(t *testing.T) {
 	}
 }
 
-// k at the top of the list used to drive the cursor negative, and View indexes rows by
-// cursor, so the program died with an index-out-of-range panic. The list now runs past the
-// files into the changeset section, so "both ends" means the ends of that whole list.
+// k at the top of a region used to drive the cursor negative, and View indexes rows by
+// cursor, so the program died with an index-out-of-range panic. With two regions on the screen
+// the guard has to exist twice, and "both ends" means the ends of the region holding the keys.
 func TestNavigationStopsAtBothEndsOfTheList(t *testing.T) {
 	m := newFileListModel(t)
-	total := len(m.rows)
+	total := len(m.fileRows())
 
 	up, down := tea.KeyMsg{Type: tea.KeyUp}, tea.KeyMsg{Type: tea.KeyDown}
 	for i := 0; i < total+3; i++ {
@@ -119,6 +119,28 @@ func TestNavigationStopsAtBothEndsOfTheList(t *testing.T) {
 	}
 	if m.cursor != total-1 {
 		t.Errorf("cursor = %d after pressing down past the bottom, want %d", m.cursor, total-1)
+	}
+
+	// The box is the other region, and the same two ends: it holds the keys here, so the file
+	// tree's cursor is a bystander and the box's must not walk out of its own rows.
+	m = boxOn(t, m)
+	tree, start := m.cursor, m.metaStart
+	m.metaCursor = len(m.rows) - 1
+	m.clamp()
+	for i := 0; i < total+3; i++ {
+		updated, _ := m.Update(up)
+		m = updated.(reviewModel)
+		if m.metaCursor < start {
+			t.Fatalf("box cursor = %d after %d presses of up, want at least the box's first row %d",
+				m.metaCursor, i+1, start)
+		}
+		if m.cursor != tree {
+			t.Fatalf("the box's navigation moved the file tree from %d to %d", tree, m.cursor)
+		}
+		_ = m.View()
+	}
+	if m.metaCursor != start {
+		t.Errorf("box cursor = %d after pressing up past the top, want %d", m.metaCursor, start)
 	}
 }
 

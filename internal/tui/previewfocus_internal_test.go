@@ -57,7 +57,7 @@ func focusPane(t *testing.T, m reviewModel) reviewModel {
 	rm := paneKey(t, m, runeKey('p'))
 	if !rm.previewHasFocus() {
 		t.Fatalf("`p` at %dx%d left the keys with the list: focus=%v pane=%d mode=%v status %q",
-			rm.width, rm.height, rm.previewFocus, rm.paneWidth(), rm.mode, rm.status)
+			rm.width, rm.height, rm.focus, rm.paneWidth(), rm.mode, rm.status)
 	}
 	return rm
 }
@@ -178,10 +178,13 @@ func TestNothingThatChangesTheReviewHappensWhileThePaneHasTheKeys(t *testing.T) 
 	m = focusPane(t, m)
 	marked, folds, cursor := countMarked(m.sess), len(m.folded), m.cursor
 
-	for _, k := range []tea.KeyMsg{keyMsg(tea.KeySpace), runeKey('s'), runeKey('t'), runeKey('e'), runeKey('a'), runeKey('c')} {
+	// `V` is on the list's bar and opens a screen of its own, so it is the read-shaped key most
+	// likely to be pressed here by mistake. The keys that move the keys are not in this list: tab,
+	// shift-tab, f and m do leave the pane, on purpose, and TestTabMovesTheKeysOutOfThePane is
+	// where that is pinned.
+	for _, k := range []tea.KeyMsg{keyMsg(tea.KeySpace), runeKey('s'), runeKey('t'), runeKey('e'), runeKey('a'), runeKey('c'), runeKey('V')} {
 		m = paneKey(t, m, k)
 	}
-	m = paneKey(t, m, keyMsg(tea.KeyTab))
 
 	if got := countMarked(m.sess); got != marked {
 		t.Errorf("a file was marked from the pane: %d marked, was %d", got, marked)
@@ -221,7 +224,7 @@ func TestQFromThePaneClosesThePreviewAndNotTheSession(t *testing.T) {
 		t.Error("`q` in the preview quit the session; quitting is the list's key")
 	}
 	if m.previewOn || m.previewHasFocus() {
-		t.Errorf("`q` left the preview on screen: previewOn=%v focus=%v", m.previewOn, m.previewFocus)
+		t.Errorf("`q` left the preview on screen: previewOn=%v focus=%v", m.previewOn, m.focus)
 	}
 	if m.mode != modeFiles {
 		t.Errorf("`q` left the session in mode %v", m.mode)
@@ -309,8 +312,8 @@ func TestAResizeAwayFromThePaneGivesTheKeysBack(t *testing.T) {
 	if !ok {
 		t.Fatalf("a resize produced %T", updated)
 	}
-	if !rm.previewFocus {
-		t.Fatal("the fixture stopped holding the flag, so this tests nothing")
+	if rm.focus != focusPreview {
+		t.Fatal("the fixture stopped holding the keys, so this tests nothing")
 	}
 	if rm.previewHasFocus() {
 		t.Error("the pane kept the keys after the terminal took the pane away")
@@ -322,22 +325,37 @@ func TestAResizeAwayFromThePaneGivesTheKeysBack(t *testing.T) {
 	}
 }
 
+// ruleAt is the glyph the frame draws in the divider's cell, from whichever row reaches it first.
+func ruleAt(view string, at int) string {
+	for _, row := range strings.Split(view, "\n") {
+		if g := dividerColumn(row, at); g != "" {
+			return g
+		}
+	}
+	return ""
+}
+
 func TestTheFocusedColumnSaysSo(t *testing.T) {
 	// Two of the three signals are text, on purpose: the terminal is not obliged to render bold or
 	// faint, and a focus the reviewer cannot see is a focus that eats keystrokes. The divider glyph and
 	// the shortcut bar survive a terminal with no styling at all; the list cursor losing its reverse
 	// video is the one signal that is styling only, and so the one here that cannot be asserted.
-	unfocused := ansi.Strip(focusFixture(t, 40).View())
-	focused := ansi.Strip(focusPane(t, focusFixture(t, 40)).View())
+	unfocusedModel := focusFixture(t, 40)
+	paneModel := focusPane(t, focusFixture(t, 40))
+	unfocused := ansi.Strip(unfocusedModel.View())
+	focused := ansi.Strip(paneModel.View())
+	// The divider is read in its own cell rather than by searching for the glyph: the changeset box
+	// draws a rule down its left edge, and an ordinary rule is what a box is made of.
+	at := paneModel.dividerAt()
 
-	if !strings.Contains(unfocused, "│") || strings.Contains(unfocused, "║") {
-		t.Errorf("the divider is not a plain divider while the list has the keys:\n%s", unfocused)
+	if got := ruleAt(unfocused, at); got != "│" {
+		t.Errorf("the divider draws %q rather than a plain rule while the list has the keys:\n%s", got, unfocused)
 	}
 	if !strings.Contains(unfocused, "space reviewed") {
 		t.Errorf("the list's own shortcut bar is missing its keys:\n%s", unfocused)
 	}
-	if !strings.Contains(focused, "║") || strings.Contains(focused, "│") {
-		t.Errorf("the divider does not say which column has the keys:\n%s", focused)
+	if got := ruleAt(focused, at); got != "║" {
+		t.Errorf("the divider draws %q rather than the double rule that says which column has the keys:\n%s", got, focused)
 	}
 	if !strings.Contains(focused, "q close preview") {
 		t.Errorf("the bar does not name the key that closes the preview:\n%s", focused)

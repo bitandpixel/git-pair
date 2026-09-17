@@ -546,9 +546,9 @@ func TestVBetweenTwoStopsDoesNotCountOutLoud(t *testing.T) {
 	}
 }
 
-// The header is where a wrong span name is most convincing: it is the line that says what the
-// whole screen is measuring. `spanName` substitutes the word "unreviewed" for a label, and it
-// may do that only for the span that is unreviewed.
+// The changeset box is where a wrong span name is most convincing: it is the row that says what the
+// whole screen is measuring. `spanName` substitutes the word "unreviewed" for a label, and it may do
+// that only for the span that is unreviewed.
 func TestHeaderNamesUnreviewedOnlyForTheUnreviewedSpan(t *testing.T) {
 	m, _ := pickerFixture(t, 2)
 	ctx := context.Background()
@@ -557,8 +557,10 @@ func TestHeaderNamesUnreviewedOnlyForTheUnreviewedSpan(t *testing.T) {
 		t.Fatalf("SetSpan unreviewed: %v", err)
 	}
 	m.refresh()
-	if !strings.Contains(m.View(), "span: unreviewed") {
-		t.Errorf("the header no longer says unreviewed for the unreviewed span:\n%s", headerOf(m))
+	// The word is what is asserted, not the line around it: the label beside it is styled, and the
+	// escapes would make an exact match a test of the style rather than of the span's name.
+	if !strings.Contains(m.View(), "unreviewed") {
+		t.Errorf("the changeset box no longer says unreviewed for the unreviewed span:\n%s", headerOf(m))
 	}
 
 	// Three submissions back is not unreviewed: most of what it contains has been through a
@@ -567,17 +569,17 @@ func TestHeaderNamesUnreviewedOnlyForTheUnreviewedSpan(t *testing.T) {
 		t.Fatalf("SetSpan older review: %v", err)
 	}
 	m.refresh()
-	if view := m.View(); strings.Contains(view, "span: unreviewed") {
-		t.Errorf("the header calls a span based on an older review unreviewed:\n%s", headerOf(m))
+	if view := m.View(); strings.Contains(view, "unreviewed") {
+		t.Errorf("the changeset box calls a span based on an older review unreviewed:\n%s", headerOf(m))
 	} else if !strings.Contains(view, "review -2..current") {
-		t.Errorf("the header does not name the span in the spelling that was chosen:\n%s", headerOf(m))
+		t.Errorf("the changeset box does not name the span in the spelling that was chosen:\n%s", headerOf(m))
 	}
 }
 
-// headerOf is the two header lines, for failure messages that would otherwise dump a whole
+// headerOf is the changeset box on its own, for failure messages that would otherwise dump a whole
 // screen to make a point about one line.
 func headerOf(m reviewModel) string {
-	return strings.Join(m.headerLines(m.sess.Header()), "\n")
+	return strings.Join(m.boxLines(nil), "\n")
 }
 
 // --- the drill-in's two modes -------------------------------------------------

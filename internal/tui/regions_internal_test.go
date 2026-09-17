@@ -1,0 +1,303 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// The row area is shared by two regions, and the split is the feature: a changeset with forty threads
+// is a reason to scroll the changeset box, not a reason to hide the file tree behind it. These pin the
+// arithmetic of the split, the keys that move between the regions and within one, what each region's
+// shortcut bar promises, and the span row -- the one row in the box a reviewer changes.
+
+// withThreads grows the box to n threads, which is the case the split exists for. The rows go inside
+// the box's half of the list, because the list is one slice holding two regions and a file row
+// appended past the split would be a row of the tree.
+func withThreads(t *testing.T, m reviewModel, n int) reviewModel {
+	t.Helper()
+	extra := make([]row, 0, n)
+	for i := range n {
+		extra = append(extra, row{kind: rowThread, name: fmt.Sprintf("thread-%02d.md", i),
+			path: fmt.Sprintf("thread-%02d.md", i), file: -1})
+	}
+	rows := make([]row, 0, len(m.rows)+n)
+	rows = append(rows, m.rows[:m.metaStart]...)
+	rows = append(rows, extra...)
+	rows = append(rows, m.rows[m.metaStart:]...)
+	m.rows = rows
+	m.clamp()
+	if len(m.metaRows()) < n {
+		t.Fatalf("the box holds %d rows after adding %d threads", len(m.metaRows()), n)
+	}
+	return m
+}
+
+// The box asks for what it needs and is capped at a third of the area, so the tree keeps two thirds of
+// it whatever the changeset says. The floor is there so a short box is still a box.
+func TestTheChangesetBoxIsCappedAndTheTreeKeepsTheRest(t *testing.T) {
+	for _, height := range []int{16, 24, 40} {
+		m := navModel(t)
+		m.height = height
+		m = withThreads(t, m, 40)
+
+		meta, files := m.regionHeights()
+		area := m.rowArea()
+		if meta+files != area {
+			t.Errorf("at height %d the regions take %d+%d rows, want the area's %d", height, meta, files, area)
+		}
+		// The share is a third of the area, or the floor that keeps the box a box when the area is
+		// too small for a third of it to hold a border and a row.
+		if cap := max(metaMinRows, area/metaShare); meta > cap {
+			t.Errorf("at height %d the box takes %d rows, more than its share of %d (area %d)", height, meta, cap, area)
+		}
+		if files < m.filesWindow() || files <= 0 {
+			t.Errorf("at height %d the tree got %d rows", height, files)
+		}
+		if got := len(m.visibleFiles()); got != min(len(m.fileRows()), files) {
+			t.Errorf("at height %d the tree shows %d rows, want %d", height, got, min(len(m.fileRows()), files))
+		}
+	}
+}
+
+// The frame is written one line per row, so a box that grew past its share would push the shortcut bar
+// off the bottom of the terminal -- the failure a reviewer would feel as keys that do nothing.
+func TestALongChangesetBoxStillFitsTheTerminal(t *testing.T) {
+	m := navModel(t)
+	m = withThreads(t, m, 40)
+
+	rows := viewRows(m.View())
+	if len(rows) > m.height {
+		t.Errorf("the frame is %d rows in a %d-row window", len(rows), m.height)
+	}
+	if !strings.Contains(strings.Join(rows, "\n"), "q quit") {
+		t.Errorf("the shortcut bar is not on the screen:\n%s", strings.Join(rows, "\n"))
+	}
+	// The box hides what it cannot show and says how much is hidden, inside its own bottom border so
+	// the note cannot change the column's height.
+	if m.metaScroll+m.metaWindow() < len(m.metaRows()) {
+		if !strings.Contains(strings.Join(rows, "\n"), "more") {
+			t.Errorf("the box hides rows without saying so:\n%s", strings.Join(rows, "\n"))
+		}
+	}
+}
+
+// gg and G mean the two ends of the region holding the keys. With two lists on the screen, "the top"
+// has to mean one of them, and the wrong one is a jump the reviewer did not ask for.
+func TestGgAndGMeanTheFocusedRegion(t *testing.T) {
+	m := withThreads(t, navModel(t), 12)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	tree, boxAt := m.cursor, m.metaCursor
+
+	m = pressRune(pressRune(m, 'g'), 'g')
+	if m.metaCursor != m.metaStart {
+		t.Errorf("gg in the box left it on %d, want its first row %d", m.metaCursor, m.metaStart)
+	}
+	if m.cursor != tree {
+		t.Errorf("gg in the box moved the tree from %d to %d", tree, m.cursor)
+	}
+
+	m = pressRune(m, 'G')
+	if m.metaCursor != len(m.rows)-1 {
+		t.Errorf("G in the box left it on %d, want the last row %d", m.metaCursor, len(m.rows)-1)
+	}
+
+	// In the tree the same two keys mean the two ends of the tree, not of the screen.
+	boxAt = m.metaCursor
+	m = pressRune(pressRune(m, 'f'), 'g')
+	m = pressRune(m, 'g')
+	if m.cursor != 0 {
+		t.Errorf("gg in the tree left it on %d, want 0", m.cursor)
+	}
+	m = pressRune(m, 'G')
+	if m.cursor != m.metaStart-1 {
+		t.Errorf("G in the tree left it on %d, want the tree's last row %d", m.cursor, m.metaStart-1)
+	}
+	if m.metaCursor != boxAt {
+		t.Errorf("G in the tree moved the box from %d to %d", boxAt, m.metaCursor)
+	}
+}
+
+// ctrl-d used to quit, which is why paging had to be ctrl-f and ctrl-b and nothing else. It pages now,
+// in whichever region has the keys, and the two keys that quit are ctrl-c and q.
+func TestCtrlDPagesTheFocusedRegionAndDoesNotQuit(t *testing.T) {
+	m := withThreads(t, navModel(t), 12)
+	m = focusOnRow(t, m, m.metaStart)
+	before := m.metaCursor
+
+	m = paneKey(t, m, keyMsg(tea.KeyCtrlD))
+	if m.quitting {
+		t.Fatal("ctrl-d quit the session")
+	}
+	if m.metaCursor <= before {
+		t.Errorf("ctrl-d in the box left it on %d, want it further down from %d", m.metaCursor, before)
+	}
+	at := m.metaCursor
+	m = paneKey(t, m, keyMsg(tea.KeyCtrlU))
+	if m.metaCursor >= at {
+		t.Errorf("ctrl-u in the box left it on %d, want it back up from %d", m.metaCursor, at)
+	}
+
+	// And the same two keys page the tree, half a window at a time, without quitting.
+	m = pressRune(pressRune(m, 'f'), 'G')
+	tree, window := m.cursor, m.activeWindow()
+	m = paneKey(t, m, keyMsg(tea.KeyCtrlU))
+	if m.cursor >= tree {
+		t.Errorf("ctrl-u in the tree left it on %d, want it up from %d (a window is %d rows)", m.cursor, tree, window)
+	}
+	m = paneKey(t, m, keyMsg(tea.KeyCtrlC))
+	if !m.quitting {
+		t.Error("ctrl-c no longer quits, and it is the key that always has")
+	}
+}
+
+// The frame has to be the same height whatever holds the keys: the layout budgets for the longest bar,
+// so moving the keys cannot move the rule under the list.
+func TestMovingTheKeysDoesNotMoveTheLayout(t *testing.T) {
+	m := navModel(t)
+	before := len(viewRows(m.View()))
+	beforeRows, _ := m.regionHeights()
+
+	after := press(m, tea.KeyTab)
+	got := viewRows(after.View())
+	if len(got) != before {
+		t.Errorf("the frame was %d rows and became %d when the keys moved to the box", before, len(got))
+	}
+	if meta, _ := after.regionHeights(); meta != beforeRows {
+		t.Errorf("the box had %d rows and got %d when it took the keys", beforeRows, meta)
+	}
+	if !strings.Contains(strings.Join(got, "\n"), "space span") {
+		t.Errorf("the box's bar does not name its own keys:\n%s", strings.Join(got, "\n"))
+	}
+}
+
+// Each region's bar names what that region reads. A key that belongs to another region is not hidden
+// by an asterisk or a mode -- it is simply not offered, which is the same rule the read-only bar uses
+// for a span the reviewer cannot act on.
+func TestEachRegionHasItsOwnShortcutBar(t *testing.T) {
+	m := navModel(t)
+	files := m.helpTextFor(focusFiles)
+	box := m.helpTextFor(focusMeta)
+
+	for _, want := range []string{"h/l fold", "space reviewed", "s submit", "m changeset", "tab focus"} {
+		if !strings.Contains(files, want) {
+			t.Errorf("the tree's bar does not mention %q: %q", want, files)
+		}
+	}
+	for _, want := range []string{"space span", "t new thread", "m changeset", "tab focus"} {
+		if !strings.Contains(box, want) {
+			t.Errorf("the box's bar does not mention %q: %q", want, box)
+		}
+	}
+	for _, gone := range []string{"h/l fold", "s submit", "space reviewed"} {
+		if strings.Contains(box, gone) {
+			t.Errorf("the box's bar offers %q, which it does not read: %q", gone, box)
+		}
+	}
+	if files == box {
+		t.Error("the two regions offer the same bar, so the bar says nothing about the keys")
+	}
+}
+
+// The borders are the box's focus light, and they are glyphs rather than styling: a terminal that
+// renders no bold still has to show which region the keys are in.
+func TestTheBoxBorderSaysWhenItHoldsTheKeys(t *testing.T) {
+	m := navModel(t)
+	idle := ansiCodes.ReplaceAllString(m.View(), "")
+	focused := ansiCodes.ReplaceAllString(press(m, tea.KeyTab).View(), "")
+
+	if !strings.Contains(idle, "╭") || strings.Contains(idle, "╔") {
+		t.Errorf("the box without the keys does not draw a single-rule frame:\n%s", idle)
+	}
+	if !strings.Contains(focused, "╔") || strings.Contains(focused, "╭") {
+		t.Errorf("the box with the keys does not draw a double-rule frame:\n%s", focused)
+	}
+}
+
+// The span row is the box's one control: what the review is measured against is worth choosing, and
+// the picker changes nothing until its own Enter -- which is why it is reachable over history too.
+func TestTheSpanRowOpensThePicker(t *testing.T) {
+	m := navModel(t)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowSpan))
+
+	m = press(m, tea.KeyEnter)
+	if m.mode != modeSpan {
+		t.Fatalf("Enter on the span row gave mode %v, want the span picker", m.mode)
+	}
+}
+
+// Space marks a file and chooses a span, depending on where it lands. The read-only gate is what makes
+// the difference worth spelling out to it: on a file it is a change to the review, and on the span row
+// it is the first keystroke of a read.
+func TestSpaceOnTheSpanRowOpensThePickerEvenOverHistory(t *testing.T) {
+	m, _ := readonlyModel(t, historySel())
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowSpan))
+
+	m = press(m, tea.KeySpace)
+	if m.mode != modeSpan {
+		t.Fatalf("space on the span row over history gave mode %v, want the span picker", m.mode)
+	}
+
+	// The same key on a file row is still the change the read-only screen will not make.
+	back := press(m, tea.KeyEsc)
+	if back.mode != modeFiles {
+		t.Fatalf("esc left the picker in mode %d", back.mode)
+	}
+	back = focusOnRow(t, back, indexOfNameBySuffix(t, back, ".go"))
+	back = press(back, tea.KeySpace)
+	if !strings.Contains(back.status, "read-only") {
+		t.Errorf("space on a file over history said %q, want the read-only refusal", back.status)
+	}
+}
+
+// The span row says it goes somewhere, which is the difference between a control and a caption; and
+// the box's own base line, which goes nowhere, stays a line of the frame rather than a row.
+func TestTheSpanRowIsARowAndTheBaseLineIsNot(t *testing.T) {
+	m := navModel(t)
+	spanRow := m.rowText(m.rows[boxIndexOf(t, m, rowSpan)])
+	if !strings.Contains(ansiCodes.ReplaceAllString(spanRow, ""), "▸") {
+		t.Errorf("the span row does not say it opens: %q", spanRow)
+	}
+	if strings.Contains(m.baseLine(), "▸") {
+		t.Errorf("the base line offers an action it does not have: %q", m.baseLine())
+	}
+	for _, r := range m.fileRows() {
+		if r.kind == rowSpan || r.kind == rowAbout {
+			t.Errorf("the changeset row %q is inside the file tree", r.name)
+		}
+	}
+	if m.metaStart == 0 || m.metaStart == len(m.rows) {
+		t.Errorf("the split between the regions is %d of %d rows", m.metaStart, len(m.rows))
+	}
+}
+
+// The ring does not end at the diff: a reviewer who arrived with `tab` leaves with it, and the keys that
+// name a region work from inside the pane. Over the overlay they are inert, because the screen is
+// nothing but the diff and keys handed to a region that is not drawn are keys that go nowhere.
+func TestTabMovesTheKeysOutOfThePane(t *testing.T) {
+	toBox := press(focusPane(t, focusFixture(t, 40)), tea.KeyTab)
+	if !toBox.metaHasFocus() {
+		t.Errorf("tab from the pane left the keys with %v, want the changeset box", toBox.focus)
+	}
+	if !strings.Contains(toBox.helpText(), "space span") {
+		t.Errorf("tab from the pane did not bring the box's bar with it: %q", toBox.helpText())
+	}
+
+	back := press(focusPane(t, focusFixture(t, 40)), tea.KeyShiftTab)
+	if back.focus != focusFiles {
+		t.Errorf("shift-tab from the pane left the keys with %v, want the file tree", back.focus)
+	}
+	if got := pressRune(pressRune(focusPane(t, focusFixture(t, 40)), 'f'), 'm'); !got.metaHasFocus() {
+		t.Errorf("f and m from the pane left the keys with %v, want the box", got.focus)
+	}
+	if !strings.Contains(focusFixture(t, 40).helpTextFor(focusPreview), "tab cycles") {
+		t.Error("the pane's bar does not name the key that leaves it")
+	}
+
+	overlay := openOverlay(t, overlayModel(t, 40))
+	if got := press(overlay, tea.KeyTab); got.mode != modePreview {
+		t.Errorf("tab in the overlay left the diff screen for mode %v, where no region is drawn", got.mode)
+	}
+}

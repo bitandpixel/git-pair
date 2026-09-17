@@ -145,30 +145,31 @@ func TestSubmitHelpWrapsToo(t *testing.T) {
 	}
 }
 
-func TestWindowRowsShrinkWhenTheHelperWraps(t *testing.T) {
+func TestRowAreaShrinksWhenTheHelperWraps(t *testing.T) {
 	m := newFileListModel(t)
 	m.height = 40
 
 	m.width = 200 // one helper row
-	wide := m.windowRows()
+	wide := m.rowArea()
 	if want := 40 - m.chromeRows(); wide != want {
-		t.Fatalf("window = %d rows at width 200, want %d (height less the chrome)", wide, want)
+		t.Fatalf("row area = %d rows at width 200, want %d (height less the chrome)", wide, want)
 	}
 
 	m.width = 20
-	rows := m.windowRows()
-	if want := 40 - m.chromeRows(); rows != want {
-		t.Errorf("window = %d rows, want %d (the helper now takes %d rows)",
-			rows, want, len(m.helpLines()))
+	area := m.rowArea()
+	if want := 40 - m.chromeRows(); area != want {
+		t.Errorf("row area = %d rows, want %d (the helper now takes %d rows)",
+			area, want, len(m.helpLines()))
 	}
-	if rows >= wide {
-		t.Errorf("the list kept %d rows while the helper grew to %d rows", rows, len(m.helpLines()))
+	if area >= wide {
+		t.Errorf("the regions kept %d rows while the helper grew to %d rows", area, len(m.helpLines()))
 	}
 	// The fixture has fewer files than either window, so nothing scrolls yet; the point is
-	// that the window stops claiming rows the helper is now using.
-	total := len(m.rows)
-	if got := len(m.visibleRows()); got != min(total, rows) {
-		t.Errorf("visibleRows = %d, want %d (total %d, window %d)", got, min(total, rows), total, rows)
+	// that the regions stop claiming rows the helper is now using.
+	_, files := m.regionHeights()
+	total := len(m.fileRows())
+	if got := len(m.visibleFiles()); got != min(total, files) {
+		t.Errorf("visibleFiles = %d, want %d (total %d, window %d)", got, min(total, files), total, files)
 	}
 }
 

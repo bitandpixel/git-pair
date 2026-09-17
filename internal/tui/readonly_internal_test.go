@@ -281,7 +281,7 @@ func TestHistoricalSpanDoesNotCreateTheAboutItDiffersFrom(t *testing.T) {
 	f.Remove(about)
 	before := f.MustGit("status", "--porcelain")
 
-	m.cursor = indexOf(t, m, rowAbout)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowAbout))
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := updated.(reviewModel)
 
@@ -306,7 +306,7 @@ func TestLiveSpanStillCreatesAWorkingTreeAbout(t *testing.T) {
 	about := m.sess.AboutPath()
 	f.Remove(about)
 
-	m.cursor = indexOf(t, m, rowAbout)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowAbout))
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := updated.(reviewModel)
 

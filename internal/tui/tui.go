@@ -39,6 +39,18 @@ const (
 	modePreview
 )
 
+// focusTarget is the part of the screen the keys belong to. The file list, the diff and the
+// changeset box are the three things a reviewer reads, and the frame says which of them holds the
+// keys rather than leaving it to be inferred: a keystroke means something different in each, and a
+// region that cannot be seen cannot be changed by one.
+type focusTarget int
+
+const (
+	focusFiles focusTarget = iota
+	focusPreview
+	focusMeta
+)
+
 type promptKind int
 
 const (
@@ -58,6 +70,9 @@ const (
 	rowThreadsHead
 	rowThread
 	rowNewThread
+	// rowSpan is the span line inside the changeset box. It is a row rather than a caption because
+	// the span is the one thing in the box a reviewer changes: Enter or Space on it opens the picker.
+	rowSpan
 )
 
 // Labels the section rows print. A thread is shown by file name: they all live in one
@@ -91,9 +106,8 @@ type row struct {
 	count         int    // how many threads the heading is standing in for
 }
 
-// inFileBlock is which rows belong to the file tree rather than to the changeset section under the
-// reviewed counter. Directory rows belong to it: they are part of the files, Tab should land on one
-// when it comes back to them, and folding a directory must not count as having left the files.
+// inFileBlock is which rows belong to the file tree rather than to the changeset box. Directory rows
+// belong to it: they are part of the files, and folding a directory must not count as having left them.
 func inFileBlock(k rowKind) bool { return k == rowFile || k == rowDir }
 
 // action is what Enter does with a row.
@@ -108,6 +122,9 @@ const (
 	actionArtifact
 	actionCollapse
 	actionNewThread
+	// actionSpan is Enter or Space on the span row: the picker, which changes nothing until its own
+	// Enter — so it is reachable over a historical span like any other read.
+	actionSpan
 )
 
 // activateBy is the Enter table: one row kind, one action. A file opens in the difftool
@@ -128,6 +145,8 @@ func activateBy(r row) action {
 		return actionCollapse
 	case rowNewThread:
 		return actionNewThread
+	case rowSpan:
+		return actionSpan
 	}
 	return actionNone
 }
@@ -165,14 +184,30 @@ type reviewModel struct {
 	sess *Session
 
 	mode   mode
-	cursor int
-	scroll int
 	width  int
 	height int
 
-	// rows is the navigable list: the files in the span, then the changeset section.
-	// It is rebuilt by refresh whenever the session or the view could have changed.
+	// cursor and scroll belong to the file list; metaCursor and metaScroll to the changeset box.
+	// Each region keeps its own place, so handing the keys over and back returns the reviewer to the
+	// row they left rather than to the top of the other list.
+	cursor     int
+	scroll     int
+	metaCursor int
+	metaScroll int
+	// focus is which region holds the keys, and prevFocus the one they were in before the preview
+	// took them, so `p` gives them back where they came from rather than always to the files.
+	focus     focusTarget
+	prevFocus focusTarget
+	// gPrefix is a `g` waiting for its partner in the region that holds the keys: the pair jumps to
+	// that region's top. It is kept apart from the diff's own previewG so the two jumps cannot read
+	// each other's half-press.
+	gPrefix bool
+
+	// rows is the navigable list: the file tree, then the changeset box's rows. It is rebuilt by
+	// refresh whenever the session or the view could have changed, and metaStart is where the box's
+	// rows begin in it — the two regions are two windows over one list.
 	rows        []row
+	metaStart   int
 	inSpan      map[string]bool
 	threadsOpen bool
 	// folded holds the directories whose contents are hidden, keyed by the directory path with
@@ -193,15 +228,8 @@ type reviewModel struct {
 	// The preview, in whichever layout it fits. previewPath is what it shows and previewOffset
 	// where in it that pane is; patches and working hold what git already answered, so moving back
 	// to a file costs nothing. previewG is the `g` waiting for its partner in the diff, kept
-	// apart from the list's markPending so the two jumps cannot read each other's half-press.
-	//
-	// previewFocus is the pane having the keys: `p` moves them from the list to the diff so a long
-	// file can be read with the same keys the overlay uses, and `p` or esc gives them back while `q`
-	// closes the preview. It is a flag rather than a mode because the list stays on the screen the
-	// whole time — which is also why nothing reads the flag directly: previewHasFocus is the only
-	// answer, since a terminal that shrank can take the pane away from under it.
+	// apart from the region's gPrefix so the two jumps cannot read each other's half-press.
 	previewOn     bool
-	previewFocus  bool
 	previewPath   string
 	previewOffset int
 	previewG      bool
@@ -425,27 +453,55 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Every action that changes something goes through one gate. Read-only-ness is a
 	// property of the span's head, not of each command, and a screen that grows a new
 	// mutating key must not be able to forget the check.
-	if doing, mutating := mutatingKey(key); mutating {
+	if doing, mutating := mutatingKey(key, m); mutating {
 		if why := m.cannot(doing); why != "" {
 			m.setStatus(why, false)
 			return m, nil
 		}
 	}
 
+	// `g` waits for its partner, as it does in the diff: the pair means the top of whichever region
+	// holds the keys. The guard is what makes the pair possible at all — without it the second `g`
+	// would be read as another prefix and the jump would never happen.
+	if key.Type == tea.KeyRunes && firstRune(key) == 'g' && !m.gPrefix {
+		m.gPrefix = true
+		return m, nil
+	}
+	pressedG := m.gPrefix
+	m.gPrefix = false
+
 	switch {
-	case key.Type == tea.KeyCtrlC, key.Type == tea.KeyCtrlD,
-		(key.Type == tea.KeyRunes && len(key.Runes) == 1 && key.Runes[0] == 'q'):
+	case key.Type == tea.KeyCtrlC,
+		key.Type == tea.KeyRunes && len(key.Runes) == 1 && key.Runes[0] == 'q':
 		m.quitting = true
 		return m, tea.Quit
 	case key.Type == tea.KeyEsc && m.status != "":
 		m.setStatus("", false)
 		return m, nil
+	// The navigation keys belong to the region holding them, and they mean the same thing in both:
+	// a row, half a page, a page, the two ends. ctrl-d used to quit, which is why paging was ctrl-f
+	// and ctrl-b and nothing else; ctrl-c and q still quit, and the key a pager means it to have gets
+	// back to paging.
 	case key.Type == tea.KeyDown, key.Type == tea.KeyRunes && firstRune(key) == 'j':
 		m.move(1)
 	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
 		m.move(-1)
-	case key.Type == tea.KeyTab, key.Type == tea.KeyShiftTab:
-		m.jumpSection()
+	case key.Type == tea.KeyCtrlD:
+		m.move(max(1, m.activeWindow()/2))
+	case key.Type == tea.KeyCtrlU:
+		m.move(-max(1, m.activeWindow()/2))
+	case key.Type == tea.KeyCtrlF:
+		m.move(max(1, m.activeWindow()))
+	case key.Type == tea.KeyCtrlB:
+		m.move(-max(1, m.activeWindow()))
+	case pressedG && key.Type == tea.KeyRunes && firstRune(key) == 'g':
+		m.activeTop()
+	case key.Type == tea.KeyRunes && firstRune(key) == 'G':
+		m.activeBottom()
+	case key.Type == tea.KeyTab:
+		m.cycleFocus(1)
+	case key.Type == tea.KeyShiftTab:
+		m.cycleFocus(-1)
 	case key.Type == tea.KeyLeft, key.Type == tea.KeyRunes && firstRune(key) == 'h':
 		m.foldUp()
 	case key.Type == tea.KeyRight, key.Type == tea.KeyRunes && firstRune(key) == 'l':
@@ -453,15 +509,20 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case key.Type == tea.KeyRunes && firstRune(key) == 'c':
 		m.toggleTree()
 	case key.Type == tea.KeySpace:
+		// Space on the span row chooses a span rather than marking one, which is what the read-only
+		// gate is told about in mutatingKey: the picker commits nothing until its own Enter.
+		if r, _, ok := m.activeRow(); ok && r.kind == rowSpan {
+			return m.openSpanPicker()
+		}
 		m.toggleMark()
 	case key.Type == tea.KeyEnter:
 		return m.activate()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'p':
 		return m.togglePreview()
-	case key.Type == tea.KeyCtrlF:
-		return m.pagePreview(1)
-	case key.Type == tea.KeyCtrlB:
-		return m.pagePreview(-1)
+	case key.Type == tea.KeyRunes && firstRune(key) == 'f':
+		m.focusOn(focusFiles)
+	case key.Type == tea.KeyRunes && firstRune(key) == 'm':
+		m.focusOn(focusMeta)
 	case key.Type == tea.KeyRunes && firstRune(key) == 'd':
 		return m.openDiffOfSelection()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'e':
@@ -474,9 +535,7 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case key.Type == tea.KeyRunes && firstRune(key) == 'T':
 		m.toggleThreads()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'V':
-		m.mode = modeSpan
-		m.pick = m.newSpanPicker()
-		m.setStatus("", false)
+		return m.openSpanPicker()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'v':
 		before := countMarked(m.sess)
 		res, err := m.sess.StepSpan(m.ctx)
@@ -513,11 +572,16 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// mutatingKey is the table of keys that change something: a reviewed mark, a file on
-// disk, a thread, a review submission. Keeping it in one place is what lets the
-// read-only gate cover commands added later.
-func mutatingKey(key tea.KeyMsg) (doing string, ok bool) {
+// mutatingKey is the table of keys that change something: a reviewed mark, a file on disk, a thread, a
+// review submission. Keeping it in one place is what lets the read-only gate cover commands added
+// later. It is asked about the row the keys are on rather than about the keystroke alone, because Space
+// means two different things depending on where it lands: on a file it sets a mark, and on the span row
+// it opens the picker, which commits nothing.
+func mutatingKey(key tea.KeyMsg, m reviewModel) (doing string, ok bool) {
 	if key.Type == tea.KeySpace {
+		if r, _, found := m.activeRow(); found && r.kind == rowSpan {
+			return "", false
+		}
 		return "mark files reviewed", true
 	}
 	if key.Type != tea.KeyRunes || len(key.Runes) != 1 {
@@ -557,7 +621,7 @@ func (m reviewModel) cannot(doing string) string {
 // the subtree, and the next clears it, so the key does the same thing to a directory that it does
 // to a file: it flips the state of the row under the cursor.
 func (m *reviewModel) toggleMark() {
-	r, ok := m.selectedRow()
+	r, _, ok := m.activeRow()
 	if !ok {
 		return
 	}
@@ -618,18 +682,28 @@ func (m *reviewModel) setFolded(dir string, folded bool) {
 	m.refresh()
 }
 
+// listOnly is the answer to a key of the file tree while the changeset box holds the keys. Folding is
+// a thing the tree does, and doing it to a list the reviewer is not looking at — with the box's bar not
+// even offering the key — is the kind of invisible action the focus is there to prevent.
+func (m *reviewModel) listOnly() bool {
+	if !m.metaHasFocus() {
+		return false
+	}
+	m.setStatus("that key belongs to the file tree — f goes back to it", false)
+	return true
+}
+
 // foldUp is `h` and the left arrow: the way back up a tree. On an open directory it closes it;
 // anywhere else in the tree — a file, or a directory already closed — it moves the cursor onto the
 // row of the directory containing it, which is how the key leaves the fold decision to the reviewer
 // rather than collapsing whatever the cursor happens to be over. It is a key of the file tree: the
-// changeset section under the counter has paths in it, but no rows that fold.
+// changeset box has paths in it, but no rows that fold.
 func (m *reviewModel) foldUp() {
-	r, ok := m.selectedRow()
-	if !ok {
+	if m.listOnly() {
 		return
 	}
-	if !inFileBlock(r.kind) {
-		m.setStatus(r.name+" is under the counter, where nothing folds — h/l fold the file tree", false)
+	r, ok := m.selectedRow()
+	if !ok {
 		return
 	}
 	if r.kind == rowDir && !m.folded[r.path] {
@@ -649,12 +723,11 @@ func (m *reviewModel) foldUp() {
 // unfoldUnder is `l` and the right arrow, and it only ever opens: the closing half of a directory
 // is `h` or Enter, so that one key cannot be the one that hides what the reviewer is reading.
 func (m *reviewModel) unfoldUnder() {
-	r, ok := m.selectedRow()
-	if !ok {
+	if m.listOnly() {
 		return
 	}
-	if !inFileBlock(r.kind) {
-		m.setStatus(r.name+" is under the counter, where nothing folds — h/l fold the file tree", false)
+	r, ok := m.selectedRow()
+	if !ok {
 		return
 	}
 	if r.kind != rowDir {
@@ -673,6 +746,9 @@ func (m *reviewModel) unfoldUnder() {
 // one key rather than a pair because the two states are the only two there are, and pressing it
 // again has exactly one sensible meaning.
 func (m *reviewModel) toggleTree() {
+	if m.listOnly() {
+		return
+	}
 	dirs := treeDirs(m.sess.Files())
 	if len(dirs) == 0 {
 		m.setStatus("nothing to fold: this span changes files at the top of the tree only", false)
@@ -821,17 +897,30 @@ func (m reviewModel) openThreadTitle(title string) (tea.Model, tea.Cmd) {
 	return m.openPathNoted(path, note)
 }
 
+// openSpanPicker is `V`, and Enter or Space on the span row: the screen where both ends are chosen
+// before either takes effect. It is reachable from a historical span for the same reason reading is —
+// the picker is how a reviewer gets back to a span they can act on, and it changes nothing until its
+// own Enter.
+func (m reviewModel) openSpanPicker() (tea.Model, tea.Cmd) {
+	m.mode = modeSpan
+	m.pick = m.newSpanPicker()
+	m.setStatus("", false)
+	return m, nil
+}
+
 // --- external process handoff ----------------------------------------------
 
 // activate does whatever the row under the cursor is for. The mapping from row to action is
 // activateBy, kept apart from the process handoff so the table is testable without handing
 // the terminal to an editor.
 func (m reviewModel) activate() (tea.Model, tea.Cmd) {
-	r, ok := m.selectedRow()
+	r, _, ok := m.activeRow()
 	if !ok {
 		return m, nil
 	}
 	switch activateBy(r) {
+	case actionSpan:
+		return m.openSpanPicker()
 	case actionDiff:
 		return m.openDiff(r.path)
 	case actionEdit:
@@ -860,7 +949,7 @@ func (m reviewModel) activate() (tea.Model, tea.Cmd) {
 // pathspec into every file the span changed under it: one key for "show me this package". Anything
 // else goes through the same decision Enter makes for it.
 func (m reviewModel) openDiffOfSelection() (tea.Model, tea.Cmd) {
-	r, ok := m.selectedRow()
+	r, _, ok := m.activeRow()
 	if !ok {
 		return m, nil
 	}
@@ -961,7 +1050,7 @@ func difftoolHead(sp span.Span) string {
 // thing an editor has to open — the tool would find its own way in — and the keys that do want the
 // whole subtree are already there, so the row says so instead of sending a path to the editor.
 func (m reviewModel) openEditor() (tea.Model, tea.Cmd) {
-	r, ok := m.selectedRow()
+	r, _, ok := m.activeRow()
 	if !ok || r.path == "" {
 		return m, nil
 	}
@@ -1017,9 +1106,10 @@ var (
 	// file line stops being a caption over the diff and becomes its title. Bold rather than coloured,
 	// because a colour is the one thing this terminal is not obliged to render.
 	styleActive = lipgloss.NewStyle().Bold(true)
-	// styleIdle is the list's cursor while the pane has the keys. The row is still where the reviewer
-	// left it, and marking it the way the active column marks its own would put two cursors on the
-	// screen, so this is the same highlight with the intensity turned down.
+	// styleIdle is the cursor of the region that does not have the keys. That row is still where the
+	// reviewer left it — which is the point of a region keeping its own cursor — but two full highlights
+	// on the screen would be two things to look at, so this is the same highlight with the intensity
+	// turned down.
 	styleIdle = lipgloss.NewStyle().Reverse(true).Faint(true)
 	styleErr  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	styleMark = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
@@ -1042,16 +1132,17 @@ func (m reviewModel) View() string {
 	case modeSpan:
 		b.WriteString(m.pickerBlock())
 	case modePreview:
-		// The whole screen is the diff. The rule is drawn here rather than in footer: in the list
-		// layout it belongs to the list column, and here it is the one thing between the diff and its
-		// keys.
-		b.WriteString(strings.Join(append(m.previewLines(), m.rule()), "\n") + "\n")
+		// The whole screen is the diff. The rule goes under it, with the shortcut bar, which is what
+		// the diff's own chrome counts.
+		b.WriteString(strings.Join(m.previewLines(), "\n") + "\n")
+		b.WriteString(m.rule() + "\n")
 	default:
 		if m.paneWidth() > 0 {
 			b.WriteString(joinColumns(m.listBlock(), m.previewLines(), m.listWidth(), m.previewHasFocus()))
 		} else {
 			b.WriteString(m.listBlock())
 		}
+		b.WriteString(m.rule() + "\n")
 	}
 	b.WriteString(m.footer())
 	// Joined rather than newline-terminated: the renderer writes a line for each line of the
@@ -1074,58 +1165,140 @@ func padRows(rows []string, height, width int) []string {
 	return rows
 }
 
-// headerLines are the two lines over the list: the changeset, and the base and span it is
-// measured against. They are also what the list column has to be wide enough for, so they are
-// built in one place rather than measured in one and drawn in another.
-func (m reviewModel) headerLines(h Header) []string {
-	return []string{
-		styleSpan.Render(h.Title),
-		styleDim.Render("base: "+h.Base) + "  " + styleDim.Render("span: "+m.spanName(h.SpanLabel)),
-	}
+// boxLabel is the left column inside the changeset box: "base" and "span" are the same width, so the
+// two values under it line up, and the words are the only explanation of which end is which.
+func boxLabel(word string) string {
+	return styleDim.Render(word + "    "[:6-len(word)])
 }
 
-// listBlock is the list column on its own: header, the rows in the window, the reviewed
-// counter, the changeset section, and the rule under it. It is apart from View because the
-// preview is drawn beside exactly this block, row for row.
-func (m reviewModel) listBlock() string {
-	var b strings.Builder
-	h := m.sess.Header()
-	reviewed, total := m.sess.Count()
+// baseLine is the box's one row that is not a choice: what the span is measured against. The span
+// beside it is a row, because that is the one a reviewer changes.
+func (m reviewModel) baseLine() string {
+	return boxLabel("base") + m.sess.Header().Base
+}
 
-	headers := m.headerLines(h)
-	b.WriteString(clip(headers[0], m.listWidth()) + "\n")
-	b.WriteString(clip(headers[1], m.listWidth()) + "\n")
-	b.WriteString("\n")
-
-	if total == 0 {
-		b.WriteString(styleDim.Render("(no changed files in this span)") + "\n")
+// boxInner is how wide a row inside the box may be: the list column less the border characters and the
+// space beside each of them.
+func (m reviewModel) boxInner() int {
+	if inner := m.listWidth() - 4; inner > 8 {
+		return inner
 	}
+	return 8
+}
+
+// boxLines draws the changeset box: the two borders, the base line inside them, and the rows of the
+// region — the span, ABOUT.md, the thread heading, the threads, and the row that starts another. The
+// borders are the box's focus light, the same job the double rule does for the preview: faint when the
+// keys are elsewhere, bold when the box holds them.
+func (m reviewModel) boxLines(section []renderedRow) []string {
+	f, closeTop, closeBottom := m.boxFrame()
+	frame := styleDim.Render
+	if m.metaHasFocus() {
+		frame = styleActive.Render
+	}
+	width := m.listWidth()
+	out := []string{frame(boxEdge(f.cornerTop, closeTop, f.edge, clip(m.sess.Header().Title, m.boxInner()), width))}
+	out = append(out, m.boxLine(f, m.baseLine(), false))
+	for _, r := range section {
+		out = append(out, m.boxLine(f, m.rowText(r.row), m.metaCursor == r.index))
+	}
+	// The box's scroll note goes inside its own bottom border rather than on a row of its own: a note
+	// that arrived and left would change the height of the column, which is what the box is here to stop.
+	more := ""
+	if hidden := len(m.metaRows()) - m.metaScroll - m.metaWindow(); hidden > 0 {
+		more = fmt.Sprintf("%d more", hidden)
+	}
+	return append(out, frame(boxEdge(f.cornerBottom, closeBottom, f.edge, more, width)))
+}
+
+// boxFrame is the changeset box's border set, which is also the box's focus light: single rules while
+// another region holds the keys, double rules while the box holds them. The divider between the list
+// and the diff uses the same convention, for the same reason -- bold and faint are the one thing a
+// terminal is not obliged to render, and a focus the reviewer cannot see is a focus that eats
+// keystrokes.
+type boxFrame struct {
+	cornerTop, cornerBottom, vertical, edge string
+}
+
+var (
+	frameIdle   = boxFrame{cornerTop: "\u256d", cornerBottom: "\u2570", vertical: "\u2502", edge: "\u2500"}
+	frameActive = boxFrame{cornerTop: "\u2554", cornerBottom: "\u255a", vertical: "\u2551", edge: "\u2550"}
+)
+
+// boxFrame is the frame to draw with, and the two glyphs that close its borders at the right. Where
+// there is a preview column the box is open on that side -- the divider is already a rule one cell
+// away, and two rules that close together read as one rule drawn twice.
+func (m reviewModel) boxFrame() (f boxFrame, closeTop, closeBottom string) {
+	f = frameIdle
+	if m.metaHasFocus() {
+		f = frameActive
+	}
+	closeTop, closeBottom = f.cornerTop, f.cornerBottom
+	if m.paneWidth() > 0 {
+		closeTop, closeBottom = f.edge, f.edge
+	}
+	return f, closeTop, closeBottom
+}
+
+// boxEdge is one border of the box, with a label in it where there is one to say. The rule between the
+// corners is what says the line is a border rather than a row.
+func boxEdge(left, right, rule, label string, width int) string {
+	body := ""
+	if label != "" {
+		body = " " + label + " "
+	}
+	fill := width - 2 - lipgloss.Width(body)
+	if fill < 0 {
+		fill, body = 0, ""
+	}
+	return left + body + strings.Repeat(rule, fill) + right
+}
+
+// boxLine is one row inside the box. The highlight covers the row's text rather than the row's width:
+// inside a border that spans the column, a full-width bar would read as a selection of the whole box.
+func (m reviewModel) boxLine(f boxFrame, text string, cursor bool) string {
+	inner := m.boxInner()
+	if cursor {
+		text = styleSelected.Render(text)
+		if !m.metaHasFocus() {
+			text = styleIdle.Render(text)
+		}
+	}
+	return f.vertical + " " + padRight(clip(text, inner), inner) + m.boxGap(f)
+}
+
+// boxGap closes a row of the box: the border, or the two spaces where the preview column already draws
+// a rule one cell away. The width is the same either way, which is what keeps the divider in one column.
+func (m reviewModel) boxGap(f boxFrame) string {
+	if m.paneWidth() > 0 {
+		return "  "
+	}
+	return " " + f.vertical
+}
+
+// listBlock is the list column on its own: the changeset box, the file tree, and the reviewed counter.
+// It is apart from View because the preview is drawn beside exactly this block, row for row, and it is
+// padded to the column's height so the two columns end on the same line whatever the window is showing.
+func (m reviewModel) listBlock() string {
+	reviewed, total := m.sess.Count()
 	files, section := m.window()
+
+	lines := m.boxLines(section)
+	lines = append(lines, "")
+	if total == 0 {
+		lines = append(lines, styleDim.Render("(no changed files in this span)"))
+	}
 	for _, r := range files {
-		b.WriteString(m.line(r) + "\n")
+		lines = append(lines, m.line(r))
 	}
 	if m.scroll > 0 {
-		b.WriteString(styleDim.Render(fmt.Sprintf("  (hidden above: %d)", m.scroll)) + "\n")
+		lines = append(lines, styleDim.Render(fmt.Sprintf("  (hidden above: %d)", m.scroll)))
 	}
-
-	b.WriteString("\n")
-	b.WriteString(m.counterLine(reviewed, total) + "\n")
-	b.WriteString("\n")
-	// The changeset section is below the counter it does not belong to, so the block above
-	// reads as "these are the files the diff touched" and the block below as "this is what
-	// the review is made of".
-	for _, r := range section {
-		b.WriteString(m.line(r) + "\n")
+	lines = append(lines, "", m.counterLine(reviewed, total))
+	for len(lines) < m.listColumnRows() {
+		lines = append(lines, "")
 	}
-	// The row area holds the height the window was given, so the rule and the shortcut bar sit at
-	// the bottom of the terminal instead of floating under a short list.
-	for i := len(files) + len(section); i < m.windowRows(); i++ {
-		b.WriteString("\n")
-	}
-	// A rule rather than a blank line, so the shortcut bar reads as chrome and not as
-	// another row of the list it sits under.
-	b.WriteString(m.rule() + "\n")
-	return b.String()
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // footer is the shortcut bar and the status line. They span the whole terminal rather than the
@@ -1220,7 +1393,8 @@ func (m reviewModel) spanName(label string) string {
 	return label
 }
 
-// helpText is the shortcut helper for the current mode. Shortcut groups are separated by
+// helpText is the shortcut bar for the keys as they mean right now: the bar of the screen the session
+// is on, or, in the list, the bar of the region that holds the keys. Shortcut groups are separated by
 // two spaces; wrapping breaks between those groups, never inside one.
 func (m reviewModel) helpText() string {
 	switch m.mode {
@@ -1233,30 +1407,78 @@ func (m reviewModel) helpText() string {
 	case modePreview:
 		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  p q esc enter close"
 	}
-	if m.previewHasFocus() {
-		// The pane has the keys, so this is the whole set rather than a selection: what it reads, and
-		// the keys that give them back. Nothing that changes the review is here because nothing that
-		// changes the review happens — and, unlike the read-only bar, nothing is missing for a reason
-		// the reviewer has to infer.
-		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  enter diff  p esc list  q close preview"
+	return m.helpTextFor(m.focus)
+}
+
+// helpTextFor is the bar of one region. It names every key that region reads and none that it does not,
+// which is what makes a key that does nothing while another region holds them an explained absence
+// rather than a dropped keystroke. The keys that mean the same thing from anywhere -- tab, f, m, p --
+// are named in every bar, because a reviewer should never have to remember which bar they read a key
+// in.
+//
+// The file tree's bar is the longest of the three on purpose: it is the bar the preview is cut against
+// and the one the layout budgets rows for, so the two shorter bars leave a blank row above the status
+// line rather than moving the divider when focus changes.
+func (m reviewModel) helpTextFor(target focusTarget) string {
+	page := "j/k move  gg/G ends  ctrl-d/u half page  ctrl-f/b page"
+	elsewhere := "p preview  f files  m changeset  tab focus"
+	if target == focusPreview {
+		// The pane reads nothing that changes the review, so its bar says what its two exits are rather
+		// than pretending the rest of the screen is available.
+		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  enter diff  p esc back  " +
+			"tab cycles  f files  m changeset  q close preview"
 	}
-	threadsHint := "T show threads"
+	threads := "T show threads"
 	if m.threadsOpen {
-		threadsHint = "T hide threads"
+		threads = "T hide threads"
+	}
+	if target == focusMeta {
+		if !m.sess.Span().Live() {
+			return page + "  enter open  space span  " + threads + "  " + elsewhere + "  q quit"
+		}
+		return page + "  enter open  space span  t new thread  a about  " + threads + "  " + elsewhere + "  q quit"
+	}
+	fold := "h/l fold  c fold all"
+	if len(treeDirs(m.sess.Files())) == 0 {
+		fold = ""
 	}
 	if !m.sess.Span().Live() {
 		// Nothing in this bar may imply the reviewer can act on history.
-		return "j/k move  tab section  h/l fold  c fold all  enter open  d diff  p preview  " + threadsHint +
-			"  v spans  V picker  q quit"
+		return strings.Join([]string{page, fold, "enter open  d diff  " + threads +
+			"  v spans  V picker  " + elsewhere + "  q quit"}, "  ")
 	}
-	return "j/k move  tab section  h/l fold  c fold all  enter open  d diff  p preview  e edit  space reviewed  a about  " +
-		"t new thread  " + threadsHint + "  v spans  V picker  s submit  q quit"
+	return strings.Join([]string{page, fold, "enter open  d diff  space reviewed  e edit  a about  " +
+		"t new thread  " + threads + "  v spans  V picker  s submit  " + elsewhere + "  q quit"}, "  ")
 }
 
-// helpLines is helpText fitted to the terminal width. A narrow window gets the overflow on
+// helpLines is helpLines fitted to the terminal width. A narrow window gets the overflow on
 // the next line instead of leaving it to the terminal, which would break a shortcut in half.
 func (m reviewModel) helpLines() []string {
 	return wrapGroups(m.helpText(), m.width)
+}
+
+// helpRows is how many rows the shortcut bar costs the layout, whichever set of keys is being offered.
+//
+// This is the budget, not the bar: the chrome that sizes the row area cannot count the focused bar's
+// lines, because the bar changes when the keys move and the layout must not. Counting the focused bar
+// is what made `p` steal a row from the list — the preview's keys fit on one line and the list's did
+// not, so focusing the diff moved the rule and handed the pane a row it had not asked for. The tallest
+// bar the session can show is reserved instead, and a shorter one leaves a blank row above the status
+// line, which is invisible in a frame that already fills the terminal.
+func (m reviewModel) helpRows() int {
+	bars := []string{m.helpTextFor(focusFiles), m.helpTextFor(focusMeta)}
+	if m.paneWidth() > 0 {
+		// Only count the preview's bar where a preview can actually be focused: the excuse for not
+		// having a pane at all is not a reason to spend a row on its bar.
+		bars = append(bars, m.helpTextFor(focusPreview))
+	}
+	rows := 0
+	for _, bar := range bars {
+		if n := len(wrapGroups(bar, m.width)); n > rows {
+			rows = n
+		}
+	}
+	return rows
 }
 
 // wrapGroups packs groups separated by two or more spaces into lines no wider than width,
@@ -1360,20 +1582,38 @@ func wrapWords(s string, width int) []string {
 // closed, or a collapse should not move the reviewer somewhere else. When the row has gone off
 // the screen, the cursor goes to the directory that holds it rather than staying at its old
 // index, which after a fold would be some unrelated row further down the list.
+// refresh rebuilds the rows and puts each region's cursor back on the row it was on. A row is
+// identified by kind and path rather than by index, because the tree re-shapes itself when a directory
+// is folded and because a thread the reviewer just wrote appears in the box without being asked; the
+// index of a row that is still there is not the number it had.
 func (m *reviewModel) refresh() {
-	var keep *row
-	if m.cursor >= 0 && m.cursor < len(m.rows) {
-		keep = &m.rows[m.cursor]
-	}
+	keepFile, keepMeta := m.rowUnder(m.cursor), m.rowUnder(m.metaCursor)
 	m.buildRows()
-	if keep != nil {
-		if i := m.rowIndex(keep.kind, keep.path); i >= 0 {
-			m.cursor = i
-		} else if _, i := m.containingDirRow(keep.path); i >= 0 {
-			m.cursor = i
-		}
-	}
+	m.restore(keepFile, &m.cursor)
+	m.restore(keepMeta, &m.metaCursor)
 	m.clamp()
+}
+
+// rowUnder is the row a cursor is on, or nil when it is off the list -- which is how a cursor that was
+// never in range stays out of the way of a rebuild that would otherwise look for a row it never had.
+func (m *reviewModel) rowUnder(i int) *row {
+	if i < 0 || i >= len(m.rows) {
+		return nil
+	}
+	return &m.rows[i]
+}
+
+// restore puts a cursor back on the row it was on, or on the directory that contained it when the row
+// itself has folded away.
+func (m *reviewModel) restore(keep *row, cursor *int) {
+	if keep == nil {
+		return
+	}
+	if i := m.rowIndex(keep.kind, keep.path); i >= 0 {
+		*cursor = i
+	} else if _, i := m.containingDirRow(keep.path); i >= 0 {
+		*cursor = i
+	}
 }
 
 // rowIndex finds the row of a given kind naming a given path, or -1. It is how the cursor knows it
@@ -1405,6 +1645,13 @@ func (m *reviewModel) buildRows() {
 		}
 		rows = append(rows, row{kind: rowFile, path: e.path, name: e.name, depth: e.depth, file: e.file})
 	}
+	// The split between the two regions: from here down are the rows the changeset box draws. One index
+	// into one list rather than two lists, because a thread the reviewer creates has to appear in the
+	// box without anything being told to update it.
+	m.metaStart = len(rows)
+	// The span is the box's first row and the only one a reviewer changes: what the review is measured
+	// against is worth choosing, so it is a row with an action rather than a line to read.
+	rows = append(rows, row{kind: rowSpan, name: m.spanName(m.sess.Header().SpanLabel), file: -1})
 	rows = append(rows, row{kind: rowAbout, path: m.sess.AboutPath(),
 		name: filepath.Base(m.sess.AboutPath()), file: -1})
 
@@ -1431,23 +1678,9 @@ func (m *reviewModel) buildRows() {
 	m.rows = rows
 }
 
-// jumpSection is Tab: it toggles between the two things a reviewer works through, the files
-// and the changeset artifacts under them, landing on the first row of the other. One key
-// both ways, because a key that only goes one direction leaves the reviewer stuck there.
-func (m *reviewModel) jumpSection() {
-	r, ok := m.selectedRow()
-	if !ok {
-		return
-	}
-	toFiles := !inFileBlock(r.kind)
-	for i, candidate := range m.rows {
-		if inFileBlock(candidate.kind) == toFiles {
-			m.cursor = i
-			m.clamp()
-			return
-		}
-	}
-}
+// jumpSection is gone, and Tab is the reason: a key that toggles between two halves of one list
+// cannot serve a screen with three things a reviewer moves between. The ring is focusRing, and each
+// region keeps its own cursor, so Tab returns to the row it left rather than to the top.
 
 // The two columns the file tree spends on itself: the indent one level costs, and the fold arrow a
 // directory row puts before its mark. Both are two cells, which is what makes a directory's children
@@ -1482,6 +1715,10 @@ func (m reviewModel) rowText(r row) string {
 		return text + r.name
 	case rowAbout:
 		return r.name
+	case rowSpan:
+		// The control rather than the caption: the arrow says the row goes somewhere, which is the
+		// whole difference between a line a reviewer reads and a line a reviewer presses.
+		return boxLabel("span") + r.name + " " + styleDim.Render("\u25b8")
 	case rowThreadsHead:
 		arrow := "▸ "
 		label := r.name
@@ -1527,42 +1764,204 @@ func (m reviewModel) dirGutter(r row) string {
 	return stylePartial.Render("◐ ")
 }
 
+// --- regions ----------------------------------------------------------------
+
+// The row area is split between the two regions. The box gets what it asks for up to a third of the
+// area and the list gets the rest, which is what makes a changeset with forty threads a reason to
+// scroll the box rather than a reason to hide the diff behind it. The floors are arithmetic rather
+// than branches: at the smallest row area the tests allow, the box takes two rows and the list keeps
+// six.
+const (
+	metaShare    = 3
+	metaMinRows  = 2
+	filesMinRows = 3
+	// minRowArea is the floor the split is allowed to go to, and it is the list's floor rather than a
+	// comfortable number: the frame is written one line per row, so a row area padded up past what the
+	// terminal has left overflows the window and the last line of the shortcut bar scrolls off the top.
+	minRowArea = filesMinRows
+	// columnChrome is what the list column writes around its two regions: the box's two borders, the
+	// base line inside it, the blank under it, the blank over the counter and the counter.
+	columnChrome = 6
+)
+
+// fileRows and metaRows are the two regions of the one list: the tree, then the rows the box draws.
+// metaStart is where the second begins, which is why a region is a slice of rows rather than a second
+// list that would have to be kept in step with the first.
+func (m reviewModel) fileRows() []row { return m.rows[:m.metaStart] }
+func (m reviewModel) metaRows() []row { return m.rows[m.metaStart:] }
+
+// rowArea is what the two regions share: the terminal less everything the frame writes around them.
+func (m reviewModel) rowArea() int {
+	if area := m.height - m.chromeRows(); area > minRowArea {
+		return area
+	}
+	return minRowArea
+}
+
+// regionHeights splits the row area into the rows the box shows and the rows the list shows.
+func (m reviewModel) regionHeights() (meta, files int) {
+	area := m.rowArea()
+	meta = min(len(m.metaRows()), max(metaMinRows, area/metaShare))
+	return meta, area - meta
+}
+
+func (m reviewModel) metaWindow() int {
+	meta, _ := m.regionHeights()
+	return meta
+}
+
+func (m reviewModel) filesWindow() int {
+	_, files := m.regionHeights()
+	return files
+}
+
+// listColumnRows is how tall the list column is above the rule: both regions and the chrome between
+// them. It is the height the preview column is cut to, so the two columns end on the same line. It is
+// not picker.go's columnRows, which is how much room the span picker's two candidate lists have.
+func (m reviewModel) listColumnRows() int {
+	meta, files := m.regionHeights()
+	return meta + files + columnChrome
+}
+
+// clamp keeps each region's cursor inside its own rows and inside its own window.
 func (m *reviewModel) clamp() {
-	total := len(m.rows)
-	if total == 0 {
-		m.cursor, m.scroll = 0, 0
+	m.clampRegion(&m.cursor, &m.scroll, 0, m.metaStart, m.filesWindow())
+	m.clampRegion(&m.metaCursor, &m.metaScroll, m.metaStart, len(m.rows), m.metaWindow())
+}
+
+// clampRegion keeps one region's cursor inside [start, end) and its window scrolled to show it.
+// Without it `k` at the top drives an index negative and View indexes rows[-1], which panics the whole
+// program — and with two regions it takes a guard of the same size to stop the box's cursor walking
+// into the file list.
+func (m *reviewModel) clampRegion(cursor, scroll *int, start, end, window int) {
+	if start >= end {
+		*cursor, *scroll = start, 0
 		return
 	}
-	if m.cursor < 0 {
-		// Without this, k at the top drives the cursor negative and View indexes
-		// files[-1], which panics the whole program.
-		m.cursor = 0
+	if *cursor < start {
+		*cursor = start
 	}
-	if m.cursor > total-1 {
-		m.cursor = total - 1
+	if *cursor > end-1 {
+		*cursor = end - 1
 	}
-	// Keep the cursor inside a window sized to the terminal, leaving room for
-	// the header, footer, and status lines.
-	window := m.windowRows()
-	if m.cursor < m.scroll {
-		m.scroll = m.cursor
+	if *scroll < start {
+		*scroll = start
 	}
-	if m.cursor >= m.scroll+window {
-		m.scroll = m.cursor - window + 1
+	if *cursor < *scroll {
+		*scroll = *cursor
+	}
+	if *cursor >= *scroll+window {
+		*scroll = *cursor - window + 1
 	}
 }
 
-func (m *reviewModel) move(delta int) {
-	total := len(m.rows)
-	if total == 0 {
-		return
+// activeRow is the row the action keys work on: the focused region's cursor. While the diff holds the
+// keys the region they came from is the one that answers, which is why the diff shows a file from the
+// list it was opened over.
+func (m reviewModel) activeRow() (row, int, bool) {
+	if m.metaHasFocus() {
+		if m.metaCursor < m.metaStart || m.metaCursor >= len(m.rows) {
+			return row{}, 0, false
+		}
+		return m.rows[m.metaCursor], m.metaCursor, true
 	}
-	m.cursor += delta
+	if m.cursor < 0 || m.cursor >= m.metaStart {
+		return row{}, 0, false
+	}
+	return m.rows[m.cursor], m.cursor, true
+}
+
+// move steps the focused region's cursor, leaving the other region where it was.
+func (m *reviewModel) move(delta int) {
+	if m.metaHasFocus() {
+		if m.metaStart >= len(m.rows) {
+			return
+		}
+		m.metaCursor += delta
+	} else {
+		if m.metaStart == 0 {
+			return
+		}
+		m.cursor += delta
+	}
 	m.clamp()
 }
 
+// activeTop and activeBottom are what gg and G mean when there are two lists on the screen: the ends
+// of the one holding the keys, not of whichever the frame drew first.
+func (m *reviewModel) activeTop() {
+	if m.metaHasFocus() {
+		m.metaCursor = m.metaStart
+	} else {
+		m.cursor = 0
+	}
+	m.clamp()
+}
+
+func (m *reviewModel) activeBottom() {
+	if m.metaHasFocus() {
+		m.metaCursor = len(m.rows) - 1
+	} else {
+		m.cursor = m.metaStart - 1
+	}
+	m.clamp()
+}
+
+// focusRing is the order Tab walks: the file list, the diff where there is room for one, and the
+// changeset box. A terminal with no room for the pane has one fewer target, because a target that
+// cannot be drawn is a target whose keys go nowhere.
+func (m reviewModel) focusRing() []focusTarget {
+	ring := []focusTarget{focusFiles}
+	if m.paneWidth() > 0 {
+		ring = append(ring, focusPreview)
+	}
+	return append(ring, focusMeta)
+}
+
+// focusOn hands the keys to a region. The status line goes with them: the shortcut bar is what names
+// the keys of the region that holds them, and a note left over from the last keystroke would read as
+// an answer to this one.
+func (m *reviewModel) focusOn(to focusTarget) {
+	if to == focusPreview && m.paneWidth() == 0 {
+		return
+	}
+	if to != focusPreview {
+		// The last region the keys were in, so `p` gives them back there rather than always to the
+		// files: reading a diff from the box should land back on the box.
+		m.prevFocus = to
+		m.previewG = false
+	}
+	m.focus = to
+	m.clamp()
+	m.setStatus("", false)
+}
+
+// cycleFocus walks the ring; dir is -1 for shift-tab, so the ring goes both ways and a reviewer who
+// overshoots comes back rather than walking the long way round.
+func (m *reviewModel) cycleFocus(dir int) {
+	ring := m.focusRing()
+	at := 0
+	for i, target := range ring {
+		if target == m.focus {
+			at = i
+			break
+		}
+	}
+	m.focusOn(ring[(at+dir+len(ring))%len(ring)])
+}
+
+// activeWindow is how many rows the region holding the keys draws, which is the distance a page is.
+func (m reviewModel) activeWindow() int {
+	if m.metaHasFocus() {
+		return m.metaWindow()
+	}
+	return m.filesWindow()
+}
+
 func (m reviewModel) selectedRow() (row, bool) {
-	if m.cursor < 0 || m.cursor >= len(m.rows) {
+	// The file list's cursor, wherever the keys are: the preview shows the file the list is on, and a
+	// box row is not something the pane can diff. Keys that act on a row ask activeRow instead.
+	if m.cursor < 0 || m.cursor >= m.metaStart {
 		return row{}, false
 	}
 	return m.rows[m.cursor], true
@@ -1575,19 +1974,35 @@ type renderedRow struct {
 	index int
 }
 
-// window splits the rows inside the scroll window into the two blocks View draws: the files,
-// then the changeset section below the reviewed counter. One window over one list, because
-// the cursor walks straight from one block into the other.
+// window splits the rows that fit each region's window into the two blocks View draws: the changeset
+// box's rows and the file list's. Two windows over one list, because the list is one list — a thread
+// the reviewer creates lands in the box without the file list being told, and each region scrolls
+// without moving the other.
 func (m reviewModel) window() (files, section []renderedRow) {
-	for _, idx := range m.visibleRows() {
-		r := renderedRow{row: m.rows[idx], index: idx}
-		if inFileBlock(m.rows[idx].kind) {
-			files = append(files, r)
-		} else {
-			section = append(section, r)
-		}
+	for _, idx := range m.visibleMeta() {
+		section = append(section, renderedRow{row: m.rows[idx], index: idx})
+	}
+	for _, idx := range m.visibleFiles() {
+		files = append(files, renderedRow{row: m.rows[idx], index: idx})
 	}
 	return files, section
+}
+
+// visibleFiles and visibleMeta are the rows of one region that fit its own window.
+func (m reviewModel) visibleFiles() []int {
+	return visibleRows(0, m.metaStart, m.scroll, m.filesWindow())
+}
+
+func (m reviewModel) visibleMeta() []int {
+	return visibleRows(m.metaStart, len(m.rows), m.metaScroll, m.metaWindow())
+}
+
+func visibleRows(start, end, scroll, window int) []int {
+	var rows []int
+	for i := max(start, scroll); i < end && i < scroll+window; i++ {
+		rows = append(rows, i)
+	}
+	return rows
 }
 
 // The preview pane is a wide-terminal luxury, so it has an entry condition rather than a squeeze:
@@ -1627,27 +2042,28 @@ func (m reviewModel) previewLayout() (list, pane int) {
 	return list, m.width - list - previewGap
 }
 
-// listContentWidth is what the list would take to write everything in full: its longest row, and
-// the lines over it. It measures every row rather than the visible window, so the divider does not
-// move when a longer path scrolls into view, and it is the width the rows are then clipped to --
-// a column that grew because a path scrolled past would be a column that never stops growing.
+// listContentWidth is what the list would take to write everything in full: its longest row, and the
+// box above it. It measures every row rather than the visible window, so the divider does not move
+// when a longer path scrolls into view, and it is the width the rows are then clipped to -- a column
+// that grew because a path scrolled past would be a column that never stops growing.
 func (m reviewModel) listContentWidth() int {
-	h := m.sess.Header()
 	widest := 0
-	for _, line := range m.headerLines(h) {
-		if w := lipgloss.Width(line); w > widest {
+	// The box's rows are inside a border, which costs four cells apiece.
+	wide := func(s string, pad int) {
+		if w := lipgloss.Width(s) + pad; w > widest {
 			widest = w
 		}
+	}
+	wide(m.sess.Header().Title, 4)
+	wide(m.baseLine(), 4)
+	for _, r := range m.metaRows() {
+		wide(m.rowText(r), 4)
+	}
+	for _, r := range m.fileRows() {
+		wide(m.rowText(r), 0)
 	}
 	if _, total := m.sess.Count(); total > 0 {
-		if w := len(fmt.Sprintf("%d / %d reviewed", 0, total)); w > widest {
-			widest = w
-		}
-	}
-	for _, r := range m.rows {
-		if w := lipgloss.Width(m.rowText(r)); w > widest {
-			widest = w
-		}
+		wide(fmt.Sprintf("%d / %d reviewed", 0, total), 0)
 	}
 	return widest
 }
@@ -1664,6 +2080,10 @@ func (m reviewModel) previewShortfall() string {
 	}
 	return ""
 }
+
+// dividerAt is the cell the two columns are separated at: the list column, then the space joinColumns
+// leaves before the rule. The gap is three cells -- space, rule, space -- so the rule is the middle one.
+func (m reviewModel) dividerAt() int { return m.listWidth() + previewGap/2 }
 
 // paneWidth is how wide the preview column is, or 0 when there is no preview: the reviewer
 // switched it off, the session is taking input, or the terminal is too small. One function decides
@@ -1697,7 +2117,7 @@ func (m reviewModel) previewBodyRows() int {
 		}
 		return rows
 	}
-	rows := m.windowRows() - 2
+	rows := m.listColumnRows() - 2
 	if rows < 1 {
 		return 1
 	}
@@ -1705,11 +2125,18 @@ func (m reviewModel) previewBodyRows() int {
 }
 
 // previewHasFocus is whether the diff has the keys: a pane is on screen and the reviewer moved into
-// it. Nothing decides a keystroke from the flag alone, because a terminal resized under the session
-// takes the pane away while the flag is still set — and a keyboard held by a column that is no longer
-// drawn is a session that reads nothing at all.
+// it. Nothing decides a keystroke from the focus value alone, because a terminal resized under the
+// session takes the pane away while the reviewer is looking at it — and a keyboard held by a column
+// that is no longer drawn is a session that reads nothing at all.
 func (m reviewModel) previewHasFocus() bool {
-	return m.previewFocus && m.paneWidth() > 0
+	return m.focus == focusPreview && m.paneWidth() > 0
+}
+
+// metaHasFocus is whether the changeset box holds the keys, asked the same way: the box is always
+// drawn, so the answer is the focus itself, and the one place that has no box to give the keys to is
+// the overlay, which has the screen.
+func (m reviewModel) metaHasFocus() bool {
+	return m.focus == focusMeta && m.mode == modeFiles
 }
 
 // previewShowing is whether a diff is on the screen right now, in either layout. Fetching, key
@@ -1750,9 +2177,12 @@ func (m reviewModel) overlayShortfall() string {
 	return ""
 }
 
-// rule is the separator above the shortcut bar, as wide as the column it separates.
+// rule is the separator over the shortcut bar, and it spans the whole terminal rather than the column
+// above it. A rule that stopped at the divider read as a property of the list — the end of that column
+// — when what it separates is the session's screen from the session's keys, and the divider occluded
+// the rest of it in both split layouts.
 func (m reviewModel) rule() string {
-	width := m.listWidth()
+	width := m.width
 	if width <= 0 {
 		width = 80
 	}
@@ -1875,9 +2305,7 @@ func (m reviewModel) togglePreview() (tea.Model, tea.Cmd) {
 		return m.leavePreview()
 	}
 	if m.previewOn && m.paneWidth() > 0 {
-		m.previewFocus = true
-		m.clamp()
-		m.setStatus("", false)
+		m.focusOn(focusPreview)
 		return m, nil
 	}
 	if m.previewShortfall() == "" {
@@ -1889,29 +2317,31 @@ func (m reviewModel) togglePreview() (tea.Model, tea.Cmd) {
 		m.setStatus(reason, false)
 		return m, nil
 	}
-	m.previewOn, m.previewFocus = true, false
+	m.previewOn = true
 	m.mode = modePreview
+	m.focus = focusPreview
 	m.previewG = false
 	m.setStatus("", false)
 	return m, nil
 }
 
-// closePreview puts the list back. The scroll position is kept, so `p` twice returns to the same place
-// in the same file rather than to its top.
+// closePreview puts the list back and gives the keys to the region that had them before `p` took them
+// away. The scroll position is kept, so `p` twice returns to the same place in the same file.
 func (m reviewModel) closePreview() (tea.Model, tea.Cmd) {
 	m.mode = modeFiles
+	m.focus = m.prevFocus
 	m.previewG = false
 	m.setStatus("", false)
 	return m, nil
 }
 
-// leavePreview gives the keys back to the list. The overlay goes away; the pane stays where it is,
-// including where it is in the file, so `p` twice returns to the same lines rather than to its top.
+// leavePreview gives the keys back to the region they came from. The pane stays where it is, including
+// where it is in the file, so `p` twice returns to the same lines rather than to its top.
 func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 	if m.mode == modePreview {
 		return m.closePreview()
 	}
-	m.previewFocus = false
+	m.focus = m.prevFocus
 	m.previewG = false
 	m.clamp()
 	m.setStatus("", false)
@@ -1925,7 +2355,8 @@ func (m reviewModel) dismissPreview() (tea.Model, tea.Cmd) {
 	if m.mode == modePreview {
 		return m.closePreview()
 	}
-	m.previewFocus, m.previewOn = false, false
+	m.previewOn = false
+	m.focus = m.prevFocus
 	m.previewG = false
 	m.clamp()
 	m.setStatus("", false)
@@ -1944,6 +2375,10 @@ func (m reviewModel) dismissPreview() (tea.Model, tea.Cmd) {
 // that claim by hiding the list; the pane makes it by holding the keyboard, which is the half the
 // reviewer can still see -- so the shortcut bar names every key this reads and none of the ones it does
 // not, and the list's own cursor goes faint until the keys come back.
+//
+// The exceptions are the keys that move the keys: tab, shift-tab, f and m. They change no part of the
+// review, and a reviewer who arrived at the diff with tab has to be able to go on with it -- a ring you
+// can only leave by backing out of is not a ring.
 //
 // Keys do mean different things here than in the list -- q closes rather than quits, enter opens the
 // file being read rather than the one under the cursor, ctrl-d scrolls rather than quits -- and that
@@ -1968,6 +2403,20 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Type == tea.KeyEsc, key.Type == tea.KeyRunes && firstRune(key) == 'p':
 		return m.leavePreview()
+	// The ring, from inside the diff. Over the overlay there is nowhere to go -- the screen is nothing
+	// but the diff, and moving the keys to a region that is not drawn is how keys get lost.
+	case !overlay && key.Type == tea.KeyTab:
+		m.cycleFocus(1)
+		return m, nil
+	case !overlay && key.Type == tea.KeyShiftTab:
+		m.cycleFocus(-1)
+		return m, nil
+	case !overlay && key.Type == tea.KeyRunes && firstRune(key) == 'f':
+		m.focusOn(focusFiles)
+		return m, nil
+	case !overlay && key.Type == tea.KeyRunes && firstRune(key) == 'm':
+		m.focusOn(focusMeta)
+		return m, nil
 	case key.Type == tea.KeyRunes && firstRune(key) == 'q':
 		return m.dismissPreview()
 	case key.Type == tea.KeyEnter:
@@ -2043,9 +2492,9 @@ func (m reviewModel) scrollPreview(dir, step int) (tea.Model, tea.Cmd) {
 }
 
 // pagePreview scrolls the pane by half a page, which keeps a line or two of context on screen at the
-// break. In the list ctrl-d is quit, so paging there is ctrl-f and ctrl-b as in a pager; once the pane
-// has the keys -- and in the overlay, which is a screen that is nothing but a diff -- ctrl-d and ctrl-u
-// page it too, and the shortcut bar says so either way.
+// break. It is the pane's own key now: the list pages its region with the same four keys, and which
+// region answers is what m.focus says, so there is no longer a pair of keys that means the diff from
+// anywhere on the screen.
 func (m reviewModel) pagePreview(dir int) (tea.Model, tea.Cmd) {
 	if !m.previewShowing() || m.previewPath == "" {
 		return m, nil
@@ -2188,7 +2637,9 @@ func clip(s string, width int) string {
 func (m reviewModel) line(r renderedRow) string {
 	text := clip(m.rowText(r.row), m.listWidth())
 	if m.cursor == r.index {
-		if m.previewHasFocus() {
+		// The cursor is the position on the screen only in the region that holds the keys; the other
+		// region keeps showing where it was, dimmed, the way the diff's cursor does.
+		if m.focus != focusFiles {
 			return styleIdle.Render(text)
 		}
 		return styleSelected.Render(text)
@@ -2196,36 +2647,18 @@ func (m reviewModel) line(r renderedRow) string {
 	return text
 }
 
-// windowRows is how many rows fit between the header and the footer.
-func (m reviewModel) windowRows() int {
-	window := m.height - m.chromeRows()
-	if window < 5 {
-		return 5
-	}
-	return window
-}
-
 // chromeRows counts the lines View writes outside the row list: the title, the base and span
 // line, the blank under them, the blank above the counter, the counter, the blank under it,
-// and then the rule over the helper, the drift banner while one is pending, the helper
-// itself, the "hidden above" note while scrolled, and the status line when there is one. The changeset section is part of the row
-// list, so it is not here — only the counter that separates the two blocks is.
+// and then the rule over the helper, the drift banner while one is pending, the shortcut bar's
+// budget, the "hidden above" note while scrolled, and the status line when there is one. The
+// changeset section is part of the row list, so it is not here — only the counter that separates
+// the two blocks is.
 func (m reviewModel) chromeRows() int {
-	chrome := 7 + len(m.helpLines()) + m.footerRows()
+	chrome := 7 + m.helpRows() + m.footerRows()
 	if m.scroll > 0 {
 		chrome++
 	}
 	return chrome
-}
-
-func (m reviewModel) visibleRows() []int {
-	total := len(m.rows)
-	window := m.windowRows()
-	var rows []int
-	for i := m.scroll; i < total && i < m.scroll+window; i++ {
-		rows = append(rows, i)
-	}
-	return rows
 }
 
 func (m *reviewModel) setStatus(text string, isErr bool) {

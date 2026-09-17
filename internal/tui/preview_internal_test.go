@@ -110,7 +110,7 @@ func TestPreviewOnlyAppearsWhenThereIsRoom(t *testing.T) {
 	if narrow.paneWidth() != 0 {
 		t.Errorf("a %d-column terminal gets a %d-column pane", narrow.width, narrow.paneWidth())
 	}
-	if strings.Contains(narrow.View(), "│") {
+	if drawsDivider(narrow) {
 		t.Error("the narrow layout draws a divider anyway")
 	}
 
@@ -131,13 +131,13 @@ func TestPreviewOnlyAppearsWhenThereIsRoom(t *testing.T) {
 	if old := (wide.width - previewGap) * 60 / 100; pane <= old {
 		t.Errorf("the pane got %d columns; the fixed 60/40 split used to give it %d, so adapting bought nothing", pane, old)
 	}
-	if !strings.Contains(wide.View(), "│") {
+	if !drawsDivider(wide) {
 		t.Error("a wide terminal draws no preview")
 	}
 
 	off := previewModel(t)
 	off.previewOn = false
-	if strings.Contains(off.View(), "│") {
+	if drawsDivider(off) {
 		t.Error("`p` off did not remove the pane")
 	}
 
@@ -185,13 +185,14 @@ func TestPreviewPagingStaysInsideTheDiff(t *testing.T) {
 		}
 		return Patch{Lines: lines, Added: 60}
 	}
-	m = askPreview(t, m)
+	// ctrl-f and ctrl-b page whichever region holds the keys, so the diff has to be holding them
+	// before the test asks it to page.
+	m = focusPane(t, askPreview(t, m))
 	body := m.previewBodyRows()
 	max := 60 - body
 
 	for range max + 10 {
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlF})
-		m = updated.(reviewModel)
+		m = paneKey(t, m, keyMsg(tea.KeyCtrlF))
 	}
 	if m.previewOffset != max {
 		t.Errorf("paged to offset %d, want it to stop at %d (%d lines, %d shown)",
@@ -203,8 +204,7 @@ func TestPreviewPagingStaysInsideTheDiff(t *testing.T) {
 	}
 
 	for range max + 10 {
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
-		m = updated.(reviewModel)
+		m = paneKey(t, m, keyMsg(tea.KeyCtrlB))
 	}
 	if m.previewOffset != 0 {
 		t.Errorf("paged back to %d, want 0", m.previewOffset)
@@ -242,7 +242,6 @@ func TestPreviewPassesGitsColoursThrough(t *testing.T) {
 func TestPreviewSaysWhenThereIsNothingToPreview(t *testing.T) {
 	m := previewModel(t)
 	m.patchFor = func(_ context.Context, _ string) Patch { return Patch{} }
-	m.cursor = indexOf(t, m, rowThread)
 	m = askPreview(t, m)
 	if !strings.Contains(m.View(), "no changes in this span") {
 		t.Errorf("the pane of an untouched file said nothing about it:\n%s", m.View())
@@ -324,9 +323,11 @@ func TestTheFrameIsExactlyTheWidthOfTheTerminal(t *testing.T) {
 	if len(rows) < 5 {
 		t.Fatalf("the block is %d rows, want a list with a pane beside it", len(rows))
 	}
-	divider := dividerColumn(rows[0])
-	if divider < 0 {
-		t.Fatal("no divider to hang the layout on")
+	// The layout fixes the divider's column; the box's own border is a different │ in a different
+	// place, so the test asks the cell the divider occupies rather than looking for the glyph.
+	divider := m.dividerAt()
+	if dividerColumn(rows[0], divider) != "\u2502" {
+		t.Fatalf("no divider to hang the layout on at column %d: %q", divider, rows[0])
 	}
 
 	widest := 0
@@ -338,8 +339,8 @@ func TestTheFrameIsExactlyTheWidthOfTheTerminal(t *testing.T) {
 		}
 		// Measured in cells, not bytes: the rows carry wide characters and styling, and a byte
 		// offset would put this divider in a different place on every row.
-		if at := dividerColumn(row); at != divider {
-			t.Errorf("row %d puts the divider at column %d, not %d: %q", i, at, divider, row)
+		if at := dividerColumn(row, divider); at != "\u2502" {
+			t.Errorf("row %d draws %q where the divider belongs (column %d): %q", i, at, divider, row)
 		}
 	}
 	if widest != m.width {
@@ -348,12 +349,26 @@ func TestTheFrameIsExactlyTheWidthOfTheTerminal(t *testing.T) {
 	}
 }
 
-func dividerColumn(row string) int {
-	i := strings.Index(row, "\u2502")
-	if i < 0 {
-		return -1
+func dividerColumn(row string, at int) string {
+	plain := ansiCodes.ReplaceAllString(row, "")
+	cells := []rune(plain)
+	if at < 0 || at >= len(cells) {
+		return ""
 	}
-	return lipgloss.Width(row[:i])
+	return string(cells[at])
+}
+
+// drawsDivider reports whether the frame separates two columns. The changeset box draws │ as well, so
+// a search for the glyph can no longer tell a pane from a box; this asks the one cell the layout
+// reserves for the divider, which is the cell that moves when the list column changes width.
+func drawsDivider(m reviewModel) bool {
+	at := m.dividerAt()
+	for _, row := range viewRows(m.View()) {
+		if g := dividerColumn(row, at); g == "\u2502" || g == "\u2551" {
+			return true
+		}
+	}
+	return false
 }
 
 // The frame is the terminal now: filled top to bottom and padded to the edges. Ending with a
@@ -515,16 +530,24 @@ func TestTheListStopsGrowingAtTheCap(t *testing.T) {
 func TestTheDividerDoesNotMoveWithTheWindow(t *testing.T) {
 	m := previewModel(t)
 	m.height = previewMinHeight
+	// The synthetic rows go into the file region: the list is one slice holding two regions, and a
+	// file row appended past the split would be a row of the changeset box.
+	extra := make([]row, 0, 13)
 	for i := range 12 {
-		m.rows = append(m.rows, row{kind: rowFile, name: fmt.Sprintf("f%02d.go", i), path: fmt.Sprintf("f%02d.go", i)})
+		extra = append(extra, row{kind: rowFile, name: fmt.Sprintf("f%02d.go", i), path: fmt.Sprintf("f%02d.go", i)})
 	}
 	long := strings.Repeat("deep/", 6) + "thing.go"
-	last := len(m.rows) - 1
-	m.rows[last].name, m.rows[last].path = long, long
+	extra = append(extra, row{kind: rowFile, name: long, path: long})
+	rows := make([]row, 0, len(m.rows)+len(extra))
+	rows = append(rows, m.rows[:m.metaStart]...)
+	rows = append(rows, extra...)
+	rows = append(rows, m.rows[m.metaStart:]...)
+	m.rows = rows
+	last := m.metaStart + len(extra) - 1
 
 	list := m.listWidth()
 	visible := 0
-	for _, idx := range m.visibleRows() {
+	for _, idx := range m.visibleFiles() {
 		if w := lipgloss.Width(m.rowText(m.rows[idx])); w > visible {
 			visible = w
 		}
@@ -567,7 +590,7 @@ func TestHidingThePreviewGivesTheListBackItsWidth(t *testing.T) {
 	if got := m.listWidth(); got != m.width {
 		t.Errorf("with the preview hidden the list is %d columns, want the terminal's %d", got, m.width)
 	}
-	if strings.Contains(m.View(), "\u2502") {
+	if drawsDivider(m) {
 		t.Error("the divider is still drawn with the preview hidden")
 	}
 }
@@ -722,10 +745,9 @@ func TestPagingReachesYourEdits(t *testing.T) {
 		}
 		return Patch{Lines: lines, Added: 40}
 	}
-	m = askPreview(t, m)
+	m = focusPane(t, askPreview(t, m))
 	for range 30 {
-		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlF})
-		m = updated.(reviewModel)
+		m = paneKey(t, m, keyMsg(tea.KeyCtrlF))
 	}
 	if !strings.Contains(ansi.Strip(m.View()), "+yours 39") {
 		t.Errorf("paging never reached the end of your edits:\n%s", ansi.Strip(m.View()))
