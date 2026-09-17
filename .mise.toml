@@ -9,42 +9,26 @@ go = "1.27.1"
 # inside the mise-managed Go installation, and anything installed there is
 # discarded on the next Go upgrade.
 #
-# The install name carries the branch it was built from, because this repository is
-# worked in several worktrees at the same time and ~/.local/bin/git-pair is one
-# shared file: whichever worktree built last would be the binary every other one was
-# pretending to test. Trunk keeps the plain name — that is the checkout whose `git
-# pair` is meant to be the real thing — and `build:prod` below writes it from
-# anywhere on purpose. Off trunk, run the namespaced name directly; `git pair` still
-# resolves to the shared binary. The gate scripts under docs/plans take the binary as
-# their first argument, so point them at the name the task prints.
+# The install name comes from scripts/install-name.sh, which namespaces it by the branch
+# it was built from. That is not decoration: this repository is worked in several
+# worktrees at once and ~/.local/bin is one shared directory, so whichever worktree
+# built last would be the binary every other one was pretending to test — and the gate
+# scripts under docs/plans resolve the same name, so a replay cannot quietly run a build
+# left behind by a different branch. Trunk keeps the plain name, and `build:prod` below
+# writes it from anywhere: overwriting the shared binary is sometimes the point, and is
+# never supposed to be a surprise.
 [tasks.build]
 run = """
 set -eu
-branch=$(git branch --show-current)
-if [ -z "$branch" ]; then
-  # Detached HEAD: which worktree this is is the thing the name has to say.
-  branch=$(basename "$(git rev-parse --show-toplevel)")
-fi
-case "$branch" in
-  main | master | git-pair) ns="" ;; # trunk, or the trunk clone sitting on a detached HEAD
-  *)
-    # Drop the `feat/`-style prefix, then keep only what a binary name can hold. A name
-    # that sanitizes away to nothing falls back to the commit, rather than to the shared
-    # name it was supposed to avoid writing.
-    ns=$(printf '%s' "${branch#*/}" | tr -c 'A-Za-z0-9._-' '-' |
-      sed -e 's/--*/-/g' -e 's/^-*//' -e 's/-$//')
-    if [ -z "$ns" ]; then ns=$(git rev-parse --short HEAD); fi
-    ;;
-esac
-name="git-pair${ns:+-$ns}"
+name=$(sh scripts/install-name.sh)
 mkdir -p "$HOME/.local/bin"
 go build -o "$HOME/.local/bin/$name" ./cmd/git-pair
 if [ "$name" = git-pair ]; then
   echo "installed ~/.local/bin/git-pair - this is the binary 'git pair' runs"
 else
-  echo "installed ~/.local/bin/$name (from $branch)"
+  echo "installed ~/.local/bin/$name (from $(git branch --show-current))"
   echo "run it as '$name ...'; 'git pair' is still ~/.local/bin/git-pair, and the gate"
-  echo "scripts take the path: bash <script.sh> ~/.local/bin/$name"
+  echo "scripts under docs/plans default to the name just installed"
 fi
 """
 description = "Compile and install onto ~/.local/bin as git-pair-<branch> (trunk installs the plain name)"

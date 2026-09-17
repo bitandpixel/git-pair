@@ -6,14 +6,24 @@
 # watching.
 #
 # Usage: bash docs/plans/completed/gitpr-mvp/artifacts/pty-walkthrough.sh [/path/to/git-pair]
-#        (default: ~/.local/bin/git-pair — run `mise run build` first)
+#        (default: the name `mise run build` installs from this repository — the shared
+#        ~/.local/bin/git-pair on trunk, a branch-namespaced one anywhere else)
 #
 # Prints "PTY: all checks passed" when every scenario painted what it should. It builds its own
 # repository in a temp directory, so it never touches the one you are standing in.
 set -uo pipefail
 
-G=${1:-$HOME/.local/bin/git-pair}
 HERE=$(cd "$(dirname "$0")" && pwd)
+# The default comes from this script's own path, not the working directory, and from the same
+# rule `mise run build` uses. This walkthrough paints the TUI and checks what came out, so the
+# binary under test has to be the one built from *this* repository — the shared name would
+# paint whatever another worktree last installed, and the checks would pass or fail on it.
+ROOT=$(cd "$HERE/../../../../.." && pwd)
+G=${1:-$HOME/.local/bin/$(sh "$ROOT/scripts/install-name.sh" "$ROOT")}
+if [ ! -x "$G" ]; then
+  printf 'no binary at %s - run `mise run build` in %s first\n' "$G" "$ROOT" >&2
+  exit 1
+fi
 DRIVER="$HERE/pty-tui.py"
 PLAIN="$HERE/pty-plain.py"
 T=$(mktemp -d /tmp/git-pair-pty.XXXXXX)
