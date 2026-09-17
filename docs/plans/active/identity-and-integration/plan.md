@@ -250,10 +250,28 @@ assertion about stale claims was vacuous because no changeset directory existed 
   amendment that drops rank 1.
 - Ambiguity is resolved by a recorded decision (`change use <id>`), not by a heuristic.
 - `refs/git-pair/changesets/<id>/archive` is the only durable ref a changeset has before
-  integration, created at `change init` (§11).
+  integration. It appears at the first `change ready` or `review submit`, which is what
+  requirements §10 describes ("review submission must update the archive ref"); `change init`
+  does not create it.
+  - *Amended 2026-09-17:* an earlier draft of this deliverable said the ref is created at
+    `change init`, citing requirements §11 — which is actually "Archive Advancement After
+    Review", and asks for no such thing. Nothing in the requirements asks for a ref before the
+    first handoff, and creating one there costs more than it buys: refs are never deleted, so a
+    typo'd `change init --id` would retire a changeset name for the life of the repository, and
+    PRD §9.1 ("deleting the directory releases the ID once the deletion is committed") and its
+    test would both have to be reversed. The CI-facing want behind the idea — a changeset that is
+    visible with no branch behind it — is the branchless-ref gap already recorded below, and it
+    belongs with M4/M5, where integration refs and the queue's treatment of them are designed
+    together.
 - The `branch:` claim from M1 is gone; `CHANGESET.yaml` is `id` + `base` again.
 - `change complete` is gone; `change archive` advances the archive over review-artifact-only commits.
 - The archive cannot move backwards.
+
+The last three land in that order, and the namespace move goes **after** them. Moving
+`refs/reviews/*` first would leave the completion refs (`refs/reviews/archive/<id>/<sha>`, which
+`change archive` deletes) stranded in a namespace everything else has left, or force a
+transitional name for them; with `change archive` first there is exactly one ref to move, so the
+move is the mechanical rename it should be.
 
 #### Tasks
 
@@ -315,16 +333,47 @@ assertion about stale claims was vacuous because no changeset directory existed 
   directory is in trunk's tree. Measured, not inferred.
 - [ ] `reviewref`: `Archive(id)`, `Update`, `Resolve` against the new namespace; delete the per-head
   archive writer and its exact-SHA matcher; no reader of `refs/reviews/*` remains.
-- [ ] `change archive`: succeeds when the archive is already at `HEAD`; advances when nothing outside
+- [x] `change archive`: succeeds when the archive is already at `HEAD`; advances when nothing outside
   `changesets/<id>/` changed between the archive and `HEAD`; otherwise refuses naming the paths and says
   a review cycle is required. Reuses `PathsChanged` and the drift machinery from the anchored-lifecycle
   plan rather than computing a second diff.
-- [ ] `change archive` refuses a terminal changeset, and refuses when no archive exists yet — the first
-  anchor is `change ready`'s job, and saying so is better than silently creating one.
-- [ ] Refuse an archive move whose target is not a descendant of the current ref. This is the one place
+  - *Amended while implementing:* the gate is **the review at HEAD**, not a diff from the archive to
+    HEAD. The archive is moved by `change ready` and every submission, so between a reviewer's approval
+    and the author's archive the two are normally the same commit, and a diff measured from the ref
+    would ask "what changed since the ref" — which a thread reply also is — instead of the question the
+    command is for: "is this head still what somebody reviewed?" `lifecycle.SummarizeAgainstTreeHEAD`
+    is that comparison, already used by `status` for its drifted commits, so no second diff is computed
+    and the two commands cannot disagree about what drift is.
+- [x] `change archive` refuses a terminal changeset. Refuses **before** the review gate, which would
+  also refuse it (an abandoned changeset derives `WORKING`) but would blame the wrong thing, and which
+  would otherwise leave a path to `squash_safe: true` on a changeset that will never be taken forward.
+  - *Amended while implementing:* it does **not** refuse when no archive ref exists yet. Reaching that
+    state needs a permitted marker at HEAD, which means `change ready` already wrote the ref, so the
+    only way to arrive is a ref that was deleted — and recreating it is the repair, not a mistake to
+    refuse. The plan asked for the refusal to keep first-anchoring in `change ready`; it still is,
+    and `change archive` never claims to have created the first one.
+- [x] Refuse an archive move whose target is not a descendant of the current ref. This is the one place
   `merge-base --is-ancestor` re-enters the write path; document that it verifies a move, not a state.
-- [ ] Delete `change complete`, `--allow-unreviewed-changes`, and the `complete_test.go` cases that only
+  - *Amended while implementing:* the refusal is for a target that is an **ancestor** of the tip. A
+    rebase produces a head that is neither ancestor nor descendant, and archiving must follow a rebase
+    — the markers moved with it, and refusing would strand the archive on a commit that no longer
+    exists on the branch. `git.Repo.IsAncestor` states the direction in its name.
+- [x] Delete `change complete`, and the `complete_test.go` cases that only
   made sense for completion; re-home the surviving-review-additions and drift cases onto `change archive`.
+  - *Amended while implementing:* `--allow-unreviewed-changes` survives. The plan expected the
+    archive-to-HEAD comparison to make drift impossible and the hatch pointless; with the gate on the
+    review at HEAD, drift over a permitted marker is still reachable (a README typo fixed after the
+    approval), and the hatch is the acknowledgement for it, reported as `acknowledged_unreviewed_paths`
+    rather than swallowed. `complete_test.go` is now `archive_test.go`.
+- [x] `status` reports the archive as current or stale with its SHA, beside `state`: `archive_ref` and
+  `archive_commit`, and `next_action` claims squash-safety only while the two agree and the changeset
+  has not ended. No separate "stale" word — the comparison against `head` is the answer, and a state
+  word for it would be a state the markers do not record.
+- [x] Update `e2e-29.sh` and `pty-walkthrough.sh` in this commit — they are the live proof that the
+  archive survives `git branch -D`, and that proof currently runs through `change complete`.
+- [x] PRD §9.5 rewritten for `change archive`, §13's second ref removed, §12's completion paragraph;
+  README's concepts, command surface, JSON contract, troubleshooting. §13's namespace move stays open
+  with the ref rename below.
 - [ ] `status` reports the archive as current or stale with its SHA, beside `state`.
 - [ ] Update `e2e-29.sh` and `pty-walkthrough.sh` in this commit — they are the live proof that the
   archive survives `git branch -D`, and that proof currently runs through `change complete`.
@@ -378,6 +427,24 @@ Landed so far:
   either is readied is invisible from one checkout. The refs check closes it the moment either is,
   and closing it earlier means a full branch scan per `change init`, which prices a rare mistake
   against a common command.
+- `change complete` is gone, and so is the second ref. A changeset now has one durable ref, and
+  `change archive` moves it onto HEAD: `reviewref.Archive`, `Update` and `Resolve` replaced `Head`,
+  `ArchiveCommit` and the per-head `refs/reviews/<id>/<sha>` writer, whose exact-SHA matcher in
+  `status` was the only thing that could tell "this head is archived" apart from "some head was
+  archived once". `status` prints `archive_ref` and `archive_commit` instead of the movable/archive
+  pair, `review submit` and `queue` report `archive_ref`, and `change archive --json` reports
+  `archive_ref`, `archive_was` and `archive_advanced` — the last two because "the ref was already
+  there" and "the ref was created" are different answers, and the first is a success rather than a
+  refusal.
+- Two rules the old pair could not state, each with the test that says why. The archive moves
+  forward and never backwards: a target that is an ancestor of the current tip is refused, because
+  the ref is the only thing guaranteeing the unsquashed chain survives the squash merge that the
+  command is preparing for, while a rebased head — neither ancestor nor descendant — is followed,
+  since its markers moved with it. And `next_action` claims squash-safety only while `archive_commit`
+  is HEAD *and* the changeset has not ended, so neither an archive of an ancestor nor an abandoned
+  changeset whose abandon marker the archive happens to name can tell an agent the work is done.
+- `change archive` refuses an abandoned changeset before the review gate, which would also have
+  refused it for the wrong reason.
 
 #### Verification
 

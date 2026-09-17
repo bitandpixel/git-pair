@@ -104,7 +104,7 @@ func TestMarkerCommandsDoNotTakeAChangesetFlag(t *testing.T) {
 	for _, args := range [][]string{
 		{"change", "ready", "--changeset", slug},
 		{"change", "unready", "--changeset", slug},
-		{"change", "complete", "--changeset", slug},
+		{"change", "archive", "--changeset", slug},
 		{"review", "submit", "--approve", "--changeset", slug},
 	} {
 		res := runIn(t, f.Dir(), args...)

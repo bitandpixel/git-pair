@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 	"gitpair/internal/reviewref"
@@ -27,7 +26,7 @@ State is never stored in a file. Lifecycle markers are commits carrying
 Review-* trailers, and state moves when a git-pair command records one:
 ` + "`change ready`" + ` offers the changeset, ` + "`change unready`" + ` withdraws it, and a
 review submission answers it. Ordinary commits do not change state; they are named
-in the reason, and they are what ` + "`change complete`" + ` refuses to archive over.
+in the reason, and they are what ` + "`change archive`" + ` refuses to archive over.
 
 --changeset reads another changeset by slug, from whichever branch carries it, so
 you can ask about work you do not have checked out. Reads are the only commands
@@ -61,9 +60,8 @@ type statusJSON struct {
 	Head            string            `json:"head"`
 	HeadFull        string            `json:"head_full"`
 	LatestReview    *latestReviewJSON `json:"latest_review"`
-	ReviewRef       string            `json:"review_ref"`
-	ReviewCommit    string            `json:"review_commit"`
 	ArchiveRef      string            `json:"archive_ref"`
+	ArchiveCommit   string            `json:"archive_commit"`
 	Uncommitted     *bool             `json:"uncommitted"`
 	Abandoned       bool              `json:"abandoned"`
 	AbandonedCommit string            `json:"abandoned_commit,omitempty"`
@@ -92,10 +90,9 @@ func runStatus(ctx context.Context, a *app, slug string) error {
 }
 
 type statusView struct {
-	json       statusJSON
-	span       span.Span
-	latestAge  string
-	archiveRef string
+	json      statusJSON
+	span      span.Span
+	latestAge string
 }
 
 func buildStatus(ctx context.Context, s *session) (*statusView, error) {
@@ -129,11 +126,11 @@ func buildStatus(ctx context.Context, s *session) (*statusView, error) {
 	}
 	if sha, err := reviewref.Resolve(ctx, s.repo, s.cs.Slug); err == nil {
 		// The name of the ref is derivable from the slug, so it is only worth
-		// reporting once the ref exists: its absence is the answer to "has this
-		// been anchored at all", which a slug-derived string could never give.
-		view.json.ReviewRef = reviewref.Head(s.cs.Slug)
-		view.json.ReviewCommit = short(sha)
-	} else if !errors.Is(err, reviewref.ErrNoReviewRef) {
+		// reporting once the ref exists: its absence is the answer to "has this ever
+		// been handed to a reviewer", which a slug-derived string could never give.
+		view.json.ArchiveRef = reviewref.Archive(s.cs.Slug)
+		view.json.ArchiveCommit = short(sha)
+	} else if !errors.Is(err, reviewref.ErrNoArchiveRef) {
 		return nil, err
 	}
 	// The span names the working span of this checkout — `base...current` — so it
@@ -152,16 +149,14 @@ func buildStatus(ctx context.Context, s *session) (*statusView, error) {
 		view.json.NextAction = fmt.Sprintf("give the change its own branch (`git switch -c <name>`), or set `base` in %s to an ancestor of %s",
 			s.cs.MetadataPath(), s.cs.Branch)
 	}
-	// Completion leaves no commit, so the archive ref is the only trace of it in
-	// derived state. Report it when it names HEAD exactly: that is the head that was
-	// completed. Once other work lands the archive names an ancestor, and saying so
-	// here would make unfinished work look finished, so it stays quiet.
-	if ref, err := archiveRefAtHead(ctx, s.repo, s.cs.Slug, s.head); err != nil {
-		return nil, err
-	} else if ref != "" {
-		view.archiveRef = ref
-		view.json.ArchiveRef = ref
-		view.json.NextAction = archivedNextAction(ref)
+	// The archive naming HEAD exactly is the one case worth calling out: it means the
+	// reviewed head is what is here, and nothing is owed but integration, which is ordinary
+	// git. When the archive names an ancestor the branch has moved on, and the state and
+	// next action above already say what that means. An abandoned changeset is asked to do
+	// nothing at all, and `nextAction` said so two paragraphs up; a ref that happens to be
+	// current does not put it back on the list.
+	if view.json.ArchiveRef != "" && view.json.ArchiveCommit == short(s.head) && !view.json.Abandoned {
+		view.json.NextAction = archivedNextAction(view.json.ArchiveRef)
 	}
 	if !s.onCurrentBranch {
 		// Every command that records something writes to the branch that is checked
@@ -217,20 +212,13 @@ func printStatus(a *app, v *statusView) {
 	} else {
 		a.printf("\nLatest review:\n  none yet\n")
 	}
-	if j.ReviewRef != "" {
-		// The movable ref is anchored by `change ready` and moved by review
-		// submissions; the archive is written by `change complete`. Calling both
-		// "archive" made a never-reviewed changeset look archived.
-		a.printf("\nReview anchors:\n")
-		a.printf("  movable: %s\n", j.ReviewRef)
-		if j.ReviewCommit != "" {
-			a.printf("    points at: %s\n", j.ReviewCommit)
+	if j.ArchiveRef != "" {
+		// One ref per changeset: it anchors the review chain and is the archive at the
+		// same time, which is honest now that nothing writes a second copy of the chain.
+		a.printf("\nReview archive:\n  %s\n", j.ArchiveRef)
+		if j.ArchiveCommit != "" {
+			a.printf("    points at: %s\n", j.ArchiveCommit)
 		}
-		if v.archiveRef != "" {
-			a.printf("  archive: %s\n", v.archiveRef)
-		}
-	} else if v.archiveRef != "" {
-		a.printf("\nReview anchors:\n  archive: %s\n", v.archiveRef)
 	}
 	if len(j.Unrecognised) > 0 {
 		a.printf("\nUnrecognised review markers (treated as implementation commits):\n")
@@ -251,25 +239,6 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
-}
-
-// archiveRefAtHead returns the completion archive ref that points exactly at head,
-// or "" when head has not been completed. An archive is written at the head it
-// completes, so an exact match is the whole test.
-func archiveRefAtHead(ctx context.Context, repo *git.Repo, slug, head string) (string, error) {
-	if head == "" {
-		return "", nil
-	}
-	entries, err := repo.ForEachRef(ctx, reviewref.ArchivePattern(slug))
-	if err != nil {
-		return "", err
-	}
-	for _, e := range entries {
-		if e.SHA == head {
-			return e.Name, nil
-		}
-	}
-	return "", nil
 }
 
 // nextAction tells an agent what to run next, so it does not have to re-derive
@@ -293,7 +262,7 @@ func nextAction(s lifecycle.Summary) string {
 			return "the head moved since the review: read it with `git pair change feedback`, " +
 				"then `git pair change ready` to offer the new head"
 		}
-		return "optionally address feedback (read it with `git pair change feedback`), then `git pair change complete`"
+		return "optionally address feedback (read it with `git pair change feedback`), then `git pair change archive`"
 	case model.StateApproved:
 		if s.Stale {
 			// Completion is the one command that asks the tree, and it refuses this head
@@ -301,12 +270,12 @@ func nextAction(s lifecycle.Summary) string {
 			// predict from `state`.
 			return "the head moved since the review: `git pair change ready` to offer it for review again"
 		}
-		return "run `git pair change complete` before squash/merge"
+		return "run `git pair change archive` before squash/merge"
 	}
 	return ""
 }
 
-// archivedNextAction replaces the next step once HEAD itself has been completed:
+// archivedNextAction replaces the next step once HEAD itself is archived:
 // there is nothing left for git-pair to do, and integration is ordinary git.
 func archivedNextAction(archiveRef string) string {
 	return fmt.Sprintf("safe to squash/merge; this head is archived at %s", archiveRef)

@@ -189,32 +189,41 @@ Review submitted: booking-transaction
   commit:  0eaad3b
   files:   none (recorded as an empty review commit)
   ref:     refs/reviews/booking-transaction -> 0eaad3b
-  next:    author: `git pair change complete` before squash/merge
+  next:    author: `git pair change archive` before squash/merge
 ```
 
-The owner then completes the changeset. Completion is theirs rather than the reviewer's: an
-approve is a judgement about the code, and deciding that the reviewed state is what gets taken
-forward is the owner's call. It adds no commit — the archive ref names the approved head:
+The owner then archives the changeset. That half is theirs rather than the reviewer's: an approve
+is a judgement about the code, and deciding that the reviewed state is what gets taken forward is
+the owner's call. The approval already left the archive current, so this says so and adds nothing:
 
 ```bash
-$ git pair change complete
-Completed changeset booking-transaction
+$ git pair change archive
+Changeset booking-transaction is already archived at 0eaad3b
 
-Review archive:
-  refs/reviews/archive/booking-transaction/0eaad3b
+refs/reviews/booking-transaction already points there; nothing moved.
 
 Safe to squash/merge.
 Review history stays reachable at refs/reviews/booking-transaction
+```
+
+An archive ref moves forward and never backwards, so replying in a thread or rewriting `ABOUT.md`
+after the approval does not strand the archive short of `HEAD`:
+
+```bash
+$ git pair change archive
+Archived changeset booking-transaction at 4f2b8c1
+
+refs/reviews/booking-transaction: 0eaad3b → 4f2b8c1
 ```
 
 Deleting the branch loses nothing:
 
 ```bash
 $ git switch main && git branch -D booking-transaction
-Deleted branch booking-transaction (was 9c04d06).
+Deleted branch booking-transaction (was 4f2b8c1).
 
-$ git rev-list --count refs/reviews/archive/booking-transaction/0eaad3b
-9
+$ git rev-list --count refs/reviews/booking-transaction
+10
 ```
 
 ## Concepts
@@ -276,22 +285,24 @@ progress. `working` is not a sixth state — it is `WORKING` chosen on purpose, 
 marker derives the same answer. The marker is written only when the changeset is in review (`READY`,
 `APPROVED` or `FEEDBACK`); on a `WORKING` or `BLOCKED` changeset there is nothing to withdraw, so the
 command succeeds and records nothing. Withdrawing an approval does not delete it: the approval stays
-in `git pair review history`, and completion refuses until a reviewer approves again.
+in `git pair review history`, and archiving refuses until a reviewer approves again.
 
-**Completion is a ref, not a marker.** `git pair change complete` commits nothing. It anchors the
-chain and writes the immutable archive ref at `HEAD`, and the changeset is finished when that
-archived history is merged into the deployment branch — ordinary git, which git-pair neither runs
-nor derives. A completed changeset therefore still reports `APPROVED` (or `FEEDBACK`), with
-`archive_ref` naming the archived commit for as long as `HEAD` is that commit. Ownership follows the
-same split: the reviewer approves the code, the owner decides it is what gets taken forward.
+**Archiving moves a ref, not a marker.** `git pair change archive` commits nothing. It advances the
+changeset's archive ref onto `HEAD`, and the changeset is finished when that history is merged into
+the deployment branch — ordinary git, which git-pair neither runs nor derives. An archived changeset
+therefore still reports `APPROVED` (or `FEEDBACK`): `archive_ref` and `archive_commit` say where the
+archive stands, and squash-safety is claimed only while that commit is `HEAD`. Ownership follows the
+same split: the reviewer approves the code, the owner decides it is what gets taken forward. There is
+one ref per changeset and it only moves forward, so nothing can quietly un-archive a chain a squash
+merge is about to depend on.
 
 **A changeset can end.** `git pair change abandon` commits `Review-State: abandoned` and moves the
-movable ref to it, which is what keeps the whole chain reachable after the branch is deleted. It is
+archive ref to it, which is what keeps the whole chain reachable after the branch is deleted. It is
 not a sixth state: the changeset reports `WORKING`, because `WORKING` already means "not in review,
 nothing owed", and `abandoned_commit` in `status --json` carries the ending beside it. That split is
 deliberate — `state` is the field agents branch on, and a changeset that can never move again has to
 be recognisable there without teaching every consumer a new state name, so the fact lives in its own
-field instead. The ending is durable in both places it can be read from: the branch, and the anchor.
+field instead. The ending is durable in both places it can be read from: the branch, and the archive ref.
 `change ready`, `change unready` and `review submit` refuse against an abandoned changeset whichever
 they meet first, which is also what stops a new branch reusing the name of one that ended. Unlike
 `change unready`, which withdraws an offer for now, this one closes the changeset, and re-running it
@@ -313,9 +324,9 @@ visible: the reason line counts what arrived since the marker, e.g.
 `marked ready by 8065dae (2 commits since)`.
 
 One command asks the harder question, and it is the one whose output gets trusted.
-`git pair change complete` compares the tree between the newest marker's parent and `HEAD` and
-refuses when anything outside `changesets/<slug>/` differs, because the archive ref it writes is
-what an agent checks before squash-merging and it has to name content somebody reviewed. A
+`git pair change archive` compares the tree between the newest marker and `HEAD` and refuses when
+anything outside `changesets/<slug>/` differs, because the archive ref it moves is what an agent
+checks before squash-merging and it has to name content somebody reviewed. A
 commit touching only `ABOUT.md` or a thread is not that drift, and comparing trees rather than
 counting commits is what keeps merges and rebases from reporting a change that never happened.
 States:
@@ -386,17 +397,18 @@ The same range applies to source, `ABOUT.md` and
 threads, and the resolved span is always printed to stderr:
 `git pair diff: last review..current`.
 
-**Review refs.** `change ready` writes `refs/reviews/<changeset>` at the ready marker, and every
-submission moves it to the exact resulting `HEAD`, in the same operation that creates the commit,
-keeping the whole implementation/review/fix chain reachable from garbage collection. The handoff is
-where the history starts being worth keeping, so an offered-but-never-reviewed changeset is anchored
-too. `git pair change complete` also
-writes `refs/reviews/archive/<changeset>/<short-sha>` at the `HEAD` it completes, created only if
-absent and never moved, so re-running complete cannot rewrite an archive. Neither kind is a
-guarantee against `git push --delete`; they keep Git from pruning what git-pair still needs.
+**The archive ref.** A changeset has one durable ref, `refs/reviews/<changeset>`. `change ready`
+writes it at the ready marker, and every submission moves it to the exact resulting `HEAD`, in the
+same operation that creates the commit, keeping the whole implementation/review/fix chain reachable
+from garbage collection. The handoff is where the history starts being worth keeping, so an
+offered-but-never-reviewed changeset is written too. `change archive` advances it over review
+artifacts, and `change abandon` moves it to the terminal marker. It moves forward and never
+backwards: the command refuses a `HEAD` behind the current tip rather than dropping the chain from
+the only ref that keeps it reachable. It is not a guarantee against `git push --delete`; it keeps
+Git from pruning what git-pair still needs.
 
 **Surviving review additions.** Review lines left untouched disappear from a `review..HEAD`
-diff, so `change ready` and `change complete` re-derive them with
+diff, so `change ready` and `change archive` re-derive them with
 `git show -U0 --no-renames <review>` and test each line for exact membership in the `HEAD` blob,
 reporting `path:line` at `HEAD`. Blank additions are ignored, binaries are skipped via
 `--numstat`, repeated identical lines collapse to one entry with a count, and only the most
@@ -409,7 +421,7 @@ of the override. See `docs/plans/completed/gitpr-mvp/research/git-plumbing-findi
 ## Command reference
 
 Every command accepts the persistent `--json` flag, but only `status`, `change ready`,
-`change unready`, `change wait`, `change complete`, `review submit`, `review history` and
+`change unready`, `change wait`, `change archive`, `review submit`, `review history` and
 `review queue` change output for it; elsewhere it is accepted and ignored.
 
 Every command also accepts `--default-branch <ref>`, which states the integration branch that
@@ -436,12 +448,12 @@ landed.
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), then moves the review ref |
 | `review history` | `--changeset <slug>` | only review marker commits, indexed from `0` |
 | `review queue` | — | every branch in this repo whose changeset is `READY`, longest wait first; read from the repository, not the checkout |
-| `change complete` | `--allow-surviving-review-additions`, `--allow-unreviewed-changes` | archives the reviewed `HEAD` and reports squash-safety; commits nothing; never merges, pushes or squashes |
+| `change archive` | `--allow-surviving-review-additions`, `--allow-unreviewed-changes` | advances the archive ref onto the reviewed `HEAD` and reports squash-safety; refuses a `HEAD` behind the archive; commits nothing; never merges, pushes or squashes |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
-commits, no blocking surviving additions. `change complete` checks: clean tree, newest
+commits, no blocking surviving additions. `change archive` checks: clean tree, newest
 review at `HEAD` is `approve` or `feedback` and still describes what `HEAD` carries (the tree is
 compared, ignoring `changesets/<cs>/`), no blocking surviving additions. The last two can be
 acknowledged with `--allow-surviving-review-additions` and `--allow-unreviewed-changes`; a block
@@ -462,7 +474,7 @@ nothing, those reads exit 2. For a span of another branch, name its ends: `git p
 | Exit code | Meaning | Seen as |
 | --- | --- | --- |
 | 0 | success | — |
-| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot complete <cs>: latest outcome is BLOCKED`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING` |
+| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot archive <cs>: latest outcome is BLOCKED`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING` |
 | 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
@@ -482,13 +494,12 @@ and two fields report that they cannot answer — `uncommitted` is `null` and `s
 both describe the checkout rather than the commit, and `next_action` names the branch to switch to.
 `abandoned` is true once `change abandon` has ended the changeset, with `abandoned_commit` naming the
 terminal marker; `state` stays `WORKING`, because the ending is a fact beside the state rather than a
-sixth state value. `review_ref` and `review_commit` describe
-the movable anchor and stay `""` until something writes it — `change ready`, or a review
-submission — because the ref's name is derivable from the changeset and its existence is the only
-fact worth reporting. Once the changeset is completed,
-`archive_ref` names the immutable archive ref — the `refs/reviews/archive/<cs>/*` that points
-at `HEAD` exactly. It goes back to `""` as soon as other work lands, so an archive of an
-ancestor never looks like a finished changeset.
+sixth state value. `archive_ref` and `archive_commit` describe
+the changeset's one durable ref and stay `""` until something writes it — `change ready`, or a
+review submission — because the ref's name is derivable from the changeset and its existence is the
+only fact worth reporting. `next_action` calls the changeset squash-safe only while `archive_commit`
+is `HEAD`: an archive of an ancestor is a statement about history, not a claim that the work is
+done.
 
 ```json
 {
@@ -499,9 +510,8 @@ ancestor never looks like a finished changeset.
   "head": "8065dae",
   "head_full": "8065dae53c0475596bfc174927075895d9fb8b76",
   "latest_review": null,
-  "review_ref": "refs/reviews/booking-transaction",
-  "review_commit": "8065dae",
-  "archive_ref": "",
+  "archive_ref": "refs/reviews/booking-transaction",
+  "archive_commit": "8065dae",
   "uncommitted": false,
   "abandoned": false,
   "reviews": 0,
@@ -528,7 +538,7 @@ neither is work a reviewer can act on.
       "head": "af740a30d9cee930b85324aedfbc0aa4b33c1408",
       "ready_commit": "af740a30d9cee930b85324aedfbc0aa4b33c1408",
       "ready_age": "0s",
-      "review_ref": "refs/reviews/booking-transaction"
+      "archive_ref": "refs/reviews/booking-transaction"
     }
   ],
   "skipped": ["untracked-work (cannot resolve changeset base \"other\": unknown revision: other)"]
@@ -565,30 +575,31 @@ is none)
   "commit": "941266b18686624cb624722b4e8c348bf03451a7",
   "empty": true,
   "files": null,
-  "next_action": "author: `git pair change complete` before squash/merge",
+  "next_action": "author: `git pair change archive` before squash/merge",
   "outcome": "approve",
   "previous_review": "",
-  "review_ref": "refs/reviews/feat",
+  "archive_ref": "refs/reviews/feat",
   "short": "941266b"
 }
 ```
 
-`git pair change complete --json` — `head` is the archived commit and `state` is the derived
-state, which completion does not change; `archive_created` is false when this head was already
-archived, which is a success rather than a refusal. `acknowledged_unreviewed_paths` counts what
-`--allow-unreviewed-changes` covered, so a completion over drift reports `WORKING` with a
-non-zero count beside it rather than looking like an ordinary approval.
+`git pair change archive --json` — `head` is the commit named and `state` is the derived state,
+which archiving does not change. `archive_ref` is the ref, `archive_was` the commit it named before
+the call (empty where there was none), and `archive_advanced` whether it moved: already being there
+is a success, reported as such. `acknowledged_unreviewed_paths` counts what
+`--allow-unreviewed-changes` covered, so archiving over drift reports `WORKING` with a non-zero
+count beside it rather than looking like an ordinary approval.
 
 ```json
 {
   "acknowledged_survivors": 0,
   "acknowledged_unreviewed_paths": 0,
-  "archive_created": true,
-  "archive_ref": "refs/reviews/archive/feat/941266b",
+  "archive_advanced": true,
+  "archive_ref": "refs/reviews/feat",
+  "archive_was": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
   "base": "main",
   "changeset": "feat",
   "head": "941266b18686624cb624722b4e8c348bf03451a7",
-  "review_ref": "refs/reviews/feat",
   "short": "941266b",
   "squash_safe": true,
   "state": "APPROVED",
@@ -633,7 +644,7 @@ only when a review submission is what ended the wait. `timed_out` is the differe
   "fetches": 3,
   "waited_seconds": 91,
   "timed_out": false,
-  "next_action": "`git pair change feedback`; feedback is non-blocking, `git pair change complete` when integration is due"
+  "next_action": "`git pair change feedback`; feedback is non-blocking, `git pair change archive` when integration is due"
 }
 ```
 
@@ -654,11 +665,11 @@ git pair change feedback            # read that submission: threads, ABOUT.md, c
 # address feedback in code, ABOUT.md and threads; commit normally
 git pair review history --json      # enumerate review commits
 git pair change ready               # again
-git pair change complete            # once approved: archive the reviewed head
+git pair change archive             # once approved: put the archive where the work is
 ```
 
 Never prompt: `change init`, `change ready`, `change unready`, `change abandon`, `change feedback`,
-`change wait`, `change complete`, `status`, `diff`, `review submit`, `review history`,
+`change wait`, `change archive`, `status`, `diff`, `review submit`, `review history`,
 `review queue`. They report
 and exit instead of asking, even with a terminal attached.
 
@@ -941,7 +952,7 @@ acknowledge them deliberately:
 
 ```bash
 git pair change ready --allow-surviving-review-additions
-git pair change complete --allow-surviving-review-additions
+git pair change archive --allow-surviving-review-additions
 ```
 
 Only the most recent review counts, and only additions outside `changesets/<changeset>/`
@@ -950,10 +961,10 @@ case the tree check cannot resolve on its own — content outside `changesets/<c
 arrived after the approval and is not worth a second review, such as a README typo:
 
 ```bash
-git pair change complete --allow-unreviewed-changes
+git pair change archive --allow-unreviewed-changes
 ```
 
-The output names how many paths it completed over, and the archive still points at that `HEAD`.
+The output names how many paths it archived over, and the archive still points at that `HEAD`.
 Neither hatch overrides a `block` or a `change unready`.
 
 ```opening an editor needs a terminal```, ``` `git pair review open` needs a terminal ``` and
@@ -968,7 +979,7 @@ files directly and use `git pair diff`, `git pair status` and `git pair review s
 `"<path>" does not appear in main...HEAD; changed paths: ...` (exit 2) — the path is not in
 the resolved span; the error lists what is.
 
-`working tree must be clean ...` (exit 1) — `change ready`, `change unready` and `change complete` act
+`working tree must be clean ...` (exit 1) — `change ready`, `change unready` and `change archive` act
 on committed state. `change init` commits its scaffolding, so a fresh changeset does not block `change
 ready`; it does block it if you then edit `ABOUT.md` without committing. Use
 `change init --no-commit` to fold the scaffolding into your first implementation commit
@@ -981,14 +992,18 @@ its changeset and a detached HEAD has no name.
 A missing entry in `git pair review queue` is usually not a queue bug: membership is derived
 state, and only a command moves it — `change ready`, `change unready`, or a review submission. A
 code change after the ready marker leaves the changeset in the queue, naming the commits in its
-reason; what that drift does stop is `change complete`, which refuses to archive a head whose
+reason; what that drift does stop is `change archive`, which refuses to move the archive over a head whose
 reviewed content has moved. A changeset whose content has landed in its base is not listed, and
 says nothing: the branch may already be gone, and the queue asks what a reviewer can act on. The
-tree is not consulted — the queue reads branches and their commits, so it answers the same way from
-`main` as from the changeset's own branch.
+queue asks what a reviewer can act on, and it answers the same way from `main` as from the
+changeset's own branch: it enumerates local branches and resolves each one's changeset, so
+membership does not depend on where you happen to be standing. A branch it cannot resolve — two
+changesets on one branch, say — is named in `skipped` rather than left out quietly.
 A hand-written ready marker counts only if `Review-State: ready` and `Review-Changeset: <slug>`
 sit in a real trailer block, separated from the subject by a blank line and from each other by
-no blank line. `cannot complete <cs>: latest outcome is BLOCKED` (exit 1) is the refusal for a
-head whose newest review does not permit integration; completing an already-archived head is not
-a refusal at all, because archive refs are never moved, so the second run changes nothing and
-says so.
+no blank line. `cannot archive <cs>: latest outcome is BLOCKED` (exit 1) is the refusal for a
+head whose newest review does not permit integration. Two other refusals belong to the archive
+itself: running `change archive` on a `HEAD` that is already archived is not a refusal — the ref is
+already where it should be, so the second run moves nothing and says so — while a `HEAD` *behind*
+the archive is, because moving there would drop the archived chain from the only ref holding it
+reachable.

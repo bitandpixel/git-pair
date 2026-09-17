@@ -4,12 +4,12 @@ package model
 // State is the effective lifecycle state of a changeset, always derived from
 // commit history rather than stored.
 //
-// There is no state for a completed changeset. Completion archives the review
-// history at a head (`git pair change complete`), and the changeset is finished
-// when that archived history is merged into the deployment branch by ordinary
-// git. git-pair derives state from a changeset's own commits, so it does not
-// derive the merge: the archive ref is reported by `status`, not folded into
-// the state name.
+// There is no state for an archived changeset. Archiving moves a ref
+// (`git pair change archive`) to keep the reviewed history reachable, and the
+// changeset is finished when that history is merged into the deployment branch
+// by ordinary git. git-pair derives state from a changeset's own commits, so it
+// does not derive the merge: the archive ref is reported by `status`, beside the
+// state rather than as another value of it.
 type State string
 
 const (
@@ -52,7 +52,7 @@ func (o Outcome) Valid() bool {
 }
 
 // PermitsIntegration reports whether a review with this outcome lets the owner
-// complete the changeset. Block does not; feedback and approve do.
+// take the changeset forward. Block does not; feedback and approve do.
 func (o Outcome) PermitsIntegration() bool {
 	return o == OutcomeFeedback || o == OutcomeApprove
 }

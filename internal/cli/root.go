@@ -113,7 +113,7 @@ Review state lives in the repository: a changeset directory holds ABOUT.md and
 review threads, lifecycle markers are commits carrying Review-* trailers, and
 refs/reviews/* keeps the complete unsquashed history reachable.
 
-Author commands:   git pair change init | ready | complete
+Author commands:   git pair change init | use | ready | unready | abandon | archive
 Reviewer commands: git pair review open | about | thread | submit | history | queue
 Inspection:        git pair status | diff`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -242,7 +242,7 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string) (ch
 		// before it disappeared, which is why it is a fallback and not a second source of
 		// state (PRD §12).
 		anchor, err := reviewref.Resolve(ctx, repo, slug)
-		if errors.Is(err, reviewref.ErrNoReviewRef) {
+		if errors.Is(err, reviewref.ErrNoArchiveRef) {
 			return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
 				fmt.Errorf("no branch carries changeset %q; `git pair review queue` lists what this repository has", slug)}
 		}

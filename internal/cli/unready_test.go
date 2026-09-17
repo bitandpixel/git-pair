@@ -115,12 +115,14 @@ func TestChangeUnreadyFromApprovedRequiresAFreshReview(t *testing.T) {
 	if got := runIn(t, f.Dir(), "status", "--json").json(t)["state"]; got != "WORKING" {
 		t.Fatalf("state = %v, want WORKING after withdrawing an approved changeset", got)
 	}
-	res := runIn(t, f.Dir(), "change", "complete")
+	archived := f.RefSHA(archiveRef(slug))
+	res := runIn(t, f.Dir(), "change", "archive")
 	if res.code != exitRefusal {
-		t.Errorf("completing an unreadied changeset exited %d, want %d\nstderr: %s", res.code, exitRefusal, res.stderr)
+		t.Errorf("archiving a withdrawn changeset exited %d, want %d\nstderr: %s", res.code, exitRefusal, res.stderr)
 	}
-	if refs := f.RefNames(archivePattern(slug)); len(refs) != 0 {
-		t.Errorf("an unreadied changeset was archived: %v", refs)
+	if got := f.RefSHA(archiveRef(slug)); got != archived {
+		t.Errorf("%s moved from %s to %s: a withdrawn changeset has nothing to archive",
+			archiveRef(slug), archived, got)
 	}
 
 	// The approval is history, not a fact to be edited: unready adds a marker, it does
@@ -129,7 +131,7 @@ func TestChangeUnreadyFromApprovedRequiresAFreshReview(t *testing.T) {
 		t.Error("unready erased the approval from status; a withdrawal supersedes, it does not delete")
 	}
 	submit(t, f, "approve")
-	runIn(t, f.Dir(), "change", "complete").mustSucceed(t, "change", "complete")
+	runIn(t, f.Dir(), "change", "archive").mustSucceed(t, "change", "archive")
 }
 
 // Taking a changeset out of the queue is not a way past the gate on the way back in: a

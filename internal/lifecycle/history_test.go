@@ -22,7 +22,7 @@ func summarize(t *testing.T, f *gittest.Fixture, slug, base, headRef string) lif
 	return summary
 }
 
-// summarizeAgainstTree is the derivation `change complete` uses: the marker verdict,
+// summarizeAgainstTree is the derivation `change archive` uses: the marker verdict,
 // then the question of whether the content it spoke about is still at headRef.
 func summarizeAgainstTree(t *testing.T, f *gittest.Fixture, slug, base, headRef string) lifecycle.Summary {
 	t.Helper()
@@ -340,7 +340,7 @@ func subjects(events []lifecycle.Event) []string {
 	return out
 }
 
-// The tree verdict is what `change complete` asks for, and it looks past a commit that
+// The tree verdict is what `change archive` asks for, and it looks past a commit that
 // touches nothing but changesets/<slug>/: that is not an implementation change, and the
 // reviewer reads ABOUT.md and threads from HEAD anyway.
 func TestSummarizeAgainstTreeChangesetOnlyCommitKeepsTheMarker(t *testing.T) {

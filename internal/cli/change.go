@@ -32,7 +32,7 @@ func newChangeCommand(a *app) *cobra.Command {
 	}
 	cmd.AddCommand(newChangeInitCommand(a), newChangeUseCommand(a), newChangeReadyCommand(a), newChangeUnreadyCommand(a),
 		newChangeAbandonCommand(a), newChangeFeedbackCommand(a), newChangeWaitCommand(a),
-		newChangeCompleteCommand(a))
+		newChangeArchiveCommand(a))
 	return cmd
 }
 
@@ -784,7 +784,7 @@ func printAbandoned(a *app, s *session, at *lifecycle.Event, sha string) error {
 			"was":              string(s.summary.State),
 			"recorded":         sha != "",
 			"abandoned_commit": at.SHA,
-			"review_ref":       reviewref.Head(s.cs.Slug),
+			"archive_ref":      reviewref.Archive(s.cs.Slug),
 		})
 	}
 	if sha == "" {
@@ -793,7 +793,7 @@ func printAbandoned(a *app, s *session, at *lifecycle.Event, sha string) error {
 	}
 	a.printf("Abandoned changeset %s\n\n", s.cs.Slug)
 	a.printf("Terminal marker: %s\n", sha)
-	a.printf("Review history stays reachable at %s\n", reviewref.Head(s.cs.Slug))
+	a.printf("Review history stays reachable at %s\n", reviewref.Archive(s.cs.Slug))
 	return nil
 }
 
@@ -806,7 +806,7 @@ func terminalRecord(ctx context.Context, repo *git.Repo, slug, base string, deri
 		return derived.Abandoned, nil
 	}
 	anchor, err := reviewref.Resolve(ctx, repo, slug)
-	if errors.Is(err, reviewref.ErrNoReviewRef) {
+	if errors.Is(err, reviewref.ErrNoArchiveRef) {
 		return nil, nil
 	}
 	if err != nil {
@@ -834,68 +834,80 @@ func (a *app) refuseIfAbandoned(ctx context.Context, s *session) error {
 	return nil
 }
 
-// --- change complete --------------------------------------------------------
+// --- change archive ---------------------------------------------------------
 
-type completeOptions struct {
+type archiveOptions struct {
 	allowSurviving  bool
 	allowUnreviewed bool
 }
 
-func newChangeCompleteCommand(a *app) *cobra.Command {
-	opts := &completeOptions{}
+func newChangeArchiveCommand(a *app) *cobra.Command {
+	opts := &archiveOptions{}
 	cmd := &cobra.Command{
-		Use:   "complete",
-		Short: "Archive the changeset's review history at HEAD",
-		Long: `Anchor the complete unsquashed history at HEAD and archive it immutably.
+		Use:   "archive",
+		Short: "Advance the changeset's archive ref to HEAD",
+		Long: `Advance the archive ref — the durable ref holding the whole unsquashed chain of
+implementation commits, ready markers, review submissions, replies and approvals — to HEAD.
 
-Checks, in order: the working tree is clean, the newest review at HEAD permits
-integration (approve or feedback) and still describes what HEAD carries — the tree is
-compared between that marker and HEAD, ignoring changesets/<changeset>/ — and no non-blank
-addition from the most recent review survives unchanged. Then the current chain is anchored
-under refs/reviews/, and the immutable archive ref
-refs/reviews/archive/<changeset>/<short-head> is written pointing at HEAD.
+Review submission already moves the ref, so an approval usually leaves it current. What this
+command is for is what comes after the review: a reply in a thread, a rewritten ABOUT.md, another
+note in the changeset directory. Those are review artifacts, not implementation, and the archive
+should not stop where the last review marker happened to fall.
 
-Completion is the owner's half of the lifecycle. A reviewer's approve is a judgement
-about the code; completing the changeset is the owner's decision that the reviewed
-state is what they are taking forward. So the command records no commit and moves no
-state: the changeset is finished when that archived history is merged into the
-deployment branch, which is ordinary git and stays yours. ` + "`git pair status`" + ` reports
-the archive ref for as long as HEAD is the archived commit.
+Checks, in order: the working tree is clean; the newest review at HEAD permits integration
+(approve or feedback) and still describes what HEAD carries — the tree is compared between that
+marker and HEAD, ignoring changesets/<changeset>/, which is why a thread reply does not invalidate
+an approval; and no non-blank addition from the most recent review survives unchanged. Then the
+ref moves.
 
-Re-running the command at the same HEAD changes nothing: archive refs are neither
-moved nor duplicated. It never merges, pushes, or squashes.`,
-		Example: `  git pair change complete
-  git pair change complete --allow-surviving-review-additions
-  git pair change complete --allow-unreviewed-changes
-  git pair change complete --json`,
+Archiving records no commit and moves no state. A reviewer's approve is a judgement about the
+code; this is the owner's decision that the reviewed state is what they are taking forward, so the
+changeset stays whatever the markers say it is, and it is finished when that archived history is
+merged into the deployment branch — ordinary git, which stays yours. ` + "`git pair status`" + `
+reports where the archive points.
+
+Already at HEAD, it succeeds and writes nothing. It will not move the archive to a commit behind
+its current tip: that would drop archived history from the only ref guaranteeing it stays
+reachable, and the refusal names both commits. It never merges, pushes, or squashes.`,
+		Example: `  git pair change archive
+  git pair change archive --allow-surviving-review-additions
+  git pair change archive --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChangeComplete(cmd.Context(), a, opts)
+			return runChangeArchive(cmd.Context(), a, opts)
 		},
 	}
 	cmd.Flags().BoolVar(&opts.allowSurviving, "allow-surviving-review-additions", false,
-		"acknowledge surviving review additions and complete anyway")
+		"acknowledge surviving review additions and archive anyway")
 	cmd.Flags().BoolVar(&opts.allowUnreviewed, "allow-unreviewed-changes", false,
-		"acknowledge that HEAD carries content beyond the reviewed marker and complete anyway")
+		"acknowledge that HEAD carries content beyond the reviewed marker and archive anyway")
 	return cmd
 }
 
-func runChangeComplete(ctx context.Context, a *app, opts *completeOptions) error {
+func runChangeArchive(ctx context.Context, a *app, opts *archiveOptions) error {
 	s, err := a.load(ctx)
 	if err != nil {
 		return err
 	}
 	if !s.clean {
-		return fmt.Errorf("working tree must be clean before completing %s; commit or stash your changes first", s.cs.Slug)
+		return fmt.Errorf("working tree must be clean before archiving %s; commit or stash your changes first", s.cs.Slug)
 	}
-	// Completion is the one command that asks whether the reviewed content is still
+	// Before the review gate, because the gate would refuse an abandoned changeset too
+	// — it derives WORKING — and say the wrong thing about why. This refusal also closes
+	// a hazard: archiving reports squash-safety, and an abandoned changeset is one whose
+	// archive happens to be current because `change abandon` moved the ref there. There is
+	// nothing to take forward, so there is nothing to archive.
+	if err := a.refuseIfAbandoned(ctx, s); err != nil {
+		return err
+	}
+	// Archiving is the one command that asks whether the reviewed content is still
 	// here. The archive it writes is a promise about a reviewed head — it is what an
 	// agent is told to trust before squash-merging — so an approval with fresh
 	// implementation work stacked on top of it must not be archived (PRD §9.5, §12).
 	// Everywhere else a commit after a marker is an observation, not a verdict.
 	//
 	// The gate is the review at HEAD rather than a lifecycle state named
-	// "completable": completion records no commit, so there is no state for it to
+	// "archivable": archiving records no commit, so there is no state for it to
 	// move the changeset into.
 	reviewed, err := lifecycle.SummarizeAgainstTreeHEAD(ctx, s.repo, s.cs.Slug, s.cs.Base)
 	if err != nil {
@@ -907,7 +919,7 @@ func runChangeComplete(ctx context.Context, a *app, opts *completeOptions) error
 	case opts.allowUnreviewed && driftOverWhichToProceed(reviewed):
 		// Acknowledged in the output, not hidden: the archive still names this head.
 	default:
-		return fmt.Errorf("cannot complete %s: latest outcome is %s (%s); completion needs an approve or feedback at HEAD",
+		return fmt.Errorf("cannot archive %s: latest outcome is %s (%s); archiving needs an approve or feedback at HEAD",
 			s.cs.Slug, reviewed.State, reviewed.Reason)
 	}
 
@@ -917,10 +929,10 @@ func runChangeComplete(ctx context.Context, a *app, opts *completeOptions) error
 	}
 	if report != nil && !report.Clean() && !opts.allowSurviving {
 		printSurvivalReport(a.stderr, *report,
-			fmt.Sprintf("Cannot complete changeset %s.", s.cs.Slug),
-			"git pair change complete --allow-surviving-review-additions")
+			fmt.Sprintf("Cannot archive changeset %s.", s.cs.Slug),
+			"git pair change archive --allow-surviving-review-additions")
 		printArtifactSurvivals(a.stderr, *report)
-		return fmt.Errorf("cannot complete %s: %d review addition(s) from %s still survive unchanged",
+		return fmt.Errorf("cannot archive %s: %d review addition(s) from %s still survive unchanged",
 			s.cs.Slug, len(report.Code), report.ReviewShort)
 	}
 
@@ -928,18 +940,35 @@ func runChangeComplete(ctx context.Context, a *app, opts *completeOptions) error
 	if err != nil {
 		return err
 	}
-	// Anchor, then archive. The movable ref is the current review HEAD, so it has
-	// to reach the head being completed — a changeset-only commit after the review
-	// submission leaves it short of HEAD — and the archive is the immutable copy of
-	// that same chain, which is what makes a squash merge lossless.
+	// Where the archive stands now. Before the first handoff there is no ref at all: the
+	// archive comes into existence with the first ready or review submission, which is the
+	// point from which there is review history worth keeping.
+	was, err := reviewref.Resolve(ctx, s.repo, s.cs.Slug)
+	if err != nil && !errors.Is(err, reviewref.ErrNoArchiveRef) {
+		return err
+	}
+	if was == head {
+		return printArchive(a, s, reviewed, head, was, report, opts.allowSurviving)
+	}
+	// Forward only. A target behind the current tip would drop the archived chain from the
+	// one ref that keeps it reachable — the case is an author archiving from an old checkout,
+	// or after winding their branch back, and in both what gets dropped is the history a
+	// squash merge would silently lose. A rebase is not this: rewritten history is neither
+	// ahead nor behind, and its markers moved with it.
+	if was != "" {
+		backwards, err := s.repo.IsAncestor(ctx, head, was)
+		if err != nil {
+			return err
+		}
+		if backwards {
+			return fmt.Errorf("cannot archive %s at %s: %s is at %s, which is ahead of it. The archive only moves forward; bring this branch up to it, or archive the commit you mean from there",
+				s.cs.Slug, short(head), reviewref.Archive(s.cs.Slug), short(was))
+		}
+	}
 	if _, err := reviewref.Update(ctx, s.repo, s.cs.Slug, head); err != nil {
 		return err
 	}
-	archiveRef, created, err := reviewref.ArchiveCommit(ctx, s.repo, s.cs.Slug, head)
-	if err != nil {
-		return err
-	}
-	return printComplete(a, s, reviewed, head, archiveRef, created, report, opts.allowSurviving)
+	return printArchive(a, s, reviewed, head, was, report, opts.allowSurviving)
 }
 
 // driftOverWhichToProceed reports the one refusal an author may acknowledge: the newest
@@ -953,8 +982,13 @@ func driftOverWhichToProceed(s lifecycle.Summary) bool {
 	return m != nil && m.Outcome.PermitsIntegration() && len(s.Drifted) > 0
 }
 
-func printComplete(a *app, s *session, reviewed lifecycle.Summary, head, archiveRef string, created bool,
+// printArchive reports where the archive now stands. `was` is the commit the ref pointed at
+// before this call, and empty when it did not exist: both are worth distinguishing from a move,
+// because "nothing to do" and "created the ref" are different answers to why HEAD is archived.
+func printArchive(a *app, s *session, reviewed lifecycle.Summary, head, was string,
 	report *survival.Report, acknowledged bool) error {
+	archiveRef := reviewref.Archive(s.cs.Slug)
+	advanced := was != head
 	if a.json {
 		out := map[string]any{
 			"changeset":                     s.cs.Slug,
@@ -963,9 +997,9 @@ func printComplete(a *app, s *session, reviewed lifecycle.Summary, head, archive
 			"head":                          head,
 			"short":                         short(head),
 			"base":                          s.cs.Base,
-			"review_ref":                    reviewref.Head(s.cs.Slug),
 			"archive_ref":                   archiveRef,
-			"archive_created":               created,
+			"archive_was":                   was,
+			"archive_advanced":              advanced,
 			"squash_safe":                   true,
 			"acknowledged_survivors":        0,
 			"surviving_review_artifacts":    0,
@@ -986,13 +1020,19 @@ func printComplete(a *app, s *session, reviewed lifecycle.Summary, head, archive
 		a.printf("Acknowledged %d path(s) outside changesets/%s/: %s.\n\n",
 			len(reviewed.Drifted), s.cs.Slug, strings.TrimSuffix(reviewed.Reason, "."))
 	}
-	a.printf("Completed changeset %s\n\n", s.cs.Slug)
-	a.printf("Review archive:\n  %s\n\n", archiveRef)
-	if !created {
-		a.printf("%s already points at %s; archive refs are never rewritten.\n\n", archiveRef, short(head))
+	if !advanced {
+		a.printf("Changeset %s is already archived at %s\n\n", s.cs.Slug, short(head))
+		a.printf("%s already points there; nothing moved.\n\n", archiveRef)
+	} else {
+		a.printf("Archived changeset %s at %s\n\n", s.cs.Slug, short(head))
+		if was == "" {
+			a.printf("%s created\n\n", archiveRef)
+		} else {
+			a.printf("%s: %s → %s\n\n", archiveRef, short(was), short(head))
+		}
 	}
 	a.printf("Safe to squash/merge.\n")
-	a.printf("Review history stays reachable at %s\n", reviewref.Head(s.cs.Slug))
+	a.printf("Review history stays reachable at %s\n", archiveRef)
 	return nil
 }
 
@@ -1408,9 +1448,9 @@ func waitNextAction(s model.State, ref string) string {
 			return fmt.Sprintf("the review landed on %s; bring it into this branch with ordinary "+
 				"Git, then `git pair change feedback`", ref)
 		}
-		return "`git pair change feedback`; feedback is non-blocking, `git pair change complete` when integration is due"
+		return "`git pair change feedback`; feedback is non-blocking, `git pair change archive` when integration is due"
 	case model.StateApproved:
-		return "`git pair change complete` before squash/merge"
+		return "`git pair change archive` before squash/merge"
 	case model.StateReady, model.StateWorking:
 		// Only reachable on a timeout: nothing became actionable.
 		return "still waiting for review activity; run `git pair change wait` again or check `git pair status --json`"

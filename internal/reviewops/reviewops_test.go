@@ -173,15 +173,16 @@ func TestSubmitRejectsInvalidOutcome(t *testing.T) {
 	}
 }
 
-// Completion archives a head and records no commit, so it is not a state a review
-// has to be told about. A reviewer who submits against an already-completed head
-// gets an ordinary review commit, and completing the result is the owner's call.
-func TestSubmitStillRecordsAgainstACompletedHead(t *testing.T) {
+// Review submission moves the archive: requirements §10 says a submission updates the
+// archive ref to the resulting commit, so a reviewer speaking against an archived head
+// advances it rather than leaving it behind. What must not happen is losing the head that was
+// archived — it is an ancestor of the new one.
+func TestSubmitAdvancesTheArchiveItWasGiven(t *testing.T) {
 	e := newEnv(t)
 	head := e.f.Head()
-	archiveRef, _, err := reviewref.ArchiveCommit(context.Background(), e.repo, e.cs.Slug, head)
-	if err != nil {
-		t.Fatalf("ArchiveCommit: %v", err)
+	ref := "refs/reviews/" + slug
+	if _, err := reviewref.Update(context.Background(), e.repo, e.cs.Slug, head); err != nil {
+		t.Fatalf("Update: %v", err)
 	}
 
 	e.f.Write("service.go", "package main\n\n// Please use a transaction here\nfunc Lock() {}\n")
@@ -190,13 +191,11 @@ func TestSubmitStillRecordsAgainstACompletedHead(t *testing.T) {
 	if result.Commit == head {
 		t.Error("the submission recorded no commit")
 	}
-	if got := e.f.RefSHA("refs/reviews/" + slug); got != result.Commit {
-		t.Errorf("review ref = %s, want the new review %s", got, result.Commit)
+	if got := e.f.RefSHA(ref); got != result.Commit {
+		t.Errorf("archive ref = %s, want the new review %s", got, result.Commit)
 	}
-	// The archive stays exactly where it was: completing a head is a statement
-	// about that head, and a later review cannot move it.
-	if got := e.f.RefSHA(archiveRef); got != head {
-		t.Errorf("archive ref = %s, want the completed head %s", got, head)
+	if !e.f.ReachableFrom(head, ref) {
+		t.Errorf("the previously archived head %s is no longer reachable from the archive", head)
 	}
 }
 

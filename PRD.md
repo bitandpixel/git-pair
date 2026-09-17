@@ -404,11 +404,12 @@ Target MVP structure:
 git-pair
 ├── change
 │   ├── init
+│   ├── use
 │   ├── ready
 │   ├── unready
 │   ├── feedback
 │   ├── wait
-│   └── complete
+│   └── archive
 │
 ├── review
 │   ├── open
@@ -548,8 +549,8 @@ command rather than inferred: a later commit does not un-ready the changeset, so
 never drops it out of the queue on its own. `git pair change unready` (§9.6) takes it out on purpose,
 and a review submission supersedes the marker.
 
-The tree is consulted at exactly one point in the lifecycle, and it is not here: `change complete`
-(§9.5) refuses to archive a head whose reviewed content has moved since the review.
+The tree is consulted at exactly one point in the lifecycle, and it is not here: `change archive`
+(§9.5) refuses to move the archive over a head whose reviewed content has moved since the review.
 
 ### Surviving review additions
 
@@ -650,73 +651,88 @@ git pair change wait --fetch --json   # exits when a reviewer has acted
 git pair change feedback               # read what they said
 ```
 
-## 9.5 `git pair change complete`
+## 9.5 `git pair change archive`
 
-Archives the complete unsquashed review history at HEAD, before squash/merge.
+Advances the changeset's archive ref to HEAD, so the whole unsquashed history stays reachable
+before a squash or merge.
+
+A changeset has one durable ref (§13), and review moves it as it goes: `change ready` writes it at
+the first handoff, and `review submit` moves it to each submission. What this command is for is what
+comes *after* a review — a reply in a thread, a rewritten `ABOUT.md`, another note in the changeset
+directory — commits that are review artifacts rather than implementation, and between which the
+archive would otherwise stop short of HEAD.
 
 The owner owns this half of the lifecycle. A reviewer's `approve` is a judgement about the code;
-completing the changeset is the owner's decision that the reviewed state is what they are taking
-forward. The command therefore records no commit and establishes no state (§12).
+archiving is the owner's decision that the reviewed state is what they are taking forward. The
+command therefore records no commit and establishes no state (§12).
 
 Responsibilities:
 
 1. verify the working tree is clean,
-2. verify the newest review at HEAD permits integration (`approve` or `feedback`), and that the
+2. verify the changeset has not ended (§9.7): archiving reports squash-safety, and abandoning
+   already left the archive sitting on the terminal marker, so an abandoned changeset has nothing
+   this command could usefully report,
+3. verify the newest review at HEAD permits integration (`approve` or `feedback`), and that the
    content it reviewed is what HEAD still carries: the tree is compared between that marker and
-   HEAD, ignoring `changesets/<changeset>/`, and drift refuses the completion (§12) — this is the
+   HEAD, ignoring `changesets/<changeset>/`, and drift refuses the archive (§12) — this is the
    only point in the lifecycle where a commit can stop an operation,
-3. run the surviving-review-additions diagnostic,
-4. require explicit acknowledgement if surviving additions remain, or if content outside
+4. run the surviving-review-additions diagnostic,
+5. require explicit acknowledgement if surviving additions remain, or if content outside
    `changesets/<changeset>/` has arrived on top of the marker that permits integration —
    `--allow-unreviewed-changes` covers the second case, and nothing covers a `block` or a
    `change unready`,
-5. ensure the complete current branch history is anchored under `refs/reviews/`,
-6. write the immutable archive ref `refs/reviews/archive/<changeset>/<short-head>` at HEAD, created
-   only if absent and never moved,
-7. print the resulting archive ref and integration readiness.
+6. refuse a HEAD behind the ref's current commit: the archive only moves forward (§13),
+7. move the archive ref to HEAD, and print where it moved and whether integration is safe.
 
-It must **not** merge, push, or squash.
+It must **not** merge, push, or squash. It creates no second copy of the history: one ref per
+changeset, advanced rather than duplicated, is what keeps §13's promise without a vocabulary of
+ref kinds for an agent to learn.
 
 Example output:
 
 ```text
-Completed changeset booking-transaction
+Archived changeset booking-transaction at 91bf204
 
-Review archive:
-  refs/reviews/archive/booking-transaction/91bf204
+refs/reviews/booking-transaction: 6c1d0aa → 91bf204
 
 Safe to squash/merge.
 Review history stays reachable at refs/reviews/booking-transaction
 ```
 
-If surviving review additions remain, completing must fail unless explicitly overridden, and so
+If surviving review additions remain, archiving must fail unless explicitly overridden, and so
 must a head whose content moved past the review that permits it:
 
 ```bash
-git pair change complete --allow-surviving-review-additions
-git pair change complete --allow-unreviewed-changes
+git pair change archive --allow-surviving-review-additions
+git pair change archive --allow-unreviewed-changes
 ```
 
-`--json` prints `changeset`, `state`, `head`, `short`, `base`, `review_ref`, `archive_ref`,
-`archive_created`, `squash_safe`, `acknowledged_survivors`, `acknowledged_unreviewed_paths` and
-`surviving_review_artifacts`. `state` is the derived state, which completion does not change.
+`--json` prints `changeset`, `state`, `head`, `short`, `base`, `archive_ref`, `archive_was`,
+`archive_advanced`, `squash_safe`, `acknowledged_survivors`, `acknowledged_unreviewed_paths` and
+`surviving_review_artifacts`. `state` is the derived state, which archiving does not change.
+`archive_was` is the commit the ref named before the call, and empty where it did not exist; it is
+reported because "the ref was already there" and "the ref was created" are different answers.
 
-Running the command again at the same HEAD succeeds and changes nothing: the operation is "this head
-is archived", and an archive ref is never moved or duplicated (§13).
+Running the command again at the same HEAD succeeds, writes nothing, and says so. Refusing to move
+backwards is not an inconvenience to work around but the point: a target behind the current tip
+would drop archived history from the only ref that keeps it reachable, which is what a squash merge
+would silently lose. Rewritten history is not behind — a rebase moves markers with it — and the
+archive follows it.
 
-Completion is not a state. The changeset is finished when the archived history is merged into the
-deployment branch, which is ordinary git that git-pair neither performs nor derives. `git pair
-status` reports `archive_ref` while HEAD is that archived commit and stops reporting it as soon as
-other work lands, so a branch with unfinished work never looks finished.
+Archiving is not a state, and not the end of the changeset: the work is finished when the archived
+history is merged into the deployment branch, which is ordinary git that git-pair neither performs
+nor derives. `git pair status` reports `archive_ref` and `archive_commit` whenever the ref exists,
+and calls the changeset squash-safe only while that commit is HEAD — an archive of an ancestor is
+not a statement that the work is done.
 
-`approve` and `complete` are intentionally separate concepts:
+`approve` and `archive` are intentionally separate concepts:
 
 ```text
 approve
     human judgment about the code
 
-complete
-    the owner's archival operation
+archive
+    the owner's decision about what to take forward
 ```
 
 ## 9.6 `git pair change unready`
@@ -745,7 +761,7 @@ identical markers behind. Retracting a `BLOCKED` changeset is not what the comma
 already expected to act, and the block stays the newest marker until they ready the changeset again.
 
 Withdrawing an approval supersedes it rather than deleting it. The approval remains in
-`git pair review history`, and because the newest marker is now the retraction, `change complete`
+`git pair review history`, and because the newest marker is now the retraction, `change archive`
 (§9.5) refuses until a reviewer approves again.
 
 A reviewer may still submit against an unready changeset — `review submit` accepts any state — which is
@@ -759,10 +775,12 @@ what keeps the gate back into `READY` reachable: surviving review additions (§1
 
 Records that the changeset will not be taken forward, and anchors the record so it outlives the branch.
 
-Two endings exist, and only one of them is git-pair's to record. Completion (§9.5) means *merged*,
-which the deployment branch knows and git-pair deliberately does not derive. Abandoning means *not
-coming back*, which the author knows the moment they decide it — and without a command for it, the
-only way to say so is to delete the branch, which destroys the history that explains why.
+Two endings exist, and only one of them is git-pair's to record today. Archiving (§9.5) is not one
+of them: it keeps history reachable while the work goes on. Landing the work — *merged* — is the
+other ending, which the deployment branch knows and git-pair deliberately does not derive; a later
+milestone records it when someone tells it so. Abandoning means *not coming back*, which the author
+knows the moment they decide it — and without a command for it, the only way to say so is to delete
+the branch, which destroys the history that explains why.
 
 Checks, in order:
 
@@ -773,7 +791,7 @@ Checks, in order:
 3. the changeset has not already ended, in which case the command succeeds and records nothing.
 
 Writes `git-pair: abandon <slug>` carrying `Review-State: abandoned` and `Review-Changeset: <slug>`, then
-moves `refs/reviews/<changeset>` (§13) to that commit. The ref move is the point of the operation: a
+moves the changeset's archive ref (§13) to that commit. The ref move is the point of the operation: a
 terminal record on a branch that gets deleted is a record that disappears with it.
 
 `abandoned` is not a sixth state. The changeset reports `WORKING`, which already means "not in
@@ -784,10 +802,10 @@ on — at its five values, while still making a changeset that can never move ag
 The ending closes the changeset, which is the difference from `change unready` (§9.6), which only
 withdraws an offer for now. `change ready`, `change unready` and `review submit` refuse against an
 abandoned changeset, and the check consults both places the record can live: the branch chain and the
-anchor. Whichever survives is enough, which is also what stops a newly created branch from restarting
-a changeset whose name already ended.
+archive ref. Whichever survives is enough, which is also what stops a newly created branch from
+restarting a changeset whose name already ended.
 
-`--json` prints `changeset`, `branch`, `state`, `was`, `recorded`, `abandoned_commit` and `review_ref`.
+`--json` prints `changeset`, `branch`, `state`, `was`, `recorded`, `abandoned_commit` and `archive_ref`.
 
 ---
 
@@ -807,11 +825,11 @@ git pair change use booking-transaction
 
 It writes one line, `ignores: <other ids>`, into the **chosen** changeset's `CHANGESET.yaml`, and
 commits that file on its own. The record belongs to the changeset that was chosen: clearing the
-others' records instead would write into another changeset's directory, which `change complete`
+others' records instead would write into another changeset's directory, which `change archive`
 (§9.5) would rightly read as a foreign path in this changeset's landing. The commit carries
 `Review-Changeset: <id>` and no `Review-State`, because recording which changeset a branch is about
 is not a lifecycle event — it must not move a changeset that is in review out of review. Like a
-ready marker it is a review artifact, so `change complete` advances over it (§9.5).
+ready marker it is a review artifact, so `change archive` advances over it (§9.5).
 
 Checks, in order:
 
@@ -1098,8 +1116,8 @@ Latest review:
   outcome: block
   commit: 91bf204
 
-Review anchors:
-  movable: refs/reviews/booking-transaction
+Review archive:
+  refs/reviews/booking-transaction
     points at: 91bf204
 
 Uncommitted changes: no
@@ -1127,7 +1145,8 @@ Potential JSON:
         "outcome": "block",
         "commit": "91bf204"
     },
-    "review_ref": "refs/reviews/booking-transaction"
+    "archive_ref": "refs/reviews/booking-transaction",
+    "archive_commit": "91bf204"
 }
 ```
 
@@ -1168,13 +1187,13 @@ ready
     ↓
 review feedback / approve
     ↓
-complete (archival, owner's decision — not a state)
+complete (a ref move, owner's decision — not a state)
 ```
 
 Any point above can also end: `git pair change abandon` (§9.7) records a terminal marker, and the
 commands that move state refuse against the changeset afterwards.
 
-The author's side of that loop is `git pair change ready`, then `git pair change wait` to learn that a reviewer has acted, then `git pair change feedback` to read the submission before addressing it, then `git pair change complete` (§9.5) to archive the reviewed head.
+The author's side of that loop is `git pair change ready`, then `git pair change wait` to learn that a reviewer has acted, then `git pair change feedback` to read the submission before addressing it, then `git pair change archive` (§9.5) to advance the archive over what the review left behind.
 
 Readiness also ends on purpose. `git pair change unready` (§9.6) writes a `working` marker and takes
 the changeset back out of the queue, which is how an author says "not finished after all" instead of
@@ -1182,9 +1201,9 @@ leaving the offer standing while they keep implementing.
 
 State comes from the commits on the branch. There is one fallback, and it is not a second
 source: where a changeset has no branch — deleted after the work landed, or after it was
-abandoned — the anchor at `refs/reviews/<changeset>` is what remains, and deriving from it can
-only report what the branch last recorded before it disappeared (§13). Nothing reads a ref to
-decide that a changeset is ready, and no command moves state by moving a ref.
+abandoned — the archive ref at `refs/reviews/<changeset>` is what remains, and
+deriving from it can only report what the branch last recorded before it disappeared (§13). Nothing
+reads a ref to decide that a changeset is ready, and no command moves state by moving a ref.
 
 Possible effective states:
 
@@ -1227,16 +1246,15 @@ agent changes implementation
 ```
 
 `git pair status` reports `APPROVED` — the newest marker is still the approval — and
-`git pair change complete` refuses to archive that head. An archive naming unreviewed content
-would be a promise the tool cannot keep, so completion is the one command that compares the
+`git pair change archive` refuses to move over that head. An archive naming unreviewed content
+would be a promise the tool cannot keep, so archiving is the one command that compares the
 tree (§9.5).
 
 ---
 
-# 13. Review Archive Refs
+# 13. The Archive Ref
 
-Offering a changeset for review should anchor it in a durable local ref, and every review
-submission moves that ref to what it reviewed:
+A changeset has one durable ref:
 
 ```text
 refs/reviews/<changeset>
@@ -1248,43 +1266,37 @@ Example:
 refs/reviews/booking-transaction
 ```
 
-pointing to the exact current `HEAD`.
+It holds the complete unsquashed implementation/review/fix chain, which is what keeps that history
+reachable through garbage collection, a squash merge, and `git branch -D`. The changeset names it,
+not the branch, so the work stays findable after the branch is gone.
 
-This keeps the entire implementation/review/fix chain reachable from Git garbage collection.
-The ref is written by `change ready` as well as by a submission, because the history worth saving
+The ref is written by `change ready` as well as by `review submit`, because the history worth saving
 begins at the first handoff rather than at the first response: a changeset that was offered and never
 reviewed, or whose branch exists only in the reflog, otherwise has nothing holding its marker alive.
-As with every review ref it is a warning rather than a guarantee — nothing here stops a later
+`change abandon` (§9.7) moves it to the terminal marker, which is what lets an ending survive
+`git branch -D`: the branch is the thing that gets deleted, and the queue and `status` can still read
+how the changeset ended from the ref. Where a changeset has no branch, the ref is the last readable
+copy of the changeset's history — a fallback for reading history, never a source of state (§12).
+
+It moves **forward and only forward**. `change archive` (§9.5) advances it over commits that are
+review artifacts, and refuses a target behind the current tip, because dropping the archived chain
+from the only ref that guarantees its reachability is exactly what a squash merge would lose.
+Rewritten history is not behind: a rebase moves the markers with it, and the archive follows.
+
+There is one ref rather than a movable anchor plus an immutable copy per archival point. Two refs
+meant two names for the same chain in `status` and `--json`, and an agent had to know which was being
+reported; the immutability the second one provided is provided here by the forward-only rule, which
+is the property anyone was actually relying on.
+
+As with every review ref this is a warning rather than a guarantee — nothing here stops a later
 `git push --delete`.
-
-`change abandon` (§9.7) also moves this ref, to its terminal marker. That is what lets an ending
-survive `git branch -D`: the branch is the thing that gets deleted, and the queue and `status` can
-still read how the changeset ended from the anchor. Where a changeset has no branch, the ref is
-the last readable copy of the changeset's history — a fallback for reading history, never a
-source of state (§12).
-
-Completing a changeset (§9.5) writes an immutable archival ref alongside it:
-
-```text
-refs/reviews/archive/<changeset>/<short-head>
-```
-
-Example:
-
-```text
-refs/reviews/archive/booking-transaction/91bf204
-```
-
-It is created only if absent and never moved, so completing the same head twice cannot rewrite an
-archive.
 
 The fundamental invariant is:
 
-> Before the review stack can be considered safely squashable, the complete final unsquashed stack must remain reachable from a dedicated review ref.
+> Before the review stack can be considered safely squashable, the complete final unsquashed stack must remain reachable from the changeset's archive ref.
 
-Remote propagation of review refs may be added via push configuration/hooks later.
-
-The MVP should ensure local preservation first.
+Remote propagation of these refs may be added via push configuration/hooks later. The MVP should
+ensure local preservation first.
 
 ---
 
@@ -1775,14 +1787,14 @@ The command must remain fully non-interactive.
 
 This forces an agent to consciously inspect surviving review material rather than accidentally returning unchanged feedback to the reviewer.
 
-## 19.3 `git pair change complete`
+## 19.3 `git pair change archive`
 
-The same diagnostic must run before completing a changeset.
+The same diagnostic must run before archiving a changeset.
 
-If surviving additions remain, `git pair change complete` must fail unless the owner explicitly overrides:
+If surviving additions remain, `git pair change archive` must fail unless the owner explicitly overrides:
 
 ```bash
-git pair change complete --allow-surviving-review-additions
+git pair change archive --allow-surviving-review-additions
 ```
 
 This provides a final safety check before archival and squash/merge.
@@ -1874,7 +1886,7 @@ git pair change ready
 git pair change unready
 git pair change wait --json
 git pair change feedback
-git pair change complete
+git pair change archive
 ```
 
 Agent behavior:
@@ -1891,7 +1903,7 @@ Agent behavior:
 10. update code and discussion documents as appropriate,
 11. commit implementation changes normally,
 12. run `git pair change ready` again,
-13. once the reviewer's approval stands at `HEAD`, run `git pair change complete` to archive it.
+13. once the reviewer's approval stands at `HEAD`, run `git pair change archive` to advance the archive onto it.
 
 `git pair status --json` remains the way to check state without blocking. `git pair diff --unreviewed` is the reviewer's span command; an author consuming a newly submitted review uses `git pair change feedback`.
 
@@ -1946,7 +1958,7 @@ Meaning:
 Integration is permitted once CI/policy passes.
 
 An implementation commit after an approval leaves the approval as the state, and the head no
-longer carries what was accepted: `git pair change complete` refuses to archive it (§9.5), and
+longer carries what was accepted: `git pair change archive` refuses to move over it (§9.5), and
 `git pair change ready` offers the new head for review.
 
 ---
@@ -2226,19 +2238,19 @@ git pair review open --unreviewed
 
 and sees the changes made after the prior review submission, including explicit deletion or modification of prior inline review feedback.
 
-Human approves, and the owner completes the changeset:
+Human approves, and the owner archives the changeset:
 
 ```bash
 git pair review submit --approve
-git pair change complete
+git pair change archive
 ```
 
-`git pair change complete` runs the same surviving-review-additions safety check before archival, and
-records no commit: it anchors the chain and writes the archive ref at the approved head.
+`git pair change archive` runs the same surviving-review-additions safety check, and records no
+commit: it advances the archive ref onto the approved head, which is where the review left it.
 
 At this point:
 
--   the complete unsquashed history is reachable via a review archive ref,
+-   the complete unsquashed history is reachable from the changeset's archive ref,
 -   the branch can safely be pushed and squash-merged,
 -   `main` can retain a single clean feature commit,
 -   the detailed review history remains recoverable.

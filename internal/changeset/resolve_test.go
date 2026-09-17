@@ -35,7 +35,7 @@ func resolveAt(t *testing.T, f *gittest.Fixture, rev string) changeset.Resolutio
 }
 
 func reviewRef(f *gittest.Fixture, id, sha string) {
-	f.MustGit("update-ref", reviewref.Head(id), sha)
+	f.MustGit("update-ref", reviewref.Archive(id), sha)
 }
 
 func selectedID(got changeset.Resolution) string {

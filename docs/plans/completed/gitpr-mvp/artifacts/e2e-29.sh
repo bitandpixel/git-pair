@@ -92,17 +92,17 @@ $G review submit --feedback -m "Naming only, non-blocking."; check "submit --fee
 $G status | sed 's/^/  /'
 printf '\n// tighten naming\n' >> src/service.ts
 git commit -qam "rename for clarity"
-$G change complete; check "complete refused: the reviewed content moved" 1 $?
+$G change archive; check "archive refused: the reviewed content moved" 1 $?
 $G change ready >/dev/null; check "ready again after feedback" 0 $?
 $G review submit --approve; check "submit --approve (empty commit)" 0 $?
 git log -1 --format='  %h %s%n%b' HEAD
 
-step "author: complete: archive and squash-safety"
+step "author: archive: advance the archive and check squash-safety"
 HEAD_BEFORE=$(git rev-parse HEAD)
-$G change complete; check "change complete" 0 $?
-[ "$(git rev-parse HEAD)" = "$HEAD_BEFORE" ] && echo "  ok: completion recorded no commit" || { echo "  FAIL: completion created a commit"; FAILED=1; }
-ARCHIVE=$(git for-each-ref --format='%(refname)' refs/reviews/archive | head -1)
-[ "$(git rev-parse "$ARCHIVE")" = "$HEAD_BEFORE" ] && echo "  ok: the archive names the completed head" || { echo "  FAIL: the archive does not point at HEAD"; FAILED=1; }
+$G change archive; check "change archive" 0 $?
+[ "$(git rev-parse HEAD)" = "$HEAD_BEFORE" ] && echo "  ok: archiving recorded no commit" || { echo "  FAIL: archiving created a commit"; FAILED=1; }
+ARCHIVE=refs/reviews/booking-transaction
+[ "$(git rev-parse "$ARCHIVE")" = "$HEAD_BEFORE" ] && echo "  ok: the archive names the archived head" || { echo "  FAIL: the archive does not point at HEAD"; FAILED=1; }
 BEFORE=$(git rev-list --count "$ARCHIVE")
 git switch -q main
 git branch -D booking-transaction >/dev/null

@@ -20,7 +20,7 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 	f.Write("service.go", "package main\n\n// Please use a transaction here\nfunc Lock() {}\n")
 	submit(t, f, "block")
 	lowerReview := f.Head()
-	lowerRef := f.RefSHA(reviewRef("booking-transaction"))
+	lowerRef := f.RefSHA(archiveRef("booking-transaction"))
 
 	// Upper changeset, stacked on the lower branch.
 	f.CreateBranch("booking-transaction-tests", "booking-transaction")
@@ -40,8 +40,8 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 	if status["state"] != "READY" {
 		t.Errorf("state = %v, want READY", status["state"])
 	}
-	if status["review_ref"] != reviewRef("booking-transaction-tests") {
-		t.Errorf("review_ref = %v, want its own ref", status["review_ref"])
+	if status["archive_ref"] != archiveRef("booking-transaction-tests") {
+		t.Errorf("archive_ref = %v, want its own ref", status["archive_ref"])
 	}
 
 	// Independent review history: the upper changeset has never been reviewed, even
@@ -90,10 +90,10 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 	// Independent refs: reviewing the upper changeset must not move the lower one.
 	submit(t, f, "approve")
 	upperHead := f.Head()
-	if got := f.RefSHA(reviewRef("booking-transaction-tests")); got != upperHead {
-		t.Errorf("%s = %s, want the upper review commit %s", reviewRef("booking-transaction-tests"), got, upperHead)
+	if got := f.RefSHA(archiveRef("booking-transaction-tests")); got != upperHead {
+		t.Errorf("%s = %s, want the upper review commit %s", archiveRef("booking-transaction-tests"), got, upperHead)
 	}
-	if got := f.RefSHA(reviewRef("booking-transaction")); got != lowerRef {
+	if got := f.RefSHA(archiveRef("booking-transaction")); got != lowerRef {
 		t.Errorf("the lower changeset's ref moved from %s to %s", lowerRef, got)
 	}
 	// Its history is now its own single approve.
@@ -103,18 +103,17 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 		t.Errorf("upper reviews = %v, want its own approve", reviews)
 	}
 
-	// Archival is per changeset too: completing the upper changeset writes its own
-	// archive ref and leaves the lower one's refs alone.
-	runIn(t, f.Dir(), "change", "complete").mustSucceed(t, "change", "complete")
-	upperArchives := f.RefNames(archivePattern("booking-transaction-tests"))
-	if len(upperArchives) != 1 {
-		t.Errorf("upper archive refs = %v, want exactly one", upperArchives)
+	// Archival is per changeset too: archiving the upper changeset moves its own ref and
+	// leaves the lower one's alone.
+	runIn(t, f.Dir(), "change", "archive").mustSucceed(t, "change", "archive")
+	if got := f.RefSHA(archiveRef("booking-transaction-tests")); got != f.Head() {
+		t.Errorf("upper archive = %s, want its own head %s", got, f.Head())
 	}
-	if got := f.RefSHA(reviewRef("booking-transaction")); got != lowerRef {
-		t.Errorf("completing the upper changeset moved the lower ref to %s, want %s", got, lowerRef)
+	if got := f.RefSHA(archiveRef("booking-transaction")); got != lowerRef {
+		t.Errorf("archiving the upper changeset moved the lower ref to %s, want %s", got, lowerRef)
 	}
-	if got := f.ReachableFrom(lowerReview, upperArchives[0]); !got {
-		t.Logf("note: the upper archive does not include the lower changeset's review commit (expected)")
+	if !f.ReachableFrom(lowerReview, archiveRef("booking-transaction")) {
+		t.Error("the lower changeset's review commit is no longer reachable from its own archive")
 	}
 }
 

@@ -86,7 +86,7 @@ type Summary struct {
 	// Stale is true when commits other than the newest marker follow it. Most callers
 	// can ignore it: state is whatever the newest marker says, and a commit does not
 	// change it (PRD §12). ReconcileStaleness is the one place the observation
-	// becomes a verdict, and only completion asks for it.
+	// becomes a verdict, and only archiving asks for it.
 	Stale bool
 	// Trailing counts the non-marker commits after the newest marker.
 	Trailing int
@@ -206,8 +206,8 @@ func parseEvent(slug string, rec []string) Event {
 		case state == model.StateValueAbandoned:
 			e.Kind = KindAbandoned
 		default:
-			// `Review-State: closed` was read here until completion became an
-			// archival ref instead of a commit. It now falls through to the
+			// `Review-State: closed` was read here until ending a changeset became a
+			// ref move instead of a commit. It now falls through to the
 			// unrecognised path, which is the conservative reading and keeps the
 			// retired vocabulary out of the model.
 			e.UnrecognisedMarker = true
@@ -318,9 +318,9 @@ func markerReason(m Event) string {
 // marker spoke about been changed underneath it? Where it has, the marker no longer
 // describes HEAD and the state is WORKING.
 //
-// Only SummarizeAgainstTree calls it, and only `change complete` uses that. An archive
+// Only SummarizeAgainstTree calls it, and only `change archive` uses that. An archive
 // ref is a promise about reviewed content — it is what an agent is told to check before
-// squash-merging — so completion refuses to name a head whose code moved after the
+// squash-merging — so archiving refuses to name a head whose code moved after the
 // review (PRD §9.5). Everywhere else a commit is not something that changes state:
 // `change ready`, `change unready` and a review submission are (PRD §12).
 //

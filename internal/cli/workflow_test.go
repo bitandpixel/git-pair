@@ -137,13 +137,12 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	// --- author: complete ---------------------------------------------------------
 	// The chain the archive must preserve: everything committed up to the approval.
 	chain := f.RevList("HEAD")
-	completed := runIn(t, f.Dir(), "change", "complete").mustSucceed(t, "change", "complete")
-	archiveRefs := f.RefNames(archivePattern(slug))
-	if len(archiveRefs) != 1 {
-		t.Fatalf("archive refs = %v, want one", archiveRefs)
+	completed := runIn(t, f.Dir(), "change", "archive").mustSucceed(t, "change", "archive")
+	if got := f.RefSHA(archiveRef(slug)); got != f.Head() {
+		t.Errorf("%s = %s, want the archived head %s", archiveRef(slug), got, f.Head())
 	}
-	mustContain(t, completed.stdout, archiveRefs[0], "complete must print the archive ref")
-	mustContain(t, completed.stdout, "Safe to squash/merge", "complete must report integration readiness")
+	mustContain(t, completed.stdout, archiveRef(slug), "archive must print the archive ref")
+	mustContain(t, completed.stdout, "Safe to squash/merge", "archive must report integration readiness")
 	if got := runIn(t, f.Dir(), "status", "--json").json(t)["state"]; got != "APPROVED" {
 		t.Errorf("state = %v, want APPROVED: completion records no commit and establishes no state", got)
 	}
@@ -171,18 +170,18 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 		t.Errorf("main moved from %s to %s", mainBefore, got)
 	}
 	reachable := map[string]bool{}
-	for _, sha := range f.RevList(archiveRefs[0]) {
+	for _, sha := range f.RevList(archiveRef(slug)) {
 		reachable[sha] = true
 	}
 	for _, sha := range chain {
 		if !reachable[sha] {
-			t.Errorf("%s is not reachable from %s after `git branch -D`", sha, archiveRefs[0])
+			t.Errorf("%s is not reachable from %s after `git branch -D`", sha, archiveRef(slug))
 		}
 	}
 	// The completed head stays reachable through the movable ref, which is what the
 	// author would find if they came back to the review after the branch was gone.
-	if !f.ReachableFrom(chain[len(chain)-1], reviewRef(slug)) {
+	if !f.ReachableFrom(chain[len(chain)-1], archiveRef(slug)) {
 		t.Errorf("the completed head %s is not reachable from %s",
-			chain[len(chain)-1], reviewRef(slug))
+			chain[len(chain)-1], archiveRef(slug))
 	}
 }

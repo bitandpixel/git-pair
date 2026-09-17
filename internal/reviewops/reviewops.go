@@ -21,7 +21,7 @@ type Result struct {
 	// Files are the paths the review changed; empty for an empty review.
 	Files []string `json:"files"`
 	// Ref is the review ref moved to Commit.
-	Ref string `json:"review_ref"`
+	Ref string `json:"archive_ref"`
 }
 
 // Empty reports whether the review recorded no file changes, which is valid and
@@ -37,9 +37,11 @@ func (r Result) Empty() bool { return len(r.Files) == 0 }
 // The ref is updated in the same call as the commit: an anchored review is the
 // point of the operation.
 //
-// A completed changeset is not a special case. Completion archives a head and
-// records no commit, so a review submitted against a completed head is an
-// ordinary submission, and completing the result is the owner's call.
+// An archived changeset is not a special case. A submission moves the archive
+// ref to its own commit, which is what requirements §10 asks for, so a reviewer
+// speaking against an archived head advances it rather than being refused — and
+// the head that was archived stays reachable, because the new commit descends
+// from it.
 func Submit(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
 	outcome model.Outcome, body string, stageAll bool) (Result, error) {
 

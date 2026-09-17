@@ -37,8 +37,8 @@ func TestReviewSubmitWritesReviewCommitAndMovesRef(t *testing.T) {
 	}
 	// PRD §10.4: "Immediately after successful review submission, update the
 	// changeset's review archive ref to the resulting exact HEAD."
-	if got := f.RefSHA(reviewRef(slug)); got != head {
-		t.Errorf("%s = %s, want the review commit %s", reviewRef(slug), got, head)
+	if got := f.RefSHA(archiveRef(slug)); got != head {
+		t.Errorf("%s = %s, want the review commit %s", archiveRef(slug), got, head)
 	}
 	// The reviewer's direct edit is part of the review (PRD §20).
 	if changed := f.ChangedFiles(before, head); len(changed) != 1 || changed[0] != "service.go" {
@@ -83,8 +83,8 @@ func TestReviewSubmitApproveOnCleanTreeCreatesEmptyReviewCommit(t *testing.T) {
 	if got := f.Trailers(head)["Review-Outcome"]; got != "approve" {
 		t.Errorf("Review-Outcome = %q, want approve", got)
 	}
-	if got := f.RefSHA(reviewRef("booking")); got != head {
-		t.Errorf("%s = %s, want the empty approval %s", reviewRef("booking"), got, head)
+	if got := f.RefSHA(archiveRef("booking")); got != head {
+		t.Errorf("%s = %s, want the empty approval %s", archiveRef("booking"), got, head)
 	}
 	if !strings.Contains(res.stdout, "none") && !strings.Contains(res.stdout, "0") {
 		t.Logf("note: human output for an empty review: %q", res.stdout)
@@ -130,7 +130,7 @@ func TestReviewSubmitNoStageLeavesEditsOut(t *testing.T) {
 	if f.Clean() {
 		t.Error("--no-stage consumed the reviewer's unstaged edit")
 	}
-	if got := f.RefSHA(reviewRef(slug)); got != f.Head() {
+	if got := f.RefSHA(archiveRef(slug)); got != f.Head() {
 		t.Errorf("review ref = %s, want the new HEAD %s", got, f.Head())
 	}
 }
@@ -216,7 +216,7 @@ func TestReviewQueueReportsReadyChangesetFields(t *testing.T) {
 	if !ok {
 		t.Fatalf("queue entry = %T, want an object", rows[0])
 	}
-	for _, key := range []string{"changeset", "branch", "base", "state", "head", "ready_commit", "ready_age", "review_ref"} {
+	for _, key := range []string{"changeset", "branch", "base", "state", "head", "ready_commit", "ready_age", "archive_ref"} {
 		if _, ok := entry[key]; !ok {
 			t.Errorf("queue entry is missing %q: %v", key, entry)
 		}
@@ -236,8 +236,8 @@ func TestReviewQueueReportsReadyChangesetFields(t *testing.T) {
 	if entry["head"] != head {
 		t.Errorf("head = %v, want the ready marker %s", entry["head"], head)
 	}
-	if entry["review_ref"] != reviewRef(slug) {
-		t.Errorf("review_ref = %v, want %s", entry["review_ref"], reviewRef(slug))
+	if entry["archive_ref"] != archiveRef(slug) {
+		t.Errorf("archive_ref = %v, want %s", entry["archive_ref"], archiveRef(slug))
 	}
 	if age, ok := entry["ready_age"].(string); !ok || age == "" {
 		t.Errorf("ready_age = %v, want a compact duration (PRD §10.6 shows \"18m\")", entry["ready_age"])

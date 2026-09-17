@@ -273,7 +273,7 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 			"outcome":         string(result.Outcome),
 			"commit":          result.Commit,
 			"short":           short(result.Commit),
-			"review_ref":      result.Ref,
+			"archive_ref":     result.Ref,
 			"files":           result.Files,
 			"empty":           result.Empty(),
 			"previous_review": previous,
@@ -309,9 +309,9 @@ func nextActionFor(o model.Outcome) string {
 		return "author: `git pair change feedback`, address it, then `git pair change ready`"
 	case model.OutcomeFeedback:
 		return "author: `git pair change feedback` to read it; feedback is non-blocking, " +
-			"`git pair change complete` when integration is due"
+			"`git pair change archive` when integration is due"
 	case model.OutcomeApprove:
-		return "author: `git pair change complete` before squash/merge"
+		return "author: `git pair change archive` before squash/merge"
 	}
 	return ""
 }
@@ -387,7 +387,7 @@ type queueEntry struct {
 	Head        string `json:"head"`
 	ReadyCommit string `json:"ready_commit"`
 	ReadyAge    string `json:"ready_age"`
-	ReviewRef   string `json:"review_ref"`
+	ArchiveRef  string `json:"archive_ref"`
 }
 
 func newReviewQueueCommand(a *app) *cobra.Command {
@@ -539,7 +539,7 @@ func runReviewQueue(ctx context.Context, a *app) error {
 // whose branch really did go missing.
 func classifyOrphan(ctx context.Context, repo *git.Repo, head, slug string) (string, error) {
 	anchor, err := reviewref.Resolve(ctx, repo, slug)
-	if errors.Is(err, reviewref.ErrNoReviewRef) {
+	if errors.Is(err, reviewref.ErrNoArchiveRef) {
 		// Never anchored means never offered: the directory is a leftover, and the
 		// queue has nothing to offer either.
 		return "", nil
@@ -617,7 +617,7 @@ func readyEntry(ctx context.Context, repo *git.Repo, cs changeset.Changeset, bra
 				Head:        head,
 				ReadyCommit: summary.Marker.SHA,
 				ReadyAge:    lifecycle.Age(at, now()),
-				ReviewRef:   reviewref.Head(cs.Slug),
+				ArchiveRef:  reviewref.Archive(cs.Slug),
 			}
 		}
 	}

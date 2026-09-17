@@ -48,7 +48,7 @@ func TestExitCodeBusinessRuleRefusal(t *testing.T) {
 		ready(t, f)
 		submit(t, f, "block")
 
-		res := runIn(t, f.Dir(), "change", "complete")
+		res := runIn(t, f.Dir(), "change", "archive")
 		if res.code != exitRefusal {
 			t.Errorf("exited %d, want %d\nstderr: %s", res.code, exitRefusal, res.stderr)
 		}
@@ -60,7 +60,7 @@ func TestExitCodeBusinessRuleRefusal(t *testing.T) {
 		f.Write("service.go", "package main\n\n// Please name this variable\nfunc Lock() {}\n")
 		submit(t, f, "approve")
 
-		res := runIn(t, f.Dir(), "change", "complete")
+		res := runIn(t, f.Dir(), "change", "archive")
 		if res.code != exitRefusal {
 			t.Errorf("exited %d, want %d\nstderr: %s", res.code, exitRefusal, res.stderr)
 		}
@@ -170,7 +170,7 @@ func TestExitCodeGitFailure(t *testing.T) {
 	if got := f.Trailers(f.Head())["Review-Outcome"]; got != "" {
 		t.Errorf("a failed submission wrote review trailers: %v", got)
 	}
-	if f.HasRef(reviewRef(slug)) {
+	if f.HasRef(archiveRef(slug)) {
 		t.Error("a failed submission created a review ref")
 	}
 }
@@ -183,12 +183,12 @@ func TestJSONKeySets(t *testing.T) {
 		f, slug := newChangeset(t, "booking", "main")
 		ready(t, f)
 		out := runIn(t, f.Dir(), "status", "--json").json(t)
-		assertKeys(t, out, "changeset", "branch", "base", "state", "head", "latest_review", "review_ref")
+		assertKeys(t, out, "changeset", "branch", "base", "state", "head", "latest_review", "archive_ref", "archive_commit")
 		if out["state"] != "READY" {
 			t.Errorf("state = %v, want READY", out["state"])
 		}
-		if out["review_ref"] != reviewRef(slug) {
-			t.Errorf("review_ref = %v, want %s", out["review_ref"], reviewRef(slug))
+		if out["archive_ref"] != archiveRef(slug) {
+			t.Errorf("archive_ref = %v, want %s", out["archive_ref"], archiveRef(slug))
 		}
 	})
 
@@ -214,15 +214,15 @@ func TestJSONKeySets(t *testing.T) {
 		f.Write("service.go", "package main\n\n// Please use a transaction here\nfunc Lock() {}\n")
 		args := []string{"review", "submit", "--block", "--json"}
 		out := runIn(t, f.Dir(), args...).mustSucceed(t, args...).json(t)
-		assertKeys(t, out, "changeset", "outcome", "commit", "review_ref", "files", "empty")
+		assertKeys(t, out, "changeset", "outcome", "commit", "archive_ref", "files", "empty")
 		if out["outcome"] != "block" {
 			t.Errorf("outcome = %v, want block", out["outcome"])
 		}
 		if out["commit"] != f.Head() {
 			t.Errorf("commit = %v, want %s", out["commit"], f.Head())
 		}
-		if out["review_ref"] != reviewRef(slug) {
-			t.Errorf("review_ref = %v, want %s", out["review_ref"], reviewRef(slug))
+		if out["archive_ref"] != archiveRef(slug) {
+			t.Errorf("archive_ref = %v, want %s", out["archive_ref"], archiveRef(slug))
 		}
 		if out["empty"] != false {
 			t.Errorf("empty = %v, want false for a review that changed a file", out["empty"])
@@ -280,26 +280,26 @@ func TestJSONKeySets(t *testing.T) {
 			t.Fatalf("ready_for_review = %v, want one entry", rows)
 		}
 		entry := rows[0].(map[string]any)
-		assertKeys(t, entry, "changeset", "branch", "base", "state", "head", "ready_commit", "ready_age", "review_ref")
+		assertKeys(t, entry, "changeset", "branch", "base", "state", "head", "ready_commit", "ready_age", "archive_ref")
 		if entry["changeset"] != slug {
 			t.Errorf("changeset = %v, want %q", entry["changeset"], slug)
 		}
 	})
 
-	t.Run("change complete", func(t *testing.T) {
+	t.Run("change archive", func(t *testing.T) {
 		f, slug, _, approve := approvedChangeset(t)
-		args := []string{"change", "complete", "--json"}
+		args := []string{"change", "archive", "--json"}
 		out := runIn(t, f.Dir(), args...).mustSucceed(t, args...).json(t)
-		assertKeys(t, out, "changeset", "state", "head", "base", "review_ref", "archive_ref",
-			"archive_created", "squash_safe", "acknowledged_survivors")
+		assertKeys(t, out, "changeset", "state", "head", "base", "archive_ref", "archive_was",
+			"archive_advanced", "squash_safe", "acknowledged_survivors")
 		if out["state"] != "APPROVED" {
-			t.Errorf("state = %v, want APPROVED: completion archives a head, it does not move the state", out["state"])
+			t.Errorf("state = %v, want APPROVED: archiving moves a ref, it does not move the state", out["state"])
 		}
 		if out["head"] != approve {
 			t.Errorf("head = %v, want the archived commit %s", out["head"], approve)
 		}
-		if out["archive_ref"] != archivePattern(slug)+"/"+f.Short(approve) {
-			t.Errorf("archive_ref = %v, want %s/%s", out["archive_ref"], archivePattern(slug), f.Short(approve))
+		if out["archive_ref"] != archiveRef(slug) {
+			t.Errorf("archive_ref = %v, want %s", out["archive_ref"], archiveRef(slug))
 		}
 		if out["squash_safe"] != true {
 			t.Errorf("squash_safe = %v, want true", out["squash_safe"])

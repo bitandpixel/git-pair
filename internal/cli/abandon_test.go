@@ -36,8 +36,8 @@ func TestChangeAbandonRecordsATerminalMarkerAndAnchorsIt(t *testing.T) {
 	if got := f.Trailers(sha)["Review-State"]; got != "abandoned" {
 		t.Errorf("Review-State = %q, want abandoned", got)
 	}
-	if got := f.RefSHA(reviewRef(slug)); got != sha {
-		t.Errorf("%s = %s, want the terminal marker %s", reviewRef(slug), got, sha)
+	if got := f.RefSHA(archiveRef(slug)); got != sha {
+		t.Errorf("%s = %s, want the terminal marker %s", archiveRef(slug), got, sha)
 	}
 
 	status := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status").json(t)
@@ -124,6 +124,10 @@ func TestWriteCommandsRefuseAnAbandonedChangeset(t *testing.T) {
 		{"change", "ready"},
 		{"change", "unready"},
 		{"review", "submit", "--approve"},
+		// Archiving reports squash-safety, so it must not report it for a changeset
+		// that will never be taken forward — even though abandoning left the archive
+		// sitting exactly on HEAD.
+		{"change", "archive"},
 	} {
 		r := runIn(t, f.Dir(), args...)
 		if r.code != exitRefusal {
@@ -142,7 +146,7 @@ func TestWriteCommandsRefuseAnAbandonedChangeset(t *testing.T) {
 	// The branch is the primary source and the anchor the fallback, not the reverse:
 	// a review ref is an anchor, not a guarantee (PRD §13), so a repository that lost
 	// it must still refuse to restart a changeset whose branch says it ended.
-	f.MustGit("update-ref", "-d", reviewRef(slug))
+	f.MustGit("update-ref", "-d", archiveRef(slug))
 	r := runIn(t, f.Dir(), "change", "ready")
 	if r.code != exitRefusal {
 		t.Errorf("`change ready` with the review ref gone exited %d, want %d\nstderr: %s",

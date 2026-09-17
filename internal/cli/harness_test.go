@@ -10,6 +10,7 @@ import (
 	"gitpair/internal/changeset"
 	"gitpair/internal/cli"
 	"gitpair/internal/gittest"
+	"gitpair/internal/reviewref"
 )
 
 // Exit codes are the agent-facing contract (plan: "Stable for agents"). They are
@@ -216,9 +217,9 @@ func submit(t *testing.T, f *gittest.Fixture, outcome string) result {
 }
 
 // reviewRef is the movable review ref for a changeset.
-func reviewRef(slug string) string { return "refs/reviews/" + slug }
-
-func archivePattern(slug string) string { return "refs/reviews/archive/" + slug }
+// archiveRef names the changeset's durable ref. It asks the package rather than spelling the
+// path out, so a change of layout is one line here and not a grep across the suite.
+func archiveRef(slug string) string { return reviewref.Archive(slug) }
 
 func mustContain(t *testing.T, haystack, needle, what string) {
 	t.Helper()

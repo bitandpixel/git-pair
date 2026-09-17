@@ -239,6 +239,24 @@ func (r *Repo) MergeBase(ctx context.Context, a, b string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// IsAncestor reports whether rev is an ancestor of head — the question behind "would moving this
+// ref lose history it already holds?". Exit 1 is git saying no rather than failing, so it answers
+// false with no error; an unresolvable revision stays an error, because an answer built on a name
+// that does not exist is worse than no answer.
+func (r *Repo) IsAncestor(ctx context.Context, rev, head string) (bool, error) {
+	_, err := r.Git(ctx, "merge-base", "--is-ancestor", rev, head)
+	if err == nil {
+		return true, nil
+	}
+	if ExitCode(err) == 1 {
+		return false, nil
+	}
+	if IsUnknownRevision(err) {
+		return false, fmt.Errorf("%w: cannot compare %s and %s", ErrUnknownRevision, rev, head)
+	}
+	return false, err
+}
+
 // --- content and history ----------------------------------------------------
 
 // ShowFile returns the contents of path at rev.
@@ -514,6 +532,12 @@ func (r *Repo) UpdateRef(ctx context.Context, ref, sha string) error {
 
 // CreateRefIfAbsent points ref at sha only when ref does not already exist.
 // It reports whether the ref was created by this call.
+//
+// It has no production caller since the archive ref became a single movable ref rather than an
+// immutable one written per archived head — moving a ref that already exists is the same call as
+// creating it. It stays because "record this once and never again" is a real need (M4's integration
+// record is the candidate) and because its unit tests pin the distinction between *absent* and
+// *git broke*, which `ResolveRef` alone cannot give.
 func (r *Repo) CreateRefIfAbsent(ctx context.Context, ref, sha string) (bool, error) {
 	if _, err := r.ResolveRef(ctx, ref); err == nil {
 		return false, nil
