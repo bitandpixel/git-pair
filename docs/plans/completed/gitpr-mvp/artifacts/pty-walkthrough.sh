@@ -118,6 +118,9 @@ expect "the shortcut bar offers quit" -1 "$T/paint.raw" "q quit"
 expect "the changeset box closes on its right" -1 "$T/paint.raw" $'\u256e'
 expect "and a child sits deeper than the directory over it" -1 "$T/paint.raw" $'    \u25cb'
 expect "with the directory's own mark one step left of it" -1 "$T/paint.raw" $'  \u25be \u25cb'
+# The tree's own rules, double because the tree holds the keys at first paint. Nothing else on this
+# screen draws a run of double rules yet: the box is idle and the divider is single.
+expect "the file tree is ruled where it holds the keys" -1 "$T/paint.raw" $'\u2550\u2550\u2550\u2550'
 # The box grew a right side without moving the divider: the diff column still starts one space and one
 # rule to the right of the list.
 expect "and the diff column still starts at its own rule" -1 "$T/paint.raw" $'\u2502 changesets' 

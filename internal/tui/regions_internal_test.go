@@ -408,3 +408,43 @@ func TestThePreviewSurvivesANewThread(t *testing.T) {
 		t.Errorf("coming back from the editor the pane has lost its diff:\n%s", m.View())
 	}
 }
+
+// --- the file tree's own rules ---------------------------------------------------------------
+
+// The tree is marked by two rules rather than a frame. A frame costs two cells each side, and the
+// terminal that needs the region named most -- the narrow one, where nothing else about the layout
+// distinguishes the regions -- is the one with no columns to spare. Both rules are drawn whatever holds
+// the keys, so the keys moving never resizes the screen; only the glyph changes.
+func TestTheTreeIsRuledAboveAndBelowAndTheRulesAreItsFocusLight(t *testing.T) {
+	spine := func(m reviewModel, rule string) string { return strings.Repeat(rule, m.listWidth()) }
+
+	m := newFileListModel(t)
+	m.focusOn(focusFiles)
+	lit := strings.Split(strings.TrimSuffix(m.listBlock(), "\n"), "\n")
+	if n := countEqual(lit, spine(m, "\u2550")); n != 2 {
+		t.Errorf("the tree is bounded by %d double rules, want two (above and below)\n%s", n, m.listBlock())
+	}
+
+	m.focusOn(focusMeta)
+	cold := strings.Split(strings.TrimSuffix(m.listBlock(), "\n"), "\n")
+	if n := countEqual(cold, spine(m, "\u2550")); n != 0 {
+		t.Errorf("%d of the tree's rules stayed double after the keys left it", n)
+	}
+	if n := countEqual(cold, spine(m, "\u2500")); n < 2 {
+		t.Errorf("the tree lost its rules rather than dimming them: %d single rules\n%s", n, m.listBlock())
+	}
+
+	if len(lit) != len(cold) {
+		t.Errorf("the column is %d rows with the keys and %d without", len(lit), len(cold))
+	}
+}
+
+func countEqual(lines []string, want string) int {
+	n := 0
+	for _, l := range lines {
+		if l == want {
+			n++
+		}
+	}
+	return n
+}
