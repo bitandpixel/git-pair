@@ -24,6 +24,9 @@ const (
 	KindImplementation Kind = iota
 	KindReady
 	KindReview
+	// KindUnready is `change unready`: a marker that ends readiness on purpose
+	// instead of leaving it to be inferred from a later commit.
+	KindUnready
 )
 
 func (k Kind) String() string {
@@ -32,6 +35,8 @@ func (k Kind) String() string {
 		return "ready"
 	case KindReview:
 		return "review"
+	case KindUnready:
+		return "unready"
 	}
 	return "implementation"
 }
@@ -160,6 +165,8 @@ func parseEvent(slug string, rec []string) Event {
 			e.UnrecognisedMarker = true
 		case state == model.StateValueReady:
 			e.Kind = KindReady
+		case state == model.StateValueWorking:
+			e.Kind = KindUnready
 		default:
 			// `Review-State: closed` was read here until completion became an
 			// archival ref instead of a commit. It now falls through to the
@@ -238,6 +245,8 @@ func markerLabel(m Event) string {
 		return "ready " + m.Short
 	case KindReview:
 		return fmt.Sprintf("review %s (%s)", m.Short, m.Outcome)
+	case KindUnready:
+		return "unready " + m.Short
 	}
 	return m.Short
 }
@@ -249,6 +258,8 @@ func markerReason(m Event) string {
 		return "marked ready by " + m.Short
 	case KindReview:
 		return fmt.Sprintf("review %s (%s) is the newest commit", m.Short, m.Outcome)
+	case KindUnready:
+		return "marked unready by " + m.Short
 	}
 	return m.Subject
 }
@@ -326,6 +337,11 @@ func (e Event) State() model.State {
 		return model.StateReady
 	case KindReview:
 		return e.Outcome.State()
+	case KindUnready:
+		// Retiring readiness lands on the state a changeset with no marker would
+		// derive anyway. Naming it here keeps the answer from depending on the
+		// fallback below, which is the answer for an implementation commit.
+		return model.StateWorking
 	}
 	return model.StateWorking
 }

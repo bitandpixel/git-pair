@@ -68,6 +68,17 @@ func ReadyMessage(slug string) Message {
 	}
 }
 
+// UnreadyMessage describes a retraction of a ready marker for slug.
+func UnreadyMessage(slug string) Message {
+	return Message{
+		Subject: fmt.Sprintf("git-pair: unready %s", slug),
+		Trailers: []string{
+			"Review-State=" + model.StateValueWorking,
+			"Review-Changeset=" + slug,
+		},
+	}
+}
+
 // ReviewMessage describes a review submission with the given outcome.
 func ReviewMessage(slug string, outcome model.Outcome, body string) Message {
 	return Message{

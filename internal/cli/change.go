@@ -30,7 +30,7 @@ func newChangeCommand(a *app) *cobra.Command {
 		// agent that typo'd the verb.
 		RunE: groupUsage("change"),
 	}
-	cmd.AddCommand(newChangeInitCommand(a), newChangeReadyCommand(a),
+	cmd.AddCommand(newChangeInitCommand(a), newChangeReadyCommand(a), newChangeUnreadyCommand(a),
 		newChangeFeedbackCommand(a), newChangeWaitCommand(a), newChangeCompleteCommand(a))
 	return cmd
 }
@@ -383,6 +383,99 @@ func isNothingToCommit(err error) bool {
 		return strings.Contains(strings.ToLower(ge.Stderr+ge.Stdout), "nothing to commit")
 	}
 	return false
+}
+
+// --- change unready --------------------------------------------------------
+
+func newChangeUnreadyCommand(a *app) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "unready",
+		Short: "Take the current changeset out of the review queue",
+		Long: `Record that this changeset is no longer offered for review, and take it out of the queue.
+
+Use it when you want to keep implementing after ` + "`change ready`" + `. The marker says so on
+purpose rather than leaving a reviewer to work it out from the diff, which is the difference between
+an offer you withdrew and an offer you forgot to withdraw.
+
+The changeset returns to WORKING, and a later ` + "`git pair change ready`" + ` puts it back in the
+queue under the same gate as the first time: review additions that still survive unchanged have to be
+resolved or acknowledged.
+
+The marker is written only when the changeset is actually in review — READY, APPROVED or FEEDBACK. On
+a changeset that is WORKING or BLOCKED there is nothing to withdraw, so the command succeeds without
+recording anything and a script can unready unconditionally.`,
+		Example: `  git pair change unready
+  git pair change unready --json`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChangeUnready(cmd.Context(), a)
+		},
+	}
+	return cmd
+}
+
+func runChangeUnready(ctx context.Context, a *app) error {
+	s, err := a.load(ctx)
+	if err != nil {
+		return err
+	}
+	if !s.clean {
+		return fmt.Errorf("working tree must be clean before taking %s out of review; commit or stash your changes first", s.cs.Slug)
+	}
+	if !inReview(s.summary.State) {
+		return printUnready(a, s, "")
+	}
+	sha, err := marker.Commit(ctx, s.repo, marker.UnreadyMessage(s.cs.Slug))
+	if err != nil {
+		return fmt.Errorf("creating unready marker: %w", err)
+	}
+	return printUnready(a, s, sha)
+}
+
+// inReview reports whether the changeset is currently offered to a reviewer, and so
+// has a readiness that `change unready` can withdraw. BLOCKED is excluded because the
+// author is already expected to act, and the block marker stays the newest marker until
+// they ready the changeset again.
+func inReview(state model.State) bool {
+	switch state {
+	case model.StateReady, model.StateApproved, model.StateFeedback:
+		return true
+	}
+	return false
+}
+
+// printUnready reports the retraction. An empty sha means there was nothing to retract:
+// the command still succeeded, and says why it recorded nothing.
+func printUnready(a *app, s *session, sha string) error {
+	// The marker is the newest commit, so its state is the derived state by
+	// construction. Without one the changeset keeps whatever state it had, which for
+	// a BLOCKED changeset is not WORKING.
+	state := s.summary.State
+	if sha != "" {
+		state = model.StateWorking
+	}
+	if a.json {
+		return a.emitJSON(map[string]any{
+			"changeset":            s.cs.Slug,
+			"branch":               s.cs.Branch,
+			"base":                 s.cs.Base,
+			"state":                string(state),
+			"was":                  string(s.summary.State),
+			"recorded":             sha != "",
+			"unready_commit":       sha,
+			"review_queue_visible": false,
+		})
+	}
+	if sha == "" {
+		a.printf("%s is not in the review queue (%s): nothing to withdraw\n", s.cs.Slug, s.summary.Reason)
+		return nil
+	}
+	a.printf("Unready: %s\n", s.cs.Slug)
+	a.printf("  head:    %s\n", short(sha))
+	a.printf("  was:     %s\n", s.summary.State)
+	a.printf("  queue:   `git pair review queue` no longer lists this changeset\n")
+	a.printf("  next:    `git pair change ready` puts it back once the work is done\n")
+	return nil
 }
 
 // --- change complete --------------------------------------------------------

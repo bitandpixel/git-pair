@@ -79,4 +79,8 @@ const (
 	TrailerChangeset = "Review-Changeset"
 
 	StateValueReady = "ready"
+	// StateValueWorking is written by `change unready`. It is not a new state: WORKING
+	// is what a changeset with no marker derives anyway, so the value exists to let an
+	// author say so on purpose rather than leaving a reviewer to infer it from a diff.
+	StateValueWorking = "working"
 )

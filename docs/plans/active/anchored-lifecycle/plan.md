@@ -104,30 +104,44 @@ relationship in `status` is its own field or part of `reason`.
 
 - `change unready` takes a readied changeset out of review, explicitly, and records why on the
   branch.
-- `status`, the TUI and `review queue` reflect it; `review submit` refuses to anchor to a changeset
-  that has been unreadied since its last ready.
+- `status`, the TUI and `review queue` reflect it.
+- `review submit` does not refuse an unreadied changeset. It accepts every state today, and an unready
+  changeset is indistinguishable in state terms from one that was never readied, so refusing one and
+  not the other would be an asymmetry no reviewer could predict. What matters is the way back in:
+  `change ready` still enforces surviving review additions, so a reviewer who acts on an unready
+  changeset has their submission counted. The plan asked for this refusal before that was thought
+  through; it is dropped rather than implemented. (The TUI takes no change either: it renders the
+  derived state, and `WORKING` was already one of the states it could show.)
 
 #### Tasks
 
-- Teach `marker.Decode` the value `working`, as its own kind rather than a review outcome, and give
+- [x] Teach `marker.Decode` the value `working`, as its own kind rather than a review outcome, and give
   it arms in `markerLabel` and `markerReason`.
-- No state machinery is needed beyond that: `derive` (`internal/lifecycle/lifecycle.go:174`) takes the
+- [x] No state machinery is needed beyond that: `derive` (`internal/lifecycle/lifecycle.go:174`) takes the
   newest marker and asks it `Event.State()`, which already falls back to `model.StateWorking`
   (`internal/lifecycle/lifecycle.go:323`). What must not happen is `working` being left unrecognised,
   because an unrecognised marker counts as an implementation commit, so the retraction would be
-  invisible to the newest-marker rule instead of ending readiness.
-- Command in `internal/cli/change.go`, next to `runChangeComplete`: clean tree, derive state, write
-  the marker iff state is READY, APPROVED or FEEDBACK, otherwise succeed without recording. Refuse
-  once the changeset is terminal.
-- Tests mirroring `internal/cli/complete_test.go`.
-- README command table, marker table, exit codes; PRD §8, §10 (new subsection beside §9.5), §12, §22.
+  invisible to the newest-marker rule instead of ending readiness. `Event.State()` names `KindUnready`
+  explicitly rather than relying on that fallback.
+- [x] Command in `internal/cli/change.go`, next to `runChangeComplete`: clean tree, derive state, write
+  the marker iff state is READY, APPROVED or FEEDBACK, otherwise succeed without recording. The refusal
+  for a terminal changeset waits for M6, since no terminal state exists to refuse yet.
+- [x] Tests mirroring `internal/cli/complete_test.go`: `internal/cli/unready_test.go`, seven cases,
+  including the two that are easy to get wrong — `recorded: false` on a BLOCKED changeset must still
+  report `state: BLOCKED`, and the working marker must be recognised rather than listed under
+  `unrecognised_markers`.
+- [x] README command table, marker table, JSON contract, agent contract, troubleshooting; PRD §8 tree,
+  new §9.6, §12, §22.
 
 #### Verification
 
-`git pair change ready && git pair change unready && git pair review queue` shows the changeset
-gone and `nothing is ready`. `review submit --approve` after an unready refuses with the anchor
-reason. A later `change ready` restores READY and re-runs the survival gate, so outstanding review
-additions still have to be answered.
+Run and green, as tests in `internal/cli/unready_test.go` and once by hand against the installed
+binary: `change ready`, `change unready`, then `review queue` shows `nothing is ready`; `status` says
+`WORKING` with reason `marked unready by <sha>` and no `unrecognised_markers`; a second `unready`
+records nothing and moves no commit; a `BLOCKED` changeset stays `BLOCKED`; `change ready` after an
+unready re-runs the survival gate (`TestChangeUnreadyDoesNotSkipTheReviewGate`, which is also where
+"a reviewer may submit against an unready changeset" is pinned); and completion after an unready
+refuses (`TestChangeUnreadyFromApprovedRequiresAFreshReview`).
 
 ### M2 — State changes only on command
 

@@ -237,9 +237,20 @@ supplies authorship and order. Both are plain Markdown with no schema.
 | --- | --- | --- |
 | ready | `git-pair: ready <slug>` | `Review-State: ready`, `Review-Changeset: <slug>` |
 | review | `review: <outcome> <slug>` | `Review-Outcome: <outcome>`, `Review-Changeset: <slug>` |
+| unready | `git-pair: unready <slug>` | `Review-State: working`, `Review-Changeset: <slug>` |
 
 A commit counts as a marker only when its trailer block parses and `Review-Changeset` matches
 the changeset being inspected; anything else is an ordinary commit.
+
+**Readiness is withdrawn with a command.** `git pair change unready` commits `Review-State: working`
+and takes the changeset out of the queue. Readiness is an offer made with `git pair change ready`, so
+withdrawing it is a command too: an author who wants to keep implementing after handing off says so,
+instead of leaving a reviewer to guess whether a changeset in the queue is finished work or work in
+progress. `working` is not a sixth state — it is `WORKING` chosen on purpose, and a changeset with no
+marker derives the same answer. The marker is written only when the changeset is in review (`READY`,
+`APPROVED` or `FEEDBACK`); on a `WORKING` or `BLOCKED` changeset there is nothing to withdraw, so the
+command succeeds and records nothing. Withdrawing an approval does not delete it: the approval stays
+in `git pair review history`, and completion refuses until a reviewer approves again.
 
 **Completion is a ref, not a marker.** `git pair change complete` commits nothing. It anchors the
 chain and writes the immutable archive ref at `HEAD`, and the changeset is finished when that
@@ -351,13 +362,14 @@ of the override. See `docs/plans/completed/gitpr-mvp/research/git-plumbing-findi
 ## Command reference
 
 Every command accepts the persistent `--json` flag, but only `status`, `change ready`,
-`change wait`, `change complete`, `review submit`, `review history` and `review queue` change
-output for it; elsewhere it is accepted and ignored.
+`change unready`, `change wait`, `change complete`, `review submit`, `review history` and
+`review queue` change output for it; elsewhere it is accepted and ignored.
 
 | Command | Flags | Notes |
 | --- | --- | --- |
 | `change init` | `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is `main`, else `master`, else a usage error |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
+| `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` only when it is in review, otherwise succeeds and records nothing |
 | `change feedback` | `--stat`, `--name-only` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
 | `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
 | `review open` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref` | TUI; needs a terminal; full changeset unless a span flag says otherwise; a `--head-*` flag opens a historical span, which is read-only |
@@ -373,7 +385,8 @@ output for it; elsewhere it is accepted and ignored.
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
 commits, no blocking surviving additions. `change complete` checks: clean tree, newest effective
-review at `HEAD` is `approve` or `feedback`, no blocking surviving additions. `change init` warns
+review at `HEAD` is `approve` or `feedback`, no blocking surviving additions. `change unready` checks
+only for a clean tree, since the marker it writes is empty. `change init` warns
 without failing
 if the base does not resolve, and commits only the changeset directory (`git commit --only`),
 so work you had already staged for another commit stays on your index.
@@ -503,6 +516,23 @@ archived, which is a success rather than a refusal.
 `git pair change ready --json` returns the `status` fields plus `ready_commit` (full SHA),
 `review_queue_visible`, `acknowledged_survivors` and `surviving_review_artifacts`.
 
+`git pair change unready --json` — `was` is the state the command found and `state` the state after
+it, which differ only when a marker was written. `recorded` is false when there was nothing to
+withdraw, which is a success rather than a refusal, and `unready_commit` is empty then.
+
+```json
+{
+  "changeset": "booking-transaction",
+  "branch": "booking-transaction",
+  "base": "main",
+  "state": "WORKING",
+  "was": "READY",
+  "recorded": true,
+  "unready_commit": "4f0c1a253c0475596bfc174927075895d9fb8b76",
+  "review_queue_visible": false
+}
+```
+
 `git pair change wait --json` — states are spelled as `status` spells them. `ref` is where the
 activity appeared: `HEAD`, or a remote-tracking branch when it was found with `--fetch` and
 has not been brought into this branch yet. `review_commit` and `review_commit_full` appear
@@ -534,6 +564,8 @@ git pair status --json              # read state and next_action without blockin
 git pair diff                       # see the whole changeset
 # implement and commit with ordinary git
 git pair change ready               # hand off to the reviewer
+# changed your mind about being done? git pair change unready
+# (do it before continuing, rather than leaving the offer standing)
 git pair change wait --fetch --json # block until a reviewer acts; exits 1 on --timeout
 git pair change feedback            # read that submission: threads, ABOUT.md, code edits
 # address feedback in code, ABOUT.md and threads; commit normally
@@ -542,9 +574,9 @@ git pair change ready               # again
 git pair change complete            # once approved: archive the reviewed head
 ```
 
-Never prompt: `change init`, `change ready`, `change feedback`, `change wait`, `change complete`,
-`status`, `diff`, `review submit`, `review history`, `review queue`. They report and
-exit instead of asking, even with a terminal attached.
+Never prompt: `change init`, `change ready`, `change unready`, `change feedback`, `change wait`,
+`change complete`, `status`, `diff`, `review submit`, `review history`, `review queue`. They report
+and exit instead of asking, even with a terminal attached.
 
 Refuse with exit 2 when stdin or stdout is a pipe or a regular file, because launching an
 editor or the TUI against one would hang: `review open`, `review reopen`, `review about`,
@@ -559,7 +591,8 @@ real editor.
 An agent must not approve its own work. `git pair review submit --approve` is a reviewer action
 and nothing in git-pair checks who ran it — identity and permissions are out of scope, so keeping
 approval on the human side of the pair is a convention you enforce. When an agent records
-progress it uses `git pair change ready`.
+progress it uses `git pair change ready`, and when the work is not finished after all it withdraws the
+offer with `git pair change unready` rather than leaving a reviewer looking at a stale offer.
 
 ## Configuration
 
@@ -811,8 +844,8 @@ files directly and use `git pair diff`, `git pair status` and `git pair review s
 `"<path>" does not appear in main...HEAD; changed paths: ...` (exit 2) — the path is not in
 the resolved span; the error lists what is.
 
-`working tree must be clean ...` (exit 1) — `change ready` and `change complete` act on committed
-state. `change init` commits its scaffolding, so a fresh changeset does not block `change
+`working tree must be clean ...` (exit 1) — `change ready`, `change unready` and `change complete` act
+on committed state. `change init` commits its scaffolding, so a fresh changeset does not block `change
 ready`; it does block it if you then edit `ABOUT.md` without committing. Use
 `change init --no-commit` to fold the scaffolding into your first implementation commit
 instead.

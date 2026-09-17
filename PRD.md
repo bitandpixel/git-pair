@@ -331,6 +331,7 @@ git-pair
 ├── change
 │   ├── init
 │   ├── ready
+│   ├── unready
 │   ├── feedback
 │   ├── wait
 │   └── complete
@@ -578,6 +579,42 @@ approve
 complete
     the owner's archival operation
 ```
+
+## 9.6 `git pair change unready`
+
+Withdraws the changeset from the review queue when the author wants to keep implementing.
+
+Readiness is an offer the author makes with `change ready`. Without a command that takes it back, the
+only way out of `READY` is to commit something, and a reviewer reading the queue cannot tell an offer
+that was withdrawn from one that was forgotten. So withdrawal is an act, recorded the way every other
+lifecycle act is.
+
+Checks, in order:
+
+1. clean working tree — the marker is a commit,
+2. the changeset is in review: `READY`, `APPROVED` or `FEEDBACK`.
+
+Writes `git-pair: unready <slug>` carrying `Review-State: working` and `Review-Changeset: <slug>`.
+
+`working` is not a sixth state. `WORKING` is what a changeset with no marker derives anyway; the value
+exists so an author can choose that state deliberately. It is recognised as a marker rather than as an
+implementation commit, so the `Reason` line names the retraction instead of counting it as work.
+
+On a `WORKING` or `BLOCKED` changeset there is nothing to withdraw. The command succeeds and records
+nothing, which lets a script unready unconditionally and keeps a repeated invocation from leaving two
+identical markers behind. Retracting a `BLOCKED` changeset is not what the command means: the author is
+already expected to act, and the block stays the newest marker until they ready the changeset again.
+
+Withdrawing an approval supersedes it rather than deleting it. The approval remains in
+`git pair review history`, and because the newest marker is now the retraction, `change complete`
+(§9.5) refuses until a reviewer approves again.
+
+A reviewer may still submit against an unready changeset — `review submit` accepts any state — which is
+what keeps the gate back into `READY` reachable: surviving review additions (§19) are still enforced by
+`change ready`.
+
+`--json` prints `changeset`, `branch`, `base`, `state`, `was`, `recorded`, `unready_commit` and
+`review_queue_visible`.
 
 ---
 
@@ -890,6 +927,10 @@ complete (archival, owner's decision — not a state)
 
 The author's side of that loop is `git pair change ready`, then `git pair change wait` to learn that a reviewer has acted, then `git pair change feedback` to read the submission before addressing it, then `git pair change complete` (§9.5) to archive the reviewed head.
 
+Readiness also ends on purpose. `git pair change unready` (§9.6) writes a `working` marker and takes
+the changeset back out of the queue, which is how an author says "not finished after all" instead of
+leaving the offer standing while they keep implementing.
+
 Possible effective states:
 
 ```text
@@ -899,6 +940,9 @@ BLOCKED
 FEEDBACK
 APPROVED
 ```
+
+Five states, six markers: `working` is written by `change unready` (§9.6) and is the same state a
+changeset with no marker derives.
 
 There is no state for a completed changeset. `complete` archives a head in `refs/reviews/` and records
 no commit, and the changeset is finished when that archived history is merged into the deployment
@@ -1550,6 +1594,7 @@ git pair change init --base <ref>
 git pair status --json
 git pair diff
 git pair change ready
+git pair change unready
 git pair change wait --json
 git pair change feedback
 git pair change complete
@@ -1572,6 +1617,10 @@ Agent behavior:
 13. once the reviewer's approval stands at `HEAD`, run `git pair change complete` to archive it.
 
 `git pair status --json` remains the way to check state without blocking. `git pair diff --unreviewed` is the reviewer's span command; an author consuming a newly submitted review uses `git pair change feedback`.
+
+When the author needs to keep implementing after handing off, `git pair change unready` (§9.6) withdraws
+the offer before that work starts. It succeeds when there is nothing to withdraw, so an agent may run
+it unconditionally rather than branching on state.
 
 An agent must **not approve its own work**.
 
