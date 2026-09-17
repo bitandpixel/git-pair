@@ -253,8 +253,9 @@ non-blank line added by the most recent review submission still survives
 unchanged at HEAD. The command is fully non-interactive: it reports what it
 found and exits non-zero rather than asking questions.
 
-Any later implementation commit makes this marker stale and returns the
-changeset to WORKING.`,
+Readiness is not taken away by a commit. The changeset stays READY until you run
+` + "`change unready`" + ` or a reviewer submits, so committing work in progress never drops it out of
+the queue on its own — and ` + "`change unready`" + ` is how you leave it on purpose.`,
 		Example: `  git pair change ready
   git pair change ready --allow-surviving-review-additions
   git pair change ready --json`,
@@ -491,10 +492,11 @@ func newChangeCompleteCommand(a *app) *cobra.Command {
 		Short: "Archive the changeset's review history at HEAD",
 		Long: `Anchor the complete unsquashed history at HEAD and archive it immutably.
 
-Checks, in order: the working tree is clean, the newest effective review at HEAD
-permits integration (approve or feedback), and no non-blank addition from the most
-recent review survives unchanged. Then the current chain is anchored under
-refs/reviews/, and the immutable archive ref
+Checks, in order: the working tree is clean, the newest review at HEAD permits
+integration (approve or feedback) and still describes what HEAD carries — the tree is
+compared between that marker and HEAD, ignoring changesets/<changeset>/ — and no non-blank
+addition from the most recent review survives unchanged. Then the current chain is anchored
+under refs/reviews/, and the immutable archive ref
 refs/reviews/archive/<changeset>/<short-head> is written pointing at HEAD.
 
 Completion is the owner's half of the lifecycle. A reviewer's approve is a judgement
@@ -527,16 +529,25 @@ func runChangeComplete(ctx context.Context, a *app, opts *completeOptions) error
 	if !s.clean {
 		return fmt.Errorf("working tree must be clean before completing %s; commit or stash your changes first", s.cs.Slug)
 	}
+	// Completion is the one command that asks whether the reviewed content is still
+	// here. The archive it writes is a promise about a reviewed head — it is what an
+	// agent is told to trust before squash-merging — so an approval with fresh
+	// implementation work stacked on top of it must not be archived (PRD §9.5, §12).
+	// Everywhere else a commit after a marker is an observation, not a verdict.
+	//
 	// The gate is the review at HEAD rather than a lifecycle state named
 	// "completable": completion records no commit, so there is no state for it to
-	// move the changeset into. An approval made stale by a later implementation
-	// commit already reads as WORKING, so it is refused here.
-	switch s.summary.State {
+	// move the changeset into.
+	reviewed, err := lifecycle.SummarizeAgainstTreeHEAD(ctx, s.repo, s.cs.Slug, s.cs.Base)
+	if err != nil {
+		return err
+	}
+	switch reviewed.State {
 	case model.StateApproved, model.StateFeedback:
 		// Integration is permitted.
 	default:
 		return fmt.Errorf("cannot complete %s: latest outcome is %s (%s); completion needs an approve or feedback at HEAD",
-			s.cs.Slug, s.summary.State, s.summary.Reason)
+			s.cs.Slug, reviewed.State, reviewed.Reason)
 	}
 
 	report, err := survivalCheck(ctx, s)
@@ -567,15 +578,15 @@ func runChangeComplete(ctx context.Context, a *app, opts *completeOptions) error
 	if err != nil {
 		return err
 	}
-	return printComplete(a, s, head, archiveRef, created, report, opts.allowSurviving)
+	return printComplete(a, s, reviewed.State, head, archiveRef, created, report, opts.allowSurviving)
 }
 
-func printComplete(a *app, s *session, head, archiveRef string, created bool,
+func printComplete(a *app, s *session, state model.State, head, archiveRef string, created bool,
 	report *survival.Report, acknowledged bool) error {
 	if a.json {
 		out := map[string]any{
 			"changeset":                  s.cs.Slug,
-			"state":                      string(s.summary.State),
+			"state":                      string(state),
 			"head":                       head,
 			"short":                      short(head),
 			"base":                       s.cs.Base,

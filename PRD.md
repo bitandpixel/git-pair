@@ -419,9 +419,13 @@ Review-State: ready
 Review-Changeset: booking-transaction
 ```
 
-Readiness applies to the exact implementation state represented by the marker.
+Readiness is an offer about the implementation state the marker sits on, and it is withdrawn by a
+command rather than inferred: a later commit does not un-ready the changeset, so work in progress
+never drops it out of the queue on its own. `git pair change unready` (§9.6) takes it out on purpose,
+and a review submission supersedes the marker.
 
-Any later implementation commit makes the previous ready marker stale and returns the effective state to `working`.
+The tree is consulted at exactly one point in the lifecycle, and it is not here: `change complete`
+(§9.5) refuses to archive a head whose reviewed content has moved since the review.
 
 ### Surviving review additions
 
@@ -530,7 +534,10 @@ forward. The command therefore records no commit and establishes no state (§12)
 Responsibilities:
 
 1. verify the working tree is clean,
-2. verify the newest effective review at HEAD permits integration (`approve` or `feedback`),
+2. verify the newest review at HEAD permits integration (`approve` or `feedback`), and that the
+   content it reviewed is what HEAD still carries: the tree is compared between that marker and
+   HEAD, ignoring `changesets/<changeset>/`, and drift refuses the completion (§12) — this is the
+   only point in the lifecycle where a commit can stop an operation,
 3. run the surviving-review-additions diagnostic,
 4. require explicit acknowledgement if surviving additions remain,
 5. ensure the complete current branch history is anchored under `refs/reviews/`,
@@ -955,16 +962,25 @@ Prefer deriving effective state from review marker commits and repository state.
 
 Important safety property:
 
-> Any implementation commit after a ready/review/approval marker invalidates that marker for the current HEAD.
+> State moves when a git-pair command records a marker, and at no other time.
 
-Example:
+A commit is not a command. An author who keeps working after `change ready` leaves the changeset
+`ready`, which is why `change unready` (§9.6) exists: taking an offer back is a decision, and a
+decision is recorded rather than inferred. `status` counts the commits that arrived since the
+marker, so the drift is visible without being a state.
+
+The archive is where the older property still holds, and it is the command whose output gets
+trusted:
 
 ```text
 review: approve
 agent changes implementation
 ```
 
-The branch must no longer be considered approved.
+`git pair status` reports `APPROVED` — the newest marker is still the approval — and
+`git pair change complete` refuses to archive that head. An archive naming unreviewed content
+would be a promise the tool cannot keep, so completion is the one command that compares the
+tree (§9.5).
 
 ---
 
@@ -1668,7 +1684,9 @@ Meaning:
 
 Integration is permitted once CI/policy passes.
 
-Any implementation commit after an approval invalidates approval for the new HEAD.
+An implementation commit after an approval leaves the approval as the state, and the head no
+longer carries what was accepted: `git pair change complete` refuses to archive it (§9.5), and
+`git pair change ready` offers the new head for review.
 
 ---
 

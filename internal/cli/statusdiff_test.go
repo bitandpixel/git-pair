@@ -107,9 +107,10 @@ func TestStatusReportsUncommittedChanges(t *testing.T) {
 	}
 }
 
-// The named safety property of PRD §12, read through `status`: an implementation
-// commit after an approve marker yields WORKING, not APPROVED.
-func TestStatusImplementationCommitAfterApproveIsWorking(t *testing.T) {
+// An implementation commit after an approve leaves the approval standing: state moves on
+// commands. What the drift does decide is whether the head may be archived, and there it
+// refuses (PRD §9.5, §12).
+func TestStatusImplementationCommitAfterApproveKeepsTheApproval(t *testing.T) {
 	f, slug, _, approve := approvedChangeset(t)
 
 	if got := runIn(t, f.Dir(), "status", "--json").json(t)["state"]; got != "APPROVED" {
@@ -119,32 +120,43 @@ func TestStatusImplementationCommitAfterApproveIsWorking(t *testing.T) {
 	f.Commit("agent: address feedback", gittest.WithFile("service.go", "package main\n\nfunc Lock() { retry() }\n"))
 
 	out := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status", "--json").json(t)
-	if out["state"] != "WORKING" {
-		t.Errorf("state = %v, want WORKING: approval must not survive an implementation commit", out["state"])
+	if out["state"] != "APPROVED" {
+		t.Errorf("state = %v, want APPROVED: a commit is not a marker", out["state"])
 	}
-	// The approval is still the latest review; only the effective state changed.
+	// The approval is still the latest review, and the reason says the branch moved.
 	latest, ok := out["latest_review"].(map[string]any)
 	if !ok || latest["outcome"] != "approve" {
 		t.Errorf("latest_review = %v, want the approve to remain the latest review", out["latest_review"])
 	}
-	mustContain(t, out["reason"].(string), "code changed since review", "status must explain the invalidation")
+	mustContain(t, out["reason"].(string), "1 commit since", "status must show the branch has moved since the review")
+
+	res := runIn(t, f.Dir(), "change", "complete")
+	if res.code != exitRefusal {
+		t.Errorf("completing drifted work exited %d, want %d\nstderr: %s", res.code, exitRefusal, res.stderr)
+	}
+	mustContain(t, res.stderr, "code changed since review", "the refusal must say the reviewed content is gone")
+	if refs := f.RefNames(archivePattern(slug)); len(refs) != 0 {
+		t.Errorf("drifted work was archived anyway: %v", refs)
+	}
 	if got := f.RefSHA(reviewRef(slug)); got != approve {
 		t.Errorf("%s moved to %s, want the approval %s", reviewRef(slug), got, approve)
 	}
 }
 
-// A hand-written Review-* trailer must not become a lifecycle event (plan risk table).
+// A hand-written Review-* trailer must not become a lifecycle event (plan risk table). It
+// establishes nothing and clears nothing — the real ready marker stands — but it is
+// reported, and it is what makes completion refuse to archive over it.
 func TestStatusReportsUnrecognisedMarkers(t *testing.T) {
 	f, _ := newChangeset(t, "booking", "main")
 	ready(t, f)
-	// A ready marker for a different changeset: it must not make this one ready, and
-	// it must invalidate the real ready marker by being a newer commit.
+	// A ready marker for a different changeset: it must not make this one ready, and it
+	// must not be honoured as the marker of record.
 	f.CommitMessage("git-pair: ready other-changeset\n\nReview-State: ready\nReview-Changeset: other-changeset\n",
 		gittest.WithEmpty())
 
 	out := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status", "--json").json(t)
-	if out["state"] != "WORKING" {
-		t.Errorf("state = %v, want WORKING: a marker for another changeset establishes nothing", out["state"])
+	if out["state"] != "READY" {
+		t.Errorf("state = %v, want READY: a marker for another changeset establishes nothing and clears nothing", out["state"])
 	}
 	list, ok := out["unrecognised_markers"].([]any)
 	if !ok || len(list) == 0 {

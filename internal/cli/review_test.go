@@ -249,9 +249,11 @@ func TestReviewQueueReportsReadyChangesetFields(t *testing.T) {
 	mustContain(t, human.stdout, "base: main", "human output must show the base (PRD §10.6)")
 }
 
-// PRD §12's safety property, seen through the queue: a ready marker puts a changeset
-// in the queue and a later implementation commit takes it back out.
-func TestReviewQueueGainsAndLosesChangesetAcrossReadyAndImplementation(t *testing.T) {
+// Queue membership follows the markers, not the working branch: `change ready` puts a
+// changeset in, an implementation commit leaves it there, and `change unready` takes it
+// out (PRD §12). The reason counts what arrived since the offer, so a reviewer can see the
+// branch has moved without the state pretending otherwise.
+func TestReviewQueueGainsAndLosesChangesetAcrossReadyAndUnready(t *testing.T) {
 	f, slug := newChangeset(t, "booking", "main")
 
 	if queueListsChangeset(t, runIn(t, f.Dir(), "review", "queue", "--json"), slug) {
@@ -263,20 +265,23 @@ func TestReviewQueueGainsAndLosesChangesetAcrossReadyAndImplementation(t *testin
 		t.Fatal("the changeset is missing from the queue after `change ready`")
 	}
 
-	// "Any later implementation commit makes the previous ready marker stale and
-	// returns the effective state to working" (PRD §9.2).
 	f.Commit("agent: one more change", gittest.WithFile("service.go", "package main\n\nfunc Lock() { retry() }\n"))
 
 	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
-	if queueListsChangeset(t, res, slug) {
-		t.Errorf("the changeset is still queued after an implementation commit:\n%s", res.stdout)
+	if !queueListsChangeset(t, res, slug) {
+		t.Errorf("an implementation commit took the changeset out of the queue; only a command moves state:\n%s", res.stdout)
 	}
 	status := runIn(t, f.Dir(), "status", "--json").json(t)
-	if status["state"] != "WORKING" {
-		t.Errorf("state = %v, want WORKING", status["state"])
+	if status["state"] != "READY" {
+		t.Errorf("state = %v, want READY", status["state"])
 	}
-	// The stale marker is still history, not a lie about the present.
-	mustContain(t, status["reason"].(string), "code changed since ready", "status must explain why the marker is stale")
+	// The queue does not hide the drift; it just refuses to infer a state from it.
+	mustContain(t, status["reason"].(string), "1 commit since", "status must show the branch has moved since the offer")
+
+	runIn(t, f.Dir(), "change", "unready").mustSucceed(t, "change", "unready")
+	if queueListsChangeset(t, runIn(t, f.Dir(), "review", "queue", "--json"), slug) {
+		t.Error("the changeset is still queued after `change unready`")
+	}
 
 	// Marking ready again re-queues it.
 	ready(t, f)
@@ -297,9 +302,10 @@ func TestReviewQueueExcludesOtherStates(t *testing.T) {
 		state string
 	}{
 		{"blocked", func() { submit(t, f, "block") }, "BLOCKED"},
-		{"working after a response", func() {
+		{"blocked, then an author response", func() {
+			// The fix is a commit, not a marker, so the block is still the newest marker.
 			f.Commit("author response", gittest.WithFile("service.go", "package main\n\nfunc Lock() { transaction() }\n"))
-		}, "WORKING"},
+		}, "BLOCKED"},
 		{"feedback", func() { ready(t, f); submit(t, f, "feedback") }, "FEEDBACK"},
 		{"approved", func() { submit(t, f, "approve") }, "APPROVED"},
 	}

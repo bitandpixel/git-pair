@@ -72,10 +72,10 @@ type Summary struct {
 	State        model.State
 	// Reason explains State in one line, for humans and `status --json`.
 	Reason string
-	// Stale is true when commits other than the newest marker follow it. That is
-	// only a candidate verdict: ReconcileStaleness confirms it against the tree,
-	// because commits that touch nothing but the changeset directory do not
-	// invalidate a marker. Callers get the reconciled answer via Summarize.
+	// Stale is true when commits other than the newest marker follow it. Most callers
+	// can ignore it: state is whatever the newest marker says, and a commit does not
+	// change it (PRD §12). ReconcileStaleness is the one place the observation
+	// becomes a verdict, and only completion asks for it.
 	Stale bool
 	// Trailing counts the non-marker commits after the newest marker.
 	Trailing int
@@ -131,15 +131,36 @@ func Summarize(ctx context.Context, repo *git.Repo, slug, base, headRef string) 
 		}
 		events = append(events, parseEvent(slug, rec))
 	}
-	// derive only counts commits. Whether those commits matter is a question
-	// about the tree, so the verdict is not final until ReconcileStaleness has
-	// looked at it; every production caller goes through here.
-	return ReconcileStaleness(ctx, repo, slug, headRef, derive(events))
+	// derive reads markers, and markers are written by commands. Whether the commits
+	// after a marker matter is a question about the tree, asked only by the one
+	// caller that needs it; see SummarizeAgainstTree.
+	return derive(events), nil
 }
 
 // SummarizeHEAD derives state for the checked-out branch.
 func SummarizeHEAD(ctx context.Context, repo *git.Repo, slug, base string) (Summary, error) {
 	return Summarize(ctx, repo, slug, base, "HEAD")
+}
+
+// SummarizeAgainstTree derives state, then asks whether the content the newest
+// marker spoke about is still at headRef. A marker whose code has been changed
+// underneath it reads as WORKING here and nowhere else.
+//
+// Completion is the only caller. It writes the archive ref that an agent is told to
+// trust when deciding what is safe to squash-merge, so that ref has to name a head
+// somebody actually reviewed (PRD §9.5). Everywhere else state moves when a git-pair
+// command records a marker, not when the author commits (PRD §12).
+func SummarizeAgainstTree(ctx context.Context, repo *git.Repo, slug, base, headRef string) (Summary, error) {
+	s, err := Summarize(ctx, repo, slug, base, headRef)
+	if err != nil {
+		return s, err
+	}
+	return ReconcileStaleness(ctx, repo, slug, headRef, s)
+}
+
+// SummarizeAgainstTreeHEAD is SummarizeAgainstTree for the checked-out branch.
+func SummarizeAgainstTreeHEAD(ctx context.Context, repo *git.Repo, slug, base string) (Summary, error) {
+	return SummarizeAgainstTree(ctx, repo, slug, base, "HEAD")
 }
 
 func parseEvent(slug string, rec []string) Event {
@@ -223,12 +244,15 @@ func derive(events []Event) Summary {
 	s.Trailing = trailing
 	s.TrailingUnrecognised = unreadable
 	if trailing > 0 {
-		// Candidate verdict only. Whether it survives is a question about the
-		// tree, not about how many commits were made; ReconcileStaleness answers
-		// it, and Summarize always calls it.
+		// Commits after the newest marker are an observation, not a verdict. State
+		// moves when a git-pair command records a marker, so readiness survives an
+		// author who keeps working and ends at `change unready` (PRD §12). What the
+		// count is for is that one caller which does ask about the tree, and the
+		// reason, which tells a reviewer the branch has moved since it was offered.
 		s.Stale = true
-		s.State = model.StateWorking
-		s.Reason = fmt.Sprintf("%d commit(s) after %s", trailing, markerLabel(marker))
+		s.State = marker.State()
+		s.Reason = fmt.Sprintf("%s (%d commit%s since)",
+			markerReason(marker), trailing, plural(trailing))
 		return s
 	}
 
@@ -264,15 +288,20 @@ func markerReason(m Event) string {
 	return m.Subject
 }
 
-// ReconcileStaleness answers the question derive cannot: do the commits after
-// the newest marker actually invalidate it?
+// ReconcileStaleness answers the question derive cannot: has the content the newest
+// marker spoke about been changed underneath it? Where it has, the marker no longer
+// describes HEAD and the state is WORKING.
 //
-// PRD §12/§421 say a later *implementation* commit makes a ready marker stale.
-// Counting non-marker commits over-reads that, because committing a fix to
-// ABOUT.md or a review thread is not an implementation change and the reviewer
-// reads those files from HEAD anyway. So the verdict is taken from the tree:
-// anything outside changesets/<slug>/ differing between the state the marker
-// approved and HEAD means the reviewed code is gone.
+// Only SummarizeAgainstTree calls it, and only `change complete` uses that. An archive
+// ref is a promise about reviewed content — it is what an agent is told to check before
+// squash-merging — so completion refuses to name a head whose code moved after the
+// review (PRD §9.5). Everywhere else a commit is not something that changes state:
+// `change ready`, `change unready` and a review submission are (PRD §12).
+//
+// The verdict comes from the tree rather than from the commit count, because committing
+// a fix to ABOUT.md or a review thread is not an implementation change and the reviewer
+// reads those files from HEAD anyway: anything outside changesets/<slug>/ differing
+// between the marker's parent and HEAD means the reviewed code is gone.
 //
 // Comparing trees rather than counting commits also folds in the cases counting
 // gets wrong: a merge of the base, a rebase that rewrote every SHA, and a change
@@ -299,6 +328,7 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 
 	if s.TrailingUnrecognised > 0 {
 		// The tree cannot speak for a trailer set git-pair cannot read.
+		s.State = model.StateWorking
 		s.Reason = fmt.Sprintf("%d unrecognised review marker(s) after %s",
 			s.TrailingUnrecognised, markerLabel(marker))
 		return s, nil
@@ -309,6 +339,7 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 		return s, err
 	}
 	if len(changed) > 0 {
+		s.State = model.StateWorking
 		s.Reason = fmt.Sprintf("code changed since %s", markerLabel(marker))
 		return s, nil
 	}
@@ -317,7 +348,6 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 	// what is at HEAD, so the marker stands and the commits get named in the
 	// reason rather than counted against it.
 	s.Stale = false
-	s.State = marker.State()
 	s.Reason = fmt.Sprintf("%s (%d changeset-only commit%s since)",
 		markerReason(marker), s.Trailing, plural(s.Trailing))
 	return s, nil

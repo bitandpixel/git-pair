@@ -222,8 +222,18 @@ func nextAction(s lifecycle.Summary) string {
 	case model.StateBlocked:
 		return "address the review, then `git pair change ready` (read it with `git pair change feedback`)"
 	case model.StateFeedback:
+		if s.Stale {
+			return "the head moved since the review: read it with `git pair change feedback`, " +
+				"then `git pair change ready` to offer the new head"
+		}
 		return "optionally address feedback (read it with `git pair change feedback`), then `git pair change complete`"
 	case model.StateApproved:
+		if s.Stale {
+			// Completion is the one command that asks the tree, and it refuses this head
+			// (PRD §9.5). Pointing an agent at it anyway would be a surprise it cannot
+			// predict from `state`.
+			return "the head moved since the review: `git pair change ready` to offer it for review again"
+		}
 		return "run `git pair change complete` before squash/merge"
 	}
 	return ""

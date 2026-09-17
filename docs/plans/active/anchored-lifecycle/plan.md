@@ -154,28 +154,48 @@ refuses (`TestChangeUnreadyFromApprovedRequiresAFreshReview`).
 
 #### Tasks
 
-- Staleness is applied inside `Summarize` itself: `derive` only counts commits and marks the verdict
-  provisional, and `Summarize` hands the result to `ReconcileStaleness` before returning
-  (`internal/lifecycle/lifecycle.go:131`). Make that opt-in rather than universal, so the seven
-  production callers (`internal/cli/review.go:474`, `internal/cli/root.go:197`,
-  `internal/cli/change.go:702`, `:820`, `:840`, `internal/tui/session.go:212`) ask for the marker
-  verdict by default and `change complete` alone asks for the tree verdict.
-- `derive`'s provisional flip (`s.Stale = true; s.State = model.StateWorking` when `trailing > 0`,
-  `internal/lifecycle/lifecycle.go:215`) should stop overwriting `State`. Keep `Stale` as an
-  observation the caller may act on, and let the state be the marker's own.
-- Rewrite the sentences that promise the old behaviour. README's "a commit that only touches
-  ABOUT.md or a thread does not invalidate the marker" and PRD §12 describe a rule that will no
-  longer exist; both become "READY means someone ran `git pair change ready` and nobody has run
-  `git pair change unready` since".
-- Keep `survival.Check` where it is: it gates `change ready` and `change complete`, and a BLOCKED
-  changeset still cannot return to READY without running `change ready`.
+- [x] Staleness was applied inside `Summarize` itself: `derive` only counts commits and marked the
+  verdict provisional, and `Summarize` handed the result to `ReconcileStaleness` before returning
+  (`internal/lifecycle/lifecycle.go:131`). It is opt-in now: `Summarize` returns the marker verdict,
+  and `SummarizeAgainstTree` / `SummarizeAgainstTreeHEAD` add the tree question. No flag on the
+  shared function, because only one caller wants it and a boolean that six callers pass `false` to is
+  a trap waiting for a seventh.
+- [x] `derive`'s provisional flip (`s.Stale = true; s.State = model.StateWorking` when `trailing > 0`)
+  no longer overwrites `State`; it keeps `Stale` as the observation and puts the count in the reason,
+  so `marked ready by 8065dae (2 commits since)` tells a reviewer the branch moved without the state
+  claiming anything about it.
+- [x] `change complete` is the one caller of `SummarizeAgainstTreeHEAD`. `ReconcileStaleness` now
+  sets `State = WORKING` itself in both invalidating branches, since it can no longer rely on `derive`
+  having done it.
+- [x] Rewrite the sentences that promise the old behaviour. README's "a commit that only touches
+  ABOUT.md or a thread does not invalidate the marker" and PRD §12's named safety property described a
+  rule that no longer exists; both are rewritten, and PRD §23's "any implementation commit after an
+  approval invalidates approval" follows. Grep for `invalidat`, `stale` and `to WORKING` over README
+  and PRD comes back with two unrelated hits.
+- [x] Keep `survival.Check` where it is: it gates `change ready` and `change complete`, and a BLOCKED
+  changeset still cannot return to READY without running `change ready`. Unchanged, and now the only
+  content gate a ready marker has to pass.
+- [x] `nextAction` names the drift for APPROVED and FEEDBACK. Without this it points an agent at
+  `change complete` for a head that command will refuse, which is the one thing the field exists to
+  prevent.
+- [x] An unrecognised `Review-*` commit no longer moves state, but it still blocks completion: the
+  tree cannot speak for trailers git-pair cannot read, so `TrailingUnrecognised` keeps that in
+  `ReconcileStaleness`. It establishes nothing and clears nothing, and `status` still lists it under
+  `unrecognised_markers`. Covered by the rewritten cases in `lifecycle_internal_test.go` and
+  `TestStatusReportsUnrecognisedMarkers`.
+- [x] `e2e-29.sh` gains a withdraw-and-re-offer step, because the queue's behaviour across an
+  implementation commit is now the opposite of what that script asserted; the completion refusal it
+  checks is labelled for the drift rather than for `WORKING`.
 
 #### Verification
 
-Scripted: ready, commit code, commit `ABOUT.md`, commit a thread file — `status --json` says READY
-at every step. Then submit a block: state is BLOCKED. Then `change ready` with the reviewer's
-addition still present: refuses, and `--allow-surviving-review-additions` still overrides. Grep
-confirms no shipped code path flips READY to WORKING on a commit.
+Run and green: the marker verdict survives a code commit, an `ABOUT.md` commit and a thread commit
+(`lifecycle/history_test.go`, `internal/cli/statusdiff_test.go`); the queue keeps a changeset whose
+branch moved and drops one that was unreadied
+(`TestReviewQueueGainsAndLosesChangesetAcrossReadyAndUnready`); completion still refuses over the
+same drift (`TestChangeCompleteRefusedAfterImplementationCommitFollowsApprove`,
+`TestSummarizeImplementationAfterApproveBlocksCompletionButNotState`); a BLOCKED changeset stays
+BLOCKED through an author's fix commit. `mise run check`, `e2e-29.sh` and `pty-walkthrough.sh` green.
 
 ### M3 — Completion cannot archive unreviewed content
 
@@ -186,15 +206,22 @@ confirms no shipped code path flips READY to WORKING on a commit.
 
 #### Tasks
 
-- One call, one place: `runChangeComplete` opts into `ReconcileStaleness`
-  (`internal/lifecycle/lifecycle.go:269`) and refuses when it reports the reviewed content gone,
-  naming the marker and the head. No new comparison is written; this milestone is a call-site change
-  plus a message.
-- That is the surviving piece of the deleted machinery, including its changeset-directory carve-out,
-  which is what lets an author reply in `ABOUT.md` after approval without breaking the anchor. The
-  function's own comment is the argument for keeping it: the verdict is taken from the tree, so a
-  base merge, a rebase, and a change followed by its revert all get the same right answer.
-- Document in PRD §9.5 and README's agent contract that the archive names a head that was reviewed.
+- [x] One call, one place: `runChangeComplete` derives with `SummarizeAgainstTreeHEAD` and refuses
+  when it reports the reviewed content gone. Landed with M2, because deleting the drift flip without
+  it would have left a hole in the same commit that opened it.
+- [x] That is the surviving piece of the deleted machinery, including its changeset-directory
+  carve-out, which is what lets an author reply in `ABOUT.md` after approval without breaking the
+  anchor. The function's own comment is the argument for keeping it: the verdict is taken from the
+  tree, so a base merge, a rebase, and a change followed by its revert all get the same right answer.
+- [x] Document in PRD §9.5 and README's agent contract that the archive names a head that was
+  reviewed. Done with M2's rewrite of §12 and the derived-state section; §9.5's own wording checked
+  against the new behaviour.
+- [ ] An escape hatch for the author who committed something outside the changeset directory after
+  approval and does not want a second review — a README typo is the canonical case. Name it against
+  `--allow-surviving-review-additions` rather than inventing a style; the flag prints what it is
+  archiving over.
+- [ ] Mutation-check the guard: reverse the diff range, typo the exclusion pathspec, point the check
+  at the movable ref instead of the newest marker. Each has to turn a test red.
 
 #### Verification
 

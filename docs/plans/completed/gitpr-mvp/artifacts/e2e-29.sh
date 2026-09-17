@@ -42,6 +42,17 @@ $G status --json | head -30
 $G review queue | sed 's/^/  /'
 $G review queue --json > /tmp/q.json; check "queue --json" 0 $?
 
+step "author: withdraw the offer, then re-offer"
+# Committing does not take a changeset out of the queue; a command does (PRD §12).
+$G change unready; check "change unready" 0 $?
+if $G review queue | grep -q booking-transaction; then
+  echo "  FAIL: an unreadied changeset is still in the queue"; FAILED=1
+else
+  echo "  ok: the queue dropped it"
+fi
+$G change unready; check "unready again is a no-op, not a refusal" 0 $?
+$G change ready; check "ready again after unready" 0 $?
+
 step "reviewer: edits code, adds thread, submits --block"
 printf '  // What happens if these execute concurrently?\n' >> src/service.ts
 printf '  // Please use a transaction here\n' >> src/service.ts
@@ -81,7 +92,7 @@ $G review submit --feedback -m "Naming only, non-blocking."; check "submit --fee
 $G status | sed 's/^/  /'
 printf '\n// tighten naming\n' >> src/service.ts
 git commit -qam "rename for clarity"
-$G change complete; check "complete refused while WORKING" 1 $?
+$G change complete; check "complete refused: the reviewed content moved" 1 $?
 $G change ready >/dev/null; check "ready again after feedback" 0 $?
 $G review submit --approve; check "submit --approve (empty commit)" 0 $?
 git log -1 --format='  %h %s%n%b' HEAD

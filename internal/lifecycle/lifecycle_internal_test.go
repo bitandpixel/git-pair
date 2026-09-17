@@ -59,8 +59,8 @@ func TestDeriveStateIsPRD12Lifecycle(t *testing.T) {
 		{"implementation only", []Event{impl("c1")}, model.StateWorking, false, 0},
 		{"ready", []Event{impl("c1"), ready("c2")}, model.StateReady, false, 0},
 		{
-			"implementation after ready invalidates it",
-			[]Event{impl("c1"), ready("c2"), impl("c3")}, model.StateWorking, true, 0,
+			"implementation after ready leaves the marker standing",
+			[]Event{impl("c1"), ready("c2"), impl("c3")}, model.StateReady, true, 0,
 		},
 		{
 			"review block",
@@ -68,9 +68,11 @@ func TestDeriveStateIsPRD12Lifecycle(t *testing.T) {
 			model.StateBlocked, false, 1,
 		},
 		{
+			// The author pushing a fix is not a marker, so the block is still the newest
+			// marker and the changeset stays BLOCKED until they run `change ready`.
 			"author response after block",
 			[]Event{impl("c1"), ready("c2"), review("c3", model.OutcomeBlock), impl("c4")},
-			model.StateWorking, true, 1,
+			model.StateBlocked, true, 1,
 		},
 		{
 			"ready again",
@@ -109,24 +111,23 @@ func TestDeriveStateIsPRD12Lifecycle(t *testing.T) {
 	}
 }
 
-// PRD §12's named safety property, called out in the plan's M2 verification:
-// "Any implementation commit after a ready/review/approval marker invalidates
-// that marker for the current HEAD."
-func TestDeriveImplementationCommitAfterApproveYieldsWorking(t *testing.T) {
+// PRD §12: state moves when a command records a marker, not when the author commits.
+// An implementation commit above an approval leaves the approval as the newest marker;
+// the count is recorded so the one caller that cares — completion — can ask the tree.
+func TestDeriveImplementationCommitAfterApproveKeepsTheMarker(t *testing.T) {
 	got := derive([]Event{
 		impl("c1"), ready("c2"), review("c3", model.OutcomeApprove), impl("c4"),
 	})
-	if got.State != model.StateWorking {
-		t.Errorf("state = %s, want WORKING: approval must not survive an implementation commit", got.State)
+	if got.State != model.StateApproved {
+		t.Errorf("state = %s, want APPROVED: a commit does not move state", got.State)
 	}
 	if !got.Stale {
-		t.Error("Stale = false, want true")
+		t.Error("Stale = false, want true: the count is still recorded for the tree question")
 	}
-	// derive only counts commits; it cannot tell an implementation commit from a
-	// changeset-only one, so it says "commit(s)" and lets ReconcileStaleness
-	// decide whether they matter.
-	if !strings.Contains(got.Reason, "commit(s) after review") {
-		t.Errorf("Reason = %q, want it to count the commits after the approve", got.Reason)
+	// derive counts commits; it cannot tell an implementation commit from a
+	// changeset-only one, which is exactly why counting is not a verdict.
+	if !strings.Contains(got.Reason, "1 commit since") {
+		t.Errorf("Reason = %q, want it to count the commit after the approve", got.Reason)
 	}
 	// The approval is still history: `review history` must list it (PRD §10.5).
 	if len(got.Reviews) != 1 || got.LatestReview == nil || got.LatestReview.Outcome != model.OutcomeApprove {
@@ -151,12 +152,12 @@ func TestRetiredCloseMarkerIsAnUnrecognisedImplementationCommit(t *testing.T) {
 	}
 
 	got := derive([]Event{impl("c1"), ready("c2"), review("c3", model.OutcomeApprove), legacy})
-	if got.State != model.StateWorking {
-		t.Errorf("state = %s, want WORKING: the retired marker must invalidate the approve, not complete the changeset",
+	if got.State != model.StateApproved {
+		t.Errorf("state = %s, want APPROVED: an unrecognised commit moves no state, but it does block completion",
 			got.State)
 	}
 	if got.TrailingUnrecognised != 1 {
-		t.Errorf("TrailingUnrecognised = %d, want 1 so the reason names it", got.TrailingUnrecognised)
+		t.Errorf("TrailingUnrecognised = %d, want 1 so the reason names it and the tree check refuses", got.TrailingUnrecognised)
 	}
 	if len(got.Reviews) != 1 {
 		t.Errorf("Reviews = %v, want the approve to stay listed", got.Reviews)
@@ -176,12 +177,16 @@ func TestDeriveNewestMarkerWins(t *testing.T) {
 }
 
 func TestDeriveMalformedMarkerIsImplementation(t *testing.T) {
-	// The plan's risk table: a commit carrying Review-* trailers that git-pair
-	// cannot interpret must be read as an implementation commit, never as a
-	// marker, and never silently honoured.
+	// The plan's risk table: a commit carrying Review-* trailers that git-pair cannot
+	// interpret is never honoured as a marker. It no longer *moves* state either —
+	// state moves on markers — but it is counted, which is what makes completion
+	// refuse to archive over it.
 	got := derive([]Event{impl("c1"), ready("c2"), malformed("c3")})
-	if got.State != model.StateWorking {
-		t.Errorf("state = %s, want WORKING: a malformed marker must invalidate the ready marker", got.State)
+	if got.State != model.StateReady {
+		t.Errorf("state = %s, want READY: a malformed commit establishes nothing and clears nothing", got.State)
+	}
+	if got.TrailingUnrecognised != 1 {
+		t.Errorf("TrailingUnrecognised = %d, want 1: the tree check must refuse over it", got.TrailingUnrecognised)
 	}
 	if len(got.Unrecognised) != 1 || got.Unrecognised[0].SHA != "c3" {
 		t.Errorf("Unrecognised = %v, want c3 listed for the warning line", got.Unrecognised)

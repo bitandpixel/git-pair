@@ -211,8 +211,8 @@ func TestChangeCompleteRefusesDirtyWorkingTree(t *testing.T) {
 	}
 }
 
-// An implementation commit after the approval invalidates it, so completing must refuse
-// until the changeset is reviewed again (PRD §12, §23).
+// An implementation commit after the approval leaves the approval as the reported state,
+// but the head no longer carries what was reviewed, so completing refuses (PRD §9.5, §12).
 func TestChangeCompleteRefusedAfterImplementationCommitFollowsApprove(t *testing.T) {
 	f, slug, _, _ := approvedChangeset(t)
 	f.Commit("agent: one more change", gittest.WithFile("service.go", "package main\n\nfunc Lock() { retry() }\n"))
@@ -222,8 +222,9 @@ func TestChangeCompleteRefusedAfterImplementationCommitFollowsApprove(t *testing
 		t.Errorf("completing after a post-approval commit exited %d, want %d\nstderr: %s",
 			res.code, exitRefusal, res.stderr)
 	}
-	if got := runIn(t, f.Dir(), "status", "--json").json(t)["state"]; got != "WORKING" {
-		t.Errorf("state = %v, want WORKING", got)
+	mustContain(t, res.stderr, "code changed since review", "the refusal must name the drift, not just the state")
+	if got := runIn(t, f.Dir(), "status", "--json").json(t)["state"]; got != "APPROVED" {
+		t.Errorf("state = %v, want APPROVED: the commit moved the head, not the state", got)
 	}
 	if refs := f.RefNames(archivePattern(slug)); len(refs) != 0 {
 		t.Errorf("the refused completion wrote archive refs: %v", refs)
@@ -365,7 +366,7 @@ func TestStatusReportsTheArchiveRefOnlyAtTheCompletedHead(t *testing.T) {
 	if ref, _ := after["archive_ref"].(string); ref != "" {
 		t.Errorf("archive_ref = %q after new work, want it empty", ref)
 	}
-	if !strings.Contains(after["next_action"].(string), "change ready") {
-		t.Errorf("next_action = %v, want the way back into the queue", after["next_action"])
+	if !strings.Contains(after["next_action"].(string), "the head moved since the review") {
+		t.Errorf("next_action = %v, want the drift named rather than a command that would refuse", after["next_action"])
 	}
 }

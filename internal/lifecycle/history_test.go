@@ -22,6 +22,17 @@ func summarize(t *testing.T, f *gittest.Fixture, slug, base, headRef string) lif
 	return summary
 }
 
+// summarizeAgainstTree is the derivation `change complete` uses: the marker verdict,
+// then the question of whether the content it spoke about is still at headRef.
+func summarizeAgainstTree(t *testing.T, f *gittest.Fixture, slug, base, headRef string) lifecycle.Summary {
+	t.Helper()
+	summary, err := lifecycle.SummarizeAgainstTree(context.Background(), repo(f), slug, base, headRef)
+	if err != nil {
+		t.Fatalf("SummarizeAgainstTree(%s, base %s, head %s): %v", slug, base, headRef, err)
+	}
+	return summary
+}
+
 // TestSummarizePRD12GoldenHistory replays the PRD §12 lifecycle against real
 // commits and checks the derived state after every step, which is the golden
 // history the plan's M2 verification asks for.
@@ -60,9 +71,11 @@ func TestSummarizePRD12GoldenHistory(t *testing.T) {
 			want: model.StateBlocked, wantRev: 1,
 		},
 		{
-			name:      "author response returns to working",
+			// Committing a fix is not a marker, so the block is still the newest one and
+			// the changeset stays BLOCKED until the author runs `change ready`.
+			name:      "author response leaves the block standing",
 			act:       func() { f.Commit("address review", gittest.WithFile("other.go", "package main\n\nvar x = 1\n")) },
-			want:      model.StateWorking,
+			want:      model.StateBlocked,
 			wantRev:   1,
 			wantStale: true,
 		},
@@ -104,10 +117,10 @@ func TestSummarizePRD12GoldenHistory(t *testing.T) {
 	}
 }
 
-// TestSummarizeImplementationAfterApproveIsWorking is the PRD §12 safety property
-// against real commits: "review: approve" followed by an agent implementation
-// commit must not leave the branch looking approved.
-func TestSummarizeImplementationAfterApproveIsWorking(t *testing.T) {
+// The archive guard, measured against real commits: an implementation commit after an
+// approval leaves the approval as the state the queue and status report, but the head no
+// longer carries the content that was approved, so completion refuses it (PRD §9.5, §12).
+func TestSummarizeImplementationAfterApproveBlocksCompletionButNotState(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
 	f.CreateBranch("booking")
@@ -122,16 +135,23 @@ func TestSummarizeImplementationAfterApproveIsWorking(t *testing.T) {
 	}
 
 	after := f.Commit("agent: address feedback", gittest.WithFile("service.go", "package main\n\nfunc Lock() {}\n"))
+
 	got := summarize(t, f, slug, base, "HEAD")
-	if got.State != model.StateWorking {
-		t.Errorf("state = %s, want WORKING", got.State)
+	if got.State != model.StateApproved {
+		t.Errorf("state = %s, want APPROVED: a commit is not a marker", got.State)
 	}
 	if !got.Stale {
 		t.Error("stale = false, want true")
 	}
 	if got.Marker == nil || got.Marker.SHA != approve {
-		t.Errorf("Marker = %+v, want the (now stale) approve %s", got.Marker, approve)
+		t.Errorf("Marker = %+v, want the approve %s still named as the newest marker", got.Marker, approve)
 	}
+
+	// What the drift does decide: the head is no longer the reviewed content.
+	if tree := summarizeAgainstTree(t, f, slug, base, "HEAD"); tree.State != model.StateWorking {
+		t.Errorf("SummarizeAgainstTree state = %s, want WORKING (reason: %s)", tree.State, tree.Reason)
+	}
+
 	// The branch head is the implementation commit, not the approval.
 	if f.Head() != after {
 		t.Fatalf("HEAD = %s, want %s", f.Head(), after)
@@ -320,10 +340,10 @@ func subjects(events []lifecycle.Event) []string {
 	return out
 }
 
-// PRD §421 invalidates a ready marker on a later *implementation* commit. A commit
-// that touches nothing but changesets/<slug>/ is not one, and the reviewer reads
-// ABOUT.md and threads from HEAD anyway, so the marker must stand.
-func TestSummarizeChangesetOnlyCommitDoesNotInvalidateReady(t *testing.T) {
+// The tree verdict is what `change complete` asks for, and it looks past a commit that
+// touches nothing but changesets/<slug>/: that is not an implementation change, and the
+// reviewer reads ABOUT.md and threads from HEAD anyway.
+func TestSummarizeAgainstTreeChangesetOnlyCommitKeepsTheMarker(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
 	f.CreateBranch("booking")
@@ -334,7 +354,7 @@ func TestSummarizeChangesetOnlyCommitDoesNotInvalidateReady(t *testing.T) {
 	f.WriteChangesetFile(slug, "ABOUT.md", "# booking\n\n## Summary\n\nExpanded for the reviewer.\n")
 	f.Commit("describe booking")
 
-	got := summarize(t, f, slug, base, "HEAD")
+	got := summarizeAgainstTree(t, f, slug, base, "HEAD")
 	if got.State != model.StateReady {
 		t.Errorf("state = %s, want READY: no implementation code changed (reason: %s)", got.State, got.Reason)
 	}
@@ -348,7 +368,7 @@ func TestSummarizeChangesetOnlyCommitDoesNotInvalidateReady(t *testing.T) {
 
 // The boundary the tree comparison has to get right: one commit touching both the
 // changeset directory and code is an implementation commit, because the code moved.
-func TestSummarizeMixedCommitInvalidatesReady(t *testing.T) {
+func TestSummarizeAgainstTreeMixedCommitDropsTheMarker(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
 	f.CreateBranch("booking")
@@ -359,7 +379,7 @@ func TestSummarizeMixedCommitInvalidatesReady(t *testing.T) {
 	f.WriteChangesetFile(slug, "ABOUT.md", "# booking\n\n## Summary\n\nAlso touched the code.\n")
 	f.Commit("address feedback", gittest.WithFile("service.go", "package main\n\nfunc Lock() {}\n"))
 
-	got := summarize(t, f, slug, base, "HEAD")
+	got := summarizeAgainstTree(t, f, slug, base, "HEAD")
 	if got.State != model.StateWorking {
 		t.Errorf("state = %s, want WORKING: code changed above the marker", got.State)
 	}
@@ -368,6 +388,11 @@ func TestSummarizeMixedCommitInvalidatesReady(t *testing.T) {
 	}
 	if !strings.Contains(got.Reason, "code changed since ready") {
 		t.Errorf("reason = %q, want it to say the code changed since the marker", got.Reason)
+	}
+	// Without the tree question the same history still reads as READY: state moves on
+	// markers, and this is the difference between the two derivations.
+	if plain := summarize(t, f, slug, base, "HEAD"); plain.State != model.StateReady {
+		t.Errorf("Summarize state = %s, want READY (reason: %s)", plain.State, plain.Reason)
 	}
 }
 

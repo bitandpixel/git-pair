@@ -267,14 +267,20 @@ withdrawal *marker* would work but needs a trailer older git-pair builds cannot 
 would leave two versions of the tool disagreeing about one branch. Moving the review ref back
 is not an undo either: state comes from commit trailers, so the submission would still count.
 
-**Derived state.** State comes from walking `base..HEAD`, reading the newest marker, then
-asking whether what it approved is still there: if anything outside `changesets/<slug>/`
-differs between the marker's parent and `HEAD`, the marker is stale and the state is
-`WORKING`, so committing code after an approval silently invalidates it. A commit that only
-touches `ABOUT.md` or a thread does not — PRD §421 invalidates a marker on a later
-*implementation* commit, and editing the description is not one. Comparing trees rather than
-counting commits is also what keeps merges and rebases from reporting a change that never
-happened. States:
+**Derived state.** State comes from walking `base..HEAD` and reading the newest marker, and
+nothing else moves it: a commit is not an event in this model. Readiness survives you pushing
+more work, and `git pair change unready` is what takes a changeset out of the queue — taking an
+offer back is a decision, and decisions are recorded rather than inferred. The drift is still
+visible: the reason line counts what arrived since the marker, e.g.
+`marked ready by 8065dae (2 commits since)`.
+
+One command asks the harder question, and it is the one whose output gets trusted.
+`git pair change complete` compares the tree between the newest marker's parent and `HEAD` and
+refuses when anything outside `changesets/<slug>/` differs, because the archive ref it writes is
+what an agent checks before squash-merging and it has to name content somebody reviewed. A
+commit touching only `ABOUT.md` or a thread is not that drift, and comparing trees rather than
+counting commits is what keeps merges and rebases from reporting a change that never happened.
+States:
 `WORKING`, `READY`, `BLOCKED`, `FEEDBACK`, `APPROVED`. `git pair status` prints the
 state plus a one-line `Reason`. There is no state file, and no state for a completed
 changeset: completion is an archive ref (below), and the merge that finishes a changeset is not
@@ -384,8 +390,9 @@ Every command accepts the persistent `--json` flag, but only `status`, `change r
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
-commits, no blocking surviving additions. `change complete` checks: clean tree, newest effective
-review at `HEAD` is `approve` or `feedback`, no blocking surviving additions. `change unready` checks
+commits, no blocking surviving additions. `change complete` checks: clean tree, newest
+review at `HEAD` is `approve` or `feedback` and still describes what `HEAD` carries (the tree is
+compared, ignoring `changesets/<cs>/`), no blocking surviving additions. `change unready` checks
 only for a clean tree, since the marker it writes is empty. `change init` warns
 without failing
 if the base does not resolve, and commits only the changeset directory (`git commit --only`),
@@ -855,8 +862,10 @@ branch first` (exit 2) — the directory is named after the branch, so renaming 
 its changeset and a detached HEAD has no name.
 
 A missing entry in `git pair review queue` is usually not a queue bug: membership is derived
-state, and a code change after the ready marker returns the changeset to `WORKING` (a commit
-touching only `ABOUT.md` or a thread leaves it `READY`).
+state, and only a command moves it — `change ready`, `change unready`, or a review submission. A
+code change after the ready marker leaves the changeset in the queue, naming the commits in its
+reason; what that drift does stop is `change complete`, which refuses to archive a head whose
+reviewed content has moved.
 A hand-written ready marker counts only if `Review-State: ready` and `Review-Changeset: <slug>`
 sit in a real trailer block, separated from the subject by a blank line and from each other by
 no blank line. `cannot complete <cs>: latest outcome is BLOCKED` (exit 1) is the refusal for a
