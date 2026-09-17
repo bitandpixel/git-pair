@@ -109,6 +109,9 @@ ok "fixture built at $R"
 step "first paint: a real terminal, a real keystroke"
 session paint q
 expect "the reviewed counter is on screen" -1 "$T/paint.raw" "reviewed"
+expect "the changeset box names the base over the tree" -1 "$T/paint.raw" "base  main"
+expect "the span is a row of the box, not a caption" -1 "$T/paint.raw" "span  main...current"
+expect "the file tree is below it" -1 "$T/paint.raw" "changesets/booking-transaction/"
 expect "the shortcut bar offers the span picker" -1 "$T/paint.raw" "V picker"
 expect "the shortcut bar offers quit" -1 "$T/paint.raw" "q quit"
 
@@ -168,6 +171,34 @@ step "marks: space marks the first row, v away and back brings the marks to the 
 session marks space,v,v,q
 expect "the marks show in the counter" 0 "$T/marks.raw" "2 / 3 reviewed"
 expect "the counter is back where it was after v v" 2 "$T/marks.raw" "2 / 3 reviewed"
+
+# --- 5b. the changeset box is a region with keys of its own ----------------
+# The screen has two regions where the keys can be, and a real terminal is what shows whether the
+# split reads: the box's borders are its focus light, its bar is its own, and the file tree under it
+# keeps its rows while the box is being read.
+step "the changeset box: m takes the keys, and the borders say so"
+session box m,q
+expect "the box's borders turn to a double rule" 0 "$T/box.raw" $'\u2554'
+expect "the box's bar names the key its own" 0 "$T/box.raw" "space span"
+expect "the box's bar names the key that goes back" 0 "$T/box.raw" "f files"
+refuse "the tree's fold keys are off the bar while the box has them" 0 "$T/box.raw" "h/l fold"
+
+step "the changeset box: tab walks the ring to it, through the diff"
+session ring2 tab,tab,q
+expect "two tabs reach the box" 1 "$T/ring2.raw" $'\u2554'
+expect "with the box's own shortcut bar" 1 "$T/ring2.raw" "t new thread"
+
+step "the changeset box: space on the span row opens the picker"
+session spanrow m,space,esc,q
+expect "the span row opens the span picker" 1 "$T/spanrow.raw" "Span picker"
+expect "and esc comes back to the list" 2 "$T/spanrow.raw" "reviewed"
+
+step "the changeset box: space there reads a document rather than marking one"
+# A repaint-only terminal makes "the tree is still there" an awkward thing to grep, so this checks the
+# claim the region boundary is really about: with the box holding the keys, the key that marks a file
+# marks nothing, and says which rows it does mark.
+session boxspace m,j,space,q
+expect "space in the box says what it marks instead" 2 "$T/boxspace.raw" "file rows"
 
 # --- 6. a ref moves while the session is open (span plan M4) ---------------
 step "drift: another process moves the ref, the screen warns and r re-pins"
