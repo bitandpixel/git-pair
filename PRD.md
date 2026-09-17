@@ -1627,7 +1627,11 @@ The navigation keys belong to the region holding them and mean the same thing in
 `gg`/`G` its two ends, `ctrl-d`/`ctrl-u` half a page, `ctrl-f`/`ctrl-b` a page. Each region's shortcut bar
 names the keys of that region and none of the others, which is what makes a key of the other region an
 absence a reviewer can read rather than a keystroke that vanishes. A rule separates the list from the
-shortcut bar.
+shortcut bar. The tree is bounded by two rules of its own — the row that separated it from the box above,
+and one under its last row, with the reviewed counter below that — and those two are its focus light:
+single rules while the box or the diff holds the keys, double while the tree holds them. Two rules rather
+than a frame because the cells a frame spends each side are columns, and the narrow terminal that needs
+the regions told apart most is the one with none to spare.
 
 The box is capped at a third of the space the terminal gives and scrolls inside its own borders, so a
 changeset with forty threads is a reason to read the box rather than a reason to hide the tree behind it;
