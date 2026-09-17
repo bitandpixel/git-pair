@@ -492,12 +492,28 @@ still resolves and `status --changeset <id>` still reads the history.
 - [ ] One predicate, built from the derivation that already exists: terminal → fail; newest marker's
   outcome → `APPROVED` passes, `FEEDBACK` passes only with `--allow-feedback`, `BLOCKED` and a withdrawal
   fail; archive not at the source head → fail; implementation drift over the reviewed content → fail.
+  - *Decided before implementing:* this makes `check` stricter than `change archive`, which accepts
+    `FEEDBACK` as permitting integration (§9.5). They are not in contradiction, and the docs have to say
+    so rather than let them look contradictory: archiving is preservation, and non-blocking feedback is
+    still a review of that head; `check` is the gate, and the repository decides at the gate whether
+    feedback alone is enough to land. An author can therefore archive a changeset that CI refuses, which
+    is the intended shape — the archive is not a claim that the work may merge.
 - [ ] §28's wording: `OK: <id> is integration-ready` plus `archive: <sha>`, or `NOT READY:` with one
   bullet per failed condition — every condition, not the first, so CI output is actionable without a
   second run.
 - [ ] Exit codes follow the existing table: 0 ready, 1 not ready, 2 usage. No new codes.
 - [ ] `--json`: `id`, `ready`, `state`, `archive`, `archive_current`, `reasons` as machine-readable
   strings, `policy`.
+  - *Decided before implementing:* the key is `changeset`, not `id`. Every command that reports a
+    changeset in JSON calls it `changeset` today, and `check` naming the same value `id` would make
+    the deferred `slug`→`id` rename a breaking change to the JSON contract as well as to the code —
+    two things to schedule instead of one. The rename, when it comes, moves every key together.
+- [ ] `check` does **not** re-run the surviving-review-additions diagnostic. §26 lists it among the
+  conditions, but `change ready` is where that decision gets made and acknowledged, and the outcome
+  and drift conditions already guarantee that nothing has changed since the marker — re-deriving it
+  would re-litigate a decision the author already took, in a command with no override flag to take
+  it again. This settles the open question at the bottom of this plan; the reason goes in the code
+  comment where the conditions are listed.
 - [ ] Works on a checked-out changeset branch; deliberately does not take `--changeset`, since it is the
   thing a forge check runs *on* a branch.
 - [ ] Table-driven tests over outcome × policy × drift × archive-current, plus a shell-level assertion
