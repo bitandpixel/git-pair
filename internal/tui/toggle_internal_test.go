@@ -61,6 +61,9 @@ func newFileListModel(t *testing.T) reviewModel {
 // the cursor drifts away from wherever you were reading.
 func TestSpaceMarksTheFileAndLeavesTheCursorOnIt(t *testing.T) {
 	m := newFileListModel(t)
+	// A file row on purpose: the top of the list is a directory now, and Space on one of those
+	// marks everything under it, which is a different test.
+	m = cursorOn(t, m, "service.go")
 	at := m.cursor
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
@@ -69,12 +72,8 @@ func TestSpaceMarksTheFileAndLeavesTheCursorOnIt(t *testing.T) {
 	if m.cursor != at {
 		t.Errorf("cursor moved from %d to %d after marking a file reviewed", at, m.cursor)
 	}
-	files := m.sess.Files()
-	if !files[at].Reviewed {
-		t.Error("the file under the cursor was not marked reviewed")
-	}
-	if files[at+1].Reviewed {
-		t.Error("marking one file marked the next one too")
+	if got := markedFiles(m.sess); len(got) != 1 || got[0] != "service.go" {
+		t.Errorf("marking one file left %v marked, want service.go alone", got)
 	}
 
 	// Pressing space again on the same row clears it, still without moving.
@@ -83,8 +82,8 @@ func TestSpaceMarksTheFileAndLeavesTheCursorOnIt(t *testing.T) {
 	if m.cursor != at {
 		t.Errorf("cursor moved from %d to %d when unmarking", at, m.cursor)
 	}
-	if m.sess.Files()[at].Reviewed {
-		t.Error("the second space did not clear the mark")
+	if got := markedFiles(m.sess); len(got) != 0 {
+		t.Errorf("the second space left %v marked, want nothing", got)
 	}
 }
 
