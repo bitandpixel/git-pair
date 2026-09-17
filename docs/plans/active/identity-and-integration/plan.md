@@ -115,6 +115,17 @@ Consequences recorded rather than asked separately:
   plan rejected git config as a home for the `branch:` claim. Measured: `git clone` records
   `origin/HEAD` for a valid remote HEAD, and the CI shape (`init` + `remote add` + `fetch <branch>`)
   does not — one flag or `git remote set-head origin --auto` covers it.
+- **Trunk pruning is the repository's business, and the rule's constraint is documented rather than
+  coded around.** Landed means "the directory is in the default branch's tree", so deleting landed
+  directories from the default branch makes every branch still carrying one look active again —
+  measured, including in `queue`. The rule for anyone who tidies: **prune only what carries a terminal
+  record** (an integration ref or an abandonment), which are excluded before anything else is
+  considered. Rejected alternatives, both measured: counting `CHANGESET.yaml` at any depth under
+  `changesets/` would make relocating safe for ~2ms, but it defends tidying rather than deleting and
+  adds a layout assumption nobody asked for; asking the history (`git log --diff-filter=A`, which does
+  catch squash landings) costs ~33ms per candidate on a 20k-commit trunk and is paid by every *active*
+  changeset, since those are absent from trunk's tree too. §35 already puts garbage collection out of
+  scope, so git-pair neither prunes nor guards the prune.
 
 ## Under review after M1 → decided: the tree rule alone
 
@@ -304,7 +315,10 @@ The seven tree-rule fixtures from the spike, ported to product tests: a stacked 
 so does it after its parent lands; a diverged parent and child both resolve to the shared changeset;
 a clone with no archive refs resolves from the tree alone; two unrelated directories are ambiguous
 until `change use` records the choice, after which the branch resolves; a branch that merged an
-unlanded sibling is ambiguous; a deleted directory is `uninitialized`.
+unlanded sibling is ambiguous; a deleted directory is `uninitialized`. Two more fixtures pin the
+pruning behaviour rather than fix it: pruning an unrecorded landed changeset from the default branch
+resurrects it on a branch that has not merged the prune, and pruning one with an integration ref does
+not.
 
 Approve, then: archive == the approval commit with no further command. Commit a reply in `ABOUT.md` →
 `change archive` advances. Commit an implementation change → `change archive` refuses and names the file,
@@ -424,6 +438,10 @@ documentation requirement, not just a command surface.
 - [ ] README states the consequence of landing outside the default branch: such a landing is invisible to
   resolution, so `git pair integration record` is what retires the changeset. A release-line repository
   that treats recording as optional reporting will show landed changesets as active forever.
+- [ ] README states the pruning rule in the same breath: a repository that removes landed changeset
+  directories from the default branch may only prune those with a terminal record, because the landed
+  test reads the default branch's tree. Measured, and it is a documentation requirement rather than a
+  bug to fix — the resurrection of an unrecorded landing is the rule working as designed.
 - [ ] Tests: a clone without the namespace produces the fetch guidance, not a false "not ready" or a
   misleading "no archive"; after the fetch, the same command succeeds.
 
@@ -502,3 +520,4 @@ against running the fetch first.
 | 2026-09-17 | decision | The integration branch is a flag or git's own answer, not configuration: `--integration <ref>`, else `refs/remotes/origin/HEAD`, else a unique `origin/main`/`origin/master`, else refuse naming the flag and `git remote set-head origin --auto`. The `pair.integrationBranch` key I had proposed was an invention — the product reads no git config today, the requirements already pass `--target origin/main` at the call site, and machine-local config is what this plan rejected for the `branch:` claim. Measured: `git clone` records `origin/HEAD` when the remote HEAD names an existing branch (path and `file://`); the CI `init`+`remote add`+`fetch <branch>` shape does not; `git remote set-head --auto` fixes it; git refuses to guess when the remote HEAD dangles. |
 | 2026-09-17 | decision | Read-side flag named `--default-branch`, not `--integration` and not `--target`. `--target` stays on `integration record` because the two are different concepts: a backport records `--target release/2.x` while the branch defining "landed" for discovery is still `main`, and neither flag can say both. Also found: `defaultBase` (`internal/cli/change.go:316`) already guesses trunk as local `main` then `master` for `change init --base`, so it must fold into the same resolver — two resolvers would let a changeset's recorded base and the landed-test disagree. |
 | 2026-09-17 | measurements | How recording interacts with release branches, measured: merged into `release/2.x` with a `main` baseline, the changeset stayed active until its integration ref existed, then retired — so a landing outside the default branch makes `integration record` load-bearing rather than informational. The record becomes verifiable: `--commit` must be reachable from `--target`, and `changesets/<id>/` must be in `tree(--commit)`, which held for merge, squash and cherry-pick landings. Backports: first landing wins, one integration ref, the refusal names the existing commit and target. Also confirmed `git cherry-pick` fast-forwards by default, which is why reachability is a poor definition of "landed" and content is a good one. |
+| 2026-09-17 | measurements | Trunk pruning probed: deleting landed `changesets/<id>/` from the default branch resurrects the changeset on any branch that has not merged the prune (measured, `status` and `queue` alike), while an integration ref or terminal record survives it. Decided: document "prune only what carries a terminal record" and leave the rule as a top-level match. Rejected with numbers: any-depth `CHANGESET.yaml` matching (~2ms, defends relocation only) and a history walk for deleted directories (~33ms per candidate on a 20k-commit trunk, charged to every active changeset). |

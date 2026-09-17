@@ -936,3 +936,90 @@ func TestRecordedCommitContainsTheDirectory(t *testing.T) {
 		})
 	}
 }
+
+func landOnMainAndPrune(t *testing.T) (*gittest.Fixture, string) {
+	t.Helper()
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("work")
+	archive(f, "work", f.CommitChangeset("work", "main"))
+	f.Commit("work", gittest.WithFile("work.txt", "1\n"))
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "-m", "land work", "work")
+	return f, f.Head()
+}
+
+func pruneTrunk(t *testing.T, f *gittest.Fixture) {
+	t.Helper()
+	f.MustGit("rm", "-r", "-q", "--", "changesets/work")
+	f.Commit("prune landed changeset directories", gittest.WithNoStage())
+}
+
+func moveTrunkToRetired(t *testing.T, f *gittest.Fixture) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(f.Dir(), "changesets", "done"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.MustGit("mv", "changesets/work", "changesets/done/work")
+	f.Commit("tidy landed changesets", gittest.WithNoStage())
+}
+
+func TestTrunkPruning(t *testing.T) {
+	t.Run("deleting from trunk resurrects an unrecorded landing", func(t *testing.T) {
+		f, _ := landOnMainAndPrune(t)
+		f.SwitchTo("work")
+		if got := treeRule(t, f); got.Candidate != nil {
+			t.Fatalf("before the prune: %s, want retired", got.Candidate.ID)
+		}
+		f.SwitchTo("main")
+		pruneTrunk(t, f)
+		f.SwitchTo("work")
+		got := treeRule(t, f)
+		if got.Candidate == nil {
+			t.Fatal("expected the prune to make the landed changeset look active again")
+		}
+		t.Logf("RESURRECTION: after trunk deleted changesets/work, the branch resolves %s again", got.Candidate.ID)
+	})
+
+	t.Run("an integration ref survives the prune", func(t *testing.T) {
+		f, landed := landOnMainAndPrune(t)
+		integrate(f, "work", landed)
+		f.SwitchTo("main")
+		pruneTrunk(t, f)
+		f.SwitchTo("work")
+		if got := treeRule(t, f); got.Candidate != nil {
+			t.Fatalf("after a recorded landing the prune must not matter, got %s", got.Candidate.ID)
+		}
+		t.Logf("recorded landing: prune changes nothing, the ref is the record")
+	})
+
+	t.Run("moving into a retired prefix survives the prune", func(t *testing.T) {
+		f, _ := landOnMainAndPrune(t)
+		f.SwitchTo("main")
+		moveTrunkToRetired(t, f)
+		f.SwitchTo("work")
+		if got, err := discovery.PruneAware(context.Background(), repo(f), f.Head(), "main"); err != nil {
+			t.Fatal(err)
+		} else if len(got) != 0 {
+			t.Fatalf("prune-aware rule: %v, want retired", got)
+		}
+		if got := treeRule(t, f); got.Candidate == nil {
+			t.Fatal("expected the plain rule to be fooled by the move as well")
+		} else {
+			t.Logf("plain rule is fooled too: resolves %s", got.Candidate.ID)
+		}
+		t.Logf("with `done/` counted as present, the same trunk stays retired")
+	})
+
+	t.Run("merging the prune is its own cure", func(t *testing.T) {
+		f, _ := landOnMainAndPrune(t)
+		f.SwitchTo("main")
+		pruneTrunk(t, f)
+		f.SwitchTo("work")
+		f.MustGit("merge", "--no-ff", "-m", "catch up", "main")
+		if got := treeRule(t, f); got.Candidate != nil {
+			t.Fatalf("got %s, want retired once the branch has merged the prune", got.Candidate.ID)
+		}
+		t.Logf("a branch that merges the prune stops being a candidate; the window is the stale branch")
+	})
+}
