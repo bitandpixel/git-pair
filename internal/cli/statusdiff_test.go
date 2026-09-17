@@ -510,7 +510,8 @@ func TestDiffSpanArgumentErrors(t *testing.T) {
 // there never will be any. status has to name the configuration instead.
 func TestStatusExplainsASelfBasedChangeset(t *testing.T) {
 	f := newRepo(t)
-	f.StageChangeset("main", "main")
+	f.CreateBranch("booking")
+	f.StageChangeset("booking", "booking")
 	f.Commit("work", gittest.WithFile("service.go", "package main\n"))
 
 	res := runIn(t, f.Dir(), "status").mustSucceed(t, "status")

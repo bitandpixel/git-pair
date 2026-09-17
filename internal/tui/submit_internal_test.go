@@ -29,9 +29,9 @@ func TestSubmitKeyEndsTheSession(t *testing.T) {
 	f.Commit("implement", gittest.WithFile("service.go", "package main\n\nfunc Lock() {}\n"))
 
 	repo := &git.Repo{Dir: f.Dir()}
-	cs, err := changeset.ForBranch(repo, slug)
+	cs, err := changeset.Current(context.Background(), repo, "")
 	if err != nil {
-		t.Fatalf("ForBranch: %v", err)
+		t.Fatalf("Current: %v", err)
 	}
 	summary, err := lifecycle.SummarizeHEAD(ctx, repo, cs.Slug, cs.Base)
 	if err != nil {
@@ -88,9 +88,9 @@ func submitModel(t *testing.T) reviewModel {
 	f.Commit("implement", gittest.WithFile("service.go", "package main\n"))
 
 	repo := &git.Repo{Dir: f.Dir()}
-	cs, err := changeset.ForBranch(repo, slug)
+	cs, err := changeset.Current(context.Background(), repo, "")
 	if err != nil {
-		t.Fatalf("ForBranch: %v", err)
+		t.Fatalf("Current: %v", err)
 	}
 	summary, err := lifecycle.SummarizeHEAD(ctx, repo, cs.Slug, cs.Base)
 	if err != nil {

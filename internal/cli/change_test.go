@@ -27,7 +27,7 @@ func TestChangeInitCreatesScaffoldingFromBranchName(t *testing.T) {
 		t.Error("ABOUT.md was not created")
 	}
 	if got, want := strings.TrimSpace(f.Read(filepath.Join(dir, "CHANGESET.yaml"))),
-		"id: feature-booking-transaction\nbase: main\nbranch: feature/booking-transaction"; got != want {
+		"id: feature-booking-transaction\nbase: main"; got != want {
 		t.Errorf("CHANGESET.yaml = %q, want %q (PRD §5)", got, want)
 	}
 	about := f.Read(filepath.Join(dir, "ABOUT.md"))
@@ -578,17 +578,35 @@ func TestChangeInitCommitDoesNotChangeLifecycleState(t *testing.T) {
 
 // --- change init / ready: a base must not be the branch itself ---------------
 
+// Starting a changeset on the integration branch is refused. A changeset is measured against
+// that branch, so one started on it can never contain anything, and every directory it carries
+// is already landed. The refusal is a clarity guard rather than a correctness rule — the tree
+// rule already makes such a changeset invisible — which is why it says what to do instead.
+func TestChangeInitRefusesOnTheIntegrationBranch(t *testing.T) {
+	f := newRepo(t)
+
+	res := runIn(t, f.Dir(), "change", "init", "--base", "HEAD")
+	if res.code != exitUsage {
+		t.Fatalf("`change init` on the integration branch exited %d, want %d\n%s", res.code, exitUsage, res.stderr)
+	}
+	mustContain(t, res.stderr, "integration branch", "the refusal should name what is wrong")
+	mustContain(t, res.stderr, "switch -c", "the refusal should say what to do instead")
+	if f.HasWorktreeFile(filepath.Join("changesets", "main", "CHANGESET.yaml")) {
+		t.Error("init wrote a changeset directory on the integration branch")
+	}
+}
+
 // Everything derived from a changeset is measured as `base...HEAD`. With base ==
 // branch that range is empty for all time, so `change ready` writes a marker that
 // no command can observe and `status` answers WORKING forever. This is the
 // configuration that has to be refused, and refused where it is created.
 func TestChangeInitRefusesToBaseAChangesetOnItsOwnBranch(t *testing.T) {
 	f := newRepo(t)
+	f.CreateBranch("booking")
 
 	for _, args := range [][]string{
-		{"change", "init"},                   // the inferred base is main, and we are on main
-		{"change", "init", "--base", "main"}, // asked for explicitly
-		{"change", "init", "--base", "HEAD"}, // self-reference by another name
+		{"change", "init", "--base", "booking"}, // asked for explicitly
+		{"change", "init", "--base", "HEAD"},    // self-reference by another name
 	} {
 		res := runIn(t, f.Dir(), args...)
 		if res.code != exitUsage {
@@ -623,8 +641,9 @@ func TestChangeInitAllowsAFreshBranchThatSharesItsBasesTip(t *testing.T) {
 
 func TestChangeReadyRefusesASelfBasedChangeset(t *testing.T) {
 	f := newRepo(t)
-	f.StageChangeset("main", "main")
-	f.WriteChangesetFile("main", "ABOUT.md", "# main\n\n## Summary\n\nDescribed.\n")
+	f.CreateBranch("booking")
+	f.StageChangeset("booking", "booking")
+	f.WriteChangesetFile("booking", "ABOUT.md", "# booking\n\n## Summary\n\nDescribed.\n")
 	f.Commit("work", gittest.WithFile("service.go", "package main\n"))
 
 	res := runIn(t, f.Dir(), "change", "ready")

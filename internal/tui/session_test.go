@@ -39,9 +39,9 @@ func newEnv(t *testing.T) *env {
 	}))
 
 	e := &env{f: f, repo: &git.Repo{Dir: f.Dir()}}
-	cs, err := changeset.ForBranch(e.repo, slug)
+	cs, err := changeset.Current(context.Background(), e.repo, "")
 	if err != nil {
-		t.Fatalf("ForBranch: %v", err)
+		t.Fatalf("Current: %v", err)
 	}
 	e.cs = cs
 	return e

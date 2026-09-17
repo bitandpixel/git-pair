@@ -109,49 +109,57 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	if branch == "" {
 		return &usageError{fmt.Errorf("%w: run `git switch -c <branch>` before `git pair change init`", changeset.ErrDetachedHead)}
 	}
-	cs, err := changeset.ForBranch(repo, branch)
-	if err != nil {
-		return &usageError{err}
+	// Starting a changeset on the integration branch is refused for clarity, not correctness:
+	// a changeset is measured against that branch, so one started on it is inert — every
+	// directory it carries is already landed. Saying so where the mistake is made beats a
+	// status line that never shows the changeset.
+	if db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch); err == nil && branch == db.LocalName() {
+		return &usageError{fmt.Errorf("%s is the integration branch, so a changeset started on it can never contain anything: `git switch -c <branch>` first", branch)}
 	}
-
-	// The ID is the identity and the branch name only supplies the default (PRD §4), so
-	// an explicit --id wins outright. A branch that already owns a changeset under another
-	// id is refused rather than shadowed by a second directory: two claims on one branch
-	// is the conflict resolve refuses to guess about.
-	if opts.id != "" {
-		if err := changeset.ValidateID(opts.id); err != nil {
-			return &usageError{err}
-		}
-		if cs.Exists && cs.Slug != opts.id {
-			return &usageError{fmt.Errorf("changeset %q already belongs to %s, and a changeset id does not change once it exists (PRD §6). Work on something else needs its own branch, or `git pair change init --id %s` on a branch of its own", cs.Slug, branch, opts.id)}
-		}
-		target, err := changeset.ForID(branch, opts.id)
-		if err != nil {
-			return &usageError{err}
-		}
-		cs = target
-	}
-	if !cs.Exists {
-		if err := refuseTakenID(ctx, repo, cs.Slug); err != nil {
-			return err
-		}
-		// A renamed branch leaves its claim behind, and "no changeset for this branch" is
-		// bad advice when the directory is sitting in the tree naming a branch that used to
-		// exist. Warn, because creating a second changeset is still a legitimate answer.
-		if stale, err := changeset.StaleClaims(ctx, repo); err == nil {
-			for _, s := range stale {
-				a.warn("warning: %s records branch %q, which no longer exists; if you renamed the branch, set `branch:` in %s rather than creating a second changeset\n",
-					s.Dir, s.Branch, filepath.Join(s.Dir, changeset.MetadataFile))
-			}
-		}
-	}
-
 	base := opts.base
 	if base == "" {
-		if base, err = defaultBase(ctx, repo); err != nil {
+		// Resolved before the changeset itself. When there is no trunk to infer a base from,
+		// the advice the caller needs is `--base <ref>`, and that has to be the error they
+		// see rather than the generic "which branch is the integration branch" refusal.
+		if base, err = defaultBase(ctx, repo, a.defaultBranch); err != nil {
 			return &usageError{err}
 		}
 		a.warn("base: %s (pass --base to choose a different ref)\n", base)
+	}
+
+	// `change init` creates a directory, which is not a resolution question. A stacked branch
+	// carries its parent's changeset directory, and that inherited directory must not stop the
+	// child from starting its own: once both exist, `base:` says which is which.
+	id := opts.id
+	if id == "" {
+		if id, err = changeset.SlugFromBranch(branch); err != nil {
+			return &usageError{err}
+		}
+	}
+	cs, err := changeset.ForID(id)
+	if err != nil {
+		return &usageError{err}
+	}
+	cs.Branch = branch
+	dir, err := changeset.DirectoryAt(ctx, repo, id)
+	if err != nil {
+		return err
+	}
+	if dir.Committed && !dir.Worktree {
+		// Retiring a changeset is a commit. Until the deletion is committed the directory's
+		// history is still live here, so the name is not free yet.
+		return &usageError{fmt.Errorf("changesets/%s/ is deleted in your working tree but the deletion is not committed; commit the deletion before starting a changeset with that name again", id)}
+	}
+	cs.Exists = dir.Worktree
+	if !cs.Exists {
+		if err := refuseTakenID(ctx, repo, id); err != nil {
+			return err
+		}
+		if res, err := changeset.ResolveCurrent(ctx, repo, a.defaultBranch); err == nil &&
+			res.Selected != nil && res.Selected.Changeset.Slug != id {
+			a.warn("warning: %s already carries changeset %q; this branch will hold two changesets, so commands that act on one accept --changeset <id>\n",
+				branch, res.Selected.Changeset.Slug)
+		}
 	}
 	if _, err := repo.RevParse(ctx, base); err != nil {
 		a.warn("warning: base %q does not resolve yet; spans and status will fail until it does\n", base)
@@ -172,7 +180,6 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	written, err := changeset.Write(repo, cs, changeset.WriteOptions{
 		Base:     base,
 		SetBase:  opts.setBase,
-		Branch:   branch,
 		About:    about,
 		SetAbout: opts.setAbout,
 	})
@@ -182,7 +189,6 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		switch {
 		case errors.Is(err, changeset.ErrBaseConflict),
 			errors.Is(err, changeset.ErrAboutConflict),
-			errors.Is(err, changeset.ErrBranchTaken),
 			errors.Is(err, changeset.ErrIDMismatch):
 			return &usageError{err}
 		}
@@ -250,9 +256,9 @@ func refuseTakenID(ctx context.Context, repo *git.Repo, id string) error {
 	} else if taken {
 		return idTakenError(ctx, repo, id, "git-pair refs already exist for it")
 	}
-	if claimed, err := changeset.Claimed(ctx, repo, id); err != nil {
+	if dir, err := changeset.DirectoryAt(ctx, repo, id); err != nil {
 		return err
-	} else if claimed {
+	} else if dir.Worktree || dir.Committed {
 		return idTakenError(ctx, repo, id, "changesets/"+id+" already exists, possibly left behind by a changeset that has landed")
 	}
 	return nil
@@ -313,13 +319,16 @@ func plural(n int, one, many string) string {
 }
 
 // defaultBase picks the repository's trunk without guessing wildly.
-func defaultBase(ctx context.Context, repo *git.Repo) (string, error) {
-	for _, candidate := range []string{"main", "master"} {
-		if _, err := repo.RevParse(ctx, "refs/heads/"+candidate); err == nil {
-			return candidate, nil
-		}
+// defaultBase is the base `change init` records when the author does not name one. It is the
+// integration branch — the same ref the landed test compares trees against — so a changeset
+// cannot be measured against one branch while being judged landed by another. The spelling is
+// the short branch name, because that is what a person reads in CHANGESET.yaml.
+func defaultBase(ctx context.Context, repo *git.Repo, override string) (string, error) {
+	db, err := changeset.DefaultBranch(ctx, repo, override)
+	if err != nil {
+		return "", fmt.Errorf("cannot infer a base: %v; pass --base <ref>", err)
 	}
-	return "", fmt.Errorf("cannot infer a base: no main or master branch exists; pass --base <ref>")
+	return db.LocalName(), nil
 }
 
 // --- change ready -----------------------------------------------------------

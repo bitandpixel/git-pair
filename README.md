@@ -219,18 +219,33 @@ $ git rev-list --count refs/reviews/archive/booking-transaction/0eaad3b
 
 ## Concepts
 
-**Changeset.** One branch, one changeset, one review stream. A changeset's identity is its
-**ID** — the name of its directory — and the branch name is only where the default comes
-from. The default normalises the branch: `/` and every character outside `[A-Za-z0-9._-]`
-become `-`, runs collapse, leading and trailing `-` are trimmed, case is kept, so
+**Changeset.** A changeset is a directory, `changesets/<id>/`, and its identity is its **ID** —
+the name of that directory. The branch name is only where the default comes from. The default
+normalises the branch: `/` and every character outside `[A-Za-z0-9._-]` become `-`, runs
+collapse, leading and trailing `-` are trimmed, case is kept, so
 `feature/booking-transaction` becomes `changesets/feature-booking-transaction/`. Choose your
 own with `git pair change init --id booking-transaction-v2`; an ID is never rewritten to fit,
 never suffixed to dodge a collision, and never changed once the changeset has refs.
 
-`CHANGESET.yaml` records `id`, `base` and `branch`. The `branch` line is the claim that makes
-the directory belong to a branch, which is what lets the ID and the branch name differ; a
-directory claiming another branch is not yours merely because its name would have matched.
-`base` is what the diff is measured against, and for a stack names another changeset's branch.
+`CHANGESET.yaml` records `id` and `base` and nothing else. `base` is what the diff is measured
+against, and for a stack names another changeset. There is no branch field: the directory does
+not belong to a branch, so renaming a branch strands nothing, and two clones of the same commits
+cannot disagree about what the directory is.
+
+**What you are working on.** The changesets on a revision are the `changesets/<id>/` directories
+it carries that the **integration branch** does not. A directory in the integration branch's tree
+is landed work — merge, squash or cherry-pick, it does not matter which, because the directory is
+in trunk either way. A directory only here is work in progress, which is what lets a parent
+branch and a child branched off it continue one changeset instead of the child inventing a second
+answer about the same work. Nothing asks which branch is checked out, so CI, a detached HEAD and
+your own branch all get the same answer.
+
+When two directories survive, the nearest review ref decides, then the `base:` of a stack; when
+nothing orders them git-pair refuses, names both, and accepts `--changeset <id>`. The integration
+branch is what "landed" is measured against: `--default-branch <ref>` states it (this is what CI
+passes), otherwise git's own answer — `refs/remotes/origin/HEAD`, then a sole `origin/main` or
+`origin/master`, then a local `main` or `master`. If none exists the command refuses rather than
+inventing a trunk, and no git config is read.
 
 **ABOUT.md and threads.** `changesets/<changeset>/ABOUT.md` is the canonical description of
 the change: the author writes it, the reviewer edits it, and edits committed by a review
@@ -395,9 +410,17 @@ Every command accepts the persistent `--json` flag, but only `status`, `change r
 `change unready`, `change wait`, `change complete`, `review submit`, `review history` and
 `review queue` change output for it; elsewhere it is accepted and ignored.
 
+Every command also accepts `--default-branch <ref>`, which states the integration branch that
+"has this landed?" is measured against. Without it git-pair reads git's own answer
+(`refs/remotes/origin/HEAD`, then a sole `origin/main` or `origin/master`, then a local `main` or
+`master`) and refuses if there is nothing to compare against. It is a flag and not a config key
+because the answer belongs to the checkout in front of the command: a CI job that fetched one
+branch has no remote HEAD, and two clones of one repository must not disagree about what has
+landed.
+
 | Command | Flags | Notes |
 | --- | --- | --- |
-| `change init` | `--id <id>`, `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is `main`, else `master`, else a usage error; `--id` names the changeset instead of the branch-derived default, and a collision with an existing directory or ref refuses rather than suffixing |
+| `change init` | `--id <id>`, `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch; refuses on that branch, where a changeset could never contain anything; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` only when it is in review, otherwise succeeds and records nothing |
 | `change abandon` | none | records the terminal `Review-State: abandoned` and anchors it; `change ready`, `change unready` and `review submit` refuse against it afterwards; idempotent |
@@ -868,6 +891,31 @@ kept.
 git-pair never guesses a base: edit the file, or `git pair change init --base <ref> --set-base`.
 From `change init` with no `--base`: `cannot infer a base: no main or master branch exists;
 pass --base <ref>` (exit 2).
+
+`cannot tell which branch is the integration branch: ...` (exit 2) — there is nothing to compare
+against, so "has this landed?" has no answer and every changeset directory on the revision would
+look like work in progress. Pass `--default-branch origin/main` (a CI job that fetched one branch
+has no recorded remote HEAD, and a repository may name trunk something else), or record git's own
+answer once with `git remote set-head origin --auto`. `change init` reports the same problem as
+`cannot infer a base: ...; pass --base <ref>`, because the recorded base and the landed test come
+from the same resolution.
+
+`this revision contains more than one changeset: aaa and bbb; name the one you mean with
+--changeset <id>` (exit 2) — the branch carries two unlanded changeset directories and nothing in
+the durable data orders them: neither owns a review ref nearer than the other, and neither names
+the other as its `base:`. That is what a branch created off a sibling looks like once it starts
+its own work. `--changeset <id>` answers for one command; `git pair change init --base <sibling>`
+at creation time is what makes the stack readable instead.
+
+`main is the integration branch, so a changeset started on it can never contain anything` (exit 2
+from `change init`) — a changeset is measured against the integration branch, so one started on it
+can never contain anything. `git switch -c <branch>` first.
+
+A changeset that reads as uninitialised on its own branch, or that has vanished from
+`review queue`, usually means its directory reached the integration branch — commonly because a
+sibling merged your unlanded branch and *that* landed. Your directory is in trunk's tree, which is
+precisely what the rule tests, so the cure is to land your own branch rather than someone else's
+merge of it. `git ls-tree <integration-branch> changesets/` shows whether the directory is there.
 
 `ABOUT.md already has content: changesets/<cs>/ABOUT.md is not empty (pass --set-about to
 replace it)` (exit 2) — `change init --about` refuses to discard a description that is

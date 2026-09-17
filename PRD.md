@@ -183,10 +183,46 @@ An ID is never rewritten to fit. An `--id` that would need normalising is refuse
 than quietly changed, because refs named after a string nobody typed are not findable by
 the person who typed it.
 
-The directory belongs to the branch its `CHANGESET.yaml` records (§5), not to the branch
-whose name it resembles. That is what allows the two names to differ at all, and it is why
-a child branch created on top of its parent does not appear to own the changeset directory
-it merely inherited.
+The directory belongs to no branch. Which changesets a revision is working on is read from
+content, and the reading is the same question everywhere: `status`, `review queue`, and a CI job
+with two branches fetched all ask it the same way.
+
+### Which changeset a revision is working on
+
+The changesets on a revision are the `changesets/<id>/` directories present in its tree that the
+integration branch's tree does not have.
+
+- A directory that has reached the integration branch is landed work. It drops out with no
+  integration ref, no branch name, and no dependence on whether the landing was a merge, a
+  squash or a cherry-pick — the directory is in trunk either way.
+- A directory that exists only here is work in progress, whichever branch line it sits on. That
+  is what lets a parent branch and the child branched off it continue one changeset instead of
+  the child inventing a second answer about the same work.
+- Nothing asks which branch is checked out, so a detached HEAD, a CI checkout and a human's
+  branch answer the same question. Branch names are not part of the durable data.
+- The cost follows the directories on this revision, not the number of changesets the repository
+  has ever had.
+
+Where more than one directory survives, they are ordered by the durable data and not by
+guesswork: the one whose review ref is nearest to the revision first; a directory named as
+another's `base:` is the parent of a stack, so it is not what the revision is working on. When
+nothing orders them, the answer is **ambiguous**, and the command refuses, names every
+candidate, and accepts `--changeset <id>`. Two unrelated changesets on one branch is a state
+only the author can settle, and picking one silently would read the wrong diff base.
+
+The **integration branch** is what "landed" is measured against. A `--default-branch <ref>`
+flag states it outright — which is what CI passes, since a job that cloned with `init` and one
+`fetch` has no recorded remote default to read. Otherwise git's own answer is used:
+`refs/remotes/origin/HEAD`, as `git clone` records it, then a sole `origin/main` or
+`origin/master`, then a local `main` or `master`. If none of those exists the command refuses
+and names the flag: guessing here would make every directory on the revision look like work in
+progress. No git config is read. Two clones of one repository must not disagree about what has
+landed.
+
+The consequence worth knowing: if someone merges your unlanded changeset into their branch and
+lands *that*, your changeset reads as landed on your own branch too, because your directory is
+now in the integration branch's tree. That is the rule working as intended — the work is in
+trunk — and it is why a changeset's branch is expected to land its own content.
 
 ---
 
@@ -203,21 +239,21 @@ The minimum required metadata is:
 ```yaml
 id: booking-transaction
 base: main
-branch: feature/booking-transaction
 ```
 
 `id` is the changeset ID, and it is the directory's name rather than a second opinion
 about it: a file whose `id` disagrees with the directory holding it is an error to
-correct, not a conflict to resolve. `branch` is the claim that makes the directory belong
-to a branch, and it is the reason the ID can differ from the branch name. `base` is the
-ref the changeset's diff is measured against.
+correct, not a conflict to resolve. `base` is the ref the changeset's diff is measured
+against, and for a stacked branch it names the changeset it sits on.
+
+That is the whole file. There is no branch field, because the directory does not belong to a
+branch (§4): recording one would put per-branch state in the durable data, and the same
+commits would then answer differently depending on which branch happened to be checked out —
+which is the disagreement the content rule exists to remove.
 
 The ID does not change once the changeset has durable refs. Renaming one means moving the
 directory and every ref under it, which is not something git-pair does silently; there is
 no rename command and no automatic migration.
-
-A changeset written before `branch:` existed has no claim, and is found by the name rule
-instead — the same answer the old code gave. A recorded claim always outranks the name.
 
 For stacked branches:
 
@@ -405,7 +441,6 @@ changesets/<id>/
 ```yaml
 id: booking-transaction-v2
 base: main
-branch: feature/booking-transaction
 ```
 
 Requirements:
@@ -440,18 +475,28 @@ that:
      git pair change init --id feature-booking-2
    ```
 
-   Two branches whose names normalise alike are a collision once the directory from one is
-   in the other's tree, which is what a derived branch and a landed changeset both look
-   like. Two sibling branches that share no directory are not one yet: nothing is in use.
-3. **It does not change.** A branch that already owns a changeset cannot acquire a second ID
-   by re-running `init`; that would put two claims on one branch (§5).
+   Two branches whose names normalise alike are a collision when the directory from one is
+   already committed on the line of development you are standing on, which is what a landed
+   changeset left on the integration branch looks like. A directory you merely inherited from
+   the branch you were created from is the same changeset seen from a second branch, so `init`
+   reports it as already initialised instead of refusing a collision between a changeset and
+   itself.
+3. **It does not change.** The ID of a directory that exists is never rewritten, and a
+   changeset that has durable refs keeps its ID for good (§5). Starting a *second* changeset on
+   a branch that already carries one is allowed — that is what a stacked branch that begins its
+   own work looks like — and `init` warns that the branch now holds two, because the tool has
+   two directories to order and the order is rarely what the author meant.
 
 Deleting a changeset directory releases its ID only when the deletion is committed, since
 retiring a changeset's notes is a commit and not a local edit.
 
-When the branch has no changeset but the tree holds one whose `branch:` names a branch that
-no longer exists — a renamed branch — `init` says so and how to fix the claim, then proceeds.
-Creating a second changeset is a legitimate answer, so this is a warning rather than a gate.
+Renaming the branch changes nothing: the directory is the identity, so the changeset resolves
+from the branch it was renamed to, and reports that branch as the one in use.
+
+`init` refuses to run on the integration branch. A changeset is measured against that branch,
+so one started on it can never contain anything, and every directory it carries already counts
+as landed. The refusal is a clarity guard: the rule itself makes such a changeset invisible,
+and the message says `git switch -c <branch>` rather than leaving the author to notice.
 
 For a stacked branch:
 
@@ -1078,11 +1123,11 @@ Readiness also ends on purpose. `git pair change unready` (§9.6) writes a `work
 the changeset back out of the queue, which is how an author says "not finished after all" instead of
 leaving the offer standing while they keep implementing.
 
-State comes from the branch. There is one fallback, and it is not a second source: where a changeset
-has no branch — deleted after the work landed, or after it was abandoned — the anchor at
-`refs/reviews/<changeset>` is what remains, and deriving from it can only report what the branch last
-claimed before it disappeared (§13). Nothing reads a ref to decide that a changeset is ready, and no
-command moves state by moving a ref.
+State comes from the commits on the branch. There is one fallback, and it is not a second
+source: where a changeset has no branch — deleted after the work landed, or after it was
+abandoned — the anchor at `refs/reviews/<changeset>` is what remains, and deriving from it can
+only report what the branch last recorded before it disappeared (§13). Nothing reads a ref to
+decide that a changeset is ready, and no command moves state by moving a ref.
 
 Possible effective states:
 
@@ -1157,9 +1202,9 @@ As with every review ref it is a warning rather than a guarantee — nothing her
 
 `change abandon` (§9.7) also moves this ref, to its terminal marker. That is what lets an ending
 survive `git branch -D`: the branch is the thing that gets deleted, and the queue and `status` can
-still read how the changeset ended from the anchor. Where a changeset has no branch, the ref is the
-last readable copy of what the branch claimed — a fallback for reading history, never a source of
-state (§12).
+still read how the changeset ended from the anchor. Where a changeset has no branch, the ref is
+the last readable copy of the changeset's history — a fallback for reading history, never a
+source of state (§12).
 
 Completing a changeset (§9.5) writes an immutable archival ref alongside it:
 

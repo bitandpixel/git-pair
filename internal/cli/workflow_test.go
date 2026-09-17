@@ -24,7 +24,7 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 
 	metadata := filepath.Join("changesets", slug, "CHANGESET.yaml")
 	about := filepath.Join("changesets", slug, "ABOUT.md")
-	wantMetadata := "id: " + slug + "\nbase: main\nbranch: " + slug
+	wantMetadata := "id: " + slug + "\nbase: main"
 	if got := strings.TrimSpace(f.Read(metadata)); got != wantMetadata {
 		t.Fatalf("CHANGESET.yaml = %q, want %q", got, wantMetadata)
 	}

@@ -222,12 +222,15 @@ func TestWriteRecordsStackedBase(t *testing.T) {
 		t.Errorf("base = %q, want booking-transaction", got)
 	}
 
-	resolved, err := changeset.ForBranch(repo, "booking-tests")
+	// The directory is uncommitted, so the checked-out revision is the one that knows about
+	// it: resolution reads HEAD and adds what the working tree holds.
+	res, err := changeset.ResolveCurrent(context.Background(), repo, "")
 	if err != nil {
-		t.Fatalf("ForBranch: %v", err)
+		t.Fatalf("ResolveCurrent: %v", err)
 	}
-	if !resolved.Exists || resolved.Base != "booking-transaction" || resolved.Slug != "booking-tests" {
-		t.Errorf("ForBranch = %+v, want an existing changeset with base booking-transaction", resolved)
+	if res.Selected == nil || res.Selected.Changeset.Base != "booking-transaction" ||
+		res.Selected.Changeset.Slug != "booking-tests" {
+		t.Errorf("resolution = %+v, want booking-tests on base booking-transaction", res.Selected)
 	}
 }
 
@@ -254,25 +257,30 @@ func TestWriteBaseConflict(t *testing.T) {
 	}
 }
 
-func TestForBranchDetachedHeadAndMissingDirectory(t *testing.T) {
+// A detached HEAD has no branch to report, and an uninitialised branch resolves to the
+// directory `change init` would create — the value that makes ErrNoChangeset's hint useful.
+func TestCurrentDetachedHeadAndMissingDirectory(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
 	repo := &git.Repo{Dir: f.Dir()}
 
-	if _, err := changeset.ForBranch(repo, ""); !errors.Is(err, changeset.ErrDetachedHead) {
-		t.Errorf("ForBranch(\"\") = %v, want ErrDetachedHead", err)
+	f.MustGit("checkout", "--detach")
+	if _, err := changeset.Current(context.Background(), repo, ""); !errors.Is(err, changeset.ErrDetachedHead) {
+		t.Errorf("Current on a detached HEAD = %v, want ErrDetachedHead", err)
 	}
-	cs, err := changeset.ForBranch(repo, "uninitialised")
+
+	f.MustGit("checkout", "-B", "uninitialised")
+	cs, err := changeset.Current(context.Background(), repo, "")
 	if err != nil {
-		t.Fatalf("ForBranch: %v", err)
+		t.Fatalf("Current: %v", err)
 	}
 	if cs.Exists {
-		t.Error("ForBranch reported a changeset that was never created")
+		t.Error("Current reported a changeset that was never created")
 	}
 	if cs.Slug != "uninitialised" || cs.Dir != filepath.Join("changesets", "uninitialised") {
-		t.Errorf("ForBranch = %+v, want the deterministic directory for the branch", cs)
+		t.Errorf("Current = %+v, want the deterministic directory for the branch", cs)
 	}
-	if _, err := changeset.RequireCurrent(context.Background(), repo); err == nil {
+	if _, err := changeset.RequireCurrent(context.Background(), repo, ""); err == nil {
 		t.Error("RequireCurrent succeeded on a branch with no changeset")
 	}
 }
@@ -405,133 +413,6 @@ func TestBaseIsOwnBranch(t *testing.T) {
 	}
 }
 
-// A changeset directory belongs to the branch its metadata claims, not to the branch
-// whose name it resembles (PRD §4). This is the whole point of `--id`: a changeset may
-// be named freely while its branch is named something else entirely.
-func TestForBranchResolvesByClaimNotByName(t *testing.T) {
-	f := gittest.New(t)
-	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
-	f.CreateBranch("feature/booking-transaction")
-	f.Write(f.ChangesetPath("booking-transaction-v2", "CHANGESET.yaml"),
-		"id: booking-transaction-v2\nbase: main\nbranch: feature/booking-transaction\n")
-	f.Write(f.ChangesetPath("booking-transaction-v2", "ABOUT.md"), "# booking-transaction-v2\n")
-
-	cs, err := changeset.ForBranch(fixRepo(f), "feature/booking-transaction")
-	if err != nil {
-		t.Fatalf("ForBranch: %v", err)
-	}
-	if !cs.Exists || cs.Slug != "booking-transaction-v2" || cs.Base != "main" {
-		t.Errorf("ForBranch = %+v, want the claimed directory booking-transaction-v2 on base main", cs)
-	}
-	if cs.ID() != "booking-transaction-v2" {
-		t.Errorf("ID() = %q, want the directory name", cs.ID())
-	}
-}
-
-// A child branch inherits its parent's changeset directory and must not appear to own
-// it. The queue reads every branch from one checkout, so a claim read from the tree is
-// as much of a lie as one read from a commit.
-func TestChildBranchDoesNotInheritItsParentsChangeset(t *testing.T) {
-	f := gittest.New(t)
-	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
-	f.CreateBranch("parent-work")
-	f.CommitChangeset("parent-work", "main")
-	f.CreateBranch("child-work")
-
-	cs, err := changeset.ForBranch(fixRepo(f), "child-work")
-	if err != nil {
-		t.Fatalf("ForBranch(child-work): %v", err)
-	}
-	if cs.Exists {
-		t.Errorf("the child claims %s, inherited from its parent", cs.Dir)
-	}
-
-	at, err := changeset.AtCommit(context.Background(), fixRepo(f), "child-work")
-	if err != nil {
-		t.Fatalf("AtCommit(child-work): %v", err)
-	}
-	if at.Exists {
-		t.Errorf("the queue would list %s as the child's own changeset", at.Dir)
-	}
-
-	// The parent still owns it, read from either place.
-	parent, err := changeset.ForBranch(fixRepo(f), "parent-work")
-	if err != nil || !parent.Exists || parent.Slug != "parent-work" {
-		t.Errorf("ForBranch(parent-work) = %+v, %v; want the parent to keep its claim", parent, err)
-	}
-	matches, err := changeset.BranchesForSlug(context.Background(), fixRepo(f), "parent-work")
-	if err != nil {
-		t.Fatalf("BranchesForSlug: %v", err)
-	}
-	if len(matches) != 1 || matches[0] != "parent-work" {
-		t.Errorf("BranchesForSlug(parent-work) = %v, want only parent-work", matches)
-	}
-}
-
-// A changeset written before the field existed resolves the way it always did. The
-// fallback gives the same answer the old rule gave, so an in-flight changeset is not
-// stranded by the new one.
-func TestForBranchFallsBackToNameForAnUnclaimedChangeset(t *testing.T) {
-	f := gittest.New(t)
-	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
-	f.CreateBranch("feature/booking")
-	f.Write(f.ChangesetPath("feature-booking", "CHANGESET.yaml"), "base: main\n")
-	f.Write(f.ChangesetPath("feature-booking", "ABOUT.md"), "# booking\n")
-
-	cs, err := changeset.ForBranch(fixRepo(f), "feature/booking")
-	if err != nil {
-		t.Fatalf("ForBranch: %v", err)
-	}
-	if !cs.Exists || cs.Slug != "feature-booking" {
-		t.Errorf("ForBranch = %+v, want the name-matched feature-booking", cs)
-	}
-	if cs.RecordedBranch != "" {
-		t.Errorf("RecordedBranch = %q, want empty: nothing claimed this directory", cs.RecordedBranch)
-	}
-}
-
-// Two directories claiming one branch is a real conflict, and it was impossible while
-// the name was the whole rule. Guessing would pick one silently.
-func TestForBranchRejectsTwoClaimsOnOneBranch(t *testing.T) {
-	f := gittest.New(t)
-	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
-	f.CreateBranch("booking")
-	for _, id := range []string{"booking", "booking-v2"} {
-		f.Write(f.ChangesetPath(id, "CHANGESET.yaml"), "id: "+id+"\nbase: main\nbranch: booking\n")
-		f.Write(f.ChangesetPath(id, "ABOUT.md"), "# "+id+"\n")
-	}
-
-	_, err := changeset.ForBranch(fixRepo(f), "booking")
-	if !errors.Is(err, changeset.ErrClaimConflict) {
-		t.Fatalf("ForBranch error = %v, want ErrClaimConflict", err)
-	}
-	for _, want := range []string{"changesets/booking", "changesets/booking-v2", "booking"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("conflict %q does not name %q", err, want)
-		}
-	}
-}
-
-// The directory is the id, so a file that says otherwise is a mistake that has to be
-// corrected rather than a second opinion to choose between.
-func TestForBranchRejectsAnIDThatDisagreesWithItsDirectory(t *testing.T) {
-	f := gittest.New(t)
-	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
-	f.CreateBranch("booking")
-	f.Write(f.ChangesetPath("booking", "CHANGESET.yaml"), "id: booking-v2\nbase: main\nbranch: booking\n")
-	f.Write(f.ChangesetPath("booking", "ABOUT.md"), "# booking\n")
-
-	_, err := changeset.ForBranch(fixRepo(f), "booking")
-	if !errors.Is(err, changeset.ErrIDMismatch) {
-		t.Fatalf("ForBranch error = %v, want ErrIDMismatch", err)
-	}
-	for _, want := range []string{"booking-v2", "changesets/booking", changeset.MetadataFile} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not name %q", err, want)
-		}
-	}
-}
-
 func TestValidateID(t *testing.T) {
 	accepted := []string{"booking-transaction", "booking-transaction-v2", "JIRA-123", "a.b_c-1"}
 	for _, id := range accepted {
@@ -556,67 +437,5 @@ func TestValidateID(t *testing.T) {
 		if err := changeset.ValidateID(id); err == nil {
 			t.Errorf("ValidateID(%q) = nil, want refusal for %s", id, why)
 		}
-	}
-}
-
-// `Write` records the claim, so a changeset created by `change init` is findable from
-// the branch it was created on even when the names do not match.
-func TestWriteRecordsTheOwningBranch(t *testing.T) {
-	f := gittest.New(t)
-	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
-	f.CreateBranch("feature/booking-transaction")
-
-	cs := changeset.Changeset{Slug: "booking-transaction-v2", Dir: filepath.Join("changesets", "booking-transaction-v2")}
-	if _, err := changeset.Write(fixRepo(f), cs, changeset.WriteOptions{Base: "main", Branch: "feature/booking-transaction"}); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	got := f.Read(cs.MetadataPath())
-	for _, want := range []string{"id: booking-transaction-v2", "base: main", "branch: feature/booking-transaction"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("CHANGESET.yaml = %q, want it to record %q", got, want)
-		}
-	}
-
-	// The same directory on another branch is a conflict, not a second owner.
-	if _, err := changeset.Write(fixRepo(f), cs, changeset.WriteOptions{Base: "main", Branch: "someone-else"}); !errors.Is(err, changeset.ErrBranchTaken) {
-		t.Errorf("Write for another branch error = %v, want ErrBranchTaken", err)
-	}
-}
-
-// The scan finds changesets by their metadata file rather than by listing directories and
-// then asking each one, so a directory under changesets/ that is not a changeset must be
-// stepped over without failing the branch that carries it.
-func TestClaimsStepsOverADirectoryThatIsNotAChangeset(t *testing.T) {
-	f := gittest.New(t)
-	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
-	f.CreateBranch("booking")
-	f.CommitChangeset("booking-work", "main")
-	f.Write(f.ChangesetPath("notes", "README.md"), "scratch, never a changeset\n")
-	// A thread sorts after CHANGESET.yaml, so a scan that took "some file in the
-	// directory" instead of the metadata file would read this as the claim.
-	f.Write(f.ChangesetPath("booking-work", "concurrency-tests.md"), "# Concurrency tests\n")
-	f.Commit("add a stray directory and a review thread")
-
-	cs, err := changeset.AtCommit(context.Background(), fixRepo(f), "booking")
-	if err != nil {
-		t.Fatalf("AtCommit: %v", err)
-	}
-	if !cs.Exists || cs.Slug != "booking-work" {
-		t.Errorf("AtCommit = %+v, want booking-work", cs)
-	}
-
-	// One call answers for every branch, and each branch gets its own answer.
-	results, err := changeset.Claims(context.Background(), fixRepo(f), []string{"booking", "main"})
-	if err != nil {
-		t.Fatalf("Claims: %v", err)
-	}
-	if got := results["booking"].Changeset.Slug; got != "booking-work" {
-		t.Errorf("Claims[booking] = %q, want booking-work", got)
-	}
-	if results["main"].Changeset.Exists {
-		t.Errorf("Claims[main] = %+v, want no changeset", results["main"].Changeset)
-	}
-	if err := results["main"].Err; err != nil {
-		t.Errorf("Claims[main].Err = %v, want a branch with nothing rather than an error", err)
 	}
 }

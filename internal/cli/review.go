@@ -423,18 +423,15 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	// Branches, not directories. Only a branch can be reviewed, so only a branch
 	// can be queued; a changeset directory whose branch is gone is a record rather
 	// than work, and the record gets one honest line instead of a warning per slug.
-	refs, err := repo.ForEachRef(ctx, "refs/heads")
+	//
+	// One trunk listing and one ref listing serve the whole queue; per branch it costs a tree
+	// listing and one batch read. That is what makes "resolve every branch" affordable — the
+	// per-archive-ref formulation this replaced asked a question per ref for each branch.
+	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
 	if err != nil {
 		return err
 	}
-	branches := make([]string, 0, len(refs))
-	for _, ref := range refs {
-		branches = append(branches, strings.TrimPrefix(ref.Name, "refs/heads/"))
-	}
-	// One scan for the whole queue: every branch's tree is listed, and every CHANGESET.yaml
-	// comes back in a single batch. See changeset.Claims for why this is not a loop of
-	// AtCommit calls.
-	claims, err := changeset.Claims(ctx, repo, branches)
+	resolutions, err := changeset.BranchResolutions(ctx, repo, db)
 	if err != nil {
 		return err
 	}
@@ -445,23 +442,27 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	var order []string
 	sets := map[string]*found{}
 	var skipped []string
-	for _, branch := range branches {
-		res := claims[branch]
-		if res.Err != nil {
-			skipped = append(skipped, branch+" (unreadable changeset metadata: "+res.Err.Error()+")")
+	for _, br := range resolutions {
+		if br.Err != nil {
+			skipped = append(skipped, br.Branch+" (unreadable changeset metadata: "+br.Err.Error()+")")
 			continue
 		}
-		cs := res.Changeset
-		if !cs.Exists {
+		if br.Resolution.Ambiguous {
+			skipped = append(skipped, br.Branch+" ("+changeset.AmbiguityError(br.Resolution).Error()+")")
 			continue
 		}
+		if br.Resolution.Selected == nil {
+			continue
+		}
+		cs := br.Resolution.Selected.Changeset
+		cs.Branch = br.Branch
 		f := sets[cs.Slug]
 		if f == nil {
 			f = &found{cs: cs}
 			sets[cs.Slug] = f
 			order = append(order, cs.Slug)
 		}
-		f.branches = append(f.branches, branch)
+		f.branches = append(f.branches, br.Branch)
 	}
 
 	var entries []queueEntry

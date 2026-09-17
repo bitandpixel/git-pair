@@ -34,9 +34,9 @@ func newFileListModel(t *testing.T) reviewModel {
 	f.Write(filepath.Join("changesets", slug, "naming.md"), "# Thread: naming\n\nServe or Handle?\n")
 
 	repo := &git.Repo{Dir: f.Dir()}
-	cs, err := changeset.ForBranch(repo, slug)
+	cs, err := changeset.Current(context.Background(), repo, "")
 	if err != nil {
-		t.Fatalf("ForBranch: %v", err)
+		t.Fatalf("Current: %v", err)
 	}
 	summary, err := lifecycle.SummarizeHEAD(ctx, repo, cs.Slug, cs.Base)
 	if err != nil {

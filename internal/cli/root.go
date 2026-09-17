@@ -46,6 +46,10 @@ type app struct {
 	stdout io.Writer
 	stderr io.Writer
 	json   bool
+	// defaultBranch is the `--default-branch` override. Every command that asks "has this
+	// landed?" needs the integration branch to answer, and CI passes this because a checkout
+	// built with `init` and one `fetch` has no recorded remote default to read.
+	defaultBranch string
 }
 
 // Execute builds the command tree and runs it, returning the process exit code.
@@ -126,6 +130,8 @@ Inspection:        git pair status | diff`,
 		},
 	}
 	root.PersistentFlags().Bool("json", false, "machine-readable output where supported")
+	root.PersistentFlags().StringVar(&a.defaultBranch, "default-branch", "",
+		"ref of the integration branch; otherwise git-pair reads git's own answer (origin/HEAD, then a sole main/master)")
 	root.AddCommand(
 		newChangeCommand(a),
 		newReviewCommand(a),
@@ -182,7 +188,7 @@ func (a *app) loadNamed(ctx context.Context, slug string) (*session, error) {
 	if err != nil {
 		return nil, err
 	}
-	cs, summary, branch, err := resolveNamed(ctx, repo, slug)
+	cs, summary, branch, err := a.resolveNamed(ctx, repo, slug)
 	if err != nil {
 		return nil, usageWrap(err)
 	}
@@ -205,14 +211,29 @@ func (a *app) loadNamed(ctx context.Context, slug string) (*session, error) {
 		onCurrentBranch: onBranch, head: head, baseIsOwnBranch: own}, nil
 }
 
-// resolveNamed finds the changeset a slug names. Two branches can slug to the same
-// directory (`feature/x` and `feature-x`), so "the" changeset is the one whose
-// history is furthest along, and the branch that answer came from is returned so
+// resolveNamed finds the changeset a slug names. Two branches can carry the same directory
+// (`feature/x` branched before the changeset existed, or a stack), so "the" changeset is the
+// one whose history is furthest along, and the branch that answer came from is returned so
 // callers can print it.
-func resolveNamed(ctx context.Context, repo *git.Repo, slug string) (changeset.Changeset, lifecycle.Summary, string, error) {
-	branches, err := changeset.BranchesForSlug(ctx, repo, slug)
+func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string) (changeset.Changeset, lifecycle.Summary, string, error) {
+	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
 	if err != nil {
 		return changeset.Changeset{}, lifecycle.Summary{}, "", err
+	}
+	resolutions, err := changeset.BranchResolutions(ctx, repo, db)
+	if err != nil {
+		return changeset.Changeset{}, lifecycle.Summary{}, "", err
+	}
+	var branches []string
+	selected := map[string]changeset.Candidate{}
+	for _, br := range resolutions {
+		if br.Err != nil || br.Resolution.Selected == nil {
+			continue
+		}
+		if br.Resolution.Selected.Changeset.Slug == slug {
+			branches = append(branches, br.Branch)
+			selected[br.Branch] = *br.Resolution.Selected
+		}
 	}
 	if len(branches) == 0 {
 		// No branch carries the slug. The anchor is the last place its history can be
@@ -252,19 +273,8 @@ func resolveNamed(ctx context.Context, repo *git.Repo, slug string) (changeset.C
 		first   error
 	)
 	for _, branch := range branches {
-		cs, err := changeset.AtCommit(ctx, repo, branch)
-		if err != nil {
-			if first == nil {
-				first = err
-			}
-			continue
-		}
-		if !cs.Exists {
-			if first == nil {
-				first = fmt.Errorf("branch %s carries no %s", branch, cs.MetadataPath())
-			}
-			continue
-		}
+		cs := selected[branch].Changeset
+		cs.Branch = branch
 		summary, err := lifecycle.Summarize(ctx, repo, cs.Slug, cs.Base, branch)
 		if err != nil {
 			if first == nil {
@@ -296,7 +306,7 @@ func (a *app) load(ctx context.Context) (*session, error) {
 	if err != nil {
 		return nil, err
 	}
-	cs, err := changeset.RequireCurrent(ctx, repo)
+	cs, err := changeset.RequireCurrent(ctx, repo, a.defaultBranch)
 	if err != nil {
 		return nil, usageWrap(err)
 	}

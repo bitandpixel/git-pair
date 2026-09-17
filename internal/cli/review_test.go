@@ -340,7 +340,7 @@ func TestReviewQueueOrdersLongestWaitingFirst(t *testing.T) {
 	// Branched from aaa-older so the two changesets are stacked, which is the
 	// ordinary way to end up with two of them at once.
 	f.CreateBranch("zzz-newer", "aaa-older")
-	f.CommitChangeset("zzz-newer", "main")
+	f.CommitChangeset("zzz-newer", "aaa-older")
 	f.Commit("implement zzz", gittest.WithFile("zzz.go", "package main\n\nfunc Z() {}\n"))
 
 	f.SwitchTo("aaa-older")
@@ -363,6 +363,36 @@ func TestReviewQueueOrdersLongestWaitingFirst(t *testing.T) {
 	}
 }
 
+// A branch carrying two changesets that nothing orders is not silently missing from the
+// queue: the queue is where an author looks to find out why a branch will not show up, so the
+// branch is named with the reason.
+func TestReviewQueueNamesABranchItCannotResolve(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("aaa-one")
+	f.CommitChangeset("aaa-one", "main")
+	f.Commit("implement aaa", gittest.WithFile("aaa.go", "package main\n"))
+	f.CreateBranch("bbb-two", "aaa-one")
+	f.CommitChangeset("bbb-two", "main")
+	f.Commit("implement bbb", gittest.WithFile("bbb.go", "package main\n"))
+
+	f.SwitchTo("main")
+	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	skipped, _ := res.json(t)["skipped"].([]any)
+	var found string
+	for _, entry := range skipped {
+		line, _ := entry.(string)
+		if strings.HasPrefix(line, "bbb-two ") {
+			found = line
+		}
+	}
+	if found == "" {
+		t.Fatalf("skipped = %v, want bbb-two named with the reason", skipped)
+	}
+	if !strings.Contains(found, "more than one changeset") {
+		t.Errorf("skipped line = %q, want it to say the branch holds more than one changeset", found)
+	}
+}
+
 // The queue is a property of the repository, not of the checkout. It used to enumerate
 // the changesets/ directory on disk, which made it useless exactly when an agent most
 // wants it: run from main, it either said nothing or complained about directories whose
@@ -373,7 +403,7 @@ func TestReviewQueueReadsBranchesNotTheWorkingTree(t *testing.T) {
 	f.CommitChangeset("aaa-one", "main")
 	f.Commit("implement aaa", gittest.WithFile("aaa.go", "package main\n\nfunc A() {}\n"))
 	f.CreateBranch("zzz-two", "aaa-one")
-	f.CommitChangeset("zzz-two", "main")
+	f.CommitChangeset("zzz-two", "aaa-one")
 	f.Commit("implement zzz", gittest.WithFile("zzz.go", "package main\n\nfunc Z() {}\n"))
 
 	f.SwitchTo("aaa-one")

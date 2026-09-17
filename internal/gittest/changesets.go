@@ -29,12 +29,11 @@ func (f *Fixture) ChangesetPath(slug string, parts ...string) string {
 // StageChangeset writes a changeset's CHANGESET.yaml and ABOUT.md into the
 // working tree without committing them.
 //
-// It records the branch that owns the changeset, the way `change init` does, so the
-// suite exercises claim-based resolution rather than the fallback for a changeset that
-// predates the field. A test that wants the older shape writes the metadata itself.
+// CHANGESET.yaml carries the id and the base and nothing else: the directory is the identity,
+// so there is no branch claim to record and no older shape to fall back to.
 func (f *Fixture) StageChangeset(slug, base string) {
 	f.t.Helper()
-	body := "id: " + slug + "\nbase: " + base + "\nbranch: " + f.CurrentBranch() + "\n"
+	body := "id: " + slug + "\nbase: " + base + "\n"
 	f.Write(f.ChangesetPath(slug, "CHANGESET.yaml"), body)
 	if !f.HasWorktreeFile(f.ChangesetPath(slug, "ABOUT.md")) {
 		f.Write(f.ChangesetPath(slug, "ABOUT.md"), DefaultAboutBody)
@@ -59,13 +58,6 @@ func (f *Fixture) ChangesetFile(slug, name string) string {
 func (f *Fixture) WriteChangesetFile(slug, name, content string) {
 	f.t.Helper()
 	f.Write(f.ChangesetPath(slug, name), content)
-}
-
-// MetadataBranch returns the `branch:` claim recorded in a changeset's
-// CHANGESET.yaml in the working tree.
-func (f *Fixture) MetadataBranch(slug string) string {
-	f.t.Helper()
-	return f.metadataValue(slug, "branch")
 }
 
 // MetadataID returns the `id:` recorded in a changeset's CHANGESET.yaml, which is the

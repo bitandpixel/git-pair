@@ -7,9 +7,8 @@ import (
 )
 
 // The ID is what git-pair calls the work from here on, so an explicit one has to survive
-// the whole path: the directory, the claim in CHANGESET.yaml, `change ready`, `status`
-// and the queue. A name that worked only at init would be a second identity, not a
-// replacement for the branch name.
+// the whole path: the directory, `change ready`, `status` and the queue. A name that worked
+// only at init would be a second identity, not a replacement for the branch name.
 func TestChangeInitHonoursAnExplicitID(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("feature/booking-transaction")
@@ -21,21 +20,15 @@ func TestChangeInitHonoursAnExplicitID(t *testing.T) {
 	if got := f.MetadataID("booking-transaction-v2"); got != "booking-transaction-v2" {
 		t.Errorf("id = %q, want the id that was typed", got)
 	}
-	if got := f.MetadataBranch("booking-transaction-v2"); got != "feature/booking-transaction" {
-		t.Errorf("branch claim = %q, want the branch it was created on", got)
-	}
 	if got := f.MetadataBase("booking-transaction-v2"); got != "main" {
 		t.Errorf("base = %q, want main", got)
-	}
-	if strings.Contains(res.stderr, "no longer exists") {
-		t.Errorf("init warned about a stale claim on a fresh repository:\n%s", res.stderr)
 	}
 	if f.HasWorktreeFile(filepath.Join("changesets", "feature-booking-transaction", "CHANGESET.yaml")) {
 		t.Error("the branch-derived directory was created as well: --id replaces the default, it does not add to it")
 	}
 
-	// Everything downstream resolves the changeset by its claim, so the branch's name is
-	// never consulted again.
+	// Everything downstream resolves the changeset from the directory it carries, so the
+	// branch's name is never consulted again.
 	runIn(t, f.Dir(), "change", "ready").mustSucceed(t, "change", "ready")
 	status := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status").json(t)
 	if status["changeset"] != "booking-transaction-v2" {
@@ -54,31 +47,26 @@ func TestChangeInitHonoursAnExplicitID(t *testing.T) {
 // from the first is in the second's tree, which is what a derived branch and a landed
 // changeset both look like. Sibling branches that never share a tree are not: nothing is
 // in use yet, and refusing them would invent a conflict git has not been asked about.
-func TestChangeInitRefusesAnIDItsDirectoryAlreadyUses(t *testing.T) {
+// A branch created off a sibling inherits that sibling's changeset directory. When the
+// inherited directory's name is also this branch's default id, the branch is that changeset:
+// the directory is the identity, so `change init` says it is already initialised rather than
+// refusing a collision between a changeset and itself. Asking for a separate identity is what
+// --id is for, and nothing is ever suffixed to dodge a collision.
+func TestChangeInitAdoptsTheDirectoryItInherits(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("feature/booking")
 	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
 
 	f.CreateBranch("feature-booking")
 
-	r := runIn(t, f.Dir(), "change", "init", "--base", "main")
-	if r.code != exitUsage {
-		t.Fatalf("`change init` on a colliding name exited %d, want %d\nstdout: %s", r.code, exitUsage, r.stdout)
-	}
-	mustContain(t, r.stderr, `changeset ID "feature-booking" is already in use`, "the refusal must name the id")
-	mustContain(t, r.stderr, "git pair change init --id feature-booking-2",
-		"the refusal must offer a way out, since the point of the failure is to make the author choose")
+	r := runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	mustContain(t, r.stdout, "already initialised", "the inherited directory must be named as the answer")
 
-	// Taking the suggestion works, and gives a second changeset its own identity.
-	initAgain := runIn(t, f.Dir(), "change", "init", "--id", "feature-booking-2", "--base", "main").
+	// A genuinely second changeset still gets its own identity when it asks for one.
+	runIn(t, f.Dir(), "change", "init", "--id", "feature-booking-2", "--base", "main").
 		mustSucceed(t, "change", "init")
 	if !f.HasWorktreeFile(filepath.Join("changesets", "feature-booking-2", "CHANGESET.yaml")) {
-		t.Error("the suggested id was not usable")
-	}
-	// `feature/booking` still exists, so its claim is not stale and must not be reported
-	// as though the branch had been renamed.
-	if strings.Contains(initAgain.stderr, "no longer exists") {
-		t.Errorf("a live claim was reported as stale:\n%s", initAgain.stderr)
+		t.Error("an explicit id was not usable")
 	}
 }
 
@@ -101,20 +89,23 @@ func TestChangeInitRefusesAnIDItsRefsAlreadyUse(t *testing.T) {
 	mustContain(t, r.stderr, "refs already exist", "the refusal must say what holds the name")
 }
 
-// A branch that already owns a changeset does not get a second identity by re-running
-// init with a different id. Two directories claiming one branch is a conflict resolution
-// refuses to guess about, so it is refused at the door.
-func TestChangeInitRefusesASecondIDOnABranchThatAlreadyHasOne(t *testing.T) {
+// A branch may hold more than one changeset — that is what a stacked branch that starts its
+// own work looks like — so a second id is not refused. It is warned about, because the tool
+// now has to order two directories and the ordering is rarely what the author meant.
+func TestChangeInitWarnsWhenABranchTakesASecondChangeset(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
 	runIn(t, f.Dir(), "change", "init", "--id", "booking-work", "--base", "main").mustSucceed(t, "change", "init")
 
-	r := runIn(t, f.Dir(), "change", "init", "--id", "booking-work-v2", "--base", "main")
-	if r.code != exitUsage {
-		t.Fatalf("changing the id exited %d, want %d\nstderr: %s", r.code, exitUsage, r.stderr)
+	r := runIn(t, f.Dir(), "change", "init", "--id", "booking-work-v2", "--base", "main").
+		mustSucceed(t, "change", "init")
+	mustContain(t, r.stderr, `already carries changeset "booking-work"`, "the warning must name what is already here")
+	mustContain(t, r.stderr, "--changeset", "the warning must say how to disambiguate")
+	for _, id := range []string{"booking-work", "booking-work-v2"} {
+		if !f.HasWorktreeFile(filepath.Join("changesets", id, "CHANGESET.yaml")) {
+			t.Errorf("changesets/%s/ is missing", id)
+		}
 	}
-	mustContain(t, r.stderr, "booking-work", "the refusal must name the changeset this branch already owns")
-	mustContain(t, r.stderr, "does not change once it exists", "the refusal must say why (PRD §6)")
 }
 
 // An id is chosen, not derived, so it is never rewritten to fit. Silently turning
@@ -143,20 +134,24 @@ func TestChangeInitRejectsAnUnusableID(t *testing.T) {
 	}
 }
 
-// Renaming a branch leaves its claim behind. Creating a second changeset is a legitimate
-// answer, so init says what it is about to do rather than refusing — but it says it.
-func TestChangeInitHintsAtAClaimFromARenamedBranch(t *testing.T) {
+// Renaming a branch used to leave its `branch:` claim behind, after which every command
+// reported "no changeset for this branch" until someone edited CHANGESET.yaml. The directory
+// is the identity, so a rename changes nothing: the changeset still resolves, and the branch
+// it is reported on is the one that is checked out.
+func TestRenamingABranchDoesNotStrandItsChangeset(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
 	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
 
 	f.MustGit("branch", "-m", "booking", "booking-renamed")
 
-	res := runIn(t, f.Dir(), "change", "init", "--id", "booking-work", "--base", "main").
-		mustSucceed(t, "change", "init")
-	mustContain(t, res.stderr, "records branch \"booking\", which no longer exists",
-		"the stale claim must be named, not left to confuse the next command")
-	mustContain(t, res.stderr, "set `branch:`", "the hint must say how to fix the claim instead")
+	status := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status").json(t)
+	if status["changeset"] != "booking" {
+		t.Errorf("changeset = %v, want booking after the branch was renamed", status["changeset"])
+	}
+	if status["branch"] != "booking-renamed" {
+		t.Errorf("branch = %v, want the branch that is checked out", status["branch"])
+	}
 }
 
 // Retiring a changeset directory is a commit, so the name is free again once that commit
@@ -172,7 +167,7 @@ func TestChangeInitReleasesAnIDOnlyWhenTheDeletionIsCommitted(t *testing.T) {
 	if r.code != exitUsage {
 		t.Fatalf("init after an uncommitted deletion exited %d, want %d\nstdout: %s", r.code, exitUsage, r.stdout)
 	}
-	mustContain(t, r.stderr, "already in use", "a deletion that is not committed has not released the name")
+	mustContain(t, r.stderr, "deletion is not committed", "a deletion that is not committed has not released the name")
 
 	f.Commit("retire the booking changeset notes")
 	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")

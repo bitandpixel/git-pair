@@ -264,7 +264,7 @@ assertion about stale claims was vacuous because no changeset directory existed 
   `git remote set-head origin --auto`. No config key. Two resolvers would let a changeset's recorded
   base and the landed-test disagree, which is the inconsistency this rule exists to remove. Refuse
   rather than treat an unresolvable trunk as "no trunk", which makes every directory a candidate.
-- [ ] `changeset.Resolve(ctx, repo, rev, defaultBranch)`: candidates from `ls-tree` of
+- [x] `changeset.Resolve(ctx, repo, rev, defaultBranch)`: candidates from `ls-tree` of
   `changesets/` in the revision and in the default branch; nearest archive tip, then `base:`-names-parent
   to break a stack, then ambiguity. `ForID` stays for `--changeset` reads; `ForBranch`/`AtCommit` and the claim machinery
   are deleted, including `StaleClaims` and the renamed-branch warning.
@@ -276,7 +276,7 @@ assertion about stale claims was vacuous because no changeset directory existed 
     nothing writes one today, and the landing outside the default branch that only it can retire is
     measured in `research/2026-09-17-combined-rule.md`. Reading it as a fact keeps `Resolve` a read of
     what is there instead of a policy about what to hide.
-- [ ] No ref fallback. Resolution is rank 0 alone; a branch whose changeset directory was deleted
+- [x] No ref fallback. Resolution is rank 0 alone; a branch whose changeset directory was deleted
   reports `uninitialized` with the normal hint. Fixture asserts exactly that, so the omission is a
   decision in the test suite rather than an oversight.
 - [ ] `change use <id>`: records which candidate this branch is working on. Refuses an id that is not
@@ -290,14 +290,14 @@ assertion about stale claims was vacuous because no changeset directory existed 
   it (`flag` / `origin-head` / `sole-candidate`), reported the same way whether the ref came from
   `--default-branch` or from detection. A CI run should be explainable from its own output rather
   than from what the machine happened to have fetched.
-- [ ] Cost assertions: resolving on a changeset branch and on trunk stay in single-digit git
+- [x] Cost assertions: resolving on a changeset branch and on trunk stay in single-digit git
   invocations with 300 archive refs present, against 1,802 for the per-ref formulation.
-- [ ] `queue` enumerates local branches and resolves each against trunk — two `ls-tree` calls per
+- [x] `queue` enumerates local branches and resolves each against trunk — two `ls-tree` calls per
   branch, which is the enumeration shape the previous plan's M4 wanted. Archive refs with no branch
   behind them are deliberately **not** listed in this milestone: with refs created at init, a
   branchless ref is as likely to be an abandoned attempt as a deleted branch, and guessing either
   way is a report nobody asked for. Recorded as a known gap.
-- [ ] README troubleshooting gains the consequence the tree rule accepts: if someone merges your
+- [x] README troubleshooting gains the consequence the tree rule accepts: if someone merges your
   unlanded changeset and lands it, your changeset reads as landed on your own branch, because your
   directory is in trunk's tree. Measured, not inferred.
 - [ ] `reviewref`: `Archive(id)`, `Update`, `Resolve` against the new namespace; delete the per-head
@@ -332,6 +332,39 @@ Landed so far:
   any distance instead of *losing* to one, which made an unarchived candidate block a ready one.
   The tests for both are `TestResolveNearestRefDecidesWhenNothingElseDoes` and
   `TestResolveUnarchivedCandidateSortsLast`.
+- Callers moved, and the claim machinery deleted rather than deprecated: `ForBranch`, `AtCommit`,
+  `Claims`, `Claimed`, `StaleClaims`, `BranchesForSlug`, `ErrClaimConflict`, `ErrBranchTaken`,
+  `WriteOptions.Branch`, and the `branch:` key, so `CHANGESET.yaml` is `id` + `base` in the code,
+  the PRD sample and the README sample. `changeset.Current`/`RequireCurrent` are the tree rule
+  with the checked-out branch's working tree added (`change init` leaves its scaffolding
+  uncommitted, and `status` has to answer about it); `--changeset <id>` filters
+  `BranchResolutions`, and `queue` enumerates local branches against one trunk listing and one
+  ref listing.
+- `--default-branch` is a persistent flag on the root command rather than a flag on each
+  resolving command. `change init` needs it — its `--base` default now comes from the same
+  resolution as the landed test, which is the fold-in the task asked for — and a flag on thirteen
+  commands is thirteen places to forget it.
+- Four behaviours users will notice, each with a test that states why: `change init` refuses on
+  the integration branch; `change init` on a branch that inherited a matching directory says it
+  is already initialised instead of refusing a collision between a changeset and itself;
+  `change init --id <other>` on a branch that already carries a changeset succeeds with a warning
+  rather than refusing, because the old refusal existed for two *claims* on one branch and the
+  rule has no such conflict; and renaming a branch needs nothing at all, so the stale-claim
+  warning went with the claim. `queue` names a branch it cannot resolve in `skipped` instead of
+  dropping it silently.
+- Cost harness: `gittest.SpawnShim` puts a logging `git` first on the **process** PATH, because
+  that is how a program finds `git` — a `PATH` entry in `cmd.Env` is not consulted by
+  `exec.LookPath`, so the first version of the harness counted nothing and every bound in it
+  passed vacuously. Both cost tests now assert a floor as well as a ceiling for that reason, and
+  the queue assertion is a scaling one: the same queue over the same branches with 300 review
+  refs added must not notice.
+- Mutation-tested: nine mutations over the new code, eight caught. The survivor was equivalent —
+  `cs.Exists = dir.Worktree || dir.Committed` where the `Committed && !Worktree` case has already
+  returned — so the dead term was removed instead of being covered.
+- Known gap, recorded in `changeset.DirectoryAt`: two branches minting the same *new* id before
+  either is readied is invisible from one checkout. The refs check closes it the moment either is,
+  and closing it earlier means a full branch scan per `change init`, which prices a rare mistake
+  against a common command.
 
 #### Verification
 

@@ -44,6 +44,18 @@ var ErrNoDefaultBranch = errors.New("cannot tell which branch is the integration
 // nothing in the durable data orders them. Guessing would silently read the wrong diff base.
 var ErrAmbiguousChangeset = errors.New("this revision contains more than one changeset")
 
+// AmbiguityError explains a tie. The candidates are named because the reader has no other way
+// to see them — nothing has shown them yet — and an escape hatch is named because a refusal
+// without one is a dead end.
+func AmbiguityError(res Resolution) error {
+	ids := make([]string, 0, len(res.Candidates))
+	for _, c := range res.Candidates {
+		ids = append(ids, c.Changeset.Slug)
+	}
+	return fmt.Errorf("%w: %s; name the one you mean with --changeset <id>",
+		ErrAmbiguousChangeset, strings.Join(ids, " and "))
+}
+
 // Where the integration branch came from. Reported in `status --json`, because a run that
 // misreports what has landed is the expensive failure mode of this rule, and the output
 // should be explainable on its own rather than from what the machine happened to fetch.
@@ -60,6 +72,13 @@ type DefaultBranchRef struct {
 	Ref string
 	// Source is one of the DefaultBranch* constants.
 	Source string
+}
+
+// LocalName is the integration branch without its refs/heads/ prefix, which is what belongs
+// in `base:` and in a message. The fully qualified ref is what comparing two commits wants;
+// in CHANGESET.yaml it is noise.
+func (d DefaultBranchRef) LocalName() string {
+	return strings.TrimPrefix(d.Ref, "refs/heads/")
 }
 
 // DefaultBranch resolves the integration branch.
@@ -154,18 +173,44 @@ type Resolution struct {
 
 // Resolve answers which changeset the revision rev is working on.
 func Resolve(ctx context.Context, repo *git.Repo, rev string, db DefaultBranchRef) (Resolution, error) {
-	res := Resolution{DefaultBranch: db}
-	revSHA, err := repo.RevParse(ctx, rev)
+	r, err := newResolver(ctx, repo, db)
 	if err != nil {
-		return res, err
+		return Resolution{DefaultBranch: db}, err
 	}
+	return r.at(ctx, repo, rev)
+}
+
+// resolver holds what every revision in one command compares against: the directories the
+// integration branch has, and where each changeset's review ref points. Both are the same for
+// every branch in the repository, so a command that asks about many revisions builds one of
+// these instead of re-listing the same two things once per branch.
+type resolver struct {
+	db      DefaultBranchRef
+	onTrunk map[string]bool
+	tips    map[string]string
+}
+
+func newResolver(ctx context.Context, repo *git.Repo, db DefaultBranchRef) (*resolver, error) {
 	landed, err := DirsAt(ctx, repo, db.Ref)
 	if err != nil {
-		return res, err
+		return nil, err
 	}
 	onTrunk := map[string]bool{}
 	for _, id := range landed {
 		onTrunk[id] = true
+	}
+	tips, err := reviewTips(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	return &resolver{db: db, onTrunk: onTrunk, tips: tips}, nil
+}
+
+func (r *resolver) at(ctx context.Context, repo *git.Repo, rev string) (Resolution, error) {
+	res := Resolution{DefaultBranch: r.db}
+	revSHA, err := repo.RevParse(ctx, rev)
+	if err != nil {
+		return res, err
 	}
 
 	// One tree listing plus one batch read: the ids come from the paths and the metadata
@@ -179,7 +224,7 @@ func Resolve(ctx context.Context, repo *git.Repo, rev string, db DefaultBranchRe
 	var order []string
 	for _, e := range entries {
 		id, ok := changesetDir(e.Path)
-		if !ok || onTrunk[id] {
+		if !ok || r.onTrunk[id] {
 			continue
 		}
 		if _, seen := oids[id]; !seen {
@@ -199,57 +244,166 @@ func Resolve(ctx context.Context, repo *git.Repo, rev string, db DefaultBranchRe
 		if err != nil {
 			return res, fmt.Errorf("%s: %w", filepath.Join(Root, id, MetadataFile), err)
 		}
-		if id2 := md["id"]; id2 != "" && id2 != id {
-			return res, fmt.Errorf("%w: %s records id %q but sits in %q; the directory name is the id, so rename the directory or correct %s",
-				ErrIDMismatch, filepath.Join(Root, id, MetadataFile), id2, id, MetadataFile)
-		}
 		mdFor[id] = md
 	}
 
-	reviewTips, err := reviewTips(ctx, repo)
+	var candidates []Candidate
+	for _, id := range order {
+		c, err := candidateFor(ctx, repo, revSHA, id, mdFor[id], r.tips)
+		if err != nil {
+			return res, err
+		}
+		candidates = append(candidates, c)
+	}
+	res.Candidates = candidates
+	return choose(res), nil
+}
+
+// ResolveCurrent resolves the checked-out revision.
+//
+// It adds what the working tree holds and HEAD does not, which is the difference that makes
+// `change init` usable: it scaffolds a changeset directory and leaves it for the author to
+// commit, and `status` has to answer about it in between. The trees are still what decide
+// everything — a directory removed from HEAD is not a candidate however it sits on disk — so
+// this is an addition of uncommitted work, not a second rule.
+func ResolveCurrent(ctx context.Context, repo *git.Repo, defaultBranchOverride string) (Resolution, error) {
+	db, err := DefaultBranch(ctx, repo, defaultBranchOverride)
+	if err != nil {
+		return Resolution{}, err
+	}
+	r, err := newResolver(ctx, repo, db)
+	if err != nil {
+		return Resolution{}, err
+	}
+	res, err := r.at(ctx, repo, "HEAD")
 	if err != nil {
 		return res, err
 	}
-
-	for _, id := range order {
-		md := mdFor[id]
-		c := Candidate{
-			Changeset: Changeset{
-				Slug:   id,
-				Branch: "", // resolution does not know or need the branch
-				Base:   md["base"],
-				Dir:    filepath.Join(Root, id),
-				Exists: true,
-			},
-			Distance: -1,
-			Ignores:  strings.Fields(md["ignores"]),
-		}
-		if tip, ok := reviewTips[id]; ok {
-			c.Review = tip
-			if d, err := distance(ctx, repo, tip, revSHA); err != nil {
-				return res, err
-			} else {
-				c.Distance = d
-			}
-			terminal, err := refIsTerminal(ctx, repo, tip)
-			if err != nil {
-				return res, err
-			}
-			c.Terminal = terminal
-		}
-		res.Candidates = append(res.Candidates, c)
+	known := map[string]bool{}
+	for _, c := range res.Candidates {
+		known[c.Changeset.Slug] = true
+	}
+	for id := range r.onTrunk {
+		known[id] = true
 	}
 
-	// Stacked candidates name their parent in `base:`, so the parent is not what this
-	// revision is working on even though its directory is present.
+	dirs, err := worktreeDirs(repo)
+	if err != nil {
+		return res, err
+	}
+	var fresh []string
+	for _, id := range dirs {
+		if !known[id] {
+			fresh = append(fresh, id)
+		}
+	}
+	if len(fresh) == 0 {
+		return res, nil
+	}
+	head, err := repo.RevParse(ctx, "HEAD")
+	if err != nil {
+		return res, err
+	}
+	added := append([]Candidate{}, res.Candidates...)
+	for _, id := range fresh {
+		md, err := readMetadata(filepath.Join(repo.Dir, Root, id, MetadataFile))
+		if err != nil {
+			return res, err
+		}
+		c, err := candidateFor(ctx, repo, head, id, md, r.tips)
+		if err != nil {
+			return res, err
+		}
+		added = append(added, c)
+	}
+	res.Candidates = added
+	return choose(res), nil
+}
+
+// BranchResolution is one local branch and what the rule says about it. A branch that fails to
+// resolve is a result with Err set rather than a failed scan: one branch with a broken
+// CHANGESET.yaml is not a reason to stop answering about the others.
+type BranchResolution struct {
+	Branch     string
+	Resolution Resolution
+	Err        error
+}
+
+// BranchResolutions resolves every local branch against the integration branch. It is the
+// enumeration `queue` wants, and the one `--changeset <id>` filters: the branches carrying work
+// are the ones with a candidate, and a changeset with no branch behind it is reported from its
+// ref instead of invented here.
+//
+// The trunk listing and the ref listing are taken once for the whole scan, so the per-branch
+// cost is a tree listing, one batch read, and a distance for whichever candidate has a ref.
+// Archive refs with no branch behind them are deliberately not included: with refs created at
+// `change init`, a branchless ref is as likely an abandoned attempt as a deleted branch.
+func BranchResolutions(ctx context.Context, repo *git.Repo, db DefaultBranchRef) ([]BranchResolution, error) {
+	branches, err := localBranches(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	r, err := newResolver(ctx, repo, db)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BranchResolution, 0, len(branches))
+	for _, b := range branches {
+		res, err := r.at(ctx, repo, "refs/heads/"+b)
+		out = append(out, BranchResolution{Branch: b, Resolution: res, Err: err})
+	}
+	return out, nil
+}
+
+// candidateFor turns one directory's metadata into a candidate.
+func candidateFor(ctx context.Context, repo *git.Repo, rev, id string, md map[string]string, tips map[string]string) (Candidate, error) {
+	if id2 := md["id"]; id2 != "" && id2 != id {
+		return Candidate{}, fmt.Errorf("%w: %s records id %q but sits in %q; the directory name is the id, so rename the directory or correct %s",
+			ErrIDMismatch, filepath.Join(Root, id, MetadataFile), id2, id, MetadataFile)
+	}
+	c := Candidate{
+		Changeset: Changeset{
+			Slug:   id,
+			Base:   md["base"],
+			Dir:    filepath.Join(Root, id),
+			Exists: true,
+		},
+		Distance: -1,
+		Ignores:  strings.Fields(md["ignores"]),
+	}
+	tip, ok := tips[id]
+	if !ok {
+		return c, nil
+	}
+	c.Review = tip
+	d, err := distance(ctx, repo, tip, rev)
+	if err != nil {
+		return c, err
+	}
+	c.Distance = d
+	terminal, err := refIsTerminal(ctx, repo, tip)
+	if err != nil {
+		return c, err
+	}
+	c.Terminal = terminal
+	return c, nil
+}
+
+// choose orders the candidates and decides whether the answer is one of them.
+//
+// Two filters run before the ordering, and they answer different questions. A stacked changeset
+// names its parent in `base:`, so the parent's directory being present does not make it the work
+// in hand. `ignores:` then removes the changesets this one has declared it is only sharing a
+// branch with — the recorded answer to an ambiguity `change use` was asked about.
+func choose(res Resolution) Resolution {
 	res.Candidates = dropNamed(res.Candidates, func(c Candidate) []string {
 		return []string{parentID(c.Changeset.Base)}
 	})
-	// A recorded decision (`git pair change use`) then removes the ones this changeset has
-	// declared it is only sharing a branch with.
 	res.Candidates = dropNamed(res.Candidates, func(c Candidate) []string { return c.Ignores })
 
 	sortCandidates(res.Candidates)
+	res.Selected = nil
+	res.Ambiguous = false
 	if len(res.Candidates) > 0 {
 		res.Selected = &res.Candidates[0]
 		if len(res.Candidates) > 1 && equalDistance(res.Candidates[0], res.Candidates[1]) {
@@ -257,16 +411,7 @@ func Resolve(ctx context.Context, repo *git.Repo, rev string, db DefaultBranchRe
 			res.Selected = nil
 		}
 	}
-	return res, nil
-}
-
-// ResolveCurrent resolves the checked-out revision, resolving the integration branch first.
-func ResolveCurrent(ctx context.Context, repo *git.Repo, defaultBranchOverride string) (Resolution, error) {
-	db, err := DefaultBranch(ctx, repo, defaultBranchOverride)
-	if err != nil {
-		return Resolution{}, err
-	}
-	return Resolve(ctx, repo, "HEAD", db)
+	return res
 }
 
 // reviewTips maps changeset id to the commit its movable review ref points at, in one call.

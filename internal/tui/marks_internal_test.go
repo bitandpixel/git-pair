@@ -37,9 +37,9 @@ func marksEnv(t *testing.T) (func(span.Selector) *Session, *gittest.Fixture) {
 	f.Commit("author response", gittest.WithFile("service.go", "package main\n\nfunc Lock() { tx() }\n"))
 
 	repo := &git.Repo{Dir: f.Dir()}
-	cs, err := changeset.ForBranch(repo, readonlySlug)
+	cs, err := changeset.Current(context.Background(), repo, "")
 	if err != nil {
-		t.Fatalf("ForBranch: %v", err)
+		t.Fatalf("Current: %v", err)
 	}
 	return func(sel span.Selector) *Session {
 		summary, err := lifecycle.SummarizeHEAD(ctx, repo, cs.Slug, cs.Base)

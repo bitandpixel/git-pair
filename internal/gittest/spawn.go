@@ -10,41 +10,35 @@ import (
 	"gitpair/internal/git"
 )
 
-// SpawnRepo returns a repo handle whose git subprocesses are counted, and a function
-// reporting how many have been counted so far.
+// SpawnShim puts a logging `git` ahead of the real one on PATH and returns a function
+// reporting how many invocations have been counted since it was called.
 //
-// Some costs are properties of the implementation rather than of its answers: a resolver
-// that asks one question per changeset ref behaves identically on every fixture and takes
-// minutes in a repository with a year of landed changesets. Counting invocations is the
-// only way to assert that, and the count comes from a shim earlier on PATH than git, so the
-// code under test is not modified to be observable.
+// Some costs are properties of the implementation rather than of its answers: a resolver that
+// asks one question per changeset ref behaves identically on every fixture and takes minutes in
+// a repository with a year of landed changesets. Counting invocations is the only way to assert
+// that, and the count comes from outside the code under test, so nothing is instrumented to be
+// measured.
 //
-// Only calls made through the returned handle are counted; the fixture's own setup calls run
-// outside it on purpose, so a test measures the code and not its scaffolding.
-func (f *Fixture) SpawnRepo(t *testing.T) (*git.Repo, func() int) {
+// PATH is rewritten for the whole test process, because that is how a program finds `git`; the
+// test's own fixture calls go through the shim too, so a measurement is a delta taken around the
+// thing being measured rather than a total. Everything created before the shim is called is
+// outside the count by construction.
+func (f *Fixture) SpawnShim(t *testing.T) (count func() int) {
 	t.Helper()
 
 	real, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatalf("gittest: no git on PATH to count around: %v", err)
 	}
-	sim := t.TempDir()
-	log := filepath.Join(sim, "spawns")
+	dir := t.TempDir()
+	log := filepath.Join(dir, "spawns")
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >>\"" + log + "\"\nexec \"" + real + "\" \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(sim, "git"), []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatalf("gittest: write spawn shim: %v", err)
 	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	env := append([]string{}, f.Env()...)
-	for i, kv := range env {
-		if strings.HasPrefix(kv, "PATH=") {
-			env[i] = "PATH=" + sim + string(os.PathListSeparator) + strings.TrimPrefix(kv, "PATH=")
-		}
-	}
-	env = append(env, "GITPAIR_SPAWN_LOG="+log)
-
-	repo := &git.Repo{Dir: f.Dir(), Env: env}
-	count := func() int {
+	return func() int {
 		data, err := os.ReadFile(log)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -60,5 +54,11 @@ func (f *Fixture) SpawnRepo(t *testing.T) (*git.Repo, func() int) {
 		}
 		return n
 	}
-	return repo, count
+}
+
+// SpawnRepo returns a repo handle whose git subprocesses are counted. The fixture's own calls
+// are counted as well once this is called, so measure around the code, not across the test.
+func (f *Fixture) SpawnRepo(t *testing.T) (*git.Repo, func() int) {
+	t.Helper()
+	return &git.Repo{Dir: f.Dir(), Env: f.Env()}, f.SpawnShim(t)
 }

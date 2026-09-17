@@ -411,6 +411,47 @@ func TestResolveUnarchivedCandidateSortsLast(t *testing.T) {
 	}
 }
 
+// A directory under changesets/ with no CHANGESET.yaml is not a changeset. Scratch directories
+// and whatever a squashed merge leaves behind must not become candidates the author has to
+// explain away.
+func TestResolveIgnoresADirectoryWithoutMetadata(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("work")
+	f.Write("changesets/scratch/notes.txt", "not a changeset\n")
+	f.CommitChangeset("work", "main")
+
+	got := resolveAt(t, f, "HEAD")
+	if selectedID(got) != "work" || len(got.Candidates) != 1 {
+		t.Errorf("selected %q from %v, want only work", selectedID(got), candidateIDs(got))
+	}
+}
+
+// A directory that has landed stays landed. Copying one out of the integration branch into a
+// working tree — a conflict resolution, a `git checkout main -- changesets/x/` — must not make
+// it work in progress on this branch, so the uncommitted additions are checked against trunk
+// too.
+func TestResolveWorktreeAdditionsAreStillCheckedAgainstTrunk(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("landed")
+	f.CommitChangeset("landed", "main")
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land it", "landed")
+
+	f.CreateBranch("work")
+	// Left uncommitted on purpose: it is the working-tree addition the test is about.
+	f.Write("changesets/landed/CHANGESET.yaml", "id: landed\nbase: main\n")
+
+	res, err := changeset.ResolveCurrent(context.Background(), repo(f), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Selected != nil || len(res.Candidates) != 0 {
+		t.Errorf("candidates %v selected %q, want nothing: the directory is on trunk", candidateIDs(res), selectedID(res))
+	}
+}
+
 func distances(got changeset.Resolution) []int {
 	out := make([]int, len(got.Candidates))
 	for i, c := range got.Candidates {
@@ -470,6 +511,9 @@ func TestResolveCostDoesNotGrowWithExistingChangesets(t *testing.T) {
 	}
 	// Two listings, one batch read, one ref listing, one distance, one terminal check, with
 	// slack. The formulation this replaced measured 1,802 on the same shape.
+	if spawns < 1 {
+		t.Fatalf("Resolve cost %d invocations: the counter measured nothing, so the bound below proves nothing", spawns)
+	}
 	if spawns > 10 {
 		t.Errorf("Resolve cost %d git invocations with 300 review refs present, want a handful", spawns)
 	}

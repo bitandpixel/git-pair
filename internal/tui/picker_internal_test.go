@@ -39,9 +39,9 @@ func pickerFixture(t *testing.T, reviews int) (reviewModel, *gittest.Fixture) {
 	}
 
 	repo := &git.Repo{Dir: f.Dir()}
-	cs, err := changeset.ForBranch(repo, readonlySlug)
+	cs, err := changeset.Current(context.Background(), repo, "")
 	if err != nil {
-		t.Fatalf("ForBranch: %v", err)
+		t.Fatalf("Current: %v", err)
 	}
 	summary, err := lifecycle.SummarizeHEAD(ctx, repo, cs.Slug, cs.Base)
 	if err != nil {
