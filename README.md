@@ -887,7 +887,8 @@ with the repository root as its working directory and receives the absolute path
 Diff viewing goes through git, so git configuration decides what you see, e.g.
 `git config diff.tool vimdiff`. `git pair diff --tool` and the TUI's `Enter` key both run
 `git difftool --no-prompt <from> -- <paths>` — one revision, so the tool compares the span's
-start against your **working tree** instead of two blobs. That is what makes the right-hand
+start against your **working tree** instead of two blobs, and a path may be a directory, which is
+git's own way of asking for every file the span changed under it. That is what makes the right-hand
 buffer the real file: edits persist, and changes you made with `e` show up when you open the
 tool again. A span that ends at a commit instead of your working tree has no working tree in the
 comparison, so it passes both pinned revisions — `git difftool --no-prompt <from> <to> -- <paths>`
@@ -913,36 +914,54 @@ marks come first, the reviewed counter under them, then the changeset documents:
 tuishow
 base: main  span: unreviewed
 
-○ src/a.ts
+▾ ○ src/
+  ▾ ○ ui/
+      ○ picker.ts
+  ○ a.ts
 
-0 / 1 reviewed
+0 / 2 reviewed
 
 ABOUT.md
 ▾ Threads
     does-the-lock-cover-the-map.md
     + new thread…
 ────────────────────────────────────────
-j/k move  tab section  enter open  d diff  p preview  e edit  space reviewed  a about  t new thread
-T hide threads  v spans  V picker  s submit  q quit
+j/k move  tab section  h/l fold  c fold all  enter open  d diff  p preview  e edit  space reviewed
+a about  t new thread  T hide threads  v spans  V picker  s submit  q quit
 ```
 
 The screen is one navigable list in two blocks: the files the diff touched, and below the
 counter the documents the review is made of. `j` runs off the bottom of the files into the
 section below — reading the code and
 then reading what the changeset says about it is one motion, not two modes — and `Tab` toggles
-between the halves. `Enter` does whatever the row under the cursor is for: the difftool for a
-file, collapse or expand for the `Threads` heading, the title prompt for `+ new thread…`, and
-for a changeset document the same decision `d` makes. `d` means diff on any row. A file row
-always has a comparison; a document is worth diffing only when the span changed it *and* it
-already existed where the span starts — on a second round of review, that is the two lines the
-author rewrote after your last submission, which is what you came back for. A document the
-changeset invented has nothing on the left side of that comparison, so it opens in the editor,
-and so does one the span left alone; the editor's exit carries a note saying which of the two
+between the halves. The files are a tree, not a list of paths: each sits under its directory, a
+directory holding nothing but one directory is folded into that row (`src/` above holds `a.ts` and
+`ui/`, so it gets its own row; a chain of single-child directories would be one row and print
+`docs/plans/active/`), and every row prints only the name the rows above it have not already said.
+`h` and `l` fold and unfold the directory under the cursor — arrows do the same, and `Enter` does
+both, the way it does for the thread heading — and `c` folds the whole tree and opens it again,
+which is how a changeset of a hundred files gets read for shape before it gets read for detail.
+Folding a directory that was hiding the cursor leaves the cursor on the directory, not on whatever
+row its old index now points at.
+A directory's mark is its subtree's: `✓` when every file under it is reviewed, `○` when none is,
+and between the two the count of what is left (`▸ ◐ src/ 2/7`) — a tick there would be a claim about
+files nobody opened. `Enter` does whatever the row under the cursor is for: the difftool for a
+file, fold or unfold for a directory and for the `Threads` heading, the title prompt for `+ new
+thread…`, and for a changeset document the same decision `d` makes. `d` means diff on any row. A file
+row always has a comparison; so does a directory, where git expands the pathspec into every file the
+span changed under it — `d` is "diff this package". A document
+is worth diffing only when the span changed it *and* it already existed where the span starts — on a
+second round of review, that is the two lines the author rewrote after your last submission, which is
+what you came back for. A document the
+changeset invented has nothing on the left side of that comparison, so it opens in the editor, and so
+does one the span left alone; the editor's exit carries a note saying which of the two
 happened, because anything written before the handoff is under the editor by the time you look
-again. `e` opens the editor regardless of the span, so it is always one key away. `Space`
-toggles reviewed on a
-file row — which stays under the cursor, since marking is not navigation — and refuses the
-rows below the counter. `a` opens
+again. `e` opens the editor regardless of the span, so it is always one key away — for a directory it
+names the two keys that do reach what is under it instead. `Space`
+toggles reviewed on a file row — which stays under the cursor, since marking is not navigation — and
+on a directory row it sets every file under it, folded or not, because a fold is a way of looking at
+the list rather than a statement about what has been read; the next press clears them. The rows below
+the counter are read rather than diffed, so marking one says so. `a` opens
 `ABOUT.md` in the editor whatever the span did; `t` prompts for a new thread from anywhere;
 `T` collapses the thread list; `v`
 steps to the next span this session has been in — the span it opened on, the full and
@@ -962,9 +981,12 @@ rows.
 On a wide terminal the list shares the screen with a preview. From 100 columns and 16 rows the
 session puts a column beside the list showing the diff of whatever the cursor is on — the span's
 diff, the same one `git pair diff` and the reviewed counter describe — with git's own `+N −M` in its
-header. The list takes the width its own paths need, up to 48 columns, and the diff gets the rest:
+header. The list takes the width its own rows need, up to 48 columns, and the diff gets the rest:
 a changeset of short names is not made to share the screen with whitespace, and one long vendored
-path cannot take the diff's columns. `ctrl-f` and `ctrl-b` page through a diff too long to fit, and the note along the bottom says how
+path cannot take the diff's columns — which is one thing the tree is for, since a row prints a base
+name where the flat list printed the whole path. Park the cursor on a directory and the pane shows
+what the span did to the whole subtree, git's pathspec doing the expanding, with the subtree's `+N −M`
+rather than one file's. `ctrl-f` and `ctrl-b` page through a diff too long to fit, and the note along the bottom says how
 much of it is left; `ctrl-d` still quits, which is why paging is not `ctrl-d`. Each line carries the
 number git gave it in its hunk header, and a line too wide for the column is broken rather than cut,
 with its colour carried across the break. Tabs are shown as the spaces they advance to, because a tab
@@ -1004,8 +1026,10 @@ computing the merge base itself, and how the same span can be described from eit
 A span can end at a commit instead of your working tree — `review open --head-review=-1`,
 `--head-commit=abc1234`, `--head-ref=origin/main` — and that is a look at history, not a review. The
 screen stops offering anything that changes something: the counter's place is taken by
-`HISTORICAL · READ ONLY`, files lose their reviewed gutter, `+ new thread…` is gone, and the
-shortcut bar lists only what still works. Pressing a key that does not work says why, names the head
+`HISTORICAL · READ ONLY`, files and directories lose their reviewed gutter, `+ new thread…` is gone, and the
+shortcut bar lists only what still works. Folding the tree is one of the things that still works — it
+changes nothing about the review, and a historical changeset is as worth reading for shape as a live
+one. Pressing a key that does not work says why, names the head
 the span is stuck on, and points at `V`, which is how you choose a span you can review — `v` walks the
 session's spans and cannot promise where it lands. The difftool
 over a historical span compares its two pinned commits rather than your working tree, so it cannot
@@ -1070,7 +1094,10 @@ Marks also survive quitting: they are written under the repository's git directo
 the review was looking at, with each file's diff key stored beside it. Reopening the same commit
 restores exactly the marks whose files still have that content, so a new commit, a rebase, or a
 different span cannot bring back a mark that no longer describes anything, and clearing every mark
-is remembered rather than resurrected. Nothing is committed or shared — `git status` cannot see the
+is remembered rather than resurrected. A directory you marked is in that file as its files, one row
+each — nothing is recorded about the directory, and no fold is — which is why marking a package and
+reopening it lands the marks on the same nine files rather than on whatever the tree happens to look
+like. Nothing is committed or shared — `git status` cannot see the
 directory and `git add` cannot stage it — and no command reports marks, so derived state is
 unaffected. Deleting that directory forgets the marks; the newest 12 commits per changeset are
 kept.
