@@ -240,7 +240,7 @@ func (s *Session) Reload(ctx context.Context) error {
 // step used to jump out of a read-only span unconditionally, which made the *second* historical span
 // on the ring unreachable -- `v` closed a loop between the last reviewable stop and the first
 // historical one, and the reviewer's word for it was "stuck cycling".
-func (s *Session) StepSpan(ctx context.Context) (pos, total int, err error) {
+func (s *Session) StepSpan(ctx context.Context) (StepResult, error) {
 	return s.step(ctx, false)
 }
 
@@ -249,28 +249,67 @@ func (s *Session) StepSpan(ctx context.Context) (pos, total int, err error) {
 // reviewer who cannot mark a file is not walking the ring -- they are leaving. The credit for that is
 // the refusal's, spent on the next press, so a reviewer comparing two pieces of history keeps their
 // walk.
-func (s *Session) StepOut(ctx context.Context) (pos, total int, err error) {
+func (s *Session) StepOut(ctx context.Context) (StepResult, error) {
 	return s.step(ctx, true)
 }
 
-// A stop that no longer resolves -- the review ref it named is gone, the branch was deleted -- leaves
-// the session where it was: a span is only ever replaced by a whole span that works. Both step
-// functions return the stop's 1-based position and the number of stops.
-func (s *Session) step(ctx context.Context, escaping bool) (pos, total int, err error) {
-	total = len(s.ring)
+// A stop that no longer resolves -- the tag it named was deleted, the review ref is gone, the branch
+// was force-pushed away -- is passed over, and reported in StepResult.Skipped. Blocking there would
+// make one dead stop a wall: the same press would fail the same way forever, with `V` the only way
+// past. Skipping it is safe because SetSpan resolves before it replaces anything, so a stop that fails
+// leaves the session exactly where it was and the next candidate is a whole span, never half of one.
+// The stop stays on the ring: a tag that comes back is a stop again.
+func (s *Session) step(ctx context.Context, escaping bool) (StepResult, error) {
+	total := len(s.ring)
+	res := StepResult{Pos: s.ringIdx + 1, Total: total}
 	if total < 2 {
-		return 1, total, fmt.Errorf("this session has only been in this span so far \u2014 V chooses another")
+		return res, fmt.Errorf("this session has only been in this span so far \u2014 V chooses another")
 	}
-	target := (s.ringIdx + 1) % total
-	if escaping && s.current.Historical() {
+
+	first := (s.ringIdx + 1) % total
+	if escaping {
 		if live := s.liveStop(); live >= 0 && live != s.ringIdx {
-			target = live
+			first = live
 		}
 	}
-	if err := s.SetSpan(ctx, s.ring[target]); err != nil {
-		return s.ringIdx + 1, total, err
+
+	var why error
+	for i := 0; i < total; i++ {
+		target := (first + i) % total
+		if target == s.ringIdx {
+			continue // where the session is standing is not somewhere to step to
+		}
+		err := s.SetSpan(ctx, s.ring[target])
+		if err == nil {
+			res.Pos = s.ringIdx + 1
+			return res, nil
+		}
+		if why == nil {
+			why = err
+		}
+		res.Skipped = append(res.Skipped, SkippedStop{Selector: s.ring[target], Reason: err.Error()})
 	}
-	return s.ringIdx + 1, total, nil
+	if why == nil {
+		why = fmt.Errorf("no other span to step to")
+	}
+	return res, why
+}
+
+// StepResult is where a step landed.
+type StepResult struct {
+	// Pos and Total are the stop it landed on and how many there are, 1-based, which is how the
+	// status line says it: "3 of 4".
+	Pos, Total int
+	// Skipped are the stops the step passed over because they no longer resolve, in the order it met
+	// them. Reporting them is the whole deal: silently skipping would look like a shorter ring, and a
+	// reviewer would go looking for the span that is really still there.
+	Skipped []SkippedStop
+}
+
+// SkippedStop is a span the step could not enter, with git's reason.
+type SkippedStop struct {
+	Selector span.Selector
+	Reason   string
 }
 
 // liveStop is a stop the reviewer can review into: the last one visited, or, for a session

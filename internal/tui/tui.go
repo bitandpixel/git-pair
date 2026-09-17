@@ -449,15 +449,15 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if refused {
 			step = m.sess.StepOut
 		}
-		pos, total, err := step(m.ctx)
+		res, err := step(m.ctx)
 		if err != nil {
-			m.setStatus(err.Error(), true)
+			m.setStatus(stepFailureNote(res, err), true)
 		} else {
 			// The span is what the preview diffs, so every cached patch is about a span
 			// that is no longer the one on screen.
 			m.forgetPatches()
 			m.refresh()
-			m.setStatus(spanNote(before, m.sess, pos, total), false)
+			m.setStatus(spanNote(before, m.sess, res), false)
 		}
 	case key.Type == tea.KeyRunes && firstRune(key) == 'r':
 		// Refreshing a drifted ref is not one of the mutating keys the read-only gate refuses:

@@ -367,7 +367,15 @@ cycling through… first to last and back to first".
 The rule was right about the need and wrong about the trigger. A reviewer who cannot mark a file is
 leaving; a reviewer pressing `v` is walking. So the escape is now earned by a refusal: the read-only
 gate credits the next `v`, and that press alone means "get me out" (`Session.StepOut`), while every
-other press is the plain walk (`Session.StepSpan`). The tests are `TestSessionStepSpanReachesEveryStop`
+other press is the plain walk (`Session.StepSpan`). A second defect in the same corner, found while fixing the first: a stop whose endpoint had stopped
+resolving (a deleted tag, a force-pushed branch) stopped the walk *entirely* — every press failed the
+same way and `V` was the only way past. `v` now steps over such stops and names them, reason included
+(`StepResult.Skipped`, worded by `skippedNote`), and the stop stays on the ring so it returns with the
+ref. Where nothing else resolves either, the press says so and moves nothing. Tests:
+`TestStepSpanSkipsAStopThatNoLongerResolves`, `TestStepSpanNamesEveryStopItSkipped`,
+`TestStepSpanSaysSoWhenEveryOtherStopIsDead`, `TestVNamesTheStopItSkipped`.
+
+The tests are `TestSessionStepSpanReachesEveryStop`
 (the loop, as reported), `TestSessionStepOutGoesWhereStepSpanWouldNot`,
 `TestARefusalMakesTheNextVMeanGetMeOut` and `TestVWithoutARefusalWalksEvenFromHistory`, and the
 mutant that restores the old behaviour is caught by three of them. Wherever this document says the

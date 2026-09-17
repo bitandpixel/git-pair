@@ -240,10 +240,10 @@ func TestSessionStepSpanWalksFullChangesetAndUnreviewed(t *testing.T) {
 	if sess.CanToggleSpan() {
 		t.Error("CanToggleSpan() = true before any review submission")
 	}
-	if _, total, err := sess.StepSpan(context.Background()); err == nil {
+	if res, err := sess.StepSpan(context.Background()); err == nil {
 		t.Error("StepSpan succeeded with no review submissions and nowhere to step")
-	} else if total != 1 {
-		t.Errorf("the ring holds %d stops before any review, want only the span it opened on", total)
+	} else if res.Total != 1 {
+		t.Errorf("the ring holds %d stops before any review, want only the span it opened on", res.Total)
 	}
 
 	// A review that touches one file, then the author's response to it.
@@ -258,12 +258,12 @@ func TestSessionStepSpanWalksFullChangesetAndUnreviewed(t *testing.T) {
 		t.Fatal("CanToggleSpan() = false after a review submission")
 	}
 
-	pos, total, err := sess.StepSpan(context.Background())
+	res, err := sess.StepSpan(context.Background())
 	if err != nil {
 		t.Fatalf("StepSpan: %v", err)
 	}
-	if pos != 2 || total != 2 {
-		t.Errorf("StepSpan landed on stop %d of %d, want 2 of 2", pos, total)
+	if res.Pos != 2 || res.Total != 2 {
+		t.Errorf("StepSpan landed on stop %d of %d, want 2 of 2", res.Pos, res.Total)
 	}
 	if !sess.Unreviewed() {
 		t.Error("Unreviewed() = false after stepping to the unreviewed span")
@@ -279,12 +279,12 @@ func TestSessionStepSpanWalksFullChangesetAndUnreviewed(t *testing.T) {
 	// Marks are keyed on a file's diff within a span: stepping to a span where that diff
 	// is not the whole story must not carry the mark over quietly.
 	sess.Toggle(indexOfFile(sess.Files(), "service.go"))
-	pos, total, err = sess.StepSpan(context.Background())
+	res, err = sess.StepSpan(context.Background())
 	if err != nil {
 		t.Fatalf("StepSpan back: %v", err)
 	}
-	if pos != 1 || total != 2 {
-		t.Errorf("StepSpan wrapped to %d of %d, want 1 of 2", pos, total)
+	if res.Pos != 1 || res.Total != 2 {
+		t.Errorf("StepSpan wrapped to %d of %d, want 1 of 2", res.Pos, res.Total)
 	}
 	if sess.Unreviewed() {
 		t.Error("Unreviewed() = true after stepping back to the full span")
@@ -326,7 +326,7 @@ func TestSessionStepSpanWalksSpansChosenWithThePicker(t *testing.T) {
 	// A whole turn of the ring arrives back at the stop the reviewer chose. That is the
 	// point of the ring: a custom span does not vanish the moment you step off it.
 	for i := 0; i < total; i++ {
-		if _, _, err := sess.StepSpan(ctx); err != nil {
+		if _, err := sess.StepSpan(ctx); err != nil {
 			t.Fatalf("StepSpan %d: %v", i+1, err)
 		}
 	}
@@ -354,11 +354,11 @@ func TestSessionRescanAddsNoStopsToTheRing(t *testing.T) {
 	}
 }
 
-// A stop that no longer resolves must not move the session half-way into it, and must not
-// chew through the rest of the ring. The realistic version: the reviewer typed a tag as an
-// endpoint — the picker takes a typed revision — and the tag has been deleted or moved by the
-// time `v` steps back onto it.
-func TestStepSpanStopsShortWhenAStopNoLongerResolves(t *testing.T) {
+// A stop whose endpoint no longer resolves -- the tag deleted, the branch force-pushed away -- is
+// passed over rather than being a wall, and it is named. Blocking there made one dead stop stop the
+// walk: every press failed the same way, and `V` was the only way past. A walk that got shorter in
+// silence would be worse in a different way, so the report says which spans it stepped over and why.
+func TestStepSpanSkipsAStopThatNoLongerResolves(t *testing.T) {
 	e := newEnv(t)
 	e.f.CommitReviewMarker(slug, "feedback")
 	tagged := e.f.Head()
@@ -368,43 +368,138 @@ func TestStepSpanStopsShortWhenAStopNoLongerResolves(t *testing.T) {
 	sess := e.session(t, span.Full())
 	live := span.Selector{Base: span.Commit(e.f.Parent(e.f.Head())), Head: span.WorkingTree()}
 	typed := span.Selector{Base: span.ChangesetBase(), Head: span.Commit("probe-tag")}
-	if err := sess.SetSpan(ctx, live); err != nil {
-		t.Fatalf("SetSpan live: %v", err)
-	}
-	if err := sess.SetSpan(ctx, typed); err != nil {
-		t.Fatalf("SetSpan tagged: %v", err)
-	}
-	if err := sess.SetSpan(ctx, live); err != nil {
-		t.Fatalf("SetSpan live again: %v", err)
+	for _, sel := range []span.Selector{live, typed, live} {
+		if err := sess.SetSpan(ctx, sel); err != nil {
+			t.Fatalf("SetSpan(%s): %v", sel.Display(), err)
+		}
 	}
 	if stops := len(sess.SpanRing()); stops != 4 {
 		t.Errorf("the ring holds %d stops, want 4: the ring is a set of spans, not a log of "+
 			"keystrokes", stops)
 	}
+	if pos, _ := sess.SpanPosition(); pos != 3 {
+		t.Fatalf("standing on stop %d, want the live span at 3", pos)
+	}
 
 	held := sess.Span().Label
-	pos, total := sess.SpanPosition()
 	e.f.MustGit("update-ref", "-d", "refs/tags/probe-tag")
-	if _, _, err := sess.StepSpan(ctx); err == nil {
-		t.Fatal("StepSpan stepped onto a span whose typed endpoint no longer resolves")
+	res, err := sess.StepSpan(ctx)
+	if err != nil {
+		t.Fatalf("a dead stop stopped the walk: %v", err)
 	}
-	if sess.Span().Label != held {
-		t.Errorf("a broken stop moved the session from %s to %s", held, sess.Span().Label)
+	if res.Pos != 1 {
+		t.Errorf("v went to stop %d, want it past the dead stop and around to stop 1", res.Pos)
 	}
-	if now, _ := sess.SpanPosition(); now != pos {
-		t.Errorf("the failed step moved the ring position from %d to %d", pos, now)
+	if held == sess.Span().Label {
+		t.Errorf("the session did not move off %s", held)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("the step reported %d skipped stops, want 1: %+v", len(res.Skipped), res.Skipped)
+	}
+	if got := res.Skipped[0].Selector.Key(); got != typed.Key() {
+		t.Errorf("the step skipped %q, want the span chosen by the typed tag", got)
+	}
+	if res.Skipped[0].Reason == "" {
+		t.Error("a skipped stop with no reason reads as a span that vanished, not one git cannot reach")
 	}
 
-	// The ring itself is intact: with the tag back, the same press arrives at it.
+	// The ring is intact: with the tag back, the stop is where it always was, and the walk stops
+	// reporting it.
 	e.f.MustGit("update-ref", "refs/tags/probe-tag", tagged)
-	if _, _, err := sess.StepSpan(ctx); err != nil {
-		t.Fatalf("StepSpan after the tag came back: %v", err)
+	for i := 0; i < 3; i++ {
+		res, err := sess.StepSpan(ctx)
+		if err != nil {
+			t.Fatalf("StepSpan %d: %v", i+1, err)
+		}
+		if len(res.Skipped) != 0 {
+			t.Fatalf("step %d skipped %d stops with the tag back: %+v", i+1, len(res.Skipped), res.Skipped)
+		}
+		if got := sess.Selector().Head; got.Kind == span.KindCommit && got.Name == "probe-tag" {
+			return // reached it, without skipping anything on the way
+		}
 	}
-	if got := sess.Selector().Head; got.Kind != span.KindCommit || got.Name != "probe-tag" {
-		t.Errorf("after recovery the head is %s %q, want the typed probe-tag", got.Kind, got.Name)
+	t.Error("walking the ring after the tag came back never arrived at the typed span")
+}
+
+// Two dead stops in a row are two names in the report. One count would leave the reviewer wondering
+// which of the spans they chose is gone.
+func TestStepSpanNamesEveryStopItSkipped(t *testing.T) {
+	e := newEnv(t)
+	e.f.CommitReviewMarker(slug, "feedback")
+	first := e.f.Head()
+	e.f.MustGit("tag", "tag-a", first)
+	e.f.Commit("more work", gittest.WithFile("service.go", "package main\n\nfunc Lock() { tx(); more() }\n"))
+	e.f.MustGit("tag", "tag-b", e.f.Head())
+	ctx := context.Background()
+
+	sess := e.session(t, span.Full())
+	spanA := span.Selector{Base: span.ChangesetBase(), Head: span.Commit("tag-a")}
+	spanB := span.Selector{Base: span.ChangesetBase(), Head: span.Commit("tag-b")}
+	for _, sel := range []span.Selector{spanA, spanB, span.SinceReview(-1)} {
+		if err := sess.SetSpan(ctx, sel); err != nil {
+			t.Fatalf("SetSpan(%s): %v", sel.Display(), err)
+		}
 	}
-	if _, totalNow := sess.SpanPosition(); totalNow != total {
-		t.Errorf("the ring shrank from %d stops to %d", total, totalNow)
+	e.f.MustGit("update-ref", "-d", "refs/tags/tag-a")
+	e.f.MustGit("update-ref", "-d", "refs/tags/tag-b")
+
+	res, err := sess.StepSpan(ctx)
+	if err != nil {
+		t.Fatalf("StepSpan: %v", err)
+	}
+	if len(res.Skipped) != 2 {
+		t.Fatalf("the step reported %d skipped stops, want both dead ones: %+v", len(res.Skipped), res.Skipped)
+	}
+	want := map[string]bool{spanA.Key(): true, spanB.Key(): true}
+	for _, got := range res.Skipped {
+		if !want[got.Selector.Key()] {
+			t.Errorf("skipped %q, want one of the two tagged spans", got.Selector.Key())
+		}
+		if got.Reason == "" {
+			t.Errorf("skipped %s with no reason", got.Selector.Display())
+		}
+	}
+}
+
+// When every other stop is dead too there is nowhere to go, and that is what gets said -- with the
+// stops named, so the reviewer knows which spans to go and resurrect.
+func TestStepSpanSaysSoWhenEveryOtherStopIsDead(t *testing.T) {
+	e := newEnv(t)
+	tagged := e.f.Commit("more work", gittest.WithFile("service.go",
+		"package main\n\nfunc Lock() { tx() }\n"))
+	e.f.MustGit("tag", "tag-a", tagged)
+	tagged2 := e.f.Commit("even more", gittest.WithFile("service.go",
+		"package main\n\nfunc Lock() { tx(); more() }\n"))
+	e.f.MustGit("tag", "tag-b", tagged2)
+	ctx := context.Background()
+
+	// No review submissions, so the presets are not on the ring: three stops, two of them tags.
+	sess := e.session(t, span.Selector{Base: span.Commit(e.f.Parent(e.f.Head())), Head: span.WorkingTree()})
+	for _, sel := range []span.Selector{
+		{Base: span.ChangesetBase(), Head: span.Commit("tag-a")},
+		{Base: span.ChangesetBase(), Head: span.Commit("tag-b")},
+		{Base: span.Commit(e.f.Parent(e.f.Head())), Head: span.WorkingTree()},
+	} {
+		if err := sess.SetSpan(ctx, sel); err != nil {
+			t.Fatalf("SetSpan(%s): %v", sel.Display(), err)
+		}
+	}
+	if _, total := sess.SpanPosition(); total != 3 {
+		t.Fatalf("the ring holds %d stops, want the span it opened on and the two tagged ones", total)
+	}
+	held := sess.Span().Label
+	e.f.MustGit("update-ref", "-d", "refs/tags/tag-a")
+	e.f.MustGit("update-ref", "-d", "refs/tags/tag-b")
+
+	res, err := sess.StepSpan(ctx)
+	if err == nil {
+		t.Fatalf("the step moved to %s with nowhere left to go", sess.Span().Label)
+	}
+	if sess.Span().Label != held {
+		t.Errorf("a step with nowhere to go moved the session from %s to %s", held, sess.Span().Label)
+	}
+	if len(res.Skipped) != 2 {
+		t.Errorf("the failure named %d skipped stops, want both: %+v", len(res.Skipped), res.Skipped)
 	}
 }
 
@@ -594,7 +689,7 @@ func TestSessionStepFromHistoricalReturnsToAReviewableSpan(t *testing.T) {
 
 	// StepOut, not StepSpan: the refusal is what earns the escape. See the two tests below for
 	// what a plain step does instead.
-	if _, _, err := sess.StepOut(ctx); err != nil {
+	if _, err := sess.StepOut(ctx); err != nil {
 		t.Fatalf("StepOut: %v", err)
 	}
 	if !sess.Span().Live() {
@@ -626,7 +721,7 @@ func TestSessionStepFromHistoricalGoesBackWhereItWasReviewing(t *testing.T) {
 		t.Fatalf("the custom span did not resolve read-only, want it to")
 	}
 
-	if _, _, err := working.StepOut(ctx); err != nil {
+	if _, err := working.StepOut(ctx); err != nil {
 		t.Fatalf("StepSpan: %v", err)
 	}
 	if got := working.Selector().Base; got.Kind != span.KindCommit {
@@ -776,11 +871,14 @@ func TestSessionStepSpanReachesEveryStop(t *testing.T) {
 
 	visited := map[int]bool{}
 	for i := 0; i < total; i++ {
-		pos, _, err := sess.StepSpan(ctx)
+		res, err := sess.StepSpan(ctx)
 		if err != nil {
 			t.Fatalf("StepSpan %d: %v", i+1, err)
 		}
-		visited[pos] = true
+		visited[res.Pos] = true
+		if len(res.Skipped) != 0 {
+			t.Fatalf("step %d skipped %d stops; every one of these resolves", i+1, len(res.Skipped))
+		}
 	}
 	if len(visited) != total {
 		t.Errorf("a turn of the ring visited %d of %d stops (%v); a step that always escapes leaves stops unreachable",
@@ -813,21 +911,21 @@ func TestSessionStepOutGoesWhereStepSpanWouldNot(t *testing.T) {
 		return sess
 	}
 
-	stepped, total, err := inHistory().StepSpan(ctx)
+	stepRes, err := inHistory().StepSpan(ctx)
 	if err != nil {
 		t.Fatalf("StepSpan: %v", err)
 	}
-	if stepped != 1 || total != 4 {
-		t.Errorf("v from history went to stop %d of %d, want the next stop around the ring", stepped, total)
+	if stepRes.Pos != 1 || stepRes.Total != 4 {
+		t.Errorf("v from history went to stop %d of %d, want the next stop around the ring", stepRes.Pos, stepRes.Total)
 	}
 
 	same := inHistory()
-	escaped, _, err := same.StepOut(ctx)
+	escaped, err := same.StepOut(ctx)
 	if err != nil {
 		t.Fatalf("StepOut: %v", err)
 	}
-	if escaped != 3 {
-		t.Errorf("the escape went to stop %d, want the unreviewed span the reviewer was on before history", escaped)
+	if escaped.Pos != 3 {
+		t.Errorf("the escape went to stop %d, want the unreviewed span the reviewer was on before history", escaped.Pos)
 	}
 	if !same.Span().Live() {
 		t.Errorf("the escape landed on %s, which is read-only as well", same.Span().Label)

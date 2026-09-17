@@ -406,6 +406,13 @@ func (s Span) RefreshRef(ctx context.Context, repo *git.Repo, name string) (Span
 // two different routes is still two stops a keystroke apart.
 func (s Selector) Key() string { return s.Base.key() + "\x1f" + s.Head.key() }
 
+// Display names a span from what the reviewer chose, without resolving anything. That is the point:
+// it is how `v` talks about a stop it could not enter, where the commits are unknown to git just then
+// -- which is the reason for skipping it.
+func (s Selector) Display() string {
+	return s.Base.String() + ".." + s.Head.String()
+}
+
 func (c Checkpoint) key() string {
 	switch c.Kind {
 	case KindReview:

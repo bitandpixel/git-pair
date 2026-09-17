@@ -390,3 +390,32 @@ func TestVWithoutARefusalWalksEvenFromHistory(t *testing.T) {
 		t.Errorf("v after an unrelated key went to stop %d, want the walk to continue to stop 2", pos)
 	}
 }
+
+// Skipping only helps if the reviewer can read it. A walk that passes over a span in silence looks
+// exactly like a ring that forgot a span -- so the status names what was skipped and why, on the key
+// press that skipped it.
+func TestVNamesTheStopItSkipped(t *testing.T) {
+	m, f := readonlyModel(t, span.Full())
+	ctx := context.Background()
+	f.MustGit("tag", "gone-tag", f.Head())
+	if err := m.sess.SetSpan(ctx, span.Selector{Base: span.ChangesetBase(), Head: span.Commit("gone-tag")}); err != nil {
+		t.Fatalf("SetSpan(tagged): %v", err)
+	}
+	// Stand on the stop before the tagged one, so the next `v` is the press that meets it.
+	if err := m.sess.SetSpan(ctx, span.SinceReview(-1)); err != nil {
+		t.Fatalf("SetSpan(unreviewed): %v", err)
+	}
+	m.refresh()
+	f.MustGit("update-ref", "-d", "refs/tags/gone-tag")
+
+	m = pressKey(t, m, runeKey('v'))
+	for _, want := range []string{"span ", "skipped", "gone-tag"} {
+		if !strings.Contains(m.status, want) {
+			t.Errorf("after skipping a span whose tag is gone the status says %q, want it to name %q", m.status, want)
+		}
+	}
+	// The reason travels with the name: "skipped X" alone reads as a span that was deleted.
+	if strings.Count(m.status, "skipped") != 1 {
+		t.Errorf("the status repeats the skip rather than naming one span: %q", m.status)
+	}
+}

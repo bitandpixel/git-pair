@@ -246,7 +246,7 @@ func (m reviewModel) applySpan(base, head span.Checkpoint) (tea.Model, tea.Cmd) 
 	m.forgetPatches()
 	m.refresh()
 
-	m.setStatus(spanNote(before, m.sess, 0, 0), false)
+	m.setStatus(spanNote(before, m.sess, StepResult{}), false)
 	return m, nil
 }
 
@@ -254,11 +254,11 @@ func (m reviewModel) applySpan(base, head span.Checkpoint) (tea.Model, tea.Cmd) 
 // spans this session has been in when there are enough of them to be worth a position, how
 // many reviewed marks stopped applying, and whether the screen went read-only with it. The
 // position is left out for two-stop sessions, where it would only be noise.
-func spanNote(before int, sess *Session, pos, total int) string {
+func spanNote(before int, sess *Session, res StepResult) string {
 	sp := sess.Span()
 	note := "span " + sp.Label
-	if total > 2 {
-		note += fmt.Sprintf(" (%d of %d)", pos, total)
+	if res.Total > 2 {
+		note += fmt.Sprintf(" (%d of %d)", res.Pos, res.Total)
 	}
 	if dropped := before - countMarked(sess); dropped > 0 {
 		note += fmt.Sprintf(" \u00b7 %d reviewed mark%s no longer applies", dropped, plural(dropped))
@@ -266,7 +266,35 @@ func spanNote(before int, sess *Session, pos, total int) string {
 	if sp.Historical() {
 		note += " \u00b7 read-only"
 	}
-	return note
+	return note + skippedNote(res.Skipped)
+}
+
+// skippedNote says what a step passed over. The spans are named rather than counted, because the
+// reviewer's next question is "which one", and each carries git's reason, because "review 0..probe-tag"
+// is not yet a diagnosis. Silence would be worse than either: an unexplained short walk reads as a ring
+// that lost a span, and the span is still there.
+func skippedNote(skipped []SkippedStop) string {
+	if len(skipped) == 0 {
+		return ""
+	}
+	what := make([]string, 0, len(skipped))
+	for _, s := range skipped {
+		what = append(what, fmt.Sprintf("%s: %s", s.Selector.Display(), s.Reason))
+	}
+	if len(skipped) == 1 {
+		return " \u00b7 skipped " + what[0]
+	}
+	return fmt.Sprintf(" \u00b7 skipped %d stops that no longer resolve: %s", len(skipped), strings.Join(what, ", "))
+}
+
+// stepFailureNote is what `v` says when nothing it tried would resolve: which stops had to be passed
+// over, then the first reason it met. The skips lead because they are the part the reviewer can act on
+// -- a span they expected to reach scrolled past, and this says it was not forgotten.
+func stepFailureNote(res StepResult, err error) string {
+	if len(res.Skipped) == 0 {
+		return err.Error()
+	}
+	return "nowhere left to step \u2014 " + strings.TrimPrefix(skippedNote(res.Skipped), " \u00b7 ")
 }
 
 func countMarked(sess *Session) int {

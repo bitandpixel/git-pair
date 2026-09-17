@@ -621,7 +621,9 @@ rows below the counter. `a` opens
 steps to the next span this session has been in — the span it opened on, the full and
 unreviewed presets, and any span chosen with `V` — every stop in order, wrapping, so nothing on
 the ring is unreachable; and after the screen has refused you something, the next `v` goes back
-to the last span you could review instead; `s` opens a submit prompt taking `b`, `f` or `a`; `q` quits.
+to the last span you could review instead. A stop whose commit, tag or ref has since gone is stepped
+over and named on the status line, reason included — the span stays on the ring, so a tag that comes
+back is a stop again; `s` opens a submit prompt taking `b`, `f` or `a`; `q` quits.
 A thread created from the list is written, opened in the editor, and left selected, so the
 reviewer can fill it in and come straight back to it. The thread heading counts what it hides —
 `▸ Threads (3)` collapsed, plain `▾ Threads` once the threads are on screen — and a rule
