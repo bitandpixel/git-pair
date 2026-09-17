@@ -135,7 +135,11 @@ func DefaultBranch(ctx context.Context, repo *git.Repo, override string) (Defaul
 		}
 	}
 
-	return DefaultBranchRef{}, fmt.Errorf("%w: no main or master branch found; pass --default-branch <ref>, or run `git remote set-head origin --auto` to record the remote's default",
+	// The common case is a CI job, and it reads like a repository problem when it is a checkout
+	// problem: a job that fetched one branch has no integration branch to compare against, which says
+	// nothing about the changeset it was asked about. Naming the fetch is what sends the reader to the
+	// step that can fix it, rather than to someone's `change ready`.
+	return DefaultBranchRef{}, fmt.Errorf("%w: no main or master branch found. A job that fetched one branch has nothing to compare against — fetch the default branch too (`git fetch origin '<branch>:refs/remotes/origin/<branch>'`), pass --default-branch <ref>, or run `git remote set-head origin --auto` to record the remote's default",
 		ErrNoDefaultBranch)
 }
 

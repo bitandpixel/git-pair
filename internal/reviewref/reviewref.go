@@ -50,6 +50,33 @@ func Archive(id string) string { return root + "/" + id + "/" + archiveChild }
 // NamespaceRoot is the ref namespace holding every changeset's durable refs.
 func NamespaceRoot() string { return root }
 
+// FetchRefspec brings the durable refs into a clone. They are not fetched by default — a clone
+// takes refs/heads/* into refs/remotes/*, and these are neither — so a CI job that was handed the
+// branch has to ask for them, and every message that says so spells it this way.
+const FetchRefspec = "+" + root + "/*:" + root + "/*"
+
+// FetchCommand is the whole command that fixes an empty namespace, spelled once so the guidance in
+// a failure and the guidance in the README cannot drift.
+const FetchCommand = "git fetch origin '" + FetchRefspec + "'"
+
+// Present reports whether this repository holds any of a changeset's durable refs at all.
+//
+// It answers a different question from Resolve, and the two must not be conflated. "This changeset
+// has no archive ref" is a fact about the changeset — nobody ever offered it for review. "This clone
+// has no git-pair refs" is a fact about the fetch, and its fix is a refspec, not a lifecycle command
+// (requirements §24). A CI job told "the review history is not anchored" goes off to re-run
+// `change ready`; told the namespace is absent, it adds one line to its checkout.
+//
+// Callers reach for it on the failure path only: it is a `for-each-ref`, and a run that is going to
+// succeed should not pay for asking.
+func Present(ctx context.Context, repo *git.Repo) (bool, error) {
+	refs, err := repo.ForEachRef(ctx, root)
+	if err != nil {
+		return false, err
+	}
+	return len(refs) > 0, nil
+}
+
 // Namespace is the ref namespace one changeset owns. Nothing lives at Namespace itself:
 // a git ref cannot be both a leaf and a namespace, which git enforces by refusing the
 // leaf once a child exists. Every ref for a changeset is therefore a child of this path.

@@ -267,6 +267,19 @@ passes), otherwise git's own answer — `refs/remotes/origin/HEAD`, then a sole 
 `origin/master`, then a local `main` or `master`. If none exists the command refuses rather than
 inventing a trunk, and no git config is read.
 
+A landing outside the integration branch is invisible to that rule, and that is what makes
+`git pair integration record` load-bearing rather than a report. A change merged into `release/2.x`
+leaves its directory absent from trunk, so the branch keeps reading as live work until someone records
+where it went: the queue keeps listing it as waiting for a reviewer, and `status` keeps offering a next
+action that already happened. A release-line repository that treats recording as optional reporting will
+show landed changesets as active forever.
+
+The same rule runs the other way when a repository tidies trunk. Deleting landed `changesets/<id>/`
+directories from the integration branch makes those changesets unlanded for every branch that has not
+merged the deletion, so they come back — with their whole review history, because the archive ref still
+points at them. Prune only what carries an integration ref or a terminal record: those stay retired
+because the durable refs, not trunk's tree, are what say the work is over.
+
 **ABOUT.md and threads.** `changesets/<changeset>/ABOUT.md` is the canonical description of
 the change: the author writes it, the reviewer edits it, and edits committed by a review
 submission are high-level feedback. Any other `.md` file in that directory is a thread;
@@ -509,7 +522,7 @@ nothing, those reads exit 2. For a span of another branch, name its ends: `git p
 | --- | --- | --- |
 | 0 | success | — |
 | 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot archive <cs>: latest outcome is BLOCKED`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:`; `integration record` finding no archive at `--source`, a landing that does not carry the changeset, or a record that already exists |
-| 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`/`integration`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal; more than one archive points at `--source` and none was named |
+| 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`/`integration`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; `cannot tell which branch is the integration branch`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal; more than one archive points at `--source` and none was named |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
 The split between 1 and 2 is deliberate and load-bearing for agents: exit 1 means the
@@ -812,6 +825,38 @@ doubling the bookkeeping, and once the record exists the archive is frozen and `
 changeset as already integrated. `--target` is optional; with it, git-pair verifies the landing commit
 is reachable from the ref you name — the one assumption it will accept about where the work went.
 
+**Fetching the durable refs.** `check` and `integration record` read
+`refs/git-pair/changesets/<id>/archive` and `…/integration`, and those are not fetched by default: a
+clone maps `refs/heads/*` into `refs/remotes/*` and nothing else. A job handed the branch and nothing
+more gets a true statement about its own checkout — `this clone has no refs/git-pair/changesets/* refs
+at all`, with the fetch printed — and a verdict it should not act on. Two fetches make a checkout
+complete:
+
+```bash
+git clone --branch "$BRANCH" --single-branch "$REPO" work && cd "$work"
+git fetch origin --no-tags main:refs/remotes/origin/main                    # the integration branch
+git fetch origin '+refs/git-pair/changesets/*:refs/git-pair/changesets/*'   # the durable refs
+git pair check
+```
+
+The default branch is not the optional one. The rule that decides which changeset a revision is working
+on compares its tree against trunk's, so a checkout holding one branch refuses to invent a trunk
+(exit 2) rather than read every directory as work in progress — and `--default-branch origin/main`
+states it directly instead of fetching. A `--single-branch` clone records no `origin/HEAD`, which is
+why the second line above names the branch.
+
+Publishing is the other half, and git-pair does not do it: nothing in the tool runs `push`, so the
+refs stay in the author's clone until the repository is configured to share them.
+
+```bash
+git config --add remote.origin.push '+refs/git-pair/changesets/*:refs/git-pair/changesets/*'
+```
+
+Documented rather than configured on anyone's behalf, because publishing review history is a decision
+about who gets to read it — the archive holds every commit of the review, including ones the author
+later dropped. Until that line is run, the author's clone holds the only copy, and a CI job reporting
+missing refs is describing exactly that.
+
 ## Configuration
 
 The editor is whatever git would use: git-pair asks git with `git var GIT_EDITOR`, so the
@@ -1032,6 +1077,13 @@ mistake: `--source` is the archived head that was reviewed, not the merge commit
 fails is `--points-at`, so an exact match is required. An abbreviated SHA is fine — it is resolved
 before discovery.
 
+When that message goes on to say `and this repository holds no refs/git-pair/changesets/* refs at all`,
+it is the first possibility and nothing else, and the message prints the fetch to run. A clone maps
+`refs/heads/*` into `refs/remotes/*` and nothing else, so the durable refs are absent even from a clone
+of a repository that published them properly. `git pair check` says the same thing rather than reporting
+the review history as unanchored: with nothing fetched, "no archive" is a fact about the checkout, and
+a verdict built from it is about the clone and not the work.
+
 `cannot resolve changeset base "main": unknown revision: main` (exit 1) — the `base` in
 `CHANGESET.yaml` is not a ref in this repository (renamed trunk, fresh clone, merged stack).
 git-pair never guesses a base: edit the file, or `git pair change init --base <ref> --set-base`.
@@ -1044,7 +1096,10 @@ look like work in progress. Pass `--default-branch origin/main` (a CI job that f
 has no recorded remote HEAD, and a repository may name trunk something else), or record git's own
 answer once with `git remote set-head origin --auto`. `change init` reports the same problem as
 `cannot infer a base: ...; pass --base <ref>`, because the recorded base and the landed test come
-from the same resolution.
+from the same resolution. In CI the missing answer is usually the checkout: a job that fetched one
+branch has neither a remote HEAD nor `origin/main` to compare against, which says nothing about the
+changeset it was asked about — the refusal names the fetch shape
+(`git fetch origin '<branch>:refs/remotes/origin/<branch>'`) beside the flag.
 
 ```text
 this revision contains more than one changeset: aaa and bbb; name the one you mean with

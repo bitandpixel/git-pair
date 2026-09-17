@@ -320,3 +320,35 @@ func TestArchivesAtFindsTheChangesetBehindACommit(t *testing.T) {
 		t.Errorf("ArchivesAt with two archives = %v, %v; want both candidates", got, err)
 	}
 }
+
+// §24's failure is not §18's failure, and `Present` is what tells them apart: one is a checkout
+// short of a refspec, the other a changeset that was never offered. It answers about the namespace,
+// so a clone holding any child — an integration record with no archive beside it — counts as
+// holding the namespace, which is the point: the fetch worked.
+func TestPresentIsAboutTheNamespace(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	ctx := context.Background()
+
+	if ok, err := reviewref.Present(ctx, repo(f)); err != nil || ok {
+		t.Errorf("Present = %v, %v; want false while the namespace holds nothing", ok, err)
+	}
+	if _, err := reviewref.CreateIntegration(ctx, repo(f), "booking", f.Head()); err != nil {
+		t.Fatalf("CreateIntegration: %v", err)
+	}
+	if ok, err := reviewref.Present(ctx, repo(f)); err != nil || !ok {
+		t.Errorf("Present = %v, %v; want true once any child exists", ok, err)
+	}
+}
+
+// The fetch guidance is one string in one place, because it appears in `check`, in
+// `integration record`, and in the README, and a message that contradicts the documentation is
+// how people end up fetching the wrong thing.
+func TestFetchRefspecNamesTheNamespace(t *testing.T) {
+	if !strings.Contains(reviewref.FetchRefspec, reviewref.NamespaceRoot()+"/*:") {
+		t.Errorf("FetchRefspec = %q, want it to map the namespace", reviewref.FetchRefspec)
+	}
+	if !strings.Contains(reviewref.FetchCommand, reviewref.FetchRefspec) {
+		t.Errorf("FetchCommand = %q does not contain %q", reviewref.FetchCommand, reviewref.FetchRefspec)
+	}
+}

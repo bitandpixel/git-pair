@@ -132,6 +132,38 @@ LANDING=$(git rev-parse HEAD)
 if git merge-base --is-ancestor "$SOURCE" "$LANDING"; then
   echo "  FAIL: the fixture landing should not descend from the archived head"; FAILED=1
 fi
+
+# A clone is the shape CI gets: `refs/heads/*` mapped into `refs/remotes/*`, and nothing else. The
+# durable refs were published perfectly and are still absent, so the two commands that lean on them
+# have to describe the checkout rather than sentence the work. The assertion that carries the weight
+# is that the answer *changes* after the fetch: that is what shows the first one was about the clone.
+REMOTE=$(mktemp -d)/remote.git; CLONE=$(mktemp -d)/ci
+git init -q --bare -b main "$REMOTE"
+git push -q "$REMOTE" --all
+git push -q "$REMOTE" '+refs/git-pair/changesets/*:refs/git-pair/changesets/*'
+git clone -q "$REMOTE" "$CLONE"
+git -C "$CLONE" switch -q booking-transaction
+out=$(cd "$CLONE" && $G check 2>&1); code=$?
+check "check in a clone without the durable refs fails" 1 $code
+printf '%s' "$out" | grep -q "this clone has no refs/git-pair/changesets/\* refs at all" \
+  && echo "  ok: it says the clone is short of refs" \
+  || { echo "  FAIL: it did not name the missing fetch: $out"; FAILED=1; }
+printf '%s' "$out" | grep -q "the review history is not anchored" \
+  && { echo "  FAIL: a fetch problem got the wording that blames the changeset"; FAILED=1; }
+out=$(cd "$CLONE" && $G integration record --source "$SOURCE" --commit "$LANDING" --target origin/release/2.x 2>&1); code=$?
+check "integration record without the durable refs fails" 1 $code
+printf '%s' "$out" | grep -q "git fetch origin" \
+  && echo "  ok: and prints the fetch to run" \
+  || { echo "  FAIL: the recorder did not print the fix: $out"; FAILED=1; }
+git -C "$CLONE" fetch -q origin '+refs/git-pair/changesets/*:refs/git-pair/changesets/*'
+out=$(cd "$CLONE" && $G check 2>&1); code=$?
+check "after the fetch, check answers about the changeset" 1 $code
+printf '%s' "$out" | grep -q "took the changeset out of review" \
+  && echo "  ok: the same command now reports the withdrawal, not the clone" \
+  || { echo "  FAIL: the answer did not change with the fetch: $out"; FAILED=1; }
+(cd "$CLONE" && $G integration record --source "$SOURCE" --commit "$LANDING" --target origin/release/2.x >/dev/null 2>&1)
+check "after the fetch, the record succeeds from the clone" 0 $?
+git switch -q booking-transaction
 $G integration record --source "$SOURCE" --commit "$LANDING" --target release/2.x >/dev/null 2>&1
 check "integration record links the archived head to a landing with no ancestry to it" 0 $?
 [ "$(git rev-parse refs/git-pair/changesets/booking-transaction/integration)" = "$LANDING" ] \

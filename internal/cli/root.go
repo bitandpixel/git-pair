@@ -73,6 +73,13 @@ func Execute(args []string) int {
 	switch {
 	case errors.Is(err, git.ErrNotRepository), errors.As(err, &ge):
 		code = exitGitError
+	case errors.Is(err, changeset.ErrNoDefaultBranch):
+		// Nothing about the repository was refused: the question "has this landed?" cannot be asked
+		// without the integration branch, and the caller supplies it — with `--default-branch` or
+		// with a fetch that brought it. That is a usage error in the sense the table means: a
+		// different invocation answers it. An unresolvable `base:` in CHANGESET.yaml stays exit 1,
+		// because there the repository really is what changed.
+		code = exitUsage
 	case errors.As(err, &ue), isUsageError(err):
 		code = exitUsage
 	}

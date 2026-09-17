@@ -114,6 +114,18 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	if err != nil && !errors.Is(err, reviewref.ErrNoArchiveRef) {
 		return err
 	}
+	// Asked only when the archive is missing, because that is the one case where the answer changes
+	// what the message should say: a changeset nobody has reviewed and a CI clone that was never
+	// given the refs both present as "no archive", and only one of them is fixed by `change ready`
+	// (§24). A run with an archive pays nothing for the question.
+	namespaceAbsent := false
+	if archive == "" {
+		present, err := reviewref.Present(ctx, s.repo)
+		if err != nil {
+			return err
+		}
+		namespaceAbsent = !present
+	}
 	// Reported beside the verdict rather than folded into it: "already integrated" is not the same
 	// fact as "not ready", and a pipeline re-running this gate after its own landing needs to tell
 	// the two apart without matching on the wording of a reason.
@@ -142,7 +154,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		Integrated:       landed != "",
 		IntegratedCommit: short(landed),
 		IntegratedAt:     where,
-		Reasons:          integrationReasons(s.cs.Slug, terminal, reviewed, archive, s.head, allowFeedback, where),
+		Reasons:          integrationReasons(s.cs.Slug, terminal, reviewed, archive, s.head, allowFeedback, where, namespaceAbsent),
 	}
 	out.Ready = len(out.Reasons) == 0
 	if out.Reasons == nil {
@@ -184,7 +196,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 // moved since the marker — re-deriving it would re-litigate a decision the author already took,
 // in a command with no override flag to take it again.
 func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summary,
-	archive, head string, allowFeedback bool, landed landing) []string {
+	archive, head string, allowFeedback bool, landed landing, namespaceAbsent bool) []string {
 	if landed.Commit != "" {
 		// The other early return, and it comes first. Once the record exists the review is over:
 		// drift and archive questions below it describe a changeset still being worked on, which
@@ -243,8 +255,16 @@ func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summ
 
 	switch {
 	case archive == "":
-		reasons = append(reasons, fmt.Sprintf("%s does not exist: the review history is not anchored",
-			reviewref.Archive(slug)))
+		if namespaceAbsent {
+			// The distinction §24 asks for. "The review history is not anchored" is true of a
+			// changeset that was never offered; said to a CI job that fetched one branch and no
+			// custom refs, it sends someone to a lifecycle command when the fix is a refspec.
+			reasons = append(reasons, fmt.Sprintf("%s does not exist, and this clone has no %s refs at all: fetch them before trusting this verdict",
+				reviewref.Archive(slug), reviewref.NamespaceRoot()+"/*"))
+		} else {
+			reasons = append(reasons, fmt.Sprintf("%s does not exist: the review history is not anchored",
+				reviewref.Archive(slug)))
+		}
 	case archive != head:
 		reasons = append(reasons, fmt.Sprintf(
 			"archive does not point to the current source commit: %s is at %s, HEAD is %s",

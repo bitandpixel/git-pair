@@ -41,6 +41,9 @@ func TestIntegrationReasons(t *testing.T) {
 		// landed is the integration record, if one exists — not a policy a caller may choose, but
 		// an input the command reads like the others.
 		landed landing
+		// namespaceAbsent is the clone's answer to "did you fetch the durable refs?" (§24). It only
+		// changes the wording of the missing-archive reason, and only when the archive is missing.
+		namespaceAbsent bool
 		// n is how many reasons the case must produce, so a merged or dropped condition
 		// shows up even where the wording matches; `contains` names text the reasons must
 		// carry, and one reason may satisfy more than one entry.
@@ -215,11 +218,39 @@ func TestIntegrationReasons(t *testing.T) {
 			contains: []string{"already integrated at " + short(landedSHA)},
 			not:      []string{"reachable from"},
 		},
+		{
+			// §24: absent refs are a fetch problem, not a lifecycle verdict. Both conditions present
+			// as "no archive", and the one sent to `change ready` wastes the run.
+			name:            "an absent archive in a clone with no git-pair refs says so",
+			summary:         lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
+			head:            head,
+			namespaceAbsent: true,
+			n:               1,
+			contains: []string{
+				"does not exist",
+				"this clone has no refs/git-pair/changesets/* refs at all",
+				"fetch them before trusting this verdict",
+			},
+			not: []string{"not anchored"},
+		},
+		{
+			// The other half: with refs in the namespace, the absence belongs to the changeset, and
+			// telling the reader to fetch would send them to the wrong fix.
+			name:    "an absent archive beside other git-pair refs blames the changeset",
+			summary: lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
+			head:    head,
+			n:       1,
+			contains: []string{
+				"refs/git-pair/changesets/booking/archive does not exist",
+				"the review history is not anchored",
+			},
+			not: []string{"this clone has no"},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := integrationReasons(slug, tc.terminal, tc.summary, tc.archive, tc.head, tc.feedback, tc.landed)
+			got := integrationReasons(slug, tc.terminal, tc.summary, tc.archive, tc.head, tc.feedback, tc.landed, tc.namespaceAbsent)
 			if len(got) != tc.n {
 				t.Fatalf("reasons = %q, want %d", got, tc.n)
 			}
@@ -249,7 +280,7 @@ func TestIntegrationReasonsReportsEveryFailureAtOnce(t *testing.T) {
 	got := integrationReasons("booking", nil, lifecycle.Summary{
 		Marker: approve, LatestReview: approve, State: model.StateWorking,
 		Drifted: []string{"service.go"}, TrailingUnrecognised: 1,
-	}, "", head, false, landing{})
+	}, "", head, false, landing{}, false)
 
 	if len(got) != 3 {
 		t.Fatalf("reasons = %q, want three: unreadable marker, drift, archive", got)

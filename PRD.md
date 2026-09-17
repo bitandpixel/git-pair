@@ -227,6 +227,14 @@ lands *that*, your changeset reads as landed on your own branch too, because you
 now in the integration branch's tree. That is the rule working as intended — the work is in
 trunk — and it is why a changeset's branch is expected to land its own content.
 
+It runs the other way as well, which is the pruning rule. Deleting landed `changesets/<id>/`
+directories from the integration branch makes those changesets unlanded for every branch that has not
+merged the deletion, and they return with their review history attached — the archive ref still points
+at it. A repository that tidies trunk may prune what carries an integration ref (§13.2) or a terminal
+record (§9.7), because those are retired by the durable refs rather than by trunk's tree. This is
+documented behaviour, not a bug to fix: the resurrection of an unrecorded landing is the rule answering
+the question it was given.
+
 ---
 
 # 5. Changeset Metadata
@@ -1200,7 +1208,9 @@ The conditions, all of them reported rather than the first:
 4. the content that review looked at is still what `HEAD` carries: the tree is compared between the
    marker and `HEAD`, ignoring `changesets/<changeset>/`, the same comparison `change archive` (§9.5)
    and `status` make,
-5. the changeset's archive ref (§13) points at `HEAD`, and
+5. the changeset's archive ref (§13) points at `HEAD` — and when it does not exist at all, the reason
+   says whether this clone holds any git-pair refs (§13.4), because "nobody reviewed this" and "you
+   never fetched the refs" must not arrive as the same sentence,
 6. the changeset has not already been integrated (§13.2) — the record says the review is over, so
    this is the other single-reason verdict, and it comes first.
 
@@ -1291,8 +1301,9 @@ The checks, in the order that makes the failures useful:
 2. `--source` resolves to a commit this repository has, else the failure names both possibilities — a
    shallow clone and a wrong SHA look identical from here;
 3. exactly one archive ref points at it. Zero fails (§18 of the requirements) saying what that usually
-   means: the refs were never fetched (`refs/git-pair/changesets/*` is not fetched by default), the
-   changeset was never archived, or the wrong commit was supplied. More than one is exit 2 listing the
+   means: the changeset was never archived, or the wrong commit was supplied — or, when the namespace is
+   empty, that the checkout never fetched it, in which case the failure prints the refspec instead
+   (§13.4). More than one is exit 2 listing the
    candidates and naming `--changeset` — the same rule every other command applies to ambiguity, so an
    agent learns one convention rather than one per command;
 4. `--changeset` disambiguates and never substitutes for a missing archive: the changeset named must
@@ -1475,8 +1486,8 @@ The fundamental invariant is:
 
 > Before the review stack can be considered safely squashable, the complete final unsquashed stack must remain reachable from the changeset's archive ref.
 
-Remote propagation of these refs may be added via push configuration/hooks later. The MVP should
-ensure local preservation first.
+Remote propagation is configuration rather than behaviour, and §13.4 is the contract: git-pair runs no
+`push`, and the refs must be fetched explicitly wherever a command needs them.
 
 ## 13.2 The integration ref
 
@@ -1522,6 +1533,37 @@ command added next month cannot forget it. Markers are refused one step earlier,
 commits them: a command that wrote a marker and only then learned the ref was frozen would leave the
 marker on the branch with nothing pointing at it — a half-write the author can undo only by rewriting
 history.
+
+## 13.4 Getting the refs where they are needed
+
+These refs are not fetched by default. A clone maps `refs/heads/*` into `refs/remotes/*` and nothing
+else, so a CI job handed the branch has no archive and no record — and the two failures that produces
+must stay separate, because their fixes are in different places:
+
+| What is missing | What it means | What fixes it |
+| --- | --- | --- |
+| this changeset's archive, while other git-pair refs exist | nobody ever offered it for review | `change ready`, on the author's branch |
+| the whole namespace | the checkout did not fetch it | `git fetch origin '+refs/git-pair/changesets/*:refs/git-pair/changesets/*'` |
+
+That is requirements §24's requirement stated as a rule: a command that needs the namespace says when
+the namespace is empty, and does not dress a fetching problem up as a lifecycle verdict. `check` says
+`this clone has no refs/git-pair/changesets/* refs at all: fetch them before trusting this verdict`
+instead of `the review history is not anchored`, and `integration record` prints the fetch rather than
+reporting a changeset nobody archived. The question is asked only on the path where it changes the
+message, so a run that succeeds pays nothing for it.
+
+Publishing is configuration, not behaviour. git-pair runs no `push` — the hygiene test forbids it, and
+publishing review history is a decision about who gets to read it — so the refs stay local until a
+repository configures
+`git config --add remote.origin.push '+refs/git-pair/changesets/*:refs/git-pair/changesets/*'`. Until
+then the author's clone holds the only copy, and the command that says so is reporting the truth rather
+than failing.
+
+The same section of the README covers the fetch a CI job needs for the *default branch* as well: the
+tree rule (§4) compares the revision against trunk's tree, so a one-branch checkout has nothing to
+compare against and resolution refuses. That refusal is a usage error — the caller supplies the answer
+with `--default-branch` or with a fetch — and it names the fetch shape, because in CI the thing at fault
+is the checkout and not the changeset.
 
 ---
 

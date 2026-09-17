@@ -681,26 +681,61 @@ archive, queue — because that is the sequence a CI job runs and the exit codes
 
 #### Tasks
 
-- [ ] One helper answering "is the namespace empty?" separately from "does this changeset have a ref?",
+- [x] One helper answering "is the namespace empty?" separately from "does this changeset have a ref?",
   because §24's error is about a CI job that fetched the wrong things and §18's is about a changeset that
-  was never archived. Conflating them sends someone to the wrong fix.
-- [ ] Used by `integration record` and `check` where refs are load-bearing; `status` and `review queue`
+  was never archived. Conflating them sends someone to the wrong fix. `reviewref.Present` answers it, and
+  `FetchRefspec`/`FetchCommand` spell the fix once so the messages and the README cannot disagree.
+- [x] Used by `integration record` and `check` where refs are load-bearing; `status` and `review queue`
   keep working without the changeset namespace and must not start failing because a CI job fetched
   nothing. They do require the **default branch** — the tree rule compares against it — so the resolver's
   refusal is the correct failure there, and the guidance it prints has to name the fetch rather than
   blame the changeset.
-- [ ] README: the fetch refspec, the push config a human needs to publish refs in the first place
+- [x] README: the fetch refspec, the push config a human needs to publish refs in the first place
   (documented, not configured — git-pair runs no `push`), and the error they will see if they skip it.
   The CI recipe also fetches the default branch, because resolution is a comparison against it.
-- [ ] README states the consequence of landing outside the default branch: such a landing is invisible to
+- [x] README states the consequence of landing outside the default branch: such a landing is invisible to
   resolution, so `git pair integration record` is what retires the changeset. A release-line repository
   that treats recording as optional reporting will show landed changesets as active forever.
-- [ ] README states the pruning rule in the same breath: a repository that removes landed changeset
+- [x] README states the pruning rule in the same breath: a repository that removes landed changeset
   directories from the default branch may only prune those with a terminal record, because the landed
   test reads the default branch's tree. Measured, and it is a documentation requirement rather than a
   bug to fix — the resurrection of an unrecorded landing is the rule working as designed.
-- [ ] Tests: a clone without the namespace produces the fetch guidance, not a false "not ready" or a
+- [x] Tests: a clone without the namespace produces the fetch guidance, not a false "not ready" or a
   misleading "no archive"; after the fetch, the same command succeeds.
+
+#### Decisions taken while implementing
+
+**The presence question is asked only where the answer changes the message.** `Present` is a
+`for-each-ref`, so `check` asks it when the archive is missing and `integration record` asks it when
+nothing matched a source — a run that succeeds pays nothing for the distinction.
+
+**The guidance is a constant in the package that owns the refs.** `FetchRefspec` and `FetchCommand` live
+beside `NamespaceRoot`, and a test asserts the command contains the refspec: a message that contradicts
+the README is how people end up fetching the wrong thing.
+
+**`cannot tell which branch is the integration branch` is exit 2.** The README's troubleshooting entry had
+said exit 2 since M2 while the code returned 1, and the code was the wrong one: nothing in the repository
+was refused, and the caller supplies the answer — with `--default-branch` or with a fetch that brought the
+branch. It is mapped in `Execute` rather than at each call site so every command agrees. An unresolvable
+`base:` in `CHANGESET.yaml` stays exit 1, because there the repository really did change.
+
+**A branch's name in prose is trimmed of the prefix a reader already knows.** `refs/remotes/origin/main`
+in a sentence reads like a mistake; `origin/main` is what the reader calls it. `DefaultBranchRef.LocalName`
+is untouched, so the value recorded in `CHANGESET.yaml` keeps its fully-qualified form — trimming there
+would let a local branch shadow a remote-tracking name without saying so.
+
+**The empty namespace is checked after discovery, not before.** Discovery is the same `for-each-ref`, and
+leading with presence would answer §18's three causes with one of them even in a repository that holds the
+refs and was simply not asked about an archived head.
+
+#### Verification, as run
+
+`internal/cli/ci_test.go` publishes every ref to a scratch bare remote, clones it (which by design brings
+branches and nothing else), and asserts that `check` and `integration record` name the missing fetch, that
+`check`'s reason afterwards is the changeset's own, and that the record then succeeds. It also covers the
+second CI mistake — a one-branch checkout, where `status` refuses with the fetch shape named and no mention
+of the changeset — and that `status` and `review queue` answer normally in a clone with no git-pair refs at
+all. `e2e-29.sh` replays the same comparison against the built binary.
 
 #### Verification
 

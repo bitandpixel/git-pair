@@ -101,7 +101,16 @@ func verifyIntegrationRecord(ctx context.Context, repo *git.Repo, in integration
 	if err != nil {
 		return nil, err
 	}
-	id, err := chooseIntegrationCandidate(candidates, source, in.changeset)
+	// §24: "no archive points at this commit" and "this clone has no git-pair refs" are different
+	// failures with different fixes, so the difference is worth asking about — but only on the path
+	// where nothing matched, so a run that succeeds pays nothing for the question.
+	namespacePresent := true
+	if len(candidates) == 0 {
+		if namespacePresent, err = reviewref.Present(ctx, repo); err != nil {
+			return nil, err
+		}
+	}
+	id, err := chooseIntegrationCandidate(candidates, source, in.changeset, namespacePresent)
 	if err != nil {
 		return nil, err
 	}
@@ -159,8 +168,17 @@ func refuseAbandonedSource(ctx context.Context, repo *git.Repo, id, source strin
 // chooseIntegrationCandidate applies §17 and §19: exactly one archive must point at the source,
 // unless the caller named the changeset — in which case that changeset still has to be one of the
 // matches. Naming a changeset disambiguates; it never substitutes for an archive that is not there.
-func chooseIntegrationCandidate(candidates []string, source, named string) (string, error) {
+//
+// `namespacePresent` separates §18's two causes. With refs in the namespace, the source is simply not
+// an archived head, and the three possibilities are listed. With none, the command says so and prints
+// the fetch: a CI job told "the changeset was never archived" will go re-run `change ready`, which is
+// someone else's command on someone else's branch, when the fix was one line in its checkout.
+func chooseIntegrationCandidate(candidates []string, source, named string, namespacePresent bool) (string, error) {
 	if len(candidates) == 0 {
+		if !namespacePresent {
+			return "", fmt.Errorf("no changeset archive points at %s, and this repository holds no %s refs at all\n\nFetch them before recording:\n  %s\n\ngit-pair never pushes these refs, so if they were never published, the author's clone still holds the only copy",
+				short(source), reviewref.NamespaceRoot()+"/*", reviewref.FetchCommand)
+		}
 		if named != "" {
 			return "", fmt.Errorf("no changeset archive points at %s, including %s: the archive of a changeset you name must still be at that commit", short(source), named)
 		}
@@ -253,10 +271,24 @@ func (a *app) describeLanding(ctx context.Context, repo *git.Repo, commit string
 	if err != nil {
 		return landing{}, err
 	}
-	out.DefaultBranch = db.LocalName()
+	// A name in prose should read like a branch, not like a path git keeps it at: a CI clone's
+	// integration branch is `origin/main` to the person reading the log.
+	out.DefaultBranch = displayRef(db.LocalName())
 	out.InDefaultBranch = in
 	out.BranchKnown = true
 	return out, nil
+}
+
+// displayRef trims the prefixes a reader already knows, so a sentence can name a branch without
+// printing where git keeps it. A ref outside those namespaces — a tag, a raw revision a pipeline
+// passed to --default-branch — is printed as supplied, because shortening it would guess.
+func displayRef(ref string) string {
+	for _, prefix := range []string{"refs/heads/", "refs/remotes/"} {
+		if strings.HasPrefix(ref, prefix) {
+			return strings.TrimPrefix(ref, prefix)
+		}
+	}
+	return ref
 }
 
 // reach phrases the containment fact for a sentence: "reachable from main", or nothing when the
