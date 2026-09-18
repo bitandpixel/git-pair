@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"github.com/charmbracelet/lipgloss"
 	"strings"
 	"testing"
 
@@ -307,22 +308,22 @@ func visibleTree(m reviewModel) string {
 func TestTheListAsItRenders(t *testing.T) {
 	m, _ := treeModel(t)
 	want := strings.Join([]string{
-		"  ▾ ○ changesets/booking/",
+		"▾ ○ changesets/booking/",
 		"    ○ ABOUT.md",
 		"    ○ CHANGESET.yaml",
-		"  ▾ ○ docs/",
+		"▾ ○ docs/",
 		"    ▾ ○ plans/active/",
-		"      ○ x.md",
+		"        ○ x.md",
 		"    ○ notes.md",
-		"  ▾ ○ internal/",
+		"▾ ○ internal/",
 		"    ▾ ○ git/",
-		"      ○ git.go",
+		"        ○ git.go",
 		"    ▾ ○ tui/",
-		"      ○ session.go",
-		"      ○ tui.go",
+		"        ○ session.go",
+		"        ○ tui.go",
 		"    ▾ ○ tuition/",
-		"      ○ why.go",
-		"  ○ main.go",
+		"        ○ why.go",
+		"○ main.go",
 		"span  main...current ▸",
 		"ABOUT.md",
 		"▾ Threads",
@@ -695,17 +696,26 @@ func TestDiffsAndEditorsKnowWhatADirectoryIs(t *testing.T) {
 	}
 }
 
-// A child has to start deeper than the directory above it. The indent used to be exactly the width of a
-// directory row's own prefix -- the fold arrow and the mark gutter -- which put every child's mark in the
-// column its parent's mark started in, and the tree read as a flat list with arrows in it.
-func TestAChildStartsDeeperThanTheDirectoryAboveIt(t *testing.T) {
+// What a reviewer compares is where the names start. A directory row spends four cells before its name
+// -- the fold arrow and the mark gutter -- and a file row two, so an indent that only counts levels puts
+// every child's name in exactly the column its parent's name started in, and the tree reads as a flat
+// list with arrows in it.
+func TestAChildNamesItsFileRightOfTheDirectoryAboveIt(t *testing.T) {
 	m, _ := treeModel(t)
 	files, _ := m.window()
-	indentOf := func(path string) int {
+	text := map[string]string{}
+	for _, f := range files {
+		text[f.path] = m.rowText(f.row)
+	}
+	nameAt := func(path string) int {
 		for _, f := range files {
 			if f.path == path {
-				text := m.rowText(f.row)
-				return len(text) - len(strings.TrimLeft(text, " "))
+				at := strings.Index(text[f.path], f.name)
+				if at < 0 {
+					t.Fatalf("the row for %q does not print its name: %q", path, text[f.path])
+				}
+				// Columns, not bytes: the fold arrow and the mark gutter are three bytes each.
+				return lipgloss.Width(text[f.path][:at])
 			}
 		}
 		t.Fatalf("the list has no row for %q", path)
@@ -721,9 +731,9 @@ func TestAChildStartsDeeperThanTheDirectoryAboveIt(t *testing.T) {
 			if child.depth != dir.depth+1 || !isUnder(child.path, dir.path) {
 				continue
 			}
-			if above, below := indentOf(dir.path), indentOf(child.path); below <= above {
-				t.Errorf("%q starts at column %d, no deeper than %q at %d",
-					child.path, below, dir.path, above)
+			if above, below := nameAt(dir.path), nameAt(child.path); below <= above {
+				t.Errorf("%q starts at column %d, no right of %q at %d:\n%s\n%s",
+					child.path, below, dir.path, above, text[dir.path], text[child.path])
 			}
 			checked++
 		}

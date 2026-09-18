@@ -117,7 +117,7 @@ expect "the shortcut bar offers quit" -1 "$T/paint.raw" "q quit"
 # The box is closed on all four sides in a real terminal, including the side nearest the diff column.
 expect "the changeset box closes on its right" -1 "$T/paint.raw" $'\u256e'
 expect "and a child sits deeper than the directory over it" -1 "$T/paint.raw" $'    \u25cb'
-expect "with the directory's own mark one step left of it" -1 "$T/paint.raw" $'  \u25be \u25cb'
+expect "with the directory's own mark and arrow above it" -1 "$T/paint.raw" $'\u25be \u25cb'
 # The tree's own rules, double because the tree holds the keys at first paint. Nothing else on this
 # screen draws a run of double rules yet: the box is idle and the divider is single.
 expect "the file tree is ruled where it holds the keys" -1 "$T/paint.raw" $'\u2550\u2550\u2550\u2550'
@@ -199,9 +199,10 @@ expect "two tabs reach the box" 1 "$T/ring2.raw" $'\u2554'
 expect "with the box's own shortcut bar" 1 "$T/ring2.raw" "t new thread"
 
 step "the changeset box: space on the span row opens the picker"
-session spanrow m,space,esc,q
+# The box opens on ABOUT.md, so the scenario walks up to the span row before pressing it.
+session spanrow m,k,space,esc,q
 expect "the span row opens the span picker" 1 "$T/spanrow.raw" "Span picker"
-expect "and esc comes back to the list" 2 "$T/spanrow.raw" "reviewed"
+expect "and esc comes back to the list" 3 "$T/spanrow.raw" "reviewed"
 
 step "the changeset box: space there reads a document rather than marking one"
 # A repaint-only terminal makes "the tree is still there" an awkward thing to grep, so this checks the

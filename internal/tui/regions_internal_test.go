@@ -448,3 +448,60 @@ func countEqual(lines []string, want string) int {
 	}
 	return n
 }
+
+// --- where the box opens, and what the prompts leave on screen --------------------------------
+
+// The box opens on ABOUT.md. Its first row is the span, which is the thing the box lets a reviewer
+// *change* -- and the span is what they set when they came, not what they came to read.
+func TestTheBoxOpensOnAboutAndThenStaysWhereItWasPut(t *testing.T) {
+	m := newFileListModel(t)
+	m.focusOn(focusMeta)
+	if kind, row := activeKind(t, m); kind != rowAbout {
+		t.Errorf("the box opened on a %v row (%q), want ABOUT.md", kind, row.name)
+	}
+
+	m = press(m, tea.KeyDown)
+	put := m.metaCursor
+	m.focusOn(focusFiles)
+	m.focusOn(focusMeta)
+	if m.metaCursor != put {
+		t.Errorf("after the reviewer moved it, the box reopened on %d rather than %d", m.metaCursor, put)
+	}
+}
+
+// The thread prompt is a line of the footer, not a screen of its own. It used to be a mode the diff
+// column refused to be drawn in, so pressing `t` next to a diff took the diff away for as long as the
+// title was being typed -- and the editor then covered what was left.
+func TestThePaneSurvivesTheThreadPrompt(t *testing.T) {
+	m := previewModel(t)
+	focusOnRow(t, m, 0)
+	m, cmd := m.ensurePreview()
+	m = deliver(t, m, cmd)
+	file, wide := m.previewPath, m.paneWidth()
+	if wide == 0 {
+		t.Fatal("the fixture has no diff column to lose")
+	}
+
+	m = pressRune(m, 't')
+	if m.mode != modePrompt {
+		t.Fatalf("`t` gave mode %v, want the title prompt", m.mode)
+	}
+	if got := m.paneWidth(); got != wide {
+		t.Errorf("the prompt took the diff column: %d columns became %d", wide, got)
+	}
+	if m.previewPath != file {
+		t.Errorf("the prompt moved the pane from %q to %q", file, m.previewPath)
+	}
+	view := m.View()
+	if !strings.Contains(view, "+added line") {
+		t.Errorf("the pane lost its diff while a title was typed:\n%s", view)
+	}
+	if !strings.Contains(view, "New thread:") {
+		t.Errorf("the prompt is not on screen:\n%s", view)
+	}
+
+	// Cancelling is the same screen again, and the box's cursor has not been touched by the trip.
+	if back := press(m, tea.KeyEsc); back.mode != modeFiles || back.paneWidth() != wide {
+		t.Errorf("esc left mode %v with a %d-column pane", back.mode, back.paneWidth())
+	}
+}
