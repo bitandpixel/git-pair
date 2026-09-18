@@ -160,7 +160,9 @@ func TestMovingTheKeysDoesNotMoveTheLayout(t *testing.T) {
 	before := len(viewRows(m.View()))
 	beforeRows, _ := m.regionHeights()
 
-	after := press(m, tea.KeyTab)
+	// The ring here runs through the overlay, so the box is two tabs away: walking out of the diff is
+	// what the ring is for, and the screen the reviewer comes back to must be the one they left.
+	after := press(press(m, tea.KeyTab), tea.KeyTab)
 	got := viewRows(after.View())
 	if len(got) != before {
 		t.Errorf("the frame was %d rows and became %d when the keys moved to the box", before, len(got))
@@ -206,7 +208,10 @@ func TestEachRegionHasItsOwnShortcutBar(t *testing.T) {
 func TestTheBoxBorderSaysWhenItHoldsTheKeys(t *testing.T) {
 	m := navModel(t)
 	idle := ansiCodes.ReplaceAllString(m.View(), "")
-	focused := ansiCodes.ReplaceAllString(press(m, tea.KeyTab).View(), "")
+	// The box by name rather than by tab: the ring here walks through the diff first, and what is under
+	// test is the border, not the walk.
+	m.focusOn(focusMeta)
+	focused := ansiCodes.ReplaceAllString(m.View(), "")
 
 	if !strings.Contains(idle, "╭") || strings.Contains(idle, "╔") {
 		t.Errorf("the box without the keys does not draw a single-rule frame:\n%s", idle)
@@ -274,8 +279,9 @@ func TestTheSpanRowIsARowAndTheBaseLineIsNot(t *testing.T) {
 }
 
 // The ring does not end at the diff: a reviewer who arrived with `tab` leaves with it, and the keys that
-// name a region work from inside the pane. Over the overlay they are inert, because the screen is
-// nothing but the diff and keys handed to a region that is not drawn are keys that go nowhere.
+// name a region work from inside the pane. Over the overlay the same keys take the diff screen down on
+// their way, which is what keeps the ring walkable where there is no pane
+// (TestTabWalksTheDiffWhereThereIsNoPane).
 func TestTabMovesTheKeysOutOfThePane(t *testing.T) {
 	toBox := press(focusPane(t, focusFixture(t, 40)), tea.KeyTab)
 	if !toBox.metaHasFocus() {
@@ -297,8 +303,80 @@ func TestTabMovesTheKeysOutOfThePane(t *testing.T) {
 	}
 
 	overlay := openOverlay(t, overlayModel(t, 40))
-	if got := press(overlay, tea.KeyTab); got.mode != modePreview {
-		t.Errorf("tab in the overlay left the diff screen for mode %v, where no region is drawn", got.mode)
+	if got := press(overlay, tea.KeyTab); got.mode != modeFiles || got.focus != focusMeta {
+		t.Errorf("tab over the overlay left mode %v with %v, want the list drawn again and the box holding the keys",
+			got.mode, got.focus)
+	}
+	if got := pressRune(overlay, 'f'); got.mode != modeFiles || got.focus != focusFiles {
+		t.Errorf("f over the overlay left mode %v with %v, want the list drawn again and the tree holding the keys",
+			got.mode, got.focus)
+	}
+}
+
+// On a narrow terminal the diff has no column to focus, so the ring stops at the overlay rather than
+// having a hole where the diff should be: tab opens it, and tab from inside it walks on. The reviewer
+// with a small terminal then reaches the diff with the same gesture everyone else has, instead of
+// remembering that one of the three regions is a different key.
+func TestTabWalksTheDiffWhereThereIsNoPane(t *testing.T) {
+	m := overlayModel(t, 40)
+	if m.paneWidth() != 0 {
+		t.Fatalf("the fixture has a pane of %d columns; the ring under test is the narrow one", m.paneWidth())
+	}
+
+	toDiff := pressOverlay(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	if toDiff.mode != modePreview || toDiff.focus != focusPreview {
+		t.Fatalf("tab from the tree gave mode %v with %v, want the overlay holding the keys", toDiff.mode, toDiff.focus)
+	}
+	if !strings.Contains(ansiCodes.ReplaceAllString(toDiff.View(), ""), "+line 1") {
+		t.Errorf("tab opened the overlay without the diff in it:\n%s", toDiff.View())
+	}
+
+	// The keys came from the tree, so `esc` returns them there rather than to wherever they last were.
+	if home := pressOverlay(t, toDiff, tea.KeyMsg{Type: tea.KeyEsc}); home.mode != modeFiles || home.focus != focusFiles {
+		t.Errorf("esc from a diff opened by tab left mode %v with %v, want the tree it came from",
+			home.mode, home.focus)
+	}
+
+	toBox := pressOverlay(t, toDiff, tea.KeyMsg{Type: tea.KeyTab})
+	if toBox.mode != modeFiles || !toBox.metaHasFocus() {
+		t.Errorf("tab from the diff left mode %v with %v, want the changeset box", toBox.mode, toBox.focus)
+	}
+	back := pressOverlay(t, toBox, tea.KeyMsg{Type: tea.KeyTab})
+	if back.mode != modeFiles || back.focus != focusFiles {
+		t.Errorf("tab from the box left mode %v with %v, want the file tree", back.mode, back.focus)
+	}
+
+	// The other way round it is the same ring: backwards from the tree is the box, and backwards from
+	// the box is the diff, so nobody walks the long way around to get to it.
+	toBoxAgain := pressOverlay(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if toBoxAgain.mode != modeFiles || !toBoxAgain.metaHasFocus() {
+		t.Errorf("shift-tab from the tree left mode %v with %v, want the box", toBoxAgain.mode, toBoxAgain.focus)
+	}
+	into := pressOverlay(t, toBoxAgain, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if into.mode != modePreview {
+		t.Errorf("shift-tab from the box gave mode %v, want the overlay", into.mode)
+	}
+	if out := pressOverlay(t, into, tea.KeyMsg{Type: tea.KeyShiftTab}); out.mode != modeFiles || out.focus != focusFiles {
+		t.Errorf("shift-tab from the diff left mode %v with %v, want the tree", out.mode, out.focus)
+	}
+}
+
+// A terminal too small for even the overlay has no diff to walk to, and the ring says so: the target
+// that cannot be drawn is the one whose keys would go nowhere. Tab keeps two stops here.
+func TestTabSkipsTheDiffWhenEvenTheOverlayDoesNotFit(t *testing.T) {
+	m := overlayModel(t, 40)
+	m.width, m.height = 30, 8
+	if m.previewIsOverlayOnly() {
+		t.Fatalf("at %dx%d the overlay still fits; this is the case where nothing does", m.width, m.height)
+	}
+
+	toBox := pressOverlay(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	if toBox.mode != modeFiles || !toBox.metaHasFocus() {
+		t.Errorf("tab gave mode %v with %v, want the changeset box and no overlay", toBox.mode, toBox.focus)
+	}
+	if back := pressOverlay(t, toBox, tea.KeyMsg{Type: tea.KeyTab}); back.mode != modeFiles || back.focus != focusFiles {
+		t.Errorf("tab gave mode %v with %v, want the tree: the ring should stop at two places here",
+			back.mode, back.focus)
 	}
 }
 

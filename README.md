@@ -940,13 +940,15 @@ are columns, and the narrow terminal that needs the regions told apart most is t
 spare; the row between the box and the tree was blank, so the pair costs one row of the tree's window.
 
 `Tab` walks the ring — tree, diff where there is room for one, box — and `f` and `m` go to a named
-one from wherever the keys are. Each region keeps its own cursor, so `Tab` returns to the row it left
-rather than to the top of a list. The navigation keys belong to the region holding them and mean the
-same thing in both: `j`/`k` a row, `gg`/`G` the two ends, `ctrl-d`/`ctrl-u` half a page, `ctrl-f`/`ctrl-b`
-a page. (`ctrl-d` used to quit, which is why paging used to be `ctrl-f` and `ctrl-b` and nothing else;
-`ctrl-c` and `q` are what quit.) The shortcut bar is the bar of the region that holds the keys, which is
-how a key belonging to the other region is a key that is not offered rather than a key that quietly does
-nothing.
+one from wherever the keys are. Where there is no room for a column beside the list, the diff's stop on
+the ring is its whole-screen form: `Tab` opens it, and from inside it `Tab` walks on and `f`/`m` name a
+region, each of which takes that screen down on the way. Each region keeps its own cursor, so `Tab`
+returns to the row it left rather than to the top of a list. The navigation keys belong to the region
+holding them and mean the same thing in both: `j`/`k` a row, `gg`/`G` the two ends, `ctrl-d`/`ctrl-u` half
+a page, `ctrl-f`/`ctrl-b` a page. (`ctrl-d` used to quit, which is why paging used to be `ctrl-f` and
+`ctrl-b` and nothing else; `ctrl-c` and `q` are what quit.) The shortcut bar is the bar of the region that
+holds the keys, which is how a key belonging to the other region is a key that is not offered rather than
+a key that quietly does nothing.
 directory holding nothing but one directory is folded into that row (`src/` above holds `a.ts` and
 `ui/`, so it gets its own row; a chain of single-child directories would be one row and print
 `docs/plans/active/`), and every row prints only the name the rows above it have not already said.
@@ -1074,14 +1076,19 @@ below those dimensions while the pane has the keys loses both — a column that 
 the keyboard, and the list takes the keys back. Same git bytes, same numbers, same wrapping, full
 width, with the file and the span it is measured against on the line above it (the span is named in
 the list otherwise, and the list is gone). It scrolls with `j`/`k`, `ctrl-d`/`ctrl-u` for half a page,
-`ctrl-f`/`ctrl-b` for a page, `gg` for the top and `G` for the bottom, and gives the list back on `Esc`
-or `Enter`. Keys mean what this screen's shortcut bar says they mean while it is up — including `q`,
-which quits here too, and `ctrl-d`, which pages rather than quits; nothing else reaches through,
-because a reviewer who cannot see the list must not be able to mark a file in it. Closing keeps the
-place: `p`, `Esc`, `p` returns to the same lines.
+`ctrl-f`/`ctrl-b` for a page, `gg` for the top and `G` for the bottom. `Esc` or `Enter` gives the list
+back, and so do the keys that move the keys — `tab`, `shift-tab`, `f` and `m` — since the region one of
+them names is only drawn once the diff stops covering the screen. The diff is a stop on the ring here as much as anywhere, which is what lets `tab` reach it: a narrow
+terminal is the one case where the ring would otherwise have a hole where the pane cannot be. Keys mean
+what this screen's shortcut bar says they mean while it is up — including `q`, which quits here too, and
+`ctrl-d`, which pages rather than quits; nothing else reaches through, because a reviewer who cannot see
+the list must not be able to mark a file in it. Closing keeps the
+place however you close it: `p`, `Esc`, `p` returns to the same lines, and so does `f`, `p`.
 Reading a historical span this way works the same — reading is what a read-only span is for. Under 40
-columns or 12 rows even this is unreadable, and the key says which way the terminal is short, naming
-the smaller of the two asks because that is the one worth growing to.
+columns or 13 rows even this is unreadable, and the key says which way the terminal is short, naming
+the smaller of the two asks because that is the one worth growing to. The row floor is its bar's
+fault: the shortcut bar is what wraps there, and a key the band cannot draw is a key nobody is
+offered, so the floor counts the bar's rows and lets the diff have what is left.
 
 Below the author's diff, the pane shows whatever you have edited without committing, under
 `── you · uncommitted` with counts and line numbers of its own. That caption is not decoration: git's

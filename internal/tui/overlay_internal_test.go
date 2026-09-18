@@ -191,7 +191,8 @@ func TestOverlayDismissesWithQEscAndEnter(t *testing.T) {
 
 // While the list is off the screen nothing that acts on it may be reachable: a mark set on a row the
 // reviewer cannot see, a review submitted from a screen with no counter, an editor opened over the diff
-// they were reading. The mode is what makes this hold without a list of exemptions.
+// they were reading. The mode is what makes this hold without a list of exemptions. The keys that move
+// the keys are the exception, and TestTheRegionKeysTakeTheOverlayDown is where they are pinned.
 func TestOverlayLetsNothingElseThrough(t *testing.T) {
 	m := openOverlay(t, overlayModel(t, 40))
 	before := marksOf(m.sess.Files())
@@ -207,7 +208,6 @@ func TestOverlayLetsNothingElseThrough(t *testing.T) {
 		{"d opens the difftool", runeKey('d')},
 		{"t starts a thread", runeKey('t')},
 		{"1 votes a thread", runeKey('1')},
-		{"tab jumps section", tea.KeyMsg{Type: tea.KeyTab}},
 		{"v walks spans", runeKey('v')},
 		{"V opens the picker", runeKey('V')},
 		{"r refreshes refs", runeKey('r')},
@@ -235,6 +235,92 @@ func TestOverlayLetsNothingElseThrough(t *testing.T) {
 	for i := range before {
 		if after[i] != before[i] {
 			t.Errorf("mark %d = %v, want %v", i, after[i], before[i])
+		}
+	}
+}
+
+// pressOverlay presses one key over the overlay and lets git answer, so the model that comes back is a
+// screen with a diff in it rather than one still waiting on a patch.
+func pressOverlay(t *testing.T, m reviewModel, key tea.KeyMsg) reviewModel {
+	t.Helper()
+	updated, cmd := m.Update(key)
+	rm, ok := updated.(reviewModel)
+	if !ok {
+		t.Fatalf("a key produced %T", updated)
+	}
+	return deliver(t, rm, cmd)
+}
+
+// The keys that move the keys are the overlay's exception, and over the overlay they have one more job:
+// the region they name is not drawn while the diff has the screen, so they take the screen down on the
+// way there. `p` is not one of them -- it names the diff, so pressed here it is the no-op its name
+// promises -- and `esc` is already tested as the way back to where the keys came from.
+func TestTheRegionKeysTakeTheOverlayDown(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		key       tea.KeyMsg
+		wantFocus focusTarget
+	}{
+		{"f names the file tree", runeKey('f'), focusFiles},
+		{"m names the changeset box", runeKey('m'), focusMeta},
+		{"tab walks on round the ring", tea.KeyMsg{Type: tea.KeyTab}, focusMeta},
+		{"shift-tab walks back round it", tea.KeyMsg{Type: tea.KeyShiftTab}, focusFiles},
+	} {
+		base := overlayModel(t, 40)
+		wasTree, wasBox := base.regionHeights()
+		m := openOverlay(t, base)
+		m.previewOffset = 7 // somewhere in the file to come back to
+		rm := pressOverlay(t, m, tc.key)
+
+		if rm.mode != modeFiles {
+			t.Errorf("%s left the diff on the screen: mode %v", tc.name, rm.mode)
+		}
+		if rm.focus != tc.wantFocus {
+			t.Errorf("%s left the keys with %v, want %v", tc.name, rm.focus, tc.wantFocus)
+		}
+		if rm.status != "" {
+			t.Errorf("%s left status %q; moving the keys is not an answer to a keystroke", tc.name, rm.status)
+		}
+		// The list is what was bought back, so it has to be drawn again rather than left off-screen.
+		if !strings.Contains(ansiCodes.ReplaceAllString(rm.View(), ""), "reviewed") {
+			t.Errorf("%s closed the diff without bringing the list back:\n%s", tc.name, rm.View())
+		}
+		// Where the diff had got to is kept, so the key that opened it returns to the same lines.
+		if rm.previewPath == "" || rm.previewOffset != 7 {
+			t.Errorf("%s lost the diff its place: path %q offset %d, want x.go and 7", tc.name, rm.previewPath, rm.previewOffset)
+		}
+		// And the list it comes back to is the list it left: the band is budgeted by width, not by what
+		// is drawn, so a round trip through the overlay cannot move the rule under the tree.
+		if tree, box := rm.regionHeights(); tree != wasTree || box != wasBox {
+			t.Errorf("%s left the tree with %d rows and the box with %d, want %d and %d", tc.name, tree, box, wasTree, wasBox)
+		}
+	}
+}
+
+// The shortcut bar is what names the keys of the screen that is up, so the overlay has to name the four
+// that take it down: a key the bar does not name is a key the reviewer has to remember. And the bar has
+// to fit the band the layout reserved for it -- a row of the bar the band cannot draw is a key offered
+// nowhere, which is why the overlay's bar counts towards the budget wherever it is the only form the
+// diff can take.
+func TestTheOverlayBarNamesAndFitsTheKeysThatCloseIt(t *testing.T) {
+	for _, width := range []int{40, 48, 60, 80, 100, 120, 160} {
+		m := openOverlay(t, overlayModel(t, 40))
+		m.width = width
+		bar := m.helpLines()
+		for _, want := range []string{"esc enter back", "tab cycles", "f files", "m changeset"} {
+			if !strings.Contains(strings.Join(bar, " "), want) {
+				t.Errorf("at %d columns the overlay's bar does not name %q: %q", width, want, strings.Join(bar, " | "))
+			}
+		}
+		band := bandOf(t, m)
+		if len(band) < len(bar) {
+			t.Fatalf("at %d columns the band draws %d of the overlay's %d bar rows:\n%s", width, len(band), len(bar), m.View())
+		}
+		for i, line := range bar {
+			// The frame pads each row to the terminal, so the row is compared with its padding off.
+			if got := strings.TrimRight(band[i], " "); got != ansiCodes.ReplaceAllString(line, "") {
+				t.Errorf("at %d columns band row %d is %q, want the bar's %q", width, i, got, line)
+			}
 		}
 	}
 }

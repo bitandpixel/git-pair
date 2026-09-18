@@ -1599,10 +1599,20 @@ func (m reviewModel) helpText() string {
 		return helpSpan(m.pick.list != nil, m.pick.nav)
 	case modePreview:
 		// The overlay's own keys. `p` is not among them: the diff already has the screen and the keys,
-		// and `q` means what it means everywhere else. `esc` (or `enter`) is the way back to the list.
-		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  esc enter back  q quit"
+		// and `q` means what it means everywhere else. `esc` (or `enter`) is the way back to the list,
+		// and the keys that move the keys take the screen down on their way to the region they name.
+		return m.overlayHelp()
 	}
 	return m.helpTextFor(m.focus)
+}
+
+// overlayHelp is the whole-screen diff's own bar: the keys the pane reads, with the two exits the
+// overlay has -- `esc` and `enter` both give the screen back -- and the keys that move the keys. It is
+// part of the row-area budget wherever the overlay is the only form the diff can take, so that no row of
+// it is ever clipped by a bar counted from the list.
+func (m reviewModel) overlayHelp() string {
+	return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  esc enter back  " +
+		"tab cycles  f files  m changeset  q quit"
 }
 
 // helpTextFor is the bar of one region. It names every key that region reads and none that it does not,
@@ -1662,10 +1672,15 @@ func (m reviewModel) helpLines() []string {
 // line, which is invisible in a frame that already fills the terminal.
 func (m reviewModel) helpRows() int {
 	bars := []string{m.helpTextFor(focusFiles), m.helpTextFor(focusMeta)}
-	if m.paneWidth() > 0 {
+	switch {
+	case m.paneWidth() > 0:
 		// Only count the preview's bar where a preview can actually be focused: the excuse for not
 		// having a pane at all is not a reason to spend a row on its bar.
 		bars = append(bars, m.helpTextFor(focusPreview))
+	case m.previewIsOverlayOnly():
+		// Nor where the overlay is the only form the diff has -- except that it is: the ring walks through
+		// that screen now, so a row of its bar that the band cannot draw is a key offered nowhere.
+		bars = append(bars, m.overlayHelp())
 	}
 	rows := 0
 	for _, bar := range bars {
@@ -2107,15 +2122,24 @@ func (m *reviewModel) activeBottom() {
 	m.clamp()
 }
 
-// focusRing is the order Tab walks: the file list, the diff where there is room for one, and the
-// changeset box. A terminal with no room for the pane has one fewer target, because a target that
-// cannot be drawn is a target whose keys go nowhere.
+// focusRing is the order Tab walks: the file list, the diff wherever it can be shown, and the changeset
+// box. A terminal with room for neither the pane nor the overlay has one fewer target, because a target
+// that cannot be drawn is a target whose keys go nowhere.
 func (m reviewModel) focusRing() []focusTarget {
 	ring := []focusTarget{focusFiles}
-	if m.paneWidth() > 0 {
+	if m.paneWidth() > 0 || m.previewIsOverlayOnly() {
 		ring = append(ring, focusPreview)
 	}
 	return append(ring, focusMeta)
+}
+
+// previewIsOverlayOnly is whether the diff can only be shown over the whole screen: there is no room for
+// a second column beside the list, but the screen itself is big enough for the overlay. It is the narrow
+// terminal's case, and the reason the diff is still a stop on the ring there -- the overlay is how that
+// region gets drawn when there is no column to focus, so leaving it out would put a hole in the ring
+// exactly where the pane cannot be.
+func (m reviewModel) previewIsOverlayOnly() bool {
+	return m.previewShortfall() != "" && m.overlayShortfall() == ""
 }
 
 // focusOn hands the keys to a region. The status line goes with them: the shortcut bar is what names
@@ -2123,6 +2147,20 @@ func (m reviewModel) focusRing() []focusTarget {
 // an answer to this one.
 func (m *reviewModel) focusOn(to focusTarget) {
 	if to == focusPreview && m.paneWidth() == 0 {
+		if !m.previewIsOverlayOnly() {
+			return
+		}
+		// The narrow terminal's version of the same move: with no column to focus, the overlay is how the
+		// diff is drawn. Where the keys came from is not drawn while it is up, which is what `esc` -- and
+		// `f`, `m` and `tab` -- take back down on the way there.
+		if m.focus != focusPreview {
+			m.prevFocus = m.focus
+		}
+		m.previewOn = true
+		m.mode = modePreview
+		m.focus = focusPreview
+		m.previewG = false
+		m.setStatus("", false)
 		return
 	}
 	if to == focusMeta && !m.metaHome {
@@ -2134,6 +2172,10 @@ func (m *reviewModel) focusOn(to focusTarget) {
 		// files: reading a diff from the box should land back on the box.
 		m.prevFocus = to
 		m.previewG = false
+		if m.mode == modePreview {
+			// The region named is only drawn once the diff stops covering the screen.
+			m.mode = modeFiles
+		}
 	}
 	m.focus = to
 	m.clamp()
@@ -2233,8 +2275,11 @@ func visibleRows(start, end, scroll, window int) []int {
 // the fewest rows that leave one row of diff after the file line, the rule and the shortcut bar.
 // TestOverlayFloorHasRoomToRead asserts the arithmetic rather than trusting it.
 const (
-	previewOverlayMinWidth  = 40
-	previewOverlayMinHeight = 12
+	previewOverlayMinWidth = 40
+	// The bar is what sets this, not the diff: at the floor's 40 columns the overlay's own bar wraps
+	// to three rows, and a bar whose rows the band cannot draw is a key offered nowhere. The body gets
+	// what is left, so a row added to that bar is a row the floor has to grow by.
+	previewOverlayMinHeight = 13
 )
 
 const (
@@ -2594,7 +2639,10 @@ func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 //
 // The exceptions are the keys that move the keys: tab, shift-tab, f and m. They change no part of the
 // review, and a reviewer who arrived at the diff with tab has to be able to go on with it -- a ring you
-// can only leave by backing out of is not a ring.
+// can only leave by backing out of is not a ring. Over the overlay they do the same and take the screen
+// down with them, because the regions they name are drawn the moment the diff stops covering them. `p`
+// is not among them: it names the diff, so pressed here it is still the no-op its name promises, while
+// `tab` names the *next region*, and taking the screen down follows from going somewhere else.
 //
 // Keys do mean different things here than in the list -- q closes rather than quits, enter opens the
 // file being read rather than the one under the cursor, ctrl-d scrolls rather than quits -- and that
@@ -2622,18 +2670,19 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// than read. Pressed here it is the no-op its name promises.
 	case key.Type == tea.KeyEsc:
 		return m.leavePreview()
-	// The ring, from inside the diff. Over the overlay there is nowhere to go -- the screen is nothing
-	// but the diff, and moving the keys to a region that is not drawn is how keys get lost.
-	case !overlay && key.Type == tea.KeyTab:
+	// The ring, from inside the diff. Over the pane the other regions are already drawn; over the
+	// overlay they are not, so these four take the screen down on the way there. On a narrow terminal the
+	// overlay is the only form the diff has, and without this the stop it is on the ring would be a hole.
+	case key.Type == tea.KeyTab:
 		m.cycleFocus(1)
 		return m, nil
-	case !overlay && key.Type == tea.KeyShiftTab:
+	case key.Type == tea.KeyShiftTab:
 		m.cycleFocus(-1)
 		return m, nil
-	case !overlay && key.Type == tea.KeyRunes && firstRune(key) == 'f':
+	case key.Type == tea.KeyRunes && firstRune(key) == 'f':
 		m.focusOn(focusFiles)
 		return m, nil
-	case !overlay && key.Type == tea.KeyRunes && firstRune(key) == 'm':
+	case key.Type == tea.KeyRunes && firstRune(key) == 'm':
 		m.focusOn(focusMeta)
 		return m, nil
 	case key.Type == tea.KeyRunes && firstRune(key) == 'q':

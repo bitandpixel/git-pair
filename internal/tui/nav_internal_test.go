@@ -219,8 +219,10 @@ func TestJStopsAtTheEndOfTheChangesetBox(t *testing.T) {
 }
 
 // Tab is the ring: the file tree, the diff where there is room for one, the changeset box, round again.
-// This fixture is too narrow for the pane, so the ring here has two targets -- which is the other half
-// of the rule: a region that cannot be drawn is not a region the keys can be lost in.
+// This fixture is too narrow for the pane, so the ring here walks through the overlay: the diff is the
+// stop the pane would be. The two-target ring, where even the overlay does not fit, is
+// TestTabSkipsTheDiffWhenEvenTheOverlayDoesNotFit -- a region that cannot be drawn at all is the one
+// that stays off the ring.
 func TestTabWalksTheFocusRing(t *testing.T) {
 	m := navModel(t)
 	if m.paneWidth() > 0 {
@@ -228,9 +230,18 @@ func TestTabWalksTheFocusRing(t *testing.T) {
 	}
 	m.cursor = 2
 
-	toBox := press(m, tea.KeyTab)
+	toDiff := press(m, tea.KeyTab)
+	if toDiff.mode != modePreview || toDiff.focus != focusPreview {
+		t.Fatalf("tab gave mode %v with %v, want the diff, which is the stop the pane would be",
+			toDiff.mode, toDiff.focus)
+	}
+	if toDiff.cursor != 2 {
+		t.Errorf("tab moved the file tree's cursor from 2 to %d", toDiff.cursor)
+	}
+
+	toBox := press(toDiff, tea.KeyTab)
 	if !toBox.metaHasFocus() {
-		t.Fatalf("tab left the keys with %v, want the changeset box", toBox.focus)
+		t.Fatalf("tab from the diff left the keys with %v, want the changeset box", toBox.focus)
 	}
 	if toBox.cursor != 2 {
 		t.Errorf("tab moved the file tree's cursor from 2 to %d", toBox.cursor)
@@ -248,8 +259,11 @@ func TestTabWalksTheFocusRing(t *testing.T) {
 	if got := press(m, tea.KeyShiftTab); !got.metaHasFocus() {
 		t.Errorf("shift-tab from the tree left the keys with %v, want the box", got.focus)
 	}
-	if got := press(toBox, tea.KeyShiftTab); got.focus != focusFiles {
-		t.Errorf("shift-tab from the box left the keys with %v, want the tree", got.focus)
+	if got := press(toBox, tea.KeyShiftTab); got.mode != modePreview {
+		t.Errorf("shift-tab from the box gave mode %v, want the diff, the stop between the two", got.mode)
+	}
+	if got := press(press(toBox, tea.KeyShiftTab), tea.KeyShiftTab); got.focus != focusFiles {
+		t.Errorf("shift-tab back round the ring left the keys with %v, want the tree", got.focus)
 	}
 
 	// f and m name a region instead of walking to the next one, from wherever the keys are.
@@ -271,7 +285,8 @@ func TestTabWalksTheFocusRing(t *testing.T) {
 	if left.focus != focusFiles {
 		t.Errorf("tab left the keys with %v, want the tree", left.focus)
 	}
-	if again := press(left, tea.KeyTab); again.metaCursor != there.metaCursor {
+	again := press(press(left, tea.KeyTab), tea.KeyTab)
+	if again.metaCursor != there.metaCursor {
 		t.Errorf("tab back into the box landed on %d, want the row it left, %d", again.metaCursor, there.metaCursor)
 	}
 }
