@@ -706,7 +706,7 @@ top, the changed files and their marks below it, and the reviewed counter under 
 │     + new thread…                    │
 ╰──────────────────────────────────────╯
 ═══════════════════════════════════════
-  ▾ ○ src/
+▾ ○ src/
     ▾ ○ ui/
         ○ picker.ts
     ○ a.ts
@@ -734,10 +734,10 @@ nothing.
 directory holding nothing but one directory is folded into that row (`src/` above holds `a.ts` and
 `ui/`, so it gets its own row; a chain of single-child directories would be one row and print
 `docs/plans/active/`), and every row prints only the name the rows above it have not already said.
-Each level is indented one step deeper than the row above it, so a child starts right of its own
-directory rather than under its name — a directory row spends two cells on its fold arrow and two more on
-its mark gutter, and an indent the width of that prefix would put every child's mark in the column its
-parent's mark started at, which is a flat list with arrows in it.
+Each level is indented four cells, so a child's name starts two cells right of the directory it is under.
+That is what the four cells are for: a directory row spends two on its fold arrow and two on its mark
+gutter before its name, and a file row only the gutter, so an indent of two a level puts every child's
+name in exactly the column its parent's name started in — which is a flat list with arrows in it.
 `h` and `l` fold and unfold the directory under the cursor — arrows do the same, and `Enter` does
 both, the way it does for the thread heading — and `c` folds the whole tree and opens it again,
 which is how a changeset of a hundred files gets read for shape before it gets read for detail.
@@ -762,7 +762,8 @@ toggles reviewed on a file row — which stays under the cursor, since marking i
 on a directory row it sets every file under it, folded or not, because a fold is a way of looking at
 the list rather than a statement about what has been read; the next press clears them. The rows in the
 box are read rather than diffed, so marking one says so. `a` opens
-`ABOUT.md` in the editor whatever the span did; `t` prompts for a new thread from anywhere;
+`ABOUT.md` in the editor whatever the span did; `t` prompts for a new thread from anywhere — in the footer's own line, over the list and the diff both,
+rather than as a screen that takes them away while the title is typed;
 `T` collapses the thread list; `v`
 steps to the next span this session has been in — the span it opened on, the full and
 unreviewed presets, and any span chosen with `V` — every stop in order, wrapping, so nothing on
@@ -783,7 +784,10 @@ rows.
 The box is a box because its rows are not files, and a row of paths under a counter of files reads as a
 file. It holds the span the review is measured against, `ABOUT.md`, the thread heading, the threads, and
 the row that starts another — what a reviewer reads before choosing a file, above the files it is
-choosing between. It is capped at a third of the space the terminal gives and scrolls inside its own
+choosing between. The first time the box takes the keys it opens on `ABOUT.md` rather than on its first
+row: the span above it is the thing a reviewer *changes*, and the span is what they set when they came,
+not what they came to read. Once the reviewer moves the cursor themselves the box leaves it where they put
+it, including across a trip to the editor. It is capped at a third of the space the terminal gives and scrolls inside its own
 borders, so forty threads are a reason to read the box rather than a reason to hide the tree behind it;
 when rows are off screen the bottom border says how many (`3 more`), which is a note inside the border
 rather than a row of its own because a note that came and went would move the whole layout. The borders

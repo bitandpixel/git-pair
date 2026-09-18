@@ -1240,7 +1240,11 @@ over styling alone so the focus survives a terminal that renders no bold. The bo
 sides in both layouts, including the side nearest the diff column: without it the rows inside read as a
 column of loose text rather than as the changeset's own block. Its cursor row is highlighted only while
 the box holds the keys, since the borders say that already and a row that looks chosen and is not is a row
-a reviewer marks by mistake. The span is the box's one
+a reviewer marks by mistake. The box opens on `ABOUT.md` the first time it takes the keys, since that is what a reviewer came to the
+box to read; the span row above it is what they change, and change least often. After the reviewer moves
+the cursor the box leaves it where they put it.
+
+The span is the box's one
 control: `Enter` or `Space` on its row opens the span picker, since what a review is measured against is
 worth choosing, and `base` above it is a line of the frame rather than a row, since a base is only read.
 The picker commits nothing until its own `Enter`, so the row is available over a historical span as well.
@@ -1249,10 +1253,10 @@ diff did, the box is the shortcut to read what was said about it.
 
 The files are a tree rather than a list of paths. Each sits under its directory, a directory that
 holds nothing but one directory is folded into that row (`src/booking/` above is one row, not two),
-and a row prints only the name the rows above it have not already said. Each level is indented one step
-deeper than the row above it — a directory row spends cells on its fold arrow and its mark gutter, and an
-indent the width of that prefix would land every child's mark in the column its parent's mark started at,
-which is a flat list with arrows in it. `h` and `l` fold and unfold
+and a row prints only the name the rows above it have not already said. Each level is indented four cells,
+which puts a child's name two cells right of the directory above it: a directory spends four cells before
+its name — the fold arrow and the mark gutter — and a file only the gutter, so two cells a level lands
+every child's name in exactly the column its parent's name started in. `h` and `l` fold and unfold
 the directory under the cursor — the left and right arrows do the same, and `Enter` does both, the
 way it does for the thread heading — while `c` folds the whole tree and opens it again, which is how
 a changeset of a hundred files is read for its shape before it is read for its detail. Folding moves
@@ -1279,6 +1283,10 @@ colours, which is the shape PRD §3's refusal to build a diff renderer leaves: t
 for glancing, and reading a diff means opening it. The frame fills the terminal — the row
 area holds the window's height and every row is padded to its width — so the shortcut bar
 sits against the bottom edge rather than under a short list.
+
+The prompts ask in a line of the footer and leave the screen otherwise as it was, so the diff column
+survives a thread title being typed and a submit prompt being answered: the reviewer who pressed `t`
+beside a diff comes back from the editor to that diff rather than to a screen that lost it on the way.
 
 `p` moves the keys into that column and does nothing else, so a diff longer than the column is read
 with the keys a diff is read with: `j`/`k`, `ctrl-d`/`ctrl-u`, `ctrl-f`/`ctrl-b`, `gg` and `G` scroll
