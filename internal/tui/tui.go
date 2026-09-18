@@ -1349,7 +1349,7 @@ func (m reviewModel) footer() string {
 	}
 	switch m.mode {
 	case modePrompt:
-		b.WriteString(threadPromptLabel + m.promptText() + threadPromptCursor + "\n")
+		b.WriteString(threadPromptLabel + m.promptText() + "\n")
 	case modeSubmit:
 		for _, line := range m.helpLines() {
 			b.WriteString(line + "\n")
@@ -1375,18 +1375,29 @@ func (m reviewModel) footer() string {
 	return b.String()
 }
 
-// promptText is the title being typed, or the ghost of it while the field is empty. The ghost is
-// faint, so a field waiting for a title cannot be read as one that already has it.
+// promptText is the field's contents: the title being typed with the caret after it, or, while the
+// field is empty, the caret over the ghost of a title. The caret goes wherever the caret is -- after
+// what has been typed, and on the field's first cell when nothing has.
 func (m reviewModel) promptText() string {
 	if m.input != "" {
-		return m.input
+		return m.input + threadPromptCursor
 	}
 	// A ghost too wide for the window is dropped rather than cut: the frame writes one row per
 	// line and cuts what overflows, and half a hint reads as a fault rather than as an invitation.
-	if lipgloss.Width(threadPromptLabel+threadTitlePlaceholder+threadPromptCursor) > m.width {
-		return ""
+	if lipgloss.Width(threadPromptLabel+threadTitlePlaceholder) > m.width {
+		return threadPromptCursor
 	}
-	return styleDim.Render(threadTitlePlaceholder)
+	return promptGhost()
+}
+
+// promptGhost is the caret resting on the first cell of the ghost title. The caret is a block, and a
+// block in front of a title nobody has typed reads as a title that is there, so it covers the ghost's
+// first letter the way a caret sitting on a cell does -- the letter stays legible inside it, which is
+// what says the field is still empty.
+func promptGhost() string {
+	first, _ := utf8.DecodeRuneInString(threadTitlePlaceholder)
+	return styleSelected.Render(string(first)) +
+		styleDim.Render(threadTitlePlaceholder[utf8.RuneLen(first):])
 }
 
 // footerRows counts the rows footer() spends on the drift banner and the status line. Both can wrap,

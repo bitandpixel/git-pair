@@ -535,8 +535,13 @@ func TestThreadPromptShowsAGhostTitleAndTheKeys(t *testing.T) {
 	if field < 0 {
 		t.Fatalf("no title field in:\n%s", strings.Join(rows, "\n"))
 	}
-	if want := threadPromptLabel + threadTitlePlaceholder + threadPromptCursor; rows[field] != want {
-		t.Errorf("an empty field reads %q, want the ghost title and the caret", rows[field])
+	if want := threadPromptLabel + threadTitlePlaceholder; rows[field] != want {
+		t.Errorf("an empty field reads %q, want the caret on the ghost's first cell", rows[field])
+	}
+	// The caret over the ghost is a reverse-video cell, which the stripped frame cannot show; what
+	// the frame can show is that the caret is not waiting after a title nobody typed.
+	if strings.HasSuffix(rows[field], threadPromptCursor) {
+		t.Errorf("the caret sits after the ghost rather than on it: %q", rows[field])
 	}
 	if hint := lineWithExact(rows, threadPromptHint); hint != field+1 {
 		t.Errorf("the keys are on row %d, want them on the row under the field (%d):\n%s",
