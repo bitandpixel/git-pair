@@ -76,8 +76,9 @@ func TestALongChangesetBoxStillFitsTheTerminal(t *testing.T) {
 		t.Errorf("the shortcut bar is not on the screen:\n%s", strings.Join(rows, "\n"))
 	}
 	// The box hides what it cannot show and says how much is hidden, inside its own bottom border so
-	// the note cannot change the column's height.
-	if m.metaScroll+m.metaWindow() < len(m.metaRows()) {
+	// the note cannot change the column's height. The scroll is an index into the list, so the count of
+	// what the window hides starts from where the box starts.
+	if m.metaScroll-m.metaStart+m.metaWindow() < len(m.metaRows()) {
 		if !strings.Contains(strings.Join(rows, "\n"), "more") {
 			t.Errorf("the box hides rows without saying so:\n%s", strings.Join(rows, "\n"))
 		}
@@ -581,5 +582,49 @@ func TestThePaneSurvivesTheThreadPrompt(t *testing.T) {
 	// Cancelling is the same screen again, and the box's cursor has not been touched by the trip.
 	if back := press(m, tea.KeyEsc); back.mode != modeFiles || back.paneWidth() != wide {
 		t.Errorf("esc left mode %v with a %d-column pane", back.mode, back.paneWidth())
+	}
+}
+
+// --- the box's window when the tree above it changes size ---------------------------------------
+
+// The box's scroll is a position in the box, not in the list. The two regions are one slice, so the
+// box's rows sit at whatever index the tree leaves them: fold a directory and they all move up. A
+// scroll left at the index the region used to start at then skips the box's first rows -- the span
+// among them, which is the one row in the box a reviewer changes.
+func TestFoldingTheTreeKeepsTheBoxAtItsTop(t *testing.T) {
+	m, _ := treeModel(t)
+	// The box opens on ABOUT.md, one row under the span, and the keys go back to the tree, which is
+	// where a fold is a key the reviewer is actually pressing.
+	m.focusOn(focusMeta)
+	m.focusOn(focusFiles)
+	at := boxIndexOf(t, m, rowSpan)
+
+	m = cursorOnDir(t, m, "docs/")
+	m = pressRune(m, 'h')
+
+	_, section := m.window()
+	for _, r := range section {
+		if r.row.kind == rowSpan {
+			return
+		}
+	}
+	t.Errorf("folding docs/ scrolled the span row (row %d, box starts at %d, box scrolled to %d) out of the box:\n%s",
+		at, m.metaStart, m.metaScroll, m.View())
+}
+
+// The same confusion one step further out: the box's "N more" note counts what its window hides from
+// the box's own first row. A scroll read as a position in the list under-counts by the height of the
+// tree, so a box with rows still hidden says it has shown everything there is.
+func TestTheBoxCountsWhatItHidesFromItsOwnStart(t *testing.T) {
+	m := withThreads(t, navModel(t), 12)
+	m = focusOnRow(t, m, m.metaStart)
+	hidden := len(m.metaRows()) - m.metaWindow()
+	if hidden <= 0 {
+		t.Fatalf("the box shows all %d of its rows in a %d-row window", len(m.metaRows()), m.metaWindow())
+	}
+
+	view := strings.Join(viewRows(m.View()), "\n")
+	if !strings.Contains(view, fmt.Sprintf("%d more", hidden)) {
+		t.Errorf("the box hides %d of its %d rows and does not say so:\n%s", hidden, len(m.metaRows()), view)
 	}
 }

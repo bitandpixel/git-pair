@@ -1295,7 +1295,9 @@ func (m reviewModel) boxLines(section []renderedRow) []string {
 	// The box's scroll note goes inside its own bottom border rather than on a row of its own: a note
 	// that arrived and left would change the height of the column, which is what the box is here to stop.
 	more := ""
-	if hidden := len(m.metaRows()) - m.metaScroll - m.metaWindow(); hidden > 0 {
+	// Measured from the region's own start: the scroll is an index into the whole list, and the rows
+	// above it belong to the tree.
+	if hidden := len(m.metaRows()) - (m.metaScroll - m.metaStart) - m.metaWindow(); hidden > 0 {
 		more = fmt.Sprintf("%d more", hidden)
 	}
 	return append(out, frame(boxEdge(f.cornerBottomLeft, f.cornerBottomRight, f.edge, more, width)))
@@ -1798,7 +1800,14 @@ func wrapWords(s string, width int) []string {
 // index of a row that is still there is not the number it had.
 func (m *reviewModel) refresh() {
 	keepFile, keepMeta := m.rowUnder(m.cursor), m.rowUnder(m.metaCursor)
+	start := m.metaStart
 	m.buildRows()
+	// The box's rows sit at whatever index the tree leaves them, so folding a directory moves the whole
+	// region up. The box's scroll is a place in the box rather than in the list, so it travels with
+	// them: left at the index the region used to begin, it reads as a scroll down the box and hides the
+	// region's first rows -- the span among them. The first build has the region start where the list
+	// does, which is also where clamp would have put a scroll of its own.
+	m.metaScroll += m.metaStart - start
 	m.restore(keepFile, &m.cursor)
 	m.restore(keepMeta, &m.metaCursor)
 	m.clamp()
@@ -2064,6 +2073,12 @@ func (m *reviewModel) clampRegion(cursor, scroll *int, start, end, window int) {
 	}
 	if *cursor >= *scroll+window {
 		*scroll = *cursor - window + 1
+	}
+	// ... and it never starts so far down that it cannot fill itself. A region that lost rows -- the
+	// threads folded away, a rebuild that found fewer files -- leaves a scroll pointing past what is
+	// left, and the box would draw two rows under a border built for six.
+	if lowest := max(start, end-window); *scroll > lowest {
+		*scroll = lowest
 	}
 }
 
