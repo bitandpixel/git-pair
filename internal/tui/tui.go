@@ -194,6 +194,9 @@ type reviewModel struct {
 	scroll     int
 	metaCursor int
 	metaScroll int
+	// metaHome is whether the reviewer has moved the box's cursor themselves. Until they do, the box
+	// opens on ABOUT.md wherever the keys arrived from.
+	metaHome bool
 	// focus is which region holds the keys, and prevFocus the one they were in before the preview
 	// took them, so `p` gives them back where they came from rather than always to the files.
 	focus     focusTarget
@@ -889,7 +892,7 @@ func (m reviewModel) openThreadTitle(title string) (tea.Model, tea.Cmd) {
 	m.refresh()
 	for i, r := range m.rows {
 		if r.kind == rowThread && r.path == path {
-			m.metaCursor = i
+			m.metaCursor, m.metaHome = i, true
 			break
 		}
 	}
@@ -1702,12 +1705,12 @@ func (m *reviewModel) buildRows() {
 // cannot serve a screen with three things a reviewer moves between. The ring is focusRing, and each
 // region keeps its own cursor, so Tab returns to the row it left rather than to the top.
 
-// The two columns the file tree spends on itself: the indent one level costs, and the fold arrow a
-// directory row puts before its mark. A row is indented by one step *plus* one per level, because the
-// prefix of its parent's row is the fold arrow and the mark gutter: indenting only by depth would land
-// every child's name in exactly the column its parent's name started in, and the tree would read as a
-// flat list with arrows in it.
-const treeIndent = "  "
+// What one level of the file tree costs. Four cells, because a directory spends two on its fold arrow
+// and two on its mark gutter before its name, and a file only the gutter: indent two per level and every
+// child's name lands in exactly the column its parent's name started in -- which is what makes a tree
+// read as a flat list with arrows in it. Four per level puts a child's name two cells right of the
+// directory it is under, which is the thing a reviewer is actually comparing.
+const treeIndent = "    "
 
 // rowText renders one row. Only the file tree carries a reviewed mark: the artifacts below the
 // counter are read rather than diffed.
@@ -1718,7 +1721,7 @@ func (m reviewModel) rowText(r row) string {
 		if !m.folded[r.path] {
 			arrow = "▾ "
 		}
-		text := strings.Repeat(treeIndent, r.depth+1) + styleDim.Render(arrow)
+		text := strings.Repeat(treeIndent, r.depth) + styleDim.Render(arrow)
 		if m.sess.Span().CanMark() {
 			text += m.dirGutter(r)
 		}
@@ -1730,7 +1733,7 @@ func (m reviewModel) rowText(r row) string {
 		}
 		return text + r.name
 	case rowFile:
-		text := strings.Repeat(treeIndent, r.depth+1)
+		text := strings.Repeat(treeIndent, r.depth)
 		if m.sess.Span().CanMark() {
 			text += m.fileGutter(r)
 		}
@@ -1899,6 +1902,9 @@ func (m *reviewModel) move(delta int) {
 		if m.metaStart >= len(m.rows) {
 			return
 		}
+		// From here the reviewer has put the box's cursor somewhere themselves, so the box stops
+		// returning to its default row.
+		m.metaHome = true
 		m.metaCursor += delta
 	} else {
 		if m.metaStart == 0 {
@@ -1947,6 +1953,10 @@ func (m *reviewModel) focusOn(to focusTarget) {
 	if to == focusPreview && m.paneWidth() == 0 {
 		return
 	}
+	if to == focusMeta && !m.metaHome {
+		// The first time the box gets the keys it opens on ABOUT.md rather than on its first row.
+		m.metaCursor = m.aboutRow()
+	}
 	if to != focusPreview {
 		// The last region the keys were in, so `p` gives them back there rather than always to the
 		// files: reading a diff from the box should land back on the box.
@@ -1960,6 +1970,21 @@ func (m *reviewModel) focusOn(to focusTarget) {
 
 // cycleFocus walks the ring; dir is -1 for shift-tab, so the ring goes both ways and a reviewer who
 // overshoots comes back rather than walking the long way round.
+// aboutRow is the changeset box's ABOUT.md row -- where the box's cursor goes the first time the box
+// gets the keys. The span row above it is the box's one control, and the span is the thing a reviewer
+// changes least often: they come to the box to read what the author said about the change.
+func (m reviewModel) aboutRow() int {
+	for i := m.metaStart; i < len(m.rows); i++ {
+		if m.rows[i].kind == rowAbout {
+			return i
+		}
+	}
+	if m.metaStart < len(m.rows) {
+		return m.metaStart
+	}
+	return 0
+}
+
 func (m *reviewModel) cycleFocus(dir int) {
 	ring := m.focusRing()
 	at := 0
@@ -2111,7 +2136,7 @@ func (m reviewModel) dividerAt() int { return m.listWidth() + previewGap/2 }
 // switched it off, the session is taking input, or the terminal is too small. One function decides
 // it, because layout and key handling have to agree on whether the pane is there.
 func (m reviewModel) paneWidth() int {
-	if !m.previewOn || m.mode != modeFiles {
+	if !m.previewOn || !m.paneAllowed() {
 		return 0
 	}
 	_, pane := m.previewLayout()
@@ -2164,6 +2189,15 @@ func (m reviewModel) metaHasFocus() bool {
 // previewShowing is whether a diff is on the screen right now, in either layout. Fetching, key
 // handling and the frame all ask this rather than paneWidth, because the overlay has no pane to
 // measure -- and because a fetch keyed to a column that is not drawn is a git call for nothing.
+// paneAllowed is whether the mode leaves the screen shared. The prompts ask their question in a line of
+// the footer, so the diff stays beside the list while a thread title is being typed and while a submit
+// prompt is open: the reviewer who pressed `t` beside a diff comes back from the editor to the same diff,
+// not to a screen that lost it on the way. The picker and the whole-screen preview take the screen, so
+// they give the column up.
+func (m reviewModel) paneAllowed() bool {
+	return m.mode == modeFiles || m.mode == modePrompt || m.mode == modeSubmit
+}
+
 func (m reviewModel) previewShowing() bool {
 	return m.mode == modePreview || m.paneWidth() > 0
 }

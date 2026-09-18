@@ -111,6 +111,9 @@ func focusOnRow(t *testing.T, m reviewModel, idx int) reviewModel {
 	}
 	if idx >= m.metaStart {
 		m.metaCursor = idx
+		// The test is placing the cursor, which is exactly what the reviewer doing it themselves
+		// means to the box: it stops offering its default row on the way in.
+		m.metaHome = true
 		m.focusOn(focusMeta)
 	} else {
 		m.cursor = idx
@@ -144,6 +147,26 @@ func boxIndexOf(t *testing.T, m reviewModel, kind rowKind) int {
 }
 
 // activeKind is the row the keys are standing on, which is the row the keys act on.
+// boxTo hands the keys to the box with its cursor on a row of a given kind, so a test that is about
+// that row does not depend on where the box chose to open.
+func boxTo(t *testing.T, m reviewModel, kind rowKind) reviewModel {
+	t.Helper()
+	m = boxOn(t, m)
+	want := boxIndexOf(t, m, kind)
+	for range len(m.rows) + 1 {
+		if m.metaCursor == want {
+			return m
+		}
+		if m.metaCursor > want {
+			m = press(m, tea.KeyUp)
+		} else {
+			m = press(m, tea.KeyDown)
+		}
+	}
+	t.Fatalf("the box's cursor would not come to rest on a %v row (at %d of %d)", kind, m.metaCursor, len(m.rows))
+	return m
+}
+
 func activeKind(t *testing.T, m reviewModel) (rowKind, row) {
 	t.Helper()
 	r, _, ok := m.activeRow()
