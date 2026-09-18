@@ -522,6 +522,67 @@ func TestThreadPromptKeepsSpacesInATitle(t *testing.T) {
 	}
 }
 
+// The prompt is one field, not two labels: the ghost title says what the field wants, so the line
+// under it carries only the keys, and neither repeats the other.
+func TestThreadPromptShowsAGhostTitleAndTheKeys(t *testing.T) {
+	m := pressRune(navModel(t), 't')
+	if m.mode != modePrompt {
+		t.Fatalf("t did not open the thread prompt (mode %d)", m.mode)
+	}
+
+	rows := viewRows(ansiCodes.ReplaceAllString(m.View(), ""))
+	field := lineWithPrefix(rows, threadPromptLabel)
+	if field < 0 {
+		t.Fatalf("no title field in:\n%s", strings.Join(rows, "\n"))
+	}
+	if want := threadPromptLabel + threadTitlePlaceholder + threadPromptCursor; rows[field] != want {
+		t.Errorf("an empty field reads %q, want the ghost title and the caret", rows[field])
+	}
+	if hint := lineWithExact(rows, threadPromptHint); hint != field+1 {
+		t.Errorf("the keys are on row %d, want them on the row under the field (%d):\n%s",
+			hint, field+1, strings.Join(rows, "\n"))
+	}
+	for _, row := range rows {
+		if strings.Contains(row, "New thread title") {
+			t.Errorf("the field's label is repeated below it: %q", row)
+		}
+	}
+
+	// The ghost stands in for a title, it is not one already entered: what the reviewer types
+	// replaces it.
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Does the lock")})
+	m = updated.(reviewModel)
+	rows = viewRows(ansiCodes.ReplaceAllString(m.View(), ""))
+	field = lineWithPrefix(rows, threadPromptLabel)
+	if want := threadPromptLabel + "Does the lock" + threadPromptCursor; rows[field] != want {
+		t.Errorf("the field reads %q, want the title typed over the ghost", rows[field])
+	}
+	if strings.Contains(strings.Join(rows, "\n"), threadTitlePlaceholder) {
+		t.Errorf("the ghost is still under the typed title:\n%s", strings.Join(rows, "\n"))
+	}
+	// The hint is the status line, which the frame already counts: neither line the prompt adds
+	// may push a row past the bottom of the terminal.
+	assertFrameFits(t, m)
+}
+
+// A ghost wider than the window would be cut rather than continued, and half a hint reads as a
+// rendering fault instead of an invitation, so a narrow field is left empty.
+func TestNarrowThreadPromptDropsItsGhostTitle(t *testing.T) {
+	m := pressRune(navModel(t), 't')
+	m.width = 20 // less than the label, the ghost and the caret together
+
+	view := ansiCodes.ReplaceAllString(m.View(), "")
+	if strings.Contains(view, threadTitlePlaceholder) {
+		t.Errorf("the ghost survived a %d-column window it does not fit:\n%s", m.width, view)
+	}
+	for _, line := range wrapProse(threadPromptHint, m.width) {
+		if !strings.Contains(view, line) {
+			t.Errorf("the keys lost %q at %d columns:\n%s", line, m.width, view)
+		}
+	}
+	assertFrameFits(t, m)
+}
+
 // The box is over the tree, and the counter is under it: what the review is made of is what a reviewer
 // reads before choosing a file, and the count of files read belongs with the files it counts.
 func TestTheChangesetBoxRendersAboveTheFiles(t *testing.T) {

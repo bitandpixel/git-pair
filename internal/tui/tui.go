@@ -82,6 +82,20 @@ const (
 	threadIndent   = "    "
 )
 
+// The title prompt is one field: a label, the ghost of a title while the field is empty, the caret,
+// and the keys that finish or abandon it. The ghost says what the field wants, so the line under it
+// has no reason to say it again.
+const (
+	threadPromptLabel      = "New thread: "
+	threadTitlePlaceholder = "Thread title"
+	threadPromptCursor     = "█"
+)
+
+// threadPromptHint names the two keys that end the title prompt. It rides the status line rather
+// than a row of its own: the frame counts the rows the footer writes, and a hint the count does
+// not know about makes the window a row taller than the terminal.
+const threadPromptHint = "Enter to create, Esc to cancel"
+
 // row is one line of the navigable list: a file in the span, or an entry of the changeset
 // section — ABOUT.md, the thread heading, one thread nested under it, or the action that
 // creates another. Both sections are in one list because a reviewer works down the screen:
@@ -534,7 +548,7 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.openAbout()
 	case key.Type == tea.KeyRunes && firstRune(key) == 't':
 		m.mode, m.input, m.promptKind = modePrompt, "", promptThread
-		m.setStatus("New thread title (Enter to create, Esc to cancel)", false)
+		m.setStatus(threadPromptHint, false)
 	case key.Type == tea.KeyRunes && firstRune(key) == 'T':
 		m.toggleThreads()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'V':
@@ -944,7 +958,7 @@ func (m reviewModel) activate() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.mode, m.input, m.promptKind = modePrompt, "", promptThread
-		m.setStatus("New thread title (Enter to create, Esc to cancel)", false)
+		m.setStatus(threadPromptHint, false)
 	}
 	return m, nil
 }
@@ -1335,7 +1349,7 @@ func (m reviewModel) footer() string {
 	}
 	switch m.mode {
 	case modePrompt:
-		b.WriteString("New thread: " + m.input + "█\n")
+		b.WriteString(threadPromptLabel + m.promptText() + threadPromptCursor + "\n")
 	case modeSubmit:
 		for _, line := range m.helpLines() {
 			b.WriteString(line + "\n")
@@ -1348,12 +1362,31 @@ func (m reviewModel) footer() string {
 	// Each line opens its own colour: the renderer skips rows that have not changed, and a style
 	// left open on a skipped row tints whatever is written under it.
 	for _, line := range wrapProse(m.status, m.width) {
-		if m.statusErr {
+		switch {
+		case m.statusErr:
 			line = styleErr.Render(line)
+		case m.mode == modePrompt:
+			// The prompt's hint is a standing instruction, not news about the last keystroke,
+			// so it reads as part of the field rather than as a report over it.
+			line = styleDim.Render(line)
 		}
 		b.WriteString(line + "\n")
 	}
 	return b.String()
+}
+
+// promptText is the title being typed, or the ghost of it while the field is empty. The ghost is
+// faint, so a field waiting for a title cannot be read as one that already has it.
+func (m reviewModel) promptText() string {
+	if m.input != "" {
+		return m.input
+	}
+	// A ghost too wide for the window is dropped rather than cut: the frame writes one row per
+	// line and cuts what overflows, and half a hint reads as a fault rather than as an invitation.
+	if lipgloss.Width(threadPromptLabel+threadTitlePlaceholder+threadPromptCursor) > m.width {
+		return ""
+	}
+	return styleDim.Render(threadTitlePlaceholder)
 }
 
 // footerRows counts the rows footer() spends on the drift banner and the status line. Both can wrap,
