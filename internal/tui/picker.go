@@ -545,12 +545,11 @@ func (m reviewModel) closeList(p spanPicker) (tea.Model, tea.Cmd) {
 //
 // The budget is the terminal minus everything else that draws: two rows for the heading and the blank
 // under it, three for the rows the drill can grow but does not always show (a refusal, and the two
-// "more off screen" hints), and the chrome -- the shortcut bar and the status, counted as they will
-// actually be drawn, since both wrap. Ignoring the wrapped bar was the bug: at 12 rows the frame came
-// out 14 tall, and a frame taller than the terminal repaints by scrolling, which loses the bottom row
-// -- the bar that says how to leave.
+// "more off screen" hints), and the band -- the shortcut bar, counted at the height it always takes.
+// Ignoring the wrapped bar was the bug: at 12 rows the frame came out 14 tall, and a frame taller than
+// the terminal repaints by scrolling, which loses the bottom row -- the bar that says how to leave.
 func (m reviewModel) listRows() int {
-	used := 2 + 3 + len(m.helpLines()) + m.footerRows()
+	used := 2 + 3 + m.bandRows()
 	return max(1, m.height-used)
 }
 
@@ -695,11 +694,12 @@ func (m reviewModel) columnText(base bool, width int) string {
 
 // columnRows is what the candidate lists have to draw in. The heading is three rows -- "Span
 // picker", the blank under it, and the BASE/HEAD titles -- and the Selected block is three more
-// (its label, the pair, and what the pair means). Same arithmetic and same reason as listRows.
+// (its label, the pair, and what the pair means). Same arithmetic and same reason as listRows:
+// the terminal less the chrome, with the band counted at the height it always takes.
 // One row is the floor: below that the terminal is too small to choose in at all, and a frame
 // that overflows loses the shortcut bar.
 func (m reviewModel) columnRows() int {
-	used := 3 + 3 + len(m.helpLines()) + m.footerRows()
+	used := 3 + 3 + m.bandRows()
 	return max(1, m.height-used)
 }
 

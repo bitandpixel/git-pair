@@ -91,9 +91,9 @@ const (
 	threadPromptCursor     = "█"
 )
 
-// threadPromptHint names the two keys that end the title prompt. It rides the status line rather
-// than a row of its own: the frame counts the rows the footer writes, and a hint the count does
-// not know about makes the window a row taller than the terminal.
+// threadPromptHint names the two keys that end the title prompt. It rides the second row of the band
+// rather than the notification slot: it says what the keys mean for as long as the field is up, so it
+// is chrome, and chrome cannot be dismissed by the reviewer or by a clock.
 const threadPromptHint = "Enter to create, Esc to cancel"
 
 // row is one line of the navigable list: a file in the span, or an entry of the changeset
@@ -238,6 +238,12 @@ type reviewModel struct {
 
 	status    string
 	statusErr bool
+	// statusKind says whether the message fades on its own or waits for the reviewer.
+	statusKind notifKind
+	// notifGen counts notifications and notifArmed is the generation whose expiry tick has been
+	// scheduled. The tick is armed once per message: the drift check answers every few seconds,
+	// and a message arriving on a timer must not be able to keep a note alive by re-arming it.
+	notifGen, notifArmed uint64
 	// patchFor is the seam tests use instead of running git.
 	patchFor func(context.Context, string) Patch
 	// workingFor is the same seam for the reviewer's own uncommitted edits.
@@ -363,7 +369,55 @@ func driftTick() tea.Cmd {
 	return tea.Tick(driftCheckEvery, func(time.Time) tea.Msg { return driftCheckMsg{} })
 }
 
+// notifKind is how long a message holds the bottom band. A note reports what the last key did and
+// costs nothing to miss, so it fades. A refusal or a failure asks the reviewer to do something, so
+// it stays until they press a key or dismiss it with esc.
+type notifKind int
+
+const (
+	notifNote notifKind = iota
+	notifSticky
+)
+
+// notifNoteTTL is how long a note stays on screen. Long enough to read after the key that caused
+// it, short enough that the shortcut bar comes back on its own while the reviewer is still
+// deciding what to press next.
+const notifNoteTTL = 4 * time.Second
+
+// notifExpireMsg retires the note that was on screen when it was scheduled.
+type notifExpireMsg struct{ seq uint64 }
+
+// Update is handle plus the notification timer. The timer is armed here rather than at the three
+// dozen places that set a message, so no message can appear without its dismissal being scheduled.
 func (m reviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	rm, cmd := m.handle(msg)
+	model, ok := rm.(reviewModel)
+	if !ok {
+		return rm, cmd
+	}
+	if next := model.armNotif(); next != nil {
+		if cmd == nil {
+			cmd = next
+		} else {
+			cmd = tea.Batch(cmd, next)
+		}
+	}
+	return model, cmd
+}
+
+// armNotif schedules the expiry the current note is owed. Sticky messages are dismissed by the
+// reviewer rather than by the clock, so they arm nothing, and a message already armed waits for
+// the tick it has.
+func (m *reviewModel) armNotif() tea.Cmd {
+	if m.status == "" || m.statusKind != notifNote || m.notifArmed == m.notifGen {
+		return nil
+	}
+	m.notifArmed = m.notifGen
+	seq := m.notifGen
+	return tea.Tick(notifNoteTTL, func(time.Time) tea.Msg { return notifExpireMsg{seq: seq} })
+}
+
+func (m reviewModel) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -422,6 +476,15 @@ func (m reviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, driftTick()
 
+	case notifExpireMsg:
+		// Only the message this tick was armed for: a note replaced in the meantime has its own
+		// tick, and a stale one must not cut the new one short. A sticky message is dismissed by
+		// the reviewer rather than by the clock, so no tick retires it.
+		if msg.seq == m.notifGen && m.statusKind == notifNote {
+			m.setStatus("", false)
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		updated, cmd := m.handleKey(msg)
 		rm, ok := updated.(reviewModel)
@@ -441,6 +504,14 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
+	}
+
+	// A refusal has been acknowledged by the next key you press: it asked for something, and you
+	// have moved. Notes are left alone until they fade, so a reviewer mid-motion still has what
+	// the last key said. This runs before the modes dispatch so that a key the focused pane reads
+	// acknowledges a refusal too -- the pane is where the keys are most of the time.
+	if m.status != "" && m.statusKind == notifSticky {
+		m.setStatus("", false)
 	}
 
 	switch m.mode {
@@ -472,7 +543,7 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// mutating key must not be able to forget the check.
 	if doing, mutating := mutatingKey(key, m); mutating {
 		if why := m.cannot(doing); why != "" {
-			m.setStatus(why, false)
+			m.setRefusal(why)
 			return m, nil
 		}
 	}
@@ -548,7 +619,7 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.openAbout()
 	case key.Type == tea.KeyRunes && firstRune(key) == 't':
 		m.mode, m.input, m.promptKind = modePrompt, "", promptThread
-		m.setStatus(threadPromptHint, false)
+		m.setStatus("", false)
 	case key.Type == tea.KeyRunes && firstRune(key) == 'T':
 		m.toggleThreads()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'V':
@@ -655,7 +726,7 @@ func (m *reviewModel) toggleMark() {
 	case r.kind == rowFile:
 		m.sess.Toggle(r.file)
 	default:
-		m.setStatus("reviewed marks apply to file rows: "+r.name+" is not one", false)
+		m.setRefusal("reviewed marks apply to file rows: " + r.name + " is not one")
 		return
 	}
 	// The list was built before the mark moved, and a directory's mark and its counts are facts
@@ -706,7 +777,7 @@ func (m *reviewModel) listOnly() bool {
 	if !m.metaHasFocus() {
 		return false
 	}
-	m.setStatus("that key belongs to the file tree — f goes back to it", false)
+	m.setRefusal("that key belongs to the file tree — f goes back to it")
 	return true
 }
 
@@ -729,7 +800,7 @@ func (m *reviewModel) foldUp() {
 	}
 	_, idx := m.containingDirRow(r.path)
 	if idx < 0 {
-		m.setStatus(r.name+" sits at the top of the tree", false)
+		m.setRefusal(r.name + " sits at the top of the tree")
 		return
 	}
 	m.cursor = idx
@@ -748,11 +819,11 @@ func (m *reviewModel) unfoldUnder() {
 		return
 	}
 	if r.kind != rowDir {
-		m.setStatus(r.name+" is a file — h/l fold a directory", false)
+		m.setRefusal(r.name + " is a file — h/l fold a directory")
 		return
 	}
 	if !m.folded[r.path] {
-		m.setStatus(r.name+" is already open", false)
+		m.setRefusal(r.name + " is already open")
 		return
 	}
 	m.setFolded(r.path, false)
@@ -768,7 +839,7 @@ func (m *reviewModel) toggleTree() {
 	}
 	dirs := treeDirs(m.sess.Files())
 	if len(dirs) == 0 {
-		m.setStatus("nothing to fold: this span changes files at the top of the tree only", false)
+		m.setRefusal("nothing to fold: this span changes files at the top of the tree only")
 		return
 	}
 	if m.treeFolded(dirs) {
@@ -954,11 +1025,11 @@ func (m reviewModel) activate() (tea.Model, tea.Cmd) {
 		m.toggleThreads()
 	case actionNewThread:
 		if why := m.cannot("start a thread"); why != "" {
-			m.setStatus(why, false)
+			m.setRefusal(why)
 			return m, nil
 		}
 		m.mode, m.input, m.promptKind = modePrompt, "", promptThread
-		m.setStatus(threadPromptHint, false)
+		m.setStatus("", false)
 	}
 	return m, nil
 }
@@ -989,14 +1060,14 @@ func (m reviewModel) openDiffOfSelection() (tea.Model, tea.Cmd) {
 // document diffed against /dev/null is the document with extra steps, so it opens plainly.
 func (m reviewModel) openArtifact(r row) (tea.Model, tea.Cmd) {
 	if r.path == "" {
-		m.setStatus("nothing to diff: "+r.name+" is a heading, not a file", false)
+		m.setRefusal("nothing to diff: " + r.name + " is a heading, not a file")
 		return m, nil
 	}
 	if why := m.cannot("edit " + r.name); why != "" && m.documentAction(r) != actionDiff {
 		// Only the diff is available over history. The file on disk is not the file this
 		// span contains, so opening it in an editor would edit something the review is not
 		// about, and creating a missing ABOUT.md would create it in the working tree.
-		m.setStatus(why, false)
+		m.setRefusal(why)
 		return m, nil
 	}
 	if r.kind == rowAbout && m.sess.Span().CanEdit() {
@@ -1074,7 +1145,7 @@ func (m reviewModel) openEditor() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if r.kind == rowDir {
-		m.setStatus(r.name+" is a directory — enter folds it, d diffs what is under it", false)
+		m.setRefusal(r.name + " is a directory — enter folds it, d diffs what is under it")
 		return m, nil
 	}
 	return m.openPath(r.path)
@@ -1336,40 +1407,13 @@ func (m reviewModel) listBlock() string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// footer is the shortcut bar and the status line. They span the whole terminal rather than the
-// list column, because they belong to the session rather than to either column.
+// footer is the band at the bottom of the screen: one fixed-height block that holds the prompt's
+// input line while a title is being typed, a notification while one is on screen, the drift warning
+// while a ref has moved, or the shortcut bar. It spans the whole terminal rather than the list
+// column, because it belongs to the session rather than to either column.
 func (m reviewModel) footer() string {
 	var b strings.Builder
-	// The drift banner is chrome, and it is full width on purpose: in a split screen the list
-	// column is narrow, and a warning that loses its key to an ellipsis warns about nothing. Full
-	// width is not unlimited either, so it wraps -- a banner that loses "[r] refresh" to a cut line
-	// warns about nothing either.
-	for _, line := range wrapProse(m.driftLine(), m.width) {
-		b.WriteString(line + "\n")
-	}
-	switch m.mode {
-	case modePrompt:
-		b.WriteString(threadPromptLabel + m.promptText() + "\n")
-	case modeSubmit:
-		for _, line := range m.helpLines() {
-			b.WriteString(line + "\n")
-		}
-	default:
-		for _, line := range m.helpLines() {
-			b.WriteString(styleDim.Render(line) + "\n")
-		}
-	}
-	// Each line opens its own colour: the renderer skips rows that have not changed, and a style
-	// left open on a skipped row tints whatever is written under it.
-	for _, line := range wrapProse(m.status, m.width) {
-		switch {
-		case m.statusErr:
-			line = styleErr.Render(line)
-		case m.mode == modePrompt:
-			// The prompt's hint is a standing instruction, not news about the last keystroke,
-			// so it reads as part of the field rather than as a report over it.
-			line = styleDim.Render(line)
-		}
+	for _, line := range m.band() {
 		b.WriteString(line + "\n")
 	}
 	return b.String()
@@ -1400,21 +1444,105 @@ func promptGhost() string {
 		styleDim.Render(threadTitlePlaceholder[utf8.RuneLen(first):])
 }
 
-// footerRows counts the rows footer() spends on the drift banner and the status line. Both can wrap,
-// and a wrapped line is a row of the terminal: chrome that counts one line for a message taking three
-// is a frame taller than the window, which repaints by scrolling. The two chrome counts ask this
-// rather than counting a line each, so they cannot drift from what footer actually writes.
-func (m reviewModel) footerRows() int {
-	rows := 0
-	rows += len(wrapProse(m.driftLine(), m.width))
-	rows += len(wrapProse(m.status, m.width))
-	return rows
+// band is footer's content, cut or padded to exactly bandRows() rows. Only one thing is shown at a
+// time, and the order is what the reviewer needs most: a prompt they are typing into, then what
+// their last key did, then the warning about the ground moving under the span.
+func (m reviewModel) band() []string {
+	var lines []string
+	switch {
+	case m.mode == modePrompt:
+		lines = append(lines, threadPromptLabel+m.promptText())
+		lines = append(lines, m.promptHint()...)
+	case m.status != "":
+		// Each line opens its own colour: the renderer skips rows that have not changed, and a
+		// style left open on a skipped row tints whatever is written under it.
+		for _, line := range wrapProse(m.status, m.width) {
+			if m.statusErr {
+				line = styleErr.Render(line)
+			}
+			lines = append(lines, line)
+		}
+	case m.driftLine() != "":
+		// Full width on purpose: in a split screen the list column is narrow, and a warning that
+		// loses "[r] refresh" to an ellipsis warns about nothing. Full width is not unlimited
+		// either, so it wraps -- a banner that loses its key to a cut line warns about nothing.
+		lines = wrapProse(m.driftLine(), m.width)
+	default:
+		lines = m.helpBar()
+	}
+	return fitBand(lines, m.bandRows(), m.width)
 }
 
-// driftLine is the warning that a named ref has moved since this span pinned it. It is a row
-// of its own rather than a status line because a status line is where the last keystroke went:
-// a reviewer who marked a file would lose the warning before they ever read it. What is on
-// screen stays the pinned span — `r` moves it, and only when asked.
+// bandRows is the height the bottom band always has, and the layout decides it -- never what the band
+// happens to be saying, so no notification can change the number of rows the list above it gets. In
+// the list that is helpRows, the budget of the tallest bar the session can show, for the reason
+// helpRows gives: the keys moving between the three regions must not move the band either. The picker,
+// the overlay and the submit prompt each draw one bar, and their band is that bar's height. The prompt
+// is the field plus however many rows its own hint takes at this width -- chrome like the bar, so its
+// height is settled by the window rather than by a message.
+func (m reviewModel) bandRows() int {
+	switch m.mode {
+	case modePrompt:
+		return 1 + max(1, len(m.promptHint()))
+	case modeFiles:
+		return max(1, m.helpRows())
+	}
+	return max(1, len(m.helpLines()))
+}
+
+// helpBar is the shortcut bar as the band draws it. The submit prompt is drawn at full strength
+// because it is a decision rather than a list of keys; everything else here is chrome, and chrome
+// is dim.
+func (m reviewModel) helpBar() []string {
+	lines := m.helpLines()
+	if m.mode == modeSubmit {
+		return lines
+	}
+	for i, line := range lines {
+		lines[i] = styleDim.Render(line)
+	}
+	return lines
+}
+
+// promptHint is the row under the prompt's field: the two keys that end it, dimmed like the bar whose
+// rows they share. It is not a notification -- it says what the keys mean for as long as the field is
+// up, so no keystroke and no timer retires it -- and it wraps like the bar, because a hint cut in half
+// names neither key.
+func (m reviewModel) promptHint() []string {
+	if m.promptKind != promptThread {
+		return nil
+	}
+	var lines []string
+	for _, line := range wrapProse(threadPromptHint, m.width) {
+		lines = append(lines, styleDim.Render(line))
+	}
+	return lines
+}
+
+// fitBand makes a block exactly n rows: a short block is padded with blanks, and a block needing
+// more rows than the band has loses its tail to an ellipsis rather than pushing the frame past the
+// bottom of the terminal. The shortcut bar is longer than any message this screen sends, so the bar
+// is normally the taller of the two and nothing is cut; a message long enough to be cut is the one
+// way a notification can say less than it was written to say.
+func fitBand(lines []string, n, width int) []string {
+	if len(lines) < n {
+		for len(lines) < n {
+			lines = append(lines, "")
+		}
+		return lines
+	}
+	if len(lines) == n {
+		return lines
+	}
+	kept := lines[:n]
+	kept[n-1] = clip(kept[n-1]+"\u2026", width)
+	return kept
+}
+
+// driftLine is the warning that a named ref has moved since this span pinned it. It is derived from
+// the session rather than set by a keystroke, which is what keeps it alive: a note may cover the
+// band for its few seconds, and then the warning is back until `r` moves the pin. What is on screen
+// stays the pinned span -- `r` moves it, and only when asked.
 func (m reviewModel) driftLine() string {
 	moved := m.sess.Drifted()
 	if len(moved) == 0 {
@@ -2256,12 +2384,12 @@ func (m reviewModel) previewWidth() int {
 }
 
 // overlayChrome counts the rows the overlay spends on itself rather than on the diff: the file line
-// above it, the note below it, the rule, the shortcut bar -- which in a narrow terminal wraps, and is
-// counted as the lines it actually takes -- the drift banner while one is pending, and a status line
-// when there is one. The list's header, counter and threads are not drawn here, so they are not
-// counted: that is what buys the extra rows of diff, and why the overlay is what a small terminal gets.
+// above it, the note below it, the rule, and the band below that -- counted at the height it always
+// takes, whatever it is showing. The list's header, counter and threads are not drawn here, so they
+// are not counted: that is what buys the extra rows of diff, and why the overlay is what a small
+// terminal gets.
 func (m reviewModel) overlayChrome() int {
-	return 3 + len(m.helpLines()) + m.footerRows()
+	return 3 + m.bandRows()
 }
 
 // overlayShortfall names why not even the overlay fits, or "" when it does. It is the smaller ask of
@@ -2417,7 +2545,7 @@ func (m reviewModel) togglePreview() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if reason := m.overlayShortfall(); reason != "" {
-		m.setStatus(reason, false)
+		m.setRefusal(reason)
 		return m, nil
 	}
 	m.previewOn = true
@@ -2523,7 +2651,7 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.closePreview()
 		}
 		if m.previewPath == "" {
-			m.setStatus("nothing to open: the preview has no file on show", false)
+			m.setRefusal("nothing to open: the preview has no file on show")
 			return m, nil
 		}
 		return m.openDiff(m.previewPath)
@@ -2745,20 +2873,40 @@ func (m reviewModel) line(r renderedRow) string {
 
 // chromeRows counts the lines View writes outside the row list: the title, the base and span
 // line, the blank under them, the blank above the counter, the counter, the blank under it,
-// and then the rule over the helper, the drift banner while one is pending, the shortcut bar's
-// budget, the "hidden above" note while scrolled, and the status line when there is one. The
-// changeset section is part of the row list, so it is not here — only the counter that separates
-// the two blocks is.
+// and then the rule over the band and the band itself -- bandRows() tall, whatever the band is
+// showing, which is why neither a message nor the keys moving between regions can reflow the list.
+// The "hidden above" note while scrolled is the one row that can still arrive late. The changeset
+// section is part of the row list, so it is not here — only the counter that separates the two
+// blocks is.
 func (m reviewModel) chromeRows() int {
-	chrome := 7 + m.helpRows() + m.footerRows()
+	chrome := 7 + m.bandRows()
 	if m.scroll > 0 {
 		chrome++
 	}
 	return chrome
 }
 
+// setStatus reports what the last keystroke did. A failure waits for the reviewer, since the next
+// key depends on what it says; anything else is a note and fades.
 func (m *reviewModel) setStatus(text string, isErr bool) {
-	m.status, m.statusErr = text, isErr
+	kind := notifNote
+	if isErr {
+		kind = notifSticky
+	}
+	m.notify(text, isErr, kind)
+}
+
+// setRefusal is the message for a key this screen cannot honour. Nothing failed, so it is not red;
+// the reviewer still has to read it and act on it, so it waits for a keypress rather than fading.
+func (m *reviewModel) setRefusal(text string) { m.notify(text, false, notifSticky) }
+
+func (m *reviewModel) notify(text string, isErr bool, kind notifKind) {
+	if text == m.status && isErr == m.statusErr && kind == m.statusKind {
+		// Saying the same thing again does not restart its clock.
+		return
+	}
+	m.status, m.statusErr, m.statusKind = text, isErr, kind
+	m.notifGen++
 }
 
 func firstRune(k tea.KeyMsg) rune {

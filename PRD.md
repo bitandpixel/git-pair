@@ -1676,6 +1676,26 @@ pathspec expands into every file the span changed under it, and the preview pane
 with the subtree's counts. The tree is a view, so it folds over a read-only span like anything else
 a reviewer reads, and shows no marks there.
 
+The shortcut bar holds the bottom band, and the band is as tall as the tallest shortcut bar the screen
+can show: the bar changes when the keys move between the file tree, the changeset box and the diff, and
+the band does not. A message about the last keystroke is drawn over the bar rather than beneath it, so
+the list does not reflow to make room for it and the keys the reviewer is reading for stay where they
+were. Dismissal follows what the message asked of the reviewer:
+
+-   a **note** reports what just happened — the span `v` landed on, what `r` cost, marks resumed at
+    startup — and fades after a few seconds, because reading it is a courtesy rather than a
+    requirement, and the shortcut bar is worth the rows it was using;
+-   a **refusal or a failure** explains why a key did nothing, or what went wrong, and stays until
+    the reviewer presses something or dismisses it with `Esc`: the next key depends on having read
+    it, and a clock that retires it would retire the instruction with it;
+-   the **drift warning** is not a message the reviewer caused, so nothing they type can clear it.
+
+`Esc` dismisses whatever is in the band. Only one thing is shown at a time, in that order of need: a
+prompt the reviewer is typing into, then what the last key did, then the drift warning. A message
+needing more rows than the band has loses its tail to an ellipsis rather than growing the frame —
+the shortcut bar is longer than any message the screen sends, so the bar is normally the taller of
+the two.
+
 On a terminal at least 100 columns and 16 rows, the list shares the screen with a preview column:
 the diff the common span made to the selected file. It prints git's
 own output, colour included, and adds only what a fixed-width column cannot decline to do: the line
@@ -1747,10 +1767,12 @@ closes — and reports movement without acting on it:
 ⚠ probe moved bb0f343 → 43915ed  [r] refresh
 ```
 
-The banner is a row above the shortcut bar rather than a status line, because a status line is where
-the last keystroke went, and a reviewer who marked a file would otherwise clear the warning by typing.
-It is full width rather than a row of the list column for the same reason: in a split screen the list
-column is narrow, and a warning that loses its key to an ellipsis warns about nothing. `r` re-pins
+The banner shares the bottom band with the shortcut bar rather than adding a row of its own, so warning
+about the span cannot move the span. It is derived from the session rather than written by the last
+keystroke, which is what keeps it alive: a note may borrow the band for its few seconds, and then the
+warning is back until `r` moves the pin. It is full width rather than a row of the list column because in
+a split screen the list column is narrow, and a warning that loses its key to an ellipsis warns about
+nothing. `r` re-pins
 every drifted endpoint to where its ref points now, recomputes the span, and reports which refs moved
 and how many reviewed marks stopped applying — marks are keyed on the file's diff within the span, so
 the marks whose diff changed match nothing and drop out, which is the honest outcome rather than a

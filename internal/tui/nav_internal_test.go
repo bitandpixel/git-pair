@@ -565,8 +565,8 @@ func TestThreadPromptShowsAGhostTitleAndTheKeys(t *testing.T) {
 	if strings.Contains(strings.Join(rows, "\n"), threadTitlePlaceholder) {
 		t.Errorf("the ghost is still under the typed title:\n%s", strings.Join(rows, "\n"))
 	}
-	// The hint is the status line, which the frame already counts: neither line the prompt adds
-	// may push a row past the bottom of the terminal.
+	// The hint is the band's second row, whose height the frame already counts: neither line the
+	// prompt adds may push a row past the bottom of the terminal.
 	assertFrameFits(t, m)
 }
 

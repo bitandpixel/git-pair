@@ -11,9 +11,10 @@ import (
 	"gitpair/internal/span"
 )
 
-// Drift is a warning about the ground moving, not about what the reviewer just did, so it gets
-// a row of the screen rather than the status line the last keystroke owns. And it is a report:
-// the span on screen stays the one that was chosen until `r` says otherwise.
+// Drift is a warning about the ground moving, not about what the reviewer just did, so it is derived
+// from the span rather than written by the last keystroke: the band carries it until `r` moves the
+// pin, and typing cannot clear it. And it is a report: the span on screen stays the one that was
+// chosen until `r` says otherwise.
 
 // driftModel returns a model reviewing from a ref-backed base, plus the fixture to move that
 // ref under it.
@@ -52,6 +53,7 @@ func TestDriftBannerWarnsAndNamesR(t *testing.T) {
 	if view := m.View(); strings.Contains(view, "moved") {
 		t.Errorf("a banner appeared before anything moved:\n%s", view)
 	}
+	chrome, area := m.chromeRows(), m.rowArea()
 
 	f.MustGit("update-ref", "refs/heads/probe", f.RevParse("HEAD~2"))
 	got := runDriftCheck(t, m)
@@ -70,15 +72,21 @@ func TestDriftBannerWarnsAndNamesR(t *testing.T) {
 		t.Errorf("the span moved to %s while the banner was up; a warning is not a refresh",
 			got.sess.Span().From)
 	}
-	// The banner is a row of the screen, so it comes out of the list, not out of the terminal.
+	// The banner shares the band with the shortcut bar, so it costs the band a row and the list
+	// none: the frame is the terminal's height, and the row area is the same with the warning up
+	// as it was without it.
 	if rows := len(strings.Split(view, "\n")); rows != got.height {
 		t.Errorf("the frame is %d rows in a %d row window with the banner up", rows, got.height)
+	}
+	if got.chromeRows() != chrome || got.rowArea() != area {
+		t.Errorf("the banner moved the layout: chrome %d→%d, row area %d→%d",
+			chrome, got.chromeRows(), area, got.rowArea())
 	}
 }
 
 // In a split screen the list column is narrow, and a banner parked there loses its key to an
-// ellipsis — which is the whole point of the banner. It lives in the footer, which is as wide
-// as the terminal.
+// ellipsis — which is the whole point of the banner. It lives in the band, which is as wide as
+// the terminal.
 func TestDriftBannerKeepsItsKeyInASplitScreen(t *testing.T) {
 	m, f := driftModel(t)
 	m.previewOn = true

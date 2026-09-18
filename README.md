@@ -987,8 +987,8 @@ the ring is unreachable. It means *next* whatever else just happened, a refusal 
 of `v` out of a read-only span is not something the ring can promise, since what sits next is
 whatever the session visited next, and getting to a span you can review in one keystroke is `V`,
 whose head column always offers `Current`. A stop whose commit, tag or ref has since gone is stepped
-over and named on the status line, reason included — the span stays on the ring, so a tag that comes
-back is a stop again; `s` opens a submit prompt taking `b`, `f` or `a`; `q` quits.
+over and named in the notification band, reason included — the span stays on the ring, so a tag that
+comes back is a stop again; `s` opens a submit prompt taking `b`, `f` or `a`; `q` quits.
 A thread created from the list is written, opened in the editor, and left selected in the box, so the
 reviewer can fill it in and come straight back to it; the preview keeps showing the file it was showing,
 because the row it reads that diff from is the file tree's cursor, which a thread has no business moving.
@@ -1020,6 +1020,16 @@ picker, because what a review is measured against is worth choosing; `base` abov
 frame rather than a row, because there is nothing to do with a base but read it. The picker changes
 nothing until its own `Enter`, which is why the row works over a historical span too, where `Space` on a
 file is still refused.
+
+The shortcut bar occupies the bottom band, and the band is as tall as the tallest shortcut bar the
+screen can show. The bar changes when the keys move between the file tree, the changeset box and the
+diff; the band does not, and neither does a message about your last keystroke — the span `v` landed on,
+what a refresh cost, why a key did nothing — which is drawn over the bar rather than under it. What
+happens next is decided by what the message asked for. A note about what just happened fades after a
+few seconds and the keys return, because missing it costs nothing. A refusal or a failure waits for
+you, because the next key depends on having read it, and any keypress or `Esc` dismisses it. `Esc`
+dismisses anything. A message long enough to need more rows than the band has loses its tail to an
+ellipsis rather than growing the frame.
 
 On a wide terminal the list shares the screen with a preview. From 100 columns and 16 rows the
 session puts a column beside the list showing the diff of whatever the cursor is on — the span's
@@ -1107,7 +1117,7 @@ read-only half is about the screen, where the mistakes would be made.
 `V` opens the span picker, where both ends are chosen before either takes effect: `Tab` moves between
 the BASE and HEAD columns, `j`/`k` move, `Space` sets the end under the cursor, and `Enter` applies
 the pair — with the lines under the columns saying what that pair resolves to, in the same words the
-header and the status line use (`main...current`, not a second spelling of the same span), and whether
+header and the band use (`main...current`, not a second spelling of the same span), and whether
 the screen would go read-only, before you commit to it. When git cannot resolve the pair there is no
 span to name, and the line shows what you chose instead (`changeset base → nonsense`). `u` and `f` are the unreviewed and full-changeset
 presets; `Esc` leaves the span exactly as it was. Each column lists the review submissions — the newest
@@ -1130,13 +1140,14 @@ with an empty filter it does nothing, because it used to throw the whole drill a
 which end it is choosing for (`for BASE`), since the columns that would otherwise say it are off screen.
 A checkpoint chosen from a drill has no row of its own, so the asterisk goes on the `Commit…` or `Ref…`
 row it came from, and `V` reopens with the cursor there. A short terminal shrinks the candidate lists
-rather than the frame: the shortcut bar and the status wrap into rows first, because a frame taller than
-the terminal repaints by scrolling and what scrolls off the bottom is the bar that says how to leave.
+rather than the frame: the shortcut bar wraps into rows first and the band is counted at the height it
+always takes, because a frame taller than the terminal repaints by scrolling and what scrolls off the
+bottom is the bar that says how to leave.
 `Ctrl-C` leaves from any of these screens — the columns, a drill, the submit prompt.
 
 An endpoint named as a ref is pinned when you choose it, and the pin is what the screen keeps
 comparing. So when `probe` moves in another window — a fetch, someone else's push — the header still
-reads `probe@bb0f343` and a row above the shortcut bar says:
+reads `probe@bb0f343` and the band says:
 
 ```text
 ⚠ probe moved bb0f343 → 43915ed  [r] refresh
@@ -1145,10 +1156,10 @@ reads `probe@bb0f343` and a row above the shortcut bar says:
 Nothing follows the branch by itself. `r` re-pins the endpoint to where the ref points now, recomputes
 the span and reports what that cost: marks are keyed on each file's diff within the span, so the ones
 whose diff changed stop applying, and the count in the report says how many. Ignoring the banner is a
-legitimate answer too — the span does not move until asked, and the warning is a row of the screen
-rather than the line the last keystroke writes to, so marking a file does not erase it. A ref that has
-gone away is not drift: there is nothing to refresh to, and the pin still resolves to the commit it
-was chosen for.
+legitimate answer too — the span does not move until asked. The warning is derived from the span rather
+than written by the last keystroke, so nothing you type erases it: a note may borrow the band for its few
+seconds, and then the warning is back. A ref that has gone away is not drift: there is nothing to refresh
+to, and the pin still resolves to the commit it was chosen for.
 
 In a narrow window the shortcut bar wraps between shortcuts rather than through them —
 `space reviewed` never arrives split in half — and the list gives up the rows it takes.
