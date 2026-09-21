@@ -1183,8 +1183,9 @@ configured remote first and also evaluates the branch's remote-tracking ref, so 
 submitted in another clone end the wait. This stays forge-agnostic: no forge APIs, only
 ordinary refs that git fetch brings down.
 
-Exits non-zero if the changeset is not ready to begin with, since then there is nothing to
-wait for, and on timeout. Without --timeout it waits indefinitely.`,
+Exits non-zero when the changeset is still WORKING — it was never handed off, so there is nobody
+to wait for — and on timeout. A changeset already BLOCKED, FEEDBACK or APPROVED is the answer you
+asked for: it reports at once and exits 0. Without --timeout it waits indefinitely.`,
 		Example: `  git pair change wait
   git pair change wait --fetch
   git pair change wait --fetch --interval 30s --timeout 2h --json`,

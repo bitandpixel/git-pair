@@ -681,6 +681,10 @@ handling two shapes), and `policy` records which rule produced the verdict — `
 `head` and `archive` are full SHAs, not the short forms the human output prints, because the job
 comparing them built one of them; `archive_current` is the two being equal.
 
+This form carries the verdict in `ready` rather than in the exit code: a not-ready run prints its
+JSON and exits 0, so a job piping it into `jq` keeps git-pair's answer separate from the pipeline's.
+Usage errors and git failures still exit 2 and 3 here.
+
 ```json
 {
   "changeset": "feat",
@@ -806,10 +810,11 @@ checkout of the branch is enough to run it:
 git pair check || exit 1
 ```
 
-The exit code is the verdict: 0 ready, 1 not ready, 2 usage, 3 git failed. A not-ready run writes
-one bullet per failed condition to stdout, so the log explains the gate without a second run, and
-`--json` carries `ready`, `reasons`, `policy` and full SHAs in `head` and `archive` for a job that
-wants to compare them against the revision it built:
+In the human form the exit code is the verdict: 0 ready, 1 not ready, 2 usage, 3 git failed. A
+not-ready run writes one bullet per failed condition to stdout, so the log explains the gate without
+a second run. `--json` carries the same facts — `ready`, `reasons`, `policy` and full SHAs in `head`
+and `archive` — but moves the verdict into `ready` and exits 0 either way, which is why a JSON gate
+asks `jq` rather than `$?`:
 
 ```bash
 git pair check --json | jq -e '.ready'

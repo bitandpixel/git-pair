@@ -1276,6 +1276,10 @@ short forms the human output prints, because the consumer compares them against 
 — `integrated_commit` is short, matching `status`. `reasons` is an array in both verdicts, so a
 consumer branches on `ready` instead of handling two shapes for one fact.
 
+In this form the verdict is `ready` rather than `$?`: a not-ready run prints its JSON and exits 0, so
+a job piping it into `jq` keeps git-pair's answer separate from the pipeline's. Only the human form
+exits 1 on a not-ready verdict; 2 for a usage error and 3 for a git failure apply to both.
+
 `integrated` is reported beside the verdict rather than folded into it. A pipeline that runs this gate
 before integrating will re-run it after, and needs to tell "not ready" from "this already happened"
 without matching on the wording of a reason.
