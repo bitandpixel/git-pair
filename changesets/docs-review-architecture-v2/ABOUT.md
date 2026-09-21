@@ -2,7 +2,7 @@
 
 ## Summary
 
-Documents the review-architecture requirements supplied 2026-06-15, reconciles them against the code and
+Documents the review-architecture requirements supplied 2026-09-21, reconciles them against the code and
 PRD, and turns the result into an eight-milestone plan. Docs only — nothing under `internal/` or `cmd/`
 moves, and `mise run check` is unaffected.
 
@@ -20,7 +20,7 @@ Four files under `docs/plans/review-architecture-v2/`:
 - `reconciliation.md` — the analysis: one architectural inversion, sixteen numbered discrepancies with code
   and PRD citations, decisions with rejected alternatives.
 - `plan.md` — goals, success criteria, constraints, decisions, M1-M8, two spikes, six risks.
-- `research/2026-06-15-landing-transition.md` — a scratch-repo measurement of the rule M3 and M4 rest on.
+- `research/2026-09-21-landing-transition.md` — a scratch-repo measurement of the rule M3 and M4 rest on.
 
 Start with `plan.md` §Decisions. `reconciliation.md` is the supporting detail; read it before reopening
 anything the decisions close.

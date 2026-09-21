@@ -41,7 +41,7 @@ Observable outcomes, not implementation details:
 
 ## Context
 
-`requirements.md` in this directory is the spec, supplied in chat on 2026-06-15. It was written against a
+`requirements.md` in this directory is the spec, supplied in chat on 2026-09-21. It was written against a
 design that overlaps the current one in most places and contradicts it in three: a moving per-changeset ref
 (current code), a third `refs/git-pair/reviews/*` namespace (nothing in the code), and a seven-field
 integration record (the code stores an object id and nothing else, deliberately, PRD §13.2).
@@ -82,7 +82,7 @@ What exists now, on `origin/main`:
 
 ## Decisions
 
-### Settled with the reviewer on 2026-06-15
+### Settled with the reviewer on 2026-09-21
 
 **D1 — Scope is the local loop.** Six entry points: `change init`, `change ready`, `review *`,
 `change wait`, `change feedback` + `change ready`, and landing. Remote and CI stay a door: the two refs are
@@ -229,7 +229,7 @@ repository. Deferred with the anchors unless a concrete need appears during impl
   wherever the branch is available); `--commit` adds `changesets/<id>/` over its first parent.
 - Derive both tips when the flags are absent: archive tip from the changeset branch HEAD or the newest
   `Review-Head`; integration tip from the first-parent transition rule in
-  `research/2026-06-15-landing-transition.md`.
+  `research/2026-09-21-landing-transition.md`.
 - Write archive first, integration second; re-run completes a half-written pair.
 - Rewrite the command's long help, which currently promises CI-only semantics and single-ref output.
 - PRD §11.4 and §16 rewritten; README's CI block rewritten, including the fetch line for the new roots.
@@ -374,7 +374,7 @@ repository. Deferred with the anchors unless a concrete need appears during impl
 | --- | --- | --- |
 | S1 | Does the first-parent transition rule hold when one merge lands several changesets at once, and when a child is landed before its parent? | M3 |
 | S2 | Does folding integration refs into the existing `List` pass really cost zero git invocations in `queue`? | M4 |
-| Done | Does the transition rule identify the landing commit for `--no-ff` merges and squashes? Yes, measured — `research/2026-06-15-landing-transition.md`. | — |
+| Done | Does the transition rule identify the landing commit for `--no-ff` merges and squashes? Yes, measured — `research/2026-09-21-landing-transition.md`. | — |
 
 ## Risks
 

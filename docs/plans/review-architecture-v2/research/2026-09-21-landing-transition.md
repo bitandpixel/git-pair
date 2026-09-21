@@ -1,6 +1,6 @@
 # Landing is a visible transition in the destination branch
 
-Measured 2026-06-15 in a scratch repository (`/tmp/trans`), for M3's derivation of the integration tip and
+Measured 2026-09-21 in a scratch repository (`/tmp/trans`), for M3's derivation of the integration tip and
 M4's unrecorded-landing detector. Both depend on the same property: because a changeset's directory is
 committed on its branch and PRD §4's tree rule keeps landed directories in the destination branch, landing
 a changeset changes trunk's tree in a way that identifies the landing commit without inference.

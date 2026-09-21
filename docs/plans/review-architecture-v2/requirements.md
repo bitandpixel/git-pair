@@ -1,6 +1,6 @@
 # git-pair Review Architecture Requirements
 
-> Supplied by the reviewer in chat on 2026-06-15 as the requirements for the work planned in
+> Supplied by the reviewer in chat on 2026-09-21 as the requirements for the work planned in
 > `../plan.md`. Reproduced here as the source of truth, with the source editor's fence labels removed.
 > Where this document and the code disagreed at the time of writing, `../reconciliation.md` records the
 > analysis and `../plan.md` §Decisions records the resolution; this file is left unedited.

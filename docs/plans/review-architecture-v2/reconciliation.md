@@ -1,7 +1,7 @@
 # Reconciliation: "Review Architecture Requirements" (draft) vs. the current implementation
 
 Status: **analysis / context capture**. Not a plan. Nothing here is decided.
-The draft requirements it reconciles were supplied by the project owner in chat on 2026-06-15 and
+The draft requirements it reconciles were supplied by the project owner in chat on 2026-09-21 and
 are not yet in `PRD.md`.
 
 Compared against: `PRD.md` (2693 lines), `README.md` (1328 lines), and the code as of
@@ -11,7 +11,7 @@ Compared against: `PRD.md` (2693 lines), `README.md` (1328 lines), and the code 
 
 ## 0. Agreed direction
 
-Settled by the owner on 2026-06-15, narrowing the draft to the **local workflow** with the remote/CI
+Settled by the owner on 2026-09-21, narrowing the draft to the **local workflow** with the remote/CI
 workflow kept as a door rather than a feature.
 
 ### 0.1 Scope: the local loop
