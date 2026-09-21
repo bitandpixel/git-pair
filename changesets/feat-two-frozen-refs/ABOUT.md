@@ -17,7 +17,7 @@ the command whose whole job was moving it.
 What remains: `refs/git-pair/archive/<id>` and `refs/git-pair/integrations/<id>`, written by one
 invocation of `git pair integration record`, create-only, with no code path that moves either.
 
-This is M1 through M7: the transition, the rule about history the transition required, the checks that make
+This is M1 through M8: the transition, the rule about history the transition required, the checks that make
 the record worth reading afterwards, the flagless local flow that writes it, the report that catches the step
 being skipped, the next actions that tell an author where the step is, and the queue's shape and the CLI's
 naming. M7-M8 follow — stacked parent tracking and the agent contract.
@@ -80,6 +80,12 @@ naming. M7-M8 follow — stacked parent tracking and the agent contract.
   merge. A parent that landed leaves the child measurable through its integration ref, with the
   landing and the destination named; a parent that was abandoned leaves the child unreconciled until
   somebody restacks it.
+- The landing contract (M8) — PRD §29 states the agent's three steps in order (`check`, the landing
+  with ordinary git, `integration record`) with **record before tidy** as the ordering rule, and §27
+  now lists what this plan gave up and what each would have cost. `docs_contract_test.go` checks
+  that every command name and ref path in PRD.md and README.md is a name the code answers to — the
+  cheap half of keeping the prose honest. No `skills/git-pair/` surface: see the plan's M8 for why
+  the sibling repository's is the counter-argument.
 - `check --json` gained `next_action` (M5), present only when the gate passes: the same sentence `status`
   prints, so an agent that gates on `ready` learns about the merge and the record without parsing human
   output. `TestApprovedStateNamesTheLandingAndTheRecord` pins that sentence across all four spellings and

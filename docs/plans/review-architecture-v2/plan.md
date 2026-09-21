@@ -612,12 +612,13 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
 
 **Tasks**
 
-- Record the three-step contract — `check`, ordinary git merge by the agent, `integration record` — in PRD
-  §29 and README, with record-before-tidy stated as the ordering rule (D4).
-- Add to Deferred: per-review anchors and what they cost (R5), publishing the two ref families and the
+- [x] Record the three-step contract — `check`, ordinary git merge by the agent, `integration record` — in PRD
+  §29 (as "The landing contract") and README, with record-before-tidy stated as the ordering rule (D4).
+- [x] Add to Deferred: per-review anchors and what they cost (R5), publishing the two ref families and the
   namespace-protected variants of them, patch-equivalent approval carry-forward, reviewer identity and
-  thread resolution state.
-- Decide in this milestone, not before: whether this repository carries a `skills/git-pair/` surface. The
+  thread resolution state — each with the cost that kept it out.
+- [x] Decide in this milestone, not before: whether this repository carries a `skills/git-pair/` surface —
+  decided **no**, recorded below. The
   sibling repository `bitandpixel/pi-git-pair` carries one already, and it documents a namespace this code
   never used (`refs/reviews/archive/<slug>/<sha>`), a command this code removed (`review close`), and a pi
   command surface (`/pair-review`, `/pair-wait`) that does not exist here at all — evidence both that the
@@ -626,10 +627,26 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
 
 **Verification**
 
-- The PRD §29 loop and the agent contract agree line for line with observed command output, checked by
+- [x] The PRD §29 loop and the agent contract agree line for line with observed command output, checked by
   replaying `pty-walkthrough.sh` against the prose.
-- A test that every ref path and command name appearing in PRD.md and README.md exists in the code — the
-  cheapest thing that keeps this from drifting again.
+- [x] A test that every ref path and command name appearing in PRD.md and README.md exists in the code — the
+  cheapest thing that keeps this from drifting again (`docs_contract_test.go`).
+
+**What landed differently**
+
+- **No `skills/git-pair/` surface in this repository.** The sibling `bitandpixel/pi-git-pair` carries
+  one, and what it documents is the argument: a ref namespace this code never used
+  (`refs/reviews/archive/<slug>/<sha>`), a command this code removed (`review close`), and pi
+  commands (`/pair-review`, `/pair-wait`) that do not exist here. A surface that duplicates the
+  contract rots beside the code and is then read as a promise. The contract is §22 and §29 of the
+  requirements, the README's command table, and `--help` on the commands themselves — three places
+  the tests above hold to the same names.
+- The doc test is deliberately weak, and says so: it checks that every name the prose uses is a name
+  the code answers to, not that the prose describes the behaviour accurately. The first is checkable
+  and is what rotted; the second is a reviewer's job.
+- `refs/git-pair/changesets/<id>/…` stays whitelisted in that test rather than scrubbed from the
+  docs, because the code really does still read those retired paths (§13.4, R4) and the migration
+  prose is truthful about it.
 
 ## Spikes / Research
 

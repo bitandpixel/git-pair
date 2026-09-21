@@ -212,6 +212,12 @@ Then the owner lands it, with ordinary git. Squash, rebase-merge, plain merge �
 opinion and takes no part; it neither runs a merge nor derives one, because squash and cherry-pick
 destroy the ancestry that would have said so.
 
+The three steps are the whole contract — `check`, the landing with ordinary git, `integration
+record` — and the order of the last two is not free: **record before tidy**. The record is asked of
+the branch that still carries the reviewed head and the changeset directory, which is why it needs
+no flags when the branch is there and needs two SHAs when it is not. Delete the branch first and
+the same fact has to be supplied by hand, or fetched back, or it is gone.
+
 One command records where the work went, and it is the only git-pair write in the whole handoff:
 
 ```bash

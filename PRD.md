@@ -2917,6 +2917,29 @@ The MVP should explicitly not attempt to:
 
 Potential later enhancements include:
 
+## Deferred by review-architecture-v2
+
+Explicitly given up while the two-ref design was being built, each with what it would cost:
+
+-   **Per-review anchors.** Attaching threads and marks to a specific review submission rather than
+    to the changeset. Cost: the anchor has to survive the rewrite it describes — a rebase renames
+    every commit around it — so it means either a content hash beside the anchor or a rule about
+    which anchors die, and both are user-visible in the middle of a review.
+-   **Publishing the two ref families, and namespace-protected variants of them.** Today
+    `refs/git-pair/*` is fetched like any other ref and written only by whoever lands the work.
+    Pushing it by policy, or moving the records to a namespace a forge protects
+    (`refs/git-pair/…` under branch protection, or an out-of-band notes ref), costs a migration
+    story for every existing clone plus a per-forge matrix — and a protection rule cannot be tested
+    locally, which is how the last generation of this design rotted.
+-   **Patch-equivalent carry-forward of approvals.** Letting a child's approval survive its parent
+    landing when the child's diff against the new base is provably the diff that was reviewed
+    (§21). Cost: a patch-id equivalence rule that has to be right, because every case where it is
+    wrong approves code nobody read. The conservative rule is kept instead.
+-   **Reviewer identity and thread resolution state.** Per-reviewer permissions, "who is this
+    comment from" as data, and resolved/unresolved threads. Cost: identity is not in git's commit
+    model in any way git-pair can enforce, and thread state is state — it wants a ref, a file, or a
+    server, all of which this product's thesis refuses while the commits can carry the answer.
+
 ## Review progress
 
 File-level progress is delivered: marks are remembered per commit and stop applying when a file's
@@ -3125,6 +3148,23 @@ The owner lands it with ordinary git and git-pair records where it went:
 ```bash
 git pair integration record --source <approved-head> --commit <landing-commit> --target main
 ```
+
+## The landing contract
+
+The agent's part in landing is three steps, in this order, and nothing else:
+
+1.  `git pair check` — the gate, run by the author and by CI alike.
+2.  The landing itself, with **ordinary git**: merge, squash-merge, or whatever forge button the
+    repository uses. git-pair writes no merge, no push, and no ref while work is in flight.
+3.  `git pair integration record` — the one command that writes the two durable refs, and the only
+    place in git-pair that writes a ref at all (§13.4).
+
+**Record before tidy.** The record is written before the branch is deleted or the working copy is
+cleaned up. It is asked of the branch that still carries the reviewed head and the changeset
+directory, so running it first means reading rather than reconstructing: with the branch present the
+command needs no flags at all, and after the branch is gone it can only be told. A landing that was
+tidied first is still recordable — with `--source` and `--commit`, or not at all if the reviewed head
+was never pushed — but that is recovery, not the loop.
 
 From then on the durable pair holds the story: the complete unsquashed history is reachable from
 `refs/git-pair/archive/<id>`, the landing is `refs/git-pair/integrations/<id>`, and the branch can be
