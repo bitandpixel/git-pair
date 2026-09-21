@@ -1889,11 +1889,17 @@ with the ones on screen, and nothing is recorded about the directory itself — 
 existing keys, and clearing every mark under a directory is remembered exactly the way clearing the
 same files one by one is.
 
-This state is **not** part of the durable review artifact.
+This state is **not** part of the durable review artifact. It is reading progress: it is never
+committed, never pushed, and reported by no command, so a mark cannot move derived state.
 
-For MVP it may be in-memory only.
+**It is remembered locally.** Marks are written under the repository's git directory at
+`$(git rev-parse --absolute-git-dir)/git-pair/marks/<changeset>/<commit>.json` — one set per commit
+the review has looked at, the newest 12 kept — and reopening that commit restores them. Deleting
+that directory forgets the marks and costs nothing else.
 
-If the underlying diff for a file changes after it was marked reviewed during the current session, `git-pair` should ideally reset it to unreviewed:
+When the underlying diff for a file changes, the mark stops applying to it: each mark is stored
+with the diff key of the file it belongs to, so only a file whose diff within the span is unchanged
+comes back marked.
 
 ```text
 ✓ reviewed
@@ -1901,7 +1907,8 @@ If the underlying diff for a file changes after it was marked reviewed during th
 ○ unreviewed
 ```
 
-This is desirable but may be implemented after the minimal TUI if necessary.
+A new commit, a rebase, or a different span cannot revive a mark that no longer describes anything,
+and clearing every mark is remembered rather than resurrected.
 
 Longer-term, reviewed hunks/sections may also be individually foldable/markable, but file-level state is sufficient for MVP.
 
@@ -2459,7 +2466,7 @@ The MVP should explicitly not attempt to:
 -   run CI/CD,
 -   implement inline-comment databases,
 -   implement GitHub-style comment anchoring,
--   persist per-file review checkmarks permanently,
+-   make per-file review checkmarks part of the review record; they persist locally to resume a review (§16),
 -   model multi-reviewer permissions,
 -   model multi-author review semantics,
 -   model complex stacked-branch graphs,
@@ -2475,7 +2482,9 @@ Potential later enhancements include:
 
 ## Review progress
 
--   persistent file review state,
+File-level progress is delivered: marks are remembered per commit and stop applying when a file's
+diff changes (§16). What remains is the hunk-level half:
+
 -   hunk-level reviewed/unreviewed state,
 -   fold reviewed hunks,
 -   jump to next unreviewed hunk,
