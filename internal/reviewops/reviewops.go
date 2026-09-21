@@ -54,7 +54,10 @@ func Submit(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
 	if err != nil {
 		return Result{}, err
 	}
-	sha, err := marker.Commit(ctx, repo, marker.ReviewMessage(cs.Slug, outcome, body))
+	// The submission names the commit it was made against. `before` is that commit and the
+	// new commit's first parent, so the trailer records the value a rebase changes — which is
+	// the whole point of writing it down rather than leaving it to be read off the graph.
+	sha, err := marker.Commit(ctx, repo, marker.ReviewMessage(cs.Slug, outcome, before, body))
 	if err != nil {
 		return Result{}, err
 	}

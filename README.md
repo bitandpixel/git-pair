@@ -293,12 +293,19 @@ supplies authorship and order. Both are plain Markdown with no schema.
 | Marker | Subject | Trailers |
 | --- | --- | --- |
 | ready | `git-pair: ready <slug>` | `Review-State: ready`, `Review-Changeset: <slug>` |
-| review | `review: <outcome> <slug>` | `Review-Outcome: <outcome>`, `Review-Changeset: <slug>` |
+| review | `review: <outcome> <slug>` | `Review-Outcome: <outcome>`, `Review-Changeset: <slug>`, `Review-Head: <sha>` |
 | unready | `git-pair: unready <slug>` | `Review-State: working`, `Review-Changeset: <slug>` |
 | abandon | `git-pair: abandon <slug>` | `Review-State: abandoned`, `Review-Changeset: <slug>` |
 
 A commit counts as a marker only when its trailer block parses and `Review-Changeset` matches
 the changeset being inspected; anything else is an ordinary commit.
+
+`Review-Head` is the commit a review spoke about — `HEAD` when the reviewer submitted, which is the
+submission's own parent. It is the only marker field that is about history rather than about a
+transition, and it is recorded rather than derived because the value it holds is the exact one a rebase
+changes: the rewritten review commit keeps its message, so the marker that survives still names the head
+this branch no longer has. Deriving it from the graph instead would read the rewritten parent as the
+reviewed one, which is the case the field exists to catch.
 
 **Readiness is withdrawn with a command.** `git pair change unready` commits `Review-State: working`
 and takes the changeset out of the queue. Readiness is an offer made with `git pair change ready`, so
@@ -358,6 +365,13 @@ outside `changesets/<slug>/` differs, because a merge is about to act on its ans
 that head would certify unreviewed content as reviewed. A commit touching only `ABOUT.md` or a thread is
 not that drift, and comparing trees rather than counting commits is what keeps merges and rebases from
 reporting a change that never happened.
+
+The tree is half the question. `check` also asks whether the commit the approval named is still in this
+history — `Review-Head` an ancestor of `HEAD` — and refuses when it is not. A rebase that resolves no
+conflict changes no file, so the tree has nothing to report and only the ancestry test refuses: an
+approval is about a commit, and git-pair does not read an approval of one commit as approval of the
+rewritten version of it. Merging the base in rewrites nothing and passes. A marker naming no head is
+refused too, because there is nothing to compare and no honest way to guess.
 States:
 `WORKING`, `READY`, `BLOCKED`, `FEEDBACK`, `APPROVED`. `git pair status` prints the
 state plus a one-line `Reason`. There is no state file, and no state for a completed
@@ -503,11 +517,11 @@ landed.
 | `review reopen` | none | TUI on `<last review>..current`, the work that has landed since you reviewed; needs a terminal; refuses if no review exists |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
-| `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move |
-| `review history` | `--changeset <slug>` | only review marker commits, indexed from `0` |
+| `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history |
+| `review history` | `--changeset <slug>` | only review marker commits, indexed from `0`, each naming the commit it reviewed under `REVIEWED` |
 | `review queue` | — | every branch in this repo whose changeset is `READY`, longest wait first; read from the repository, not the checkout |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug |
-| `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition; no `--changeset`, because it is the gate a forge runs *on* a revision |
+| `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition — the review's outcome, whether the commit it approved is still in this history, and whether the content still matches; no `--changeset`, because it is the gate a forge runs *on* a revision |
 | `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>` | writes both durable refs for one changeset, create-only: the archive at `--source` and the integration at `--commit`. The changeset is discovered from the `changesets/<id>/` directories `--source` carries and the integration branch does not, so a pipeline needs the two SHAs it already holds and not the changeset name; `--changeset` disambiguates a stacked child. Verifies `--commit` is reachable from `--target` and carries the changeset directory; needs no checkout and writes no commit; re-running it with the same pair succeeds and changes nothing |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 
@@ -548,7 +562,9 @@ Output is indented two spaces, and empty lists may serialise as `null` rather th
 (`review queue`, `review submit`'s `files`), so test for both.
 
 `git pair status --json`, waiting for the first review. Once a review exists `latest_review`
-becomes `{"index": 0, "outcome": "block", "commit": "332887c"}`; `unrecognised_markers` (a
+becomes `{"index": 0, "outcome": "block", "commit": "332887c", "reviewed_head": "1a2b3c4"}` —
+`reviewed_head` is the commit that submission spoke about, from its `Review-Head` trailer, and it is
+omitted when the marker names none; `unrecognised_markers` (a
 list of `<sha> <subject>`) appears only when non-empty. Read another changeset with `--changeset`
 and two fields report that they cannot answer — `uncommitted` is `null` and `span` is `""` — because
 both describe the checkout rather than the commit, and `next_action` names the branch to switch to.
@@ -635,6 +651,7 @@ rather than wrong (§PRD §13.4).
       "outcome": "block",
       "sha": "332887cf6413e66d45d0ad5d59d93f7d30484ffd",
       "short": "332887c",
+      "reviewed_head": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
       "subject": "review: block booking-transaction",
       "when": "2026-09-16T00:43:44Z"
     }
@@ -663,9 +680,11 @@ is none)
 every failed condition (an empty array when it passed, so a consumer branches on `ready` rather than
 handling two shapes), and `policy` records which rule produced the verdict — `approve-only`, or
 `approve-or-feedback` with `--allow-feedback` — so a gate's decision in a log can be re-derived.
-`head` is a full SHA, not the short form the human output prints, because the job comparing the verdict
-built that commit. Nothing in the verdict reads a durable ref except `integrated`, which reports a
-changeset already recorded as landed (§PRD §11.3).
+`head` and `reviewed_head` are full SHAs, not the short forms the human output prints, because the job
+comparing the verdict built one of them and the other is the end of the lineage comparison.
+`reviewed_head` is the commit the newest permitting review named; it is reported whichever way the
+verdict went and omitted only when that marker names no head. Nothing else in the verdict reads a
+durable ref except `integrated`, which reports a changeset already recorded as landed (PRD §11.3).
 
 This form carries the verdict in `ready` rather than in the exit code: a not-ready run prints its
 JSON and exits 0, so a job piping it into `jq` keeps git-pair's answer separate from the pipeline's.
@@ -677,6 +696,7 @@ Usage errors and git failures still exit 2 and 3 here.
   "ready": false,
   "state": "APPROVED",
   "head": "941266b18686624cb624722b4e8c348bf03451a7",
+  "reviewed_head": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
   "reasons": [
     "content outside changesets/feat/ changed since 1a2b3c4: src/service.ts"
   ],
@@ -764,6 +784,10 @@ git pair review history --json      # enumerate review commits
 git pair change ready               # again
 git pair check                      # assert integration-readiness; $? is the answer
 ```
+
+Rebasing after an approval invalidates it, and `check` says so in as many words. Re-offer the work with
+`change ready` and wait for a reviewer; do not edit the marker's `Review-Head` to make the comparison
+line up — that trailer is the reviewer's statement about what they looked at, not the author's to amend.
 
 `check` is the last step an agent runs. Landing is not the agent's: the merge is ordinary git run by
 whoever owns the destination branch, and `git pair integration record` follows it (§13).
@@ -1352,13 +1376,23 @@ no name to derive one from. Renaming a branch needs nothing: resolution reads wh
 directories the revision carries, not which branch you are standing on, and `--changeset <id>` reads
 one from any branch while HEAD stays where it is.
 
-`git pair check` printing `NOT READY:` while `git pair status` says `APPROVED` is usually one of two
-things, and both bullets name which: content outside `changesets/<cs>/` changed since the approval —
-which is what the approval was about, and a changeset-only commit is not that drift, so the approval
-stands — or the newest review is `feedback`, which the default policy does not accept (the bullet says
-so, and `--allow-feedback` is the switch). A third bullet, `changeset is already integrated at …`, is not
-a problem to fix: the record says the review is over, and re-running the gate after a landing reports that
-rather than a second opinion. `check` is also the one command that ignores your
+`git pair check` printing `NOT READY:` while `git pair status` says `APPROVED` is one of three things,
+and every bullet names which:
+
+- **The branch was rewritten.** `review 91bf204 reviewed a7f3c98, which is no longer in this history` —
+  the approval named a commit (`Review-Head`) that this branch no longer contains, so a rebase, amend or
+  force-push moved under the review. The tree may match exactly; that is the case this condition exists
+  for. Re-approve the rewritten head (`git pair change ready`, then a review submission), or merge the
+  base instead of rebasing onto it. A bullet naming a head this repository `does not have` is different:
+  that is a fetch gap, not a rewrite, and it is the clone that needs fixing.
+- **The content moved.** `content outside changesets/<cs>/ changed since …` — that is what the approval
+  was about, and a changeset-only commit is not that drift, so the approval stands.
+- **The policy refused.** The newest review is `feedback`, which the default policy does not accept; the
+  bullet says so, and `--allow-feedback` is the switch.
+
+A fourth bullet, `changeset is already integrated at …`, is not a problem to fix: the record says the
+review is over, and re-running the gate after a landing reports that rather than a second opinion.
+`check` is also the one command that ignores your
 working tree: it asserts the commit, and uncommitted edits are not in `HEAD` to be reviewed.
 
 A missing entry in `git pair review queue` is usually not a queue bug: membership is derived

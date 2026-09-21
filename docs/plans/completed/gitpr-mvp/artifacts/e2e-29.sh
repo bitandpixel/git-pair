@@ -114,7 +114,7 @@ $G change ready >/dev/null; check "ready again after feedback" 0 $?
 $G review submit --approve; check "submit --approve (empty commit)" 0 $?
 git log -1 --format='  %h %s%n%b' HEAD
 
-step "author: the gate over the approved head, and the two ways it stops meaning it"
+step "author: the gate over the approved head, and the three ways it stops meaning it"
 SOURCE=$(git rev-parse HEAD)
 $G check; check "check: the approved head is integration-ready" 0 $?
 # An integration-ready changeset is still a branch and some commits. The record is written by the
@@ -134,6 +134,42 @@ WITHDRAWAL=$(git rev-parse HEAD)
   && echo "  ok: the withdrawal is a marker commit, and writes no ref" \
   || { echo "  FAIL: the withdrawal wrote a ref, or recorded no marker"; FAILED=1; }
 $G check >/dev/null 2>&1; check "check: a withdrawn changeset fails the gate" 1 $?
+
+# The third way is the one the tree cannot see. A rebase that resolves no conflict changes no file, so
+# the content comparison still passes and only the lineage test refuses: an approval is about a commit,
+# and `Review-Head` is what makes that question askable (PRD §10.4, §11.3). This runs on a throwaway
+# copy of the branch, because the landing below is about the history the record names.
+git switch -qc rewritten booking-transaction
+$G change ready >/dev/null; check "ready the copy" 0 $?
+$G review submit --approve >/dev/null; check "approve the copy" 0 $?
+REVIEWED=$(git rev-parse HEAD~1)
+git switch -qc trunk-moved main
+git commit -q --allow-empty -m "trunk moves without changing a file"
+git switch -q rewritten
+git rebase -q trunk-moved; check "rebase the copy onto the moved trunk" 0 $?
+if [ -z "$(git diff HEAD@{1} HEAD --name-only)" ]; then
+  echo "  ok: the rebase changed no file, so the tree comparison has nothing to report"
+else
+  echo "  FAIL: the rebase changed files, so this no longer isolates the lineage rule"; FAILED=1
+fi
+REBASED=$($G check 2>&1); REBASE_EXIT=$?
+if printf '%s\n' "$REBASED" | grep -q "no longer in this history" && [ "$REBASE_EXIT" = 1 ]; then
+  echo "  ok: a tree-identical rebase loses the approval"
+else
+  echo "  FAIL: a tree-identical rebase did not refuse the merge (exit $REBASE_EXIT)"; FAILED=1
+  printf '%s\n' "$REBASED" | sed 's/^/    /'
+fi
+if $G check --json | grep -q "\"reviewed_head\": \"$REVIEWED\""; then
+  echo "  ok: --json names the commit the approval spoke about ($REVIEWED)"
+else
+  echo "  FAIL: --json did not report reviewed_head $REVIEWED"; FAILED=1
+fi
+$G status | grep -q "reviewed: ${REVIEWED:0:7}" \
+  && echo "  ok: status names it too" \
+  || { echo "  FAIL: status did not report the reviewed head"; FAILED=1; }
+git switch -q booking-transaction
+git branch -D rewritten >/dev/null
+git branch -D trunk-moved >/dev/null
 
 step "integration: record where the work landed"
 # The landing goes to a branch that is not the default one, which is the case only the record can

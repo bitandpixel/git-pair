@@ -57,6 +57,16 @@ type Event struct {
 	Outcome model.Outcome
 	// Author is the commit author name, useful when explaining a marker.
 	Author string
+	// ReviewedHead is the commit a review submission spoke about, from its
+	// `Review-Head` trailer. It is the value `check` tests ancestry against, because it is
+	// the one a rebase changes while the message survives: the rewritten marker still
+	// names a head that is no longer in this line of history (PRD §11.3, §12).
+	//
+	// Empty means the marker names nothing — written before the trailer existed, or by a
+	// hand-edited commit. That is reported rather than guessed at: the review commit's own
+	// first parent would be the same value before a rebase and a *rewritten* parent after
+	// one, so deriving it would make the rule pass in exactly the case it exists for.
+	ReviewedHead string
 	// UnrecognisedMarker is true when the commit carries Review-* trailers but
 	// not a complete, valid marker for this changeset. Such a commit is
 	// treated as an implementation commit — the conservative reading, since it
@@ -209,6 +219,7 @@ func parseEvent(slug string, rec []string) Event {
 	case hasOutcome:
 		if o, ok := model.ParseOutcome(outcome); ok && changeset == slug {
 			e.Kind, e.Outcome = KindReview, o
+			e.ReviewedHead = reviewedHead(trailers[model.TrailerHead])
 		} else {
 			e.UnrecognisedMarker = true
 		}
@@ -231,6 +242,22 @@ func parseEvent(slug string, rec []string) Event {
 		}
 	}
 	return e
+}
+
+// reviewedHead accepts the value of a `Review-Head` trailer: a hex object id of plausible
+// length, abbreviated or full. Anything else — a branch name, a typo, an empty value — is read
+// as no head named, which `check` reports rather than resolving and hoping for the best.
+func reviewedHead(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) < 7 || len(raw) > 40 {
+		return ""
+	}
+	for _, r := range raw {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return ""
+		}
+	}
+	return raw
 }
 
 func derive(events []Event) Summary {
@@ -348,6 +375,10 @@ func markerReason(m Event) string {
 // Comparing trees rather than counting commits also folds in the cases counting
 // gets wrong: a merge of the base, a rebase that rewrote every SHA, and a change
 // followed by its own revert all end at "is the approved code still here".
+//
+// That is the content question and not the lineage one. A tree-identical rebase answers this
+// check "still here" and must still refuse, because the approval was about a commit, not about a
+// tree: `check`'s ancestry condition on `Review-Head` is what catches it (PRD §12).
 func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef string, s Summary) (Summary, error) {
 	if !s.Stale || s.Marker == nil {
 		return s, nil

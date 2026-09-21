@@ -199,9 +199,15 @@ Exactly one outcome is required:
   --feedback   non-blocking observations; integration is still permitted
   --approve    the reviewer accepts the current implementation
 
-The commit carries Review-Outcome and Review-Changeset trailers, and it is the whole
+The commit carries Review-Outcome, Review-Changeset and Review-Head trailers, and it is the whole
 submission: no ref is written, because while work is in flight the branch is what holds
 the chain. ` + "`git pair integration record`" + ` writes the durable refs, once, at landing.
+
+Review-Head is the commit being reviewed — ` + "`HEAD`" + ` as the submission was made, which is the new
+commit's own parent. It is written down because a rebase rewrites the review commit and keeps its
+message: the marker that survives says which commit it approved, and ` + "`git pair check`" + ` refuses to
+read that approval as covering the rewritten history. Merging the base in rewrites nothing and costs
+nothing.
 
 Source edits, inline comments, ABOUT.md edits, and thread files all become part
 of the review; a review commit with no changes at all is valid, which is what
@@ -349,23 +355,28 @@ most recent, matching ` + "`git pair diff --since-review`" + `.
 				var out []map[string]any
 				for i, r := range s.summary.Reviews {
 					out = append(out, map[string]any{
-						"index":   i,
-						"sha":     r.SHA,
-						"short":   r.Short,
-						"outcome": string(r.Outcome),
-						"subject": r.Subject,
-						"author":  r.Author,
-						"when":    r.When.UTC().Format(time.RFC3339),
-						"age":     lifecycle.Age(r.When, now()),
+						"index": i,
+						"sha":   r.SHA,
+						"short": r.Short,
+						// reviewed_head is the commit this submission spoke about, from its
+						// `Review-Head` trailer; absent when the marker names none.
+						"reviewed_head": r.ReviewedHead,
+						"outcome":       string(r.Outcome),
+						"subject":       r.Subject,
+						"author":        r.Author,
+						"when":          r.When.UTC().Format(time.RFC3339),
+						"age":           lifecycle.Age(r.When, now()),
 					})
 				}
 				return a.emitJSON(map[string]any{"changeset": s.cs.Slug, "reviews": out})
 			}
 			w := tabwriter.NewWriter(a.stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "INDEX\tSHA\tOUTCOME\tAGE\tSUBJECT")
+			fmt.Fprintln(w, "INDEX\tSHA\tREVIEWED\tOUTCOME\tAGE\tSUBJECT")
 			for i, r := range s.summary.Reviews {
-				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n",
-					i, r.Short, r.Outcome, lifecycle.Age(r.When, now()), r.Subject)
+				// REVIEWED is the commit the submission spoke about — its `Review-Head`, which is
+				// where this commit sits in the line rather than what it changed.
+				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
+					i, r.Short, short(r.ReviewedHead), r.Outcome, lifecycle.Age(r.When, now()), r.Subject)
 			}
 			return w.Flush()
 		},

@@ -238,12 +238,18 @@ func (s *Session) Reload(ctx context.Context) error {
 // unpredictability with extra steps. Reaching a span you can review is `V`'s job -- its head column
 // always offers `Current` -- and the walk reaches every live stop anyway.
 //
-// A stop that no longer resolves -- the tag it named was deleted, the review ref is gone, the branch
-// was force-pushed away -- is passed over, and reported in StepResult.Skipped. Blocking there would
+// A stop that no longer resolves -- the tag it named was deleted, the branch was force-pushed away,
+// the review commit was rewritten off the branch by a rebase -- is passed over, and reported in
+// StepResult.Skipped. Blocking there would
 // make one dead stop a wall: the same press would fail the same way forever, with `V` the only way
 // past. Skipping is safe because SetSpan resolves before it replaces anything, so a stop that fails
 // leaves the session exactly where it was and the next candidate is a whole span, never half of one.
 // The stop stays on the ring: a tag that comes back is a stop again.
+//
+// What this does not do is tolerate the rewrite. A session can be asked to paint history that no
+// longer belongs to the branch, and it will -- painting a span is not a verdict. The gate is what
+// refuses rewritten history: `git pair check` tests the approved `Review-Head` against this line
+// before a merge is licensed (PRD §12).
 func (s *Session) StepSpan(ctx context.Context) (StepResult, error) {
 	total := len(s.ring)
 	res := StepResult{Pos: s.ringIdx + 1, Total: total}

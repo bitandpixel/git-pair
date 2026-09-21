@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 	"gitpair/internal/reviewref"
@@ -33,7 +34,14 @@ a check people read and one they re-run.
 
 The conditions are that the changeset has not ended and has not been recorded as landed; that the
 newest marker is a review whose outcome permits integration (` + "`approve`" + `, or ` + "`feedback`" + ` with
-` + "`--allow-feedback`" + `); and that the content that review looked at is still what ` + "`HEAD`" + ` carries.
+` + "`--allow-feedback`" + `); that the commit that review spoke about (` + "`Review-Head`" + `) is still in this
+line of history; and that the content it looked at is still what ` + "`HEAD`" + ` carries.
+
+The lineage condition and the content condition are different questions, and a rewrite separates them.
+A rebase that resolves no conflict changes no file, so the tree still matches and only the ancestry
+test refuses — which is the point: an approval is about a commit, and git-pair does not read an
+approval of one commit as approval of the rewritten version of it. Merging the base in, or committing
+on top, rewrites nothing and passes.
 
 ` + "`check`" + ` refuses feedback on its own unless you say otherwise. Non-blocking feedback is still a
 review of a head, so it permits integration in the tool's own terms — but the repository decides at
@@ -82,6 +90,11 @@ type checkJSON struct {
 	Head    string   `json:"head"`
 	Reasons []string `json:"reasons"`
 	Policy  string   `json:"policy"`
+	// ReviewedHead is the commit the newest permitting review spoke about, from its
+	// `Review-Head` trailer, resolved to a full SHA where this clone can. It is reported
+	// whether or not the verdict is ready: when the gate refuses for lineage, the log has to
+	// name both ends of the comparison (PRD §11.3).
+	ReviewedHead string `json:"reviewed_head,omitempty"`
 	// Integrated says an integration record exists, and IntegratedAt where its commit sits. Like
 	// status's integration fields, they sit beside the verdict rather than changing what `ready`
 	// means: a changeset that has landed is not integration-ready again.
@@ -124,15 +137,23 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	if allowFeedback {
 		policy = policyApproveOrFeedback
 	}
+	// The lineage question, asked of the same derivation so the two conditions cannot disagree
+	// about which marker is newest or what it approved. It is the check the tree cannot do: a
+	// rebase that changes no file passes the drift test and fails this one.
+	lineage, reviewedHead, err := lineageReason(ctx, s.repo, reviewed, s.head, allowFeedback)
+	if err != nil {
+		return err
+	}
 	out := checkJSON{
 		Changeset:        s.cs.Slug,
 		State:            string(reviewed.State),
 		Head:             s.head,
 		Policy:           policy,
+		ReviewedHead:     reviewedHead,
 		Integrated:       landed != "",
 		IntegratedCommit: short(landed),
 		IntegratedAt:     where,
-		Reasons:          integrationReasons(s.cs.Slug, terminal, reviewed, s.head, allowFeedback, where),
+		Reasons:          integrationReasons(s.cs.Slug, terminal, reviewed, s.head, allowFeedback, where, lineage),
 	}
 	out.Ready = len(out.Reasons) == 0
 	if out.Reasons == nil {
@@ -164,7 +185,11 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 }
 
 // integrationReasons lists every reason this changeset is not integration-ready, in the order a
-// reader can act on them: what the reviewers decided, then what moved since they decided it.
+// reader can act on them: what the reviewers decided, then what moved since they decided it — the
+// history first, then the content, because a rewritten branch invalidates the review of it.
+//
+// `lineage` is the rewritten-history reason, computed by lineageReason and empty when the condition
+// passed or did not apply.
 //
 // It reads the derivation rather than recomputing anything. `status` and this command ask the same
 // questions of the same commits, and a second implementation of "is the reviewed content still
@@ -176,7 +201,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 // moved since the marker — re-deriving it would re-litigate a decision the author already took,
 // in a command with no override flag to take it again.
 func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summary,
-	head string, allowFeedback bool, landed landing) []string {
+	head string, allowFeedback bool, landed landing, lineage string) []string {
 	if landed.Commit != "" {
 		// The other early return, and it comes first. Once the record exists the review is over:
 		// the drift question below it describes a changeset still being worked on, which this one
@@ -228,12 +253,70 @@ func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summ
 		reasons = append(reasons, fmt.Sprintf(
 			"%d review marker(s) after %s carry trailers git-pair cannot read", s.TrailingUnrecognised, markerOr(s)))
 	}
+	if lineage != "" {
+		// The rewritten-history condition, and the reason the gate is about a commit rather
+		// than only about a tree (PRD §12).
+		reasons = append(reasons, lineage)
+	}
 	if len(s.Drifted) > 0 {
 		reasons = append(reasons, fmt.Sprintf("content outside changesets/%s/ changed since %s: %s",
 			slug, markerOr(s), strings.Join(s.Drifted, ", ")))
 	}
 
 	return reasons
+}
+
+// lineageReason asks the question the tree cannot: is the commit the approving review spoke about
+// still in this line of history?
+//
+// It is asked only where the newest marker is a review that permits integration — with no approval
+// standing there is nothing for a rewrite to invalidate, and a `READY` changeset rebased before
+// anyone read it owes no explanation. Where it applies it answers three ways: the named commit is
+// an ancestor of HEAD (pass, and its full SHA is returned for `--json`), it is not (the branch was
+// rewritten since the review), or this clone cannot tell (the commit is not here at all, which in CI
+// is a fetch gap and must not read as a verdict about the work).
+//
+// An approval whose marker names no head is refused rather than waved through. The review commit's
+// own first parent is the same value as the trailer before a rewrite and a *rewritten* parent after
+// one, so deriving it would make the rule pass in exactly the case it exists for — and a marker with
+// no `Review-Head` is a marker whose approval covers an unknown commit (PRD §12).
+func lineageReason(ctx context.Context, repo *git.Repo, s lifecycle.Summary,
+	head string, allowFeedback bool) (reason, reviewedHead string, err error) {
+	m := s.Marker
+	if m == nil || m.Kind != lifecycle.KindReview {
+		return "", "", nil
+	}
+	switch m.Outcome {
+	case model.OutcomeApprove:
+		// An approval is exactly what a rewrite can invalidate.
+	case model.OutcomeFeedback:
+		if !allowFeedback {
+			// The outcome reason below already refuses this changeset, and the lineage of a
+			// feedback that does not permit integration is not the thing standing in the way.
+			return "", "", nil
+		}
+	default:
+		return "", "", nil
+	}
+	if m.ReviewedHead == "" {
+		return fmt.Sprintf("review %s names no reviewed commit, so git-pair cannot tell which history its approval covers", m.Short), "", nil
+	}
+	full, err := repo.RevParse(ctx, m.ReviewedHead+"^{commit}")
+	if err != nil {
+		if errors.Is(err, git.ErrUnknownRevision) {
+			return fmt.Sprintf("review %s names %s as the commit it reviewed, which this repository does not have: fetch it before reading this verdict", m.Short, m.ReviewedHead), m.ReviewedHead, nil
+		}
+		return "", "", err
+	}
+	inLine, err := repo.IsAncestor(ctx, full, head)
+	if err != nil {
+		return "", full, err
+	}
+	if inLine {
+		return "", full, nil
+	}
+	return fmt.Sprintf("review %s reviewed %s, which is no longer in this history: the branch was rewritten since the review, so the approval does not license integration",
+		m.Short, short(full)), full, nil
 }
 
 // markerOr names the newest marker for a reason line, which is only reached where a marker

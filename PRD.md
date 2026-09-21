@@ -967,6 +967,7 @@ review: booking-transaction
 
 Review-Outcome: block
 Review-Changeset: booking-transaction
+Review-Head: 8f21c0d4b7a5e9c3d0f4a6b8e1c2d3f4a5b6c7d8
 ```
 
 or:
@@ -976,7 +977,18 @@ review: approve booking-transaction
 
 Review-Outcome: approve
 Review-Changeset: booking-transaction
+Review-Head: 8f21c0d4b7a5e9c3d0f4a6b8e1c2d3f4a5b6c7d8
 ```
+
+`Review-Head` is the commit the submission spoke about: `HEAD` as the reviewer submitted, which is the
+new commit's own first parent. It is recorded rather than left implicit because the implicit value is
+the exact one a rebase changes — the rewritten review commit keeps its message, so the marker that
+survives still names the head that is gone from the branch, and §11.3's ancestry condition refuses it.
+Deriving the value from the graph instead would defeat the rule: after a rewrite the first parent is
+itself rewritten, so the derived head would always be in the line.
+
+A submission that names no head — written before this trailer existed, or by hand — is refused by the
+gate rather than assumed, and the reason says the approval covers an unknown commit (§11.3).
 
 The submission is the marker commit and nothing more. It used to move the archive ref onto the resulting
 exact `HEAD`, so reviewed history stayed reachable without the branch; review writes no ref now, because
@@ -1125,6 +1137,7 @@ Reason: review 91bf204 (approve) is the newest commit
 Latest review:
   outcome: approve
   commit: 91bf204  (20m ago)
+  reviewed: a7f3c98
   history: 3 review(s) — `git pair review history`
 
 Uncommitted changes: no
@@ -1171,7 +1184,8 @@ Potential JSON:
     "latest_review": {
         "index": 2,
         "outcome": "block",
-        "commit": "91bf204"
+        "commit": "91bf204",
+        "reviewed_head": "a7f3c98"
     },
     "archive_ref": "",
     "archive_commit": "",
@@ -1186,6 +1200,11 @@ Potential JSON:
 they are reported the way they are so a consumer sees one shape either way, and their presence is the
 statement that the work landed. `integration_ref` and `integrated_commit` name the landing itself and
 appear only with it (§13).
+
+`latest_review.reviewed_head` is the commit that submission spoke about, from its `Review-Head`
+trailer (§10.4) — the other end of the comparison `git pair check` makes when it refuses a rewritten
+branch (§11.3). It is omitted when the marker names no head, which is itself the answer the gate
+refuses on.
 
 The three `default_branch` fields are the other half of the resolution. Which changeset a revision is
 working on is a comparison against the integration branch (§4), so a run that reports nothing has
@@ -1230,10 +1249,21 @@ The conditions, all of them reported rather than the first:
    `feedback` under `--allow-feedback`. A changeset that is merely marked ready, or withdrawn by
    `change unready`, is not reviewed,
 3. no marker after it carries `Review-*` trailers this build cannot read,
-4. the content that review looked at is still what `HEAD` carries: the tree is compared between the
+4. the commit that review spoke about is still in this line of history: `Review-Head` (§10.4) is an
+   ancestor of, or is, `HEAD`. A rewrite — rebase, amend, force-push — rewrites the marker and keeps
+   its message, so the surviving approval names a commit the branch no longer has. A marker that names
+   no head is refused too: the gate cannot place an approval whose commit it does not know, and
+   deriving the value from the graph would read the rewritten parent as the reviewed one, which is the
+   case the condition exists to catch (§12),
+5. the content that review looked at is still what `HEAD` carries: the tree is compared between the
    marker and `HEAD`, ignoring `changesets/<changeset>/`, the same comparison `status` makes,
 5. the changeset has not already been integrated (§13.2) — the record says the review is over, so
    this is the other single-reason verdict, and it comes first.
+
+Conditions 4 and 5 are different questions, and a rewrite is what separates them. A rebase that
+resolves no conflict changes no file, so the tree comparison passes and only the ancestry test refuses.
+That is the requirement "rebase after approval requires re-approval" made enforceable (§12), and it is
+why the gate asks about a commit rather than only about a tree.
 
 Every condition is a reading of commits, and only one of them reads a durable ref: the integration ref
 is consulted to say "this already landed". Nothing is asked of the archive family (§13.1), which is the
@@ -1260,6 +1290,18 @@ NOT READY:
 - content outside changesets/booking-transaction/ changed since 91bf204: src/booking/service.ts
 ```
 
+A rewritten branch says so in the same list:
+
+```text
+$ git pair check
+
+NOT READY:
+- review 91bf204 reviewed a7f3c98, which is no longer in this history: the branch was rewritten since the review, so the approval does not license integration
+```
+
+The name of the rewritten head is in that sentence because it is the other half of the comparison — a
+reader who sees only "history moved" cannot tell a rebase from a fetch gap.
+
 The passing verdict names the commit it cleared, not only the changeset: a log that says "ready" without
 saying what it looked at cannot be re-read after the branch has moved. `next` is the rest of the handoff
 (§9.5), printed by the commands that know where the work stands.
@@ -1284,10 +1326,12 @@ default refuses and `--allow-feedback` says otherwise. There is no per-changeset
 flag is on the command that runs the gate, which is the one place the policy is known.
 
 `--json` prints `changeset`, `ready`, `state`, `head`, `reasons`, `policy` (`approve-only` or
-`approve-or-feedback`, so a verdict in a log carries the policy that produced it), `integrated` and
-`integrated_commit`. `head` is a full SHA rather than the short form the human output prints, because
-the consumer compares it against the revision it built — `integrated_commit` is short, matching
-`status`. `reasons` is an array in both verdicts, so a consumer branches on `ready` instead of handling
+`approve-or-feedback`, so a verdict in a log carries the policy that produced it), `reviewed_head`,
+`integrated` and `integrated_commit`. `head` and `reviewed_head` are full SHAs rather than the short
+forms the human output prints, because the consumer compares them against the revision it built —
+`integrated_commit` is short, matching `status`. `reviewed_head` is the commit the newest permitting
+review named (§10.4), reported whether or not the verdict is ready, and omitted where the marker names
+no head. `reasons` is an array in both verdicts, so a consumer branches on `ready` instead of handling
 two shapes for one fact.
 
 In this form the verdict is `ready` rather than `$?`: a not-ready run prints its JSON and exits 0, so
@@ -1501,6 +1545,25 @@ agent changes implementation
 `git pair status` reports `APPROVED` — the newest marker is still the approval — and `git pair check`
 (§11.3) refuses that head. A gate that passed it would certify unreviewed content as reviewed, so
 `check` is the one command that compares the tree (§11.3).
+
+An approval is about a commit, and the tree is only half of it. The other half is lineage, and it is
+the half a rewrite changes without touching a file:
+
+```text
+review: approve          (Review-Head: a7f3c98)
+git rebase main          (a7f3c98 becomes a different commit; the message, and the trailer, survive)
+```
+
+`git pair check` (§11.3) refuses that branch, because the commit the reviewer accepted is not in this
+history. Merging the base in rewrites nothing, and passes. This is the requirement "rebase after
+approval requires re-approval", and `Review-Head` (§10.4) is what makes it enforceable without a ref
+namespace: the marker carries its own evidence of what it approved.
+
+Two consequences worth stating plainly. An approval whose marker names no head is refused rather than
+trusted, because git-pair cannot tell which history it covered. And a review submission that is itself
+rewritten is not the submission the reviewer made — the requirement's "must not be treated as
+equivalent to the original approval automatically" — which is what it means for the pre-rewrite review
+commit to be unreachable once the branch moves on (§13.4).
 
 ---
 
@@ -2436,6 +2499,12 @@ Agent behavior:
 14. stop there. Landing is not the agent's step: the merge is ordinary git run by whoever owns the
     destination branch, and `git pair integration record` (§11.4) follows it.
 
+An agent that rebases a branch after an approval has invalidated it, and `check` will say so (§12). The
+response is to re-offer the work — `change ready`, then wait for a reviewer — and not to argue with the
+gate: git-pair does not read an approval of one commit as approval of its rewritten successor, and an
+agent editing a `Review-Head` trailer to make the comparison line up would be recording an approval it
+did not receive. Where the history has to be tidied, tidy it before the handoff.
+
 `git pair status --json` remains the way to check state without blocking. `git pair diff --unreviewed` is the reviewer's span command; an author consuming a newly submitted review uses `git pair change feedback`.
 
 When the author needs to keep implementing after handing off, `git pair change unready` (§9.6) withdraws
@@ -2497,6 +2566,10 @@ Integration is permitted once CI/policy passes.
 An implementation commit after an approval leaves the approval as the state, and the head no
 longer carries what was accepted: `git pair check` refuses it (§11.3), and `git pair change ready`
 offers the new head for review.
+
+The same is true when nothing in the tree changes. A rebase leaves the approval as the state and
+refuses the merge, because the approval names a commit — `Review-Head`, §10.4 — that this history no
+longer contains (§12).
 
 ---
 

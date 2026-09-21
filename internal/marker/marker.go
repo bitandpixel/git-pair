@@ -92,14 +92,28 @@ func UnreadyMessage(slug string) Message {
 }
 
 // ReviewMessage describes a review submission with the given outcome.
-func ReviewMessage(slug string, outcome model.Outcome, body string) Message {
+//
+// head is the commit the reviewer was looking at — HEAD at the moment of the submission, which is the
+// new commit's first parent. It is recorded rather than left implicit because a rebase rewrites the
+// review commit while preserving its message: the rewritten marker still names the head that is gone
+// from this line, which is what lets `check` refuse to read an approval as approval of rewritten history
+// (PRD §10.4, §11.3).
+func ReviewMessage(slug string, outcome model.Outcome, head, body string) Message {
+	trailers := []string{
+		"Review-Outcome=" + string(outcome),
+		"Review-Changeset=" + slug,
+	}
+	// An unknown head is recorded as no trailer rather than as an empty one: a marker
+	// that names nothing is readable as "this review does not say what it reviewed",
+	// which is what the gate then reports, while `Review-Head:` with nothing after it
+	// is a malformed trailer block to every other reader.
+	if head != "" {
+		trailers = append(trailers, "Review-Head="+head)
+	}
 	return Message{
-		Subject: fmt.Sprintf("review: %s %s", outcome, slug),
-		Body:    body,
-		Trailers: []string{
-			"Review-Outcome=" + string(outcome),
-			"Review-Changeset=" + slug,
-		},
+		Subject:  fmt.Sprintf("review: %s %s", outcome, slug),
+		Body:     body,
+		Trailers: trailers,
 	}
 }
 

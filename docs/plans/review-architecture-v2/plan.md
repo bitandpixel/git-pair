@@ -121,7 +121,12 @@ rewrites the commit but preserves its message, so the rewritten marker still nam
 the ancestry test refuses it. *Rejected: keeping `refs/git-pair/reviews/*` now — it is a third namespace,
 and allocating `123` is a read-modify-write across clones, which is the coordination this spec bans.*
 The consequence is stated in R5 below: after a rebase the original review commit is reflog-only, so
-"inspect it exactly as submitted" is deferred with the anchors.
+"inspect it exactly as submitted" is deferred with the anchors. Two details settled during M2: the
+condition is asked only where the outcome permits integration, so a `block` stays a `block` with one
+reason; and a review commit that names no head is refused rather than assumed, because the value cannot
+be recovered from the graph without reading the rewritten parent as the reviewed one — which is the case
+the rule exists to catch. A marker from an older build therefore stops licensing a merge until it is
+re-submitted.
 
 **D7 — The tree rule stays.** PRD §4's comparison against the destination branch's tree remains the way
 active work is recognised; the integration ref is the skip signal beside it; landed `changesets/<id>/`
@@ -223,7 +228,7 @@ repository. Deferred with the anchors unless a concrete need appears during impl
   that tolerates vanished commits (`tui/session.go:242`) is exercised by the branch-drift scenario and the
   existing span tests rather than a new one; its comment is M2's to rewrite.
 
-### M2 — `Review-Head` and the rebase rule
+### M2 — `Review-Head` and the rebase rule — done 2026-09-21
 
 **Deliverables**
 
@@ -234,20 +239,43 @@ repository. Deferred with the anchors unless a concrete need appears during impl
 
 **Tasks**
 
-- Add a `Review-Head` trailer written by `reviewops.Submit` and read by `lifecycle.parseEvent`
+- [x] Add a `Review-Head` trailer written by `reviewops.Submit` and read by `lifecycle.parseEvent`
   (`lifecycle.go:198-230`); carry it on `lifecycle.Event` and expose it in `status` and `review history`.
-- Add the ancestry condition with `IsAncestor` (`git.go:246`, `merge-base --is-ancestor`), which the hygiene
+- [x] Add the ancestry condition with `IsAncestor` (`git.go:246`, `merge-base --is-ancestor`), which the hygiene
   test already permits.
-- Reverse the two comments that currently defend rewrite-tolerance (`change.go:977-980` and, in the TUI,
+- [x] Reverse the two comments that currently defend rewrite-tolerance (`change.go:977-980` and, in the TUI,
   `session.go:242`) so they describe the new rule instead of the old one.
-- PRD §12 and §11.3 updated for the new condition; README's rebase guidance rewritten.
+- [x] PRD §12 and §11.3 updated for the new condition; README's rebase guidance rewritten.
 
 **Verification**
 
-- Table-driven tests: linear rebase → refused; tree-identical rebase → refused (this fails today and is the
+- [x] Table-driven tests: linear rebase → refused; tree-identical rebase → refused (this fails today and is the
   headline case); fast-forward → accepted; amend of an unreviewed commit → unaffected; approval followed by
   a metadata-only commit → accepted.
-- `check --json` carries the approved head and the verdict reason; contract tests pin the shape.
+- [x] `check --json` carries the approved head and the verdict reason; contract tests pin the shape.
+
+**What landed differently**
+
+- The `change.go:977-980` comment to reverse went with `change archive` in M1. The TUI's
+  `session.go` comment was the one still standing; it now says the ring walk skips dead stops for the
+  screen's sake and that the gate is what refuses rewritten history, rather than defending the rewrite.
+- A marker naming **no** head is refused, not trusted. The plan left that case open; deriving the value
+  would read the rewritten parent as the reviewed one, so silence is a refusal with its own reason
+  ("names no reviewed commit"). Absence and unknown are two reasons and not one — the second ("this
+  repository does not have it: fetch it") is a fetch gap, and the reader fixes a different thing.
+- The condition is asked only where integration is permitted — after the outcome test — so a `block`
+  verdict still says `block`, and `feedback` under `--allow-feedback` is covered by the same table. It
+  sits between the unreadable-trailers reason and the drift reason, which is the order a reader works
+  through: was it accepted, can we read it, is it this history, is it this content.
+- `review history` gained a `REVIEWED` column, since the task asks the history to report the value and
+  the human table was the only surface that would not have.
+- The e2e replay gained the tree-identical rebase as a third way a passed gate stops meaning it, run on a
+  throwaway copy of the branch so the landing later in the script stays about the history the record
+  names. It asserts the tree comparison has nothing to report, which is what makes the case isolate the
+  lineage rule rather than the content rule.
+- Nothing had to be done about git dropping markers: `git rebase` keeps commits that were empty when
+  they were written, so an approval survives a rebase as a rewritten commit naming a gone head — the case
+  the rule catches, not one it has to work around.
 
 ### M3 — `integration record` as the two-ref write point
 

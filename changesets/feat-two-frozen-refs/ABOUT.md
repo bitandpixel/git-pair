@@ -17,8 +17,9 @@ the command whose whole job was moving it.
 What remains: `refs/git-pair/archive/<id>` and `refs/git-pair/integrations/<id>`, written by one
 invocation of `git pair integration record`, create-only, with no code path that moves either.
 
-M2-M8 of the plan are not here. `Review-Head` and the rebase rule, landed-unrecorded detection, the
-per-branch queue, stacked parent tracking and the agent contract follow.
+This is M1 and M2 of the plan: the transition, and the rule about history the transition required.
+M3-M8 follow — landed-unrecorded detection, the per-branch queue, stacked parent tracking and the agent
+contract.
 
 ## What changed
 
@@ -44,7 +45,14 @@ per-branch queue, stacked parent tracking and the agent contract follow.
   path that writes markers rather than after the fact.
 - `internal/hygiene` — `TestDurableRefsAreOnlyEverCreated`: exactly one `update-ref` in non-test source,
   and the old-value it passes must be 40 zeros.
-- `internal/tui` — the session held an archive ref name for no reader; it is gone.
+- `internal/tui` — the session held an archive ref name for no reader; it is gone. The span-walk comment
+  that defended tolerating a force-pushed history now says the screen paints any span and the gate is
+  what refuses rewritten history.
+- `Review-Head` (M2) — `model.TrailerHead`, written by `marker.ReviewMessage` and therefore by
+  `reviewops.Submit` alone: a `ready`, `working` or `abandoned` marker names no head, because those
+  commands ask no question about lineage. `lifecycle.Event.ReviewedHead` carries the value; `check`'s new
+  `lineageReason` asks it of the newest review only where integration is permitted, and the head is
+  reported by `check --json`, `status` (a `reviewed:` line) and `review history` (a `REVIEWED` column).
 - `PRD.md`, `README.md` — the two-ref model throughout: §3's vocabulary, §9.5 repurposed as "Handing the
   work on", §9.6/§9.7's endings, §11.1's status transcript, §11.3's conditions, §11.4's discovery, §12's
   lifecycle, §13 rewritten (13.1 archive, 13.2 integrations, 13.3 create-only, 13.4 fetching), §19.3, §21,
@@ -64,6 +72,18 @@ half-written record has to finish rather than fail on the half that worked, so a
 already names succeeds and says nothing moved. Asking for a different commit is refused with no override
 flag: the pair is what a release note, a bisect, or an agent asking "where did this review go" reads as
 fact, and moving it under them is the failure the milestone exists to make impossible.
+
+**`Review-Head` is recorded, never derived from first parent.** The plan required recording it; what
+needed deciding was what to do when a marker names no head, and the answer is to refuse. Deriving the
+value from the graph would read the rewritten parent as the reviewed one — the exact case the rule exists
+to catch — so a marker that names nothing cannot be placed, and git-pair does not guess at an approval.
+The cost here is close to zero (every marker in this repository's own changesets came from a build that
+records the trailer); the cost of the compat hole is a rule with an exception in it.
+
+**The lineage question is asked only where integration is permitted.** A `block` verdict says `block`;
+the gate does not complicate a refusal the author already understands with a second one about ancestry.
+The two ways the head can be missing get two reasons, because a rewritten branch and a clone that has
+not fetched are different things to fix.
 
 **`integration record` derives the changeset from content, not from the archive ref.** Discovery-by-archive
 would have kept a ref written during review alive, which is the thing being deleted. The directories
@@ -85,11 +105,17 @@ them stays valid.
 
 `mise run check` (gofmt, vet, `go test ./...`) passes. `mise run build` then
 `docs/plans/completed/gitpr-mvp/artifacts/e2e-29.sh` prints `E2E: all checks passed`, and
-`pty-walkthrough.sh` prints `PTY: all checks passed`.
+`pty-walkthrough.sh` prints `PTY: all checks passed`. The replay now rebases a throwaway copy of the
+branch after an approval and asserts the gate refuses while the tree comparison has nothing to report,
+which is what makes the case test the lineage rule rather than the content rule.
 
 New assertions worth naming: `TestChangeReadyWritesNoRefs` and its three siblings;
 `TestRecordedChangesetRefusesFurtherWork`, which covers the no-op paths as well as the state-moving ones;
 the create-only cases in `reviewref_test.go`; and the hygiene test that pins the single `update-ref`.
+For M2: `TestCheckRefusesHistoryTheApprovalDidNotReview` (tree-identical rebase refused, rebase onto a
+moved trunk refused, merge of the trunk accepted, implementation commit refused for content rather than
+lineage, changeset-only commit accepted, reset back to the reviewed head accepted), the two no-head cases,
+and `TestReviewSubmitRecordsTheReviewedHead`.
 
 ## Known limitations
 
@@ -99,6 +125,12 @@ the same. The plan accepts this (§13.1); the queue names the work it cannot pla
 
 `integration record` still refuses a second landing for a recorded changeset, so a backport to a release
 branch is not recordable. Unchanged from before this changeset.
+
+A review marker written by an older build — or by hand — names no `Review-Head`, and `git pair check`
+refuses it rather than assuming the head was the marker's parent. That is deliberate (see the design
+decision above), but it does mean an approval recorded before this changeset stops licensing a merge
+until it is re-submitted. Nothing in this repository is in that position; a pair with a long-lived branch
+could be.
 
 ## Open questions
 

@@ -265,11 +265,11 @@ func TestCheckUsageErrors(t *testing.T) {
 // against the revision it built, and `reasons` always an array so a consumer never has to
 // handle "empty means a different type".
 func TestCheckJSONContract(t *testing.T) {
-	f, slug, _, approved := approvedChangeset(t)
+	f, slug, reviewed, approved := approvedChangeset(t)
 	args := []string{"check", "--json"}
 	out := runIn(t, f.Dir(), args...).mustSucceed(t, args...).json(t)
 
-	assertKeys(t, out, "changeset", "ready", "state", "head", "reasons", "policy")
+	assertKeys(t, out, "changeset", "ready", "state", "head", "reasons", "policy", "reviewed_head")
 	if out["changeset"] != slug {
 		t.Errorf("changeset = %v, want %q", out["changeset"], slug)
 	}
@@ -284,6 +284,11 @@ func TestCheckJSONContract(t *testing.T) {
 	}
 	if len(out["head"].(string)) != 40 {
 		t.Errorf("head = %v, want the full SHA a CI job can compare against its build", out["head"])
+	}
+	// The other end of the lineage comparison, resolved to a full SHA: a log that refuses a merge
+	// because the approved commit is gone has to name both commits, not just the one still here.
+	if out["reviewed_head"] != reviewed {
+		t.Errorf("reviewed_head = %v, want the commit the approval spoke about (%s)", out["reviewed_head"], reviewed)
 	}
 	// No archive key: the gate reads the derivation and the trunk, and a field naming a durable ref
 	// would invite a consumer to treat the refs as part of the verdict — when the refs are only ever

@@ -75,6 +75,12 @@ const (
 	TrailerOutcome   = "Review-Outcome"
 	TrailerState     = "Review-State"
 	TrailerChangeset = "Review-Changeset"
+	// TrailerHead is the commit a review submission spoke about, written on review
+	// commits only. It is what makes an approval about a piece of history rather than
+	// about a tree: a rebase rewrites the review commit but preserves its message, so
+	// the rewritten marker still names a head that is no longer in this line, and the
+	// ancestry test refuses it (PRD §11.3, §12).
+	TrailerHead = "Review-Head"
 
 	StateValueReady = "ready"
 	// StateValueWorking is written by `change unready`. It is not a new state: WORKING

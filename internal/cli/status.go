@@ -54,6 +54,10 @@ type latestReviewJSON struct {
 	Index   int    `json:"index"`
 	Outcome string `json:"outcome"`
 	Commit  string `json:"commit"`
+	// ReviewedHead is the commit this submission spoke about, from its `Review-Head` trailer.
+	// It is the value `check` measures lineage against, so a reader who is told "not in this
+	// history" by the gate can see what the two ends of that comparison were (PRD §11.1).
+	ReviewedHead string `json:"reviewed_head,omitempty"`
 }
 
 type statusJSON struct {
@@ -165,9 +169,10 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 	}
 	if r := s.summary.LatestReview; r != nil {
 		view.json.LatestReview = &latestReviewJSON{
-			Index:   len(s.summary.Reviews) - 1,
-			Outcome: string(r.Outcome),
-			Commit:  short(r.SHA),
+			Index:        len(s.summary.Reviews) - 1,
+			Outcome:      string(r.Outcome),
+			Commit:       short(r.SHA),
+			ReviewedHead: short(r.ReviewedHead),
 		}
 		view.latestAge = lifecycle.Age(r.When, now())
 	}
@@ -272,6 +277,11 @@ func printStatus(a *app, v *statusView) {
 		}
 		a.printf("  outcome: %s\n", j.LatestReview.Outcome)
 		a.printf("  commit: %s%s\n", j.LatestReview.Commit, age)
+		if j.LatestReview.ReviewedHead != "" {
+			// The commit the reviewer was looking at, which is not this commit: a review
+			// submission is a child of the head it reviewed.
+			a.printf("  reviewed: %s\n", j.LatestReview.ReviewedHead)
+		}
 		a.printf("  history: %d review(s) — `git pair review history`\n", j.Reviews)
 	} else {
 		a.printf("\nLatest review:\n  none yet\n")
