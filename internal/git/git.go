@@ -632,6 +632,24 @@ func (r *Repo) RecentCommits(ctx context.Context, limit int, revs ...string) ([]
 	return tips, nil
 }
 
+// FirstParentLine lists the commits on ref's first-parent line, newest first, at most limit of
+// them (200 when limit is unset).
+//
+// The first-parent distinction is the point. A `--no-ff` merge brings a whole branch into the
+// destination's ancestry, and the commit that landed the work is on the destination's own line, not among
+// the commits that arrived with it. Anything that asks "which commit put this here" over ancestry would
+// answer with the branch's own commits.
+func (r *Repo) FirstParentLine(ctx context.Context, ref string, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	out, err := r.Git(ctx, "rev-list", "--first-parent", "--max-count="+strconv.Itoa(limit), ref)
+	if err != nil {
+		return nil, err
+	}
+	return splitLines(out), nil
+}
+
 // RefTip is a ref, the commit it points at with tags peeled, and when that commit was
 // made.
 type RefTip struct {

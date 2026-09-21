@@ -297,3 +297,100 @@ func TestIntegrationRecordAnswersFromTheRecordBeforeTheChecks(t *testing.T) {
 	mustContain(t, second.stderr, shortOf(landing), "naming what is already on it")
 	mustNotContain(t, second.stderr, "does not add changesets/", "and not about the tree it never got to")
 }
+
+// The local flow names neither SHA, and the repository answers: the landing is the newest commit on the
+// destination's first-parent line that added the changeset directory, and the reviewed head is the branch
+// still carrying it. Both are read from the graph, and both are then put through the same four checks as a
+// pair the caller typed — derivation buys the caller the translation, not a weaker record.
+func TestIntegrationRecordDerivesBothTips(t *testing.T) {
+	f, slug, source, _ := recordFixture(t)
+	f.SwitchTo("main")
+	f.MustGit("checkout", source, "--", changeset.Root+"/"+slug)
+	f.Commit("booking: squash-merge the reviewed work")
+	landing := f.Head()
+	branchTip := f.RevParse("booking")
+
+	res := runIn(t, f.Dir(), "integration", "record", "--json")
+	res.mustSucceed(t, "integration", "record")
+	if got := f.RefSHA(integrationRef(slug)); got != landing {
+		t.Errorf("the integration ref is at %s, want the derived landing %s", got, landing)
+	}
+	if got := f.RefSHA(archiveRef(slug)); got != branchTip {
+		t.Errorf("the archive is at %s, want the reviewed branch tip %s", got, branchTip)
+	}
+	// Provenance is reported, because "the SHAs came from the graph" is a fact worth knowing when the
+	// record is audited later.
+	out := res.json(t)
+	derived, _ := out["derived"].([]any)
+	if len(derived) != 2 {
+		t.Fatalf("derived = %v, want both tips listed", out["derived"])
+	}
+	if derived[0] != "commit" || derived[1] != "source" {
+		t.Errorf("derived = %v, want the order the flags are asked in", derived)
+	}
+	human := runIn(t, f.Dir(), "integration", "record").mustSucceed(t, "integration", "record")
+	mustContain(t, human.stdout, "already recorded", "the derived pair is the pair, so a retry is the same no-op")
+	mustContain(t, human.stdout, "derived:     --commit and --source", "and the text surface says so")
+}
+
+// One changeset directory missing its record is the answer; two is a caller who has to say which. The
+// ambiguity is a usage error naming both ids, and --changeset settles it without naming a single SHA.
+func TestIntegrationRecordDerivationRefusesToChooseBetweenTwo(t *testing.T) {
+	f, slug, source, _ := recordFixture(t)
+	f.SwitchTo("booking")
+	second := "booking-follow-up"
+	runIn(t, f.Dir(), "change", "init", "--id", second, "--base", "main").mustSucceed(t, "change", "init")
+	f.Commit("the follow-up's work", gittest.WithFile("follow-up.go", "package main\n"))
+	ready(t, f)
+	submit(t, f, "approve")
+	childHead := f.Head()
+
+	f.SwitchTo("main")
+	f.MustGit("checkout", source, "--", changeset.Root+"/"+slug)
+	f.MustGit("checkout", childHead, "--", changeset.Root+"/"+second)
+	f.Commit("land both changesets", gittest.WithFile("landed.md", "landed\n"))
+
+	res := runIn(t, f.Dir(), "integration", "record")
+	if res.code != 2 {
+		t.Fatalf("an ambiguous derivation exited %d, want 2\n%s%s", res.code, res.stdout, res.stderr)
+	}
+	mustContain(t, res.stderr, "more than one changeset on main is missing its integration record", "it names the branches it read")
+	mustContain(t, res.stderr, slug, "and both candidates")
+	mustContain(t, res.stderr, second, "both of them")
+	mustContain(t, res.stderr, "--changeset", "and the flag that settles it")
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Errorf("an ambiguous derivation wrote %v", got)
+	}
+
+	// With the id named, the same command derives both SHAs and writes one pair — and only that pair.
+	named := runIn(t, f.Dir(), "integration", "record", "--changeset", second)
+	named.mustSucceed(t, "integration", "record")
+	if !f.HasRef(integrationRef(second)) {
+		t.Errorf("no record for %s", second)
+	}
+	if f.HasRef(integrationRef(slug)) {
+		t.Error("naming one changeset recorded the other one too")
+	}
+}
+
+// With the branch deleted there is no derivation to make: nothing in the clone holds the reviewed head
+// unless the durable refs were fetched. The refusal says which directory it could not place, names the
+// flag, and points at the fetch — the honest version of a guess about which commit was approved.
+func TestIntegrationRecordDerivationStopsWhenTheBranchIsGone(t *testing.T) {
+	f, slug, source, _ := recordFixture(t)
+	f.SwitchTo("main")
+	f.MustGit("checkout", source, "--", changeset.Root+"/"+slug)
+	f.Commit("booking: squash-merge the reviewed work")
+	f.ForceDeleteBranch("booking")
+
+	res := runIn(t, f.Dir(), "integration", "record")
+	if res.code != 2 {
+		t.Fatalf("a deleted branch exited %d, want 2\n%s%s", res.code, res.stdout, res.stderr)
+	}
+	mustContain(t, res.stderr, "no branch here carries changesets/"+slug+"/", "it says what it could not place")
+	mustContain(t, res.stderr, "--source <sha>", "names the flag")
+	mustContain(t, res.stderr, "git fetch origin", "and the fetch that could bring the chain back")
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Errorf("a stopped derivation wrote %v", got)
+	}
+}

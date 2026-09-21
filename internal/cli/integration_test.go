@@ -186,12 +186,16 @@ func TestIntegrationRecordRefusesWhatItMustRefuse(t *testing.T) {
 		want  []string
 	}{
 		{
-			name: "a missing flag",
-			setup: func(_ *testing.T, _ *gittest.Fixture, _, _, landing string) []string {
-				return []string{"--commit", landing}
+			// Nothing named and nothing derivable. The command asks the repository before it asks the
+			// caller — the landing is a first-parent transition and the reviewed head is a branch — so
+			// this is the refusal that fires when the repository cannot answer, and it says which
+			// branches it looked at and what to name instead.
+			name: "nothing named, and nothing on the destination to derive from",
+			setup: func(_ *testing.T, _ *gittest.Fixture, _, _, _ string) []string {
+				return nil
 			},
 			code: 2,
-			want: []string{"both required"},
+			want: []string{"no changeset directory on main, so there is nothing here to record", "--source and --commit"},
 		},
 		{
 			name: "a source this repository does not have",

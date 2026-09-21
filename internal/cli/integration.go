@@ -68,8 +68,13 @@ The changeset id comes from content, not from a ref: it is the ` + "`changesets/
 directory too.
 
 The two SHAs are the two you have after a landing: ` + "`--source`" + ` is the branch you were reviewing,
-` + "`--commit`" + ` is the merge or squash you just made. Both are flags because CI has neither — the
-command takes a position rather than a checkout, writes no commit, and runs from any branch.
+` + "`--commit`" + ` is the merge or squash you just made. Name neither and the repository is asked: the
+landing is the newest commit on the destination's first-parent line that added ` + "`changesets/<id>/`" + `,
+and the reviewed head is the branch still carrying that directory. Either flag can be named on its own, and
+anything ambiguous or out of sight is a refusal naming the candidates rather than a guess — CI, which has
+neither branch nor a fresh merge in its checkout, passes both.
+
+The command takes a position rather than a checkout, writes no commit, and runs from any branch.
 
 Before it writes, four things are verified, and each refuses rather than warns:
 
@@ -126,12 +131,23 @@ type integrationRecord struct {
 	// changeset's own `base:` field, "default" for the default branch. Empty means the caller named it,
 	// which is the only case where the reachability check was promised to them.
 	TargetDerived string
+	// Derived lists the flags git-pair filled in itself ("source", "commit"), so the answer can say
+	// which parts of the record the caller named and which the repository supplied.
+	Derived []string
 }
 
 // resolveIntegrationRecord turns the flags into the pair to write: the two commits, and which changeset
 // they are about. It asks no policy questions, because runIntegrationRecord has to read the record that
 // may already exist before it decides whether to verify a new one.
 func resolveIntegrationRecord(ctx context.Context, repo *git.Repo, in integrationRecordInput) (*integrationRecord, error) {
+	rec := &integrationRecord{}
+	if in.source == "" || in.commit == "" {
+		derived, err := deriveMissingTips(ctx, repo, in, rec)
+		if err != nil {
+			return nil, err
+		}
+		in = derived
+	}
 	if in.source == "" || in.commit == "" {
 		return nil, &usageError{fmt.Errorf("--source and --commit are both required: the head that was reviewed, and the commit the work became")}
 	}
@@ -151,7 +167,228 @@ func resolveIntegrationRecord(ctx context.Context, repo *git.Repo, in integratio
 	if err != nil {
 		return nil, err
 	}
-	return &integrationRecord{ID: id, Source: source, Commit: landing}, nil
+	rec.ID, rec.Source, rec.Commit = id, source, landing
+	return rec, nil
+}
+
+// derivationWindow is how far back the landing search walks a destination branch. A landing older than
+// this is a changeset someone is remembering rather than one they merged a moment ago, and the flags are
+// the answer for that: a guess made from a window the caller cannot see is a worse contract than a
+// refusal that names the window.
+const derivationWindow = 200
+
+// deriveMissingTips fills in whichever of the two SHAs the caller did not name, and refuses rather than
+// guess.
+//
+// The local flow is the reason the flags are optional at all: the person who merged knows they merged and
+// should not have to translate that into two object ids. The repository knows too — the landing is the
+// commit that added `changesets/<id>/` to the destination's first-parent line, and the reviewed head is
+// the branch still carrying the directory — so both are read from the graph rather than asked for. What
+// is *not* done is choosing between two readings: an ambiguity here is a usage error naming the
+// candidates, because the thing being written is a durable record and the caller is the one who knows
+// which of the two they meant.
+func deriveMissingTips(ctx context.Context, repo *git.Repo, in integrationRecordInput, rec *integrationRecord) (integrationRecordInput, error) {
+	dests, err := derivationDestinations(ctx, repo, in)
+	if err != nil {
+		return in, err
+	}
+	id := in.changeset
+	if id == "" && in.source != "" {
+		// A named source names its own changesets by the directories in its tree. That reading is the
+		// one the resolution below applies anyway; it runs first here because the landing search needs
+		// an id.
+		source, err := resolveCommit(ctx, repo, "--source", in.source)
+		if err != nil {
+			return in, err
+		}
+		candidates, err := changesetsAtSource(ctx, repo, source, in)
+		if err != nil {
+			return in, err
+		}
+		if id, err = chooseChangeset(candidates, source, ""); err != nil {
+			return in, err
+		}
+	}
+	if id == "" {
+		if id, err = changesetToDerive(ctx, repo, dests); err != nil {
+			return in, err
+		}
+	}
+	if in.commit == "" {
+		landing, err := deriveLanding(ctx, repo, dests, id)
+		if err != nil {
+			return in, err
+		}
+		in.commit = landing
+		rec.Derived = append(rec.Derived, "commit")
+	}
+	if in.source == "" {
+		head, err := deriveArchiveTip(ctx, repo, dests, id)
+		if err != nil {
+			return in, err
+		}
+		in.source = head
+		rec.Derived = append(rec.Derived, "source")
+	}
+	return in, nil
+}
+
+// derivationDestinations are the branches a landing could have gone to: the --target the caller named,
+// else the branch the current checkout's changeset was measured against plus the branch git-pair calls
+// the default. Deduplicated by commit, because a changeset based on trunk has one destination and a
+// refusal that lists it twice reads like a bug.
+func derivationDestinations(ctx context.Context, repo *git.Repo, in integrationRecordInput) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	add := func(ref string) {
+		if ref == "" {
+			return
+		}
+		sha, err := repo.RevParse(ctx, ref+"^{commit}")
+		if err != nil || seen[sha] {
+			return
+		}
+		seen[sha] = true
+		out = append(out, ref)
+	}
+	if in.target != "" {
+		add(in.target)
+		return out, nil
+	}
+	if cur, err := changeset.Current(ctx, repo, in.defaultBranch); err == nil {
+		add(cur.Base)
+	}
+	if db, err := changeset.DefaultBranch(ctx, repo, in.defaultBranch); err == nil {
+		add(db.Ref)
+	}
+	return out, nil
+}
+
+// changesetToDerive is the reading for someone standing on the branch they just merged into: which
+// changeset the record is for, from the directories the destination carries.
+//
+// Two passes, because two things are being asked. Normally the answer is the one directory with no
+// integration record — that is what a landing looks like before it is recorded, and it is why a partially
+// recorded repository still resolves uniquely. When every directory on the branch already has a record the
+// answer is the same directory again, because this is a CI job running the command a second time: it must
+// hear "already recorded" rather than a usage error it will report as a failed build. The record decides
+// what the command *does* — write, complete, or no-op — and discovery decides only which changeset the
+// question is about.
+//
+// Either way an ambiguity is a usage error naming the candidates. Choosing between two changesets is not
+// something a durable record should do by itself.
+func changesetToDerive(ctx context.Context, repo *git.Repo, dests []string) (string, error) {
+	recorded := map[string]bool{}
+	if entries, err := reviewref.List(ctx, repo); err == nil {
+		for _, e := range entries {
+			if e.Kind == reviewref.KindIntegration {
+				recorded[e.ID] = true
+			}
+		}
+	}
+	var all, unrecorded []string
+	for _, dest := range dests {
+		dirs, err := changeset.DirsAt(ctx, repo, dest)
+		if err != nil {
+			return "", err
+		}
+		for _, id := range dirs {
+			if !slices.Contains(all, id) {
+				all = append(all, id)
+			}
+			if !recorded[id] && !slices.Contains(unrecorded, id) {
+				unrecorded = append(unrecorded, id)
+			}
+		}
+	}
+	names := make([]string, 0, len(dests))
+	for _, d := range dests {
+		names = append(names, displayRef(d))
+	}
+	found, noun := unrecorded, "is missing its integration record"
+	if len(unrecorded) == 0 {
+		found, noun = all, "has no integration record to check a retry against"
+	}
+	switch {
+	case len(found) == 1:
+		return found[0], nil
+	case len(found) == 0:
+		return "", &usageError{fmt.Errorf("no changeset directory on %s, so there is nothing here to record\n\n`git pair integration record` derives the pair from the repository: the landing is the commit that added changesets/<id>/ to %s's first-parent line, and the reviewed head is the branch still carrying the directory. Name --source and --commit to record something else — an older landing, or one on a branch git-pair was not told about",
+			strings.Join(names, " or "), strings.Join(names, " or "))}
+	default:
+		return "", &usageError{fmt.Errorf("more than one changeset on %s %s:%s\n\nName the one this record is for with --changeset <id>",
+			strings.Join(names, " or "), noun, "\n  "+strings.Join(found, "\n  "))}
+	}
+}
+
+// deriveLanding is the first-parent transition rule: the newest commit on a destination's own line whose
+// tree carries the changeset directory and whose first parent's does not. It is the same rule M4's
+// unrecorded-landing detector will use, and the same reason it works is the reason the record is needed at
+// all — the directory is committed content, so its arrival survives the squash, rebase and cherry-pick
+// that destroy the ancestry.
+func deriveLanding(ctx context.Context, repo *git.Repo, dests []string, id string) (string, error) {
+	path := "changesets/" + id
+	var names []string
+	for _, dest := range dests {
+		names = append(names, displayRef(dest))
+		line, err := repo.FirstParentLine(ctx, dest, derivationWindow)
+		if err != nil {
+			return "", err
+		}
+		for _, sha := range line {
+			if !repo.PathExistsAt(ctx, sha, path) {
+				continue
+			}
+			if parent, err := repo.RevParse(ctx, sha+"^1"); err == nil && repo.PathExistsAt(ctx, parent, path) {
+				continue
+			}
+			return sha, nil
+		}
+	}
+	return "", &usageError{fmt.Errorf("no commit in the last %d on %s added changesets/%s/, so git-pair cannot see where this changeset landed\n\nPass --commit <sha> for the merge, squash or cherry-pick you made. The search stops at %d commits deliberately: guessing from a window nobody named is worse than asking, and an older landing is one you remember rather than one you just made.",
+		derivationWindow, strings.Join(names, " or "), id, derivationWindow)}
+}
+
+// deriveArchiveTip is the other end: the branch still carrying the changeset directory is the one whose
+// tip was reviewed. Excluding the destinations matters — after a merge landing the destination carries the
+// directory too, and naming its tip as the reviewed head would record the merge commit as its own source.
+//
+// When no branch carries it the derivation stops and says so. That is the case the archive ref exists for
+// (§13.1): with the branch deleted, nothing in this clone holds the reviewed head unless the durable refs
+// were fetched, and a guess about which commit was approved is exactly what this command must not make.
+func deriveArchiveTip(ctx context.Context, repo *git.Repo, dests []string, id string) (string, error) {
+	exclude := map[string]bool{}
+	for _, dest := range dests {
+		if sha, err := repo.RevParse(ctx, dest+"^{commit}"); err == nil {
+			exclude[sha] = true
+		}
+		exclude[displayRef(dest)] = true
+	}
+	tips, err := repo.RefTips(ctx, "refs/heads/*")
+	if err != nil {
+		return "", err
+	}
+	path := "changesets/" + id
+	var found []string
+	for _, tip := range tips {
+		name := displayRef(tip.Name)
+		if exclude[name] || exclude[tip.Commit] {
+			continue
+		}
+		if repo.PathExistsAt(ctx, tip.Commit, path) {
+			found = append(found, tip.Name)
+		}
+	}
+	switch {
+	case len(found) == 1:
+		return found[0], nil
+	case len(found) == 0:
+		return "", &usageError{fmt.Errorf("no branch here carries changesets/%s/, so git-pair cannot see which head was reviewed\n\nPass --source <sha> for the branch tip the approval spoke about. If the branch has been deleted the durable refs are what holds that chain (§13.4): git fetch origin '%s'",
+			id, reviewref.FetchRefspec)}
+	default:
+		return "", &usageError{fmt.Errorf("more than one branch carries changesets/%s:%s\n\nName the one that was reviewed with --source <ref>",
+			id, "\n  "+strings.Join(found, "\n  "))}
+	}
 }
 
 // verifyIntegrationRecord decides whether the record may be written, in the order that makes the refusal
@@ -467,15 +704,16 @@ func resolveCommit(ctx context.Context, repo *git.Repo, flag, rev string) (strin
 // destination and so no reachability check was made; `target_derived` says git-pair chose it (the
 // changeset's `base:`, else the default branch) rather than the caller naming it.
 type integrationRecordJSON struct {
-	Changeset       string `json:"changeset"`
-	Source          string `json:"source"`
-	Commit          string `json:"commit"`
-	Target          string `json:"target"`
-	TargetDerived   bool   `json:"target_derived,omitempty"`
-	ArchiveRef      string `json:"archive_ref"`
-	IntegrationRef  string `json:"integration_ref"`
-	Recorded        bool   `json:"recorded"`
-	AlreadyRecorded bool   `json:"already_recorded"`
+	Changeset       string   `json:"changeset"`
+	Source          string   `json:"source"`
+	Commit          string   `json:"commit"`
+	Target          string   `json:"target"`
+	TargetDerived   bool     `json:"target_derived,omitempty"`
+	Derived         []string `json:"derived,omitempty"`
+	ArchiveRef      string   `json:"archive_ref"`
+	IntegrationRef  string   `json:"integration_ref"`
+	Recorded        bool     `json:"recorded"`
+	AlreadyRecorded bool     `json:"already_recorded"`
 }
 
 // landing is what git-pair can honestly say about a recorded integration commit.
@@ -618,6 +856,7 @@ func (a *app) reportIntegration(rec *integrationRecord, res reviewref.PairResult
 			Commit:          rec.Commit,
 			Target:          rec.Target,
 			TargetDerived:   rec.TargetDerived != "",
+			Derived:         rec.Derived,
 			ArchiveRef:      res.ArchiveRef,
 			IntegrationRef:  res.IntegrationRef,
 			Recorded:        wrote,
@@ -640,6 +879,13 @@ func (a *app) reportIntegration(rec *integrationRecord, res reviewref.PairResult
 	a.printf("  integration: %s -> %s\n", res.IntegrationRef, short(rec.Commit))
 	if rec.Target != "" {
 		a.printf("  verified reachable from %s%s\n", displayRef(rec.Target), derivedNote(rec))
+	}
+	if len(rec.Derived) > 0 {
+		// Which parts of the record the repository supplied rather than the caller. Both values are
+		// printed on the lines above, so this line is about provenance: a record whose SHAs came from the
+		// graph is a different act of writing than one whose SHAs were typed, and a reader auditing it
+		// later should know which they are looking at.
+		a.printf("  derived:     --%s\n", strings.Join(rec.Derived, " and --"))
 	}
 	return nil
 }

@@ -1366,7 +1366,7 @@ reports the dirt, because `status` is observing.
 ## 11.4 `git pair integration record`
 
 ```bash
-git pair integration record --source <sha> --commit <sha> [--target <ref>] [--changeset <id>] [--allow-feedback]
+git pair integration record [--source <sha>] [--commit <sha>] [--target <ref>] [--changeset <id>] [--allow-feedback]
 ```
 
 Records that the reviewed head `--source` became the commit `--commit`, by writing **both** durable
@@ -1388,6 +1388,20 @@ means *this changeset is finished*: if the process stops between the two writes 
 as not-yet-recorded and the next invocation completes the pair. The reverse order could leave a finished
 changeset whose chain nothing holds.
 
+**Either SHA can be derived, and neither is ever guessed.** A person who has just merged knows they merged
+and should not have to translate that into two object ids, and the repository knows it too: the landing is
+the newest commit on the destination's first-parent line that added `changesets/<id>/`, and the reviewed
+head is the branch still carrying that directory. So `git pair integration record` with no flags works from
+the branch someone merged into, and either flag can be named on its own. CI passes both — a shallow clone
+may hold neither branch — and the derivation is the local convenience rather than the contract.
+
+What the derivation will not do is choose. Two changeset directories missing their records, two branches
+carrying one directory, or no branch carrying it at all (the branch was deleted, and nothing here holds the
+reviewed head unless §13.4's fetch brought it back) are exit 2 naming the candidates and the flag that
+settles the question. One deliberate exception: when every directory on the destination already has a
+record, the command re-derives the same pair and answers "already recorded", because a CI job that runs the
+command on every build must hear that rather than a usage error it will report as a failed build.
+
 The changeset is **discovered from content, not from a ref**. `--source` is resolved through `rev-parse`
 first — an abbreviated SHA pasted from a CI log must resolve before discovery, not match nothing — and
 then the `changesets/<id>/` directories in its tree are the candidates, minus the ones the destination
@@ -1399,7 +1413,8 @@ to have been fetched, and no branch to be standing around.
 
 Resolution comes first, because every check below is about commits the caller named:
 
-1. `--source` and `--commit` are both required — exit 2, since nothing about the repository is wrong;
+1. `--source` and `--commit`, or what the repository can derive in their place (below) — a pair that
+   neither supplies is exit 2, since nothing about the repository is wrong;
 2. `--source` resolves to a commit this repository has, else the failure names both possibilities — a
    shallow clone and a wrong SHA look identical from here;
 3. the candidates. None fails, saying what that usually means: the wrong commit was supplied, or the
@@ -1503,7 +1518,9 @@ already named this exact pair — a retry is a success, and the two successes ar
 log. `target` is the branch the landing was verified against in branch form (`main`, `origin/main`), empty
 when nothing identified one and so no containment check was made; `target_derived` is present and true only
 when git-pair chose that branch rather than the caller naming it, which is the one verification in the
-answer that nobody asked for.
+answer that nobody asked for. `derived` lists the flags git-pair filled in itself (`"commit"`, `"source"`),
+and is absent when the caller named both — the SHAs are on the same lines either way, and this says where
+they came from.
 
 When the clone holds no `refs/git-pair/*` refs at all, the command prints a warning naming the fetch
 (§13.4) and records anyway. The candidate rule means its answer comes from trees rather than refs, so the

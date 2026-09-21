@@ -17,10 +17,9 @@ the command whose whole job was moving it.
 What remains: `refs/git-pair/archive/<id>` and `refs/git-pair/integrations/<id>`, written by one
 invocation of `git pair integration record`, create-only, with no code path that moves either.
 
-This is M1, M2 and the verification half of M3: the transition, the rule about history the transition
-required, and the checks that make the record worth reading afterwards. M3's flagless local flow (derive
-`--source` and `--commit`) and M4-M8 follow — landed-unrecorded detection, the per-branch queue, stacked
-parent tracking and the agent contract.
+This is M1, M2 and M3: the transition, the rule about history the transition required, the checks that make
+the record worth reading afterwards, and the flagless local flow that writes it. M4-M8 follow —
+landed-unrecorded detection, the per-branch queue, stacked parent tracking and the agent contract.
 
 ## What changed
 
@@ -64,6 +63,11 @@ parent tracking and the agent contract.
 - `internal/reviewref` — `RecordedPair` reads both halves with absent ones as the empty string, and
   `Conflict` returns the write's own conflict error without writing, so the refusal a retry hears is the
   refusal the write would have given.
+- Flagless recording (M3) — `--source` and `--commit` are optional. The landing comes from
+  `git.Repo.FirstParentLine` (new) and the transition rule M4's detector will share; the reviewed head comes
+  from the branch still carrying the directory, destinations excluded. Ambiguity at either end is exit 2
+  naming the candidates, and the answer says which of the two it filled in (`derived:` in the text,
+  `"derived"` in the JSON).
 - `PRD.md`, `README.md` — the two-ref model throughout: §3's vocabulary, §9.5 repurposed as "Handing the
   work on", §9.6/§9.7's endings, §11.1's status transcript, §11.3's conditions, §11.4's discovery, §12's
   lifecycle, §13 rewritten (13.1 archive, 13.2 integrations, 13.3 create-only, 13.4 fetching), §19.3, §21,
@@ -110,6 +114,12 @@ not fetched are different things to fix.
   is refused with what is on it. Both belong ahead of the checks: a second landing into a branch that
   already carries the directory also fails the transition check, and the reader needs the answer about the
   record rather than the incidental complaint about the tree.
+- **Derivation never chooses.** The local flow reads the graph — the first-parent transition, the branch
+  carrying the directory — because the person who merged should not have to translate it into object ids,
+  but two candidates at either end is a usage error rather than a pick, and `--source` is not reconstructed
+  from `Review-Head` after a branch deletion. A durable ref written from a plausible guess is worse than a
+  command that asked. The one deliberate leniency is the second pass over already-recorded directories, so
+  a CI job that records on every build hears "already recorded" instead of a failed build.
 
 **`integration record` derives the changeset from content, not from the archive ref.** Discovery-by-archive
 would have kept a ref written during review alive, which is the thing being deleted. The directories
@@ -148,7 +158,9 @@ and `TestReviewSubmitRecordsTheReviewedHead`. For M3:
 written), `TestIntegrationRecordRefusesACommitThatDidNotAddTheChangeset`,
 `TestIntegrationRecordDerivesTheDestination` (derived trunk accepted, unnamed release branch refused with
 the flag named), `TestIntegrationRecordAcceptsAChildLandedOnTrunk`,
-`TestIntegrationRecordAnswersFromTheRecordBeforeTheChecks`, and `TestRecordedPairAndConflict`.
+`TestIntegrationRecordAnswersFromTheRecordBeforeTheChecks`, `TestIntegrationRecordDerivesBothTips`,
+`TestIntegrationRecordDerivationRefusesToChooseBetweenTwo`,
+`TestIntegrationRecordDerivationStopsWhenTheBranchIsGone`, and `TestRecordedPairAndConflict`.
 
 ## Known limitations
 

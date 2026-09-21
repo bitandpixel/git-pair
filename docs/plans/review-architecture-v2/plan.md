@@ -277,7 +277,7 @@ repository. Deferred with the anchors unless a concrete need appears during impl
   they were written, so an approval survives a rebase as a rewritten commit naming a gone head — the case
   the rule catches, not one it has to work around.
 
-### M3 — `integration record` as the two-ref write point — verification landed 2026-09-21
+### M3 — `integration record` as the two-ref write point — done 2026-09-21
 
 **Deliverables**
 
@@ -293,7 +293,7 @@ repository. Deferred with the anchors unless a concrete need appears during impl
 - [x] Verify, refusing by default per P1: the changeset is named by both readings; an approving marker exists
   in `--source`'s lineage; `--commit` is reachable from the destination branch (`--target` stops being optional
   wherever the branch is available); `--commit` adds `changesets/<id>/` over its first parent.
-- [ ] Derive both tips when the flags are absent: archive tip from the changeset branch HEAD or the newest
+- [x] Derive both tips when the flags are absent: archive tip from the changeset branch HEAD or the newest
   `Review-Head`; integration tip from the first-parent transition rule in
   `research/2026-09-21-landing-transition.md`.
 - [x] Write archive first, integration second; re-run completes a half-written pair.
@@ -307,6 +307,14 @@ repository. Deferred with the anchors unless a concrete need appears during impl
   four refusals.
 - [x] A test proving an unreviewed head cannot be recorded as integrated.
 - [x] The gate scripts land the same changeset twice, the second time proving the no-op.
+
+The tests that carry the above: `TestIntegrationRecordRefusesWhatWasNeverReviewed` (six verdict shapes,
+each asserting nothing was written), `TestIntegrationRecordRefusesACommitThatDidNotAddTheChangeset`,
+`TestIntegrationRecordDerivesTheDestination`, `TestIntegrationRecordDerivesBothTips`,
+`TestIntegrationRecordDerivationRefusesToChooseBetweenTwo`,
+`TestIntegrationRecordDerivationStopsWhenTheBranchIsGone`,
+`TestIntegrationRecordAnswersFromTheRecordBeforeTheChecks`, `TestRecordedPairAndConflict`, and
+`TestScanLineageKeepsEveryChangesetsMarkers.
 
 **What landed differently**
 
@@ -339,8 +347,27 @@ repository. Deferred with the anchors unless a concrete need appears during impl
   reviewed head is inside the destination branch and such a range is empty exactly when a record is written.
 - The plan's "PRD §16" is the draft PRD's numbering; the CI text in this repository is README's *Recording
   the landing* and *Fetching the durable refs*, plus PRD §11.4 and §9.5, and all four moved.
-- Still open in M3: the flagless local flow (derive `--source` and `--commit`). Both remain required flags,
-  so the command's contract is unchanged from the CI shape M1 shipped.
+- The flagless flow derives both tips and guesses at neither. The landing is the first-parent transition
+  (a new `git.Repo.FirstParentLine`, because the rule is about the destination's own line and not the
+  ancestry a `--no-ff` merge dragged in); the reviewed head is the branch still carrying the directory,
+  with the destinations excluded — after a merge landing the destination carries it too, and naming its tip
+  would record the merge as its own source.
+- The walk is bounded at 200 commits and the refusal says so. A landing older than the window is one
+  someone is remembering rather than one they just merged, and `--source`/`--commit` are the answer for it.
+  `--source` is never derived from `Review-Head`: with the branch gone the markers are unreachable, and the
+  honest refusal names the fetch (§13.4) rather than reconstructing an approval from whatever the object
+  database still happens to hold.
+- Discovery runs in two passes over the destination's directories — unrecorded first, then all — because
+  they answer two different questions. Unrecorded-first keeps a partially recorded repository resolving
+  uniquely. The fallback exists for CI: a job that runs `integration record` on every build must hear
+  "already recorded" on its second run, not a usage error it reports as a failed build. The record still
+  decides what happens (write, complete, no-op); discovery only decides which changeset is being asked
+  about.
+- Every derivation ambiguity is exit 2 naming the candidates and the flag that settles it: two directories
+  without records, two branches carrying one directory, or no branch carrying it at all.
+- The answer reports its own provenance — `derived: --commit and --source` in the text, `"derived"` in the
+  JSON — because a record whose SHAs came from the graph is a different act of writing from one whose SHAs
+  were typed, and the difference matters to whoever audits it later.
 
 ### M4 — Landed, unrecorded
 
