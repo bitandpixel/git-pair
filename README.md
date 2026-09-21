@@ -18,7 +18,8 @@ The MVP deliberately does not:
 - create or manage pull requests, merge branches, squash branches, or push
 - run coding agents or CI/CD
 - keep inline-comment databases or GitHub-style comment anchoring
-- persist per-file review checkmarks beyond the current TUI session
+- treat per-file review checkmarks as review state — they persist locally under the git directory
+  so a review can be resumed, and no command reports them
 - model multi-reviewer permissions, multi-author semantics, or complex stacked-branch graphs;
   a stack is only a `base:` value in `CHANGESET.yaml`
 - distinguish a human's code edit from a human's comment

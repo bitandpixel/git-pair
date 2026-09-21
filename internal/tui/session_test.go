@@ -172,8 +172,8 @@ func TestSessionToggleMarksFilesReviewed(t *testing.T) {
 	}
 }
 
-// PRD §16: "If the underlying diff for a file changes after it was marked reviewed
-// during the current session, git-pair should ideally reset it to unreviewed."
+// PRD §16: "When the underlying diff for a file changes, the mark stops applying to
+// it: each mark is stored with the diff key of the file it belongs to."
 func TestSessionResetsReviewedMarkWhenFileDiffChanges(t *testing.T) {
 	e := newEnv(t)
 	sess := e.session(t, span.Full())
