@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,6 +144,20 @@ func TestActionableStates(t *testing.T) {
 	for _, s := range []string{"READY", "WORKING", ""} {
 		if actionable(model.State(s)) {
 			t.Errorf("%s is actionable, want not", s)
+		}
+	}
+}
+
+// "Exits non-zero if the changeset is not ready to begin with" was the help, and it is true of
+// WORKING alone: a changeset already BLOCKED, FEEDBACK or APPROVED is the answer a wait is asking
+// for, so it reports at once and exits 0 (TestChangeWaitReturnsAtOnceWhenAReviewIsAlreadyIn pins
+// that exit). An agent told otherwise reads exit 0 as "nothing happened" and polls a finished
+// review again.
+func TestChangeWaitHelpNamesTheStateThatRefuses(t *testing.T) {
+	long := newChangeWaitCommand(&app{}).Long
+	for _, want := range []string{"WORKING", "BLOCKED", "FEEDBACK", "APPROVED", "exits 0"} {
+		if !strings.Contains(long, want) {
+			t.Errorf("`change wait` help never says %q:\n%s", want, long)
 		}
 	}
 }
