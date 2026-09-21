@@ -74,6 +74,7 @@ READY FOR REVIEW
 
 booking-transaction
   base: main
+  branch: booking-transaction
   ready: 0s ago
   head: 8065dae
 ```
@@ -519,7 +520,7 @@ landed.
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history |
 | `review history` | `--changeset <slug>` | only review marker commits, indexed from `0`, each naming the commit it reviewed under `REVIEWED` |
-| `review queue` | — | every branch in this repo whose changeset is `READY`, longest wait first, plus any landing in the integration branch that no integration record accounts for; read from the repository, not the checkout |
+| `review queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus any landing in the integration branch that no integration record accounts for; read from the repository, not the checkout |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug |
 | `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition — the review's outcome, whether the commit it approved is still in this history, and whether the content still matches; no `--changeset`, because it is the gate a forge runs *on* a revision |
 | `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>`, `--allow-feedback` (all optional) | writes both durable refs for one changeset, create-only: the archive at `--source` and the integration at `--commit`. The changeset is discovered from the `changesets/<id>/` directories `--source` carries and the integration branch does not, so a pipeline needs the two SHAs it already holds and not the changeset name; `--changeset` disambiguates a stacked child. Before it writes: the source's history must name this changeset and its newest verdict must permit integration (`approve`, or `feedback` with `--allow-feedback`); `--commit` must be in the destination branch's history (the `--target` you name, else the changeset's `base:`, else the default branch) and must be the commit that added `changesets/<id>/` there. Name neither SHA and the repository is asked — the landing is the first-parent commit on the destination that added the directory, the reviewed head is the branch still carrying it — and anything ambiguous is a usage error naming the candidates. Needs no checkout and writes no commit; re-running it with the same pair succeeds and changes nothing |
@@ -1512,8 +1513,11 @@ moved. A changeset whose content has landed in its base is not listed, and
 says nothing: the branch may already be gone, and the queue asks what a reviewer can act on. The
 queue asks what a reviewer can act on, and it answers the same way from `main` as from the
 changeset's own branch: it enumerates local branches and resolves each one's changeset, so
-membership does not depend on where you happen to be standing. A branch it cannot resolve — two
-changesets on one branch, say — is named in `skipped` rather than left out quietly.
+membership does not depend on where you happen to be standing. Rows are per branch rather than per
+changeset — a review is a commit appended to a branch, so the branch is what is ready — which means one
+changeset on two branches (a copy made to try something else, a parent and its child) is two rows with two
+heads, and each row prints the branch it speaks for. A branch it cannot resolve — two changesets on one
+branch, say — is named in `skipped` rather than left out quietly.
 
 A missing entry that is *not* work in progress is reported rather than hidden. A changeset directory the
 integration branch carries with no integration record is a landing nobody recorded, and `review queue`

@@ -442,12 +442,9 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	if err != nil {
 		return err
 	}
-	type found struct {
-		cs       changeset.Changeset
-		branches []string
-	}
-	var order []string
-	sets := map[string]*found{}
+	seen := map[string]bool{}
+	noted := map[string]bool{}
+	var entries []queueEntry
 	var skipped []string
 	// One read of the durable namespace for the whole command. Three things in here are questions about
 	// those refs — has this changeset landed, does this orphan have a chain to read, which landings carry
@@ -472,37 +469,37 @@ func runReviewQueue(ctx context.Context, a *app) error {
 		}
 		cs := br.Resolution.Selected.Changeset
 		cs.Branch = br.Branch
-		f := sets[cs.Slug]
-		if f == nil {
-			f = &found{cs: cs}
-			sets[cs.Slug] = f
-			order = append(order, cs.Slug)
-		}
-		f.branches = append(f.branches, br.Branch)
-	}
-
-	var entries []queueEntry
-	for _, slug := range order {
-		f := sets[slug]
+		seen[cs.Slug] = true
 		// A changeset with an integration ref has landed, and a review queue has nothing to ask of
 		// it. This is the case the queue could not answer before the record existed: the landing
 		// went to a branch that is not the default one, so the directory is still absent from trunk
 		// and the tree rule still reads it as live work. It is named in the skip note rather than
 		// dropped silently, because unlike a trunk landing this branch is still here and its
 		// disappearance from the queue would otherwise be a mystery.
-		if sha, ok := durable.Integrated[slug]; ok {
-			skipped = append(skipped, fmt.Sprintf("%s (integrated at %s)", slug, short(sha)))
+		//
+		// The note is per changeset and printed once, even though the rows below are per branch: two
+		// branches can carry one landed changeset, and "it landed at 4f2b8c1" is one fact, repeated
+		// twice for the same reason.
+		if sha, ok := durable.Integrated[cs.Slug]; ok {
+			if !noted[cs.Slug] {
+				noted[cs.Slug] = true
+				skipped = append(skipped, fmt.Sprintf("%s (integrated at %s)", cs.Slug, short(sha)))
+			}
 			continue
 		}
-		// A slug can match more than one branch; the one whose head carries the
-		// newest ready marker wins.
-		best, _, err := readyEntry(ctx, repo, f.cs, f.branches)
+		// One row per branch, because one review lives on one branch. Two branches can carry the same
+		// changeset — a copy made to try a different approach, a parent and the child branched off it —
+		// and they have different heads, different markers, and often different states. Collapsing them
+		// to one row and picking the branch with the newest ready marker made a changeset under review on
+		// one branch invisible on the other, which is the reviewer's question the queue exists to answer
+		// (requirements, invariant 5).
+		entry, err := branchReadyEntry(ctx, repo, cs, br.Branch)
 		if err != nil {
-			skipped = append(skipped, slug+" ("+err.Error()+")")
+			skipped = append(skipped, br.Branch+" ("+err.Error()+")")
 			continue
 		}
-		if best != nil {
-			entries = append(entries, *best)
+		if entry != nil {
+			entries = append(entries, *entry)
 		}
 	}
 
@@ -517,7 +514,7 @@ func runReviewQueue(ctx context.Context, a *app) error {
 		return err
 	}
 	for _, slug := range dirs {
-		if _, ok := sets[slug]; ok {
+		if seen[slug] {
 			continue
 		}
 		note, err := classifyOrphan(ctx, repo, head, slug, durable)
@@ -530,6 +527,8 @@ func runReviewQueue(ctx context.Context, a *app) error {
 		}
 	}
 
+	// Longest waiting first. Ties keep the branch order git reports (`for-each-ref` sorts by refname),
+	// so a repository with two ready branches and one changeset prints them the same way every run.
 	sort.SliceStable(entries, func(i, j int) bool {
 		return ageLess(entries[i].ReadyAge, entries[j].ReadyAge)
 	})
@@ -550,6 +549,9 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	a.printf("READY FOR REVIEW\n\n")
 	for _, e := range entries {
 		a.printf("%s\n", e.Changeset)
+		// The branch is printed because the row is per branch: the same changeset can be queued twice
+		// with different heads, and a reader comparing two rows has to be able to tell them apart.
+		a.printf("  branch: %s\n", e.Branch)
 		a.printf("  base: %s\n", e.Base)
 		a.printf("  ready: %s ago\n", e.ReadyAge)
 		a.printf("  head: %s\n", short(e.Head))
@@ -622,46 +624,31 @@ func printSkipped(a *app, skipped []string) {
 	}
 }
 
-// readyEntry returns the queue row for cs if one of its branches is READY.
-func readyEntry(ctx context.Context, repo *git.Repo, cs changeset.Changeset, branches []string) (*queueEntry, time.Time, error) {
-	var entry *queueEntry
-	var at time.Time
-	var firstErr error
-	for _, branch := range branches {
-		summary, err := lifecycle.Summarize(ctx, repo, cs.Slug, cs.Base, branch)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		if summary.State != model.StateReady || summary.Marker == nil {
-			continue
-		}
-		head, err := repo.RevParse(ctx, branch)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		if entry == nil || summary.Marker.When.After(at) {
-			at = summary.Marker.When
-			entry = &queueEntry{
-				Changeset:   cs.Slug,
-				Branch:      branch,
-				Base:        cs.Base,
-				State:       string(summary.State),
-				Head:        head,
-				ReadyCommit: summary.Marker.SHA,
-				ReadyAge:    lifecycle.Age(at, now()),
-			}
-		}
+// branchReadyEntry is the queue row for one branch, or nil when that branch is not READY.
+//
+// It asks about one branch because that is the unit the queue reports: review commits are appended to a
+// branch, so the branch is what is ready, and two branches carrying one changeset have two answers.
+func branchReadyEntry(ctx context.Context, repo *git.Repo, cs changeset.Changeset, branch string) (*queueEntry, error) {
+	summary, err := lifecycle.Summarize(ctx, repo, cs.Slug, cs.Base, branch)
+	if err != nil {
+		return nil, err
 	}
-	if entry == nil && firstErr != nil {
-		return nil, time.Time{}, firstErr
+	if summary.State != model.StateReady || summary.Marker == nil {
+		return nil, nil
 	}
-	return entry, at, nil
+	head, err := repo.RevParse(ctx, branch)
+	if err != nil {
+		return nil, err
+	}
+	return &queueEntry{
+		Changeset:   cs.Slug,
+		Branch:      branch,
+		Base:        cs.Base,
+		State:       string(summary.State),
+		Head:        head,
+		ReadyCommit: summary.Marker.SHA,
+		ReadyAge:    lifecycle.Age(summary.Marker.When, now()),
+	}, nil
 }
 
 // ageLess orders "18m" before "1h" before "2d" so the longest wait comes first.

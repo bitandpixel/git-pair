@@ -471,6 +471,65 @@ func TestReviewQueueReadsBranchesNotTheWorkingTree(t *testing.T) {
 	}
 }
 
+// One branch, one row. A changeset can sit on two branches at once — a copy made to try a different
+// approach, a parent and the child branched off it — and the two have different heads, different marker
+// commits, and often different states. The queue used to collapse them into a single row and print
+// whichever branch carried the newest ready marker, which made work on one branch invisible on the
+// other. The reviewer's question is per branch, because a review commit is appended to a branch
+// (requirements, invariant 5), so the row is too.
+func TestReviewQueueKeepsOneRowPerBranchForOneChangeset(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	ready(t, f)
+	f.CreateBranch("booking-copy", "booking")
+	f.Commit("copy: a different approach", gittest.WithFile("alt.go", "package main\n\nfunc Alt() {}\n"))
+	ready(t, f)
+
+	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	rows := res.jsonList(t, "ready_for_review")
+	if len(rows) != 2 {
+		t.Fatalf("ready_for_review = %d rows, want one per branch:\n%s", len(rows), res.stdout)
+	}
+	byBranch := map[string]map[string]any{}
+	for _, r := range rows {
+		row, ok := r.(map[string]any)
+		if !ok {
+			t.Fatalf("queue row = %T, want an object", r)
+		}
+		if row["changeset"] != slug {
+			t.Errorf("row %v names changeset %v, want %q", row, row["changeset"], slug)
+		}
+		byBranch[row["branch"].(string)] = row
+	}
+	original, at := byBranch["booking"], byBranch["booking-copy"]
+	if original == nil || at == nil {
+		t.Fatalf("the queue queued %v, want rows for booking and booking-copy", byBranch)
+	}
+	// Two rows that pointed at the same head would be a bug wearing invariant 5's clothes. The point of
+	// the row is the branch, and these branches disagree about what is ready.
+	if original["head"] == at["head"] {
+		t.Errorf("both rows name head %v; the copy's implementation commit should have moved it", original["head"])
+	}
+	if original["ready_commit"] == at["ready_commit"] {
+		t.Errorf("both rows name ready_commit %v, want each branch's own marker", original["ready_commit"])
+	}
+
+	human := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	mustContain(t, human.stdout, "branch: booking\n", "the human form says which branch a row is")
+	mustContain(t, human.stdout, "branch: booking-copy\n", "and prints both rows")
+
+	// Each branch's own state decides its own row. Blocking the copy does not borrow the original's
+	// readiness, and the original does not inherit the block.
+	submit(t, f, "block")
+	after := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	rows = after.jsonList(t, "ready_for_review")
+	if len(rows) != 1 {
+		t.Fatalf("after blocking the copy the queue holds %d rows, want the original alone:\n%s", len(rows), after.stdout)
+	}
+	if got := rows[0].(map[string]any)["branch"]; got != "booking" {
+		t.Errorf("the surviving row is branch %v, want booking", got)
+	}
+}
+
 // A squash-merged changeset whose branch has been deleted is the single most common
 // thing the old queue got wrong: it either stayed listed as READY forever or became a
 // permanent `note: skipped ... (no branch matches this changeset directory)`. Both are

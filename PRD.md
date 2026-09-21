@@ -1083,6 +1083,14 @@ Scope is the repository, not the checkout: the queue enumerates local branches, 
 Running it on the deployment branch is therefore meaningful, and the working tree it happens to have
 checked out changes nothing.
 
+**One row per branch**, because one review lives on one branch: a review submission is a commit appended
+to a branch, so the branch is what is ready. A changeset can sit on two branches at once — a copy made to
+try a different approach, a parent and the child branched off it — and those branches have different heads,
+different marker commits, and often different states. Collapsing them into one row would make work under
+review on one branch invisible on the other, so each branch answers for itself and the row names it. Two
+branches carrying one changeset are ordered by their own ages, and a tie keeps the branch order git
+reports.
+
 A changeset directory whose branch is gone is classified rather than skipped, and the record is what
 classifies it. A directory with no integration ref and no archive was never recorded, and says nothing —
 which includes a clone that has never fetched `refs/git-pair/*` (§13.4): the queue reads local branches
@@ -1115,11 +1123,13 @@ READY FOR REVIEW
 
 booking-transaction-tests
   base: booking-transaction
+  branch: booking-transaction
   ready: 18m ago
   head: a31c9d2
 
 waitlist-rebooking
   base: main
+  branch: waitlist-rebooking
   ready: 1h ago
   head: 92bf019
 
