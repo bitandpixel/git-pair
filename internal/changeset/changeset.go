@@ -375,7 +375,7 @@ const IgnoresKey = "ignores"
 // SetIgnores records in a changeset's own CHANGESET.yaml which other changesets it is merely
 // sharing a branch with. The record lives in the chosen changeset's file and nowhere else: to
 // clear the losing candidates' records instead would write into another changeset's directory,
-// which `change archive` would rightly read as a foreign path in this changeset's landing.
+// which would then be read as part of this changeset's landing.
 //
 // Comments, unknown keys and their order survive; the file is rewritten only when the value
 // actually changes, so running the command twice records one commit rather than two.

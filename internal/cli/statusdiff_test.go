@@ -40,8 +40,10 @@ func TestStatusJSONEmitsPRDKeySet(t *testing.T) {
 	if out["head"] != head && out["head"] != shortOf(head) {
 		t.Errorf("head = %v, want %s", out["head"], shortOf(head))
 	}
-	if out["archive_ref"] != archiveRef(slug) {
-		t.Errorf("archive_ref = %v, want %s", out["archive_ref"], archiveRef(slug))
+	// The key is there and empty. The record is what landing writes, and a consumer should read one
+	// shape here whether or not anything has landed.
+	if out["archive_ref"] != "" {
+		t.Errorf("archive_ref = %v, want empty for work in flight (slug %s)", out["archive_ref"], slug)
 	}
 	latest, ok := out["latest_review"].(map[string]any)
 	if !ok {
@@ -107,11 +109,11 @@ func TestStatusReportsUncommittedChanges(t *testing.T) {
 	}
 }
 
-// An implementation commit after an approve leaves the approval standing: state moves on
-// commands. What the drift does decide is whether the head may be archived, and there it
-// refuses (PRD §9.5, §12).
+// An implementation commit after an approve leaves the approval standing: state moves on markers, not
+// on commits. What the drift does decide is whether the head may be integrated, and `check` is where
+// that refuses (PRD §9.5, §12).
 func TestStatusImplementationCommitAfterApproveKeepsTheApproval(t *testing.T) {
-	f, slug, _, approve := approvedChangeset(t)
+	f, slug, _, _ := approvedChangeset(t)
 
 	if got := runIn(t, f.Dir(), "status", "--json").json(t)["state"]; got != "APPROVED" {
 		t.Fatalf("state = %v, want APPROVED before the agent commits", got)
@@ -130,13 +132,17 @@ func TestStatusImplementationCommitAfterApproveKeepsTheApproval(t *testing.T) {
 	}
 	mustContain(t, out["reason"].(string), "1 commit since", "status must show the branch has moved since the review")
 
-	res := runIn(t, f.Dir(), "change", "archive")
+	res := runIn(t, f.Dir(), "check")
 	if res.code != exitRefusal {
-		t.Errorf("completing drifted work exited %d, want %d\nstderr: %s", res.code, exitRefusal, res.stderr)
+		t.Errorf("checking drifted work exited %d, want %d\nstdout: %s\nstderr: %s",
+			res.code, exitRefusal, res.stdout, res.stderr)
 	}
-	mustContain(t, res.stderr, "code changed since review", "the refusal must say the reviewed content is gone")
-	if got := f.RefSHA(archiveRef(slug)); got != approve {
-		t.Errorf("%s moved to %s, want the approval %s", archiveRef(slug), got, approve)
+	mustContain(t, res.stdout, "content outside changesets/"+slug+"/ changed since",
+		"the refusal must say the reviewed content is gone")
+	mustContain(t, res.stdout, "service.go", "and name the path that moved")
+	// Nothing was written while the gate refused.
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Errorf("a refused check wrote %v", got)
 	}
 }
 

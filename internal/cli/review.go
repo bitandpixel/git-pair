@@ -199,10 +199,9 @@ Exactly one outcome is required:
   --feedback   non-blocking observations; integration is still permitted
   --approve    the reviewer accepts the current implementation
 
-The commit carries Review-Outcome and Review-Changeset trailers, and
-refs/git-pair/changesets/<changeset>/archive is moved to the resulting HEAD in the same
-operation so
-the full unsquashed chain stays reachable.
+The commit carries Review-Outcome and Review-Changeset trailers, and it is the whole
+submission: no ref is written, because while work is in flight the branch is what holds
+the chain. ` + "`git pair integration record`" + ` writes the durable refs, once, at landing.
 
 Source edits, inline comments, ABOUT.md edits, and thread files all become part
 of the review; a review commit with no changes at all is valid, which is what
@@ -274,11 +273,10 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 			"outcome":         string(result.Outcome),
 			"commit":          result.Commit,
 			"short":           short(result.Commit),
-			"archive_ref":     result.Ref,
 			"files":           result.Files,
 			"empty":           result.Empty(),
 			"previous_review": previous,
-			"next_action":     nextActionFor(result.Outcome),
+			"next_action":     nextActionFor(result.Outcome, s.cs.Base),
 		})
 	}
 	a.printf("Review submitted: %s\n", s.cs.Slug)
@@ -292,27 +290,26 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 			a.printf("           %s\n", f)
 		}
 	}
-	a.printf("  ref:     %s -> %s\n", result.Ref, short(result.Commit))
 	if s.summary.LatestReview != nil {
 		a.printf("  supersedes: %s (the newest submission decides the state)\n",
 			reviewLabel(s.summary.LatestReview))
 	}
-	a.printf("  next:    %s\n", nextActionFor(result.Outcome))
+	a.printf("  next:    %s\n", nextActionFor(result.Outcome, s.cs.Base))
 	if clean, err := s.repo.IsClean(ctx); err == nil && !clean {
 		a.warn("\nwarning: the working tree is still dirty; those changes are not part of this review\n")
 	}
 	return nil
 }
 
-func nextActionFor(o model.Outcome) string {
+func nextActionFor(o model.Outcome, base string) string {
 	switch o {
 	case model.OutcomeBlock:
 		return "author: `git pair change feedback`, address it, then `git pair change ready`"
 	case model.OutcomeFeedback:
 		return "author: `git pair change feedback` to read it; feedback is non-blocking, " +
-			"`git pair change archive` when integration is due"
+			landingNextAction(base)
 	case model.OutcomeApprove:
-		return "author: `git pair change archive` before squash/merge"
+		return "author: " + landingNextAction(base)
 	}
 	return ""
 }
@@ -388,7 +385,6 @@ type queueEntry struct {
 	Head        string `json:"head"`
 	ReadyCommit string `json:"ready_commit"`
 	ReadyAge    string `json:"ready_age"`
-	ArchiveRef  string `json:"archive_ref"`
 }
 
 func newReviewQueueCommand(a *app) *cobra.Command {
@@ -425,9 +421,9 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	// can be queued; a changeset directory whose branch is gone is a record rather
 	// than work, and the record gets one honest line instead of a warning per slug.
 	//
-	// One trunk listing and one ref listing serve the whole queue; per branch it costs a tree
-	// listing and one batch read. That is what makes "resolve every branch" affordable — the
-	// per-archive-ref formulation this replaced asked a question per ref for each branch.
+	// One trunk listing serves the whole queue; per branch it costs a tree listing and one batch
+	// read. That is what makes "resolve every branch" affordable — the formulation this replaced
+	// asked a question per durable ref for each branch.
 	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
 	if err != nil {
 		return err
@@ -551,10 +547,12 @@ func runReviewQueue(ctx context.Context, a *app) error {
 // merged, and had its branch deleted — nothing left for a reviewer to do — and work
 // whose branch really did go missing.
 func classifyOrphan(ctx context.Context, repo *git.Repo, head, slug string) (string, error) {
-	anchor, err := reviewref.Resolve(ctx, repo, slug)
+	archive, err := reviewref.ResolveArchive(ctx, repo, slug)
 	if errors.Is(err, reviewref.ErrNoArchiveRef) {
-		// Never anchored means never offered: the directory is a leftover, and the
-		// queue has nothing to offer either.
+		// With no archive ref there is no record of this changeset, and a directory with no
+		// branch behind it is either a leftover or work whose branch was deleted before anyone
+		// recorded it — git-pair cannot tell which, so it says nothing rather than guessing about
+		// deleted work. M4 gives this case its own reported state.
 		return "", nil
 	}
 	if err != nil {
@@ -570,33 +568,33 @@ func classifyOrphan(ctx context.Context, repo *git.Repo, head, slug string) (str
 	if base == "" {
 		return "", nil
 	}
-	// An integrated changeset landed, and the branch that carried it is gone. That is the merge
-	// case with a receipt: nothing is pending, and the diff would only say the work is not in its
-	// base — which the record already says better.
+	// An integrated changeset landed, and the branch that carried it is gone. That is the case
+	// the record was written for: nothing is pending, and the diff would only say the work is not
+	// in its base — which the record already says better.
 	if sha, err := reviewref.ResolveIntegration(ctx, repo, slug); err == nil && sha != "" {
 		return "", nil
 	} else if err != nil && !errors.Is(err, reviewref.ErrNotIntegrated) {
 		return "", err
 	}
-	// An abandoned changeset ended on purpose, and the anchor carries the ending. That
-	// is the whole answer: nothing is pending, and the diff would only report that the
-	// work is not in its base, which is what abandoning means (PRD §9.7).
-	if summary, err := lifecycle.Summarize(ctx, repo, slug, base, anchor); err == nil && summary.Abandoned != nil {
+	// An abandoned changeset ended on purpose, and the archive carries the ending. That is the
+	// whole answer: nothing is pending, and the diff would only report that the work is not in its
+	// base, which is what abandoning means (PRD §9.7).
+	if summary, err := lifecycle.Summarize(ctx, repo, slug, base, archive); err == nil && summary.Abandoned != nil {
 		return "", nil
 	}
-	// The anchor is a commit that survives the branch, so it can be compared with
-	// the base without touching the working tree: identical changeset content on
-	// both sides is what a merge leaves behind.
+	// The archive ref names a commit that survives the branch, so it can be compared with the
+	// base without touching the working tree: identical changeset content on both sides is what a
+	// merge leaves behind.
 	dir := filepath.Join(changeset.Root, slug)
-	changed, err := repo.PathsChanged(ctx, base, anchor, dir)
+	changed, err := repo.PathsChanged(ctx, base, archive, dir)
 	if err != nil {
 		return "", err
 	}
 	if len(changed) == 0 {
 		return "", nil
 	}
-	return fmt.Sprintf("%s (anchored at %s, whose %s is not in %s and no branch carries it)",
-		slug, short(anchor), dir, base), nil
+	return fmt.Sprintf("%s (archived at %s, whose %s is not in %s and no branch carries it)",
+		slug, short(archive), dir, base), nil
 }
 
 func printSkipped(a *app, skipped []string) {
@@ -638,7 +636,6 @@ func readyEntry(ctx context.Context, repo *git.Repo, cs changeset.Changeset, bra
 				Head:        head,
 				ReadyCommit: summary.Marker.SHA,
 				ReadyAge:    lifecycle.Age(at, now()),
-				ArchiveRef:  reviewref.Archive(cs.Slug),
 			}
 		}
 	}

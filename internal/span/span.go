@@ -312,8 +312,7 @@ func display(c Checkpoint) string {
 
 // ShortRef trims a full `refs/...` name to the form a reviewer would type, keeping enough
 // to identify it: `refs/heads/main` becomes `main`, `refs/remotes/origin/main` keeps the
-// remote, and anything else (`refs/git-pair/changesets/booking/archive`) keeps its full name
-// rather than
+// remote, and anything else (`refs/git-pair/archive/booking`) keeps its full name rather than
 // becoming ambiguous. The checkpoint itself keeps the full name, so resolution stays
 // unambiguous and drift can be checked against the right ref.
 func ShortRef(name string) string {

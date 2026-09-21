@@ -1,179 +1,118 @@
-// Package reviewref owns the durable refs that keep review history reachable.
+// Package reviewref owns git-pair's durable refs.
 //
-// A changeset has one of them: its archive, named by the changeset id rather than by any
-// branch, so the work stays findable after the branch is deleted and readable by a CI job that
-// never had the branch.
+// There are exactly two families, both flat, both named by the changeset id rather than by any
+// branch, and both written by one command at one moment — `git pair integration record`, after the
+// work has landed:
 //
-//	refs/git-pair/changesets/<id>/archive
+//	refs/git-pair/archive/<id>      the real unsquashed, unrebased tip: implementation and review
+//	                                commits interleaved, the whole conversation
+//	refs/git-pair/integrations/<id> the commit that introduced the changeset into the destination
+//	                                branch
 //
-// The archive holds the complete unsquashed implementation/review/fix chain, which is what lets
-// a branch be squash-merged without losing the review conversation. It moves forward as review
-// happens — `change ready` and `review submit` write it as they write their markers, and
-// `change archive` advances it over commits that are review artifacts only — and never
-// backwards, which is the guarantee that makes the ref worth resolving.
+// Together they are the permanent paper trail: what was reviewed, and what it became. The pair is
+// written in that order — archive first, integration second — because the ref whose existence means
+// "this changeset is finished" is the integration one, so a crash between the two leaves a
+// changeset that reads as recorded-but-not-finished and a retry completes it. The reverse order
+// would leave a finished changeset whose chain nothing anchors.
 //
-// Nothing lives at `refs/git-pair/changesets/<id>` itself. A git ref cannot be a leaf and a
-// namespace at once — git enforces that by refusing to create the leaf once a child exists — so
-// every ref a changeset owns is a child of that path. `archive` is one, and `integration` — the
-// record of where the work landed, written once and never moved — is the other.
+// Neither ref ever moves and neither is ever deleted by git-pair. Nothing in this package writes a
+// ref while work is in flight: during a review the branch is the whole story, and the only durable
+// fact worth a ref is the one that does not exist until landing. That is also why publishing them
+// is a refspec rather than a protocol — both are append-only, so no fetch or push in this
+// repository needs a force.
+//
+// Create-only is tolerant of an identical re-create: asking for the commit the ref already names is
+// a no-op, and asking for a different one is a refusal naming both. Agents retry, and a re-run
+// after a partial write has to be the way you finish the write rather than the way you discover you
+// need a command git-pair does not have.
 package reviewref
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"gitpair/internal/git"
 )
 
-// root is the ref namespace holding every changeset's durable refs. Callers that need to look
-// for those refs ask for NamespaceRoot rather than rebuilding a path, so the layout lives here.
-const root = "refs/git-pair/changesets"
+// NamespaceRoot is the ref namespace holding every durable git-pair ref. Callers that need to look
+// for those refs ask for it rather than rebuilding a path, so the layout lives here — including in
+// the messages that tell a reader how to fetch what is missing.
+const NamespaceRoot = "refs/git-pair"
 
-// archiveChild is the child of a changeset's namespace that holds its archive. It is a child
-// rather than the namespace itself because a ref cannot be both a leaf and a namespace, and the
-// namespace already holds — and will hold more than — one ref per changeset.
-const archiveChild = "archive"
+// The two families are separate namespaces rather than children of one path per changeset, so a
+// flat `<family>/<id>` leaf is legal and a changeset id never has to be parsed out of a ref path.
+const (
+	integrationsRoot = NamespaceRoot + "/integrations"
+	archiveRoot      = NamespaceRoot + "/archive"
+)
 
-// integrationChild is the child holding the record of the work landing: the commit the changeset
-// became in the target history. It is written once by `git pair integration record` and never
-// moved, and its existence freezes the archive (§23): the pair of refs is a mapping from the
-// archived head to the integrated commit, and moving either end would silently rewrite that
-// mapping for every later reader.
-const integrationChild = "integration"
+// Integration returns the changeset's integration ref: the commit the changeset became in the
+// destination branch.
+func Integration(id string) string { return integrationsRoot + "/" + id }
 
-// Archive returns the changeset's archive ref.
-func Archive(id string) string { return root + "/" + id + "/" + archiveChild }
-
-// NamespaceRoot is the ref namespace holding every changeset's durable refs.
-func NamespaceRoot() string { return root }
+// Archive returns the changeset's archive ref: the unsquashed, unrebased tip the record was made
+// from. It exists only once the changeset has landed, which is the whole point — before that the
+// branch holds the chain, and a ref that moved with the branch would be a second, staler copy of
+// it.
+func Archive(id string) string { return archiveRoot + "/" + id }
 
 // FetchRefspec brings the durable refs into a clone. They are not fetched by default — a clone
 // takes refs/heads/* into refs/remotes/*, and these are neither — so a CI job that was handed the
-// branch has to ask for them, and every message that says so spells it this way.
-const FetchRefspec = "+" + root + "/*:" + root + "/*"
+// branch has to ask for them, and every message that says so spells it this way. There is no `+`:
+// both families are append-only, so a fetch that would have to move one of them is the bug, not the
+// case to enable.
+const FetchRefspec = NamespaceRoot + "/*:" + NamespaceRoot + "/*"
 
 // FetchCommand is the whole command that fixes an empty namespace, spelled once so the guidance in
 // a failure and the guidance in the README cannot drift.
 const FetchCommand = "git fetch origin '" + FetchRefspec + "'"
 
-// Present reports whether this repository holds any of a changeset's durable refs at all.
+// Present reports whether this repository holds any durable git-pair ref at all.
 //
-// It answers a different question from Resolve, and the two must not be conflated. "This changeset
-// has no archive ref" is a fact about the changeset — nobody ever offered it for review. "This clone
-// has no git-pair refs" is a fact about the fetch, and its fix is a refspec, not a lifecycle command
-// (requirements §24). A CI job told "the review history is not anchored" goes off to re-run
-// `change ready`; told the namespace is absent, it adds one line to its checkout.
+// It answers a different question from ResolveArchive, and the two must not be conflated. "This
+// changeset has no record" is a fact about the changeset — nobody ever recorded it. "This clone has
+// no git-pair refs" is a fact about the fetch, and its fix is a refspec, not a lifecycle command. A
+// CI job told "the record does not exist" goes off to re-run someone else's command; told the
+// namespace is absent, it adds one line to its checkout.
 //
 // Callers reach for it on the failure path only: it is a `for-each-ref`, and a run that is going to
 // succeed should not pay for asking.
 func Present(ctx context.Context, repo *git.Repo) (bool, error) {
-	refs, err := repo.ForEachRef(ctx, root)
+	refs, err := repo.ForEachRef(ctx, NamespaceRoot)
 	if err != nil {
 		return false, err
 	}
 	return len(refs) > 0, nil
 }
 
-// Namespace is the ref namespace one changeset owns. Nothing lives at Namespace itself:
-// a git ref cannot be both a leaf and a namespace, which git enforces by refusing the
-// leaf once a child exists. Every ref for a changeset is therefore a child of this path.
-func Namespace(id string) string { return root + "/" + id }
-
-// Taken reports whether any durable ref already belongs to this changeset id, which is
-// how `change init` refuses to hand out a name that is already someone's (PRD §5).
+// Taken reports whether either durable ref already belongs to this changeset id, which is how
+// `change init` refuses to hand out a name that is already someone's (PRD §5).
 //
-// Any child counts, not just the archive: a changeset that has an integration ref and no
-// archive ref has a history, and handing its name to a new changeset would attach that history
-// to a stranger. Matching is by path component, so `booking` is not blocked by `booking-v2`.
+// Either family counts. A changeset with an integration ref and no archive ref has a history, and
+// handing its name to a new changeset would attach that history to a stranger. Matching is on the
+// two exact paths, so `booking` is not blocked by `booking-v2` — and a legacy ref left behind by the
+// pre-two-ref layout (`refs/git-pair/changesets/<id>/archive`) does not block the name, because its
+// id is no longer readable as a path component of these families.
 func Taken(ctx context.Context, repo *git.Repo, id string) (bool, error) {
-	ns := Namespace(id)
-	refs, err := repo.ForEachRef(ctx, root)
+	refs, err := repo.ForEachRef(ctx, NamespaceRoot)
 	if err != nil {
 		return false, err
 	}
+	archive, integration := Archive(id), Integration(id)
 	for _, r := range refs {
-		if r.Name == ns || strings.HasPrefix(r.Name, ns+"/") {
+		if r.Name == archive || r.Name == integration {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-// ChangesetID reports the changeset id a durable ref names, so
-// `refs/git-pair/changesets/booking/archive` answers `booking`, and anything else — including a
-// ref in some other namespace — answers no. Callers that want only one kind of child say so: a
-// namespace holding only an integration ref belongs to a changeset with no archived history.
-//
-// A stacked changeset records its parent as either the parent's id or the ref that names it, and
-// both mean the same parent, so the resolution rule has to read the id out of either spelling.
-// Only this namespace is accepted, and only as `<id>/<child>`: a branch is allowed to be called
-// `feature/archive`, and mistaking one for a durable ref would attribute the branch's work to a
-// changeset called `feature`.
-func ChangesetID(ref string) (string, bool) {
-	rest, ok := strings.CutPrefix(ref, root+"/")
-	if !ok {
-		return "", false
-	}
-	id, child, ok := strings.Cut(rest, "/")
-	if !ok || id == "" || child == "" || strings.Contains(child, "/") {
-		return "", false
-	}
-	return id, true
-}
-
-// RefuseIntegrated returns ErrArchiveFrozen when the changeset already has an integration record.
-//
-// It is the check `Update` makes, exposed for callers that want to refuse *before* writing. A
-// marker commit and the archive move it triggers are one operation, so a command that committed
-// first and then learned the ref was frozen would leave a marker on the branch with nothing
-// pointing at it — a half-write no command can undo without a rewrite.
-func RefuseIntegrated(ctx context.Context, repo *git.Repo, id string) error {
-	integrated, err := ResolveIntegration(ctx, repo, id)
-	if errors.Is(err, ErrNotIntegrated) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return fmt.Errorf("%w: %s is recorded as integrated at %s, so its archive does not move and git-pair records nothing further for it; the mapping from the archived head to that commit is the record",
-		ErrArchiveFrozen, id, short(integrated))
-}
-
-// Update points the changeset's archive ref at sha. Called in the same operation that
-// creates a review commit, never later.
-//
-// It is also the one place the archive freeze lives. Every command that moves the archive —
-// `change ready`, `change unready`, `review submit`, `change abandon`, `change archive` — comes
-// through here, so the rule "an integrated changeset's archive does not move" (requirements §23)
-// is enforced once rather than remembered in five places, and a command added next month cannot
-// forget it. The cost is one `rev-parse` per marker commit, which is what the guarantee is worth:
-// the mapping `archive A → integration B` is the whole product of integration recording, and a
-// later `change ready` on a branch someone forgot to delete would silently change what it says.
-func Update(ctx context.Context, repo *git.Repo, id, sha string) (string, error) {
-	if err := RefuseIntegrated(ctx, repo, id); err != nil {
-		return Archive(id), err
-	}
-	ref := Archive(id)
-	if err := repo.UpdateRef(ctx, ref, sha); err != nil {
-		return ref, fmt.Errorf("updating %s: %w", ref, err)
-	}
-	return ref, nil
-}
-
-// ErrArchiveFrozen is returned by Update for a changeset whose integration ref exists.
-var ErrArchiveFrozen = errors.New("the archive is frozen once the changeset is integrated")
-
-// Integration returns the changeset's integration ref: the commit the changeset became in the
-// target history, as recorded by `git pair integration record`.
-func Integration(id string) string { return root + "/" + id + "/" + integrationChild }
-
-// ResolveIntegration returns the commit a changeset was integrated as, or ErrNotIntegrated when
-// the record does not exist. Integrated-ness is the presence of this ref and nothing else:
-// squash, rebase and cherry-pick rewrite commit identity, so no ancestry or patch-ID reading can
-// derive the fact (requirements §14).
+// ResolveIntegration returns the commit a changeset was integrated as, or ErrNotIntegrated when the
+// record does not exist. Integrated-ness is the presence of this ref and nothing else: squash,
+// rebase and cherry-pick rewrite commit identity, so no ancestry or patch-ID reading can derive the
+// fact (requirements §14).
 func ResolveIntegration(ctx context.Context, repo *git.Repo, id string) (string, error) {
 	sha, err := repo.ResolveRef(ctx, Integration(id))
 	if err != nil {
@@ -182,61 +121,15 @@ func ResolveIntegration(ctx context.Context, repo *git.Repo, id string) (string,
 	return sha, nil
 }
 
-// ErrNotIntegrated means the changeset has no integration ref — which is not the same as saying
-// it has not landed. It says nobody recorded it, which in a CI clone that never fetched
-// refs/git-pair/changesets/* is a fetching problem (requirements §24).
+// ErrNotIntegrated means the changeset has no integration ref — which is not the same as saying it
+// has not landed. It says nobody recorded it, which in a CI clone that never fetched
+// refs/git-pair/* is a fetching problem, and elsewhere is the state the queue reports as landed but
+// unrecorded.
 var ErrNotIntegrated = errors.New("this changeset has not been integrated")
 
-// CreateIntegration writes the integration ref, and refuses when one already exists: the record
-// is created once and never rewritten (requirements §22). The existence check is what lets the
-// command print its own explanation instead of git's `fatal: refusing to update ref`, and the
-// create-only write behind it is what makes the check un-raceable — two CI jobs recording the same
-// landing cannot both win.
-func CreateIntegration(ctx context.Context, repo *git.Repo, id, sha string) (bool, error) {
-	ref := Integration(id)
-	created, err := repo.CreateRefIfAbsent(ctx, ref, sha)
-	if err != nil {
-		return false, fmt.Errorf("recording the integration of %s: %w", id, err)
-	}
-	return created, nil
-}
-
-// ArchivesAt returns every changeset whose archive ref points exactly at commit, sorted by id.
-//
-// This is the discovery a forge needs (requirements §16): the integration process knows the source
-// SHA it built and not the changeset id, and the archive ref is the only thing that connects the
-// two. It is an exact-object question, so callers resolve an abbreviated SHA before asking — and
-// zero matches is a real answer, not a failure to interpret: it may mean the refs were never
-// fetched, or the wrong SHA was supplied (§18).
-func ArchivesAt(ctx context.Context, repo *git.Repo, commit string) ([]string, error) {
-	refs, err := repo.ForEachRef(ctx, root)
-	if err != nil {
-		return nil, err
-	}
-	var ids []string
-	for _, r := range refs {
-		if r.SHA != commit {
-			continue
-		}
-		id, ok := ChangesetID(r.Name)
-		if !ok || !strings.HasSuffix(r.Name, "/"+archiveChild) {
-			continue
-		}
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	return ids, nil
-}
-
-func short(sha string) string {
-	if len(sha) > 7 {
-		return sha[:7]
-	}
-	return sha
-}
-
-// Resolve returns the SHA the changeset's archive ref points at.
-func Resolve(ctx context.Context, repo *git.Repo, id string) (string, error) {
+// ResolveArchive returns the commit a changeset's archive ref points at, or ErrNoArchiveRef when it
+// does not exist — which is what a changeset that has never been recorded looks like.
+func ResolveArchive(ctx context.Context, repo *git.Repo, id string) (string, error) {
 	sha, err := repo.ResolveRef(ctx, Archive(id))
 	if err != nil {
 		return "", fmt.Errorf("%w: %s", ErrNoArchiveRef, Archive(id))
@@ -244,34 +137,167 @@ func Resolve(ctx context.Context, repo *git.Repo, id string) (string, error) {
 	return sha, nil
 }
 
-// ErrNoArchiveRef means the changeset has never had a review submission.
+// ErrNoArchiveRef means the changeset has no archived chain: no `integration record` has ever run
+// for it. Reading it as "never reviewed" would be wrong — before landing, the branch holds the
+// chain and no ref does.
 var ErrNoArchiveRef = errors.New("no archive ref for this changeset")
 
-// Entry is a changeset's archive ref.
+// Kind distinguishes the two durable ref families in a List entry.
+type Kind string
+
+const (
+	// KindArchive is the unsquashed implementation-and-review chain.
+	KindArchive Kind = "archive"
+	// KindIntegration is the record of the commit the changeset became.
+	KindIntegration Kind = "integration"
+)
+
+// Entry is one durable ref.
 type Entry struct {
 	Ref string
 	SHA string
 	// ID is the changeset the ref belongs to.
 	ID string
+	// Kind is which of the two families this ref is in.
+	Kind Kind
 }
 
-// List returns every changeset's archive ref.
+// List returns every durable ref, archive and integration together.
 //
-// Refs in the namespace that are not archives are skipped rather than reported: a namespace
-// holding only an integration ref belongs to a changeset with no archived history, and a caller
-// asking for archives would be wrong to treat it as one.
+// One `for-each-ref` over the namespace is the whole cost, which is what lets the resolver answer
+// "which of these landed?" for every changeset in a repository without a question per changeset.
+// Entries are returned in git's ref order; callers that care about an ordering say so themselves.
 func List(ctx context.Context, repo *git.Repo) ([]Entry, error) {
-	refs, err := repo.ForEachRef(ctx, root)
+	refs, err := repo.ForEachRef(ctx, NamespaceRoot)
 	if err != nil {
 		return nil, err
 	}
 	var out []Entry
 	for _, r := range refs {
-		id, ok := ChangesetID(r.Name)
-		if !ok || !strings.HasSuffix(r.Name, "/"+archiveChild) {
+		id, kind, ok := identify(r.Name)
+		if !ok {
 			continue
 		}
-		out = append(out, Entry{Ref: r.Name, SHA: r.SHA, ID: id})
+		out = append(out, Entry{Ref: r.Name, SHA: r.SHA, ID: id, Kind: kind})
 	}
 	return out, nil
+}
+
+// identify reads a changeset id and a family out of a durable ref path, and answers no for anything
+// that is not one — a stray ref someone else put under the namespace, or a family directory spelled
+// wrongly. Both families are one level deep, so a path with another slash in it names no changeset.
+func identify(ref string) (string, Kind, bool) {
+	for _, family := range []struct {
+		prefix string
+		kind   Kind
+	}{
+		{archiveRoot + "/", KindArchive},
+		{integrationsRoot + "/", KindIntegration},
+	} {
+		id, ok := strings.CutPrefix(ref, family.prefix)
+		if !ok || id == "" || strings.Contains(id, "/") {
+			continue
+		}
+		return id, family.kind, true
+	}
+	return "", "", false
+}
+
+// ErrRefConflict is returned by CreateOnly when the ref exists at a different commit than the one
+// requested. It is the loud half of create-only: the record is written once, and an attempt to
+// write a different one is the case where somebody is about to lose paper trail.
+var ErrRefConflict = errors.New("the durable ref already exists at a different commit")
+
+// CreateOnly points ref at sha, and refuses rather than moving a ref that exists.
+//
+// It reports whether this call created the ref. Re-asking for the commit the ref already names is a
+// no-op returning false, not an error: agents retry, and the retry has to complete the record
+// instead of failing on the half that succeeded. Asking for a different commit is ErrRefConflict,
+// and the error names both commits — the question a re-run asks is "what did we already say?".
+//
+// The write itself is create-only at the git level (`update-ref` with the all-zeros old value), so
+// two processes recording the same landing cannot both win, and this function's read of an
+// existing ref is a report rather than a check.
+func CreateOnly(ctx context.Context, repo *git.Repo, ref, sha string) (bool, error) {
+	created, err := repo.CreateRefIfAbsent(ctx, ref, sha)
+	if err == nil {
+		return created, nil
+	}
+	// The create failed. Either somebody held the name the whole time or the write raced, and both
+	// mean the ref this call did not write names something — so answer with what it names rather than
+	// with git's wording.
+	existing, readErr := repo.ResolveRef(ctx, ref)
+	if readErr != nil || existing == sha {
+		return false, fmt.Errorf("creating %s: %w", ref, err)
+	}
+	return false, conflictError(ref, existing, sha)
+}
+
+// conflictError is the refusal every create-only write shares. It answers the question a re-run is
+// actually asking — what is already on the record, and what did I ask for — and says in the same
+// breath that there is no flag for overriding it, because there is no operation that would implement
+// one.
+func conflictError(ref, existing, wanted string) error {
+	return fmt.Errorf("%w: %s records %s, and %s was asked for\n\n"+
+		"git-pair never moves a durable ref; if this pair is wrong, the record was written from the wrong commit",
+		ErrRefConflict, ref, short(existing), short(wanted))
+}
+
+// Pair is what one `integration record` invocation writes: both halves of the record.
+type Pair struct {
+	// ID is the changeset the pair belongs to.
+	ID string
+	// Archive is the unsquashed tip `refs/git-pair/archive/<id>` holds.
+	Archive string
+	// Integration is the landing commit `refs/git-pair/integrations/<id>` holds.
+	Integration string
+}
+
+// PairResult reports what a write did, so a command can say "recorded" and "already recorded"
+// about each half of the pair separately rather than claiming something it did not do.
+type PairResult struct {
+	ArchiveCreated     bool
+	IntegrationCreated bool
+	ArchiveRef         string
+	IntegrationRef     string
+	Archive            string
+	IntegrationCommit  string
+}
+
+// CreatePair writes both refs for one changeset, archive first.
+//
+// The order is the reason a half-written pair is recoverable: the integration ref is the one whose
+// existence means "this changeset is finished", so if the process dies between the two writes the
+// changeset still reads as not-yet-recorded and the next invocation completes it. Writing
+// integration first would leave a finished changeset whose chain nothing holds — the exact loss the
+// archive ref exists to prevent.
+//
+// Re-running with the same pair creates nothing and fails nothing. Re-running with a pair whose
+// other half disagrees is a refusal from CreateOnly, and the refusal says which ref and which two
+// commits disagree.
+func CreatePair(ctx context.Context, repo *git.Repo, pair Pair) (PairResult, error) {
+	res := PairResult{
+		ArchiveRef:        Archive(pair.ID),
+		IntegrationRef:    Integration(pair.ID),
+		Archive:           pair.Archive,
+		IntegrationCommit: pair.Integration,
+	}
+	archive, err := CreateOnly(ctx, repo, res.ArchiveRef, pair.Archive)
+	if err != nil {
+		return res, err
+	}
+	res.ArchiveCreated = archive
+	created, err := CreateOnly(ctx, repo, res.IntegrationRef, pair.Integration)
+	if err != nil {
+		return res, err
+	}
+	res.IntegrationCreated = created
+	return res, nil
+}
+
+func short(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }

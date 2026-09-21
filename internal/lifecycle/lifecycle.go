@@ -161,11 +161,10 @@ func SummarizeHEAD(ctx context.Context, repo *git.Repo, slug, base string) (Summ
 // marker spoke about is still at headRef. A marker whose code has been changed
 // underneath it reads as WORKING here and nowhere else.
 //
-// `change archive` and `check` are the callers. Both decide that a head is safe to hand on —
-// one by moving the ref an agent is told to trust, one by asserting the same thing to CI — so
-// they share the reading rather than each keeping its own idea of what drift means
-// (PRD §9.5, §11.3). Everywhere else state moves when a git-pair command records a marker, not
-// when the author commits (PRD §12).
+// `check` is the caller: the gate decides that a head is safe to hand on, and it needs the
+// derivation and the drift in one reading rather than two that could disagree (PRD §9.5, §11.3).
+// Everywhere else state moves when a git-pair command records a marker, not when the author
+// commits (PRD §12).
 func SummarizeAgainstTree(ctx context.Context, repo *git.Repo, slug, base, headRef string) (Summary, error) {
 	s, err := Summarize(ctx, repo, slug, base, headRef)
 	if err != nil {
@@ -183,7 +182,8 @@ func SummarizeAgainstTreeHEAD(ctx context.Context, repo *git.Repo, slug, base st
 //
 // The range summaries answer "what happened between base and head". This answers the narrower
 // question a caller asks when it holds one commit and wants to know what that commit records —
-// the tip of an archive ref, say, which is where `change abandon` leaves the ref. It uses the same
+// the commit `integration record --source` names, or the landing whose record must not be written
+// for work that was abandoned. It uses the same
 // trailer parsing as the range walk, so the two cannot disagree about what a marker says, and it
 // needs no base: a caller holding a SHA from a ref should not have to resolve a branch that may
 // never have been fetched.
@@ -335,11 +335,10 @@ func markerReason(m Event) string {
 // marker spoke about been changed underneath it? Where it has, the marker no longer
 // describes HEAD and the state is WORKING.
 //
-// Only SummarizeAgainstTree calls it, and only `change archive` uses that. An archive
-// ref is a promise about reviewed content — it is what an agent is told to check before
-// squash-merging — so archiving refuses to name a head whose code moved after the
-// review (PRD §9.5). Everywhere else a commit is not something that changes state:
-// `change ready`, `change unready` and a review submission are (PRD §12).
+// Only SummarizeAgainstTree calls it, and only `check` uses that. The gate is the one place
+// git-pair asks whether reviewed content is still there, because a merge is about to act on the
+// answer (PRD §9.5). Everywhere else a commit is not something that changes state: `change ready`,
+// `change unready` and a review submission are (PRD §12).
 //
 // The verdict comes from the tree rather than from the commit count, because committing
 // a fix to ABOUT.md or a review thread is not an implementation change and the reviewer

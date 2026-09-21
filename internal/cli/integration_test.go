@@ -1,10 +1,12 @@
 package cli_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"gitpair/internal/changeset"
+	"gitpair/internal/git"
 	"gitpair/internal/gittest"
 	"gitpair/internal/reviewref"
 )
@@ -31,25 +33,45 @@ func recordFixture(t *testing.T) (*gittest.Fixture, string, string, string) {
 	return f, slug, source, f.Head()
 }
 
-// The happy path, and the two properties the command's whole design rests on: no ancestry has to
-// exist between what was archived and what landed, and the command needs no checkout of the
-// changeset — it is addressed by SHA and ref, because the person running it is a pipeline.
+// The happy path, and the properties the command's whole design rests on: it writes both durable
+// refs and nothing else writes them; no ancestry has to exist between what was reviewed and what
+// landed; and the command needs no checkout of the changeset — it is addressed by SHA and ref,
+// because the person running it is a pipeline.
 func TestIntegrationRecordLinksAnArchivedHeadToALanding(t *testing.T) {
 	f, slug, source, landing := recordFixture(t)
 	f.SwitchTo("main") // not the changeset's branch, and not the landing's either
+
+	// Nothing durable exists for this changeset before the record: no command writes a ref while
+	// work is in flight, which is the property the whole milestone is about.
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Fatalf("durable refs before the record: %v", got)
+	}
 
 	res := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--target", "release/2.x")
 	res.mustSucceed(t, "integration", "record")
 	mustContain(t, res.stdout, "recorded "+shortOf(landing), "the answer must say what it recorded")
 	mustContain(t, res.stdout, reviewref.Integration(slug), "the answer must name the ref it wrote")
+	mustContain(t, res.stdout, reviewref.Archive(slug), "and the other one")
 	mustContain(t, res.stdout, "reachable from release/2.x", "and the check it made")
 
 	if got := f.RefSHA(reviewref.Integration(slug)); got != landing {
-		t.Errorf("the record is at %s, want %s", got, landing)
+		t.Errorf("the integration record is at %s, want %s", got, landing)
 	}
-	// The archive is the other half of the mapping and is not this command's to touch.
+	// The archive half is the unsquashed head, which is the half no other ref in the repository
+	// reaches: it is what survives the branch deletion, and it is what a squash destroys.
 	if got := f.RefSHA(reviewref.Archive(slug)); got != source {
-		t.Errorf("the archive moved to %s, want the archived head %s", got, source)
+		t.Errorf("the archive is at %s, want the reviewed head %s", got, source)
+	}
+	if got := durableRefs(t, f); len(got) != 2 {
+		t.Errorf("durable refs after the record = %v, want exactly the pair", got)
+	}
+	// The chain the archive names is reachable from the archive alone, which is the property the
+	// landing is allowed to destroy on the branch.
+	f.ForceDeleteBranch("booking")
+	for _, want := range []string{source, f.RevParse(source + "~1")} {
+		if !f.ReachableFrom(want, reviewref.Archive(slug)) {
+			t.Errorf("%s is not reachable from the archive after the branch was deleted", shortOf(want))
+		}
 	}
 }
 
@@ -67,6 +89,7 @@ func TestIntegrationRecordJSON(t *testing.T) {
 		"source":          source,
 		"commit":          landing,
 		"target":          "release/2.x",
+		"archive_ref":     reviewref.Archive(slug),
 		"integration_ref": reviewref.Integration(slug),
 	} {
 		if got[key] != want {
@@ -91,24 +114,31 @@ func TestIntegrationRecordAcceptsAbbreviatedSHAs(t *testing.T) {
 	}
 }
 
-// §22: one record per changeset. The refusal names the record that exists rather than the one being
-// attempted, and it survives being asked twice with different answers — which is the backport case,
-// the one most likely to arrive as a second CI run against a release branch.
+// §22: one record per changeset, and a retry is not a failure. The pair of behaviours is the point:
+// the same command run twice is a success that changed nothing, and a *different* pair for a
+// changeset that already has one is a refusal that names what is already recorded — including in the
+// backport case, the one most likely to arrive as a second CI run against a release branch.
 func TestIntegrationRecordIsCreatedOnce(t *testing.T) {
-	f, _, source, landing := recordFixture(t)
+	f, slug, source, landing := recordFixture(t)
 	first := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing)
 	first.mustSucceed(t, "integration", "record")
 
-	// A re-run of the same command must not be a success that did nothing: a pipeline that
-	// records twice has a problem worth failing on.
 	again := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing)
-	if again.code != 1 {
-		t.Fatalf("re-recording exited %d, want 1\n%s%s", again.code, again.stdout, again.stderr)
+	again.mustSucceed(t, "integration", "record")
+	mustContain(t, again.stdout, "already recorded", "the retry says what it found")
+	mustContain(t, again.stdout, shortOf(source), "naming the source it holds")
+	mustContain(t, again.stdout, shortOf(landing), "and the commit it holds")
+	out := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--json").json(t)
+	if out["recorded"] != false || out["already_recorded"] != true {
+		t.Errorf("recorded = %v, already_recorded = %v; a retry that wrote nothing must say so",
+			out["recorded"], out["already_recorded"])
 	}
-	mustContain(t, again.stderr, "already recorded", "the refusal must say a record exists")
-	mustContain(t, again.stderr, shortOf(source), "and name the source it holds")
-	mustContain(t, again.stderr, shortOf(landing), "and the commit it holds")
+	if got := f.RefSHA(reviewref.Archive(slug)); got != source {
+		t.Errorf("the retry moved the archive to %s", got)
+	}
 
+	// The same *source* recorded against a different commit is a different claim about the same
+	// changeset, and there is no answer that is both safe and automatic.
 	f.SwitchTo("release/2.x")
 	f.Commit("backport the same work", gittest.WithFile("backport.md", "again\n"))
 	backport := f.Head()
@@ -117,17 +147,36 @@ func TestIntegrationRecordIsCreatedOnce(t *testing.T) {
 	if second.code != 1 {
 		t.Fatalf("a second landing exited %d, want 1\n%s%s", second.code, second.stdout, second.stderr)
 	}
-	mustContain(t, second.stderr, "one integration record", "the refusal must explain why a backport is not a second record")
-	mustContain(t, second.stderr, "release/2.x", "and may name what the caller asked about")
-	if got := f.RefSHA(reviewref.Integration("booking")); got != landing {
+	mustContain(t, second.stderr, reviewref.Integration(slug)+" records", "the refusal names the record that exists")
+	mustContain(t, second.stderr, shortOf(landing), "with its commit, so the reader can see which claim is on the record")
+	mustContain(t, second.stderr, reviewref.Integration(slug), "and the ref to go and look at")
+	mustContain(t, second.stderr, "never moves", "and says plainly that there is no flag for this")
+	if got := f.RefSHA(reviewref.Integration(slug)); got != landing {
 		t.Errorf("the record moved to %s; §22 says it stays at %s", got, landing)
+	}
+
+	// A half record — the crash case — is completed by the same command, not refused.
+	f2, slug2, source2, landing2 := recordFixture(t)
+	if _, err := reviewref.CreateOnly(context.Background(), &git.Repo{Dir: f2.Dir()}, reviewref.Archive(slug2), source2); err != nil {
+		t.Fatalf("seed the half pair: %v", err)
+	}
+	half := runIn(t, f2.Dir(), "integration", "record", "--source", source2, "--commit", landing2)
+	half.mustSucceed(t, "integration", "record")
+	mustContain(t, half.stdout, "completed the record", "a half-written pair is finished, not refused")
+	if got := f2.RefSHA(reviewref.Integration(slug2)); got != landing2 {
+		t.Errorf("the completion left the record at %s, want %s", got, landing2)
 	}
 }
 
 // Every refusal the command owes, with the exit code and the phrase that makes it actionable. The
-// table is the contract: §18's nothing-matched is a repository fact (exit 1), §19's ambiguity is an
-// argument problem (exit 2, the same rule every other command applies to ambiguity), and the rest
-// are the verifications §21 lists.
+// table is the contract: an absent changeset directory is a repository fact (exit 1), an ambiguous
+// one is an argument problem (exit 2, the same rule every other command applies to ambiguity), and the
+// rest are the verifications §21 lists.
+//
+// Note what is not here: no case about an archive ref. The command used to require one to exist at the
+// source commit, which was the same fact — "this commit was the reviewed head of a changeset" — read
+// out of a ref that only existed because someone ran a command. It is read from the commit's own tree
+// now.
 func TestIntegrationRecordRefusesWhatItMustRefuse(t *testing.T) {
 	tests := []struct {
 		name string
@@ -153,47 +202,43 @@ func TestIntegrationRecordRefusesWhatItMustRefuse(t *testing.T) {
 			want: []string{"--source", "is not a commit this repository has"},
 		},
 		{
-			name: "no archive points at the source (§18)",
-			// The implementation commit is real work; it was simply never archived.
+			name: "a source carrying no changeset directory",
+			// Real work, never claimed by a changeset: there is nothing to record, and saying so is
+			// better than inventing an id from the branch the commit happens to sit on.
+			setup: func(t *testing.T, f *gittest.Fixture, _, _, landing string) []string {
+				t.Helper()
+				f.SwitchTo("main")
+				unrelated := f.Commit("work with no changeset directory", gittest.WithFile("more.go", "package main\n"))
+				return []string{"--source", unrelated, "--commit", landing}
+			},
+			code: 1,
+			want: []string{"no changesets/<id>/ directory exists in"},
+		},
+		{
+			name: "a source carrying two changeset directories is ambiguous",
+			// The stacked case: a child carries its parent's directory, so two ids are true of the
+			// commit at once. Ambiguity is a usage error — the repository is not broken, the caller
+			// has to say which one they mean.
 			setup: func(t *testing.T, f *gittest.Fixture, _, _, landing string) []string {
 				t.Helper()
 				f.SwitchTo("booking")
-				f.Commit("work nobody offered for review", gittest.WithFile("more.go", "package main\n"))
+				f.Commit("claim a second changeset too", gittest.WithFile(changeset.Root+"/other/CHANGESET.yaml", "id: other\nbase: main\n"))
 				return []string{"--source", f.Head(), "--commit", landing}
 			},
-			code: 1,
-			want: []string{"no changeset archive points at", "never fetched", "never archived", "wrong commit"},
-		},
-		{
-			name: "the named changeset still needs an archive there",
-			setup: func(t *testing.T, f *gittest.Fixture, slug, _, landing string) []string {
-				t.Helper()
-				return []string{"--source", f.RevParse("main"), "--commit", landing, "--changeset", slug}
-			},
-			code: 1,
-			want: []string{"must still be at that commit"},
-		},
-		{
-			name: "two archives at one commit (§19)",
-			setup: func(t *testing.T, f *gittest.Fixture, _, source, landing string) []string {
-				t.Helper()
-				// git-pair cannot create this state — one archive per id, forward-only — so it is
-				// built by hand, which is also why the command must refuse rather than pick.
-				f.MustGit("update-ref", reviewref.Archive("booking-v2"), source)
-				return []string{"--source", source, "--commit", landing}
-			},
 			code: 2,
-			want: []string{"more than one changeset archive points at", "booking", "booking-v2", "--changeset"},
+			want: []string{"more than one changeset directory exists", "booking", "other", "--changeset"},
 		},
 		{
-			name: "a named changeset that is not one of the matches",
+			// `--changeset` picks between the changesets a source actually carries. It is not a way
+			// to name a changeset the commit knows nothing about, and the refusal says which of the
+			// two the caller has done.
+			name: "the named changeset is not one the source carries",
 			setup: func(t *testing.T, f *gittest.Fixture, _, source, landing string) []string {
 				t.Helper()
-				f.MustGit("update-ref", reviewref.Archive("booking-v2"), source)
 				return []string{"--source", source, "--commit", landing, "--changeset", "someone-elses-work"}
 			},
 			code: 1,
-			want: []string{"does not replace the archive", "booking"},
+			want: []string{"not among the changesets", "booking", "--changeset picks between them"},
 		},
 		{
 			name: "an abandoned changeset has nothing to integrate",
@@ -253,20 +298,22 @@ func TestIntegrationRecordRefusesWhatItMustRefuse(t *testing.T) {
 	}
 }
 
-// §23: the record freezes the archive. The commands that move it are the ones that have to refuse,
-// and they have to refuse before writing, or the branch keeps a marker with nothing pointing at it.
-func TestArchiveIsFrozenOnceIntegrationIsRecorded(t *testing.T) {
+// Once the pair exists, no in-flight command has anything left to write for this changeset. The
+// commands refuse on the record — they check the integration ref before committing, so the branch
+// never gains a marker that points at nothing — and there is no command that could move a ref even if
+// one asked: the package has no API for it, and the refusal is the human-facing half of that.
+func TestRecordedChangesetRefusesFurtherWork(t *testing.T) {
 	f, slug, source, landing := recordFixture(t)
 	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing).mustSucceed(t, "integration", "record")
 	f.SwitchTo("booking")
 
-	// A review artifact on the branch: exactly what `change archive` exists to move the ref over.
-	f.Commit("note an edge case after the landing", gittest.WithFile("changesets/booking/ABOUT.md", "# booking\n\n## Summary\n\nnoted\n"))
+	// Work on the branch after the landing: exactly what the moving ref used to chase.
+	f.Commit("note an edge case after the landing", gittest.WithFile("changesets/"+slug+"/ABOUT.md", "# booking\n\n## Summary\n\nnoted\n"))
 	before := f.RefSHA(reviewref.Archive(slug))
+	integrated := f.RefSHA(reviewref.Integration(slug))
 	branchHead := f.Head()
 
 	for _, args := range [][]string{
-		{"change", "archive"},
 		{"change", "ready"},
 		{"change", "unready"},
 		{"review", "submit", "--approve"},
@@ -277,18 +324,57 @@ func TestArchiveIsFrozenOnceIntegrationIsRecorded(t *testing.T) {
 			t.Errorf("git-pair %v exited %d, want 1\n%s%s", args, res.code, res.stdout, res.stderr)
 			continue
 		}
-		mustContain(t, res.stderr, "integrated at", "the refusal must name the record that freezes the archive")
+		mustContain(t, res.stderr, "recorded as integrated at", "the refusal must name the record")
 		mustContain(t, res.stderr, slug, "and the changeset it belongs to")
 	}
 	if got := f.RefSHA(reviewref.Archive(slug)); got != before {
-		t.Errorf("the archive moved to %s; the frozen record says %s", got, before)
+		t.Errorf("the archive moved to %s; the record says %s", got, before)
 	}
-	// No command may leave a marker behind either. A marker commit with no ref pointing at it is
-	// the half-write the write gate exists to prevent, and it is invisible to every later
-	// derivation that reads state from the ref's history.
+	if got := f.RefSHA(reviewref.Integration(slug)); got != integrated {
+		t.Errorf("the integration record moved to %s", got)
+	}
+	// No command may leave a marker behind either. A marker commit on a branch whose record is
+	// already written is a claim that no derivation will ever be asked about, and it would be the
+	// half-write the write gate exists to prevent.
 	if got := f.Head(); got != branchHead {
 		t.Errorf("a refused command committed: HEAD is %s (%s), was %s (%s)",
 			shortOf(got), f.Subject(got), shortOf(branchHead), f.Subject(branchHead))
+	}
+
+	// The no-op paths have to refuse as well. `change unready` on a changeset that is not in review,
+	// and `change abandon` on one that has already ended, both succeed without writing anything — so
+	// without the command-layer gate a recorded changeset would get "nothing to withdraw" where the
+	// honest answer is that the work is finished. And `change abandon` is the one that would otherwise
+	// have written a marker onto landed work.
+	f2, slug2 := newChangeset(t, "booking", "main")
+	ready(t, f2)
+	runIn(t, f2.Dir(), "change", "unready").mustSucceed(t, "change", "unready")
+	source2 := f2.RevParse("booking")
+	// The landing goes somewhere that is not the default branch, so the directory is still absent
+	// from trunk and the branch still resolves to the changeset — which is the shape the reader of a
+	// withdrawn, landed changeset is actually standing in.
+	f2.CreateBranch("release/2.x", "main")
+	f2.MustGit("checkout", source2, "--", changeset.Root+"/"+slug2)
+	landing2 := f2.Commit("booking: land the withdrawn work", gittest.WithFile("landed.md", "landed\n"))
+	runIn(t, f2.Dir(), "integration", "record", "--source", source2, "--commit", landing2).
+		mustSucceed(t, "integration", "record")
+	f2.SwitchTo("booking")
+
+	for _, args := range [][]string{{"change", "unready"}, {"change", "abandon"}} {
+		res := runIn(t, f2.Dir(), args...)
+		if res.code != 1 {
+			t.Errorf("git-pair %v on landed, unoffered work exited %d, want 1\n%s%s",
+				args, res.code, res.stdout, res.stderr)
+			continue
+		}
+		mustContain(t, res.stderr, "recorded as integrated at", "it refuses on the record, not on the state")
+		mustContain(t, res.stderr, slug2, "and names the changeset")
+	}
+	if got := f2.Head(); got != source2 {
+		t.Errorf("a refused no-op committed: HEAD is %s, want %s", shortOf(got), shortOf(source2))
+	}
+	if got := f2.RefSHA(reviewref.Archive(slug2)); got != source2 {
+		t.Errorf("the archive moved to %s", got)
 	}
 }
 

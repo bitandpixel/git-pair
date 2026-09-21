@@ -534,3 +534,97 @@ func goSourceFiles(t *testing.T, dir string, excludeDirs []string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// TestDurableRefsAreOnlyEverCreated is the mechanical half of "no command can move or delete a
+// durable ref". The verb list cannot express it: `git update-ref <ref> <sha> <old>` is an ordinary git
+// command, and it is precisely the operation git-pair must never perform, because the two families
+// under refs/git-pair are records rather than pointers — the answer to "what was reviewed, and what did
+// it become", written once, at landing.
+//
+// So this asks a narrower question of every non-test source: where does git-pair invoke `update-ref`
+// at all, and with what? The answer has to be one call, inside internal/git, passing git's all-zeros
+// old value — the form that asks git to fail if the name is already taken. There is no second write,
+// and so no way for a command written next year to move a record while believing it is creating one.
+func TestDurableRefsAreOnlyEverCreated(t *testing.T) {
+	root := moduleRoot(t)
+	const createOnly = "zeroOID"
+
+	var sites []string
+	var zeroValue string
+	moved := 0
+	for _, path := range goSourceFiles(t, filepath.Join(root, "internal"), nil) {
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			rel = path
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		fileSet := token.NewFileSet()
+		file, err := parser.ParseFile(fileSet, path, src, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			switch n := node.(type) {
+			case *ast.ValueSpec:
+				// The old value the one allowed write passes. Its value is the whole
+				// difference between creating a ref and moving one, so it is checked rather
+				// than trusted.
+				for _, name := range n.Names {
+					if name.Name != createOnly {
+						continue
+					}
+					for _, value := range n.Values {
+						if lit, ok := value.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+							zeroValue = unquote(lit.Value)
+						}
+					}
+				}
+			case *ast.CallExpr:
+				if classify(n) != callGit {
+					return true
+				}
+				namesRef := false
+				for _, lit := range stringLiterals(n.Args...) {
+					if lit.value == "update-ref" {
+						namesRef = true
+					}
+				}
+				if !namesRef {
+					return true
+				}
+				sites = append(sites, rel+":"+strconv.Itoa(fileSet.Position(n.Pos()).Line))
+				passesZeroOld := false
+				for _, arg := range n.Args {
+					if ident, ok := arg.(*ast.Ident); ok && ident.Name == createOnly {
+						passesZeroOld = true
+					}
+				}
+				if !passesZeroOld {
+					moved++
+				}
+			}
+			return true
+		})
+	}
+
+	if len(sites) != 1 {
+		t.Fatalf("shipped code invokes `git update-ref` at %v; want exactly one call site, the create-only write in internal/git",
+			sites)
+	}
+	if want := filepath.Join("internal", "git") + string(filepath.Separator); !strings.HasPrefix(sites[0], want) {
+		t.Errorf("the only `update-ref` call is at %s, want it in %s, which owns every ref write", sites[0], want)
+	}
+	if moved > 0 {
+		t.Errorf("%d of the %d `update-ref` calls pass no all-zeros old value, so they can move a durable ref; neither family may be moved",
+			moved, len(sites))
+	}
+	if zeroValue == "" {
+		t.Fatal("no all-zeros old-value constant was found; the one allowed write cannot be create-only without it")
+	}
+	if len(zeroValue) != 40 || strings.Trim(zeroValue, "0") != "" {
+		t.Errorf("the old value passed to `update-ref` is %q, want git's 40-zero all-zeros object id", zeroValue)
+	}
+}

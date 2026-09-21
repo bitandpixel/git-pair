@@ -4,12 +4,10 @@ package model
 // State is the effective lifecycle state of a changeset, always derived from
 // commit history rather than stored.
 //
-// There is no state for an archived changeset. Archiving moves a ref
-// (`git pair change archive`) to keep the reviewed history reachable, and the
-// changeset is finished when that history is merged into the deployment branch
-// by ordinary git. git-pair derives state from a changeset's own commits, so it
-// does not derive the merge: the archive ref is reported by `status`, beside the
-// state rather than as another value of it.
+// There is no state for a landed changeset. Landing happens with ordinary git, and git-pair
+// derives state from a changeset's own markers, so it does not derive the merge: the record
+// written by `git pair integration record` is reported by `status`, beside the state rather than
+// as another value of it. Markers are the only thing that moves state.
 type State string
 
 const (

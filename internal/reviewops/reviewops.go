@@ -10,7 +10,6 @@ import (
 	"gitpair/internal/git"
 	"gitpair/internal/marker"
 	"gitpair/internal/model"
-	"gitpair/internal/reviewref"
 )
 
 // Result describes a completed review submission.
@@ -20,28 +19,23 @@ type Result struct {
 	Commit string `json:"commit"`
 	// Files are the paths the review changed; empty for an empty review.
 	Files []string `json:"files"`
-	// Ref is the review ref moved to Commit.
-	Ref string `json:"archive_ref"`
 }
 
 // Empty reports whether the review recorded no file changes, which is valid and
 // normal for an approval on a clean tree.
 func (r Result) Empty() bool { return len(r.Files) == 0 }
 
-// Submit records a review submission and moves the changeset's archive ref onto it.
+// Submit records a review submission.
+//
+// It writes a commit and nothing else. There is no ref to move: while work is in flight the branch
+// is the whole story, and the durable refs are written at landing by `git pair integration record`,
+// once, from a head that has stopped moving. A review commit is therefore its own record — `Review-*`
+// trailers on an ordinary commit, reachable from the branch, greppable with the tools the reviewer
+// already uses.
 //
 // stageAll controls whether the working tree is swept in first. It defaults to
 // true because a review submission normally *is* everything the reviewer just
 // did; the CLI's --no-stage exists for reviewers who stage deliberately.
-//
-// The ref is updated in the same call as the commit: an anchored review is the
-// point of the operation.
-//
-// An archived changeset is not a special case. A submission moves the archive
-// ref to its own commit, which is what requirements §10 asks for, so a reviewer
-// speaking against an archived head advances it rather than being refused — and
-// the head that was archived stays reachable, because the new commit descends
-// from it.
 func Submit(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
 	outcome model.Outcome, body string, stageAll bool) (Result, error) {
 
@@ -64,21 +58,9 @@ func Submit(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
 	if err != nil {
 		return Result{}, err
 	}
-	ref, err := reviewref.Update(ctx, repo, cs.Slug, sha)
-	if err != nil {
-		return Result{Commit: sha, Ref: ref}, fmt.Errorf(
-			"review commit %s was created but %s could not be updated: %w", short(sha), ref, err)
-	}
 	files, err := repo.DiffNames(ctx, before, sha)
 	if err != nil {
-		return Result{Commit: sha, Ref: ref}, err
+		return Result{Commit: sha}, err
 	}
-	return Result{Outcome: outcome, Commit: sha, Files: files, Ref: ref}, nil
-}
-
-func short(sha string) string {
-	if len(sha) > 7 {
-		return sha[:7]
-	}
-	return sha
+	return Result{Outcome: outcome, Commit: sha, Files: files}, nil
 }

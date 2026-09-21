@@ -31,22 +31,23 @@ Every failed condition is listed, not the first: a gate that reports one problem
 two-minute fix into two round trips, and a log that explains itself once is the difference between
 a check people read and one they re-run.
 
-The conditions are that the changeset has not ended; that the newest marker is a review whose
-outcome permits integration (` + "`approve`" + `, or ` + "`feedback`" + ` with ` + "`--allow-feedback`" + `); that the
-content that review looked at is still what ` + "`HEAD`" + ` carries; and that the changeset's archive
-ref points at ` + "`HEAD`" + `.
+The conditions are that the changeset has not ended and has not been recorded as landed; that the
+newest marker is a review whose outcome permits integration (` + "`approve`" + `, or ` + "`feedback`" + ` with
+` + "`--allow-feedback`" + `); and that the content that review looked at is still what ` + "`HEAD`" + ` carries.
 
-` + "`check`" + ` is stricter than ` + "`change archive`" + ` about feedback, deliberately. Archiving is
-preservation — non-blocking feedback is still a review of that head, so it may be archived. ` + "`check`" + `
-is the gate, and the repository decides at the gate whether feedback alone is enough to land. An
-author can archive a changeset that ` + "`check`" + ` refuses; the archive is not a claim that the work
-may merge.
+` + "`check`" + ` refuses feedback on its own unless you say otherwise. Non-blocking feedback is still a
+review of a head, so it permits integration in the tool's own terms — but the repository decides at
+the gate whether feedback alone is enough to land, and the default is that it is not.
 
 The assertion is about the commit, not the checkout: uncommitted changes are not in ` + "`HEAD`" + ` and
 cannot invalidate a review of it, so a dirty working tree does not change the answer.
 
 Without ` + "`--changeset`" + `, on purpose: this is the check a forge runs *on* a revision, and naming a
 second changeset would make the verdict ambiguous about what was gated.
+
+Passing the gate is the first of three steps: the gate, then an ordinary git merge or squash into the
+base branch performed by whoever owns it, then ` + "`git pair integration record`" + ` to write the durable
+record. git-pair does the gate and the record and nothing in between.
 
 Exit codes: 0 integration-ready, 1 not ready, 2 usage, 3 git failed.`,
 		Example: `  git pair check
@@ -76,17 +77,12 @@ type checkJSON struct {
 	// State is the derived state, reported beside the verdict rather than as part of it:
 	// `ready` is the answer, `state` is why a reader may want to look further.
 	State string `json:"state"`
-	// Head and Archive are full SHAs, not the short forms the human output prints, because
-	// the consumer of this command compares them against the revision it built.
-	Head    string `json:"head"`
-	Archive string `json:"archive"`
-	// ArchiveCurrent is archive == head. It is spelled out because "the archive exists"
-	// and "the archive names this commit" are different facts, and the second is the one
-	// the gate depends on.
-	ArchiveCurrent bool     `json:"archive_current"`
-	Reasons        []string `json:"reasons"`
-	Policy         string   `json:"policy"`
-	// Integrated says an integration ref exists, and IntegratedAt where its commit sits. Like
+	// Head is the full SHA, not the short form the human output prints, because the consumer of
+	// this command compares it against the revision it built.
+	Head    string   `json:"head"`
+	Reasons []string `json:"reasons"`
+	Policy  string   `json:"policy"`
+	// Integrated says an integration record exists, and IntegratedAt where its commit sits. Like
 	// status's integration fields, they sit beside the verdict rather than changing what `ready`
 	// means: a changeset that has landed is not integration-ready again.
 	Integrated       bool    `json:"integrated"`
@@ -110,22 +106,6 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	if err != nil {
 		return err
 	}
-	archive, err := reviewref.Resolve(ctx, s.repo, s.cs.Slug)
-	if err != nil && !errors.Is(err, reviewref.ErrNoArchiveRef) {
-		return err
-	}
-	// Asked only when the archive is missing, because that is the one case where the answer changes
-	// what the message should say: a changeset nobody has reviewed and a CI clone that was never
-	// given the refs both present as "no archive", and only one of them is fixed by `change ready`
-	// (§24). A run with an archive pays nothing for the question.
-	namespaceAbsent := false
-	if archive == "" {
-		present, err := reviewref.Present(ctx, s.repo)
-		if err != nil {
-			return err
-		}
-		namespaceAbsent = !present
-	}
 	// Reported beside the verdict rather than folded into it: "already integrated" is not the same
 	// fact as "not ready", and a pipeline re-running this gate after its own landing needs to tell
 	// the two apart without matching on the wording of a reason.
@@ -148,13 +128,11 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		Changeset:        s.cs.Slug,
 		State:            string(reviewed.State),
 		Head:             s.head,
-		Archive:          archive,
-		ArchiveCurrent:   archive != "" && archive == s.head,
 		Policy:           policy,
 		Integrated:       landed != "",
 		IntegratedCommit: short(landed),
 		IntegratedAt:     where,
-		Reasons:          integrationReasons(s.cs.Slug, terminal, reviewed, archive, s.head, allowFeedback, where, namespaceAbsent),
+		Reasons:          integrationReasons(s.cs.Slug, terminal, reviewed, s.head, allowFeedback, where),
 	}
 	out.Ready = len(out.Reasons) == 0
 	if out.Reasons == nil {
@@ -178,17 +156,19 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		return errSilent
 	}
 	a.printf("OK: %s is integration-ready\n", s.cs.Slug)
-	a.printf("archive: %s\n", short(archive))
+	// The commit the gate cleared, named on the passing line as well as in --json: a log that says
+	// "ready" without saying what it looked at cannot be re-read after the branch has moved.
+	a.printf("head:  %s\n", short(s.head))
+	a.printf("next:  %s\n", landingNextAction(s.cs.Base))
 	return nil
 }
 
 // integrationReasons lists every reason this changeset is not integration-ready, in the order a
-// reader can act on them: what the reviewers decided, then what moved since they decided it, then
-// where the archive stands.
+// reader can act on them: what the reviewers decided, then what moved since they decided it.
 //
-// It reads the derivation rather than recomputing anything. `status`, `change archive` and this
-// command ask the same questions of the same commits, and a second implementation of "is the
-// reviewed content still here" would be a second answer waiting to disagree with the first.
+// It reads the derivation rather than recomputing anything. `status` and this command ask the same
+// questions of the same commits, and a second implementation of "is the reviewed content still
+// here" would be a second answer waiting to disagree with the first.
 //
 // The surviving-review-additions diagnostic is deliberately absent. Requirements §26 lists it
 // among the readiness conditions, but `change ready` is where that decision is made and
@@ -196,13 +176,13 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 // moved since the marker — re-deriving it would re-litigate a decision the author already took,
 // in a command with no override flag to take it again.
 func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summary,
-	archive, head string, allowFeedback bool, landed landing, namespaceAbsent bool) []string {
+	head string, allowFeedback bool, landed landing) []string {
 	if landed.Commit != "" {
 		// The other early return, and it comes first. Once the record exists the review is over:
-		// drift and archive questions below it describe a changeset still being worked on, which
-		// this one is not. It outranks the abandoned check because an integration ref is a record
-		// that was written, while an abandonment would have had to move a frozen archive to follow
-		// it — which nothing in git-pair can do.
+		// the drift question below it describes a changeset still being worked on, which this one
+		// is not. It outranks the abandoned check because an integration record is a record that
+		// was written, and git-pair writes no marker for a changeset that has landed, so an
+		// abandonment cannot have been recorded after it.
 		return []string{fmt.Sprintf("changeset is already integrated at %s%s", short(landed.Commit), landed.reach())}
 	}
 	if terminal != nil {
@@ -253,23 +233,6 @@ func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summ
 			slug, markerOr(s), strings.Join(s.Drifted, ", ")))
 	}
 
-	switch {
-	case archive == "":
-		if namespaceAbsent {
-			// The distinction §24 asks for. "The review history is not anchored" is true of a
-			// changeset that was never offered; said to a CI job that fetched one branch and no
-			// custom refs, it sends someone to a lifecycle command when the fix is a refspec.
-			reasons = append(reasons, fmt.Sprintf("%s does not exist, and this clone has no %s refs at all: fetch them before trusting this verdict",
-				reviewref.Archive(slug), reviewref.NamespaceRoot()+"/*"))
-		} else {
-			reasons = append(reasons, fmt.Sprintf("%s does not exist: the review history is not anchored",
-				reviewref.Archive(slug)))
-		}
-	case archive != head:
-		reasons = append(reasons, fmt.Sprintf(
-			"archive does not point to the current source commit: %s is at %s, HEAD is %s",
-			reviewref.Archive(slug), short(archive), short(head)))
-	}
 	return reasons
 }
 

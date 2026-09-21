@@ -118,9 +118,9 @@ refs. It does not replace git, your editor, your difftool, or your forge.
 
 Review state lives in the repository: a changeset directory holds ABOUT.md and
 review threads, lifecycle markers are commits carrying Review-* trailers, and
-refs/git-pair/changesets/* keeps the complete unsquashed history reachable.
+and refs/git-pair/* holds the two durable refs written when a changeset lands.
 
-Author commands:   git pair change init | use | ready | unready | abandon | archive
+Author commands:   git pair change init | use | ready | unready | abandon
 Reviewer commands: git pair review open | about | thread | submit | history | queue
 Inspection:        git pair status | diff
 Gates:             git pair check`,
@@ -250,12 +250,12 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 		}
 	}
 	if len(branches) == 0 {
-		// No branch carries the slug. The anchor is the last place its history can be
-		// read, and for a changeset that ended or landed that is exactly what a reader is
-		// asking about. Deriving from the anchor can only report what the branch claimed
-		// before it disappeared, which is why it is a fallback and not a second source of
-		// state (PRD §12).
-		anchor, err := reviewref.Resolve(ctx, repo, slug)
+		// No branch carries the slug, so the durable pair is the only place its history can be
+		// read — which is exactly what a reader asking about a landed changeset wants. For a
+		// changeset that never landed there is nothing to read: the branch was the record, and it
+		// is gone. Deriving from the archive can only report what the branch claimed before it
+		// disappeared, which is why it is a fallback and not a second source of state (PRD §12).
+		anchor, err := reviewref.ResolveArchive(ctx, repo, slug)
 		if errors.Is(err, reviewref.ErrNoArchiveRef) {
 			return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
 				fmt.Errorf("no branch carries changeset %q; `git pair review queue` lists what this repository has", slug)}
@@ -267,7 +267,7 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 		if err != nil {
 			if errors.Is(err, git.ErrUnknownPath) {
 				return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
-					fmt.Errorf("changeset %q is anchored at %s but carries no %s", slug, short(anchor), changeset.MetadataFile)}
+					fmt.Errorf("changeset %q is recorded at %s but carries no %s", slug, short(anchor), changeset.MetadataFile)}
 			}
 			return changeset.Changeset{}, lifecycle.Summary{}, "", err
 		}

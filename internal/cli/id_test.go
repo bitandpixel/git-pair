@@ -70,23 +70,39 @@ func TestChangeInitAdoptsTheDirectoryItInherits(t *testing.T) {
 	}
 }
 
-// A ref outlives its branch, so a name whose refs exist is spoken for even with no
-// directory anywhere. Matching must be exact: `booking-transaction` may not be blocked by
+// A durable ref outlives its branch, so a name one of the two families holds is spoken for even with
+// no directory anywhere. Matching is on the two exact paths, so `booking-transaction` is not blocked by
 // `booking-transaction-v2`, which shares its prefix.
+//
+// The two families block equally: a changeset with only an archive ref is a record half-written, and
+// handing its id to a new changeset would strand that chain on a stranger's work.
 func TestChangeInitRefusesAnIDItsRefsAlreadyUse(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
-	f.MustGit("update-ref", "refs/git-pair/changesets/booking-transaction-v2/archive", f.Head())
+	f.MustGit("update-ref", "refs/git-pair/integrations/booking-transaction-v2", f.Head())
+	// A ref from the retired `refs/git-pair/changesets/<id>/archive` layout reserves nothing: its id
+	// is not readable as a component of either family, so treating it as a claim would block names
+	// that no longer belong to anything.
+	f.MustGit("update-ref", "refs/git-pair/changesets/legacy/archive", f.Head())
 
 	runIn(t, f.Dir(), "change", "init", "--id", "booking-transaction", "--base", "main").
 		mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "change", "init", "--id", "legacy", "--base", "main").mustSucceed(t, "change", "init")
 
 	f.CreateBranch("second")
 	r := runIn(t, f.Dir(), "change", "init", "--id", "booking-transaction-v2", "--base", "main")
 	if r.code != exitUsage {
-		t.Fatalf("reusing a name with refs exited %d, want %d\nstderr: %s", r.code, exitUsage, r.stderr)
+		t.Fatalf("reusing a name with a record exited %d, want %d\nstderr: %s", r.code, exitUsage, r.stderr)
 	}
 	mustContain(t, r.stderr, "refs already exist", "the refusal must say what holds the name")
+
+	// The other family the same way.
+	f.CreateBranch("third")
+	f.MustGit("update-ref", "refs/git-pair/archive/half-written", f.Head())
+	r = runIn(t, f.Dir(), "change", "init", "--id", "half-written", "--base", "main")
+	if r.code != exitUsage {
+		t.Errorf("reusing a name with an archive ref only exited %d, want %d\nstderr: %s", r.code, exitUsage, r.stderr)
+	}
 }
 
 // A branch may hold more than one changeset — that is what a stacked branch that starts its

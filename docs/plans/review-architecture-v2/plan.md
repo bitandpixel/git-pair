@@ -148,7 +148,7 @@ repository. Deferred with the anchors unless a concrete need appears during impl
 
 ## Milestones
 
-### M1 — Ref substrate: two frozen families
+### M1 — Ref substrate: two frozen families — **done 2026-09-21**
 
 **Deliverables**
 
@@ -160,30 +160,68 @@ repository. Deferred with the anchors unless a concrete need appears during impl
 
 **Tasks**
 
-- Split `internal/reviewref` into the two flat families. Delete `Update`, `ErrArchiveFrozen`,
+- [x] Split `internal/reviewref` into the two flat families. Delete `Update`, `ErrArchiveFrozen`,
   `RefuseIntegrated`, `Namespace`, the `<id>/<child>` parser in `ChangesetID`, and the leaf/namespace
   comment block that only the old nesting needed (`reviewref.go:15`, `:106-125`).
-- Make create-only tolerant of an identical re-create: same target is a no-op, different target is the
-  refusal. `CreateRefIfAbsent` (`reviewref.go:195`) is the shared primitive.
-- Delete the write sites: `change.go:547` (ready), `:675` (unready), `:785` (abandon), `:990` (archive),
-  `reviewops.go:67` (submit).
-- Delete `change archive` (`newChangeArchiveCommand`, `change.go:859`) and move its two gates — surviving additions and
+  `RefuseIntegrated` moved rather than disappeared: the refusal of a recorded changeset belongs with the
+  thing that writes markers, so it is exported from `internal/marker` and called by `Commit`/`CommitPaths`
+  and by the three `change` commands before their no-op paths. `Taken` checks the two exact paths, so a
+  nested legacy name reserves nothing.
+- [x] Make create-only tolerant of an identical re-create: same target is a no-op, different target is the
+  refusal. `CreateRefIfAbsent` (`reviewref.go:195`) is the shared primitive — and it lives in
+  `internal/git` now, as the atomic `update-ref <ref> <sha> <zero-oid>`, because that is the layer that
+  owns git invocations. `reviewref.CreateOnly` and `CreatePair` are its two callers.
+- [x] Delete the write sites: `change.go:547` (ready), `:675` (unready), `:785` (abandon), `:990` (archive),
+  `reviewops.go:67` (submit). `git.UpdateRef` is deleted too, so there is no API left that could move a
+  ref; the hygiene test asserts one `update-ref` in shipped code and that its old-value is the zero oid.
+- [x] Delete `change archive` (`newChangeArchiveCommand`, `change.go:859`) and move its two gates — surviving additions and
   drift — behind the `check` path that already runs them; its squash-safety output moves to M5.
-- Point `Present`, `Taken`, `FetchRefspec` and `FetchCommand` at `refs/git-pair`; return both families from
-  `List` in the single existing `for-each-ref` pass.
-- Replace the state reads in `candidateFor` (`resolve.go:388-401`, `:485`): candidate ordering and
-  terminality come from the markers on the branch, not from a ref tip.
-- Rewrite `e2e-29.sh`, `pty-walkthrough.sh`, the `gittest` fixtures, and PRD §3, §9.5-§9.7, §12, §13 and
+- [x] Point `Present`, `Taken`, `FetchRefspec` and `FetchCommand` at `refs/git-pair`; return both families from
+  `List` in the single existing `for-each-ref` pass. `FetchRefspec` carries no `+`, because a fetch that can
+  clobber a create-only ref is a way around the rule.
+- [x] Replace the state reads in `candidateFor` (`resolve.go:388-401`, `:485`): candidate ordering and
+  terminality come from the markers on the branch, not from a ref tip. Ordering is the newest commit
+  touching `changesets/<id>/`, computed only when two candidates survive; `Candidate` lost `Review` and
+  `Terminal`.
+- [x] Rewrite `e2e-29.sh`, `pty-walkthrough.sh`, the `gittest` fixtures, and PRD §3, §9.5-§9.7, §12, §13 and
   README's Quickstart transcript, which currently prints an archive-ref line.
+
+**What landed differently**
+
+- `change archive`'s squash-safety output is retired, not moved to M5: the claim was "the archive is at
+  `HEAD`, so a squash loses nothing", and with no pre-landing ref there is nothing left to compare `HEAD`
+  against. M5 keeps the fetch guidance and next-action wording.
+- Part of M3 came forward: `integration record` derives the changeset from content (the directories
+  `--source` carries and trunk does not) and writes **both** refs. With `change archive` gone there was no
+  other write point for the archive family, and discovery-by-archive-ref would have kept a ref written
+  during review alive. M3 keeps its verification checks and the flagless local flow.
+- `check --json` lost `archive` and `archive_current` here rather than in M2/M3 — keeping the keys would
+  mean reporting a ref that no longer exists — and `check` no longer reads the archive family at all.
+- Fetch guidance moved to the commands that read the namespace: `integration record` warns and records
+  anyway (its candidate rule reads trees), `review queue` stays silent, and `check` says nothing about
+  refs. §13.4 says which silence is the one to be careful with.
+- PRD and README moved further than the listed sections, because both named the old refs in §4, §8, §9.2,
+  §9.8, §10.4, §10.6, §11.1, §11.3, §11.4, §19.3, §21, §22, §25, §26 and §29 (PRD) and in Concepts, the
+  command table, the JSON contracts and Troubleshooting (README). §9.5 was repurposed as "Handing the work
+  on" rather than deleted, so §9.6-§9.8 keep their numbers and their cross-references.
+- `e2e-29.sh` was extended rather than rewritten — it now covers both refs, the idempotent re-record, the
+  conflicting-record refusal, and the four commands that refuse a recorded changeset.
+  `pty-walkthrough.sh` needed no change: the ref it moves mid-session is a branch, not a git-pair ref.
+- The TUI holds no archive ref at all now (`Session.archiveRef` and `ArchiveRef()` are gone), so its
+  vanished-commit tolerance is exercised only by the existing span tests
+  (`TestStepSpanSkipsAStopThatNoLongerResolves` and friends) and by the walkthrough's branch-drift
+  scenario. M2's task to rewrite `session.go`'s rewrite-tolerance comment is still open.
 
 **Verification**
 
-- `mise run check`.
-- New unit tests: create-only idempotency, conflicting re-create refusal, `Taken` across both families.
-- Integration tests asserting that `change ready`, `change unready`, `change abandon` and `review submit`
-  leave `refs/git-pair/*` empty — one test per command, so a future write site fails a named test.
-- The TUI passes `pty-walkthrough.sh`, and the session code that tolerates vanished commits
-  (`tui/session.go:242`) is exercised with a branch whose ref is gone.
+- [x] `mise run check`.
+- [x] New unit tests: create-only idempotency, conflicting re-create refusal, `Taken` across both families.
+- [x] Integration tests asserting that `change ready`, `change unready`, `change abandon` and `review submit`
+  leave `refs/git-pair/*` empty — one test per command, so a future write site fails a named test
+  (`internal/cli/in_flight_refs_test.go`).
+- [x] The TUI passes `pty-walkthrough.sh`. M1 removed the TUI's only git-pair ref, so the session code
+  that tolerates vanished commits (`tui/session.go:242`) is exercised by the branch-drift scenario and the
+  existing span tests rather than a new one; its comment is M2's to rewrite.
 
 ### M2 — `Review-Head` and the rebase rule
 

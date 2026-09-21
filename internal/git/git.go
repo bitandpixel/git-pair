@@ -524,30 +524,48 @@ func (r *Repo) ResolveRef(ctx context.Context, ref string) (string, error) {
 	return r.RevParse(ctx, ref)
 }
 
-// UpdateRef points ref at sha.
-func (r *Repo) UpdateRef(ctx context.Context, ref, sha string) error {
-	_, err := r.Git(ctx, "update-ref", ref, sha)
-	return err
-}
+// zeroOID is git's null object id, which is what `update-ref` accepts as an old value meaning "this
+// ref must not exist yet".
+const zeroOID = "0000000000000000000000000000000000000000"
 
-// CreateRefIfAbsent points ref at sha only when ref does not already exist.
-// It reports whether the ref was created by this call.
+// ErrRefTaken reports that a create-only ref write found the name already held by a different
+// commit. It is a condition rather than a failure of git, so the caller can turn it into its own
+// refusal with its own wording.
+var ErrRefTaken = errors.New("ref already exists at a different commit")
+
+// CreateRefIfAbsent points ref at sha only when ref does not already exist. It reports whether the
+// ref was created by this call.
 //
-// It has no production caller since the archive ref became a single movable ref rather than an
-// immutable one written per archived head — moving a ref that already exists is the same call as
-// creating it. It stays because "record this once and never again" is a real need (M4's integration
-// record is the candidate) and because its unit tests pin the distinction between *absent* and
-// *git broke*, which `ResolveRef` alone cannot give.
+// The create is atomic at the git level: `update-ref <ref> <new> <old>` with the all-zeros old value
+// fails if the ref has come into existence, so two processes recording the same fact cannot both win,
+// and the caller's "did it already exist?" answer is git's rather than a read that could go stale
+// between checking and writing. A refusal is re-read, because the only reason a ref that was absent a
+// moment ago is now present is that somebody else won: the same target is a no-op success, and a
+// different one is ErrRefTaken naming both commits — "what is on the record, and what did I ask for"
+// is the question a re-run is actually asking.
 func (r *Repo) CreateRefIfAbsent(ctx context.Context, ref, sha string) (bool, error) {
-	if _, err := r.ResolveRef(ctx, ref); err == nil {
-		return false, nil
-	} else if !errors.Is(err, ErrUnknownRevision) {
-		return false, err
-	}
-	if err := r.UpdateRef(ctx, ref, sha); err != nil {
-		return false, err
+	if _, err := r.Git(ctx, "update-ref", ref, sha, zeroOID); err != nil {
+		existing, readErr := r.ResolveRef(ctx, ref)
+		if readErr != nil {
+			// Either the ref is gone by the time we looked, or the write failed for a reason that has
+			// nothing to do with ownership: report what git said.
+			return false, err
+		}
+		if existing == sha {
+			return false, nil // the same writer, or a retry of it
+		}
+		return false, fmt.Errorf("%w: %s names %s, and %s was asked for",
+			ErrRefTaken, ref, short(existing), short(sha))
 	}
 	return true, nil
+}
+
+// short abbreviates a commit sha the way git's own messages do, for text a human reads.
+func short(sha string) string {
+	if len(sha) < 7 {
+		return sha
+	}
+	return sha[:7]
 }
 
 // RefEntry is one line of `git for-each-ref` output.

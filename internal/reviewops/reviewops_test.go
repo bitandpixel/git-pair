@@ -11,7 +11,6 @@ import (
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 	"gitpair/internal/reviewops"
-	"gitpair/internal/reviewref"
 )
 
 const slug = "booking-transaction"
@@ -89,11 +88,12 @@ func TestSubmitCreatesStandardizedReviewCommitAndMovesRef(t *testing.T) {
 	if trailers["Review-Changeset"] != slug {
 		t.Errorf("Review-Changeset = %q, want %q", trailers["Review-Changeset"], slug)
 	}
-	if got := e.f.RefSHA("refs/git-pair/changesets/" + slug + "/archive"); got != result.Commit {
-		t.Errorf("refs/git-pair/changesets/%s/archive points at %s, want the review commit %s", slug, got, result.Commit)
-	}
-	if result.Ref != "refs/git-pair/changesets/"+slug+"/archive" {
-		t.Errorf("Ref = %q, want refs/git-pair/changesets/%s/archive", result.Ref, slug)
+	// The submission is the commit and nothing else. PRD §10.4 used to add "immediately after a
+	// successful submission, update the changeset's review archive ref to the resulting exact HEAD" —
+	// a pointer four commands had to keep pointing at HEAD, and the durable refs are now written once,
+	// at landing. There is no ref for a submission to report.
+	if refs := e.f.RefNames("refs/git-pair"); len(refs) != 0 {
+		t.Errorf("Submit wrote %v for %s; the review is the commit with the trailers", refs, slug)
 	}
 	// The reviewer's direct edit is part of the review (PRD §20).
 	if len(result.Files) != 1 || result.Files[0] != "service.go" {
@@ -129,8 +129,9 @@ func TestSubmitApproveOnCleanTreeCreatesEmptyReviewCommit(t *testing.T) {
 	if got := e.f.Subject(result.Commit); got != "review: approve "+slug {
 		t.Errorf("subject = %q", got)
 	}
-	if got := e.f.RefSHA("refs/git-pair/changesets/" + slug + "/archive"); got != result.Commit {
-		t.Errorf("review ref = %s, want the empty approval %s", got, result.Commit)
+	// The empty approval is a commit and nothing more — no ref accompanies it.
+	if refs := e.f.RefNames("refs/git-pair"); refs != nil {
+		t.Errorf("an empty approval wrote %v", refs)
 	}
 	// The empty approval is still a lifecycle marker: the effective state is APPROVED.
 	if got := e.summary(t).State; got != model.StateApproved {
@@ -173,29 +174,17 @@ func TestSubmitRejectsInvalidOutcome(t *testing.T) {
 	}
 }
 
-// Review submission moves the archive: requirements §10 says a submission updates the
-// archive ref to the resulting commit, so a reviewer speaking against an archived head
-// advances it rather than leaving it behind. What must not happen is losing the head that was
-// archived — it is an ancestor of the new one.
-func TestSubmitAdvancesTheArchiveItWasGiven(t *testing.T) {
+// What a submission must never do is write a durable ref. The test this replaced asserted the
+// submission advanced the archive ref it was handed; the property worth keeping from it is the one it
+// was really protecting — that a submission does not lose history — and that falls out of the commit
+// being an ordinary child of HEAD on the branch, asserted above.
+func TestSubmitWritesNoRef(t *testing.T) {
 	e := newEnv(t)
-	head := e.f.Head()
-	ref := "refs/git-pair/changesets/" + slug + "/archive"
-	if _, err := reviewref.Update(context.Background(), e.repo, e.cs.Slug, head); err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-
 	e.f.Write("service.go", "package main\n\n// Please use a transaction here\nfunc Lock() {}\n")
-	result := e.submit(t, model.OutcomeBlock, "", true)
+	e.submit(t, model.OutcomeBlock, "", true)
 
-	if result.Commit == head {
-		t.Error("the submission recorded no commit")
-	}
-	if got := e.f.RefSHA(ref); got != result.Commit {
-		t.Errorf("archive ref = %s, want the new review %s", got, result.Commit)
-	}
-	if !e.f.ReachableFrom(head, ref) {
-		t.Errorf("the previously archived head %s is no longer reachable from the archive", head)
+	if refs := e.f.RefNames("refs/git-pair"); refs != nil {
+		t.Errorf("a review submission wrote %v; the refs belong to landing", refs)
 	}
 }
 
@@ -232,8 +221,9 @@ func TestSubmitRequiresCommits(t *testing.T) {
 	}
 }
 
-// Two submissions in a row must both stay reachable: each moves the ref, so the
-// first review's commit is an ancestor of the second rather than garbage.
+// Two submissions in a row must both stay reachable. They are commits on the branch, so each is an
+// ancestor of the next; keeping the older one readable after the branch is gone is the record's job at
+// landing, not a ref's job during review.
 func TestSubmitKeepsEarlierReviewsReachable(t *testing.T) {
 	e := newEnv(t)
 
@@ -244,10 +234,7 @@ func TestSubmitKeepsEarlierReviewsReachable(t *testing.T) {
 	if !e.f.ReachableFrom(first.Commit, second.Commit) {
 		t.Error("the first review is not an ancestor of the second")
 	}
-	if got := e.f.RefSHA("refs/git-pair/changesets/" + slug + "/archive"); got != second.Commit {
-		t.Errorf("review ref = %s, want the newest review %s", got, second.Commit)
-	}
-	if !e.f.ReachableFrom(first.Commit, "refs/git-pair/changesets/"+slug+"/archive") {
-		t.Error("the first review is not reachable from the review ref (PRD §13)")
+	if refs := e.f.RefNames("refs/git-pair"); refs != nil {
+		t.Errorf("two submissions wrote %v; the chain is the branch, until it is the record", refs)
 	}
 }

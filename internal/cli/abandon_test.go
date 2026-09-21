@@ -2,16 +2,21 @@ package cli_test
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gitpair/internal/gittest"
 )
 
-// Abandoning is the one ending git-pair can record for itself. Completion means "merged",
-// which only the deployment branch knows; abandoning means "not coming back", which the
-// author knows the moment they decide it. The record has to outlive the branch, because
-// the branch is what gets deleted next.
-func TestChangeAbandonRecordsATerminalMarkerAndAnchorsIt(t *testing.T) {
+// Abandoning is the one ending git-pair can record for itself. Completion means "landed", which only
+// the person doing the landing knows; abandoning means "not coming back", which the author knows the
+// moment they decide it.
+//
+// The ending is a marker commit and nothing more. It used to also move the archive ref onto itself so
+// the ending would outlive the branch — which meant an abandoned changeset had durable refs, while a
+// completed one got its refs from the landing that actually proved something. Now a record exists only
+// for work that landed, and the abandoned changeset's history is its branch.
+func TestChangeAbandonRecordsATerminalMarker(t *testing.T) {
 	f, slug := newChangeset(t, "booking", "main")
 	ready(t, f)
 
@@ -36,8 +41,10 @@ func TestChangeAbandonRecordsATerminalMarkerAndAnchorsIt(t *testing.T) {
 	if got := f.Trailers(sha)["Review-State"]; got != "abandoned" {
 		t.Errorf("Review-State = %q, want abandoned", got)
 	}
-	if got := f.RefSHA(archiveRef(slug)); got != sha {
-		t.Errorf("%s = %s, want the terminal marker %s", archiveRef(slug), got, sha)
+	// Nothing durable is written. `slug` is in scope precisely so this fails if a future change
+	// decides an ending deserves a ref of its own.
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Errorf("`change abandon` wrote %v for %s; an abandoned changeset has nothing to record", got, slug)
 	}
 
 	status := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status").json(t)
@@ -54,9 +61,15 @@ func TestChangeAbandonRecordsATerminalMarkerAndAnchorsIt(t *testing.T) {
 	mustContain(t, human.stdout, "abandoned by "+f.Short(sha), "the human output must name the ending")
 }
 
-// The anchor is the point. Once the branch is gone the queue has to stop talking about the
-// changeset entirely, and `status` still has to be able to say how it ended.
-func TestChangeAbandonOutlivesTheBranch(t *testing.T) {
+// The consequence of writing no ref, stated as a test: when the branch goes, the abandoned
+// changeset's history goes with it. The queue is silent (there is no branch, and the directory is not
+// on trunk), and `status` has nothing left to read — no anchor to fall back on, because the only
+// durable refs git-pair writes are the ones landing records for work that arrived somewhere.
+//
+// This is a real loss, and it is the one the design accepts rather than prevent: an abandoned
+// changeset is work nobody is going to land, and the alternative was a ref maintained by four
+// commands to hold the history of changesets that were never finished.
+func TestChangeAbandonHistoryGoesWithTheBranch(t *testing.T) {
 	f, slug := newChangeset(t, "booking", "main")
 	ready(t, f)
 	runIn(t, f.Dir(), "change", "abandon").mustSucceed(t, "change", "abandon")
@@ -68,23 +81,14 @@ func TestChangeAbandonOutlivesTheBranch(t *testing.T) {
 	if queueListsChangeset(t, queue, slug) {
 		t.Errorf("an abandoned changeset is in the queue:\n%s", queue.stdout)
 	}
-	if skipped := queue.json(t)["skipped"]; skipped != nil {
-		t.Errorf("skipped = %v, want silence about a changeset that ended on purpose", skipped)
-	}
 
-	status := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").mustSucceed(t, "status").json(t)
-	if status["abandoned"] != true {
-		t.Errorf("abandoned = %v, want true, read from the anchor: %v", status["abandoned"], status)
+	res := runIn(t, f.Dir(), "status", "--changeset", slug)
+	if res.code == 0 {
+		t.Fatalf("status read a changeset whose branch and record are both gone:\n%s", res.stdout)
 	}
-	if status["branch"] != "" {
-		t.Errorf("branch = %v, want empty: there is no branch to name", status["branch"])
-	}
-	if status["state"] != "WORKING" {
-		t.Errorf("state = %v, want WORKING", status["state"])
-	}
-	human := runIn(t, f.Dir(), "status", "--changeset", slug).mustSucceed(t, "status")
-	mustContain(t, human.stdout, "Branch: none (read from the review anchor)",
-		"a branchless read must say so rather than print an empty branch")
+	mustContain(t, res.stderr, slug, "the refusal names the changeset it could not resolve")
+	mustNotContain(t, res.stderr, "abandoned by",
+		"and it does not claim an ending it can no longer see")
 }
 
 // The queue reads a directory left on the deployment branch, and a directory whose
@@ -111,11 +115,11 @@ func TestReviewQueueIsSilentAboutAnAbandonedChangesetDirectoryLeftBehind(t *test
 	}
 }
 
-// A terminal changeset cannot be restarted by the commands that move state. This is also
-// the guard against a branch reusing the name of a changeset that ended: the fresh branch
-// carries no markers, and only the anchor still knows how the last one finished.
+// A terminal changeset cannot be restarted by the commands that move state. The refusal is a reading
+// of the branch's own commits: the marker that ended the changeset is in the range the commands
+// derive from, and there is no ref involved to be missing, unfetched, or stale.
 func TestWriteCommandsRefuseAnAbandonedChangeset(t *testing.T) {
-	f, slug := newChangeset(t, "booking", "main")
+	f, _ := newChangeset(t, "booking", "main")
 	ready(t, f)
 	res := runIn(t, f.Dir(), "change", "abandon", "--json").mustSucceed(t, "change", "abandon")
 	at := f.Short(res.json(t)["abandoned_commit"].(string))
@@ -124,10 +128,6 @@ func TestWriteCommandsRefuseAnAbandonedChangeset(t *testing.T) {
 		{"change", "ready"},
 		{"change", "unready"},
 		{"review", "submit", "--approve"},
-		// Archiving reports squash-safety, so it must not report it for a changeset
-		// that will never be taken forward — even though abandoning left the archive
-		// sitting exactly on HEAD.
-		{"change", "archive"},
 	} {
 		r := runIn(t, f.Dir(), args...)
 		if r.code != exitRefusal {
@@ -143,22 +143,22 @@ func TestWriteCommandsRefuseAnAbandonedChangeset(t *testing.T) {
 		t.Errorf("a refused write still committed: head is %s, want %v", f.Head(), res.json(t)["abandoned_commit"])
 	}
 
-	// The branch is the primary source and the anchor the fallback, not the reverse:
-	// a review ref is an anchor, not a guarantee (PRD §13), so a repository that lost
-	// it must still refuse to restart a changeset whose branch says it ended.
-	f.MustGit("update-ref", "-d", archiveRef(slug))
-	r := runIn(t, f.Dir(), "change", "ready")
-	if r.code != exitRefusal {
-		t.Errorf("`change ready` with the review ref gone exited %d, want %d\nstderr: %s",
-			r.code, exitRefusal, r.stderr)
+	// The branch is the whole source of the ending. There is no anchor to lose, which is what makes
+	// the refusal above a reading of the commits rather than a reading of a ref somebody might have
+	// failed to fetch.
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Errorf("refused writes left durable refs behind: %v", got)
 	}
-	mustContain(t, r.stderr, "was abandoned by "+at,
-		"the refusal must come from the branch when the anchor is gone")
 }
 
-// The anchor is consulted as well as the branch, which is what makes a recreated slug
-// refuse instead of starting a clean-looking changeset over a name that already ended.
-func TestAbandonedSlugCannotBeReopenedOnARecreatedBranch(t *testing.T) {
+// The other half of accepting the loss: with the branch gone there is nothing left to consult, so a
+// branch that takes the slug again starts clean. `change init` still refuses to hand out the name
+// while a record exists — records only exist for changesets that landed — and the marker-derived
+// refusal above only lives as long as the branch that carries it.
+//
+// Asserted as a passing `change ready` rather than as an absence, so the day a record for abandoned
+// work is added, this test is the one that has to change and say why.
+func TestAbandonedSlugIsReusableOnceTheBranchIsGone(t *testing.T) {
 	f, slug := newChangeset(t, "booking", "main")
 	ready(t, f)
 	runIn(t, f.Dir(), "change", "abandon").mustSucceed(t, "change", "abandon")
@@ -170,10 +170,10 @@ func TestAbandonedSlugCannotBeReopenedOnARecreatedBranch(t *testing.T) {
 	f.Commit("implement the new attempt", gittest.WithFile("service.go", "package main\n\nfunc Lock() {}\n"))
 
 	r := runIn(t, f.Dir(), "change", "ready")
-	if r.code != exitRefusal {
-		t.Fatalf("`change ready` on a recreated slug exited %d, want %d\nstdout: %s", r.code, exitRefusal, r.stdout)
+	r.mustSucceed(t, "change", "ready")
+	if action := f.Subject(f.Head()); !strings.Contains(action, "ready") {
+		t.Errorf("HEAD is %q, want the ready marker: the new attempt is a fresh changeset", action)
 	}
-	mustContain(t, r.stderr, "was abandoned by", "the refusal must come from the anchored record")
 }
 
 // Re-running is not an error and must not stack a second marker, so a script can abandon

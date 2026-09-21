@@ -34,10 +34,6 @@ func resolveAt(t *testing.T, f *gittest.Fixture, rev string) changeset.Resolutio
 	return got
 }
 
-func reviewRef(f *gittest.Fixture, id, sha string) {
-	f.MustGit("update-ref", reviewref.Archive(id), sha)
-}
-
 func selectedID(got changeset.Resolution) string {
 	if got.Selected == nil {
 		return ""
@@ -53,26 +49,29 @@ func candidateIDs(got changeset.Resolution) []string {
 	return ids
 }
 
-func TestResolveStackedPicksTheNearest(t *testing.T) {
+// Two changesets on one branch, and nothing in the metadata ordering them: the branch's own
+// history decides, by the newest commit that touched each changeset's directory. This is the
+// reading the archive-ref distance used to provide, and it is the only one that works in a fresh
+// clone — where there are no refs to measure against, and never any more will be while the work is
+// in flight.
+func TestResolveOrdersTwoChangesetsByWhatTheBranchLastTouched(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
 
 	f.CreateBranch("booking")
-	parent := f.CommitChangeset("booking", "main")
-	reviewRef(f, "booking", parent)
-
-	f.CreateBranch("booking-tests")
-	child := f.CommitChangeset("booking-tests", "refs/git-pair/changesets/booking/archive")
-	reviewRef(f, "booking-tests", child)
-	f.Commit("more tests", gittest.WithFile("booking_test.txt", "1\n"))
+	f.CommitChangeset("booking", "main")
+	f.Commit("booking work", gittest.WithFile("booking.txt", "1\n"))
+	// A second changeset claimed on the same branch, and then worked on. Neither names the other,
+	// so only the branch's own history can say which is live.
+	f.CommitChangeset("booking-tests", "main")
+	f.Commit("test work", gittest.WithFile("booking_test.txt", "1\n"))
 
 	if got := resolveAt(t, f, "HEAD"); selectedID(got) != "booking-tests" {
-		t.Errorf("on the child branch selected %q, want booking-tests (nearest review ref)", selectedID(got))
+		t.Errorf("on the branch selected %q from %v, want booking-tests: its directory is what this branch touched last",
+			selectedID(got), candidateIDs(got))
 	}
-
-	f.SwitchTo("booking")
-	if got := resolveAt(t, f, "HEAD"); selectedID(got) != "booking" {
-		t.Errorf("on the parent branch selected %q, want booking", selectedID(got))
+	if got := resolveAt(t, f, "HEAD"); got.Selected.Distance >= got.Candidates[1].Distance {
+		t.Errorf("distances %v do not put booking-tests first", distances(got))
 	}
 }
 
@@ -125,7 +124,7 @@ func TestResolveChildOfLandedParent(t *testing.T) {
 	f.CommitChangeset("booking", "main")
 	f.Commit("booking work", gittest.WithFile("booking.txt", "1\n"))
 	f.CreateBranch("booking-tests")
-	f.CommitChangeset("booking-tests", "refs/git-pair/changesets/booking/archive")
+	f.CommitChangeset("booking-tests", "booking")
 	f.Commit("test work", gittest.WithFile("booking_test.txt", "1\n"))
 
 	f.SwitchTo("main")
@@ -138,8 +137,9 @@ func TestResolveChildOfLandedParent(t *testing.T) {
 	}
 }
 
-// Resolution reads trees, so a repository with no git-pair refs at all still answers. This is
-// the CI shape: a checkout of the branch and of the integration branch, nothing else fetched.
+// Resolution reads trees, so a repository with no git-pair refs at all still answers. That is the
+// ordinary shape now rather than a degenerate one: nothing writes a ref until a changeset lands, so
+// every branch in a young repository resolves with the namespace empty.
 func TestResolveWithoutAnyRefs(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
@@ -147,7 +147,7 @@ func TestResolveWithoutAnyRefs(t *testing.T) {
 	f.CommitChangeset("booking", "main")
 	f.Commit("work", gittest.WithFile("booking.txt", "1\n"))
 
-	if refs := f.RefNames(reviewref.NamespaceRoot()); len(refs) != 0 {
+	if refs := f.RefNames(reviewref.NamespaceRoot); len(refs) != 0 {
 		t.Fatalf("fixture should hold no git-pair refs, got %v", refs)
 	}
 	if got := resolveAt(t, f, "HEAD"); selectedID(got) != "booking" {
@@ -187,8 +187,9 @@ func TestResolveSiblingMergeIsAmbiguousUntilRecorded(t *testing.T) {
 	}
 }
 
-// Two unarchived candidates have no distance between them, so the stack order comes from the
-// metadata: the candidate named as another's base is the parent.
+// The stack order comes from the metadata before it comes from any measurement: the candidate named
+// as another's base is its parent, and a parent's directory sitting in a child's tree is not the work
+// in hand.
 func TestResolveOrdersAStackWithoutRefs(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
@@ -196,7 +197,7 @@ func TestResolveOrdersAStackWithoutRefs(t *testing.T) {
 	f.CommitChangeset("booking", "main")
 	f.Commit("booking work", gittest.WithFile("booking.txt", "1\n"))
 	f.CreateBranch("booking-tests")
-	f.CommitChangeset("booking-tests", "refs/git-pair/changesets/booking/archive")
+	f.CommitChangeset("booking-tests", "booking")
 	f.Commit("test work", gittest.WithFile("booking_test.txt", "1\n"))
 
 	got := resolveAt(t, f, "HEAD")
@@ -205,37 +206,11 @@ func TestResolveOrdersAStackWithoutRefs(t *testing.T) {
 	}
 }
 
-// `change abandon` leaves the directory in the tree, and the branch really is that changeset's
-// branch. Reporting the candidate with its terminal fact beats saying "no changeset here",
-// which would send the author to `change init` against a directory that is still there.
-func TestResolveReportsATerminalCandidate(t *testing.T) {
-	f := gittest.New(t)
-	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
-	f.CreateBranch("booking")
-	init := f.CommitChangeset("booking", "main")
-	f.CommitReadyMarker("booking")
-	end := f.CommitMessage("git-pair: abandon booking\n\nReview-State: abandoned\n", gittest.WithEmpty())
-	reviewRef(f, "booking", end)
-
-	got := resolveAt(t, f, "HEAD")
-	if got.Selected == nil {
-		t.Fatal("selected nothing, want the abandoned changeset reported")
-	}
-	if !got.Selected.Terminal {
-		t.Errorf("Terminal = false for a changeset abandoned at %s, want true", f.Short(end))
-	}
-	if got.Selected.Review != f.RevParse(end) {
-		t.Errorf("Review = %s, want %s", got.Selected.Review, f.RevParse(end))
-	}
-	_ = init
-}
-
 func TestResolveDeletedDirectoryHasNoCandidate(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
 	f.CreateBranch("booking")
-	init := f.CommitChangeset("booking", "main")
-	reviewRef(f, "booking", init)
+	f.CommitChangeset("booking", "main")
 	f.Commit("work", gittest.WithFile("booking.txt", "1\n"))
 	f.MustGit("rm", "-r", "-q", "--", "changesets/booking")
 	f.Commit("drop the directory", gittest.WithNoStage())
@@ -289,10 +264,11 @@ func TestResolvePruningTheIntegrationBranch(t *testing.T) {
 	}
 }
 
-// A base recorded as the parent's archive ref and one recorded as a branch name mean the same
-// parent, so dropping the parent from the candidate set must not depend on the spelling.
+// A base recorded as the parent's changeset id and one recorded as the branch carrying it mean the
+// same parent, so dropping the parent from the candidate set must not depend on the spelling. A ref
+// path is not a base spelling: it named a pointer that no longer exists while the work is in flight.
 func TestResolveBaseSpelling(t *testing.T) {
-	for _, base := range []string{"booking", "refs/heads/booking", "refs/git-pair/changesets/booking/archive"} {
+	for _, base := range []string{"booking", "refs/heads/booking"} {
 		t.Run(base, func(t *testing.T) {
 			f := gittest.New(t)
 			f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
@@ -327,87 +303,91 @@ func TestResolveMutualIgnoresKeepsBothCandidates(t *testing.T) {
 	}
 }
 
-// Nearest review ref wins. The stacked test above is decided by the base naming its parent, so
-// this one deliberately stacks on trunk: with nothing in the metadata ordering the two, the
-// distances have to, and the child is the nearer.
-func TestResolveNearestRefDecidesWhenNothingElseDoes(t *testing.T) {
+// The branch's own history decides when nothing else does. The stacked test above is decided by the
+// base naming its parent, so this one deliberately stacks on trunk: with nothing in the metadata
+// ordering the two, the distances have to, and the child — whose directory this branch created last —
+// is the nearer.
+func TestResolveBranchHistoryDecidesWhenNothingElseDoes(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
 	f.CreateBranch("work")
 	f.CommitChangeset("work", "main")
 	f.Commit("work", gittest.WithFile("work.txt", "1\n"))
-	reviewRef(f, "work", f.Head())
 
 	f.CreateBranch("child")
 	f.CommitChangeset("child", "main")
 	f.Commit("child work", gittest.WithFile("child.txt", "1\n"))
-	reviewRef(f, "child", f.Head())
 
 	got := resolveAt(t, f, "HEAD")
 	if got.Selected == nil {
 		t.Fatal("selected nothing, want the nearer changeset")
 	}
 	if got.Selected.Changeset.Slug != "child" {
-		t.Errorf("selected %q from %v, want child: it owns the nearer review ref", got.Selected.Changeset.Slug, candidateIDs(got))
+		t.Errorf("selected %q from %v, want child: it owns the directory this branch touched last",
+			got.Selected.Changeset.Slug, candidateIDs(got))
 	}
 	if got.Selected.Distance >= got.Candidates[len(got.Candidates)-1].Distance {
 		t.Errorf("candidates are not ordered near to far: %v/%v", candidateIDs(got), distances(got))
 	}
 }
 
-// Two changesets both readied on their own branches and then merged into a third are the same
-// distance from it, and nothing orders them. This is the tie the rule refuses rather than
-// breaking: either answer silently picks a diff base.
+// Two changeset directories arriving in one commit are the same distance from it, and nothing orders
+// them. This is the tie the rule refuses rather than breaking: either answer silently picks a diff
+// base, and the reader cannot see that a coin was flipped. A merge that brings two unlanded
+// directories together is how a repository gets here.
 func TestResolveEqualDistanceIsAmbiguous(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
-	f.CreateBranch("one")
-	f.CommitChangeset("one", "main")
-	f.Commit("work one", gittest.WithFile("one.txt", "1\n"))
-	reviewRef(f, "one", f.Head())
-
-	f.SwitchTo("main")
-	f.CreateBranch("two")
-	f.CommitChangeset("two", "main")
-	f.Commit("work two", gittest.WithFile("two.txt", "2\n"))
-	reviewRef(f, "two", f.Head())
-
-	f.SwitchTo("main")
 	f.CreateBranch("both")
-	f.MustGit("merge", "--quiet", "--no-ff", "-m", "take one", "one")
-	f.MustGit("merge", "--quiet", "--no-ff", "-m", "take two", "two")
+	f.Commit("claim two changesets in one commit", gittest.WithFiles(map[string]string{
+		"changesets/one/CHANGESET.yaml": "id: one\nbase: main\n",
+		"changesets/two/CHANGESET.yaml": "id: two\nbase: main\n",
+	}))
 
 	got := resolveAt(t, f, "HEAD")
 	if !got.Ambiguous || got.Selected != nil {
 		t.Fatalf("got %v at distances %v ambiguous=%v selected=%q, want an undecided tie",
 			candidateIDs(got), distances(got), got.Ambiguous, selectedID(got))
 	}
-	if got.Candidates[0].Distance < 0 {
-		t.Errorf("distances = %v, want real distances so the tie is a tie and not an absence", distances(got))
+	for _, d := range distances(got) {
+		if d != 0 {
+			t.Errorf("distances = %v, want both at 0: the tie is a tie, not an ordering that failed", distances(got))
+		}
+	}
+	// The refusal carries both names and the way out, because the reader has nothing else to go on.
+	if err := changeset.AmbiguityError(got); !strings.Contains(err.Error(), "one and two") ||
+		!strings.Contains(err.Error(), "--changeset") {
+		t.Errorf("AmbiguityError = %q, want both ids and the flag that decides", err)
 	}
 }
 
-// A candidate with no review ref has no distance, and absence is not evidence of being the
-// changeset in progress. Without the sentinel it would compete at distance zero and outrank a
-// changeset with real review history on the same branch.
-func TestResolveUnarchivedCandidateSortsLast(t *testing.T) {
+// A directory with no commit on this line to measure from has no distance at all, and absence is not
+// evidence of being the work in hand: it sorts after every real distance rather than competing at
+// zero. The case that produces it is `change init` — a scaffolded directory sitting uncommitted beside
+// the changeset the branch has actually been working on — and the committed one wins.
+func TestResolveWorktreeOnlyCandidateSortsLast(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
 	f.CreateBranch("work")
 	f.CommitChangeset("sent", "main")
 	f.Commit("sent work", gittest.WithFile("sent.txt", "1\n"))
-	reviewRef(f, "sent", f.Head())
+	// The scaffold: on disk, not in any commit.
+	f.WriteChangesetFile("scaffold", "CHANGESET.yaml", "id: scaffold\nbase: main\n")
 
-	f.CommitChangeset("not-yet", "main")
-	f.Commit("later work", gittest.WithFile("later.txt", "1\n"))
-
-	got := resolveAt(t, f, "HEAD")
+	repo := repo(f)
+	got, err := changeset.ResolveCurrent(context.Background(), repo, "")
+	if err != nil {
+		t.Fatalf("ResolveCurrent: %v", err)
+	}
 	if got.Selected == nil {
-		t.Fatal("selected nothing, want the changeset that has a review ref")
+		t.Fatal("selected nothing, want the changeset this branch has worked on")
 	}
 	if got.Selected.Changeset.Slug != "sent" {
-		t.Errorf("selected %q at distances %v, want sent: the other has never been archived",
+		t.Errorf("selected %q at distances %v, want sent: the other has no history on this line",
 			got.Selected.Changeset.Slug, distances(got))
+	}
+	if got.Ambiguous {
+		t.Errorf("ambiguous = true at distances %v, want the absence to lose rather than tie", distances(got))
 	}
 }
 
@@ -481,16 +461,23 @@ func TestResolveRefusesAMismatchedID(t *testing.T) {
 	}
 }
 
-// The cost is a property of the implementation. Each of these refs is a changeset that landed
-// and left its directory on trunk; a rule that asked a question per ref would scale with them,
-// and this repository has 300 of them.
+// The cost is a property of the implementation. This repository holds three hundred changesets that
+// landed — their directories are on trunk, and each has a record in the namespace — and a rule that
+// asked a question per durable ref would scale with them.
 func TestResolveCostDoesNotGrowWithExistingChangesets(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
-	base := f.Head()
+	files := map[string]string{}
 	for i := 0; i < 300; i++ {
-		reviewRef(f, "cs-"+strings.Repeat("x", 1)+itoa(i), base)
+		id := "cs-" + itoa(i)
+		files["changesets/"+id+"/CHANGESET.yaml"] = "id: " + id + "\nbase: main\n"
 	}
+	f.Commit("land three hundred changesets", gittest.WithFiles(files))
+	landed := f.Head()
+	for i := 0; i < 300; i++ {
+		f.MustGit("update-ref", reviewref.Integration("cs-"+itoa(i)), landed)
+	}
+
 	f.CreateBranch("work")
 	f.CommitChangeset("work", "main")
 	f.Commit("work", gittest.WithFile("work.txt", "1\n"))
@@ -509,13 +496,15 @@ func TestResolveCostDoesNotGrowWithExistingChangesets(t *testing.T) {
 	if selectedID(got) != "work" {
 		t.Fatalf("selected %q, want work", selectedID(got))
 	}
-	// Two listings, one batch read, one ref listing, one distance, one terminal check, with
-	// slack. The formulation this replaced measured 1,802 on the same shape.
+	// One revision's tree listing, one batch read of its metadata, the trunk listing it compares
+	// against, and the two calls that order more than one candidate — with slack. Nothing here is
+	// charged per changeset that has ever existed: the formulation this replaced measured 1,802 git
+	// invocations on this shape, because it asked one ancestry question per archive ref.
 	if spawns < 1 {
 		t.Fatalf("Resolve cost %d invocations: the counter measured nothing, so the bound below proves nothing", spawns)
 	}
 	if spawns > 10 {
-		t.Errorf("Resolve cost %d git invocations with 300 review refs present, want a handful", spawns)
+		t.Errorf("Resolve cost %d git invocations with 300 landed changesets and 300 records present, want a handful", spawns)
 	}
 }
 

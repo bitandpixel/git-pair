@@ -48,21 +48,23 @@ func TestExitCodeBusinessRuleRefusal(t *testing.T) {
 		ready(t, f)
 		submit(t, f, "block")
 
-		res := runIn(t, f.Dir(), "change", "archive")
+		res := runIn(t, f.Dir(), "check")
 		if res.code != exitRefusal {
 			t.Errorf("exited %d, want %d\nstderr: %s", res.code, exitRefusal, res.stderr)
 		}
 	})
 
-	t.Run("surviving additions at completion time", func(t *testing.T) {
+	t.Run("content moved after the approval", func(t *testing.T) {
 		f, _ := newChangeset(t, "booking", "main")
 		ready(t, f)
-		f.Write("service.go", "package main\n\n// Please name this variable\nfunc Lock() {}\n")
 		submit(t, f, "approve")
+		f.Commit("author response", gittest.WithFile("service.go", "package main\n\nfunc Lock() { named() }\n"))
 
-		res := runIn(t, f.Dir(), "change", "archive")
+		// The gate is the one a merge runs: the approval no longer describes the content, so the
+		// assertion fails and says so in the exit code.
+		res := runIn(t, f.Dir(), "check")
 		if res.code != exitRefusal {
-			t.Errorf("exited %d, want %d\nstderr: %s", res.code, exitRefusal, res.stderr)
+			t.Errorf("exited %d, want %d\nstdout: %s\nstderr: %s", res.code, exitRefusal, res.stdout, res.stderr)
 		}
 	})
 
@@ -180,15 +182,17 @@ func TestExitCodeGitFailure(t *testing.T) {
 // allowed; missing or renamed ones are not.
 func TestJSONKeySets(t *testing.T) {
 	t.Run("status", func(t *testing.T) {
-		f, slug := newChangeset(t, "booking", "main")
+		f, _ := newChangeset(t, "booking", "main")
 		ready(t, f)
 		out := runIn(t, f.Dir(), "status", "--json").json(t)
 		assertKeys(t, out, "changeset", "branch", "base", "state", "head", "latest_review", "archive_ref", "archive_commit")
 		if out["state"] != "READY" {
 			t.Errorf("state = %v, want READY", out["state"])
 		}
-		if out["archive_ref"] != archiveRef(slug) {
-			t.Errorf("archive_ref = %v, want %s", out["archive_ref"], archiveRef(slug))
+		// The keys are always present and empty while work is in flight: the record is what landing
+		// writes, and a consumer should not have to handle two shapes for "there is no record yet".
+		if out["archive_ref"] != "" || out["archive_commit"] != "" {
+			t.Errorf("archive_ref = %v, archive_commit = %v; nothing has landed", out["archive_ref"], out["archive_commit"])
 		}
 	})
 
@@ -209,20 +213,17 @@ func TestJSONKeySets(t *testing.T) {
 	})
 
 	t.Run("review submit", func(t *testing.T) {
-		f, slug := newChangeset(t, "booking", "main")
+		f, _ := newChangeset(t, "booking", "main")
 		ready(t, f)
 		f.Write("service.go", "package main\n\n// Please use a transaction here\nfunc Lock() {}\n")
 		args := []string{"review", "submit", "--block", "--json"}
 		out := runIn(t, f.Dir(), args...).mustSucceed(t, args...).json(t)
-		assertKeys(t, out, "changeset", "outcome", "commit", "archive_ref", "files", "empty")
+		assertKeys(t, out, "changeset", "outcome", "commit", "files", "empty")
 		if out["outcome"] != "block" {
 			t.Errorf("outcome = %v, want block", out["outcome"])
 		}
 		if out["commit"] != f.Head() {
 			t.Errorf("commit = %v, want %s", out["commit"], f.Head())
-		}
-		if out["archive_ref"] != archiveRef(slug) {
-			t.Errorf("archive_ref = %v, want %s", out["archive_ref"], archiveRef(slug))
 		}
 		if out["empty"] != false {
 			t.Errorf("empty = %v, want false for a review that changed a file", out["empty"])
@@ -280,29 +281,32 @@ func TestJSONKeySets(t *testing.T) {
 			t.Fatalf("ready_for_review = %v, want one entry", rows)
 		}
 		entry := rows[0].(map[string]any)
-		assertKeys(t, entry, "changeset", "branch", "base", "state", "head", "ready_commit", "ready_age", "archive_ref")
+		assertKeys(t, entry, "changeset", "branch", "base", "state", "head", "ready_commit", "ready_age")
 		if entry["changeset"] != slug {
 			t.Errorf("changeset = %v, want %q", entry["changeset"], slug)
 		}
 	})
 
-	t.Run("change archive", func(t *testing.T) {
-		f, slug, _, approve := approvedChangeset(t)
-		args := []string{"change", "archive", "--json"}
+	t.Run("integration record", func(t *testing.T) {
+		f, slug, source, landing := recordFixture(t)
+		args := []string{"integration", "record", "--source", source, "--commit", landing, "--json"}
 		out := runIn(t, f.Dir(), args...).mustSucceed(t, args...).json(t)
-		assertKeys(t, out, "changeset", "state", "head", "base", "archive_ref", "archive_was",
-			"archive_advanced", "squash_safe", "acknowledged_survivors")
-		if out["state"] != "APPROVED" {
-			t.Errorf("state = %v, want APPROVED: archiving moves a ref, it does not move the state", out["state"])
+		assertKeys(t, out, "changeset", "source", "commit", "target", "archive_ref", "integration_ref",
+			"recorded", "already_recorded")
+		if out["changeset"] != slug {
+			t.Errorf("changeset = %v, want %q", out["changeset"], slug)
 		}
-		if out["head"] != approve {
-			t.Errorf("head = %v, want the archived commit %s", out["head"], approve)
+		// Full SHAs, because the consumer is a pipeline holding the SHA it built.
+		if out["source"] != source || out["commit"] != landing {
+			t.Errorf("source/commit = %v/%v, want %s/%s", out["source"], out["commit"], source, landing)
 		}
-		if out["archive_ref"] != archiveRef(slug) {
-			t.Errorf("archive_ref = %v, want %s", out["archive_ref"], archiveRef(slug))
+		if out["archive_ref"] != archiveRef(slug) || out["integration_ref"] != integrationRef(slug) {
+			t.Errorf("refs = %v/%v, want %s and %s", out["archive_ref"], out["integration_ref"],
+				archiveRef(slug), integrationRef(slug))
 		}
-		if out["squash_safe"] != true {
-			t.Errorf("squash_safe = %v, want true", out["squash_safe"])
+		if out["recorded"] != true || out["already_recorded"] != false {
+			t.Errorf("recorded = %v, already_recorded = %v, want the pair written by this call",
+				out["recorded"], out["already_recorded"])
 		}
 	})
 }

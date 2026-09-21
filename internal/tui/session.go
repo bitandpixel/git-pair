@@ -22,7 +22,6 @@ import (
 	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/reviewmark"
-	"gitpair/internal/reviewref"
 	"gitpair/internal/span"
 )
 
@@ -58,13 +57,12 @@ type File struct {
 
 // Session is the review state the TUI renders.
 type Session struct {
-	repo       *git.Repo
-	cs         changeset.Changeset
-	summary    lifecycle.Summary
-	sel        span.Selector
-	current    span.Span
-	files      []File
-	archiveRef string
+	repo    *git.Repo
+	cs      changeset.Changeset
+	summary lifecycle.Summary
+	sel     span.Selector
+	current span.Span
+	files   []File
 
 	// marks and markErr hold the resolved store, so a repository without a usable git directory
 	// does not pay for it on every toggle.
@@ -96,7 +94,6 @@ type Session struct {
 func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	s := &Session{
 		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span,
-		archiveRef: reviewref.Archive(opts.Changeset.Slug),
 	}
 	if err := s.Rescan(ctx); err != nil {
 		return nil, err
@@ -668,9 +665,6 @@ func (s *Session) Repo() *git.Repo { return s.repo }
 
 // Summary is the derived lifecycle state, needed to submit from the TUI.
 func (s *Session) Summary() lifecycle.Summary { return s.summary }
-
-// ArchiveRef is the ref holding this changeset's review history reachable.
-func (s *Session) ArchiveRef() string { return s.archiveRef }
 
 // UnreviewedCount is how many files still need attention.
 func (s *Session) UnreviewedCount() int {
