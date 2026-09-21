@@ -97,7 +97,7 @@ func TestChangeUseIsIdempotent(t *testing.T) {
 func TestChangeUseOnAnUnambiguousBranchSaysSo(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 	head := f.Head()
 
 	res := runIn(t, f.Dir(), "change", "use", "booking").mustSucceed(t, "change", "use")

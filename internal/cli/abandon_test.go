@@ -77,7 +77,7 @@ func TestChangeAbandonHistoryGoesWithTheBranch(t *testing.T) {
 	f.SwitchTo("main")
 	f.ForceDeleteBranch("booking")
 
-	queue := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue")
+	queue := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue")
 	if queueListsChangeset(t, queue, slug) {
 		t.Errorf("an abandoned changeset is in the queue:\n%s", queue.stdout)
 	}
@@ -106,7 +106,7 @@ func TestReviewQueueIsSilentAboutAnAbandonedChangesetDirectoryLeftBehind(t *test
 	f.Commit("keep the notes from the booking attempt")
 	f.ForceDeleteBranch("booking")
 
-	queue := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue")
+	queue := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue")
 	if queueListsChangeset(t, queue, slug) {
 		t.Errorf("an abandoned changeset is in the queue:\n%s", queue.stdout)
 	}
@@ -152,7 +152,7 @@ func TestWriteCommandsRefuseAnAbandonedChangeset(t *testing.T) {
 }
 
 // The other half of accepting the loss: with the branch gone there is nothing left to consult, so a
-// branch that takes the slug again starts clean. `change init` still refuses to hand out the name
+// branch that takes the slug again starts clean. `init` still refuses to hand out the name
 // while a record exists — records only exist for changesets that landed — and the marker-derived
 // refusal above only lives as long as the branch that carries it.
 //

@@ -21,7 +21,7 @@ func TestReviewQueueCostFollowsBranchesNotExistingChangesets(t *testing.T) {
 	count := f.SpawnShim(t)
 
 	before := count()
-	runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	withoutRefs := count() - before
 
 	base := f.Head()
@@ -30,7 +30,7 @@ func TestReviewQueueCostFollowsBranchesNotExistingChangesets(t *testing.T) {
 	}
 
 	before = count()
-	runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	withRefs := count() - before
 
 	if withoutRefs < 1 {
@@ -60,7 +60,7 @@ func TestReviewQueueCostDoesNotGrowWithUnrecordedLandings(t *testing.T) {
 	count := f.SpawnShim(t)
 
 	before := count()
-	runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	empty := count() - before
 
 	files := map[string]string{}
@@ -72,7 +72,7 @@ func TestReviewQueueCostDoesNotGrowWithUnrecordedLandings(t *testing.T) {
 	f.Commit("land three hundred changesets", gittest.WithFiles(files))
 
 	before = count()
-	runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	withDirs := count() - before
 
 	if empty < 1 {

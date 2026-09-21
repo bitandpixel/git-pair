@@ -16,7 +16,7 @@ func TestExitCodeSuccess(t *testing.T) {
 	for _, args := range [][]string{
 		{"status"},
 		{"status", "--json"},
-		{"review", "queue"},
+		{"queue"},
 		{"review", "history"},
 		{"diff"},
 		{"--version"},
@@ -189,7 +189,7 @@ func TestExitCodeUsageError(t *testing.T) {
 		{"non-integer base index", []string{"diff", "--base-review=xyz"}},
 		{"contradictory bases", []string{"diff", "--base-commit=abc", "--base-ref=main"}},
 		{"base named twice across the families", []string{"diff", "--since-review=-1", "--base-review=-1"}},
-		{"extra argument", []string{"review", "queue", "extra"}},
+		{"extra argument", []string{"queue", "extra"}},
 		{"thread without a title", []string{"review", "thread"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -215,8 +215,8 @@ func TestExitCodeUsageError(t *testing.T) {
 	// A detached HEAD has no changeset to act on.
 	detached := newRepo(t)
 	detached.Detach()
-	if res := runIn(t, detached.Dir(), "change", "init", "--base", "main"); res.code != exitUsage {
-		t.Errorf("change init on a detached HEAD exited %d, want %d\nstderr: %s",
+	if res := runIn(t, detached.Dir(), "init", "--base", "main"); res.code != exitUsage {
+		t.Errorf("`init` on a detached HEAD exited %d, want %d\nstderr: %s",
 			res.code, exitUsage, res.stderr)
 	}
 }
@@ -348,10 +348,10 @@ func TestJSONKeySets(t *testing.T) {
 		}
 	})
 
-	t.Run("review queue", func(t *testing.T) {
+	t.Run("queue", func(t *testing.T) {
 		f, slug := newChangeset(t, "booking", "main")
 		ready(t, f)
-		out := runIn(t, f.Dir(), "review", "queue", "--json").json(t)
+		out := runIn(t, f.Dir(), "queue", "--json").json(t)
 		assertKeys(t, out, "ready_for_review", "landed_unrecorded")
 		if _, ok := out["landed_unrecorded"].([]any); !ok {
 			t.Errorf("landed_unrecorded = %#v, want an array (never null: it answers a question)", out["landed_unrecorded"])

@@ -9,7 +9,7 @@ import (
 	"gitpair/internal/gittest"
 )
 
-// PRD §9.1: `git pair change init` creates the deterministic changeset directory, its
+// PRD §9.1: `git pair init` creates the deterministic changeset directory, its
 // metadata and ABOUT.md, accepts --base, is idempotent, and must not destroy existing
 // changeset data.
 func TestChangeInitCreatesScaffoldingFromBranchName(t *testing.T) {
@@ -17,7 +17,7 @@ func TestChangeInitCreatesScaffoldingFromBranchName(t *testing.T) {
 	f.CreateBranch("feature/booking-transaction")
 	head := f.Head()
 
-	res := runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	res := runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 
 	dir := filepath.Join("changesets", "feature-booking-transaction")
 	if !f.HasWorktreeFile(filepath.Join(dir, "CHANGESET.yaml")) {
@@ -34,10 +34,10 @@ func TestChangeInitCreatesScaffoldingFromBranchName(t *testing.T) {
 	for _, heading := range []string{"Summary", "What changed", "Design decisions", "Validation"} {
 		mustContain(t, about, heading, "ABOUT.md scaffold")
 	}
-	// `change init` commits the scaffold, so a following `change ready` is not
+	// `init` commits the scaffold, so a following `change ready` is not
 	// blocked by a dirty working tree.
 	if f.Head() == head {
-		t.Error("change init did not commit the scaffolding")
+		t.Error("`init` did not commit the scaffolding")
 	}
 	if got := f.Subject("HEAD"); got != "git-pair: initialize changeset feature-booking-transaction" {
 		t.Errorf("HEAD subject = %q, want the initialize marker", got)
@@ -55,7 +55,7 @@ func TestChangeInitRecordsRequestedBase(t *testing.T) {
 	f.Commit("impl", gittest.WithFile("service.go", "package main\n"))
 
 	f.CreateBranch("booking-transaction-tests", "booking-transaction")
-	runIn(t, f.Dir(), "change", "init", "--base", "booking-transaction").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "booking-transaction").mustSucceed(t, "init")
 
 	if got := f.MetadataBase("booking-transaction-tests"); got != "booking-transaction" {
 		t.Errorf("base = %q, want booking-transaction", got)
@@ -70,12 +70,12 @@ func TestChangeInitIsIdempotent(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
 
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 	dir := filepath.Join("changesets", "booking")
 	about := f.Read(filepath.Join(dir, "ABOUT.md"))
 	metadata := f.Read(filepath.Join(dir, "CHANGESET.yaml"))
 
-	second := runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	second := runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 	if got := f.Read(filepath.Join(dir, "ABOUT.md")); got != about {
 		t.Errorf("second init rewrote ABOUT.md:\n%s", got)
 	}
@@ -87,7 +87,7 @@ func TestChangeInitIsIdempotent(t *testing.T) {
 	// Author content must survive a re-run just as the scaffold does (PRD §9.1).
 	authorText := "# booking\n\n## Summary\n\nThe real description.\n"
 	f.Write(filepath.Join(dir, "ABOUT.md"), authorText)
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 	if got := f.Read(filepath.Join(dir, "ABOUT.md")); got != authorText {
 		t.Errorf("init overwrote the author's ABOUT.md:\n%s", got)
 	}
@@ -96,9 +96,9 @@ func TestChangeInitIsIdempotent(t *testing.T) {
 func TestChangeInitBaseConflict(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 
-	res := runIn(t, f.Dir(), "change", "init", "--base", "trunk")
+	res := runIn(t, f.Dir(), "init", "--base", "trunk")
 	if res.code != exitUsage {
 		t.Errorf("changing the base exited %d, want %d (usage error)\nstderr: %s", res.code, exitUsage, res.stderr)
 	}
@@ -107,7 +107,7 @@ func TestChangeInitBaseConflict(t *testing.T) {
 	}
 	mustContain(t, res.stderr+res.stdout, "--set-base", "conflict message")
 
-	runIn(t, f.Dir(), "change", "init", "--base", "trunk", "--set-base").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "trunk", "--set-base").mustSucceed(t, "init")
 	if got := f.MetadataBase("booking"); got != "trunk" {
 		t.Errorf("base = %q after --set-base, want trunk", got)
 	}
@@ -119,7 +119,7 @@ func TestChangeInitDefaultsToTrunk(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
 
-	runIn(t, f.Dir(), "change", "init").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init").mustSucceed(t, "init")
 
 	if got := f.MetadataBase("booking"); got != "main" {
 		t.Errorf("base = %q, want main", got)
@@ -132,7 +132,7 @@ func TestChangeInitRefusesToGuessWithoutTrunk(t *testing.T) {
 	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
 	f.CreateBranch("booking")
 
-	res := runIn(t, f.Dir(), "change", "init")
+	res := runIn(t, f.Dir(), "init")
 	if res.code != exitUsage {
 		t.Errorf("init with no main/master branch exited %d, want %d\nstderr: %s", res.code, exitUsage, res.stderr)
 	}
@@ -142,12 +142,12 @@ func TestChangeInitRefusesToGuessWithoutTrunk(t *testing.T) {
 	}
 }
 
-// `change init` needs a branch to name the changeset after (plan M1).
+// `init` needs a branch to name the changeset after (plan M1).
 func TestChangeInitRefusesDetachedHead(t *testing.T) {
 	f := newRepo(t)
 	f.Detach()
 
-	res := runIn(t, f.Dir(), "change", "init", "--base", "main")
+	res := runIn(t, f.Dir(), "init", "--base", "main")
 	if res.code != exitUsage {
 		t.Errorf("detached HEAD exited %d, want %d\nstderr: %s", res.code, exitUsage, res.stderr)
 	}
@@ -157,7 +157,7 @@ func TestChangeInitRefusesDetachedHead(t *testing.T) {
 }
 
 // PRD §9.2: `change ready` creates a lifecycle marker commit with machine-readable
-// trailers and makes the changeset discoverable by `git pair review queue`.
+// trailers and makes the changeset discoverable by `git pair queue`.
 func TestChangeReadyCreatesMarkerAndEnqueuesChangeset(t *testing.T) {
 	f, slug := newChangeset(t, "feature/booking-transaction", "main")
 	before := f.Head()
@@ -185,9 +185,9 @@ func TestChangeReadyCreatesMarkerAndEnqueuesChangeset(t *testing.T) {
 		t.Error("change ready left the working tree dirty")
 	}
 
-	queue := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	queue := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	if !queueListsChangeset(t, queue, slug) {
-		t.Errorf("review queue does not list the changeset that was just marked ready:\n%s", queue.stdout)
+		t.Errorf("the queue does not list the changeset that was just marked ready:\n%s", queue.stdout)
 	}
 
 	status := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status", "--json").json(t)
@@ -207,7 +207,7 @@ func TestChangeReadyRefusesWithoutChangeset(t *testing.T) {
 	if res.code != exitUsage {
 		t.Errorf("exited %d, want %d (no changeset to mark)\nstderr: %s", res.code, exitUsage, res.stderr)
 	}
-	mustContain(t, res.stderr, "change init", "the refusal must point at the command that fixes it")
+	mustContain(t, res.stderr, "git pair init", "the refusal must point at the command that fixes it")
 	if f.Head() != before {
 		t.Error("a ready marker was created for a branch with no changeset")
 	}
@@ -279,7 +279,7 @@ func TestChangeReadyBlockedBySurvivingReviewAdditions(t *testing.T) {
 	if f.Head() != before {
 		t.Errorf("a ready marker was created despite the surviving addition (HEAD %s -> %s)", before, f.Head())
 	}
-	if queueListsChangeset(t, runIn(t, f.Dir(), "review", "queue", "--json"), slug) {
+	if queueListsChangeset(t, runIn(t, f.Dir(), "queue", "--json"), slug) {
 		t.Error("the refused changeset appeared in the review queue")
 	}
 
@@ -382,7 +382,7 @@ func queueListsChangeset(t *testing.T, res result, slug string) bool {
 	return false
 }
 
-// --- change init: committing -------------------------------------------------
+// --- init: committing -------------------------------------------------
 
 // PRD §9.1 + §28 (agent contract): init must leave the repository in a state
 // where the next command works, which means the scaffold cannot sit uncommitted
@@ -392,7 +392,7 @@ func TestChangeInitCommitsTheScaffold(t *testing.T) {
 	f.CreateBranch("booking")
 	before := f.Head()
 
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 
 	if f.RevListCount("main..HEAD") != 1 {
 		t.Errorf("init made %d commits above main, want exactly 1", f.RevListCount("main..HEAD"))
@@ -417,7 +417,7 @@ func TestChangeInitCommitLeavesUnstagedAndStagedWorkAlone(t *testing.T) {
 	f.MustGit("add", "staged.go")
 	f.Write("unstaged.go", "package main\n")
 
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 
 	if got := f.ChangedFiles("HEAD~1", "HEAD"); len(got) != 2 {
 		t.Errorf("commit touched %v, want only the two scaffolding files", got)
@@ -439,7 +439,7 @@ func TestChangeInitNoCommitLeavesTheScaffoldUncommitted(t *testing.T) {
 	f.CreateBranch("booking")
 	before := f.Head()
 
-	res := runIn(t, f.Dir(), "change", "init", "--base", "main", "--no-commit").mustSucceed(t, "change", "init")
+	res := runIn(t, f.Dir(), "init", "--base", "main", "--no-commit").mustSucceed(t, "init")
 
 	if f.Head() != before {
 		t.Error("--no-commit still created a commit")
@@ -454,10 +454,10 @@ func TestChangeInitNoCommitLeavesTheScaffoldUncommitted(t *testing.T) {
 func TestChangeInitAfterCommittingIsIdempotent(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 	first := f.Head()
 
-	second := runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	second := runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 
 	if f.Head() != first {
 		t.Errorf("re-init created a commit: HEAD moved from %s to %s", first, f.Head())
@@ -465,7 +465,7 @@ func TestChangeInitAfterCommittingIsIdempotent(t *testing.T) {
 	mustContain(t, second.stdout, "already tracked", "re-init should explain that there is nothing to commit")
 }
 
-// --- change init: ABOUT.md content ------------------------------------------
+// --- init: ABOUT.md content ------------------------------------------
 
 // The point of --about: initialise and describe in one non-interactive call, so
 // an agent does not have to sequence a write, an add, and a commit.
@@ -474,7 +474,7 @@ func TestChangeInitAboutFlagWritesAndCommitsContent(t *testing.T) {
 	f.CreateBranch("booking")
 
 	body := "# booking\n\n## Summary\n\nAdds row-level locking.\n"
-	runIn(t, f.Dir(), "change", "init", "--base", "main", "--about", body).mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main", "--about", body).mustSucceed(t, "init")
 
 	if got := f.Read(filepath.Join("changesets", "booking", "ABOUT.md")); got != body {
 		t.Errorf("ABOUT.md = %q, want %q", got, body)
@@ -490,8 +490,8 @@ func TestChangeInitAboutContentIsNewlineNormalised(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
 
-	runIn(t, f.Dir(), "change", "init", "--base", "main", "--about", "# booking\n\n## Summary\n\nNo trailing newline.\n\n\n").
-		mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main", "--about", "# booking\n\n## Summary\n\nNo trailing newline.\n\n\n").
+		mustSucceed(t, "init")
 
 	if got, want := f.Read(filepath.Join("changesets", "booking", "ABOUT.md")), "# booking\n\n## Summary\n\nNo trailing newline.\n"; got != want {
 		t.Errorf("ABOUT.md = %q, want %q", got, want)
@@ -503,7 +503,7 @@ func TestChangeInitReadsAboutFromStdin(t *testing.T) {
 	f.CreateBranch("booking")
 
 	body := "# booking\n\n## Summary\n\nDescribed through a pipe.\n"
-	runStdinIn(t, f.Dir(), body, "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runStdinIn(t, f.Dir(), body, "init", "--base", "main").mustSucceed(t, "init")
 
 	if got := f.FileAt("HEAD", filepath.Join("changesets", "booking", "ABOUT.md")); got != body {
 		t.Errorf("ABOUT.md at HEAD = %q, want %q", got, body)
@@ -516,7 +516,7 @@ func TestChangeInitEmptyStdinFallsBackToTheScaffold(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
 
-	runStdinIn(t, f.Dir(), "", "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runStdinIn(t, f.Dir(), "", "init", "--base", "main").mustSucceed(t, "init")
 
 	about := f.Read(filepath.Join("changesets", "booking", "ABOUT.md"))
 	mustContain(t, about, "## Summary", "scaffold headings")
@@ -527,7 +527,7 @@ func TestChangeInitAboutDashNeedsStdin(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
 
-	res := runStdinIn(t, f.Dir(), "", "change", "init", "--base", "main", "--about", "-")
+	res := runStdinIn(t, f.Dir(), "", "init", "--base", "main", "--about", "-")
 	if res.code != exitUsage {
 		t.Errorf("--about - with empty stdin exited %d, want %d\n%s", res.code, exitUsage, res.stderr)
 	}
@@ -544,7 +544,7 @@ func TestChangeInitAboutDoesNotClobberWithoutSetAbout(t *testing.T) {
 	f.MustGit("add", "changesets/booking/ABOUT.md")
 	f.MustGit("commit", "-m", "describe booking")
 
-	res := runIn(t, f.Dir(), "change", "init", "--base", "main", "--about", "# booking\n\noverwritten\n")
+	res := runIn(t, f.Dir(), "init", "--base", "main", "--about", "# booking\n\noverwritten\n")
 	if res.code != exitUsage {
 		t.Errorf("--about over existing content exited %d, want %d\n%s", res.code, exitUsage, res.stderr)
 	}
@@ -553,8 +553,8 @@ func TestChangeInitAboutDoesNotClobberWithoutSetAbout(t *testing.T) {
 		t.Errorf("ABOUT.md was modified: %q", got)
 	}
 
-	runIn(t, f.Dir(), "change", "init", "--base", "main", "--about", "# booking\n\nreplaced\n", "--set-about").
-		mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main", "--about", "# booking\n\nreplaced\n", "--set-about").
+		mustSucceed(t, "init")
 	if got := f.FileAt("HEAD", filepath.Join("changesets", "booking", "ABOUT.md")); got != "# booking\n\nreplaced\n" {
 		t.Errorf("ABOUT.md at HEAD = %q, want the replacement committed", got)
 	}
@@ -565,18 +565,18 @@ func TestChangeInitAboutDoesNotClobberWithoutSetAbout(t *testing.T) {
 func TestChangeInitCommitDoesNotChangeLifecycleState(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 
 	status := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status")
 	if got := status.json(t)["state"]; got != "WORKING" {
 		t.Errorf("state after init = %v, want WORKING", got)
 	}
-	if list := runIn(t, f.Dir(), "review", "queue", "--json").jsonList(t, "ready_for_review"); len(list) != 0 {
+	if list := runIn(t, f.Dir(), "queue", "--json").jsonList(t, "ready_for_review"); len(list) != 0 {
 		t.Errorf("a freshly initialised changeset is in the review queue: %v", list)
 	}
 }
 
-// --- change init / ready: a base must not be the branch itself ---------------
+// --- init / ready: a base must not be the branch itself ---------------
 
 // Starting a changeset on the integration branch is refused. A changeset is measured against
 // that branch, so one started on it can never contain anything, and every directory it carries
@@ -585,9 +585,9 @@ func TestChangeInitCommitDoesNotChangeLifecycleState(t *testing.T) {
 func TestChangeInitRefusesOnTheIntegrationBranch(t *testing.T) {
 	f := newRepo(t)
 
-	res := runIn(t, f.Dir(), "change", "init", "--base", "HEAD")
+	res := runIn(t, f.Dir(), "init", "--base", "HEAD")
 	if res.code != exitUsage {
-		t.Fatalf("`change init` on the integration branch exited %d, want %d\n%s", res.code, exitUsage, res.stderr)
+		t.Fatalf("`init` on the integration branch exited %d, want %d\n%s", res.code, exitUsage, res.stderr)
 	}
 	mustContain(t, res.stderr, "integration branch", "the refusal should name what is wrong")
 	mustContain(t, res.stderr, "switch -c", "the refusal should say what to do instead")
@@ -605,8 +605,8 @@ func TestChangeInitRefusesToBaseAChangesetOnItsOwnBranch(t *testing.T) {
 	f.CreateBranch("booking")
 
 	for _, args := range [][]string{
-		{"change", "init", "--base", "booking"}, // asked for explicitly
-		{"change", "init", "--base", "HEAD"},    // self-reference by another name
+		{"init", "--base", "booking"}, // asked for explicitly
+		{"init", "--base", "HEAD"},    // self-reference by another name
 	} {
 		res := runIn(t, f.Dir(), args...)
 		if res.code != exitUsage {
@@ -624,7 +624,7 @@ func TestChangeInitRefusesToBaseAChangesetOnItsOwnBranch(t *testing.T) {
 
 // The opposite guard: a branch created moments ago shares its tip with main, and
 // init must still work there. Comparing commits instead of refs would break the
-// normal first run of `change init`.
+// normal first run of `init`.
 func TestChangeInitAllowsAFreshBranchThatSharesItsBasesTip(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
@@ -632,7 +632,7 @@ func TestChangeInitAllowsAFreshBranchThatSharesItsBasesTip(t *testing.T) {
 		t.Fatal("the fixture branch is not at its base's tip; this test no longer guards anything")
 	}
 
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 
 	if got := f.MetadataBase("booking"); got != "main" {
 		t.Errorf("base = %q, want main", got)

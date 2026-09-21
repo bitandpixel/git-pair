@@ -23,9 +23,9 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	f.Commit("seed", gittest.WithFile("main.go", "package main\n\nfunc main() {}\n"))
 	mainBefore := f.RevParse("main")
 
-	// --- author: git pair change init --base main ---------------------------------
+	// --- author: git pair init --base main ---------------------------------
 	f.CreateBranch(slug)
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 
 	metadata := filepath.Join("changesets", slug, "CHANGESET.yaml")
 	about := filepath.Join("changesets", slug, "ABOUT.md")
@@ -48,7 +48,7 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	// --- author: git pair change ready -------------------------------------------
 	ready(t, f)
 
-	queue := runIn(t, f.Dir(), "review", "queue", "--json")
+	queue := runIn(t, f.Dir(), "queue", "--json")
 	if rows := queue.jsonList(t, "ready_for_review"); len(rows) != 1 ||
 		rows[0].(map[string]any)["changeset"] != slug {
 		t.Fatalf("queue = %v, want %s waiting for review", rows, slug)
@@ -72,7 +72,7 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	if !ok || latest["outcome"] != "block" {
 		t.Fatalf("latest_review = %v, want the blocking review", status["latest_review"])
 	}
-	if rows := runIn(t, f.Dir(), "review", "queue", "--json").jsonList(t, "ready_for_review"); len(rows) != 0 {
+	if rows := runIn(t, f.Dir(), "queue", "--json").jsonList(t, "ready_for_review"); len(rows) != 0 {
 		t.Errorf("a blocked changeset is still queued: %v", rows)
 	}
 
@@ -100,7 +100,7 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	if got := f.Subject(f.Head()); strings.HasPrefix(got, "git-pair: ready") {
 		t.Error("a ready marker was created despite the surviving addition")
 	}
-	if rows := runIn(t, f.Dir(), "review", "queue", "--json").jsonList(t, "ready_for_review"); len(rows) != 0 {
+	if rows := runIn(t, f.Dir(), "queue", "--json").jsonList(t, "ready_for_review"); len(rows) != 0 {
 		t.Errorf("the refused changeset is queued: %v", rows)
 	}
 

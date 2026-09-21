@@ -73,6 +73,16 @@ func printArtifactSurvivals(w io.Writer, r survival.Report) {
 	}
 }
 
+// plural counts a noun into a sentence: one for the singular form, many for the plural. It takes
+// the two spellings rather than a noun because English will not be regular about this, and because
+// the count belongs in the string: "2 changeset directories are" is the fact, and the rest is prose.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		return s[:i] + "…"

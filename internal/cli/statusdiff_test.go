@@ -179,7 +179,7 @@ func TestStatusWithoutChangesetIsUsageError(t *testing.T) {
 		t.Errorf("status on a branch with no changeset exited %d, want %d\nstderr: %s",
 			res.code, exitUsage, res.stderr)
 	}
-	mustContain(t, res.stderr, "change init", "the refusal must name the command that fixes it")
+	mustContain(t, res.stderr, "git pair init", "the refusal must name the command that fixes it")
 }
 
 // --- diff (PRD §17) ---------------------------------------------------------

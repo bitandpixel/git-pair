@@ -90,7 +90,7 @@ printf 'func createOffering() {\n\to := load()\n\treturn o\n}\n' > src/service.t
 git add -A && git commit -qm "initial implementation"
 
 git switch -qc booking-transaction
-"$G" change init --base main >/dev/null || { echo "fixture: change init failed"; exit 1; }
+"$G" init --base main >/dev/null || { echo "fixture: init failed"; exit 1; }
 printf '# booking-transaction\n\n## Summary\n\nTransactional locking around offering creation.\n\n## What changed\n\n- business-scoped locking\n\n## Design decisions\n\nAdmin scheduling serializes at business level.\n\n## Validation\n\n- unit tests\n\n## Known limitations\n\n## Open questions\n' > changesets/booking-transaction/ABOUT.md
 git add -A && git commit -qm "implement transactional locking"
 "$G" change ready >/dev/null

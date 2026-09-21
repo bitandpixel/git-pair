@@ -13,7 +13,7 @@ import (
 func TestChangeUnreadyTakesAReadyChangesetOutOfTheQueue(t *testing.T) {
 	f, slug := newChangeset(t, "booking-transaction", "main")
 	ready(t, f)
-	if !queueListsChangeset(t, runIn(t, f.Dir(), "review", "queue", "--json"), slug) {
+	if !queueListsChangeset(t, runIn(t, f.Dir(), "queue", "--json"), slug) {
 		t.Fatal("the fixture is not in the queue before unready")
 	}
 	readyCommit := f.Head()
@@ -21,7 +21,7 @@ func TestChangeUnreadyTakesAReadyChangesetOutOfTheQueue(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "change", "unready").mustSucceed(t, "change", "unready")
 
-	if queueListsChangeset(t, runIn(t, f.Dir(), "review", "queue", "--json"), slug) {
+	if queueListsChangeset(t, runIn(t, f.Dir(), "queue", "--json"), slug) {
 		t.Error("the changeset is still in the review queue after unready")
 	}
 	marker := f.Head()
@@ -117,13 +117,13 @@ func TestChangeUnreadyWithdrawalIsReadableWhileTheBranchStands(t *testing.T) {
 	if out["archive_ref"] != "" {
 		t.Errorf("archive_ref = %v, want empty: the marker is the whole record", out["archive_ref"])
 	}
-	if queueListsChangeset(t, runIn(t, f.Dir(), "review", "queue", "--json"), slug) {
+	if queueListsChangeset(t, runIn(t, f.Dir(), "queue", "--json"), slug) {
 		t.Error("the withdrawn changeset is in the queue with its branch standing")
 	}
 
 	f.SwitchTo("main")
 	f.ForceDeleteBranch("booking-transaction")
-	if queueListsChangeset(t, runIn(t, f.Dir(), "review", "queue", "--json"), slug) {
+	if queueListsChangeset(t, runIn(t, f.Dir(), "queue", "--json"), slug) {
 		t.Error("the withdrawn changeset is in the queue with its branch deleted")
 	}
 	res := runIn(t, f.Dir(), "status", "--changeset", slug)

@@ -44,7 +44,7 @@ func landExtra(t *testing.T, f *gittest.Fixture, id string) {
 func TestQueueAndStatusReportALandingNobodyRecorded(t *testing.T) {
 	f, slug, _ := landedFixture(t)
 
-	q := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	q := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	mustContain(t, q.stdout, "LANDED, UNRECORDED", "the finding is a section of its own, not a note")
 	mustContain(t, q.stdout, slug, "and it names the changeset")
 	mustContain(t, q.stdout, "git pair integration record --changeset "+slug,
@@ -65,7 +65,7 @@ func TestQueueAndStatusReportALandingNobodyRecorded(t *testing.T) {
 
 	// Recording it retires the finding from both reports, because the finding is about the absence.
 	runIn(t, f.Dir(), "integration", "record", "--changeset", slug).mustSucceed(t, "integration", "record")
-	after := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	after := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	mustNotContain(t, after.stdout, "LANDED, UNRECORDED", "a recorded landing is not a finding")
 	mustNotContain(t, after.stdout, slug, "and the changeset is not named in the queue at all")
 	quiet := runIn(t, f.Dir(), "status")
@@ -85,7 +85,7 @@ func TestQueueAcceptsALandingTheRetiredLayoutRecorded(t *testing.T) {
 	f, slug, landing := landedFixture(t)
 	f.MustGit("update-ref", "refs/git-pair/changesets/"+slug+"/integration", landing)
 
-	q := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	q := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	mustNotContain(t, q.stdout, "LANDED, UNRECORDED", "the old record is still a record")
 	mustNotContain(t, q.stdout, slug, "and the changeset is left alone")
 
@@ -93,7 +93,7 @@ func TestQueueAcceptsALandingTheRetiredLayoutRecorded(t *testing.T) {
 	// landing happened, and the missing fact is the one this report is about.
 	f.MustGit("update-ref", "-d", "refs/git-pair/changesets/"+slug+"/integration")
 	f.MustGit("update-ref", "refs/git-pair/changesets/"+slug+"/archive", landing)
-	q = runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	q = runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	mustContain(t, q.stdout, "LANDED, UNRECORDED", "an archive ref alone records no landing")
 	mustContain(t, q.stdout, slug, "so the changeset is reported")
 }
@@ -105,8 +105,8 @@ func TestQueueSaysOnceThatTheNamespaceIsAbsent(t *testing.T) {
 	landExtra(t, f, "docs-cleanup")
 	landExtra(t, f, "refactor-parser")
 
-	q := runIn(t, f.Dir(), "review", "queue")
-	q.mustSucceed(t, "review", "queue")
+	q := runIn(t, f.Dir(), "queue")
+	q.mustSucceed(t, "queue")
 	if n := strings.Count(q.stderr, reviewref.FetchCommand); n != 1 {
 		t.Errorf("the fetch guidance appears %d times, want once (three unrecorded landings):\n%s", n, q.stderr)
 	}
@@ -123,7 +123,7 @@ func TestQueueHedgesWhenOtherRecordsExist(t *testing.T) {
 	// empty, so "no record" is a claim about this changeset rather than about the clone.
 	f.MustGit("update-ref", reviewref.Integration("someone-elses-work"), other)
 
-	q := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	q := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	mustContain(t, q.stdout, slug, "the unrecorded landing is still reported")
 	mustNotContain(t, q.stderr, "no refs/git-pair/* refs at all",
 		"but this clone does hold durable refs, so that claim would be false")
@@ -139,13 +139,13 @@ func TestQueueCountsLandingsItDoesNotPrint(t *testing.T) {
 		landExtra(t, f, fmt.Sprintf("landing-%02d", i))
 	}
 
-	q := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	q := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	mustContain(t, q.stdout, "booking", "the first findings are printed")
 	mustContain(t, q.stdout, "and 2 more", "the rest are counted")
 	if n := strings.Count(q.stdout, "git pair integration record --changeset"); n != 10 {
 		t.Errorf("the queue printed %d invocations, want the 10-item cap:\n%s", n, q.stdout)
 	}
-	rows := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue").jsonList(t, "landed_unrecorded")
+	rows := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue").jsonList(t, "landed_unrecorded")
 	if len(rows) != 12 {
 		t.Errorf("--json lists %d unrecorded landings, want all 12", len(rows))
 	}
@@ -155,7 +155,7 @@ func TestQueueCountsLandingsItDoesNotPrint(t *testing.T) {
 // would be indistinguishable from a build that never asked. (`skipped` stays a nullable note list.)
 func TestQueueJSONCarriesTheSectionAsAnArray(t *testing.T) {
 	fresh := newRepo(t)
-	out := runIn(t, fresh.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue").json(t)
+	out := runIn(t, fresh.Dir(), "queue", "--json").mustSucceed(t, "queue").json(t)
 	value, ok := out["landed_unrecorded"]
 	if !ok {
 		t.Fatalf("the queue's JSON has no %q key: %v", "landed_unrecorded", out)
@@ -165,7 +165,7 @@ func TestQueueJSONCarriesTheSectionAsAnArray(t *testing.T) {
 	}
 
 	f, slug, _ := landedFixture(t)
-	rows := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue").jsonList(t, "landed_unrecorded")
+	rows := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue").jsonList(t, "landed_unrecorded")
 	if len(rows) != 1 {
 		t.Fatalf("landed_unrecorded = %v, want one entry", rows)
 	}
@@ -188,7 +188,7 @@ func TestQueueDoesNotReportLiveWorkAsALanding(t *testing.T) {
 	f, slug := newChangeset(t, "booking", "main")
 	ready(t, f)
 
-	q := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	q := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	mustContain(t, q.stdout, "READY FOR REVIEW", "the changeset is in the queue")
 	mustContain(t, q.stdout, slug, "under its own heading")
 	mustNotContain(t, q.stdout, "LANDED, UNRECORDED", "and nowhere else")
@@ -204,7 +204,7 @@ func TestQueueDoesNotReportLiveWorkAsALanding(t *testing.T) {
 func TestQueueDoesNotReportALandingOnAnotherBranch(t *testing.T) {
 	f, slug, _, _ := recordFixture(t) // lands on release/2.x, unrecorded by design
 
-	q := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	q := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	mustNotContain(t, q.stdout, "LANDED, UNRECORDED", "a landing outside the destination is not this finding")
 	mustNotContain(t, q.stdout, slug, "and the changeset is not named")
 }

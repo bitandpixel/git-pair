@@ -363,7 +363,7 @@ func TestResolveEqualDistanceIsAmbiguous(t *testing.T) {
 
 // A directory with no commit on this line to measure from has no distance at all, and absence is not
 // evidence of being the work in hand: it sorts after every real distance rather than competing at
-// zero. The case that produces it is `change init` — a scaffolded directory sitting uncommitted beside
+// zero. The case that produces it is `init` — a scaffolded directory sitting uncommitted beside
 // the changeset the branch has actually been working on — and the committed one wins.
 func TestResolveWorktreeOnlyCandidateSortsLast(t *testing.T) {
 	f := gittest.New(t)

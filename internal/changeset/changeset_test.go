@@ -148,7 +148,7 @@ func TestThreadTemplateAndAboutTemplate(t *testing.T) {
 	}
 }
 
-// PRD §9.1: `change init` creates deterministic scaffolding, is idempotent, and
+// PRD §9.1: `init` creates deterministic scaffolding, is idempotent, and
 // "should not destroy existing changeset data".
 func TestWriteCreatesScaffoldingAndIsIdempotent(t *testing.T) {
 	f := gittest.New(t)
@@ -258,7 +258,7 @@ func TestWriteBaseConflict(t *testing.T) {
 }
 
 // A detached HEAD has no branch to report, and an uninitialised branch resolves to the
-// directory `change init` would create — the value that makes ErrNoChangeset's hint useful.
+// directory `init` would create — the value that makes ErrNoChangeset's hint useful.
 func TestCurrentDetachedHeadAndMissingDirectory(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))

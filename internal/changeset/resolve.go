@@ -113,7 +113,7 @@ func DefaultBranch(ctx context.Context, repo *git.Repo, override string) (Defaul
 	}
 
 	// A remote carrying both main and master is a genuine coin flip, so it is refused rather
-	// than guessed. Locally, `main` wins over `master` the way `change init`'s base default
+	// than guessed. Locally, `main` wins over `master` the way `init`'s base default
 	// has always decided it: a repository holding both almost certainly means main, and a
 	// second rule there would only make the same repository answer differently depending on
 	// which command asked.
@@ -274,7 +274,7 @@ func (r *resolver) at(ctx context.Context, repo *git.Repo, rev string) (Resoluti
 // ResolveCurrent resolves the checked-out revision.
 //
 // It adds what the working tree holds and HEAD does not, which is the difference that makes
-// `change init` usable: it scaffolds a changeset directory and leaves it for the author to
+// `init` usable: it scaffolds a changeset directory and leaves it for the author to
 // commit, and `status` has to answer about it in between. The trees are still what decide
 // everything — a directory removed from HEAD is not a candidate however it sits on disk — so
 // this is an addition of uncommitted work, not a second rule.
@@ -501,7 +501,7 @@ func distanceFromTouch(ctx context.Context, repo *git.Repo, rev, id string) (int
 
 // parentID reads the changeset id out of a base value. A stacked base is either the parent's id or
 // the branch that carries it — `booking` or `refs/heads/booking` — and both mean the same parent, so
-// the rule reads the id out of either rather than depending on which spelling `change init` was
+// the rule reads the id out of either rather than depending on which spelling `init` was
 // handed.
 func parentID(base string) string {
 	return strings.TrimPrefix(base, "refs/heads/")

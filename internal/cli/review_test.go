@@ -202,7 +202,7 @@ func TestReviewHistoryWithNoReviews(t *testing.T) {
 	}
 }
 
-// --- review queue (PRD §10.6) ------------------------------------------------
+// --- queue (PRD §10.6) ------------------------------------------------
 
 // A ready marker is what puts a changeset in the queue, and the entry must carry the
 // fields PRD §10.6 shows: base, ready age, head.
@@ -211,7 +211,7 @@ func TestReviewQueueReportsReadyChangesetFields(t *testing.T) {
 	ready(t, f)
 	head := f.Head()
 
-	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	res := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	rows := res.jsonList(t, "ready_for_review")
 	if len(rows) != 1 {
 		t.Fatalf("ready_for_review = %v, want exactly one entry", rows)
@@ -246,7 +246,7 @@ func TestReviewQueueReportsReadyChangesetFields(t *testing.T) {
 		t.Errorf("ready_age = %v, want a compact duration (PRD §10.6 shows \"18m\")", entry["ready_age"])
 	}
 
-	human := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	human := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	mustContain(t, human.stdout, "READY FOR REVIEW", "human output")
 	mustContain(t, human.stdout, slug, "human output must name the changeset")
 	mustContain(t, human.stdout, "base: main", "human output must show the base (PRD §10.6)")
@@ -265,18 +265,18 @@ func TestReviewQueueReportsReadyChangesetFields(t *testing.T) {
 func TestReviewQueueGainsAndLosesChangesetAcrossReadyAndUnready(t *testing.T) {
 	f, slug := newChangeset(t, "booking", "main")
 
-	if queueListsChangeset(t, runIn(t, f.Dir(), "review", "queue", "--json"), slug) {
+	if queueListsChangeset(t, runIn(t, f.Dir(), "queue", "--json"), slug) {
 		t.Fatal("an unready changeset is already in the queue")
 	}
 
 	ready(t, f)
-	if !queueListsChangeset(t, runIn(t, f.Dir(), "review", "queue", "--json"), slug) {
+	if !queueListsChangeset(t, runIn(t, f.Dir(), "queue", "--json"), slug) {
 		t.Fatal("the changeset is missing from the queue after `change ready`")
 	}
 
 	f.Commit("agent: one more change", gittest.WithFile("service.go", "package main\n\nfunc Lock() { retry() }\n"))
 
-	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	res := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	if !queueListsChangeset(t, res, slug) {
 		t.Errorf("an implementation commit took the changeset out of the queue; only a command moves state:\n%s", res.stdout)
 	}
@@ -288,13 +288,13 @@ func TestReviewQueueGainsAndLosesChangesetAcrossReadyAndUnready(t *testing.T) {
 	mustContain(t, status["reason"].(string), "1 commit since", "status must show the branch has moved since the offer")
 
 	runIn(t, f.Dir(), "change", "unready").mustSucceed(t, "change", "unready")
-	if queueListsChangeset(t, runIn(t, f.Dir(), "review", "queue", "--json"), slug) {
+	if queueListsChangeset(t, runIn(t, f.Dir(), "queue", "--json"), slug) {
 		t.Error("the changeset is still queued after `change unready`")
 	}
 
 	// Marking ready again re-queues it.
 	ready(t, f)
-	if !queueListsChangeset(t, runIn(t, f.Dir(), "review", "queue", "--json"), slug) {
+	if !queueListsChangeset(t, runIn(t, f.Dir(), "queue", "--json"), slug) {
 		t.Error("the changeset did not return to the queue after a new ready marker")
 	}
 }
@@ -324,7 +324,7 @@ func TestReviewQueueExcludesOtherStates(t *testing.T) {
 			if got := runIn(t, f.Dir(), "status", "--json").json(t)["state"]; got != tc.state {
 				t.Fatalf("state = %v, want %s", got, tc.state)
 			}
-			if queueListsChangeset(t, runIn(t, f.Dir(), "review", "queue", "--json"), slug) {
+			if queueListsChangeset(t, runIn(t, f.Dir(), "queue", "--json"), slug) {
 				t.Errorf("a %s changeset is in the queue", tc.state)
 			}
 		})
@@ -354,7 +354,7 @@ func TestReviewQueueOrdersLongestWaitingFirst(t *testing.T) {
 		t.Fatal("fixture left changes")
 	}
 
-	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	res := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	rows := res.jsonList(t, "ready_for_review")
 	if len(rows) != 2 {
 		t.Fatalf("ready_for_review = %v, want both ready changesets:\n%s", rows, res.stdout)
@@ -385,7 +385,7 @@ func TestReviewQueueOrdersABranchCarryingTwoChangesetsByItsOwnHistory(t *testing
 	f.CommitReadyMarker("bbb-two")
 
 	f.SwitchTo("main")
-	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	res := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	if skipped := res.json(t)["skipped"]; skipped != nil {
 		t.Errorf("skipped = %v, want both branches listed: bbb-two last worked on its own directory\n%s",
 			skipped, res.stdout)
@@ -413,7 +413,7 @@ func TestReviewQueueNamesABranchItCannotResolve(t *testing.T) {
 	f.CommitReadyMarker("ccc-two")
 
 	f.SwitchTo("main")
-	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	res := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	skipped, _ := res.json(t)["skipped"].([]any)
 	var found string
 	for _, entry := range skipped {
@@ -459,7 +459,7 @@ func TestReviewQueueReadsBranchesNotTheWorkingTree(t *testing.T) {
 		t.Fatal("the fixture left a changeset directory on main")
 	}
 
-	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	res := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	rows := res.jsonList(t, "ready_for_review")
 	if len(rows) != 2 {
 		t.Fatalf("ready_for_review = %v, want both changesets listed from main:\n%s", rows, res.stdout)
@@ -484,7 +484,7 @@ func TestReviewQueueKeepsOneRowPerBranchForOneChangeset(t *testing.T) {
 	f.Commit("copy: a different approach", gittest.WithFile("alt.go", "package main\n\nfunc Alt() {}\n"))
 	ready(t, f)
 
-	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	res := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	rows := res.jsonList(t, "ready_for_review")
 	if len(rows) != 2 {
 		t.Fatalf("ready_for_review = %d rows, want one per branch:\n%s", len(rows), res.stdout)
@@ -513,14 +513,14 @@ func TestReviewQueueKeepsOneRowPerBranchForOneChangeset(t *testing.T) {
 		t.Errorf("both rows name ready_commit %v, want each branch's own marker", original["ready_commit"])
 	}
 
-	human := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	human := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	mustContain(t, human.stdout, "branch: booking\n", "the human form says which branch a row is")
 	mustContain(t, human.stdout, "branch: booking-copy\n", "and prints both rows")
 
 	// Each branch's own state decides its own row. Blocking the copy does not borrow the original's
 	// readiness, and the original does not inherit the block.
 	submit(t, f, "block")
-	after := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	after := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	rows = after.jsonList(t, "ready_for_review")
 	if len(rows) != 1 {
 		t.Fatalf("after blocking the copy the queue holds %d rows, want the original alone:\n%s", len(rows), after.stdout)
@@ -545,14 +545,14 @@ func TestReviewQueueIsSilentAboutChangesetsThatLanded(t *testing.T) {
 	f.Commit("land the booking change")
 	f.ForceDeleteBranch("booking")
 
-	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	res := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	if queueListsChangeset(t, res, slug) {
 		t.Errorf("a landed changeset is still in the queue:\n%s", res.stdout)
 	}
 	if skipped := res.json(t)["skipped"]; skipped != nil {
 		t.Errorf("skipped = %v, want nothing said about a changeset that has landed", skipped)
 	}
-	human := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	human := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	if strings.Contains(human.stdout+human.stderr, "skipped") {
 		t.Errorf("the queue complained about a landed changeset:\n%s\n%s", human.stdout, human.stderr)
 	}
@@ -575,7 +575,7 @@ func TestReviewQueueIgnoresDirectoriesThatWereNeverOffered(t *testing.T) {
 		"changesets/" + slug + "/ABOUT.md":       "# booking\n\nWritten down, never offered.\n",
 	}))
 
-	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	res := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	if queueListsChangeset(t, res, slug) {
 		t.Errorf("a changeset with no marker is not ready:\n%s", res.stdout)
 	}
@@ -603,7 +603,7 @@ func TestReviewQueueNamesArchivedWorkThatNeverLanded(t *testing.T) {
 	f.Commit("note the booking change")
 	f.ForceDeleteBranch("booking")
 
-	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	res := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	if queueListsChangeset(t, res, slug) {
 		t.Errorf("work with no branch behind it is not reviewable:\n%s", res.stdout)
 	}
@@ -632,7 +632,7 @@ func TestReviewQueueIsSilentAboutAnUnrecordedOrphan(t *testing.T) {
 	f.Commit("note the booking change")
 	f.ForceDeleteBranch("booking")
 
-	res := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue", "--json")
+	res := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	if queueListsChangeset(t, res, slug) {
 		t.Errorf("an orphan with no record is not reviewable:\n%s", res.stdout)
 	}

@@ -35,12 +35,12 @@ git add -A && git commit -qm "initial implementation"
 
 step "author: branch, init, implement"
 git switch -qc booking-transaction
-$G change init --base main; check "change init" 0 $?
-$G change init --base main >/dev/null; check "change init idempotent" 0 $?
+$G init --base main; check "init" 0 $?
+$G init --base main >/dev/null; check "init idempotent" 0 $?
 # A second init naming a different base is a conflict, not an edit: the changeset keeps the base it
 # was created with until someone says --set-base. TestChangeInitBaseConflict covers this in Go;
 # these two lines cover it against an installed binary, which is what the M1 row claims.
-$G change init --base trunk >/dev/null 2>&1; check "change init refuses to move an existing base" 2 $?
+$G init --base trunk >/dev/null 2>&1; check "init refuses to move an existing base" 2 $?
 grep -q '^base: main$' changesets/booking-transaction/CHANGESET.yaml && echo "  ok: the refused init left the base alone" || { echo "  FAIL: a refused init rewrote the base"; FAILED=1; }
 [ -f changesets/booking-transaction/CHANGESET.yaml ] && echo "  ok: CHANGESET.yaml exists" || { echo "  FAIL: no CHANGESET.yaml"; FAILED=1; }
 printf '# booking-transaction\n\n## Summary\n\nTransactional locking around offering creation and enrollment.\n\n## What changed\n\n- business-scoped locking\n\n## Design decisions\n\nAdmin scheduling serializes at business level.\n\n## Validation\n\n- unit tests\n\n## Known limitations\n\n## Open questions\n' > changesets/booking-transaction/ABOUT.md
@@ -49,13 +49,13 @@ git add -A && git commit -qm "implement transactional locking"
 step "author: ready"
 $G change ready; check "change ready" 0 $?
 $G status --json | head -30
-$G review queue | sed 's/^/  /'
-$G review queue --json > /tmp/q.json; check "queue --json" 0 $?
+$G queue | sed 's/^/  /'
+$G queue --json > /tmp/q.json; check "queue --json" 0 $?
 
 step "author: withdraw the offer, then re-offer"
 # Committing does not take a changeset out of the queue; a command does (PRD §12).
 $G change unready; check "change unready" 0 $?
-if $G review queue | grep -q booking-transaction; then
+if $G queue | grep -q booking-transaction; then
   echo "  FAIL: an unreadied changeset is still in the queue"; FAILED=1
 else
   echo "  ok: the queue dropped it"
@@ -290,7 +290,7 @@ done
   && echo "  ok: nothing moved either ref, and no command can" \
   || { echo "  FAIL: a durable ref moved after the record"; FAILED=1; }
 git switch -q main
-$G review queue 2>&1 | grep -q "booking-transaction (integrated at" \
+$G queue 2>&1 | grep -q "booking-transaction (integrated at" \
   && echo "  ok: the queue says the changeset landed instead of listing it" \
   || { echo "  FAIL: the queue did not account for the landed changeset"; FAILED=1; }
 BEFORE=$(git rev-list --count "$ARCHIVE")
@@ -324,7 +324,7 @@ $G review submit --approve >/dev/null 2>&1; check "and approved" 0 $?
 git switch -q main
 git checkout unrecorded-landing -- changesets/unrecorded-landing
 git commit -qm "unrecorded-landing: land it, write no record"
-out=$($G review queue 2>&1)
+out=$($G queue 2>&1)
 printf '%s' "$out" | grep -q "LANDED, UNRECORDED" \
   && echo "  ok: the queue reports the landing as its own heading" \
   || { echo "  FAIL: an unrecorded landing left no trace in the queue: $out"; FAILED=1; }
@@ -340,14 +340,14 @@ printf '%s' "$out" | grep -q "no changeset for this branch" \
   || { echo "  FAIL: status said only that the branch has no changeset: $out"; FAILED=1; }
 $G integration record --changeset unrecorded-landing >/dev/null 2>&1
 check "recording the landing is a success" 0 $?
-if $G review queue 2>&1 | grep -q "LANDED, UNRECORDED"; then
+if $G queue 2>&1 | grep -q "LANDED, UNRECORDED"; then
   echo "  FAIL: the report outlived the record"; FAILED=1
 else
   echo "  ok: and the report goes quiet once the record exists"
 fi
 
 step "queue is empty again"
-$G review queue | sed 's/^/  /'
+$G queue | sed 's/^/  /'
 
 printf '\n'
 if [ "$FAILED" = 0 ]; then echo "E2E: all checks passed"; else echo "E2E: FAILURES PRESENT"; exit 1; fi

@@ -236,7 +236,7 @@ func TestIntegrationRecordAcceptsAChildLandedOnTrunk(t *testing.T) {
 
 	child := "booking-transaction-tests"
 	f.CreateBranch(child, "booking-transaction")
-	runIn(t, f.Dir(), "change", "init", "--base", "booking-transaction").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "booking-transaction").mustSucceed(t, "init")
 	f.Commit("add the concurrent final-seat test", gittest.WithFile("service_test.go",
 		"package main\n\nfunc TestFinalSeat() {}\n"))
 	ready(t, f)
@@ -339,7 +339,7 @@ func TestIntegrationRecordDerivationRefusesToChooseBetweenTwo(t *testing.T) {
 	f, slug, source, _ := recordFixture(t)
 	f.SwitchTo("booking")
 	second := "booking-follow-up"
-	runIn(t, f.Dir(), "change", "init", "--id", second, "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--id", second, "--base", "main").mustSucceed(t, "init")
 	f.Commit("the follow-up's work", gittest.WithFile("follow-up.go", "package main\n"))
 	ready(t, f)
 	submit(t, f, "approve")

@@ -48,7 +48,7 @@ content is the `ABOUT.md` text and the reviewer's two inline comments.
 ```bash
 $ git switch -c booking-transaction
 
-$ git pair change init --base main
+$ git pair init --base main
 created changesets/booking-transaction/
 created changesets/booking-transaction/CHANGESET.yaml
 created changesets/booking-transaction/ABOUT.md
@@ -67,9 +67,9 @@ $ git pair change ready
 Ready: booking-transaction
   head:  8065dae
   base:  main
-  queue: `git pair review queue` now lists this changeset
+  queue: `git pair queue` now lists this changeset
 
-$ git pair review queue
+$ git pair queue
 READY FOR REVIEW
 
 booking-transaction
@@ -242,7 +242,7 @@ the name of that directory. The branch name is only where the default comes from
 normalises the branch: `/` and every character outside `[A-Za-z0-9._-]` become `-`, runs
 collapse, leading and trailing `-` are trimmed, case is kept, so
 `feature/booking-transaction` becomes `changesets/feature-booking-transaction/`. Choose your
-own with `git pair change init --id booking-transaction-v2`; an ID is never rewritten to fit,
+own with `git pair init --id booking-transaction-v2`; an ID is never rewritten to fit,
 never suffixed to dodge a collision, and never changed once the changeset has refs.
 
 `CHANGESET.yaml` records `id` and `base` and nothing else. `base` is what the diff is measured
@@ -494,7 +494,7 @@ of the override. See `docs/plans/completed/gitpr-mvp/research/git-plumbing-findi
 ## Command reference
 
 Every command accepts the persistent `--json` flag, but only `status`, `change ready`,
-`change unready`, `change wait`, `review submit`, `review history`, `review queue`, `check` and
+`change unready`, `change wait`, `review submit`, `review history`, `queue`, `check` and
 `integration record` change output for it; elsewhere it is accepted and ignored.
 
 Every command also accepts `--default-branch <ref>`, which states the integration branch that
@@ -507,7 +507,7 @@ landed.
 
 | Command | Flags | Notes |
 | --- | --- | --- |
-| `change init` | `--id <id>`, `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch; refuses on that branch, where a changeset could never contain anything; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |
+| `init` | `--id <id>`, `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch; refuses on that branch, where a changeset could never contain anything; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` when the changeset is in review, otherwise succeeds and records nothing; refuses a changeset whose work is recorded as integrated |
 | `change use <id>` | none | records which changeset a branch carrying more than one is working on: writes `ignores: <other ids>` into the chosen changeset's `CHANGESET.yaml` and commits that file; refuses an id the branch does not offer and a record that would leave the branch still undecided; idempotent |
@@ -520,7 +520,7 @@ landed.
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history |
 | `review history` | `--changeset <slug>` | only review marker commits, indexed from `0`, each naming the commit it reviewed under `REVIEWED` |
-| `review queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus any landing in the integration branch that no integration record accounts for; read from the repository, not the checkout |
+| `queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus any landing in the integration branch that no integration record accounts for; read from the repository, not the checkout |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug |
 | `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition — the review's outcome, whether the commit it approved is still in this history, and whether the content still matches; no `--changeset`, because it is the gate a forge runs *on* a revision |
 | `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>`, `--allow-feedback` (all optional) | writes both durable refs for one changeset, create-only: the archive at `--source` and the integration at `--commit`. The changeset is discovered from the `changesets/<id>/` directories `--source` carries and the integration branch does not, so a pipeline needs the two SHAs it already holds and not the changeset name; `--changeset` disambiguates a stacked child. Before it writes: the source's history must name this changeset and its newest verdict must permit integration (`approve`, or `feedback` with `--allow-feedback`); `--commit` must be in the destination branch's history (the `--target` you name, else the changeset's `base:`, else the default branch) and must be the commit that added `changesets/<id>/` there. Name neither SHA and the repository is asked — the landing is the first-parent commit on the destination that added the directory, the reviewed head is the branch still carrying it — and anything ambiguous is a usage error naming the candidates. Needs no checkout and writes no commit; re-running it with the same pair succeeds and changes nothing |
@@ -533,7 +533,7 @@ review whose outcome permits integration (`approve`, or `feedback` under `--allo
 unreadable came after it, the changeset has not ended, it has not already been recorded as integrated,
 and the tree still matches what the review looked at (ignoring `changesets/<cs>/`). It reads no other
 ref, and every failed condition is reported in one run. `change unready` checks
-only for a clean tree, since the marker it writes is empty. `change init` warns
+only for a clean tree, since the marker it writes is empty. `init` warns
 without failing
 if the base does not resolve, and commits only the changeset directory (`git commit --only`),
 so work you had already staged for another commit stays on your index.
@@ -560,8 +560,8 @@ the invocation itself was wrong, so retrying unchanged will fail again.
 ## JSON contracts
 
 Output is indented two spaces, and empty lists may serialise as `null` rather than `[]`
-(`review queue`'s `ready_for_review` and `skipped`, `review submit`'s `files`), so test for both. A key
-that answers a question rather than collecting notes is always an array: `review queue`'s
+(`queue`'s `ready_for_review` and `skipped`, `review submit`'s `files`), so test for both. A key
+that answers a question rather than collecting notes is always an array: `queue`'s
 `landed_unrecorded` says `[]` for "asked, and none", so a consumer never has to tell that apart from a
 build old enough not to have been asked.
 
@@ -616,7 +616,7 @@ one is visible in a sentence about the changeset.
 }
 ```
 
-`git pair review queue --json` — `head` and `ready_commit` are full SHAs. `skipped` names changesets
+`git pair queue --json` — `head` and `ready_commit` are full SHAs. `skipped` names changesets
 the queue cannot explain (`null` when empty): a branch whose metadata cannot be read, a branch the
 resolution rule cannot settle between two changesets, a recorded changeset whose archive is in no base
 and on no branch, or a changeset whose integration ref says it landed — that one names the commit,
@@ -820,7 +820,7 @@ only when a review submission is what ended the wait. `timed_out` is the differe
 The non-interactive loop from PRD §22:
 
 ```bash
-git pair change init --base main --about "$ABOUT"   # once, on a named branch
+git pair init --base main --about "$ABOUT"   # once, on a named branch
 git pair status --json              # read state and next_action without blocking
 git pair diff                       # see the whole changeset
 # implement and commit with ordinary git
@@ -842,9 +842,9 @@ line up — that trailer is the reviewer's statement about what they looked at, 
 `check` is the last step an agent runs. Landing is not the agent's: the merge is ordinary git run by
 whoever owns the destination branch, and `git pair integration record` follows it (§13).
 
-Never prompt: `change init`, `change ready`, `change unready`, `change abandon`, `change feedback`,
+Never prompt: `init`, `change ready`, `change unready`, `change abandon`, `change feedback`,
 `change wait`, `status`, `check`, `diff`, `review submit`, `review history`,
-`review queue`. They report
+`queue`. They report
 and exit instead of asking, even with a terminal attached.
 
 Refuse with exit 2 when stdin or stdout is a pipe or a regular file, because launching an
@@ -1399,15 +1399,15 @@ because nothing in its verdict depends on one.
 
 `cannot resolve changeset base "main": unknown revision: main` (exit 1) — the `base` in
 `CHANGESET.yaml` is not a ref in this repository (renamed trunk, fresh clone, merged stack).
-git-pair never guesses a base: edit the file, or `git pair change init --base <ref> --set-base`.
-From `change init` with no `--base`: `cannot infer a base: no main or master branch exists;
+git-pair never guesses a base: edit the file, or `git pair init --base <ref> --set-base`.
+From `init` with no `--base`: `cannot infer a base: no main or master branch exists;
 pass --base <ref>` (exit 2).
 
 `cannot tell which branch is the integration branch: ...` (exit 2) — there is nothing to compare
 against, so "has this landed?" has no answer and every changeset directory on the revision would
 look like work in progress. Pass `--default-branch origin/main` (a CI job that fetched one branch
 has no recorded remote HEAD, and a repository may name trunk something else), or record git's own
-answer once with `git remote set-head origin --auto`. `change init` reports the same problem as
+answer once with `git remote set-head origin --auto`. `init` reports the same problem as
 `cannot infer a base: ...; pass --base <ref>`, because the recorded base and the landed test come
 from the same resolution. In CI the missing answer is usually the checkout: a job that fetched one
 branch has neither a remote HEAD nor `origin/main` to compare against, which says nothing about the
@@ -1424,27 +1424,27 @@ history orders them: no commit touched one directory more recently than the othe
 other as its `base:`. That is what a sibling merged in looks like, and what a branch created off a sibling looks
 like once it starts its own work. `git pair change use <id>` settles it for the branch, by recording
 the choice in the chosen changeset's `CHANGESET.yaml`; `--changeset <id>` answers for one command;
-and `git pair change init --base <sibling>` at creation time is what makes a stack readable without
+and `git pair init --base <sibling>` at creation time is what makes a stack readable without
 any record at all.
 
 `main is the integration branch, so a changeset started on it can never contain anything` (exit 2
-from `change init`) — a changeset is measured against the integration branch, so one started on it
+from `init`) — a changeset is measured against the integration branch, so one started on it
 can never contain anything. `git switch -c <branch>` first.
 
 A changeset that reads as uninitialised on its own branch, or that has vanished from
-`review queue`, usually means its directory reached the integration branch — commonly because a
+`queue`, usually means its directory reached the integration branch — commonly because a
 sibling merged your unlanded branch and *that* landed. Your directory is in trunk's tree, which is
 precisely what the rule tests, so the cure is to land your own branch rather than someone else's
 merge of it. `git ls-tree <integration-branch> changesets/` shows whether the directory is there — and
-if it is there while no integration record names it, `review queue` does not leave you to work that out:
+if it is there while no integration record names it, `queue` does not leave you to work that out:
 it prints the changeset under `LANDED, UNRECORDED`.
 
 `ABOUT.md already has content: changesets/<cs>/ABOUT.md is not empty (pass --set-about to
-replace it)` (exit 2) — `change init --about` refuses to discard a description that is
+replace it)` (exit 2) — `init --about` refuses to discard a description that is
 already there. Same rule, same flag shape as changing a base.
 
 `self-referential changeset base: changeset "main" cannot be based on main, the branch it
-lives on` (exit 2 from `change init`, exit 1 from `change ready`) — everything is measured as
+lives on` (exit 2 from `init`, exit 1 from `change ready`) — everything is measured as
 `base...HEAD`, so a changeset based on its own branch is empty forever and its `ready` marker
 can never be observed. Use a branch of its own, or point `base` at an ancestor. The test is on
 the ref, not the commit: a branch created a moment ago shares `main`'s tip and is valid.
@@ -1475,9 +1475,9 @@ files directly and use `git pair diff`, `git pair status` and `git pair review s
 the resolved span; the error lists what is.
 
 `working tree must be clean ...` (exit 1) — `change ready` and `change unready` act
-on committed state. `change init` commits its scaffolding, so a fresh changeset does not block `change
+on committed state. `init` commits its scaffolding, so a fresh changeset does not block `change
 ready`; it does block it if you then edit `ABOUT.md` without committing. Use
-`change init --no-commit` to fold the scaffolding into your first implementation commit
+`init --no-commit` to fold the scaffolding into your first implementation commit
 instead.
 
 `no changeset for this branch: changesets/foo` (exit 2), or `HEAD is detached; check out a
@@ -1505,7 +1505,7 @@ review is over, and re-running the gate after a landing reports that rather than
 `check` is also the one command that ignores your
 working tree: it asserts the commit, and uncommitted edits are not in `HEAD` to be reviewed.
 
-A missing entry in `git pair review queue` is usually not a queue bug: membership is derived
+A missing entry in `git pair queue` is usually not a queue bug: membership is derived
 state, and only a command moves it — `change ready`, `change unready`, or a review submission. A
 code change after the ready marker leaves the changeset in the queue, naming the commits in its
 reason; what that drift does stop is `git pair check`, which refuses a head whose reviewed content has
@@ -1520,7 +1520,7 @@ heads, and each row prints the branch it speaks for. A branch it cannot resolve 
 branch, say — is named in `skipped` rather than left out quietly.
 
 A missing entry that is *not* work in progress is reported rather than hidden. A changeset directory the
-integration branch carries with no integration record is a landing nobody recorded, and `review queue`
+integration branch carries with no integration record is a landing nobody recorded, and `queue`
 gives it its own `LANDED, UNRECORDED` heading with the `git pair integration record` invocation that
 closes the gap; `git pair status` on a branch carrying no changeset of its own says the same inside its
 exit-2 answer. It is the one state where the paper trail is nothing but the merge commit, which is why

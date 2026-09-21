@@ -94,7 +94,7 @@ func Present(ctx context.Context, repo *git.Repo) (bool, error) {
 }
 
 // Taken reports whether either durable ref already belongs to this changeset id, which is how
-// `change init` refuses to hand out a name that is already someone's (PRD §5).
+// `init` refuses to hand out a name that is already someone's (PRD §5).
 //
 // Either family counts. A changeset with an integration ref and no archive ref has a history, and
 // handing its name to a new changeset would attach that history to a stranger. Matching is on the

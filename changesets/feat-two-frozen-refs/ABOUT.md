@@ -17,10 +17,10 @@ the command whose whole job was moving it.
 What remains: `refs/git-pair/archive/<id>` and `refs/git-pair/integrations/<id>`, written by one
 invocation of `git pair integration record`, create-only, with no code path that moves either.
 
-This is M1 through M5: the transition, the rule about history the transition required, the checks that make
+This is M1 through M6: the transition, the rule about history the transition required, the checks that make
 the record worth reading afterwards, the flagless local flow that writes it, the report that catches the step
-being skipped, and the next actions that tell an author where the step is. M6-M8 follow — the per-branch
-queue, stacked parent tracking and the agent contract.
+being skipped, the next actions that tell an author where the step is, and the queue's shape and the CLI's
+naming. M7-M8 follow — stacked parent tracking and the agent contract.
 
 ## What changed
 
@@ -64,12 +64,19 @@ queue, stacked parent tracking and the agent contract.
 - `internal/reviewref` — `RecordedPair` reads both halves with absent ones as the empty string, and
   `Conflict` returns the write's own conflict error without writing, so the refusal a retry hears is the
   refusal the write would have given.
+- Queue per branch (M6) — `queue` prints one row per branch, with a `branch:` line, instead of grouping by
+  changeset id and printing whichever branch carried the newest ready marker. Two branches can carry one
+  changeset, and they have different heads and different states; a review is a commit appended to a branch,
+  so the branch is the thing that is ready.
+- Naming (M6, plan P3) — `git pair queue` and `git pair init` are the spellings, hard-renamed with no
+  aliases; the two commands moved into `init.go` and `queue.go` because top-level commands live one per
+  file. Historical documents keep the old names: they record what was true when they were written.
 - `check --json` gained `next_action` (M5), present only when the gate passes: the same sentence `status`
   prints, so an agent that gates on `ready` learns about the merge and the record without parsing human
   output. `TestApprovedStateNamesTheLandingAndTheRecord` pins that sentence across all four spellings and
   the record's absence, and pins the one asymmetry in how the record's two halves appear in JSON.
 - Landed, unrecorded (M4) — a `changesets/<id>/` directory in the integration branch with no integration
-  ref is a merge whose record never ran, and it is now a reported state: `review queue` gives it its own
+  ref is a merge whose record never ran, and it is now a reported state: `queue` gives it its own
   heading with the `git pair integration record` invocation, and `status` puts the same finding on its
   exit-2 "no changeset for this branch" answer. `internal/cli/landed.go` holds the detector, the wording,
   and `refIndex` — one read of the durable namespace that also answers the queue's two other questions
@@ -183,6 +190,7 @@ the flag named), `TestIntegrationRecordAcceptsAChildLandedOnTrunk`,
 `TestIntegrationRecordAnswersFromTheRecordBeforeTheChecks`, `TestIntegrationRecordDerivesBothTips`,
 `TestIntegrationRecordDerivationRefusesToChooseBetweenTwo`,
 `TestIntegrationRecordDerivationStopsWhenTheBranchIsGone`, and `TestRecordedPairAndConflict`.
+For M6: `TestReviewQueueKeepsOneRowPerBranchForOneChangeset`.
 For M4: `TestQueueAndStatusReportALandingNobodyRecorded`,
 `TestQueueAcceptsALandingTheRetiredLayoutRecorded`, `TestQueueSaysOnceThatTheNamespaceIsAbsent`,
 `TestQueueHedgesWhenOtherRecordsExist`, `TestQueueCountsLandingsItDoesNotPrint`,

@@ -20,7 +20,7 @@ import (
 //
 // A substring grep cannot express that. `git.MergeBase` legitimately passes
 // "merge-base", `--json` output legitimately has a "branch" key, and
-// `change init` tells the user to "run `git switch -c <branch>`" — all three contain
+// `init` tells the user to "run `git switch -c <branch>`" — all three contain
 // forbidden words while invoking nothing forbidden. So this test reads the source as
 // syntax and only looks at *git invocations*: the argument slices handed to the
 // helpers in internal/git, to repo.Git/GitStdin/GitInherit, and to exec.Command.

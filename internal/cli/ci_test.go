@@ -97,7 +97,7 @@ func TestCICloneWithoutTheGitPairRefsSaysSo(t *testing.T) {
 	}
 }
 
-// `status` and `review queue` read branches and commits, so the durable namespace is not load-bearing
+// `status` and `queue` read branches and commits, so the durable namespace is not load-bearing
 // for them and a CI job that fetched nothing custom must not be told its repository is broken. What
 // they do need is the default branch — the tree rule compares against it — and that refusal is
 // #TestOneBranchCheckoutNamesTheFetchItIsMissing's business, not this one.
@@ -128,7 +128,7 @@ func TestStatusAndQueueWorkWithoutTheGitPairRefs(t *testing.T) {
 		t.Errorf("default_branch_commit = %v, want %s", got["default_branch_commit"], shortOf(f.RevParse("main")))
 	}
 
-	queue := runIn(t, clone, "review", "queue").mustSucceed(t, "review", "queue")
+	queue := runIn(t, clone, "queue").mustSucceed(t, "queue")
 	mustContain(t, queue.stdout, slug, "the offered changeset is in the queue with no git-pair refs fetched")
 }
 

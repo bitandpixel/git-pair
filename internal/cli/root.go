@@ -118,12 +118,12 @@ refs. It does not replace git, your editor, your difftool, or your forge.
 
 Review state lives in the repository: a changeset directory holds ABOUT.md and
 review threads, lifecycle markers are commits carrying Review-* trailers, and
-and refs/git-pair/* holds the two durable refs written when a changeset lands.
+refs/git-pair/* holds the two durable refs written when a changeset lands.
 
-Author commands:   git pair change init | use | ready | unready | abandon
-Reviewer commands: git pair review open | about | thread | submit | history | queue
-Inspection:        git pair status | diff
-Gates:             git pair check`,
+Author commands:   git pair init, then git pair change use | ready | unready | abandon
+Reviewer commands: git pair review open | about | thread | submit | history
+Reading state:     git pair queue | status | diff
+Gates and record:  git pair check, then git pair integration record`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if jsonFlag, err := cmd.Flags().GetBool("json"); err == nil {
 				a.json = jsonFlag
@@ -141,8 +141,10 @@ Gates:             git pair check`,
 	root.PersistentFlags().StringVar(&a.defaultBranch, "default-branch", "",
 		"ref of the integration branch; otherwise git-pair reads git's own answer (origin/HEAD, then a sole main/master)")
 	root.AddCommand(
+		newInitCommand(a),
 		newChangeCommand(a),
 		newReviewCommand(a),
+		newQueueCommand(a),
 		newStatusCommand(a),
 		newDiffCommand(a),
 		newCheckCommand(a),
@@ -258,7 +260,7 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 		anchor, err := reviewref.ResolveArchive(ctx, repo, slug)
 		if errors.Is(err, reviewref.ErrNoArchiveRef) {
 			return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
-				fmt.Errorf("no branch carries changeset %q; `git pair review queue` lists what this repository has", slug)}
+				fmt.Errorf("no branch carries changeset %q; `git pair queue` lists what this repository has", slug)}
 		}
 		if err != nil {
 			return changeset.Changeset{}, lifecycle.Summary{}, "", err

@@ -178,7 +178,7 @@ changeset:
 changesets/feature-booking-transaction/
 ```
 
-The rule is deterministic, and it is a suggestion. `change init --id <id>` chooses the ID
+The rule is deterministic, and it is a suggestion. `init --id <id>` chooses the ID
 instead (§9.1), which is what makes the identity independent of the branch: branches get
 renamed, two branches can normalise to the same name, and integration tooling should not
 have to infer an identity from a branch.
@@ -188,7 +188,7 @@ than quietly changed, because refs named after a string nobody typed are not fin
 the person who typed it.
 
 The directory belongs to no branch. Which changesets a revision is working on is read from
-content, and the reading is the same question everywhere: `status`, `review queue`, and a CI job
+content, and the reading is the same question everywhere: `status`, `queue`, and a CI job
 with two branches fetched all ask it the same way.
 
 ### Which changeset a revision is working on
@@ -257,7 +257,7 @@ LANDED, UNRECORDED
       git pair integration record --changeset booking-transaction
 ```
 
-`git pair review queue` (§10.6) prints it as its own heading, below the queue; `git pair status`
+`git pair queue` (§10.6) prints it as its own heading, below the queue; `git pair status`
 (§11.1) prints the same finding on a branch that carries no changeset of its own, attached to the
 answer that already tells you the branch holds no work in progress. Both read the pair of facts the
 rule needs — the destination's directories, and the namespace's integration refs — from the reads the
@@ -444,22 +444,23 @@ Git history provides authorship and sequencing, so the document format should re
 
 # 8. CLI Structure
 
-The CLI has two primary subdomains:
+The CLI has two subdomains and a flat front door.
 
 ```text
-git pair change ...
-git pair review ...
+git pair change ...    the author's commands over a changeset in progress
+git pair review ...    the reviewer's commands over a branch
 ```
 
-Shared inspection commands remain top-level. `git pair integration ...` is a third, and the one a
-pipeline runs rather than a person: it takes SHAs and refs instead of a checkout, and writes no commit.
-
-Target MVP structure:
+Four commands are top-level because they are not "a change to a changeset" or "a reviewer action":
+`init` starts the author's loop, and an agent's first invocation should say what it does without a group
+name in the way; `queue` is read by authors, reviewers and CI alike, so it belongs to neither side; and
+`status`, `diff`, `check` and `integration record` read or record state. Each has one spelling — a
+renamed command with an alias behind it is two commands, and the second one stops being documented.
 
 ```text
 git-pair
+├── init
 ├── change
-│   ├── init
 │   ├── use
 │   ├── ready
 │   ├── unready
@@ -471,9 +472,9 @@ git-pair
 │   ├── about
 │   ├── thread
 │   ├── submit
-│   ├── history
-│   └── queue
+│   └── history
 │
+├── queue
 ├── status
 ├── diff
 ├── check
@@ -486,15 +487,15 @@ git-pair
 
 # 9. Author Commands
 
-## 9.1 `git pair change init`
+## 9.1 `git pair init`
 
 Initializes review scaffolding for the current branch.
 
 Example:
 
 ```bash
-git pair change init --base main
-git pair change init --id booking-transaction-v2 --base main
+git pair init --base main
+git pair init --id booking-transaction-v2 --base main
 ```
 
 Creates:
@@ -541,7 +542,7 @@ that:
 
    Choose another ID:
 
-     git pair change init --id feature-booking-2
+     git pair init --id feature-booking-2
    ```
 
    Two branches whose names normalise alike are a collision when the directory from one is
@@ -571,7 +572,7 @@ and the message says `git switch -c <branch>` rather than leaving the author to 
 For a stacked branch:
 
 ```bash
-git pair change init --base booking-transaction
+git pair init --base booking-transaction
 ```
 
 ## 9.2 `git pair change ready`
@@ -588,7 +589,7 @@ Requirements:
 -   create a review marker commit only if validation succeeds or an explicit override is supplied,
 -   write nothing outside the marker commit: no ref is created or moved while work is in flight, and
     the branch is what holds the history until landing (§13),
--   make the branch discoverable by `git pair review queue`.
+-   make the branch discoverable by `git pair queue`.
 
 Suggested commit:
 
@@ -836,7 +837,7 @@ abandoned changeset, and `git pair check` reports the ending as the reason the c
 integration-ready. The refusal reads the branch's own commits, so it is not a reading of a ref somebody
 might have failed to fetch — and it lasts exactly as long as the branch. A branch created later under
 the same id starts clean, because with the branch gone nothing is left saying the earlier one ended,
-and `change init` reserves an id only against the records that landed changesets leave behind (§13).
+and `init` reserves an id only against the records that landed changesets leave behind (§13).
 
 `--json` prints `changeset`, `branch`, `state`, `was`, `recorded` and `abandoned_commit`.
 
@@ -1072,7 +1073,7 @@ Only commits explicitly identified as review marker commits count as reviews.
 
 Ordinary Git commits do not.
 
-## 10.6 `git pair review queue`
+## 10.6 `git pair queue`
 
 Shows changesets currently ready for human review.
 
@@ -1158,8 +1159,8 @@ still absent from trunk, and it is the integration ref that says the queue has n
 Future/global support should allow:
 
 ```bash
-git pair review queue --global
-git pair review queue --json
+git pair queue --global
+git pair queue --json
 ```
 
 A global repository registry may eventually live in:
@@ -1297,7 +1298,7 @@ closes each gap (§4's *Landed, unrecorded*): "this branch holds no work in prog
 here and nobody wrote the record" are two halves of one situation, and a reader told only the first goes
 looking for a branch they forgot rather than for the record they did not write. The exit code is
 unchanged — the branch really does not carry work in progress, which is what that code means — and
-`git pair review queue --json` (§10.6) is where the same finding is machine-readable.
+`git pair queue --json` (§10.6) is where the same finding is machine-readable.
 
 ## 11.2 `git pair diff`
 
@@ -1764,7 +1765,7 @@ is the last readable copy of its history — a fallback for reading history, nev
 Absence is an answer. An in-flight changeset has no archive, and `status --json` reports `archive_ref` and
 `archive_commit` empty rather than omitting them, so a consumer sees one shape either way. A changeset read
 by `--changeset` whose directory survives on no branch and which has no archive is reported as an orphan by
-`review queue` (§10.6) and is not a changeset to any command that writes.
+`queue` (§10.6) and is not a changeset to any command that writes.
 
 One half of the pair can exist without the other, and only in one direction. `integration record` writes
 the archive first (§11.4), so an interrupted run leaves a changeset that still reads as not-yet-recorded
@@ -1772,7 +1773,7 @@ and the next invocation completes the pair. An archive with no integration ref i
 record rather than a finished one, and it must not be read as "landed": integrated-ness comes from
 `refs/git-pair/integrations/<id>` alone (§13.2).
 
-The two paths an id uses are reserved against `change init` (§9.1): a new changeset may not take an id
+The two paths an id uses are reserved against `init` (§9.1): a new changeset may not take an id
 whose archive or integration ref already exists, which is what stops a fresh branch from attaching itself
 to a landed changeset's history. The check is of those two exact paths, so an unrelated ref under
 `refs/git-pair` — a nested name git-pair no longer uses — does not reserve anything.
@@ -1801,7 +1802,7 @@ not the protocol. A tool that inferred integration through them would be confide
 every squash merge, which is the common case on a forge.
 
 Because the ref is the only answer, integrated-ness is derived from its presence and nothing else:
-`status` reports it, `review queue` skips it, `git pair check` (§11.3) refuses a changeset that already
+`status` reports it, `queue` skips it, `git pair check` (§11.3) refuses a changeset that already
 has one, and the commands that move state (`change ready`, `change unready`, `change abandon`,
 `review submit`) refuse against it.
 
@@ -1854,7 +1855,7 @@ that *read* the namespace say anything about it, and each says what its own answ
 `integration record` warns and records anyway — its candidate rule reads trees, not refs, so an empty
 namespace changes nothing about what it writes and everything about what a reader elsewhere believes
 (§11.4). `git pair check` says nothing about refs, because nothing in its verdict depends on one (§11.3).
-`review queue` prints no warning at all, which is the one silence to be careful with: work recorded in
+`queue` prints no warning at all, which is the one silence to be careful with: work recorded in
 another clone is simply absent from a queue that never fetched (§10.6).
 
 Publishing is configuration, not behaviour. git-pair runs no `push` — the hygiene test forbids it, and
@@ -2625,7 +2626,7 @@ Agents should interact with `git-pair` through stable non-interactive commands r
 Primary agent commands:
 
 ```bash
-git pair change init --base <ref>
+git pair init --base <ref>
 git pair status --json
 git pair diff
 git pair change ready
@@ -2683,7 +2684,7 @@ action rather than about its own. `git pair check`'s `integrated` is the field a
 learn the record already exists.
 
 That the step can be skipped is why it is detectable. A changeset directory in the integration branch
-with no integration ref is a merge whose record never ran, `git pair review queue` prints it under
+with no integration ref is a merge whose record never ran, `git pair queue` prints it under
 `LANDED, UNRECORDED` with the invocation that fixes it, and `git pair status` says the same on a branch
 carrying no work of its own (§4's *Landed, unrecorded*). A supervisor agent that runs the queue between
 steps sees a landing that lost its paper trail instead of a changeset that quietly disappeared, which is
@@ -2741,7 +2742,7 @@ longer contains (§12).
 
 # 24. Queue and Notifications
 
-`git pair review queue` provides a deterministic query for actionable review work.
+`git pair queue` provides a deterministic query for actionable review work.
 
 This enables future automation such as:
 
@@ -2754,7 +2755,7 @@ This enables future automation such as:
 The machine-readable interface should be sufficient for external automation:
 
 ```bash
-git pair review queue --json
+git pair queue --json
 ```
 
 `git-pair` itself does not need to implement notifications in MVP.
@@ -2871,7 +2872,7 @@ Do not design the MVP around this yet.
 Repository registry and:
 
 ```bash
-git pair review queue --global
+git pair queue --global
 ```
 
 ## Remote record enforcement
@@ -2938,7 +2939,7 @@ The MVP is successful if the following workflow works cleanly:
 ```bash
 git switch -c booking-transaction
 
-git pair change init --base main
+git pair init --base main
 ```
 
 Agent:
@@ -2955,7 +2956,7 @@ git pair change ready
 Human:
 
 ```bash
-git pair review queue
+git pair queue
 git pair review open
 ```
 

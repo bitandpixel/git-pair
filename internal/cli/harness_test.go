@@ -179,7 +179,7 @@ func newRepo(t *testing.T) *gittest.Fixture {
 // newChangeset builds a repository whose branch has a committed changeset directory
 // and one implementation commit, ready for `git pair change ready`.
 //
-// The scaffolding is written by the fixture rather than by `git pair change init` so
+// The scaffolding is written by the fixture rather than by `git pair init` so
 // that a broken init only fails the tests that exercise it. change_test.go covers
 // the product's own scaffolding.
 func newChangeset(t *testing.T, branch, base string) (*gittest.Fixture, string) {

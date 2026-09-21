@@ -11,7 +11,7 @@ import (
 
 // A changeset directory in the destination branch with no integration record is work that landed and
 // lost its paper trail. Nothing else in git-pair says so. The tree rule (PRD §12) makes a directory the
-// destination carries stop being a claim, so the changeset leaves `status` and `review queue` at the
+// destination carries stop being a claim, so the changeset leaves `status` and `queue` at the
 // moment it becomes most worth remembering, and the command that would have caught it — `integration
 // record` — is the one step the integration contract (PRD §22) allows to be skipped: the merge happens
 // outside git-pair, so nothing in this tool sees it.
@@ -124,7 +124,7 @@ func (a *app) printUnrecorded(found []unrecordedLanding, namespaceEmpty bool, de
 		a.printf("      %s\n", u.Command)
 	}
 	if extra := len(found) - len(shown); extra > 0 {
-		a.printf("  and %d more (`git pair review queue --json` lists every one)\n", extra)
+		a.printf("  and %d more (`git pair queue --json` lists every one)\n", extra)
 	}
 	a.printf("\n")
 	if namespaceEmpty {

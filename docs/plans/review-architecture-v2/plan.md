@@ -495,18 +495,46 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
 
 **Tasks**
 
-- Key `runReviewQueue` by branch instead of by slug (`review.go:441-486`); drop the merged `branches[]` and
+- [x] Key `runReviewQueue` by branch instead of by slug (`review.go:441-486`); drop the merged `branches[]` and
   the "best of" choice in `readyEntry` (`:609`).
-- Rename `review queue` → `queue` and `change init` → `init`, with no aliases; update the help text,
+- [x] Rename `review queue` → `queue` and `change init` → `init`, with no aliases; update the help text,
   README's command table, and every test that names the old spellings.
-- PRD §10.6 and README's command table updated.
+- [x] PRD §10.6 and README's command table updated.
 
 **Verification**
 
-- A fixture with one changeset on two branches in different states yields two rows with two distinct
-  states.
-- `--json` contract test for the per-row branch field; every existing test that invoked the old spellings
-  fails and is updated in the same commit.
+- [x] A fixture with one changeset on two branches in different states yields two rows — with a note below
+  on what "two distinct states" can mean in a queue that lists only READY branches.
+- [x] `--json` contract test for the per-row branch field; every existing test that invoked the old
+  spellings fails and is updated in the same commit.
+
+**What landed differently**
+
+- Two commits, because the two halves are different kinds of change: the per-branch queue is a behaviour
+  fix with a JSON contract, and the rename is a naming decision that touches every mention of two commands.
+- Rows are per branch, and the human form prints `branch:`. Two rows can carry the same changeset name, and
+  a reader comparing them needs the difference; `--json` already had the field. The integrated-skip note
+  stays per changeset and prints once, because "it landed at 4f2b8c1" is one fact however many branches
+  still carry the directory.
+- The verification line asks for "two rows with two distinct states", and the queue has no such thing to
+  show: it lists READY branches, so every row's state is `READY`. The test pins what is real — one
+  changeset on two branches, both READY, two rows with distinct heads and distinct ready-marker commits —
+  and adds the case the old rule actually hid: block one branch and the other's row survives, because each
+  branch's own state decides its own row rather than the newest marker winning the pair.
+- The renamed commands moved into `init.go` and `queue.go` of their own, because every other top-level
+  command has a file (`status.go`, `check.go`, `diff.go`, `integration.go`); leaving them in `change.go`
+  and `review.go` would have made the file layout contradict the command tree. `plural` went to
+  `report.go` with the other output helpers it was never specific to.
+- **Historical documents keep the old spellings.** The completed plans, audits and research notes under
+  `docs/plans/completed/`, and other changesets' `ABOUT.md`, record what was true when they were written;
+  renaming commands inside them would rewrite the record, the way editing a changelog would. The two live
+  gate scripts that happen to live under that directory were updated, because they run against the binary
+  being built. `reconciliation.md` and this plan keep both spellings wherever they are making a
+  before/after argument.
+- Root's help text now reads `Reading state: git pair queue | status | diff`, which is where a person
+  looking for the queue will look, and the `change` and `review` group help no longer claim the two moved
+  commands.
+
 
 ### M7 — Stacked changesets
 

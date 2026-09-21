@@ -112,7 +112,7 @@ func TestQueueListsInFlightChangesetsWithNoRefs(t *testing.T) {
 	if got := durableRefs(t, f); len(got) != 0 {
 		t.Fatalf("durable refs for in-flight work: %v", got)
 	}
-	queue := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	queue := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	mustContain(t, queue.stdout, slug, "the offered changeset is in the queue with nothing recorded")
 }
 

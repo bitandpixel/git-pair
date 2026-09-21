@@ -49,7 +49,7 @@ var (
 type Changeset struct {
 	// Slug is the changeset ID: the filesystem name of its directory. It is the
 	// identity refs and JSON output name, and it is not derived from the branch except
-	// as the default `change init` suggests.
+	// as the default `init` suggests.
 	Slug string
 	// Branch is the branch the caller was asking about. Resolution does not determine
 	// it — the rule reads trees, not checkouts — so callers fill it in from what they
@@ -61,7 +61,7 @@ type Changeset struct {
 	// Dir is the changeset directory relative to the repository root.
 	Dir string
 	// Exists is false when the directory has not been created yet. Only Current can
-	// return such a value, so `change init` can report what it would create.
+	// return such a value, so `init` can report what it would create.
 	Exists bool
 }
 
@@ -147,7 +147,7 @@ func ValidateID(id string) error {
 }
 
 // ForID names the changeset directory an id would use, without consulting the tree.
-// `change init` needs the value to check for collisions before it writes anything.
+// `init` needs the value to check for collisions before it writes anything.
 func ForID(id string) (Changeset, error) {
 	if err := ValidateID(id); err != nil {
 		return Changeset{}, err
@@ -156,7 +156,7 @@ func ForID(id string) (Changeset, error) {
 }
 
 // DirectoryState says where a changeset directory is present: on disk, in HEAD's tree, or
-// both. `change init` needs the two halves separately. A directory on disk is this changeset
+// both. `init` needs the two halves separately. A directory on disk is this changeset
 // being re-initialised, which is idempotent. A directory in HEAD but not on disk is a deletion
 // that has not been committed, and a name whose history is still live on this line of
 // development is not free — retiring a changeset is a commit, not an `rm`.
@@ -166,7 +166,7 @@ func ForID(id string) (Changeset, error) {
 //
 // The window neither half closes is two branches that each created the same new id without
 // either being readied: nothing is visible from one checkout, and the refs check below closes
-// it the moment either is. A full branch scan per `change init` prices a rare mistake against
+// it the moment either is. A full branch scan per `init` prices a rare mistake against
 // a common command.
 type DirectoryState struct {
 	Worktree  bool
@@ -332,7 +332,7 @@ func currentOn(ctx context.Context, repo *git.Repo, db DefaultBranchRef) (Change
 		return Changeset{}, AmbiguityError(res)
 	}
 	if res.Selected == nil {
-		// Nothing is in progress here. The value names the directory `change init` would
+		// Nothing is in progress here. The value names the directory `init` would
 		// create from this branch's name, which is what `status` reports and what
 		// ErrNoChangeset's hint points at.
 		fallback, err := SlugFromBranch(branch)
@@ -363,7 +363,7 @@ func RequireCurrentOn(ctx context.Context, repo *git.Repo, db DefaultBranchRef) 
 		return c, err
 	}
 	if !c.Exists {
-		return c, fmt.Errorf("%w: %s (run `git pair change init --base <ref>`)", ErrNoChangeset, c.Dir)
+		return c, fmt.Errorf("%w: %s (run `git pair init --base <ref>`)", ErrNoChangeset, c.Dir)
 	}
 	return c, nil
 }
@@ -574,7 +574,7 @@ func normalizeMarkdown(s string) string {
 //
 // The check is by ref identity, not by commit. A branch created moments ago
 // shares its tip with its base legitimately, so "same SHA" would refuse the
-// normal first run of `change init` on a new branch.
+// normal first run of `init` on a new branch.
 func BaseIsOwnBranch(ctx context.Context, repo *git.Repo, base, branch string) (bool, error) {
 	if base == "" || branch == "" {
 		return false, nil
@@ -596,7 +596,7 @@ func (c Changeset) AboutExists(repo *git.Repo) bool {
 	return err == nil && !info.IsDir()
 }
 
-// AboutTemplate is the starting ABOUT.md written by `change init`. Headings
+// AboutTemplate is the starting ABOUT.md written by `init`. Headings
 // follow PRD §6 so an agent has somewhere to put each kind of context.
 func AboutTemplate(slug string) string {
 	return "# " + slug + "\n\n" +

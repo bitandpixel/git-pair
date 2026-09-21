@@ -494,11 +494,11 @@ func TestQueueSkipsAnIntegratedChangeset(t *testing.T) {
 	runIn(t, f.Dir(), "change", "ready").mustSucceed(t, "change", "ready")
 	f.SwitchTo("main")
 
-	before := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	before := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	mustContain(t, before.stdout, slug, "the offered changeset is in the queue before it lands")
 
 	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--target", "release/2.x").mustSucceed(t, "integration", "record")
-	after := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
+	after := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	if strings.Contains(after.stdout, slug) {
 		t.Errorf("the queue still lists %s after the record:\n%s", slug, after.stdout)
 	}

@@ -23,8 +23,8 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 
 	// Upper changeset, stacked on the lower branch.
 	f.CreateBranch("booking-transaction-tests", "booking-transaction")
-	runIn(t, f.Dir(), "change", "init", "--base", "booking-transaction").
-		mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "booking-transaction").
+		mustSucceed(t, "init")
 	f.Commit("add concurrent final-seat test", gittest.WithFile("service_test.go",
 		"package main\n\nfunc TestFinalSeat() {}\n"))
 	ready(t, f)
@@ -55,7 +55,7 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 	}
 
 	// Only the upper changeset is queued; the lower one is blocked.
-	queue := runIn(t, f.Dir(), "review", "queue", "--json")
+	queue := runIn(t, f.Dir(), "queue", "--json")
 	rows := queue.jsonList(t, "ready_for_review")
 	if len(rows) != 1 {
 		t.Fatalf("queue = %v, want only the ready upper changeset", rows)

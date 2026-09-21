@@ -104,7 +104,7 @@ func TestListReportsBothFamiliesAndTheRetiredOnes(t *testing.T) {
 	}
 }
 
-// `change init` refuses an id either family already holds. Matching is on the two exact paths, so
+// `init` refuses an id either family already holds. Matching is on the two exact paths, so
 // `booking-v2` is free while `booking` is taken — and a legacy nested ref no longer reserves the
 // name, because its id is not readable as a component of either family.
 func TestTakenSeesEitherFamily(t *testing.T) {
