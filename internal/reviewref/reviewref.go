@@ -46,6 +46,12 @@ const NamespaceRoot = "refs/git-pair"
 const (
 	integrationsRoot = NamespaceRoot + "/integrations"
 	archiveRoot      = NamespaceRoot + "/archive"
+
+	// The retired layout nested both families under one directory per changeset. Named here so the
+	// reader of a List entry can be told which layout wrote a ref.
+	legacyRoot             = NamespaceRoot + "/changesets"
+	legacyArchiveChild     = "archive"
+	legacyIntegrationChild = "integration"
 )
 
 // Integration returns the changeset's integration ref: the commit the changeset became in the
@@ -150,6 +156,15 @@ const (
 	KindArchive Kind = "archive"
 	// KindIntegration is the record of the commit the changeset became.
 	KindIntegration Kind = "integration"
+	// KindLegacyIntegration and KindLegacyArchive are the two families of the retired layout —
+	// `refs/git-pair/changesets/<id>/{archive,integration}` — which the pre-two-ref code wrote and an
+	// upgrade leaves where it is. They are reported rather than dropped because a landing written down
+	// under the old name *is* written down: a command asking whether the fact is recorded has to answer
+	// that question about history it did not write, and answering "no" to every changeset that predates
+	// the upgrade would report a hundred findings nobody caused and train people to ignore the one they
+	// did. They reserve no names (`Taken` says so), and nothing new is ever written at either path.
+	KindLegacyIntegration Kind = "legacy-integration"
+	KindLegacyArchive     Kind = "legacy-archive"
 )
 
 // Entry is one durable ref.
@@ -199,6 +214,20 @@ func identify(ref string) (string, Kind, bool) {
 			continue
 		}
 		return id, family.kind, true
+	}
+	rest, ok := strings.CutPrefix(ref, legacyRoot+"/")
+	if !ok {
+		return "", "", false
+	}
+	id, child, ok := strings.Cut(rest, "/")
+	if !ok || id == "" || strings.Contains(child, "/") {
+		return "", "", false
+	}
+	switch child {
+	case legacyArchiveChild:
+		return id, KindLegacyArchive, true
+	case legacyIntegrationChild:
+		return id, KindLegacyIntegration, true
 	}
 	return "", "", false
 }

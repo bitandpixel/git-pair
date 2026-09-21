@@ -19,7 +19,6 @@ import (
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 	"gitpair/internal/reviewops"
-	"gitpair/internal/reviewref"
 	"gitpair/internal/span"
 	"gitpair/internal/tui"
 )
@@ -439,7 +438,7 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	if err != nil {
 		return err
 	}
-	resolutions, err := changeset.BranchResolutions(ctx, repo, db)
+	scan, err := changeset.ScanBranches(ctx, repo, db)
 	if err != nil {
 		return err
 	}
@@ -450,7 +449,16 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	var order []string
 	sets := map[string]*found{}
 	var skipped []string
-	for _, br := range resolutions {
+	// One read of the durable namespace for the whole command. Three things in here are questions about
+	// those refs — has this changeset landed, does this orphan have a chain to read, which landings carry
+	// no record — and each used to ask git separately, once per changeset. The queue's cost now follows
+	// the branches, not the number of changesets the repository has ever had.
+	durable, err := indexDurableRefs(ctx, repo)
+	if err != nil {
+		return err
+	}
+	unrecorded := durable.unrecordedLandings(scan.TrunkIDs)
+	for _, br := range scan.Branches {
 		if br.Err != nil {
 			skipped = append(skipped, br.Branch+" (unreadable changeset metadata: "+br.Err.Error()+")")
 			continue
@@ -482,11 +490,9 @@ func runReviewQueue(ctx context.Context, a *app) error {
 		// and the tree rule still reads it as live work. It is named in the skip note rather than
 		// dropped silently, because unlike a trunk landing this branch is still here and its
 		// disappearance from the queue would otherwise be a mystery.
-		if sha, err := reviewref.ResolveIntegration(ctx, repo, slug); err == nil {
+		if sha, ok := durable.Integrated[slug]; ok {
 			skipped = append(skipped, fmt.Sprintf("%s (integrated at %s)", slug, short(sha)))
 			continue
-		} else if !errors.Is(err, reviewref.ErrNotIntegrated) {
-			return err
 		}
 		// A slug can match more than one branch; the one whose head carries the
 		// newest ready marker wins.
@@ -514,7 +520,7 @@ func runReviewQueue(ctx context.Context, a *app) error {
 		if _, ok := sets[slug]; ok {
 			continue
 		}
-		note, err := classifyOrphan(ctx, repo, head, slug)
+		note, err := classifyOrphan(ctx, repo, head, slug, durable)
 		if err != nil {
 			skipped = append(skipped, slug+" ("+err.Error()+")")
 			continue
@@ -530,12 +536,14 @@ func runReviewQueue(ctx context.Context, a *app) error {
 
 	if a.json {
 		return a.emitJSON(map[string]any{
-			"ready_for_review": entries,
-			"skipped":          skipped,
+			"ready_for_review":  entries,
+			"skipped":           skipped,
+			"landed_unrecorded": unrecorded,
 		})
 	}
 	if len(entries) == 0 {
 		a.printf("READY FOR REVIEW\n\n  nothing is ready\n")
+		a.printUnrecorded(unrecorded, durable.NamespaceEmpty, displayRef(db.Ref), true)
 		printSkipped(a, skipped)
 		return nil
 	}
@@ -547,6 +555,7 @@ func runReviewQueue(ctx context.Context, a *app) error {
 		a.printf("  head: %s\n", short(e.Head))
 		a.printf("\n")
 	}
+	a.printUnrecorded(unrecorded, durable.NamespaceEmpty, displayRef(db.Ref), false)
 	printSkipped(a, skipped)
 	return nil
 }
@@ -557,17 +566,18 @@ func runReviewQueue(ctx context.Context, a *app) error {
 // which gave the same warning to two opposite situations: work that was reviewed,
 // merged, and had its branch deleted — nothing left for a reviewer to do — and work
 // whose branch really did go missing.
-func classifyOrphan(ctx context.Context, repo *git.Repo, head, slug string) (string, error) {
-	archive, err := reviewref.ResolveArchive(ctx, repo, slug)
-	if errors.Is(err, reviewref.ErrNoArchiveRef) {
+func classifyOrphan(ctx context.Context, repo *git.Repo, head, slug string, durable refIndex) (string, error) {
+	// The chain an orphan might have is read from the same index the rest of this command reads, so an
+	// orphan with no refs costs nothing: no `rev-parse`, no per-slug question about the namespace.
+	archive, ok := durable.Archive[slug]
+	if !ok {
 		// With no archive ref there is no record of this changeset, and a directory with no
 		// branch behind it is either a leftover or work whose branch was deleted before anyone
 		// recorded it — git-pair cannot tell which, so it says nothing rather than guessing about
-		// deleted work. M4 gives this case its own reported state.
+		// deleted work. The one shape of it it *can* tell is a directory the destination carries:
+		// that is a landing rather than a disappearance, and `landedIn` reports it under its own
+		// heading instead (see `unrecordedLandings`).
 		return "", nil
-	}
-	if err != nil {
-		return "", err
 	}
 	base, err := changeset.BaseAt(ctx, repo, head, slug)
 	if err != nil {
@@ -582,10 +592,8 @@ func classifyOrphan(ctx context.Context, repo *git.Repo, head, slug string) (str
 	// An integrated changeset landed, and the branch that carried it is gone. That is the case
 	// the record was written for: nothing is pending, and the diff would only say the work is not
 	// in its base — which the record already says better.
-	if sha, err := reviewref.ResolveIntegration(ctx, repo, slug); err == nil && sha != "" {
+	if _, ok := durable.Integrated[slug]; ok {
 		return "", nil
-	} else if err != nil && !errors.Is(err, reviewref.ErrNotIntegrated) {
-		return "", err
 	}
 	// An abandoned changeset ended on purpose, and the archive carries the ending. That is the
 	// whole answer: nothing is pending, and the diff would only report that the work is not in its

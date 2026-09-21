@@ -275,7 +275,10 @@ func TestJSONKeySets(t *testing.T) {
 		f, slug := newChangeset(t, "booking", "main")
 		ready(t, f)
 		out := runIn(t, f.Dir(), "review", "queue", "--json").json(t)
-		assertKeys(t, out, "ready_for_review")
+		assertKeys(t, out, "ready_for_review", "landed_unrecorded")
+		if _, ok := out["landed_unrecorded"].([]any); !ok {
+			t.Errorf("landed_unrecorded = %#v, want an array (never null: it answers a question)", out["landed_unrecorded"])
+		}
 		rows := out["ready_for_review"].([]any)
 		if len(rows) != 1 {
 			t.Fatalf("ready_for_review = %v, want one entry", rows)

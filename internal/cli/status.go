@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"gitpair/internal/changeset"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 	"gitpair/internal/reviewref"
@@ -115,7 +116,7 @@ type statusJSON struct {
 func runStatus(ctx context.Context, a *app, slug string) error {
 	s, err := a.loadFor(ctx, slug)
 	if err != nil {
-		return err
+		return a.landingsOnNoChangeset(ctx, slug, err)
 	}
 	view, err := buildStatus(ctx, a, s)
 	if err != nil {
@@ -127,6 +128,40 @@ func runStatus(ctx context.Context, a *app, slug string) error {
 	}
 	printStatus(a, view)
 	return nil
+}
+
+// landingsOnNoChangeset annotates the one `status` failure that has a second half to it.
+//
+// "No changeset for this branch" is true and stays the answer — exit 2, because the command asked about
+// work in progress and this branch holds none. But when the branch is the destination, the same
+// repository may also be holding directories that landed with no record written, and a reader told only
+// the first half goes looking for a branch they forgot instead of the record they did not write. The
+// finding is printed where a reader on that branch will see it, with the invocation that closes the gap
+// (PRD §22's contract, made detectable).
+//
+// Every step of the detection is best-effort: this path already has an answer, and a report about
+// landings is never a reason to fail in a new way.
+func (a *app) landingsOnNoChangeset(ctx context.Context, slug string, err error) error {
+	if slug != "" || !errors.Is(err, changeset.ErrNoChangeset) {
+		return err
+	}
+	repo, rerr := a.loadRepo(ctx)
+	if rerr != nil {
+		return err
+	}
+	db, derr := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
+	if derr != nil {
+		return err
+	}
+	dirs, derr := changeset.DirsAt(ctx, repo, db.Ref)
+	if derr != nil {
+		return err
+	}
+	durable, derr := indexDurableRefs(ctx, repo)
+	if derr != nil {
+		return err
+	}
+	return unrecordedInStatus(err, durable.unrecordedLandings(dirs), durable.NamespaceEmpty, displayRef(db.Ref))
 }
 
 type statusView struct {

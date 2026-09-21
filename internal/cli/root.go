@@ -234,13 +234,13 @@ func (a *app) loadNamed(ctx context.Context, slug string) (*session, error) {
 // one whose history is furthest along, and the branch that answer came from is returned so
 // callers can print it.
 func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db changeset.DefaultBranchRef) (changeset.Changeset, lifecycle.Summary, string, error) {
-	resolutions, err := changeset.BranchResolutions(ctx, repo, db)
+	scan, err := changeset.ScanBranches(ctx, repo, db)
 	if err != nil {
 		return changeset.Changeset{}, lifecycle.Summary{}, "", err
 	}
 	var branches []string
 	selected := map[string]changeset.Candidate{}
-	for _, br := range resolutions {
+	for _, br := range scan.Branches {
 		if br.Err != nil || br.Resolution.Selected == nil {
 			continue
 		}

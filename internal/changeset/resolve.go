@@ -205,6 +205,16 @@ func newResolver(ctx context.Context, repo *git.Repo, db DefaultBranchRef) (*res
 	return &resolver{db: db, onTrunk: onTrunk}, nil
 }
 
+// trunkIDs returns the destination's directories in a stable order, for callers reporting them.
+func (r *resolver) trunkIDs() []string {
+	out := make([]string, 0, len(r.onTrunk))
+	for id := range r.onTrunk {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (r *resolver) at(ctx context.Context, repo *git.Repo, rev string) (Resolution, error) {
 	res := Resolution{DefaultBranch: r.db}
 	revSHA, err := repo.RevParse(ctx, rev)
@@ -343,27 +353,40 @@ type BranchResolution struct {
 	Err        error
 }
 
-// BranchResolutions resolves every local branch against the integration branch. It is the
-// enumeration `queue` wants, and the one `--changeset <id>` filters: the branches carrying work
-// are the ones with a candidate, and a changeset with no branch behind it is a record rather than
-// work, which is where `status --changeset` goes looking instead.
+// Scan is one pass over the repository: every local branch and what the rule says about it, plus
+// the changeset directories the destination branch carries.
+type Scan struct {
+	DefaultBranch DefaultBranchRef
+	Branches      []BranchResolution
+	// TrunkIDs names the changeset directories present in the destination branch, sorted. They are
+	// landed work whether or not anyone wrote a record — the tree rule (PRD §12) makes a directory
+	// the destination carries no claim on anything — which is why the listing travels with the scan
+	// instead of being read again by whoever asks "has anything landed unrecorded?".
+	TrunkIDs []string
+}
+
+// ScanBranches resolves every local branch against the integration branch. It is the enumeration
+// `queue` wants, and the one `--changeset <id>` filters: the branches carrying work are the ones
+// with a candidate, and a changeset with no branch behind it is a record rather than work, which is
+// where `status --changeset` goes looking instead.
 //
-// The trunk listing is taken once for the whole scan, so the per-branch cost is a tree listing and
-// one batch read — plus two calls per candidate on the rare branch that carries more than one
-// unlanded changeset and has to order them.
-func BranchResolutions(ctx context.Context, repo *git.Repo, db DefaultBranchRef) ([]BranchResolution, error) {
+// The trunk listing is taken once for the whole scan and returned with the answers, so the per-branch
+// cost is a tree listing and one batch read — plus two calls per candidate on the rare branch that
+// carries more than one unlanded changeset and has to order them.
+func ScanBranches(ctx context.Context, repo *git.Repo, db DefaultBranchRef) (Scan, error) {
 	branches, err := localBranches(ctx, repo)
 	if err != nil {
-		return nil, err
+		return Scan{}, err
 	}
 	r, err := newResolver(ctx, repo, db)
 	if err != nil {
-		return nil, err
+		return Scan{}, err
 	}
-	out := make([]BranchResolution, 0, len(branches))
+	out := Scan{DefaultBranch: db, TrunkIDs: r.trunkIDs()}
+	out.Branches = make([]BranchResolution, 0, len(branches))
 	for _, b := range branches {
 		res, err := r.at(ctx, repo, "refs/heads/"+b)
-		out = append(out, BranchResolution{Branch: b, Resolution: res, Err: err})
+		out.Branches = append(out.Branches, BranchResolution{Branch: b, Resolution: res, Err: err})
 	}
 	return out, nil
 }

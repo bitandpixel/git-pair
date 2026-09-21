@@ -519,7 +519,7 @@ landed.
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history |
 | `review history` | `--changeset <slug>` | only review marker commits, indexed from `0`, each naming the commit it reviewed under `REVIEWED` |
-| `review queue` | — | every branch in this repo whose changeset is `READY`, longest wait first; read from the repository, not the checkout |
+| `review queue` | — | every branch in this repo whose changeset is `READY`, longest wait first, plus any landing in the integration branch that no integration record accounts for; read from the repository, not the checkout |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug |
 | `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition — the review's outcome, whether the commit it approved is still in this history, and whether the content still matches; no `--changeset`, because it is the gate a forge runs *on* a revision |
 | `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>`, `--allow-feedback` (all optional) | writes both durable refs for one changeset, create-only: the archive at `--source` and the integration at `--commit`. The changeset is discovered from the `changesets/<id>/` directories `--source` carries and the integration branch does not, so a pipeline needs the two SHAs it already holds and not the changeset name; `--changeset` disambiguates a stacked child. Before it writes: the source's history must name this changeset and its newest verdict must permit integration (`approve`, or `feedback` with `--allow-feedback`); `--commit` must be in the destination branch's history (the `--target` you name, else the changeset's `base:`, else the default branch) and must be the commit that added `changesets/<id>/` there. Name neither SHA and the repository is asked — the landing is the first-parent commit on the destination that added the directory, the reviewed head is the branch still carrying it — and anything ambiguous is a usage error naming the candidates. Needs no checkout and writes no commit; re-running it with the same pair succeeds and changes nothing |
@@ -559,7 +559,10 @@ the invocation itself was wrong, so retrying unchanged will fail again.
 ## JSON contracts
 
 Output is indented two spaces, and empty lists may serialise as `null` rather than `[]`
-(`review queue`, `review submit`'s `files`), so test for both.
+(`review queue`'s `ready_for_review` and `skipped`, `review submit`'s `files`), so test for both. A key
+that answers a question rather than collecting notes is always an array: `review queue`'s
+`landed_unrecorded` says `[]` for "asked, and none", so a consumer never has to tell that apart from a
+build old enough not to have been asked.
 
 `git pair status --json`, waiting for the first review. Once a review exists `latest_review`
 becomes `{"index": 0, "outcome": "block", "commit": "332887c", "reviewed_head": "1a2b3c4"}` —
@@ -617,9 +620,10 @@ the queue cannot explain (`null` when empty): a branch whose metadata cannot be 
 resolution rule cannot settle between two changesets, a recorded changeset whose archive is in no base
 and on no branch, or a changeset whose integration ref says it landed — that one names the commit,
 because the branch is usually still here and its disappearance from the queue would otherwise be a
-mystery. A changeset that has landed in its base, and a directory with no record at all, are both silent
-— neither is work a reviewer can act on, and a clone that never fetched `refs/git-pair/*` is silent here
-rather than wrong (§PRD §13.4).
+mystery. A changeset that has landed in its base, and a directory with no branch and no record anywhere, are both
+silent — neither is work a reviewer can act on, and a clone that never fetched `refs/git-pair/*` is
+silent here rather than wrong (PRD §13.4). What is *not* silent is a directory the integration branch
+carries with no integration ref: that is a merge whose record never ran, and it is reported by name.
 
 ```json
 {
@@ -634,9 +638,40 @@ rather than wrong (§PRD §13.4).
       "ready_age": "0s"
     }
   ],
-  "skipped": ["untracked-work (cannot resolve changeset base \"other\": unknown revision: other)"]
+  "skipped": ["untracked-work (cannot resolve changeset base \"other\": unknown revision: other)"],
+  "landed_unrecorded": [
+    {
+      "changeset": "waitlist-rebooking",
+      "command": "git pair integration record --changeset waitlist-rebooking"
+    }
+  ]
 }
 ```
+
+`landed_unrecorded` is the queue's second job: work that reached the integration branch while nobody
+wrote its record. Each entry carries the invocation that closes the gap, and the human form prints the
+same thing under its own heading:
+
+```text
+LANDED, UNRECORDED
+
+  waitlist-rebooking
+    in main with no integration record. Record it with:
+      git pair integration record --changeset waitlist-rebooking
+```
+
+The state is the one the merge leaves behind when the step after it is skipped: the directory is in
+trunk, so the rules that find work in progress stop seeing it, and the branch may already be deleted.
+`git pair status` prints the same finding on a branch that carries no changeset of its own — attached to
+its exit-2 "no changeset for this branch" answer, which stays exit 2 because the branch really does hold
+no work in progress.
+
+Both reports say "no integration record *in this clone*", and mean it: a record written where the merge
+ran arrives with `git fetch origin 'refs/git-pair/*:refs/git-pair/*'`, and an empty namespace is stated
+once as one condition rather than once per changeset. A landing recorded under the retired
+`refs/git-pair/changesets/<id>/integration` path counts as recorded — the fact is written down — while an
+archive ref alone does not, because it says a chain exists rather than that a landing happened. The
+printed list caps at ten and counts the rest; `--json` carries all of them.
 
 `git pair review history --json`
 
@@ -1394,7 +1429,9 @@ A changeset that reads as uninitialised on its own branch, or that has vanished 
 `review queue`, usually means its directory reached the integration branch — commonly because a
 sibling merged your unlanded branch and *that* landed. Your directory is in trunk's tree, which is
 precisely what the rule tests, so the cure is to land your own branch rather than someone else's
-merge of it. `git ls-tree <integration-branch> changesets/` shows whether the directory is there.
+merge of it. `git ls-tree <integration-branch> changesets/` shows whether the directory is there — and
+if it is there while no integration record names it, `review queue` does not leave you to work that out:
+it prints the changeset under `LANDED, UNRECORDED`.
 
 `ABOUT.md already has content: changesets/<cs>/ABOUT.md is not empty (pass --set-about to
 replace it)` (exit 2) — `change init --about` refuses to discard a description that is
@@ -1472,6 +1509,15 @@ queue asks what a reviewer can act on, and it answers the same way from `main` a
 changeset's own branch: it enumerates local branches and resolves each one's changeset, so
 membership does not depend on where you happen to be standing. A branch it cannot resolve — two
 changesets on one branch, say — is named in `skipped` rather than left out quietly.
+
+A missing entry that is *not* work in progress is reported rather than hidden. A changeset directory the
+integration branch carries with no integration record is a landing nobody recorded, and `review queue`
+gives it its own `LANDED, UNRECORDED` heading with the `git pair integration record` invocation that
+closes the gap; `git pair status` on a branch carrying no changeset of its own says the same inside its
+exit-2 answer. It is the one state where the paper trail is nothing but the merge commit, which is why
+the queue looks for it instead of waiting to be asked. Read it as "not recorded *here*" until
+`git fetch origin 'refs/git-pair/*:refs/git-pair/*'` says otherwise.
+
 A hand-written ready marker counts only if `Review-State: ready` and `Review-Changeset: <slug>`
 sit in a real trailer block, separated from the subject by a blank line and from each other by
 no blank line.

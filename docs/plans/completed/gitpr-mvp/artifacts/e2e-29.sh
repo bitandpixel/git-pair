@@ -301,6 +301,44 @@ else
   echo "  ok: the archive stops at the head the record names"
 fi
 
+step "a landing nobody recorded is reported rather than hidden"
+# The merge is git's, and so is the step after it. When that step is skipped the changeset is in the
+# worst place the design has: its directory is in trunk, so the rules that find work in progress stop
+# seeing it, and the paper trail is the merge commit alone. The detector is what makes the integration
+# contract (PRD §22) enforceable, so the script that walks the contract walks the miss too.
+git switch -q main
+git checkout -qb unrecorded-landing
+mkdir -p changesets/unrecorded-landing
+printf 'base: main\n' > changesets/unrecorded-landing/CHANGESET.yaml
+printf 'Summary: work that lands without its record.\n' > changesets/unrecorded-landing/ABOUT.md
+printf 'landed\n' > unrecorded.md && git add -A && git commit -qm "unrecorded-landing: the work"
+$G change ready >/dev/null 2>&1; check "the second changeset is offered" 0 $?
+$G review submit --approve >/dev/null 2>&1; check "and approved" 0 $?
+git switch -q main
+git checkout unrecorded-landing -- changesets/unrecorded-landing
+git commit -qm "unrecorded-landing: land it, write no record"
+out=$($G review queue 2>&1)
+printf '%s' "$out" | grep -q "LANDED, UNRECORDED" \
+  && echo "  ok: the queue reports the landing as its own heading" \
+  || { echo "  FAIL: an unrecorded landing left no trace in the queue: $out"; FAILED=1; }
+printf '%s' "$out" | grep -q "git pair integration record --changeset unrecorded-landing" \
+  && echo "  ok: and prints the invocation that closes the gap" \
+  || { echo "  FAIL: the report did not say what to run: $out"; FAILED=1; }
+out=$($G status 2>&1); code=$?
+[ "$code" = 2 ] && echo "  ok: status on the destination branch still exits 2" \
+  || { echo "  FAIL: status on the destination branch exited $code"; FAILED=1; }
+printf '%s' "$out" | grep -q "no changeset for this branch" \
+  && printf '%s' "$out" | grep -q "no integration record" \
+  && echo "  ok: and its answer carries the finding" \
+  || { echo "  FAIL: status said only that the branch has no changeset: $out"; FAILED=1; }
+$G integration record --changeset unrecorded-landing >/dev/null 2>&1
+check "recording the landing is a success" 0 $?
+if $G review queue 2>&1 | grep -q "LANDED, UNRECORDED"; then
+  echo "  FAIL: the report outlived the record"; FAILED=1
+else
+  echo "  ok: and the report goes quiet once the record exists"
+fi
+
 step "queue is empty again"
 $G review queue | sed 's/^/  /'
 

@@ -240,6 +240,48 @@ terminal record (§9.7) is a marker on a branch, so pruning trunk does not retir
 documented behaviour, not a bug to fix: the resurrection of an unrecorded landing is the rule answering
 the question it was given.
 
+### Landed, unrecorded
+
+The rule above has a second half, and it is a report rather than a reading. A `changesets/<id>/`
+directory present in the integration branch's tree with **no integration ref** (§13.2) is work that
+landed and whose record was never written — the merge happened, and the `git pair integration record`
+that follows it (§22) did not. The tree rule makes that state invisible: the changeset stops being a
+claim, its branch may be deleted, and the paper trail is the merge commit alone. So the state is
+detected and reported, by name, with the invocation that closes the gap:
+
+```text
+LANDED, UNRECORDED
+
+  booking-transaction
+    in main with no integration record. Record it with:
+      git pair integration record --changeset booking-transaction
+```
+
+`git pair review queue` (§10.6) prints it as its own heading, below the queue; `git pair status`
+(§11.1) prints the same finding on a branch that carries no changeset of its own, attached to the
+answer that already tells you the branch holds no work in progress. Both read the pair of facts the
+rule needs — the destination's directories, and the namespace's integration refs — from the reads the
+command was already making, so the report costs nothing per changeset and grows nothing as a repository
+ages.
+
+Two properties the wording has to hold:
+
+- **"Not recorded" means not recorded *here*.** A record written in the clone that ran the merge reaches
+  this one only through §13.4's fetch, so every report of this finding names both readings and the fetch
+  that settles between them. An empty namespace is one condition about the clone, not one per changeset,
+  and is stated once.
+- **A landing the retired layout recorded is recorded.** `refs/git-pair/changesets/<id>/integration` is a
+  different path spelling the same fact, and a detector that reported every changeset predating the
+  upgrade as lost paper trail would be ignored, including the one time it was right. An archive ref
+  alone is not a record of a landing: it says a chain exists.
+
+The finding is capped where it is printed — ten changesets, the rest counted — because the queue is also
+a notification surface, and because a repository with fifty unrecorded landings has a workflow problem
+that a fifty-line list will not fix. `--json` carries all of them (§10.6).
+
+This is the cheapest thing in the design that protects the durable-memory goal, and it is why the merge
+stays outside git-pair without the paper trail becoming optional.
+
 ---
 
 # 5. Changeset Metadata
@@ -1047,13 +1089,20 @@ which includes a clone that has never fetched `refs/git-pair/*` (§13.4): the qu
 and the refs that outlive them, so an unfetched namespace is silence here rather than an error. A
 directory whose archive and base carry the same `changesets/<changeset>/` content landed and was recorded,
 and says nothing. Anything else — recorded work whose archive is not in its base and on no branch — is
-named in `skipped` with both SHAs, because that line is then the only surviving trace of the work.
+named in `skipped` with both SHAs, because that line is then the only surviving trace of the work. The
+classification reads the durable namespace once for the whole queue, so a directory with no refs behind
+it costs nothing, and the same read answers the landing question below.
 
 A changeset with an integration ref (§13.2) has landed, and the queue has nothing to ask of it. It is
 named in `skipped` with the commit it landed as rather than dropped in silence, because unlike a
 trunk landing its branch is usually still here — and a landing outside the default branch is exactly
 the case the tree rule cannot see, since the directory is still absent from trunk and reads as live
 work until someone records where the change went.
+
+Work that reached the integration branch with **no integration ref** is the opposite case, and the queue
+is where it is reported: its own `LANDED, UNRECORDED` heading, naming each changeset and printing the
+`git pair integration record` invocation that closes the gap (§4's *Landed, unrecorded*). It is not a
+skip note, because "nothing to do" is the wrong reading of a record somebody forgot to write.
 
 A branch the rule cannot resolve is named there too, with its candidates and both ways out (§9.8).
 A branch that is quietly missing from the queue is indistinguishable from a branch with nothing to
@@ -1075,7 +1124,22 @@ waitlist-rebooking
   head: 92bf019
 
 note: skipped booking-transaction (integrated at 5556bc5)
+
+LANDED, UNRECORDED
+
+  waitlist-rebooking
+    in main with no integration record. Record it with:
+      git pair integration record --changeset waitlist-rebooking
+
+note: "no integration record" means none *in this clone* — a record written where the merge ran
+      arrives with git fetch origin 'refs/git-pair/*:refs/git-pair/*'
 ```
+
+The heading is the merge somebody made and nobody recorded (§22). The note keeps both readings of it
+alive: the record may exist in the clone that ran the merge and simply not have been fetched here.
+`--json` reports the same finding as `landed_unrecorded`, an array of `{"changeset", "command"}` — always
+an array, since it answers a question, and a consumer should not have to tell "none" apart from "this
+build predates the question". `ready_for_review` and `skipped` keep their documented shapes.
 
 The note is the record talking: `booking-transaction`'s branch may still be checked out and its directory
 still absent from trunk, and it is the integration ref that says the queue has nothing to ask of it
@@ -1215,6 +1279,15 @@ a CI job's trunk can be stale, absent, or named by flag without any of that show
 about the changeset. `default_branch_source` is `flag`, `origin-head` or `sole-candidate`, reported the
 same way however the branch arrived, because "how did you know?" is the question a strange answer
 raises.
+
+On a branch that carries no changeset of its own the command has nothing to report, and the answer is a
+usage refusal. When that branch is the integration branch the refusal also names the landings it carries
+that no integration record accounts for, and prints the `git pair integration record` invocation that
+closes each gap (§4's *Landed, unrecorded*): "this branch holds no work in progress" and "work landed
+here and nobody wrote the record" are two halves of one situation, and a reader told only the first goes
+looking for a branch they forgot rather than for the record they did not write. The exit code is
+unchanged — the branch really does not carry work in progress, which is what that code means — and
+`git pair review queue --json` (§10.6) is where the same finding is machine-readable.
 
 ## 11.2 `git pair diff`
 
@@ -2591,6 +2664,13 @@ Recording the landing (§11.4) belongs to whoever performs the merge, which in p
 the agent: an agent that recorded its own integration would be asserting a fact about the forge's
 action rather than about its own. `git pair check`'s `integrated` is the field a pipeline reads to
 learn the record already exists.
+
+That the step can be skipped is why it is detectable. A changeset directory in the integration branch
+with no integration ref is a merge whose record never ran, `git pair review queue` prints it under
+`LANDED, UNRECORDED` with the invocation that fixes it, and `git pair status` says the same on a branch
+carrying no work of its own (§4's *Landed, unrecorded*). A supervisor agent that runs the queue between
+steps sees a landing that lost its paper trail instead of a changeset that quietly disappeared, which is
+what makes the sequence above a contract rather than an expectation.
 
 ---
 

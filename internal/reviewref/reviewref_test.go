@@ -39,10 +39,14 @@ func TestRefNaming(t *testing.T) {
 	}
 }
 
-// List reads both families in one pass, and tells them apart, because a caller asking "which of
-// these landed?" needs the integration refs and a caller asking "where is the chain?" needs the
-// archive refs, and neither should pay for a second `for-each-ref` to find out.
-func TestListReturnsBothFamilies(t *testing.T) {
+// List reads every durable family in one pass, and tells them apart, because a caller asking "which of
+// these landed?" needs the integration refs and a caller asking "where is the chain?" needs the archive
+// refs, and neither should pay for a second `for-each-ref` to find out.
+//
+// The retired layout is reported too, under kinds of its own. `Taken` refuses to let it reserve a name,
+// but a command asking whether a landing was written down has to answer about history this code did not
+// write, and a legacy record is a record.
+func TestListReportsBothFamiliesAndTheRetiredOnes(t *testing.T) {
 	f := gittest.New(t)
 	head := f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
 	ctx := context.Background()
@@ -53,13 +57,16 @@ func TestListReturnsBothFamilies(t *testing.T) {
 	if _, err := reviewref.CreateOnly(ctx, repo(f), reviewref.Integration("other"), head); err != nil {
 		t.Fatalf("CreateOnly: %v", err)
 	}
-	// A ref under the namespace that belongs to neither family — a stray, or the retired
-	// `refs/git-pair/changesets/<id>/archive` layout a pre-two-ref repository still holds — must
-	// not be reported as either. Reading one would attribute a changeset that no longer exists to
-	// someone's work.
+	// The retired layout, spelled as the pre-two-ref code wrote it.
 	f.MustGit("update-ref", "refs/git-pair/changesets/legacy/archive", head)
+	f.MustGit("update-ref", "refs/git-pair/changesets/legacy/integration", head)
+	// And refs under the namespace that belong to no family at all — a stray someone left, a nested
+	// path in a family that has no nesting. Reporting one would attribute a changeset that does not
+	// exist to someone's work.
 	f.MustGit("update-ref", "refs/git-pair/stray", head)
 	f.MustGit("update-ref", "refs/git-pair/archive/nested/notes", head)
+	f.MustGit("update-ref", "refs/git-pair/changesets/legacy/other", head)
+	f.MustGit("update-ref", "refs/git-pair/changesets/legacy/nested/deep", head)
 
 	entries, err := reviewref.List(ctx, repo(f))
 	if err != nil {
@@ -70,16 +77,19 @@ func TestListReturnsBothFamilies(t *testing.T) {
 		got[e.Ref] = e.Kind
 	}
 	for ref, want := range map[string]reviewref.Kind{
-		"refs/git-pair/archive/booking":      reviewref.KindArchive,
-		"refs/git-pair/integrations/booking": reviewref.KindIntegration,
-		"refs/git-pair/integrations/other":   reviewref.KindIntegration,
+		"refs/git-pair/archive/booking":               reviewref.KindArchive,
+		"refs/git-pair/integrations/booking":          reviewref.KindIntegration,
+		"refs/git-pair/integrations/other":            reviewref.KindIntegration,
+		"refs/git-pair/changesets/legacy/archive":     reviewref.KindLegacyArchive,
+		"refs/git-pair/changesets/legacy/integration": reviewref.KindLegacyIntegration,
 	} {
 		if got[ref] != want {
 			t.Errorf("List reported %s as %q, want %q (entries: %+v)", ref, got[ref], want, entries)
 		}
 	}
 	for _, ref := range []string{
-		"refs/git-pair/changesets/legacy/archive",
+		"refs/git-pair/changesets/legacy/other",
+		"refs/git-pair/changesets/legacy/nested/deep",
 		"refs/git-pair/stray",
 		"refs/git-pair/archive/nested/notes",
 	} {

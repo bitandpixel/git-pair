@@ -17,9 +17,9 @@ the command whose whole job was moving it.
 What remains: `refs/git-pair/archive/<id>` and `refs/git-pair/integrations/<id>`, written by one
 invocation of `git pair integration record`, create-only, with no code path that moves either.
 
-This is M1, M2 and M3: the transition, the rule about history the transition required, the checks that make
-the record worth reading afterwards, and the flagless local flow that writes it. M4-M8 follow —
-landed-unrecorded detection, the per-branch queue, stacked parent tracking and the agent contract.
+This is M1 through M4: the transition, the rule about history the transition required, the checks that make
+the record worth reading afterwards, the flagless local flow that writes it, and the report that catches the
+step being skipped. M5-M8 follow — the per-branch queue, stacked parent tracking and the agent contract.
 
 ## What changed
 
@@ -63,6 +63,14 @@ landed-unrecorded detection, the per-branch queue, stacked parent tracking and t
 - `internal/reviewref` — `RecordedPair` reads both halves with absent ones as the empty string, and
   `Conflict` returns the write's own conflict error without writing, so the refusal a retry hears is the
   refusal the write would have given.
+- Landed, unrecorded (M4) — a `changesets/<id>/` directory in the integration branch with no integration
+  ref is a merge whose record never ran, and it is now a reported state: `review queue` gives it its own
+  heading with the `git pair integration record` invocation, and `status` puts the same finding on its
+  exit-2 "no changeset for this branch" answer. `internal/cli/landed.go` holds the detector, the wording,
+  and `refIndex` — one read of the durable namespace that also answers the queue's two other questions
+  about those refs, which it had been asking once per changeset.
+- `changeset.BranchResolutions` became `ScanBranches`, returning `Scan{Branches, TrunkIDs}`: the destination's
+  directories are the same listing the resolver already took, and the detector is the subtraction.
 - Flagless recording (M3) — `--source` and `--commit` are optional. The landing comes from
   `git.Repo.FirstParentLine` (new) and the transition rule M4's detector will share; the reviewed head comes
   from the branch still carrying the directory, destinations excluded. Ambiguity at either end is exit 2
@@ -114,6 +122,15 @@ not fetched are different things to fix.
   is refused with what is on it. Both belong ahead of the checks: a second landing into a branch that
   already carries the directory also fails the transition check, and the reader needs the answer about the
   record rather than the incidental complaint about the tree.
+- **A landing the retired layout recorded is recorded.** `reviewref.List` now reports
+  `refs/git-pair/changesets/<id>/{integration,archive}` under kinds of their own, and the detector counts the
+  integration one. The alternative was that every repository upgrading from the pre-two-ref release opened
+  with a screenful of findings nobody caused, and a report that does that gets ignored the one time it is
+  true. An archive ref alone still says nothing about a landing, and `Taken` still lets a legacy name be
+  reused — different questions, tested apart.
+- **The finding is a report, not a reading.** The tree rule is untouched: a directory in the destination is
+  still not a claim, and exit codes are unchanged. What changed is that a state which used to be invisible
+  now says who should run what.
 - **Derivation never chooses.** The local flow reads the graph — the first-parent transition, the branch
   carrying the directory — because the person who merged should not have to translate it into object ids,
   but two candidates at either end is a usage error rather than a pick, and `--source` is not reconstructed
@@ -161,6 +178,13 @@ the flag named), `TestIntegrationRecordAcceptsAChildLandedOnTrunk`,
 `TestIntegrationRecordAnswersFromTheRecordBeforeTheChecks`, `TestIntegrationRecordDerivesBothTips`,
 `TestIntegrationRecordDerivationRefusesToChooseBetweenTwo`,
 `TestIntegrationRecordDerivationStopsWhenTheBranchIsGone`, and `TestRecordedPairAndConflict`.
+For M4: `TestQueueAndStatusReportALandingNobodyRecorded`,
+`TestQueueAcceptsALandingTheRetiredLayoutRecorded`, `TestQueueSaysOnceThatTheNamespaceIsAbsent`,
+`TestQueueHedgesWhenOtherRecordsExist`, `TestQueueCountsLandingsItDoesNotPrint`,
+`TestQueueJSONCarriesTheSectionAsAnArray`, `TestQueueDoesNotReportLiveWorkAsALanding`,
+`TestQueueDoesNotReportALandingOnAnotherBranch`, and
+`TestReviewQueueCostDoesNotGrowWithUnrecordedLandings`; `e2e-29.sh` merges a changeset without recording it
+and reads the finding back out of both commands.
 
 ## Known limitations
 

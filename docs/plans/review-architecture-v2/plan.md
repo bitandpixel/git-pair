@@ -369,7 +369,7 @@ each asserting nothing was written), `TestIntegrationRecordRefusesACommitThatDid
   JSON — because a record whose SHAs came from the graph is a different act of writing from one whose SHAs
   were typed, and the difference matters to whoever audits it later.
 
-### M4 — Landed, unrecorded
+### M4 — Landed, unrecorded — done 2026-09-21
 
 **Deliverables**
 
@@ -378,20 +378,64 @@ each asserting nothing was written), `TestIntegrationRecordRefusesACommitThatDid
 
 **Tasks**
 
-- Compute `dirsInTrunk − integrationRefIDs` inside the existing resolver, from the single `List` pass — no
+- [x] Compute `dirsInTrunk − integrationRefIDs` inside the existing resolver, from the single `List` pass — no
   new git invocation.
-- `queue` gains a `LANDED, UNRECORDED` section printing the `integration record` invocation; `status`
+- [x] `queue` gains a `LANDED, UNRECORDED` section printing the `integration record` invocation; `status`
   prints the same finding when run on a branch that carries no changeset of its own, keeping exit 2 on the
   `ErrNoChangeset` path (`root.go:386`).
-- Guard with the existing `Present` discipline (`reviewref.go:70`): empty namespace → one fetch message;
-  otherwise the wording keeps both readings alive — "not recorded, or not recorded here".
-- Cap the list and count the remainder.
+- [x] Guard with the existing `Present` discipline (`reviewref.go:70`): empty namespace → one fetch message;
+  otherwise the wording keeps both readings alive — "not recorded, or not recorded here". The guard comes
+  from the same `List` that answers the question, so hedging costs nothing and `Present` stays reserved for
+  runs that have already failed.
+- [x] Cap the list and count the remainder.
 
 **Verification**
 
-- Tests for all four states: recorded, unrecorded, never-a-changeset, and unfetched namespace.
-- A test pinning the cost: the resolver issues the same number of git invocations as before this milestone.
-- `queue --json` contract test for the new section, with `reasons`-style arrays never `null`.
+- [x] Tests for all four states: recorded, unrecorded, never-a-changeset, and unfetched namespace.
+- [x] A test pinning the cost: the resolver issues the same number of git invocations as before this
+  milestone — and the queue now issues *fewer* than it did, because the report is not the only thing that
+  stopped asking per changeset.
+- [x] `queue --json` contract test for the new section, with `reasons`-style arrays never `null`.
+
+The tests that carry the above: `TestQueueAndStatusReportALandingNobodyRecorded`,
+`TestQueueAcceptsALandingTheRetiredLayoutRecorded`, `TestQueueSaysOnceThatTheNamespaceIsAbsent`,
+`TestQueueHedgesWhenOtherRecordsExist`, `TestQueueCountsLandingsItDoesNotPrint`,
+`TestQueueJSONCarriesTheSectionAsAnArray`, `TestQueueDoesNotReportLiveWorkAsALanding`,
+`TestQueueDoesNotReportALandingOnAnotherBranch`, and
+`TestReviewQueueCostDoesNotGrowWithUnrecordedLandings`. `e2e-29.sh` now merges a second changeset without
+recording it, reads the finding out of `queue` and `status`, records it, and checks both go quiet.
+
+**What landed differently**
+
+- The detector reads the destination's directories from the branch scan, which needed them anyway:
+  `changeset.BranchResolutions` became `ScanBranches`, returning `Scan{Branches, TrunkIDs}`. One tree
+  listing serves both the rule that finds work in progress and the report of what landed without a
+  record, which is the same comparison on both sides of one line.
+- `queue` now reads the durable namespace **once** (`refIndex`). Three of its questions were questions
+  about those refs — has this changeset landed, does this orphan have a chain to read, which landings
+  carry no record — and each had been asking git separately per changeset. `classifyOrphan` and the
+  integrated-skip both read the index now, so an orphan with no refs costs nothing and the queue's
+  invocation count no longer follows the repository's history. The milestone asked for "no new git
+  invocation"; what it got was two fewer.
+- **A landing the retired layout recorded is recorded.** `reviewref.List` reports
+  `refs/git-pair/changesets/<id>/{integration,archive}` under kinds of their own, and the detector treats
+  the integration one as the fact it is. Without this, every repository upgrading from the pre-two-ref
+  release would open with a screenful of findings nobody caused — and the report would be ignored,
+  including the one time it was right. An archive ref alone still does not count: it says a chain exists,
+  not that a landing happened. `Taken` still lets a legacy name be reused; these are different questions
+  and the two behaviours are tested apart.
+- `status` puts the finding on its exit-2 error rather than printing a section. "No changeset for this
+  branch" and "work landed here and nobody wrote the record" are two halves of one situation, and the
+  exit code is still about the first half. That path emits no JSON object at all (it is an error in both
+  modes), so `review queue --json` is the machine-readable surface for the finding, and the docs say so
+  rather than pretending `status --json` answers it.
+- `landed_unrecorded` is never null; `ready_for_review` and `skipped` keep their documented nulls. The
+  line drawn is between a key that answers a question and a key that collects notes, and it is written
+  down in the README's JSON section rather than left as a coincidence of implementation.
+- A landing on a branch that is not the destination is **not** this finding, and that is tested rather
+  than assumed. §0.8.2's rule says "the destination branch", and it is the right scope: a release-branch
+  landing still has its branch, its markers and `integration record`'s own refusals, while a trunk
+  landing has nothing — the tree rule retired the claim and no ref wrote it down.
 
 ### M5 — `change archive` retired, next actions rewritten
 
