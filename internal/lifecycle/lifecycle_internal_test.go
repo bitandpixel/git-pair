@@ -135,8 +135,8 @@ func TestDeriveImplementationCommitAfterApproveKeepsTheMarker(t *testing.T) {
 	}
 }
 
-// The close marker is retired: completion is an archive ref written by
-// `git pair change archive`, so nothing writes `Review-State: closed` any more,
+// The close marker is retired: completion is the pair of refs `git pair integration record`
+// writes at landing, so nothing writes `Review-State: closed` any more,
 // and reading it is not part of the model. What a repository that already carries
 // one gets is the same conservative reading as any other unreadable trailer set.
 func TestRetiredCloseMarkerIsAnUnrecognisedImplementationCommit(t *testing.T) {

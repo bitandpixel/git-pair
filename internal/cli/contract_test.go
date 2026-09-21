@@ -93,6 +93,83 @@ func TestExitCodeBusinessRuleRefusal(t *testing.T) {
 
 // Exit 2 is a usage or argument problem, including a repository that is not ready to
 // be used with the command at all.
+// The approved state is where git-pair hands the work on, and both machine surfaces are pinned here
+// because both are read by something that acts on it: `status --json` by an observer deciding what to
+// do next, `check --json` by the gate the author and CI run. They must say the same thing, and the thing
+// they say has to include the step git-pair does not perform — the merge — and the one it performs but
+// cannot decide — the record. An agent that finishes an approval and reads only "APPROVED" has no way to
+// know the contract continues, and an agent that parses prose out of a text field will parse it wrongly
+// eventually.
+func TestApprovedStateNamesTheLandingAndTheRecord(t *testing.T) {
+	f, _ := newChangeset(t, "booking", "main")
+	ready(t, f)
+	submit(t, f, "approve")
+	head := f.Head()
+
+	st := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status", "--json").json(t)
+	assertKeys(t, st, "state", "head", "head_full", "next_action", "integrated", "archive_ref", "archive_commit")
+	if st["state"] != "APPROVED" {
+		t.Errorf("status state = %v, want APPROVED", st["state"])
+	}
+	if st["head_full"] != head {
+		t.Errorf("status head_full = %v, want the approved head %s", st["head_full"], head)
+	}
+	want := "`git pair check`, then merge into main with ordinary git, then `git pair integration record`"
+	if st["next_action"] != want {
+		t.Errorf("status next_action = %v, want %q", st["next_action"], want)
+	}
+	// The next step is landing, so nothing may report it already done — and the two halves of the
+	// record are reported differently on purpose, which is worth pinning rather than rediscovering:
+	// `archive_ref`/`archive_commit` are present and empty so a consumer sees one shape either way,
+	// while `integration_ref`/`integrated_commit` appear only with the record itself (README, PRD §11.1).
+	if st["integrated"] != false {
+		t.Errorf("status integrated = %v on an unrecorded changeset", st["integrated"])
+	}
+	if st["archive_ref"] != "" || st["archive_commit"] != "" {
+		t.Errorf("status reports an archive before one exists: %v / %v", st["archive_ref"], st["archive_commit"])
+	}
+	if _, present := st["integration_ref"]; present {
+		t.Errorf("status carries integration_ref = %v with no record to name", st["integration_ref"])
+	}
+
+	ch := runIn(t, f.Dir(), "check", "--json").mustSucceed(t, "check", "--json").json(t)
+	assertKeys(t, ch, "changeset", "state", "ready", "head", "policy", "reasons", "next_action")
+	if ch["ready"] != true {
+		t.Fatalf("check ready = %v with reasons %v, want the gate to pass", ch["ready"], ch["reasons"])
+	}
+	if ch["head"] != head {
+		t.Errorf("check head = %v, want the commit the gate cleared (%s) — a log that says ready without saying what it looked at cannot be re-read", ch["head"], head)
+	}
+	if ch["next_action"] != st["next_action"] {
+		t.Errorf("check next_action = %v, want the same step status names: %v", ch["next_action"], st["next_action"])
+	}
+	if reasons, isList := ch["reasons"].([]any); !isList || len(reasons) != 0 {
+		t.Errorf("check reasons = %#v on a passing gate, want an empty array", ch["reasons"])
+	}
+
+	// The human forms say it too, in the same words. They are what a person reads, and the two
+	// commands disagreeing about the next step would be the contract drifting in real time.
+	human := runIn(t, f.Dir(), "check").mustSucceed(t, "check")
+	mustContain(t, human.stdout, "next:  "+want, "check's answer names the merge and the record")
+	shown := runIn(t, f.Dir(), "status").mustSucceed(t, "status")
+	mustContain(t, shown.stdout, "Next: "+want, "and so does status's")
+
+	// A refusal says nothing about the next step: `reasons` is the next step when the gate fails, and
+	// two fields would be two answers.
+	f.Commit("implementation after the approval", gittest.WithFile("extra.go", "package main\n"))
+	refused := runIn(t, f.Dir(), "check", "--json").mustSucceed(t, "check", "--json").json(t)
+	if refused["ready"] != false {
+		t.Fatalf("check ready = true after an unreviewed implementation commit")
+	}
+	if _, present := refused["next_action"]; present {
+		t.Errorf("check next_action = %v on a failing gate, want the key absent: reasons is the next step, "+
+			"and two fields would be two answers", refused["next_action"])
+	}
+	if len(refused["reasons"].([]any)) == 0 {
+		t.Errorf("check reasons = %v on a failing gate, want at least one reason", refused["reasons"])
+	}
+}
+
 func TestExitCodeUsageError(t *testing.T) {
 	f, _ := newChangeset(t, "booking", "main")
 

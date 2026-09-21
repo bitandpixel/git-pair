@@ -437,7 +437,7 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
   landing still has its branch, its markers and `integration record`'s own refusals, while a trunk
   landing has nothing — the tree rule retired the claim and no ref wrote it down.
 
-### M5 — `change archive` retired, next actions rewritten
+### M5 — `change archive` retired, next actions rewritten — done 2026-09-21
 
 **Deliverables**
 
@@ -446,19 +446,45 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
 
 **Tasks**
 
-- `status`'s `NextAction` gains the approved case: merge into `<base>`, then `git pair integration record`
+- [x] `status`'s `NextAction` gains the approved case: merge into `<base>`, then `git pair integration record`
   (`status.go:138`, alongside the existing integrated line at `:221`). `check`'s success path prints the same
   next step.
-- Move `change archive`'s squash-safety reporting into `status`/`check`; delete the command's flag set
+- [x] Move `change archive`'s squash-safety reporting into `status`/`check`; delete the command's flag set
   (`--allow-surviving-review-additions`, `--allow-unreviewed-changes`) or relocate the flags to `check`
   where the corresponding check lives.
-- `change unready` and `change abandon` documented as marker-only; PRD §9.6, §9.7 and §29 updated.
+- [x] `change unready` and `change abandon` documented as marker-only; PRD §9.6, §9.7 and §29 updated.
 
 **Verification**
 
-- Snapshot/contract tests for `status --json` and `check --json` in the approved state.
-- `pty-walkthrough.sh` replays the PRD §29 loop end to end: init → ready → review → feedback → ready →
+- [x] Snapshot/contract tests for `status --json` and `check --json` in the approved state.
+- [x] `pty-walkthrough.sh` replays the PRD §29 loop end to end: init → ready → review → feedback → ready →
   approve → merge → record → branch deleted → `status` and `queue` on trunk read correctly.
+
+**What landed differently**
+
+- The command, its flags, and its squash-safety reporting went in M1, so this milestone was the sweep and
+  the machine surfaces. Nothing needed relocating: the tree verdict the command printed is the same
+  derivation `check` refuses on and `status` reports as stale, and the one override that guarded a real
+  decision (`--allow-surviving-review-additions`) belongs to `change ready`, where the decision is made —
+  PRD §11.3 says plainly that `check` does not re-litigate it, and there is no flag to relocate.
+- `check --json` gained `next_action`, present only when `ready` is true. The gate is the command an
+  agent runs to decide whether work may land, and until now the step that follows it — the merge someone
+  else performs and the record that follows — was in the human output only. A failing gate carries no
+  such key rather than an empty one: `reasons` is its next step, and two fields would be two answers.
+- The approved-state contract is pinned across both surfaces by
+  `TestApprovedStateNamesTheLandingAndTheRecord`: the same next-step string from `status --json` and
+  `check --json` and both human forms, the full SHA the gate cleared, and the record's absence. It also
+  pins the one asymmetry the record's JSON has — `archive_ref`/`archive_commit` are present and empty
+  while work is in flight, `integration_ref`/`integrated_commit` appear only with the record — because
+  that is documented behaviour worth noticing before it drifts.
+- The §29 loop is replayed by `e2e-29.sh` rather than `pty-walkthrough.sh`. The walkthrough is the TUI's
+  (first paint, the span picker, the drill, the ring) and it is the only thing that proves the screen
+  works against a real terminal; moving a CLI lifecycle into it would replace those checks with worse
+  versions of checks the other script already makes. The e2e now runs further than §29 does: approve →
+  gate → merge → record → branch deletion, plus M4's landing-nobody-recorded, plus the rebase and
+  release-branch refusals.
+- Three stale test comments still described the world where a command advanced an archive ref; they are
+  the last mentions of it outside the history in `ABOUT.md` and the plan.
 
 ### M6 — Queue per branch, and naming
 
@@ -562,10 +588,20 @@ while its parent is under review. This is the spec's choice, not a bug, but it f
 reason is opaque. Mitigation: M7's named causes, and a documentation line saying to rebase and re-request
 after the parent settles.
 
-**R4 — Migration.** Repositories holding `refs/git-pair/changesets/<id>/{archive,integration}` will show
-every past landing as unrecorded, and `Taken` will keep the old ids reserved. Mitigation: that warning is
-also the migration nudge; the migration is "run `integration record` for the ones you want linked", not a
-ref rename; `Taken`'s behaviour with legacy names gets an explicit test.
+**R4 — Migration.** Repositories holding `refs/git-pair/changesets/<id>/{archive,integration}` were
+expected to show every past landing as unrecorded, and `Taken` was expected to keep the old ids reserved.
+M4 resolved both differently: `List` reports the retired paths under kinds of their own and a legacy
+*integration* ref counts as the record it is, so an upgrade is quiet — a report that fires on every
+changeset in the repository is a report that gets ignored. `Taken` does not reserve legacy names. What
+remains of the migration is opt-in: `integration record` for a legacy changeset writes the new pair beside
+the old refs, and the old ones are left alone because nothing in git-pair moves or deletes a ref.
+
+**R7 — `e2e-29.sh` flaked twice during this plan** (M2's `status did not report the reviewed head`), once
+in a chain that had just run `mise run check`, and it has not reproduced in the 20+ runs since. Both
+assertions in that step now capture stdout and stderr instead of piping into `grep`, so the next
+occurrence prints what the command actually said rather than looking like a missing field. Nothing in the
+plan's changes explains a transient, and the same assertions pass under load; treat a recurrence as a bug
+to chase in `status`'s git invocations, not as a reason to weaken the assertion.
 
 **R5 — Dropping per-review anchors loses altered-history inspection.** After a rebase the original review
 commit is reflog-only, so invariant 6/7 in the spec are not met by this plan, and "detect altered review

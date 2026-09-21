@@ -725,6 +725,11 @@ This form carries the verdict in `ready` rather than in the exit code: a not-rea
 JSON and exits 0, so a job piping it into `jq` keeps git-pair's answer separate from the pipeline's.
 Usage errors and git failures still exit 2 and 3 here.
 
+A passing verdict also carries `next_action` — the same sentence `status` prints in its `next_action`,
+naming the merge and then `git pair integration record` — so an agent that gates on `ready` learns what
+comes next without parsing the human output. It is present only when `ready` is true, because on a
+failing gate the next step is `reasons`.
+
 ```json
 {
   "changeset": "feat",

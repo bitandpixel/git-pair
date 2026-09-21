@@ -159,14 +159,21 @@ else
   echo "  FAIL: a tree-identical rebase did not refuse the merge (exit $REBASE_EXIT)"; FAILED=1
   printf '%s\n' "$REBASED" | sed 's/^/    /'
 fi
-if $G check --json | grep -q "\"reviewed_head\": \"$REVIEWED\""; then
+out=$($G check --json 2>&1)
+if printf '%s\n' "$out" | grep -q "\"reviewed_head\": \"$REVIEWED\""; then
   echo "  ok: --json names the commit the approval spoke about ($REVIEWED)"
 else
-  echo "  FAIL: --json did not report reviewed_head $REVIEWED"; FAILED=1
+  echo "  FAIL: --json did not report reviewed_head $REVIEWED"; printf '%s\n' "$out" | sed 's/^/    /'; FAILED=1
 fi
-$G status | grep -q "reviewed: ${REVIEWED:0:7}" \
-  && echo "  ok: status names it too" \
-  || { echo "  FAIL: status did not report the reviewed head"; FAILED=1; }
+# Both forms are captured rather than piped, so a run that failed for an unrelated reason says so
+# instead of looking like a missing field. Piping `status` into grep hides its exit code and its stderr,
+# which turns a transient git error into an assertion about the reviewed head.
+out=$($G status 2>&1)
+if printf '%s\n' "$out" | grep -q "reviewed: ${REVIEWED:0:7}"; then
+  echo "  ok: status names it too"
+else
+  echo "  FAIL: status did not report the reviewed head (${REVIEWED:0:7})"; printf '%s\n' "$out" | sed 's/^/    /'; FAILED=1
+fi
 git switch -q booking-transaction
 git branch -D rewritten >/dev/null
 git branch -D trunk-moved >/dev/null

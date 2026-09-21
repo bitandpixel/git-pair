@@ -101,6 +101,12 @@ type checkJSON struct {
 	Integrated       bool    `json:"integrated"`
 	IntegratedCommit string  `json:"integrated_commit,omitempty"`
 	IntegratedAt     landing `json:"-"`
+	// NextAction is the step a passing verdict licenses — the merge someone else performs, then the
+	// record — spelled the same way `status` spells it. It appears only when the gate passed: when it
+	// did not, `reasons` is the next step, and a consumer should never have to decide which of two
+	// fields to believe. An agent reading this verdict rather than the exit code should not have to
+	// parse a sentence to learn what comes next.
+	NextAction string `json:"next_action,omitempty"`
 }
 
 func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
@@ -156,6 +162,9 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		Reasons:          integrationReasons(s.cs.Slug, terminal, reviewed, s.head, allowFeedback, where, lineage),
 	}
 	out.Ready = len(out.Reasons) == 0
+	if out.Ready {
+		out.NextAction = landingNextAction(s.cs.Base)
+	}
 	if out.Reasons == nil {
 		// `reasons` is an array in both verdicts. `null` would make every consumer
 		// handle two shapes for the same fact, and the fact it is checking — whether the
@@ -180,7 +189,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	// The commit the gate cleared, named on the passing line as well as in --json: a log that says
 	// "ready" without saying what it looked at cannot be re-read after the branch has moved.
 	a.printf("head:  %s\n", short(s.head))
-	a.printf("next:  %s\n", landingNextAction(s.cs.Base))
+	a.printf("next:  %s\n", out.NextAction)
 	return nil
 }
 

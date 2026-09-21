@@ -1402,12 +1402,19 @@ flag is on the command that runs the gate, which is the one place the policy is 
 
 `--json` prints `changeset`, `ready`, `state`, `head`, `reasons`, `policy` (`approve-only` or
 `approve-or-feedback`, so a verdict in a log carries the policy that produced it), `reviewed_head`,
-`integrated` and `integrated_commit`. `head` and `reviewed_head` are full SHAs rather than the short
+`integrated`, `integrated_commit` and `next_action`. `head` and `reviewed_head` are full SHAs rather than the short
 forms the human output prints, because the consumer compares them against the revision it built —
 `integrated_commit` is short, matching `status`. `reviewed_head` is the commit the newest permitting
 review named (§10.4), reported whether or not the verdict is ready, and omitted where the marker names
 no head. `reasons` is an array in both verdicts, so a consumer branches on `ready` instead of handling
 two shapes for one fact.
+
+`next_action` is the handoff the passing verdict licenses (§9.5) — the gate, then the merge, then the
+record — and it is present only when `ready` is true. When the gate failed its next step is its
+`reasons`, and a consumer should not have to decide which of two fields to believe. The sentence is the
+one `status` prints, spelled by the same function and tested against it: this is the command an agent
+runs to decide whether work may land, and the step that follows should not have to be parsed out of a
+human line. The human form prints the same string as `next:`.
 
 In this form the verdict is `ready` rather than `$?`: a not-ready run prints its JSON and exits 0, so
 a job piping it into `jq` keeps git-pair's answer separate from the pipeline's. Only the human form

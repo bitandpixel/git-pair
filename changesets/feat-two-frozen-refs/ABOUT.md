@@ -17,9 +17,10 @@ the command whose whole job was moving it.
 What remains: `refs/git-pair/archive/<id>` and `refs/git-pair/integrations/<id>`, written by one
 invocation of `git pair integration record`, create-only, with no code path that moves either.
 
-This is M1 through M4: the transition, the rule about history the transition required, the checks that make
-the record worth reading afterwards, the flagless local flow that writes it, and the report that catches the
-step being skipped. M5-M8 follow — the per-branch queue, stacked parent tracking and the agent contract.
+This is M1 through M5: the transition, the rule about history the transition required, the checks that make
+the record worth reading afterwards, the flagless local flow that writes it, the report that catches the step
+being skipped, and the next actions that tell an author where the step is. M6-M8 follow — the per-branch
+queue, stacked parent tracking and the agent contract.
 
 ## What changed
 
@@ -63,6 +64,10 @@ step being skipped. M5-M8 follow — the per-branch queue, stacked parent tracki
 - `internal/reviewref` — `RecordedPair` reads both halves with absent ones as the empty string, and
   `Conflict` returns the write's own conflict error without writing, so the refusal a retry hears is the
   refusal the write would have given.
+- `check --json` gained `next_action` (M5), present only when the gate passes: the same sentence `status`
+  prints, so an agent that gates on `ready` learns about the merge and the record without parsing human
+  output. `TestApprovedStateNamesTheLandingAndTheRecord` pins that sentence across all four spellings and
+  the record's absence, and pins the one asymmetry in how the record's two halves appear in JSON.
 - Landed, unrecorded (M4) — a `changesets/<id>/` directory in the integration branch with no integration
   ref is a merge whose record never ran, and it is now a reported state: `review queue` gives it its own
   heading with the `git pair integration record` invocation, and `status` puts the same finding on its
@@ -183,7 +188,7 @@ For M4: `TestQueueAndStatusReportALandingNobodyRecorded`,
 `TestQueueHedgesWhenOtherRecordsExist`, `TestQueueCountsLandingsItDoesNotPrint`,
 `TestQueueJSONCarriesTheSectionAsAnArray`, `TestQueueDoesNotReportLiveWorkAsALanding`,
 `TestQueueDoesNotReportALandingOnAnotherBranch`, and
-`TestReviewQueueCostDoesNotGrowWithUnrecordedLandings`; `e2e-29.sh` merges a changeset without recording it
+`TestReviewQueueCostDoesNotGrowWithUnrecordedLandings`, and `TestApprovedStateNamesTheLandingAndTheRecord`; `e2e-29.sh` merges a changeset without recording it
 and reads the finding back out of both commands.
 
 ## Known limitations
