@@ -690,9 +690,11 @@ backwards:
     `change archive`: the head a later reader needs is the head the record names, and the record is
     written by the person who knows where the work went.
 -   **A merge is not a git-pair operation.** It is not derived, reported as state, or gated (§12).
-    `integration record` verifies facts about commits the author chose to make — that the landing
-    carries the changeset directory, that it is reachable from the ref it was verified against — and
-    never reaches for a merge itself.
+    `integration record` verifies facts about commits the author chose to make — that the head being
+    recorded was reviewed (§11.4), that the landing is in the destination branch's history, that it is the
+    commit which brought the changeset directory into it — and never reaches for a merge itself. The
+    verifications are what make the record worth reading later; none of them is a decision about whether
+    the work should have landed.
 -   **The record is written once.** Both refs are created, never moved, and re-running the recorder
     with the same pair succeeds without changing anything (§13.3). A landing that needs correcting is
     corrected in git and recorded under a changeset id that has no record yet, not by moving a ref.
@@ -1364,7 +1366,7 @@ reports the dirt, because `status` is observing.
 ## 11.4 `git pair integration record`
 
 ```bash
-git pair integration record --source <sha> --commit <sha> [--target <ref>] [--changeset <id>]
+git pair integration record --source <sha> --commit <sha> [--target <ref>] [--changeset <id>] [--allow-feedback]
 ```
 
 Records that the reviewed head `--source` became the commit `--commit`, by writing **both** durable
@@ -1395,7 +1397,7 @@ to begin with). That is §4's rule read at the commit the record names, and it i
 works from a CI checkout: it asks two trees, so it needs no ref to have been written first, no namespace
 to have been fetched, and no branch to be standing around.
 
-The checks, in the order that makes the failures useful:
+Resolution comes first, because every check below is about commits the caller named:
 
 1. `--source` and `--commit` are both required — exit 2, since nothing about the repository is wrong;
 2. `--source` resolves to a commit this repository has, else the failure names both possibilities — a
@@ -1407,18 +1409,55 @@ The checks, in the order that makes the failures useful:
    this asks about (§21);
 4. `--changeset` disambiguates and never substitutes: the id named must itself be a directory
    `--source` carries;
-5. `--source` is not an abandoned changeset's terminal marker (§9.7) — an abandoned changeset has
-   nothing to integrate, and one commit is enough to tell;
-6. `--commit` resolves;
-7. with `--target`, `--commit` is reachable from it;
-8. `changesets/<changeset>/` exists in `--commit`'s tree. The directory is committed content that
-   travels with the change through merge, squash and cherry-pick, so this is what makes a record
-   pointing at an unrelated commit — a release-branch housekeeping commit, say — fail instead of
-   quietly succeeding.
+5. `--commit` resolves.
 
-What step 7 does not assume matters: `--commit` need not descend from `--source`. A squash landing has
-no ancestry between the two, and the record is the thing that connects them. Reachability there is
-verifying a ref the caller named, which is why it does not reopen the derivation this design removed.
+**Then the record is read, before anything is verified.** If both refs already name exactly this pair, the
+command answers "already recorded" and writes nothing — and it answers before the four checks below,
+because a CI re-run arrives with whatever flags the second job happened to have, and re-verifying a fact
+already on the record against a different set of assumptions can only produce a refusal about the
+assumptions. A *different* pair for a changeset that already has one is refused here too, naming what is on
+the record: that is the answer to the question a re-run is asking, and the alternative is a refusal about
+the tree, which a second landing into a branch that already carries the changeset directory would also
+fail.
+
+**Then four verifications, each a refusal rather than a warning.** A record is the durable answer to
+"where did this reviewed work go", and the checks exist because an confidently-written wrong pair is worse
+than a refused command — the paper trail is what a release note, a bisect, or an agent trusts without
+re-deriving it.
+
+1. **The changeset is the changeset `--source`'s history names.** Tree discovery says which directories
+   the commit carries; the markers in its ancestry say which changeset was worked and reviewed. They have
+   to agree. A source whose markers name only some other changeset — a directory copied out of a stacked
+   parent, an id renamed after the review — is refused with both names in the sentence, because "never
+   reviewed" would send the reader to review work that has been reviewed, under a name that is not its own.
+2. **Its newest verdict permits integration.** The newest marker naming the changeset in `--source`'s
+   ancestry must be a review whose outcome permits integration: `approve`, or `feedback` with
+   `--allow-feedback`, the recorder's copy of `check`'s flag (§11.3). No markers, an offer with no verdict,
+   a block, feedback without the flag and an ending all refuse. This is the same reading `check` makes of
+   the same history, which is the point: the two commands a person runs one after the other must not
+   disagree about what counts as reviewed, and an unreviewed head written into the durable pair would make
+   the pair lie.
+3. **`--commit` is in the destination branch's history.** With `--target`, that ref is the destination and
+   the check is exactly one containment test. Without it, git-pair names the destination itself and tries
+   what it can: the `base:` recorded in the changeset's own `CHANGESET.yaml`, then the default branch, and
+   the first that contains the commit is the one the record is verified against. Trying both is what keeps
+   a stacked child recordable — its `base:` is its parent branch, and a stack merged into trunk in one go
+   lands the child on trunk — and it is not a licence to be wrong: a commit in neither history is refused,
+   naming what was tried and where each guess came from. Landing somewhere else is allowed, only not
+   silent: `--target <ref>` is how you say so. When nothing identifies a destination at all, no check is
+   made and `target` comes back empty. "This repository cannot say where work lands" is a different fact
+   from "the work did not land where it was said to", and only the second one refuses.
+4. **`--commit` is the commit that brought `changesets/<id>/` there.** Not that the directory is present —
+   that the commit *added* it over its first parent. The directory is committed content that travels with
+   the change through merge, squash and cherry-pick, so its arrival is the fact that identifies a landing
+   commit when ancestry has been destroyed; and presence alone cannot tell the landing from a follow-up
+   commit on the destination branch that merely carries what the landing put there. A record pointing at
+   such a commit — a release-branch housekeeping commit, say — fails here instead of quietly succeeding.
+
+What check 3 does not assume matters: `--commit` need not descend from `--source`. A squash landing has no
+ancestry between the two, and the record is the thing that connects them. Reachability verifies a ref
+rather than deriving where the work landed, which is why it does not reopen the derivation this design
+removed.
 
 Both writes are create-only (`update-ref <ref> <sha> <old>` with `<old>` the zero oid), behind an
 existence check that prints git-pair's explanation rather than git's `refusing to update ref`. Asking for
@@ -1442,16 +1481,29 @@ booking-transaction: recorded d91c21e as the integration of a7f3c98
   verified reachable from origin/main
 ```
 
+Without `--target` the same line says which branch git-pair chose and how:
+
+```text
+  verified reachable from main (the changeset's base branch)
+```
+
+The no-op answer prints nothing about reachability, because it made no checks: it read the record, found
+this pair already on it, and wrote nothing.
+
 Re-running it is a success that changed nothing, and says so:
 
 ```text
 booking-transaction: already recorded d91c21e as the integration of a7f3c98; nothing changed
 ```
 
-`--json` prints `changeset`, `source`, `commit`, `target`, `archive_ref`, `integration_ref`, `recorded`
-and `already_recorded`, with full SHAs, so a pipeline can compare them against what it built. `recorded`
-means this call wrote at least one ref and `already_recorded` means both already named this exact pair —
-a retry is a success, and the two successes are worth telling apart in a log.
+`--json` prints `changeset`, `source`, `commit`, `target`, `target_derived`, `archive_ref`,
+`integration_ref`, `recorded` and `already_recorded`, with full SHAs, so a pipeline can compare them
+against what it built. `recorded` means this call wrote at least one ref and `already_recorded` means both
+already named this exact pair — a retry is a success, and the two successes are worth telling apart in a
+log. `target` is the branch the landing was verified against in branch form (`main`, `origin/main`), empty
+when nothing identified one and so no containment check was made; `target_derived` is present and true only
+when git-pair chose that branch rather than the caller naming it, which is the one verification in the
+answer that nobody asked for.
 
 When the clone holds no `refs/git-pair/*` refs at all, the command prints a warning naming the fetch
 (§13.4) and records anyway. The candidate rule means its answer comes from trees rather than refs, so the

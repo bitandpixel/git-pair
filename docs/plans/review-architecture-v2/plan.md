@@ -277,7 +277,7 @@ repository. Deferred with the anchors unless a concrete need appears during impl
   they were written, so an approval survives a rebase as a rewritten commit naming a gone head — the case
   the rule catches, not one it has to work around.
 
-### M3 — `integration record` as the two-ref write point
+### M3 — `integration record` as the two-ref write point — verification landed 2026-09-21
 
 **Deliverables**
 
@@ -287,26 +287,60 @@ repository. Deferred with the anchors unless a concrete need appears during impl
 
 **Tasks**
 
-- Discover the changeset from content: directories in `--source`'s tree minus the destination branch's
+- [x] Discover the changeset from content: directories in `--source`'s tree minus the destination branch's
   (`changeset.DirsAt`), cross-checked against `Review-Changeset` in `--source`'s lineage. Agreement is
   required; disagreement refuses.
-- Verify, refusing by default per P1: the changeset is named by both readings; an approving marker exists in
-  `--source`'s lineage; `--commit` is reachable from the destination branch (`--target` stops being optional
+- [x] Verify, refusing by default per P1: the changeset is named by both readings; an approving marker exists
+  in `--source`'s lineage; `--commit` is reachable from the destination branch (`--target` stops being optional
   wherever the branch is available); `--commit` adds `changesets/<id>/` over its first parent.
-- Derive both tips when the flags are absent: archive tip from the changeset branch HEAD or the newest
+- [ ] Derive both tips when the flags are absent: archive tip from the changeset branch HEAD or the newest
   `Review-Head`; integration tip from the first-parent transition rule in
   `research/2026-09-21-landing-transition.md`.
-- Write archive first, integration second; re-run completes a half-written pair.
-- Rewrite the command's long help, which currently promises CI-only semantics and single-ref output.
-- PRD §11.4 and §16 rewritten; README's CI block rewritten, including the fetch line for the new roots.
+- [x] Write archive first, integration second; re-run completes a half-written pair.
+- [x] Rewrite the command's long help, which currently promises CI-only semantics and single-ref output.
+- [x] PRD §11.4 and §16 rewritten; README's CI block rewritten, including the fetch line for the new roots.
 
 **Verification**
 
-- Integration tests for merge, squash and cherry-pick landings; for the derivation of both tips; for the
+- [x] Integration tests for merge, squash and cherry-pick landings; for the derivation of both tips; for the
   archive-then-integration ordering; for completion after a simulated partial write; and for each of the
   four refusals.
-- A test proving an unreviewed head cannot be recorded as integrated.
-- The gate scripts land the same changeset twice, the second time proving the no-op.
+- [x] A test proving an unreviewed head cannot be recorded as integrated.
+- [x] The gate scripts land the same changeset twice, the second time proving the no-op.
+
+**What landed differently**
+
+- The first half of M3 — both refs written, create-only, in archive-then-integration order, with discovery
+  from content — landed in M1, because retiring `change archive` left the recorder as the only write point.
+  What landed now is the verification in front of the write.
+- Check 2 asks for the *newest* verdict, not for an approval anywhere in the history: a superseded approval
+  is not the reviewer's answer (§10.6), and `change unready` or `change abandon` after an approval take the
+  head out of the recordable set. This is the same reading `check` makes of the same history, which is why
+  the recorder carries `--allow-feedback` too: two commands run one after the other must not disagree about
+  what counts as reviewed. An unreadable `Review-Outcome` refuses rather than guessing.
+- Check 3 tries the derived destinations in order — the changeset's own `base:`, then the default branch —
+  and takes the first that contains the commit, rather than checking only the first one it can name. A
+  stacked child's `base:` is its parent branch and its landing is trunk, so a single-candidate rule would
+  refuse the ordinary way a stack lands. Nothing derivable at all is a check that is not made (`target`
+  empty), because "cannot say where work lands" and "did not land where said" are different facts and only
+  the second refuses.
+- The record is read before the checks run. An already-recorded pair answers "already recorded" without
+  verifying, and a *different* pair is refused with what is on the record — a second landing into a branch
+  that already carries the directory also fails check 4, and the reader needs the answer about the record,
+  not the incidental complaint about the tree. `reviewref.Conflict` returns the same error the write returns,
+  so the two cannot drift apart in wording.
+- Check 4 is the transition rather than the presence: the commit must *add* `changesets/<id>/` over its first
+  parent. Presence passes for a follow-up commit on the destination branch, which is the wrong thing to
+  record as a landing. P1's merge-commit exception has not been needed: landing a stack as one merge adds
+  both directories over the first parent, so each record passes.
+- `lifecycle.ScanLineage` is new: the recorder needs the markers in `--source`'s ancestry without the
+  single-id filter `Summarize` applies (the disagreement between the directory and the markers is the
+  refusal), and over the whole ancestry rather than `base..source`, because after a merge landing the
+  reviewed head is inside the destination branch and such a range is empty exactly when a record is written.
+- The plan's "PRD §16" is the draft PRD's numbering; the CI text in this repository is README's *Recording
+  the landing* and *Fetching the durable refs*, plus PRD §11.4 and §9.5, and all four moved.
+- Still open in M3: the flagless local flow (derive `--source` and `--commit`). Both remain required flags,
+  so the command's contract is unchanged from the CI shape M1 shipped.
 
 ### M4 — Landed, unrecorded
 

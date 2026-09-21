@@ -522,7 +522,7 @@ landed.
 | `review queue` | — | every branch in this repo whose changeset is `READY`, longest wait first; read from the repository, not the checkout |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug |
 | `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition — the review's outcome, whether the commit it approved is still in this history, and whether the content still matches; no `--changeset`, because it is the gate a forge runs *on* a revision |
-| `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>` | writes both durable refs for one changeset, create-only: the archive at `--source` and the integration at `--commit`. The changeset is discovered from the `changesets/<id>/` directories `--source` carries and the integration branch does not, so a pipeline needs the two SHAs it already holds and not the changeset name; `--changeset` disambiguates a stacked child. Verifies `--commit` is reachable from `--target` and carries the changeset directory; needs no checkout and writes no commit; re-running it with the same pair succeeds and changes nothing |
+| `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>`, `--allow-feedback` | writes both durable refs for one changeset, create-only: the archive at `--source` and the integration at `--commit`. The changeset is discovered from the `changesets/<id>/` directories `--source` carries and the integration branch does not, so a pipeline needs the two SHAs it already holds and not the changeset name; `--changeset` disambiguates a stacked child. Before it writes: the source's history must name this changeset and its newest verdict must permit integration (`approve`, or `feedback` with `--allow-feedback`); `--commit` must be in the destination branch's history (the `--target` you name, else the changeset's `base:`, else the default branch) and must be the commit that added `changesets/<id>/` there. Needs no checkout and writes no commit; re-running it with the same pair succeeds and changes nothing |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
@@ -548,7 +548,7 @@ nothing, those reads exit 2. For a span of another branch, name its ends: `git p
 | Exit code | Meaning | Seen as |
 | --- | --- | --- |
 | 0 | success | — |
-| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:`; `integration record` finding no changeset directory at `--source`, a landing that does not carry the changeset, a record naming a different commit, or a changeset already recorded as integrated |
+| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:`; `integration record` finding no changeset directory at `--source`, a head that was never reviewed, a landing that is not in the destination branch or did not add the changeset directory, or a record naming a different commit |
 | 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`/`integration`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; `cannot tell which branch is the integration branch`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal; more than one changeset directory in `--source` and none named with `--changeset` |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
@@ -706,10 +706,13 @@ Usage errors and git failures still exit 2 and 3 here.
 ```
 
 `git pair integration record --json` — what the recorder wrote, with full SHAs so a pipeline can
-compare them against the revisions it built. `target` is empty when `--target` was not given, and
-then no reachability check was made. `recorded` means this call wrote at least one ref and
-`already_recorded` means both refs already named this exact pair: a retry is a success that changed
-nothing, and the two are worth telling apart in a log.
+compare them against the revisions it built. `target` is the branch the landing was verified against, in
+branch form, and is empty when nothing identified one and so no containment check was made;
+`target_derived` appears only when git-pair chose that branch itself rather than the caller naming it.
+`recorded` means this call wrote at least one ref and `already_recorded` means both refs already named this
+exact pair: a retry is a success that changed nothing, and the two are worth telling apart in a log. A
+retry answers from the record before it runs any checks, so it prints no verification and refuses on no
+check — including when it arrives with fewer flags than the run that wrote the pair.
 
 ```json
 {
@@ -717,6 +720,7 @@ nothing, and the two are worth telling apart in a log.
   "source": "a7f3c98d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
   "commit": "d91c21ed5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0c",
   "target": "origin/main",
+  "target_derived": false,
   "archive_ref": "refs/git-pair/archive/booking-transaction",
   "integration_ref": "refs/git-pair/integrations/booking-transaction",
   "recorded": true,
@@ -852,9 +856,25 @@ settles it when the source carries two, which is what a stacked child does. A sq
 cherry-pick are all recordable, and none of them leaves ancestry between the two SHAs: the record is what
 connects them. Both refs are create-only — a re-run with the same pair is a success that changed nothing,
 and asking for a different commit is refused, naming both — and once the record exists `check` refuses the
-changeset as already integrated and the commands that write markers refuse it too. `--target` is optional;
-with it, git-pair verifies the landing commit is reachable from the ref you name — the one assumption it
-will accept about where the work went.
+changeset as already integrated and the commands that write markers refuse it too.
+
+What the recorder refuses is what makes the pair worth reading later, and all four checks are refusals
+rather than warnings:
+
+- **the source was not reviewed.** The newest marker naming the changeset in `--source`'s history must
+  permit integration — `approve`, or `feedback` with `--allow-feedback`, the same switch `check` offers.
+  An unreviewed head cannot be recorded as integrated.
+- **the changeset's history names a different changeset.** Tree discovery says which directories a commit
+  carries; the markers say which changeset was reviewed. When they disagree the refusal names both, which
+  is the difference between "nobody reviewed this" and "this is someone else's reviewed work".
+- **the landing is not in the destination branch.** `--target` names the destination; without it git-pair
+  tries the changeset's own `base:` and then the default branch, and takes the first that holds the commit.
+  A commit in neither is refused naming what it tried — landing on a release branch is allowed, only not
+  silent, so pass `--target release/2.x` when that is where it went.
+- **the landing commit did not add the changeset directory.** A commit whose first parent already carries
+  `changesets/<id>/` did not bring the changeset in, so it is a follow-up on the destination branch rather
+  than the landing. This is the check that survives squash, rebase and cherry-pick, because the directory's
+  arrival is a fact about trees.
 
 **Fetching the durable refs.** `git pair integration record` reads and writes
 `refs/git-pair/archive/<id>` and `refs/git-pair/integrations/<id>`, and neither is fetched by default: a
@@ -1273,6 +1293,32 @@ fine; `--source` is resolved through `rev-parse` before discovery.
 
 `more than one changeset directory exists in a81c123: aaa and bbb` (exit 2) — a stacked child carries
 its parent's directory as well as its own. `--changeset <id>` names which one the record is for.
+
+The recorder also refuses a record it does not believe, and each of these says which belief failed:
+
+`nothing in a81c123's history is a git-pair marker for changeset booking, so this head has never been
+offered for review` (exit 1) — the directory is committed content, so tree discovery finds the changeset
+in a head nobody has offered. `change ready` offers the work and `review submit --approve` records the
+verdict; a landing follows a verdict. The sibling refusal, `the newest marker for booking ... is
+`Review-State: ready`, which is an offer rather than a verdict`, is the same rule one step later: an
+offered-but-unreviewed head is not integration-ready, and `git pair check` refuses it too. If this pair
+lands on non-blocking feedback, `--allow-feedback` says so.
+
+`no marker in a81c123's history names changeset booking; the markers there name booking-v1` (exit 1) — the
+commit carries the directory and its own history reviews a different changeset, which is what a copied
+directory or a renamed id leaves behind. The record would say this head is the reviewed head of `booking`,
+and the commits disagree; the refusal names both ids because "review it again" would be the wrong advice.
+
+`4f2b8c1 is not reachable from main: the record would say the work landed somewhere it is not` (exit 1) —
+the destination check. When you passed `--target`, that ref is the destination and the commit is not in it.
+When you did not, the refusal says what it tried and where each guess came from (the changeset's `base:`,
+then the default branch) — and says the flag that settles it, because landing a change on a release branch
+is allowed, only not silent: `--target release/2.x`.
+
+`4f2b8c1 does not add changesets/booking/ over its first parent d91c21e` (exit 1) — the commit carries the
+directory but did not bring it in, so it is a follow-up on the destination branch rather than the landing.
+The refusal names the transition it wanted and the `git log --first-parent` command that lists the
+candidates; a merge, a squash or a cherry-pick of the reviewed branch is the commit to record.
 
 `the durable ref already exists at a different commit: refs/git-pair/integrations/booking records
 d91c21e, and 4f2b8c1 was asked for` (exit 1) — the changeset is already recorded, and git-pair never

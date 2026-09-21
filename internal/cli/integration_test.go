@@ -107,7 +107,7 @@ func TestIntegrationRecordAcceptsAbbreviatedSHAs(t *testing.T) {
 	f, _, source, landing := recordFixture(t)
 
 	res := runIn(t, f.Dir(), "integration", "record",
-		"--source", f.Short(source), "--commit", f.Short(landing))
+		"--source", f.Short(source), "--commit", f.Short(landing), "--target", "release/2.x")
 	res.mustSucceed(t, "integration", "record")
 	if got := f.RefSHA(reviewref.Integration("booking")); got != landing {
 		t.Errorf("the record is at %s, want %s", got, landing)
@@ -120,15 +120,15 @@ func TestIntegrationRecordAcceptsAbbreviatedSHAs(t *testing.T) {
 // backport case, the one most likely to arrive as a second CI run against a release branch.
 func TestIntegrationRecordIsCreatedOnce(t *testing.T) {
 	f, slug, source, landing := recordFixture(t)
-	first := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing)
+	first := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--target", "release/2.x")
 	first.mustSucceed(t, "integration", "record")
 
-	again := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing)
+	again := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--target", "release/2.x")
 	again.mustSucceed(t, "integration", "record")
 	mustContain(t, again.stdout, "already recorded", "the retry says what it found")
 	mustContain(t, again.stdout, shortOf(source), "naming the source it holds")
 	mustContain(t, again.stdout, shortOf(landing), "and the commit it holds")
-	out := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--json").json(t)
+	out := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--target", "release/2.x", "--json").json(t)
 	if out["recorded"] != false || out["already_recorded"] != true {
 		t.Errorf("recorded = %v, already_recorded = %v; a retry that wrote nothing must say so",
 			out["recorded"], out["already_recorded"])
@@ -160,7 +160,7 @@ func TestIntegrationRecordIsCreatedOnce(t *testing.T) {
 	if _, err := reviewref.CreateOnly(context.Background(), &git.Repo{Dir: f2.Dir()}, reviewref.Archive(slug2), source2); err != nil {
 		t.Fatalf("seed the half pair: %v", err)
 	}
-	half := runIn(t, f2.Dir(), "integration", "record", "--source", source2, "--commit", landing2)
+	half := runIn(t, f2.Dir(), "integration", "record", "--source", source2, "--commit", landing2, "--target", "release/2.x")
 	half.mustSucceed(t, "integration", "record")
 	mustContain(t, half.stdout, "completed the record", "a half-written pair is finished, not refused")
 	if got := f2.RefSHA(reviewref.Integration(slug2)); got != landing2 {
@@ -304,7 +304,7 @@ func TestIntegrationRecordRefusesWhatItMustRefuse(t *testing.T) {
 // one asked: the package has no API for it, and the refusal is the human-facing half of that.
 func TestRecordedChangesetRefusesFurtherWork(t *testing.T) {
 	f, slug, source, landing := recordFixture(t)
-	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing).mustSucceed(t, "integration", "record")
+	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--target", "release/2.x").mustSucceed(t, "integration", "record")
 	f.SwitchTo("booking")
 
 	// Work on the branch after the landing: exactly what the moving ref used to chase.
@@ -346,17 +346,20 @@ func TestRecordedChangesetRefusesFurtherWork(t *testing.T) {
 	// without the command-layer gate a recorded changeset would get "nothing to withdraw" where the
 	// honest answer is that the work is finished. And `change abandon` is the one that would otherwise
 	// have written a marker onto landed work.
+	// A reviewed, landed, still-unoffered changeset: approved, then withdrawn, is the shape the reader
+	// of a landed changeset is actually standing in — `change unready` below has nothing to withdraw,
+	// and `change abandon` would write a marker onto landed work. The record names the approved head,
+	// which is what `integration record` requires: a head whose newest marker is a verdict (§11.4).
 	f2, slug2 := newChangeset(t, "booking", "main")
 	ready(t, f2)
-	runIn(t, f2.Dir(), "change", "unready").mustSucceed(t, "change", "unready")
+	submit(t, f2, "approve")
 	source2 := f2.RevParse("booking")
-	// The landing goes somewhere that is not the default branch, so the directory is still absent
-	// from trunk and the branch still resolves to the changeset — which is the shape the reader of a
-	// withdrawn, landed changeset is actually standing in.
+	// The landing goes somewhere that is not the default branch, so the directory is still absent from
+	// trunk and the branch still resolves to the changeset.
 	f2.CreateBranch("release/2.x", "main")
 	f2.MustGit("checkout", source2, "--", changeset.Root+"/"+slug2)
 	landing2 := f2.Commit("booking: land the withdrawn work", gittest.WithFile("landed.md", "landed\n"))
-	runIn(t, f2.Dir(), "integration", "record", "--source", source2, "--commit", landing2).
+	runIn(t, f2.Dir(), "integration", "record", "--source", source2, "--commit", landing2, "--target", "release/2.x").
 		mustSucceed(t, "integration", "record")
 	f2.SwitchTo("booking")
 
@@ -389,7 +392,7 @@ func TestStatusReportsIntegration(t *testing.T) {
 		t.Fatalf("integrated = %v before the record; the branch alone must not claim a landing", before["integrated"])
 	}
 
-	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing).mustSucceed(t, "integration", "record")
+	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--target", "release/2.x").mustSucceed(t, "integration", "record")
 	after := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status").json(t)
 	if after["integrated"] != true {
 		t.Fatalf("integrated = %v after the record", after["integrated"])
@@ -431,6 +434,8 @@ func TestStatusReportsALandingOnTrunk(t *testing.T) {
 	landing := f.Head()
 	f.ForceDeleteBranch("booking")
 
+	// No --target: the changeset's own `base:` is main and the landing is in main, so the destination
+	// git-pair derives is the one the record should be verified against.
 	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing).mustSucceed(t, "integration", "record")
 	got := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").mustSucceed(t, "status").json(t)
 	if got["integrated"] != true {
@@ -454,7 +459,7 @@ func TestCheckFailsAnIntegratedChangeset(t *testing.T) {
 	f.SwitchTo("booking")
 	runIn(t, f.Dir(), "check").mustSucceed(t, "check")
 
-	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing).mustSucceed(t, "integration", "record")
+	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--target", "release/2.x").mustSucceed(t, "integration", "record")
 	res := runIn(t, f.Dir(), "check")
 	if res.code != 1 {
 		t.Fatalf("check on an integrated changeset exited %d, want 1\n%s", res.code, res.stdout+res.stderr)
@@ -478,17 +483,17 @@ func TestCheckFailsAnIntegratedChangeset(t *testing.T) {
 // branch is still here, and its disappearance would otherwise read as a bug.
 func TestQueueSkipsAnIntegratedChangeset(t *testing.T) {
 	f, slug, source, landing := recordFixture(t)
-	// The queue lists what is offered, and the fixture's last act was an approval. Re-offering
-	// moves the archive, so the source is re-read rather than assumed.
+	// The queue lists what is offered, and an approval is not an offer — so the changeset is re-offered
+	// to see it there. The record still names the approved head: a head whose newest marker is `ready`
+	// has no verdict on it, and the recorder refuses it for that reason (§11.4).
 	f.SwitchTo("booking")
 	runIn(t, f.Dir(), "change", "ready").mustSucceed(t, "change", "ready")
-	source = f.Head()
 	f.SwitchTo("main")
 
 	before := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
 	mustContain(t, before.stdout, slug, "the offered changeset is in the queue before it lands")
 
-	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing).mustSucceed(t, "integration", "record")
+	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--target", "release/2.x").mustSucceed(t, "integration", "record")
 	after := runIn(t, f.Dir(), "review", "queue").mustSucceed(t, "review", "queue")
 	if strings.Contains(after.stdout, slug) {
 		t.Errorf("the queue still lists %s after the record:\n%s", slug, after.stdout)

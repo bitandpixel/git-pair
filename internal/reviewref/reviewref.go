@@ -243,6 +243,46 @@ func conflictError(ref, existing, wanted string) error {
 		ErrRefConflict, ref, short(existing), short(wanted))
 }
 
+// RecordedPair reads both halves of a changeset's record. A half that does not exist is the empty
+// string rather than an error, because the caller is asking "what is on the record, if anything" and a
+// half pair is a real answer — it is the crash case `CreatePair` completes.
+func RecordedPair(ctx context.Context, repo *git.Repo, id string) (Pair, error) {
+	out := Pair{ID: id}
+	sha, err := ResolveArchive(ctx, repo, id)
+	if err != nil && !errors.Is(err, ErrNoArchiveRef) {
+		return Pair{}, err
+	}
+	out.Archive = sha
+	sha, err = ResolveIntegration(ctx, repo, id)
+	if err != nil && !errors.Is(err, ErrNotIntegrated) {
+		return Pair{}, err
+	}
+	out.Integration = sha
+	return out, nil
+}
+
+// Conflict reports the refusal `CreatePair` would return for pair, without writing anything.
+//
+// It exists so the recorder can refuse an already-recorded changeset before it starts verifying a
+// claim it has no way to write. The order matters for what the reader learns: a second landing of a
+// changeset whose directory is already in the destination branch fails the landing check too, and
+// "this changeset is recorded at <sha>, and refs do not move" is the answer to the question that was
+// actually asked. The write keeps its own conflict handling — this is a read, and a race is still
+// resolved by git's create-only update.
+func Conflict(ctx context.Context, repo *git.Repo, pair Pair) error {
+	recorded, err := RecordedPair(ctx, repo, pair.ID)
+	if err != nil {
+		return err
+	}
+	if recorded.Archive != "" && recorded.Archive != pair.Archive {
+		return conflictError(Archive(pair.ID), recorded.Archive, pair.Archive)
+	}
+	if recorded.Integration != "" && recorded.Integration != pair.Integration {
+		return conflictError(Integration(pair.ID), recorded.Integration, pair.Integration)
+	}
+	return nil
+}
+
 // Pair is what one `integration record` invocation writes: both halves of the record.
 type Pair struct {
 	// ID is the changeset the pair belongs to.

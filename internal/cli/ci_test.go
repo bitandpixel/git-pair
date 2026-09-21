@@ -64,10 +64,11 @@ func publishAndClone(t *testing.T, f *gittest.Fixture) string {
 // different answers. That is what shows the first answer was about the clone.
 func TestCICloneWithoutTheGitPairRefsSaysSo(t *testing.T) {
 	f, slug, source, landing := recordFixture(t)
-	// Offered again, so `check` has one clear thing left to say once the refs arrive.
+	// Offered again, so `check` has one clear thing left to say once the refs arrive. The record names
+	// the head the approval spoke about, not this re-offer: a head whose newest marker is `ready` has no
+	// verdict on it, and the recorder refuses it for the same reason `check` refuses it below.
 	f.SwitchTo("booking")
 	runIn(t, f.Dir(), "change", "ready").mustSucceed(t, "change", "ready")
-	source = f.Head()
 	clone := publishAndClone(t, f)
 	gitIn(t, clone, "switch", "--quiet", "booking")
 

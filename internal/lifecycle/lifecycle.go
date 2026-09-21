@@ -205,6 +205,56 @@ func MarkerAt(ctx context.Context, repo *git.Repo, rev string) (map[string]strin
 	return parseTrailers(block), nil
 }
 
+// MarkerScan is one commit from ScanLineage: enough to ask which changeset it speaks about and what it
+// said, without the caller re-parsing trailer syntax.
+type MarkerScan struct {
+	SHA     string
+	Short   string
+	Subject string
+	When    time.Time
+	// Trailers is the parsed trailer block, kept whole rather than reduced to a Kind. A scan answers
+	// "which changesets do the markers here name", which is a question across ids, and Summarize's
+	// single-id filter would have thrown the answer away.
+	Trailers map[string]string
+}
+
+// ScanLineage walks rev's ancestry newest-first and returns every commit carrying a marker trailer.
+//
+// Two things make this different from Summarize. It does not filter by changeset id, because the
+// disagreement between "which directory is in this commit" and "which changeset do the markers name" is
+// itself a refusal a recorder reports (PRD §11.4), and it is invisible once the scan has dropped the
+// other ids. And the walk is the whole ancestry rather than `base..rev`, because after a merge landing
+// the reviewed head is inside the destination branch: a range that excludes the destination is empty
+// precisely when a record is being written. The cost is one `git log` over history the recorder runs
+// once per landing, which is why it asks for trailers only and keeps commits with no trailer out of
+// the result instead of handing back the repository.
+func ScanLineage(ctx context.Context, repo *git.Repo, rev string) ([]MarkerScan, error) {
+	fields := []string{"%H", "%h", "%ct", "%s", "%(trailers:only,unfold)"}
+	records, err := repo.LogFields(ctx, rev, fields...)
+	if err != nil {
+		return nil, err
+	}
+	// LogFields walks oldest-first for the callers that read a story; a scan is asked about the newest
+	// verdict, so it returns the order git would have shown.
+	out := make([]MarkerScan, 0, len(records))
+	for i := len(records) - 1; i >= 0; i-- {
+		rec := records[i]
+		if len(rec) < len(fields) {
+			continue
+		}
+		trailers := parseTrailers(rec[4])
+		if len(trailers) == 0 {
+			continue
+		}
+		var when time.Time
+		if secs, err := parseInt(rec[2]); err == nil {
+			when = time.Unix(secs, 0).UTC()
+		}
+		out = append(out, MarkerScan{SHA: rec[0], Short: rec[1], Subject: rec[3], When: when, Trailers: trailers})
+	}
+	return out, nil
+}
+
 func parseEvent(slug string, rec []string) Event {
 	e := Event{SHA: rec[0], Short: rec[1], Subject: rec[4], Author: rec[3]}
 	if secs, err := parseInt(rec[2]); err == nil {

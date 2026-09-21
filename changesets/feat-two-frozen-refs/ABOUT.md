@@ -17,9 +17,10 @@ the command whose whole job was moving it.
 What remains: `refs/git-pair/archive/<id>` and `refs/git-pair/integrations/<id>`, written by one
 invocation of `git pair integration record`, create-only, with no code path that moves either.
 
-This is M1 and M2 of the plan: the transition, and the rule about history the transition required.
-M3-M8 follow — landed-unrecorded detection, the per-branch queue, stacked parent tracking and the agent
-contract.
+This is M1, M2 and the verification half of M3: the transition, the rule about history the transition
+required, and the checks that make the record worth reading afterwards. M3's flagless local flow (derive
+`--source` and `--commit`) and M4-M8 follow — landed-unrecorded detection, the per-branch queue, stacked
+parent tracking and the agent contract.
 
 ## What changed
 
@@ -53,6 +54,16 @@ contract.
   commands ask no question about lineage. `lifecycle.Event.ReviewedHead` carries the value; `check`'s new
   `lineageReason` asks it of the newest review only where integration is permitted, and the head is
   reported by `check --json`, `status` (a `reviewed:` line) and `review history` (a `REVIEWED` column).
+- `integration record` verifies before it writes (M3). `verifyReviewedSource` reads `--source`'s ancestry:
+  the markers must name the changeset being recorded, and its newest verdict must permit integration —
+  `approve`, or `feedback` with the recorder's new `--allow-feedback`. `verifyLandingReachable` puts the
+  landing in the destination's history, the destination being `--target` or, when unnamed, the changeset's
+  own `base:` then the default branch. The fourth check is the first-parent transition: the commit must
+  *add* `changesets/<id>/`, not merely carry it. `lifecycle.ScanLineage` is the walk all of that reads;
+  `reviewref.RecordedPair` and `Conflict` are the record read back before any check runs.
+- `internal/reviewref` — `RecordedPair` reads both halves with absent ones as the empty string, and
+  `Conflict` returns the write's own conflict error without writing, so the refusal a retry hears is the
+  refusal the write would have given.
 - `PRD.md`, `README.md` — the two-ref model throughout: §3's vocabulary, §9.5 repurposed as "Handing the
   work on", §9.6/§9.7's endings, §11.1's status transcript, §11.3's conditions, §11.4's discovery, §12's
   lifecycle, §13 rewritten (13.1 archive, 13.2 integrations, 13.3 create-only, 13.4 fetching), §19.3, §21,
@@ -84,6 +95,21 @@ records the trailer); the cost of the compat hole is a rule with an exception in
 the gate does not complicate a refusal the author already understands with a second one about ancestry.
 The two ways the head can be missing get two reasons, because a rewritten branch and a clone that has
 not fetched are different things to fix.
+- **The recorder asks for the newest verdict, not for an approval somewhere.** The plan's wording was "an
+  approving marker exists"; a superseded approval is not the reviewer's answer, and `change unready` or
+  `change abandon` after an approval must take the head out of the recordable set. So the newest marker
+  naming the changeset decides, on the same reading `check` makes — which is why the recorder grew
+  `--allow-feedback` rather than a laxer default: the two commands a person runs one after the other must
+  not disagree about what counts as reviewed.
+- **A derived destination is tried, not assumed.** `--target` absent means trying the changeset's `base:`
+  and then the default branch and taking the first that contains the commit. Checking only the first name
+  git-pair can reach would refuse the ordinary landing of a stacked child, whose `base:` is its parent
+  branch and whose landing is trunk. Nothing derivable is a check not made, not a refusal: "this repository
+  cannot say where work lands" is not the same fact as "the work did not land where it was said to".
+- **The record is read before anything is verified.** A retry answers from the record, and a different pair
+  is refused with what is on it. Both belong ahead of the checks: a second landing into a branch that
+  already carries the directory also fails the transition check, and the reader needs the answer about the
+  record rather than the incidental complaint about the tree.
 
 **`integration record` derives the changeset from content, not from the archive ref.** Discovery-by-archive
 would have kept a ref written during review alive, which is the thing being deleted. The directories
@@ -107,7 +133,9 @@ them stays valid.
 `docs/plans/completed/gitpr-mvp/artifacts/e2e-29.sh` prints `E2E: all checks passed`, and
 `pty-walkthrough.sh` prints `PTY: all checks passed`. The replay now rebases a throwaway copy of the
 branch after an approval and asserts the gate refuses while the tree comparison has nothing to report,
-which is what makes the case test the lineage rule rather than the content rule.
+which is what makes the case test the lineage rule rather than the content rule. It also records the
+release-branch landing without `--target` first, asserting the refusal names the trunk it tried and the
+flag that settles it, and that nothing was written.
 
 New assertions worth naming: `TestChangeReadyWritesNoRefs` and its three siblings;
 `TestRecordedChangesetRefusesFurtherWork`, which covers the no-op paths as well as the state-moving ones;
@@ -115,7 +143,12 @@ the create-only cases in `reviewref_test.go`; and the hygiene test that pins the
 For M2: `TestCheckRefusesHistoryTheApprovalDidNotReview` (tree-identical rebase refused, rebase onto a
 moved trunk refused, merge of the trunk accepted, implementation commit refused for content rather than
 lineage, changeset-only commit accepted, reset back to the reviewed head accepted), the two no-head cases,
-and `TestReviewSubmitRecordsTheReviewedHead`.
+and `TestReviewSubmitRecordsTheReviewedHead`. For M3:
+`TestIntegrationRecordRefusesWhatWasNeverReviewed` (six verdict shapes, each asserting nothing was
+written), `TestIntegrationRecordRefusesACommitThatDidNotAddTheChangeset`,
+`TestIntegrationRecordDerivesTheDestination` (derived trunk accepted, unnamed release branch refused with
+the flag named), `TestIntegrationRecordAcceptsAChildLandedOnTrunk`,
+`TestIntegrationRecordAnswersFromTheRecordBeforeTheChecks`, and `TestRecordedPairAndConflict`.
 
 ## Known limitations
 

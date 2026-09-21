@@ -289,7 +289,8 @@ func TestJSONKeySets(t *testing.T) {
 
 	t.Run("integration record", func(t *testing.T) {
 		f, slug, source, landing := recordFixture(t)
-		args := []string{"integration", "record", "--source", source, "--commit", landing, "--json"}
+		args := []string{"integration", "record", "--source", source, "--commit", landing,
+			"--target", "release/2.x", "--json"}
 		out := runIn(t, f.Dir(), args...).mustSucceed(t, args...).json(t)
 		assertKeys(t, out, "changeset", "source", "commit", "target", "archive_ref", "integration_ref",
 			"recorded", "already_recorded")

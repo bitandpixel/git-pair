@@ -187,6 +187,20 @@ if git merge-base --is-ancestor "$SOURCE" "$LANDING"; then
 fi
 ARCHIVE=refs/git-pair/archive/booking-transaction
 INTEGRATION=refs/git-pair/integrations/booking-transaction
+# The recorder verifies before it writes, and the destination is one of the four things it verifies. No
+# --target here means git-pair names the destination itself — the changeset's `base:`, then the default
+# branch — and this landing is in neither, so the refusal is the answer, with the flag that settles it.
+# Landing on a release branch is allowed; it is only not allowed to be silent.
+out=$($G integration record --source "$SOURCE" --commit "$LANDING" 2>&1); code=$?
+if [ "$code" = 1 ] && printf '%s\n' "$out" | grep -q "is not reachable from main" \
+   && printf '%s\n' "$out" | grep -q "changeset's own \`base:\`" \
+   && printf '%s\n' "$out" | grep -q -- "--target <ref>"; then
+  echo "  ok: an unnamed destination outside trunk is refused, and says how to name it"
+else
+  echo "  FAIL: the unnamed destination was not refused as expected (exit $code)"; printf '%s\n' "$out" | sed 's/^/    /'; FAILED=1
+fi
+[ -z "$(git for-each-ref refs/git-pair)" ] && echo "  ok: a refused record writes nothing" \
+  || { echo "  FAIL: a refused record wrote a ref"; FAILED=1; }
 $G integration record --source "$SOURCE" --commit "$LANDING" --target release/2.x; check "integration record" 0 $?
 [ "$(git rev-parse "$ARCHIVE")" = "$SOURCE" ] && echo "  ok: the archive names the reviewed head" \
   || { echo "  FAIL: the archive does not name the reviewed head"; FAILED=1; }

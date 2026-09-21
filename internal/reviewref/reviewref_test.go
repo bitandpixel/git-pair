@@ -330,3 +330,62 @@ func TestFetchRefspecNamesTheNamespace(t *testing.T) {
 		t.Errorf("FetchCommand = %q does not contain %q", reviewref.FetchCommand, reviewref.FetchRefspec)
 	}
 }
+
+// The recorder reads the record before it verifies anything, and both halves of that read matter: a pair
+// that already says exactly this is a no-op, and a pair that says something else is refused with what is
+// on the record — which is the refusal the reader needs, not the incidental complaint a later check would
+// make. Conflict returns the same error the write returns, so the two cannot disagree about wording.
+func TestRecordedPairAndConflict(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	one, two := f.Head(), f.Commit("second", gittest.WithFile("b.go", "package main\n"))
+	ctx := context.Background()
+	pair := reviewref.Pair{ID: "booking", Archive: one, Integration: two}
+
+	if got, err := reviewref.RecordedPair(ctx, repo(f), "booking"); err != nil || got.Archive != "" || got.Integration != "" {
+		t.Fatalf("RecordedPair before the record = %+v, %v; want an empty pair and no error", got, err)
+	}
+	if err := reviewref.Conflict(ctx, repo(f), pair); err != nil {
+		t.Fatalf("Conflict before the record = %v, want nil", err)
+	}
+	if _, err := reviewref.CreatePair(ctx, repo(f), pair); err != nil {
+		t.Fatalf("CreatePair: %v", err)
+	}
+	got, err := reviewref.RecordedPair(ctx, repo(f), "booking")
+	if err != nil || got.Archive != one || got.Integration != two {
+		t.Fatalf("RecordedPair = %+v, %v; want the pair just written", got, err)
+	}
+	if err := reviewref.Conflict(ctx, repo(f), pair); err != nil {
+		t.Errorf("Conflict for the pair on the record = %v, want nil: the retry completes, it does not argue", err)
+	}
+
+	// A different landing commit for a changeset that has one: the integration half is what disagrees,
+	// and the refusal names the ref, what it records, and what was asked for.
+	backport := f.Commit("backport", gittest.WithFile("c.go", "package main\n"))
+	err = reviewref.Conflict(ctx, repo(f), reviewref.Pair{ID: "booking", Archive: one, Integration: backport})
+	if !errors.Is(err, reviewref.ErrRefConflict) {
+		t.Fatalf("Conflict for a second landing = %v, want ErrRefConflict", err)
+	}
+	for _, want := range []string{reviewref.Integration("booking"), f.Short(two), f.Short(backport), "never moves"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the conflict must name %q, got: %v", want, err)
+		}
+	}
+
+	// A half pair is a real answer, and it is the answer that decides the retry completes rather than
+	// refuses: the crash case leaves an archive with no integration, and the same pair written again has
+	// to finish it.
+	f2 := gittest.New(t)
+	f2.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	half := reviewref.Pair{ID: "booking", Archive: f2.Head(), Integration: f2.Commit("second", gittest.WithFile("b.go", "package main\n"))}
+	if _, err := reviewref.CreateOnly(ctx, repo(f2), reviewref.Archive("booking"), half.Archive); err != nil {
+		t.Fatalf("seed the half pair: %v", err)
+	}
+	got, err = reviewref.RecordedPair(ctx, repo(f2), "booking")
+	if err != nil || got.Archive != half.Archive || got.Integration != "" {
+		t.Fatalf("RecordedPair on a half pair = %+v, %v; want the archive and an empty integration", got, err)
+	}
+	if err := reviewref.Conflict(ctx, repo(f2), half); err != nil {
+		t.Errorf("Conflict on a half pair = %v, want nil: completing a half record is not a conflict", err)
+	}
+}
