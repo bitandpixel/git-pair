@@ -81,6 +81,11 @@ const (
 	// the rewritten marker still names a head that is no longer in this line, and the
 	// ancestry test refuses it (PRD §11.3, §12).
 	TrailerHead = "Review-Head"
+	// TrailerParentHead is the tip of the branch this changeset is stacked on, at the moment a
+	// review submission was made. It is written beside `Review-Head` for a stacked changeset and
+	// nothing else: the parent branch moves under a child for reasons the child's own history
+	// cannot show (PRD §21).
+	TrailerParentHead = "Review-Parent-Head"
 
 	StateValueReady = "ready"
 	// StateValueWorking is written by `change unready`. It is not a new state: WORKING

@@ -98,7 +98,7 @@ func UnreadyMessage(slug string) Message {
 // review commit while preserving its message: the rewritten marker still names the head that is gone
 // from this line, which is what lets `check` refuse to read an approval as approval of rewritten history
 // (PRD §10.4, §11.3).
-func ReviewMessage(slug string, outcome model.Outcome, head, body string) Message {
+func ReviewMessage(slug string, outcome model.Outcome, head, parentHead, body string) Message {
 	trailers := []string{
 		"Review-Outcome=" + string(outcome),
 		"Review-Changeset=" + slug,
@@ -109,6 +109,11 @@ func ReviewMessage(slug string, outcome model.Outcome, head, body string) Messag
 	// is a malformed trailer block to every other reader.
 	if head != "" {
 		trailers = append(trailers, "Review-Head="+head)
+	}
+	// The same for a stacked changeset's parent: an unstacked changeset writes nothing, because
+	// `Review-Parent-Head=` with no value would claim a parent with no name.
+	if parentHead != "" {
+		trailers = append(trailers, "Review-Parent-Head="+parentHead)
 	}
 	return Message{
 		Subject:  fmt.Sprintf("review: %s %s", outcome, slug),

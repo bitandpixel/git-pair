@@ -47,8 +47,8 @@ changeset whose content has landed in its base is not listed, and says nothing.
 
 --json is the stable contract for notifications, dashboards, and agent
 supervisors.`,
-		Example: `  git pair review queue
-  git pair review queue --json`,
+		Example: `  git pair queue
+  git pair queue --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewQueue(cmd.Context(), a)
@@ -80,6 +80,8 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	noted := map[string]bool{}
 	var entries []queueEntry
 	var skipped []string
+	// Stacks whose parent has moved on. A note, not a row: see behindParent.
+	var stale []string
 	// One read of the durable namespace for the whole command. Three things in here are questions about
 	// those refs — has this changeset landed, does this orphan have a chain to read, which landings carry
 	// no record — and each used to ask git separately, once per changeset. The queue's cost now follows
@@ -133,6 +135,15 @@ func runReviewQueue(ctx context.Context, a *app) error {
 			continue
 		}
 		if entry != nil {
+			// A stacked child whose parent has moved is a review someone is about to read against a
+			// base that is no longer current. It is a note and not a row, and not a refusal: a READY
+			// changeset has no approval for the parent to invalidate (a review submission would have
+			// made the newest marker that review, and the row would be gone), so all the queue can
+			// honestly say is that the parent is ahead.
+			if behind, err := a.behindParent(ctx, repo, cs, db, entry.Head); err == nil && behind > 0 {
+				stale = append(stale, fmt.Sprintf("%s on %s is %s behind parent %s",
+					cs.Slug, br.Branch, plural(behind, "commit", "commits"), entry.Base))
+			}
 			entries = append(entries, *entry)
 		}
 	}
@@ -178,6 +189,7 @@ func runReviewQueue(ctx context.Context, a *app) error {
 		a.printf("READY FOR REVIEW\n\n  nothing is ready\n")
 		a.printUnrecorded(unrecorded, durable.NamespaceEmpty, displayRef(db.Ref), true)
 		printSkipped(a, skipped)
+		printBehindParent(a, stale)
 		return nil
 	}
 	a.printf("READY FOR REVIEW\n\n")
@@ -193,7 +205,18 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	}
 	a.printUnrecorded(unrecorded, durable.NamespaceEmpty, displayRef(db.Ref), false)
 	printSkipped(a, skipped)
+	printBehindParent(a, stale)
 	return nil
+}
+
+// printBehindParent says which ready rows sit on a parent that has moved. It goes to the notes stream
+// with the other qualifications, because the row itself is a true answer to the queue's question — the
+// branch *is* ready — and what the note adds is what the reviewer is about to read: a diff measured
+// against a parent that is no longer there.
+func printBehindParent(a *app, stale []string) {
+	for _, s := range stale {
+		a.warn("note: %s\n", s)
+	}
 }
 
 // classifyOrphan decides what to say about a changeset directory with no branch
@@ -256,6 +279,28 @@ func printSkipped(a *app, skipped []string) {
 	for _, s := range skipped {
 		a.warn("note: skipped %s\n", s)
 	}
+}
+
+// behindParent counts the parent commits this changeset's branch does not have, or 0 when it is not
+// stacked, has no parent branch to compare against, or is already current.
+func (a *app) behindParent(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
+	db changeset.DefaultBranchRef, head string) (int, error) {
+	parent, err := changeset.ParentOf(ctx, repo, cs, db)
+	if err != nil || parent.Tip == "" {
+		return 0, err
+	}
+	base, err := repo.MergeBase(ctx, head, parent.Tip)
+	if err != nil {
+		return 0, err
+	}
+	if base == parent.Tip {
+		return 0, nil
+	}
+	records, err := repo.LogFields(ctx, head+".."+parent.Tip, "%h")
+	if err != nil {
+		return 0, err
+	}
+	return len(records), nil
 }
 
 // branchReadyEntry is the queue row for one branch, or nil when that branch is not READY.

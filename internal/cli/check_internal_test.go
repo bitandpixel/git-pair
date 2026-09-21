@@ -184,7 +184,7 @@ func TestIntegrationReasons(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := integrationReasons(slug, tc.terminal, tc.summary, tc.head, tc.feedback, tc.landed, "")
+			got := integrationReasons(slug, tc.terminal, tc.summary, tc.head, tc.feedback, tc.landed, "", "")
 			if len(got) != tc.n {
 				t.Fatalf("reasons = %q, want %d", got, tc.n)
 			}
@@ -214,7 +214,7 @@ func TestIntegrationReasonsReportsEveryFailureAtOnce(t *testing.T) {
 	got := integrationReasons("booking", nil, lifecycle.Summary{
 		Marker: approve, LatestReview: approve, State: model.StateWorking,
 		Drifted: []string{"service.go"}, TrailingUnrecognised: 1,
-	}, head, false, landing{}, "review aaaaaaa reviewed bbbbbbb, which is no longer in this history")
+	}, head, false, landing{}, "review aaaaaaa reviewed bbbbbbb, which is no longer in this history", "")
 
 	if len(got) != 3 {
 		t.Fatalf("reasons = %q, want three: unreadable marker, rewritten history, drift", got)

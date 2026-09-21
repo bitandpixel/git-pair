@@ -330,7 +330,33 @@ func (a *app) load(ctx context.Context) (*session, error) {
 	if err != nil {
 		return nil, usageWrap(err)
 	}
-	return a.sessionFor(ctx, repo, cs, db)
+	s, err := a.sessionFor(ctx, repo, cs, db)
+	if err != nil {
+		return nil, a.explainBrokenStack(ctx, repo, cs, db, err)
+	}
+	return s, nil
+}
+
+// explainBrokenStack turns "the base does not resolve" into what that means for a stack. A child is
+// measured against its parent branch; when that branch is gone and there is no integration ref to
+// relink the stack to, every command that measures answers with git's own unknown-revision error,
+// which names neither the parent nor the way out. The stack needs a decision from its author, so the
+// message says so (PRD §21).
+func (a *app) explainBrokenStack(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
+	db changeset.DefaultBranchRef, err error) error {
+	if cs.ParentBranch == "" || !errors.Is(err, git.ErrUnknownRevision) {
+		return err
+	}
+	if _, e := repo.RevParse(ctx, "refs/heads/"+cs.ParentBranch); e == nil {
+		return err
+	}
+	if cs.ParentChangeset != "" {
+		if _, e := reviewref.ResolveIntegration(ctx, repo, cs.ParentChangeset); e == nil {
+			return err
+		}
+	}
+	return fmt.Errorf("%s is stacked on %s, which is gone with no integration record: the stack is unreconciled — choose a new base with `git pair init --parent <branch> --set-parent`, or land the parent and record it: %w",
+		cs.Slug, cs.ParentBranch, err)
 }
 
 // loadRepo resolves the repository without requiring a changeset.

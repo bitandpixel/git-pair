@@ -356,12 +356,16 @@ func ReadyMessage(slug string) string {
 // ReviewMessage is a review submission commit message (PRD §10.4). outcome is
 // "block", "feedback" or "approve". head is the commit the review speaks about — pass ""
 // for a marker that names none, which is the shape a submission written before `Review-Head`
-// existed has.
-func ReviewMessage(slug, outcome, head string) string {
+// existed has. parentHead is the tip of the branch this changeset is stacked on, or "" for an
+// unstacked one.
+func ReviewMessage(slug, outcome, head, parentHead string) string {
 	message := "review: " + outcome + " " + slug + "\n\nReview-Outcome: " + outcome +
 		"\nReview-Changeset: " + slug
 	if head != "" {
 		message += "\nReview-Head: " + head
+	}
+	if parentHead != "" {
+		message += "\nReview-Parent-Head: " + parentHead
 	}
 	return message + "\n"
 }
@@ -378,7 +382,14 @@ func (f *Fixture) CommitReadyMarker(slug string, opts ...CommitOpt) string {
 // commits yet, where there is no head to name and the marker carries no `Review-Head`.
 func (f *Fixture) CommitReviewMarker(slug, outcome string, opts ...CommitOpt) string {
 	f.t.Helper()
-	return f.CommitMessage(ReviewMessage(slug, outcome, f.reviewedHead()), append([]CommitOpt{WithEmpty()}, opts...)...)
+	return f.CommitMessage(ReviewMessage(slug, outcome, f.reviewedHead(), ""), append([]CommitOpt{WithEmpty()}, opts...)...)
+}
+
+// CommitReviewMarkerOnParent commits a review submission that also records the tip of the branch
+// this changeset is stacked on, as `review submit` does for a stacked changeset.
+func (f *Fixture) CommitReviewMarkerOnParent(slug, outcome, parentHead string, opts ...CommitOpt) string {
+	f.t.Helper()
+	return f.CommitMessage(ReviewMessage(slug, outcome, f.reviewedHead(), parentHead), append([]CommitOpt{WithEmpty()}, opts...)...)
 }
 
 // reviewedHead is HEAD, or "" where the repository has no commits yet.

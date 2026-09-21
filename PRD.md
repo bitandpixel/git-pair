@@ -299,10 +299,24 @@ id: booking-transaction
 base: main
 ```
 
+```yaml
+id: booking-transaction-tests
+parent: booking-transaction
+parent-changeset: booking-transaction
+```
+
 `id` is the changeset ID, and it is the directory's name rather than a second opinion
 about it: a file whose `id` disagrees with the directory holding it is an error to
 correct, not a conflict to resolve. `base` is the ref the changeset's diff is measured
-against, and for a stacked branch it names the changeset it sits on.
+against.
+
+A stacked changeset spells that ref as `parent:` instead, and names the changeset living on
+that branch as `parent-changeset:`. The branch is the active locator while the parent is in
+flight; the changeset ID is what still means something after the parent lands and its branch is
+deleted (§21). `parent:` **is** the base — everything that measures the changeset reads one value
+— so a file setting both `parent:` and `base:` is an error to correct, like an `id` that
+disagrees with its directory. Changing either takes an explicit flag (§9.1); git-pair never
+restacks a changeset on its own.
 
 Those two keys are what every changeset has. There is no branch field, because the directory does
 not belong to a branch (§4): recording one would put per-branch state in the durable data, and the
@@ -512,6 +526,18 @@ changesets/<id>/
 id: booking-transaction-v2
 base: main
 ```
+
+For a stacked changeset, `--parent <branch>` writes the stack instead of a base (§5):
+
+```bash
+git pair init --parent booking-transaction
+```
+
+It records the parent branch and the parent's changeset ID, discovered on that branch and left
+empty when the branch does not hold exactly one unlanded changeset — a value nobody checked is
+not written down as a claim. `--set-parent` restacks an existing changeset, the way `--set-base`
+changes a base; `--parent` with `--base` is refused, and `--parent` naming the integration branch
+or the current branch is refused, because neither is a stack.
 
 Requirements:
 
@@ -2592,17 +2618,19 @@ main
             └─ booking-transaction-ui
 ```
 
-Changeset metadata:
+Each level names the one below it (§5):
 
 ```text
 booking-transaction:
   base: main
 
 booking-transaction-tests:
-  base: booking-transaction
+  parent: booking-transaction
+  parent-changeset: booking-transaction
 
 booking-transaction-ui:
-  base: booking-transaction-tests
+  parent: booking-transaction-tests
+  parent-changeset: booking-transaction-tests
 ```
 
 Each branch has:
@@ -2615,7 +2643,61 @@ Each branch has:
 
 There is no shared review content between stacked branches in MVP.
 
-Stack relationships only influence the configured base ref.
+## The conservative approval rule
+
+A parent branch moves while its child is being read, and none of it is visible in the child's
+history: the child's commits are unchanged, so the drift test and the rebase test both pass. The
+rule is therefore:
+
+> Any change to the parent branch after a child is approved invalidates the child's approval.
+
+This includes parent implementation commits, parent review commits, parent approval commits,
+rebases of the parent, and merges into the parent. It is intentionally conservative: git-pair does
+not attempt to tell a metadata-only parent commit from an implementation change.
+
+A review submission for a stacked changeset records the parent's tip in `Review-Parent-Head`,
+beside `Review-Head`. That is what makes the question askable afterwards, and it is written only
+for a changeset that is stacked. `status`, `queue` and `check` compare the recorded tip with the
+branch's current one.
+
+**The reason names the kind of movement** — implementation commit, review commit, approval,
+rebase, or merge — because a rule that reports only "the parent moved" reads as arbitrary, and an
+author who thinks the gate is being pedantic stops trusting it.
+
+A submission whose approval recorded no parent tip is not refused: the absence says the trailer
+was not written, which is not evidence that the parent moved. `status` says what is missing.
+
+## When the parent lands
+
+A landed parent may have its branch deleted, which is the ordinary end of a stack rather than an
+accident. The integration ref is the bridge: the child's measurement base becomes
+`refs/git-pair/integrations/<parent>`, the commit the parent's work became, so the child stays
+measurable. `check` then refuses with where the work went and what to do about it — the child is
+rebased onto the destination and reviewed again.
+
+A child landed without rebasing carries an archive chain that includes the parent's unsquashed
+commits. That is expected: the archive is the history of the branch that was merged, and the
+parent's own record is a separate pair of refs.
+
+## When the parent is abandoned
+
+A parent that was abandoned rather than integrated leaves the child **unreconciled**. git-pair does
+not silently reparent a child: the reason refuses and names the step,
+
+```bash
+git pair init --parent <branch> --set-parent
+```
+
+and the author chooses the new base. A parent branch that is gone with no integration record is
+reported the same way, because from this clone the two look alike.
+
+## Reading the stack
+
+`status` prints a `Stack:` section naming the parent branch, its changeset, the tip the approval
+recorded and the parent's current tip, or the parent's absence. `queue` lists READY branches,
+which by definition have no approval to invalidate, so it notes instead the rows sitting on a
+parent that has moved ahead — the diff a reviewer is about to read is measured against a parent
+that is no longer current.
 
 ---
 

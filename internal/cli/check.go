@@ -150,6 +150,12 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	if err != nil {
 		return err
 	}
+	// The stack question. A child's own history can be untouched and its parent can have landed,
+	// been rewritten, or been abandoned underneath it, and only the parent's side shows that.
+	parent, err := a.parentSinceApproval(ctx, s.repo, s.cs, s.trunk, reviewed.Marker)
+	if err != nil {
+		return err
+	}
 	out := checkJSON{
 		Changeset:        s.cs.Slug,
 		State:            string(reviewed.State),
@@ -159,7 +165,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		Integrated:       landed != "",
 		IntegratedCommit: short(landed),
 		IntegratedAt:     where,
-		Reasons:          integrationReasons(s.cs.Slug, terminal, reviewed, s.head, allowFeedback, where, lineage),
+		Reasons:          integrationReasons(s.cs.Slug, terminal, reviewed, s.head, allowFeedback, where, lineage, parent.Reason),
 	}
 	out.Ready = len(out.Reasons) == 0
 	if out.Ready {
@@ -210,7 +216,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 // moved since the marker — re-deriving it would re-litigate a decision the author already took,
 // in a command with no override flag to take it again.
 func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summary,
-	head string, allowFeedback bool, landed landing, lineage string) []string {
+	head string, allowFeedback bool, landed landing, lineage, parent string) []string {
 	if landed.Commit != "" {
 		// The other early return, and it comes first. Once the record exists the review is over:
 		// the drift question below it describes a changeset still being worked on, which this one
@@ -266,6 +272,13 @@ func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summ
 		// The rewritten-history condition, and the reason the gate is about a commit rather
 		// than only about a tree (PRD §12).
 		reasons = append(reasons, lineage)
+	}
+	if parent != "" {
+		// The stack condition: this changeset's own history is untouched and the review of it
+		// still reads as an approval, but what it was reviewed against has moved, landed, or
+		// ended. The conservative rule says that is the approval's end (PRD §21), and the reason
+		// names the kind of movement so it reads as a rule rather than as bad luck.
+		reasons = append(reasons, parent)
 	}
 	if len(s.Drifted) > 0 {
 		reasons = append(reasons, fmt.Sprintf("content outside changesets/%s/ changed since %s: %s",

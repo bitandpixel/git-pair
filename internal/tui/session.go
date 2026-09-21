@@ -37,6 +37,10 @@ type Options struct {
 	// submission is visible in the normal screen once the alt screen is gone.
 	// Defaults to os.Stdout.
 	Out io.Writer
+	// Trunk is the integration branch, passed so a stacked changeset's review submission can tell
+	// a parent branch from the branch everything is measured against. The zero value says
+	// "nobody resolved it", which records no parent rather than guessing one.
+	Trunk changeset.DefaultBranchRef
 }
 
 // Header is the session's identity line.
@@ -61,6 +65,8 @@ type Session struct {
 	cs      changeset.Changeset
 	summary lifecycle.Summary
 	sel     span.Selector
+	// trunk is the integration branch, kept so a submission can record a parent tip (PRD §21).
+	trunk   changeset.DefaultBranchRef
 	current span.Span
 	files   []File
 
@@ -93,7 +99,7 @@ type Session struct {
 // NewSession resolves the span and scans the changed files.
 func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	s := &Session{
-		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span,
+		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span, trunk: opts.Trunk,
 	}
 	if err := s.Rescan(ctx); err != nil {
 		return nil, err
@@ -668,6 +674,9 @@ func (s *Session) Changeset() changeset.Changeset { return s.cs }
 
 // Repo is the repository under review.
 func (s *Session) Repo() *git.Repo { return s.repo }
+
+// Trunk is the integration branch as the caller resolved it, possibly the zero value.
+func (s *Session) Trunk() changeset.DefaultBranchRef { return s.trunk }
 
 // Summary is the derived lifecycle state, needed to submit from the TUI.
 func (s *Session) Summary() lifecycle.Summary { return s.summary }

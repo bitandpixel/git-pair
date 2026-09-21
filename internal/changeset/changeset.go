@@ -35,6 +35,9 @@ var (
 	ErrAboutConflict = errors.New("ABOUT.md already has content")
 	// ErrBaseIsOwnBranch means the base is the very branch the changeset lives on.
 	ErrBaseIsOwnBranch = errors.New("self-referential changeset base")
+	// ErrParentWithBase means a CHANGESET.yaml names both a `base:` and a `parent:`, which
+	// is one fact spelled twice.
+	ErrParentWithBase = errors.New("changeset names both base and parent")
 	// ErrIDMismatch means a CHANGESET.yaml records an `id` that is not the name of the
 	// directory holding it.
 	ErrIDMismatch = errors.New("changeset id does not match its directory")
@@ -56,8 +59,17 @@ type Changeset struct {
 	// know, and an empty value means no branch is involved.
 	Branch string
 	// Base is the ref the changeset's diff is measured against. For stacked
-	// branches this is another changeset's branch name.
+	// branches this is another changeset's branch name — whichever key recorded it.
 	Base string
+	// ParentBranch is the branch named by `parent:`, empty for a changeset measured straight
+	// against the integration branch. It stays the branch name even when the measurement base has
+	// been redirected to the parent's integration ref, so the stack and the diff base can be
+	// reported separately (§21).
+	ParentBranch string
+	// ParentChangeset is the changeset this one is stacked on, from `parent-changeset:`. It is
+	// empty for a changeset measured against the integration branch, and empty for a stack whose
+	// parent changeset was not known when the stack was recorded.
+	ParentChangeset string
 	// Dir is the changeset directory relative to the repository root.
 	Dir string
 	// Exists is false when the directory has not been created yet. Only Current can
@@ -260,13 +272,87 @@ func metadataAt(ctx context.Context, repo *git.Repo, rev, dir string) (map[strin
 }
 
 // BaseAt reads the base a changeset directory recorded at a revision, for callers
-// that have the slug and a commit but no branch to hang them on.
+// that have the slug and a commit but no branch to hang them on. A stacked changeset
+// answers with its parent branch, which is its base.
 func BaseAt(ctx context.Context, repo *git.Repo, rev, slug string) (string, error) {
-	md, err := metadataAt(ctx, repo, rev, filepath.Join(Root, slug))
+	stack, err := StackAt(ctx, repo, rev, slug)
 	if err != nil {
 		return "", err
 	}
-	return md["base"], nil
+	return stack.Base, nil
+}
+
+// Parent is the branch a changeset is stacked on and where that branch stands right now. A zero
+// value means the changeset is not stacked.
+type Parent struct {
+	// Branch is the parent branch's short name, as `parent:` recorded it.
+	Branch string
+	// Tip is the parent branch's current commit, empty when the branch is gone or has not been
+	// pushed yet. It is what a review submission records as `Review-Parent-Head`.
+	Tip string
+}
+
+// ParentOf names the branch a changeset is stacked on.
+//
+// Three things make a changeset unstacked, and all three answer with the zero Parent: measured against
+// the integration branch (ordinary drift covers the integration branch moving), measured against a ref
+// that is not a branch, and measured against its own branch. A parent whose branch is missing is
+// *still* a stack, and answers with the branch and no tip — that is the case a child has to be
+// reconciled over, not the case where there is nothing to reconcile.
+func ParentOf(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranchRef) (Parent, error) {
+	if c.Base == "" {
+		return Parent{}, nil
+	}
+	// The branch is the stack. `Base` can name the parent's integration ref instead of its branch,
+	// because a landed parent is still measured against — see relinkStacks — and the branch name is
+	// where the two cases are told apart.
+	if c.ParentBranch != "" {
+		return parentOfBranch(ctx, repo, c.ParentBranch, c.Branch, db)
+	}
+	if db.Ref != "" && (c.Base == db.LocalName() || c.Base == db.Ref) {
+		return Parent{}, nil
+	}
+	name := c.Base
+	if !strings.HasPrefix(name, "refs/heads/") {
+		name = "refs/heads/" + name
+	}
+	if c.Branch != "" && name == "refs/heads/"+c.Branch {
+		return Parent{}, nil
+	}
+	sha, err := repo.RevParse(ctx, name)
+	if errors.Is(err, git.ErrUnknownRevision) {
+		return Parent{Branch: strings.TrimPrefix(name, "refs/heads/")}, nil
+	}
+	if err != nil {
+		return Parent{}, err
+	}
+	return Parent{Branch: strings.TrimPrefix(name, "refs/heads/"), Tip: sha}, nil
+}
+
+func parentOfBranch(ctx context.Context, repo *git.Repo, branch, own string, db DefaultBranchRef) (Parent, error) {
+	if db.Ref != "" && (branch == db.LocalName() || branch == db.Ref) {
+		return Parent{}, nil
+	}
+	if own != "" && branch == own {
+		return Parent{}, nil
+	}
+	sha, err := repo.RevParse(ctx, "refs/heads/"+branch)
+	if errors.Is(err, git.ErrUnknownRevision) {
+		return Parent{Branch: branch}, nil
+	}
+	if err != nil {
+		return Parent{}, err
+	}
+	return Parent{Branch: branch, Tip: sha}, nil
+}
+
+// StackAt reads the stack relationship a changeset directory recorded at a revision.
+func StackAt(ctx context.Context, repo *git.Repo, rev, slug string) (Stack, error) {
+	md, err := metadataAt(ctx, repo, rev, filepath.Join(Root, slug))
+	if err != nil {
+		return Stack{}, err
+	}
+	return stackOf(md)
 }
 
 // DirsAt lists the changeset directories present in a revision's tree. It reads the tree and
@@ -368,6 +454,47 @@ func RequireCurrentOn(ctx context.Context, repo *git.Repo, db DefaultBranchRef) 
 	return c, nil
 }
 
+// The two stack keys. `parent:` names the branch this changeset is stacked on and *is* its base:
+// a file that sets both `parent:` and `base:` is refused the way an inconsistent `id:` is, because
+// the two spellings are two answers to "what does this diff against?" and they will not stay in
+// agreement. `parent-changeset:` records the changeset living on that branch — the durable half of
+// the relationship, which is what still means something after the parent branch is deleted and its
+// work has become an integration ref.
+const (
+	ParentKey          = "parent"
+	ParentChangesetKey = "parent-changeset"
+)
+
+// Stack is what a CHANGESET.yaml says about where a changeset sits: the branch it is measured
+// against, and — when it is stacked — the parent branch and the parent's changeset.
+type Stack struct {
+	// Base is the ref the changeset's diff is measured against. It is `parent:` when there is
+	// one, and `base:` otherwise, which is why everything that measures a changeset reads this
+	// field rather than either key.
+	Base string
+	// Parent is the branch named by `parent:`, empty for a changeset measured straight against
+	// the integration branch.
+	Parent string
+	// ParentChangeset is the changeset recorded on the parent branch, empty when nobody could
+	// say which one it was at the time the stack was recorded.
+	ParentChangeset string
+}
+
+// stackOf reads the stack out of already-parsed metadata. It is the one place that decides which
+// key wins, so the tree reader, the working-tree reader and the writer cannot disagree about what
+// a file means.
+func stackOf(md map[string]string) (Stack, error) {
+	base, parent := md["base"], md[ParentKey]
+	if base != "" && parent != "" {
+		return Stack{}, fmt.Errorf("%w: %s: %q and %s: %q; `parent:` is the base, so keep one of them",
+			ErrParentWithBase, ParentKey, parent, "base", base)
+	}
+	if parent != "" {
+		return Stack{Base: parent, Parent: parent, ParentChangeset: strings.TrimSpace(md[ParentChangesetKey])}, nil
+	}
+	return Stack{Base: base}, nil
+}
+
 // IgnoresKey is the CHANGESET.yaml key naming the other changesets this one is merely sharing a
 // branch with, recorded by `git pair change use`.
 const IgnoresKey = "ignores"
@@ -459,10 +586,18 @@ func parseMetadata(data string) (map[string]string, error) {
 
 // WriteOptions selects what Write should create or replace.
 type WriteOptions struct {
-	// Base is the ref the changeset diff is measured against. Required.
+	// Base is the ref the changeset diff is measured against. Required unless Parent is set.
 	Base string
 	// SetBase replaces an existing base value instead of reporting a conflict.
 	SetBase bool
+	// Parent names the branch this changeset is stacked on. It *is* the base (PRD §21), so it is
+	// written as `parent:` and no `base:` is written; passing Base and Parent together is refused.
+	Parent string
+	// ParentChangeset records which changeset lives on the parent branch. Written only with Parent.
+	ParentChangeset string
+	// SetParent replaces an existing stack — a different parent, or a parent replacing a plain
+	// base — instead of reporting a conflict.
+	SetParent bool
 	// About is explicit ABOUT.md content. Empty means "scaffold it".
 	About string
 	// SetAbout replaces existing ABOUT.md content instead of reporting a conflict.
@@ -481,10 +616,17 @@ func Write(repo *git.Repo, c Changeset, opts WriteOptions) (written []string, er
 	if c.Dir == "" {
 		return nil, errors.New("changeset: empty directory")
 	}
-	if opts.Base == "" {
-		return nil, errors.New("changeset: base must not be empty")
+	if opts.Parent != "" && opts.Base != "" {
+		return nil, fmt.Errorf("%w: %s and %s; `parent:` is the base, so name one of them",
+			ErrParentWithBase, opts.Parent, opts.Base)
 	}
 	base := opts.Base
+	if opts.Parent != "" {
+		base = opts.Parent
+	}
+	if base == "" {
+		return nil, errors.New("changeset: base must not be empty")
+	}
 	id := filepath.Base(filepath.Clean(c.Dir))
 	if err := ValidateID(id); err != nil {
 		return nil, err
@@ -506,19 +648,28 @@ func Write(repo *git.Repo, c Changeset, opts WriteOptions) (written []string, er
 		return written, fmt.Errorf("%w: %s records id %q but sits in %q; the directory name is the id, so rename the directory or correct the file",
 			ErrIDMismatch, c.MetadataPath(), existing, id)
 	}
-	if existing, ok := md["base"]; ok && existing != "" && existing != base && !opts.SetBase {
-		return written, fmt.Errorf("%w: %s names base %q, not %q (pass --set-base to change it)",
-			ErrBaseConflict, c.MetadataPath(), existing, base)
+	existing, err := stackOf(md)
+	if err != nil {
+		return written, fmt.Errorf("%s: %w", c.MetadataPath(), err)
 	}
-	want := "id: " + id + "\nbase: " + base + "\n"
+	if existing.Base != "" && existing.Base != base && !opts.SetBase && !opts.SetParent {
+		flag := "--set-base"
+		if opts.Parent != "" {
+			flag = "--set-parent"
+		}
+		return written, fmt.Errorf("%w: %s is measured against %q, not %q (pass %s to change it)",
+			ErrBaseConflict, c.MetadataPath(), existing.Base, base, flag)
+	}
+	want := renderMetadata(md, id, opts)
 	_, mdStatErr := os.Stat(mdPath)
+	current, _ := os.ReadFile(mdPath)
 	switch {
 	case errors.Is(mdStatErr, os.ErrNotExist):
 		if err := os.WriteFile(mdPath, []byte(want), 0o644); err != nil {
 			return written, err
 		}
 		written = append(written, c.MetadataPath())
-	case mdStatErr == nil && md["base"] != base:
+	case mdStatErr == nil && string(current) != want:
 		if err := os.WriteFile(mdPath, []byte(want), 0o644); err != nil {
 			return written, err
 		}
@@ -553,6 +704,38 @@ func Write(repo *git.Repo, c Changeset, opts WriteOptions) (written []string, er
 		return written, aboutStatErr
 	}
 	return written, nil
+}
+
+// renderMetadata writes CHANGESET.yaml: the keys git-pair owns, in the order that reads best, then
+// any key it does not recognise.
+//
+// The pass-through is not decoration. `change use` records `ignores:` in this same file, and an
+// author's hand-edited key is a decision; a command that rewrites the base must not quietly delete
+// either one. Keys are sorted because a rewrite that reordered them would show up in a diff as a
+// change nobody made.
+func renderMetadata(md map[string]string, id string, opts WriteOptions) string {
+	out := "id: " + id + "\n"
+	if opts.Parent != "" {
+		out += ParentKey + ": " + opts.Parent + "\n"
+		if opts.ParentChangeset != "" {
+			out += ParentChangesetKey + ": " + opts.ParentChangeset + "\n"
+		}
+	} else {
+		out += "base: " + opts.Base + "\n"
+	}
+	rest := make([]string, 0, len(md))
+	for k := range md {
+		switch k {
+		case "id", "base", ParentKey, ParentChangesetKey:
+		default:
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	for _, k := range rest {
+		out += k + ": " + md[k] + "\n"
+	}
+	return out
 }
 
 // normalizeMarkdown makes piped or flag-supplied content end in exactly one

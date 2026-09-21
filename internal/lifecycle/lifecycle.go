@@ -67,6 +67,13 @@ type Event struct {
 	// first parent would be the same value before a rebase and a *rewritten* parent after
 	// one, so deriving it would make the rule pass in exactly the case it exists for.
 	ReviewedHead string
+	// ReviewedParentHead is the tip of the branch this changeset is stacked on, as known when a
+	// review submission was made. A parent moves for reasons invisible in the child's own history,
+	// so the only way to ask "has the parent moved since this approval?" is to have written the
+	// answer down at the time (PRD §21). Empty means the submission recorded no parent: either
+	// the changeset was not stacked, or it was approved before the trailer existed. Neither is
+	// evidence that the parent moved, so an empty value is not a refusal.
+	ReviewedParentHead string
 	// UnrecognisedMarker is true when the commit carries Review-* trailers but
 	// not a complete, valid marker for this changeset. Such a commit is
 	// treated as an implementation commit — the conservative reading, since it
@@ -270,6 +277,7 @@ func parseEvent(slug string, rec []string) Event {
 		if o, ok := model.ParseOutcome(outcome); ok && changeset == slug {
 			e.Kind, e.Outcome = KindReview, o
 			e.ReviewedHead = reviewedHead(trailers[model.TrailerHead])
+			e.ReviewedParentHead = reviewedHead(trailers[model.TrailerParentHead])
 		} else {
 			e.UnrecognisedMarker = true
 		}
@@ -504,6 +512,11 @@ func (e Event) State() model.State {
 
 // parseTrailers reads `Key: value` lines from a git trailer block. The first
 // value wins, so a duplicated key cannot be smuggled past a check.
+// Trailers reads the git-pair trailer block of a commit message: only `Review-*` keys, first
+// occurrence wins, as the marker parser reads them. Exported for callers that classify a commit by
+// what it marks rather than by its subject, which anyone can rewrite.
+func Trailers(body string) map[string]string { return parseTrailers(body) }
+
 func parseTrailers(block string) map[string]string {
 	out := map[string]string{}
 	for _, line := range strings.Split(block, "\n") {

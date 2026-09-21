@@ -170,7 +170,7 @@ func TestCheckAsksTheRebaseRuleOnlyWhereIntegrationIsPermitted(t *testing.T) {
 func TestCheckRefusesAnApprovalThatNamesNoReviewedCommit(t *testing.T) {
 	f, slug := newChangeset(t, "booking-transaction", "main")
 	ready(t, f)
-	f.CommitMessage(gittest.ReviewMessage(slug, "approve", ""), gittest.WithEmpty())
+	f.CommitMessage(gittest.ReviewMessage(slug, "approve", "", ""), gittest.WithEmpty())
 
 	res := runIn(t, f.Dir(), "check")
 	if res.code != 1 {
@@ -190,7 +190,7 @@ func TestCheckRefusesWhenTheReviewedCommitIsAbsent(t *testing.T) {
 	f, slug := newChangeset(t, "booking-transaction", "main")
 	ready(t, f)
 	const absent = "1111111111111111111111111111111111111111"
-	f.CommitMessage(gittest.ReviewMessage(slug, "approve", absent), gittest.WithEmpty())
+	f.CommitMessage(gittest.ReviewMessage(slug, "approve", absent, ""), gittest.WithEmpty())
 
 	res := runIn(t, f.Dir(), "check")
 	if res.code != 1 {

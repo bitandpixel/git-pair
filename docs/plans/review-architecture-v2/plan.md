@@ -546,24 +546,62 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
 
 **Tasks**
 
-- Add `parent:` and `parent-changeset:` to `CHANGESET.yaml` per P2; refuse `parent:` with `base:`; drop the
-  dead `refs/git-pair/changesets/<x>/archive` spelling from `parentID` (`resolve.go:500-512`).
-- Record the parent tip the child was approved against, beside `Review-Head`, and compare it in `status`,
-  `queue` and `check`.
-- Classify the movement into implementation commit / review commit / approval / rebase / merge, and put the
-  classification in the reason. Without it the rule reads as arbitrary and people stop trusting `check`.
-- Parent integrated: resolve through `integrations/<parent>` and print "parent landed as X; rebase onto
-  <destination>". Parent abandoned: refuse with "unreconciled — choose a new base", and accept an explicit
-  re-parent. Never reparent implicitly.
-- Document that a child landed without rebasing has an archive chain that contains the parent's unsquashed
-  history, and that this is expected.
-- PRD §4 and §9.1 updated for the new metadata; the stacked tests in `stacked_test.go` rewritten.
+- [x] Add `parent:` and `parent-changeset:` to `CHANGESET.yaml` per P2; refuse `parent:` with `base:`. (The
+  dead `refs/git-pair/changesets/<x>/archive` spelling in `parentID` went with M1; `parentID` is now one
+  `TrimPrefix`.)
+- [x] Record the parent tip the child was approved against (`Review-Parent-Head`, beside `Review-Head`)
+  and compare it in `status`, `queue` and `check`.
+- [x] Classify the movement into implementation commit / review commit / approval / rebase / merge, and put
+  the classification in the reason. Without it the rule reads as arbitrary and people stop trusting `check`.
+- [x] Parent integrated: resolve through `integrations/<parent>` and say where the work went. Parent
+  abandoned: refuse with "unreconciled — choose a new base", and accept an explicit re-parent. Never
+  reparent implicitly.
+- [x] Document that a child landed without rebasing has an archive chain that contains the parent's
+  unsquashed history, and that this is expected.
+- [x] PRD §5 and §9.1 updated for the new metadata (§4 is the core-rules section; the metadata lives in
+  §5), §21 rewritten; `stacked_parent_test.go` added beside the existing `stacked_test.go`, which still
+  covers what it always covered.
 
 **Verification**
 
-- One test per movement class, each asserting the specific reason string, plus a test that a child with a
-  parent whose branch is gone cannot pass `check`.
-- A test for parent-integrated resolution against a real squash landing.
+- [x] One test per movement class, each asserting the specific reason fragment, plus the gone-parent and
+  landed-parent cases.
+- [x] A test for parent-integrated resolution against a real squash landing.
+
+**What landed differently**
+
+- `parent:` is not a second base, it is the base. `changeset.Stack` reads whichever key the file
+  uses, and every measurement — the span, the drift comparison, `choose()`'s rule for dropping an
+  inherited parent directory — goes through the one value, so there is no order of precedence to
+  remember and no way for two keys to disagree. A file that sets both is refused the way an `id`
+  that disagrees with its directory is.
+- `Review-Parent-Head`, not a ref. The parent's identity at approval time is a fact about the
+  approval, so it travels with the approval: same commit, same trailer block, same greppability as
+  `Review-Head`, and nothing new for a reviewer to fetch.
+- An approval that recorded no parent tip is not refused. The trailer's absence says the reviewer's
+  git-pair was older than this rule, which is not evidence that the parent moved; refusing would
+  invalidate every stacked child in every repository the moment this code appears. `status` says
+  what is missing. Same reasoning as M4's legacy-ref tolerance.
+- **A landed parent keeps its child measurable.** Deleting the parent branch used to make the child
+  unanswerable: every command measures against the base, the base was a branch that had been
+  deleted, and the answer was git's `unknown revision`. The resolver now relinks a stack whose
+  parent branch is gone to `refs/git-pair/integrations/<parent>`, which is the durable bridge
+  requirements §Stacked Changesets describes, and it holds the commit the parent's work became —
+  exactly what the child should be measured against now. The branch name stays in
+  `Changeset.ParentBranch`, so "your parent landed" and "your parent is gone" remain different
+  sentences.
+- The queue cannot report a broken approval, and says so differently. It lists READY branches, and a
+  READY changeset has no approval to invalidate — a review submission would have made the newest
+  marker that review and removed the row. What the queue can honestly report is that the parent is
+  ahead of the branch about to be reviewed, so that is the note it prints.
+- A parent whose branch is gone with *no* integration record cannot be measured, and `check` fails
+  with exit 2 rather than a NOT READY verdict. The verdict would be a guess; the message names the
+  parent, says the stack is unreconciled, and names the command that decides.
+- `init` grew `--parent` / `--set-parent` rather than making `--base` smarter. Two spellings of one
+  intent is how `base:` got a meaning that depends on which branch you are on.
+- The movement class comes from trailers, not subjects: a commit with two parents is a merge whatever
+  its message claims, and a subject line is editable prose.
+
 
 ### M8 — The agent contract and the deferred list
 

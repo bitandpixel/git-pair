@@ -23,12 +23,14 @@ import (
 // (plan P3).
 
 type initOptions struct {
-	base     string
-	setBase  bool
-	id       string
-	about    string
-	setAbout bool
-	noCommit bool
+	base      string
+	setBase   bool
+	parent    string
+	setParent bool
+	id        string
+	about     string
+	setAbout  bool
+	noCommit  bool
 }
 
 func newInitCommand(a *app) *cobra.Command {
@@ -43,12 +45,23 @@ once refs exist it names those too. The branch name is only where the default co
 so feature/booking-transaction becomes changesets/feature-booking-transaction/ unless you
 say otherwise:
 
-  git pair change init --id booking-transaction-v2
+  git pair init --id booking-transaction-v2
 
 An ID is chosen, not derived, so it is never rewritten to fit: --id booking\ v2 is refused
 rather than quietly turned into booking-v2, because refs named after a string nobody typed
 are not findable by the person who typed it. IDs are unique in git-pair's namespace, and a
 collision stops the command instead of appending a suffix.
+
+A stacked changeset names the branch it sits on with --parent, which records it as
+parent: — that branch IS the base, so the two keys are never both written:
+
+  git switch -c booking-transaction-tests
+  git pair init --parent booking-transaction
+
+The parent's own changeset is recorded beside it as parent-changeset:, which is what still names
+the relationship after the parent lands and its branch is gone. Restacking an existing changeset
+takes --set-parent, the same way changing a base takes --set-base; git-pair never restacks a changeset
+by itself, because a parent that moved or died is a decision for the author, not a default.
 
 The commit covers the changeset directory only, so whatever else is staged on
 your index stays there. Use --no-commit to leave the scaffolding in the working
@@ -57,24 +70,26 @@ tree for your first implementation commit instead.
 ABOUT.md gets a scaffold with the standard review headings unless you supply
 content, which makes describe-and-initialise a single non-interactive call:
 
-  git pair change init --base main --about "$DESCRIPTION"
-  git pair change init --base main --about - < about.md
-  cat about.md | git pair change init --base main
+  git pair init --base main --about "$DESCRIPTION"
+  git pair init --base main --about - < about.md
+  cat about.md | git pair init --base main
 
 Existing content is never overwritten silently: replacing a populated ABOUT.md
 takes --set-about, the same way changing a base takes --set-base.`,
-		Example: `  git pair change init --base main
-  git pair change init --base main --id booking-transaction-v2
-  git pair change init --base booking-transaction   # stacked branch
-  git pair change init --base main --about - < draft.md`,
+		Example: `  git pair init --base main
+  git pair init --base main --id booking-transaction-v2
+  git pair init --parent booking-transaction
+  git pair init --base main --about - < draft.md`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runChangeInit(cmd.Context(), a, opts)
 		},
 	}
-	cmd.Flags().StringVar(&opts.base, "base", "", "ref this changeset is stacked on (default: main, then master)")
+	cmd.Flags().StringVar(&opts.base, "base", "", "ref this changeset's diff is measured against (default: main, then master)")
 	cmd.Flags().StringVar(&opts.id, "id", "", "changeset ID (default: the branch name, normalised)")
 	cmd.Flags().BoolVar(&opts.setBase, "set-base", false, "overwrite an existing base value")
+	cmd.Flags().StringVar(&opts.parent, "parent", "", "stack this changeset on <branch>, recording it as parent:")
+	cmd.Flags().BoolVar(&opts.setParent, "set-parent", false, "restack an existing changeset onto --parent")
 	cmd.Flags().StringVar(&opts.about, "about", "", "ABOUT.md content; - reads it from stdin")
 	cmd.Flags().BoolVar(&opts.setAbout, "set-about", false, "overwrite an existing ABOUT.md")
 	cmd.Flags().BoolVar(&opts.noCommit, "no-commit", false, "leave the scaffolding uncommitted")
@@ -91,7 +106,7 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		return err
 	}
 	if branch == "" {
-		return &usageError{fmt.Errorf("%w: run `git switch -c <branch>` before `git pair change init`", changeset.ErrDetachedHead)}
+		return &usageError{fmt.Errorf("%w: run `git switch -c <branch>` before `git pair init`", changeset.ErrDetachedHead)}
 	}
 	// Starting a changeset on the integration branch is refused for clarity, not correctness:
 	// a changeset is measured against that branch, so one started on it is inert — every
@@ -99,6 +114,12 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	// status line that never shows the changeset.
 	if db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch); err == nil && branch == db.LocalName() {
 		return &usageError{fmt.Errorf("%s is the integration branch, so a changeset started on it can never contain anything: `git switch -c <branch>` first", branch)}
+	}
+	if opts.parent != "" && opts.base != "" {
+		return &usageError{fmt.Errorf("--parent %s and --base %s name the same thing twice: a stacked changeset's parent IS its base. Name the parent, or drop --parent and name the base", opts.parent, opts.base)}
+	}
+	if opts.parent != "" && opts.parent == branch {
+		return &usageError{fmt.Errorf("--parent %s is the branch this changeset lives on, so the stack would move with every commit. Name the branch you branched off", branch)}
 	}
 	base := opts.base
 	if base == "" {
@@ -111,7 +132,7 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		a.warn("base: %s (pass --base to choose a different ref)\n", base)
 	}
 
-	// `change init` creates a directory, which is not a resolution question. A stacked branch
+	// `init` creates a directory, which is not a resolution question. A stacked branch
 	// carries its parent's changeset directory, and that inherited directory must not stop the
 	// child from starting its own: once both exist, `base:` says which is which.
 	id := opts.id
@@ -149,6 +170,22 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		a.warn("warning: base %q does not resolve yet; spans and status will fail until it does\n", base)
 	}
 
+	// The durable half of the stack: which changeset lives on the parent branch. It is discovered,
+	// not demanded — a parent that carries none, or carries two, is recorded with just its branch
+	// name, because guessing an ID here would write a claim nobody checked into the file that is
+	// read after the parent is gone.
+	parentChangeset := ""
+	if opts.parent != "" {
+		if db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch); err == nil && opts.parent == db.LocalName() {
+			return &usageError{fmt.Errorf("--parent %s is the integration branch, which is not a stack: a changeset measured against it is not stacked. --base %s is the flag for that", opts.parent, opts.parent)}
+		}
+		pcs, why := parentChangesetOn(ctx, repo, opts.parent, a.defaultBranch)
+		parentChangeset = pcs
+		if pcs == "" {
+			a.warn("warning: parent %s has no changeset of its own (%s), so parent-changeset: is left empty. The stack is recorded by branch name only\n", opts.parent, why)
+		}
+	}
+
 	if own, err := changeset.BaseIsOwnBranch(ctx, repo, base, branch); err != nil {
 		return err
 	} else if own {
@@ -161,17 +198,25 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		return err
 	}
 
-	written, err := changeset.Write(repo, cs, changeset.WriteOptions{
+	writeOpts := changeset.WriteOptions{
 		Base:     base,
 		SetBase:  opts.setBase,
 		About:    about,
 		SetAbout: opts.setAbout,
-	})
+	}
+	if opts.parent != "" {
+		writeOpts.Base = ""
+		writeOpts.Parent = opts.parent
+		writeOpts.ParentChangeset = parentChangeset
+		writeOpts.SetParent = opts.setParent
+	}
+	written, err := changeset.Write(repo, cs, writeOpts)
 	if err != nil {
 		// These are all "your arguments describe something that already exists"
 		// errors rather than repository states, so they exit 2.
 		switch {
 		case errors.Is(err, changeset.ErrBaseConflict),
+			errors.Is(err, changeset.ErrParentWithBase),
 			errors.Is(err, changeset.ErrAboutConflict),
 			errors.Is(err, changeset.ErrIDMismatch):
 			return &usageError{err}
@@ -250,7 +295,7 @@ func refuseTakenID(ctx context.Context, repo *git.Repo, id string) error {
 
 func idTakenError(ctx context.Context, repo *git.Repo, id, why string) error {
 	if free := freeID(ctx, repo, id); free != "" {
-		return &usageError{fmt.Errorf("changeset ID %q is already in use: %s.\n\nChoose another ID:\n\n  git pair change init --id %s", id, why, free)}
+		return &usageError{fmt.Errorf("changeset ID %q is already in use: %s.\n\nChoose another ID:\n\n  git pair init --id %s", id, why, free)}
 	}
 	return &usageError{fmt.Errorf("changeset ID %q is already in use: %s. Choose another ID with --id", id, why)}
 }
@@ -296,7 +341,23 @@ func printInitNext(a *app, cs changeset.Changeset, described bool) {
 }
 
 // defaultBase picks the repository's trunk without guessing wildly.
-// defaultBase is the base `change init` records when the author does not name one. It is the
+// parentChangesetOn finds the changeset that lives on a parent branch, and says why it could not.
+func parentChangesetOn(ctx context.Context, repo *git.Repo, parent, defaultBranch string) (string, string) {
+	db, err := changeset.DefaultBranch(ctx, repo, defaultBranch)
+	if err != nil {
+		return "", "the integration branch is not resolved, so the parent's changeset cannot be told from its inherited ones"
+	}
+	res, err := changeset.Resolve(ctx, repo, "refs/heads/"+parent, db)
+	if err != nil {
+		return "", err.Error()
+	}
+	if res.Selected == nil {
+		return "", "no single unlanded changeset on it"
+	}
+	return res.Selected.Changeset.Slug, ""
+}
+
+// defaultBase is the base `init` records when the author does not name one. It is the
 // integration branch — the same ref the landed test compares trees against — so a changeset
 // cannot be measured against one branch while being judged landed by another. The spelling is
 // the short branch name, because that is what a person reads in CHANGESET.yaml.

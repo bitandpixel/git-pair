@@ -17,7 +17,7 @@ the command whose whole job was moving it.
 What remains: `refs/git-pair/archive/<id>` and `refs/git-pair/integrations/<id>`, written by one
 invocation of `git pair integration record`, create-only, with no code path that moves either.
 
-This is M1 through M6: the transition, the rule about history the transition required, the checks that make
+This is M1 through M7: the transition, the rule about history the transition required, the checks that make
 the record worth reading afterwards, the flagless local flow that writes it, the report that catches the step
 being skipped, the next actions that tell an author where the step is, and the queue's shape and the CLI's
 naming. M7-M8 follow — stacked parent tracking and the agent contract.
@@ -71,6 +71,15 @@ naming. M7-M8 follow — stacked parent tracking and the agent contract.
 - Naming (M6, plan P3) — `git pair queue` and `git pair init` are the spellings, hard-renamed with no
   aliases; the two commands moved into `init.go` and `queue.go` because top-level commands live one per
   file. Historical documents keep the old names: they record what was true when they were written.
+- Stacked changesets (M7) — a child records `parent:` (which *is* its base) and `parent-changeset:`
+  (the durable half, readable after the parent's branch is gone); `init --parent` writes them and
+  `--set-parent` restacks explicitly. A review submission for a stacked changeset records the
+  parent's tip as `Review-Parent-Head`, and the conservative rule (PRD §21) — any parent movement
+  ends the child's approval — is enforced by `check`, reported by `status`, and noted by `queue`.
+  The reason names the kind of movement: implementation commit, review commit, approval, rebase, or
+  merge. A parent that landed leaves the child measurable through its integration ref, with the
+  landing and the destination named; a parent that was abandoned leaves the child unreconciled until
+  somebody restacks it.
 - `check --json` gained `next_action` (M5), present only when the gate passes: the same sentence `status`
   prints, so an agent that gates on `ready` learns about the merge and the record without parsing human
   output. `TestApprovedStateNamesTheLandingAndTheRecord` pins that sentence across all four spellings and
@@ -190,6 +199,10 @@ the flag named), `TestIntegrationRecordAcceptsAChildLandedOnTrunk`,
 `TestIntegrationRecordAnswersFromTheRecordBeforeTheChecks`, `TestIntegrationRecordDerivesBothTips`,
 `TestIntegrationRecordDerivationRefusesToChooseBetweenTwo`,
 `TestIntegrationRecordDerivationStopsWhenTheBranchIsGone`, and `TestRecordedPairAndConflict`.
+For M7: `TestAnyParentMovementEndsTheChildsApproval`,
+`TestChildOfALandedParentIsToldWhereTheWorkWent`,
+`TestChildOfAnAbandonedParentIsUnreconciled`, `TestRestackingTakesAnExplicitFlag`,
+`TestInitParentWritesTheStackOnce`, `TestNamingBothParentAndBaseIsRefused`.
 For M6: `TestReviewQueueKeepsOneRowPerBranchForOneChangeset`.
 For M4: `TestQueueAndStatusReportALandingNobodyRecorded`,
 `TestQueueAcceptsALandingTheRetiredLayoutRecorded`, `TestQueueSaysOnceThatTheNamespaceIsAbsent`,

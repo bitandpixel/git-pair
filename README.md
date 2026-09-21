@@ -22,7 +22,8 @@ The MVP deliberately does not:
 - treat per-file review checkmarks as review state — they persist locally under the git directory
   so a review can be resumed, and no command reports them
 - model multi-reviewer permissions, multi-author semantics, or complex stacked-branch graphs;
-  a stack is only a `base:` value in `CHANGESET.yaml`
+  a stack is a `parent:` value in `CHANGESET.yaml` plus one rule (§Stacked): any parent movement
+  ends the child's approval, and the reason says what kind of movement it was
 - distinguish a human's code edit from a human's comment
 - send notifications, or enforce review refs remotely
 
@@ -245,10 +246,13 @@ collapse, leading and trailing `-` are trimmed, case is kept, so
 own with `git pair init --id booking-transaction-v2`; an ID is never rewritten to fit,
 never suffixed to dodge a collision, and never changed once the changeset has refs.
 
-`CHANGESET.yaml` records `id` and `base` and nothing else. `base` is what the diff is measured
-against, and for a stack names another changeset. There is no branch field: the directory does
-not belong to a branch, so renaming a branch strands nothing, and two clones of the same commits
-cannot disagree about what the directory is.
+`CHANGESET.yaml` records `id` and where the changeset sits, and nothing else. `base` is what the
+diff is measured against. A stacked changeset spells that as `parent:` — the branch it sits on,
+which *is* its base — beside `parent-changeset:`, the changeset living there; the two spellings are
+never both written. The parent changeset is what still names the relationship after the parent
+lands and its branch is deleted, which is when a child needs it most. There is no branch field: the
+directory does not belong to a branch, so renaming a branch strands nothing, and two clones of the
+same commits cannot disagree about what the directory is.
 
 **What you are working on.** The changesets on a revision are the `changesets/<id>/` directories
 it carries that the **integration branch** does not. A directory in the integration branch's tree
@@ -507,7 +511,7 @@ landed.
 
 | Command | Flags | Notes |
 | --- | --- | --- |
-| `init` | `--id <id>`, `--base <ref>`, `--set-base`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch; refuses on that branch, where a changeset could never contain anything; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |
+| `init` | `--id <id>`, `--base <ref>`, `--set-base`, `--parent <branch>`, `--set-parent`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch; refuses on that branch, where a changeset could never contain anything; `--parent` stacks the changeset instead of naming a base, recording the parent's changeset ID beside it, and `--set-parent` restacks it — never done implicitly, because a parent that moved, landed or died is the author's decision; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` when the changeset is in review, otherwise succeeds and records nothing; refuses a changeset whose work is recorded as integrated |
 | `change use <id>` | none | records which changeset a branch carrying more than one is working on: writes `ignores: <other ids>` into the chosen changeset's `CHANGESET.yaml` and commits that file; refuses an id the branch does not offer and a record that would leave the branch still undecided; idempotent |

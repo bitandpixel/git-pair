@@ -35,6 +35,7 @@ import (
 	"strings"
 
 	"gitpair/internal/git"
+	"gitpair/internal/reviewref"
 )
 
 // ErrNoDefaultBranch means nothing identifies the integration branch, so "has this landed?"
@@ -264,7 +265,7 @@ func (r *resolver) at(ctx context.Context, repo *git.Repo, rev string) (Resoluti
 		}
 		candidates = append(candidates, c)
 	}
-	res.Candidates = candidates
+	res.Candidates = relinkStacks(ctx, repo, candidates)
 	if err := nearness(ctx, repo, revSHA, res.Candidates); err != nil {
 		return res, err
 	}
@@ -397,12 +398,18 @@ func candidateFor(id string, md map[string]string) (Candidate, error) {
 		return Candidate{}, fmt.Errorf("%w: %s records id %q but sits in %q; the directory name is the id, so rename the directory or correct %s",
 			ErrIDMismatch, filepath.Join(Root, id, MetadataFile), id2, id, MetadataFile)
 	}
+	stack, err := stackOf(md)
+	if err != nil {
+		return Candidate{}, fmt.Errorf("%s: %w", filepath.Join(Root, id, MetadataFile), err)
+	}
 	return Candidate{
 		Changeset: Changeset{
-			Slug:   id,
-			Base:   md["base"],
-			Dir:    filepath.Join(Root, id),
-			Exists: true,
+			Slug:            id,
+			Base:            stack.Base,
+			ParentBranch:    stack.Parent,
+			ParentChangeset: stack.ParentChangeset,
+			Dir:             filepath.Join(Root, id),
+			Exists:          true,
 		},
 		Distance: -1,
 		Ignores:  strings.Fields(md[IgnoresKey]),
@@ -417,7 +424,7 @@ func candidateFor(id string, md map[string]string) (Candidate, error) {
 // branch with — the recorded answer to an ambiguity `change use` was asked about.
 func choose(res Resolution) Resolution {
 	res.Candidates = dropNamed(res.Candidates, func(c Candidate) []string {
-		return []string{parentID(c.Changeset.Base)}
+		return []string{stackParentID(c)}
 	})
 	res.Candidates = dropNamed(res.Candidates, func(c Candidate) []string { return c.Ignores })
 
@@ -505,6 +512,41 @@ func distanceFromTouch(ctx context.Context, repo *git.Repo, rev, id string) (int
 // handed.
 func parentID(base string) string {
 	return strings.TrimPrefix(base, "refs/heads/")
+}
+
+// stackParentID names the branch a candidate is stacked on, whether the stack recorded it as a
+// branch or the resolver redirected the measurement base to the parent's integration ref.
+func stackParentID(c Candidate) string {
+	if c.Changeset.ParentBranch != "" {
+		return c.Changeset.ParentBranch
+	}
+	return parentID(c.Changeset.Base)
+}
+
+// relinkStacks points a stacked changeset at its parent's integration ref when the parent branch is
+// gone, which is the ordinary state of a child whose parent has landed and been cleaned up.
+//
+// Without this the child answers nothing at all: every command measures against the base, the base is
+// a branch that no longer exists, and the answer to "what does this changeset contain?" is an
+// unknown-revision error. The integration ref is the durable half of the relationship — the bridge
+// requirements §Stacked Changesets describes — and it holds the commit the parent's work became, which
+// is what the child should be measured against now. Nothing is invented: the branch name stays in
+// ParentBranch, so the child can still be told its parent has landed rather than merely moved.
+func relinkStacks(ctx context.Context, repo *git.Repo, candidates []Candidate) []Candidate {
+	for i, c := range candidates {
+		if c.Changeset.ParentBranch == "" || c.Changeset.ParentChangeset == "" {
+			continue
+		}
+		if _, err := repo.RevParse(ctx, "refs/heads/"+c.Changeset.ParentBranch); err == nil {
+			continue
+		}
+		ref := reviewref.Integration(c.Changeset.ParentChangeset)
+		if _, err := repo.RevParse(ctx, ref); err != nil {
+			continue
+		}
+		candidates[i].Changeset.Base = ref
+	}
+	return candidates
 }
 
 // dropNamed removes the candidates that another candidate names, keeping the list untouched

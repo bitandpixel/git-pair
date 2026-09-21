@@ -258,7 +258,15 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 	if err := a.refuseIfAbandoned(ctx, s); err != nil {
 		return err
 	}
-	result, err := reviewops.Submit(ctx, s.repo, s.cs, outcome, opts.message, !opts.noStage)
+	// A stacked changeset's submission records the parent branch's tip alongside the head it
+	// reviewed. The parent moves for reasons the child's history cannot show — its own rebases,
+	// its landing, its abandonment — and the only way to ask later whether the approval still
+	// covers the work is to have written the answer down while it was still known (PRD §21).
+	parent, err := changeset.ParentOf(ctx, s.repo, s.cs, s.trunk)
+	if err != nil {
+		return err
+	}
+	result, err := reviewops.Submit(ctx, s.repo, s.cs, outcome, opts.message, !opts.noStage, parent.Tip)
 	if err != nil {
 		return err
 	}
@@ -491,7 +499,7 @@ func openSession(ctx context.Context, a *app, s *session, sel span.Selector, nam
 	if note != "" {
 		a.warn("%s\n", note)
 	}
-	err := tui.Run(ctx, tui.Options{Repo: s.repo, Changeset: s.cs, Summary: s.summary, Span: sel})
+	err := tui.Run(ctx, tui.Options{Repo: s.repo, Changeset: s.cs, Summary: s.summary, Span: sel, Trunk: s.trunk})
 	if errors.Is(err, tui.ErrQuit) {
 		return nil
 	}

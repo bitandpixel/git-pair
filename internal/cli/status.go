@@ -61,6 +61,19 @@ type latestReviewJSON struct {
 	ReviewedHead string `json:"reviewed_head,omitempty"`
 }
 
+// parentJSON is the stack this changeset sits on as the reader sees it now: the parent branch, where
+// its tip stands, the tip the newest approval recorded, and whether those two still agree. Absent for
+// a changeset that is not stacked (PRD §21).
+type parentJSON struct {
+	Branch    string `json:"branch"`
+	Changeset string `json:"changeset,omitempty"`
+	Tip       string `json:"tip,omitempty"`
+	Recorded  string `json:"recorded_at_approval,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Next      string `json:"next,omitempty"`
+	Note      string `json:"note,omitempty"`
+}
+
 type statusJSON struct {
 	Changeset string `json:"changeset"`
 	Branch    string `json:"branch"`
@@ -79,6 +92,8 @@ type statusJSON struct {
 	Head                string            `json:"head"`
 	HeadFull            string            `json:"head_full"`
 	LatestReview        *latestReviewJSON `json:"latest_review"`
+	// Parent is the stack, and is nil for a changeset measured against the integration branch.
+	Parent *parentJSON `json:"parent,omitempty"`
 	// ArchiveRef and ArchiveCommit report the changeset's archived chain: the unsquashed
 	// implementation-and-review tip the record was made from. They are non-empty only once the
 	// changeset has been recorded, because that is the only moment git-pair writes the ref. An
@@ -211,6 +226,22 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 		}
 		view.latestAge = lifecycle.Age(r.When, now())
 	}
+	// The stack. An approval measures itself against a parent tip as well as a head, and the parent
+	// moves in ways this branch's own history cannot show, so `status` says what the approval
+	// recorded and whether it still stands (PRD §21).
+	if ps, err := a.parentSinceApproval(ctx, s.repo, s.cs, s.trunk, s.summary.Marker); err != nil {
+		return nil, err
+	} else if ps.Branch != "" {
+		view.json.Parent = &parentJSON{
+			Branch:    ps.Branch,
+			Changeset: ps.Changeset,
+			Tip:       short(ps.Tip),
+			Recorded:  short(ps.Recorded),
+			Reason:    ps.Reason,
+			Next:      ps.Next,
+			Note:      ps.Note,
+		}
+	}
 	if sha, err := reviewref.ResolveArchive(ctx, s.repo, s.cs.Slug); err == nil {
 		// The name of the ref is derivable from the slug, so it is only worth
 		// reporting once the ref exists: its absence is the answer to "has this ever been
@@ -320,6 +351,33 @@ func printStatus(a *app, v *statusView) {
 		a.printf("  history: %d review(s) — `git pair review history`\n", j.Reviews)
 	} else {
 		a.printf("\nLatest review:\n  none yet\n")
+	}
+	if p := j.Parent; p != nil {
+		// The stack reads after the review because its whole subject is whether that review still
+		// means what it said.
+		a.printf("\nStack:\n")
+		who := p.Branch
+		if p.Changeset != "" {
+			who = fmt.Sprintf("%s (changeset %s)", p.Branch, p.Changeset)
+		}
+		switch {
+		case p.Tip == "":
+			a.printf("  parent: %s — the branch is gone\n", who)
+		case p.Recorded == "":
+			a.printf("  parent: %s at %s\n", who, p.Tip)
+		case p.Recorded == p.Tip:
+			a.printf("  parent: %s at %s — unchanged since the approval\n", who, p.Tip)
+		default:
+			a.printf("  parent: %s at %s (approval recorded %s)\n", who, p.Tip, p.Recorded)
+		}
+		if p.Reason != "" {
+			// The reason already names the step — it is a refusal in another command's mouth, and a
+			// reader of `status` is the same reader — so it is printed once rather than twice.
+			a.printf("  stale:  %s\n", p.Reason)
+		}
+		if p.Note != "" {
+			a.printf("  note:   %s\n", p.Note)
+		}
 	}
 	if j.ArchiveRef != "" {
 		// Both families belong to the record, so they read together: the commit the work became, and
