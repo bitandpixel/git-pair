@@ -230,6 +230,17 @@ func TestCheckUsageErrors(t *testing.T) {
 			t.Errorf("`check <arg>` exited %d, want %d\nstderr: %s", res.code, exitUsage, res.stderr)
 		}
 	})
+
+	// `--json` moves where the verdict lives, not the exit-code table: a call cobra refuses is
+	// still a usage error, so a JSON job that ignores `$?` still learns the repository was
+	// never readable rather than reading an absent object as "not ready".
+	t.Run("asking for json does not soften a usage error", func(t *testing.T) {
+		f, _, _, _ := approvedChangeset(t)
+		res := runIn(t, f.Dir(), "check", "--json", "booking-transaction")
+		if res.code != exitUsage {
+			t.Errorf("`check --json <arg>` exited %d, want %d\nstderr: %s", res.code, exitUsage, res.stderr)
+		}
+	})
 }
 
 // The JSON is the contract an automation consumes: full SHAs, because a CI job compares them
@@ -264,9 +275,16 @@ func TestCheckJSONContract(t *testing.T) {
 	}
 
 	// The failure case reports the same keys, so a consumer branches on `ready` rather
-	// than on which keys are present.
+	// than on which keys are present. It also exits 0: `--json` carries the verdict in
+	// `ready`, and the exit code is the verdict in the human form alone. Pinned because
+	// "the exit code is the verdict" is the sentence a reader brings to this output too.
 	f.Commit("author response", gittest.WithFile("service.go", "package main\n\nfunc Lock() { x() }\n"))
-	bad := runIn(t, f.Dir(), "check", "--json").json(t)
+	badRun := runIn(t, f.Dir(), "check", "--json")
+	if badRun.code != exitOK {
+		t.Errorf("not-ready `check --json` exited %d, want %d — the verdict travels in `ready`\nstdout: %s",
+			badRun.code, exitOK, badRun.stdout)
+	}
+	bad := badRun.json(t)
 	if bad["ready"] != false {
 		t.Errorf("ready = %v, want false", bad["ready"])
 	}
