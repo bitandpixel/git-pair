@@ -111,9 +111,6 @@ func focusOnRow(t *testing.T, m reviewModel, idx int) reviewModel {
 	}
 	if idx >= m.metaStart {
 		m.metaCursor = idx
-		// The test is placing the cursor, which is exactly what the reviewer doing it themselves
-		// means to the box: it stops offering its default row on the way in.
-		m.metaHome = true
 		m.focusOn(focusMeta)
 	} else {
 		m.cursor = idx
@@ -176,8 +173,8 @@ func activeKind(t *testing.T, m reviewModel) (rowKind, row) {
 	return r.kind, r
 }
 
-// Each region has two ends, and j does not cross from one into the other: the box has a cursor of its
-// own, and a keystroke that moved both would move the reviewer off a row they were reading in the other.
+// Each half of the list column has two ends, and the tree's is a hard one: `j` past the last file stays
+// there and leaves the box's cursor where it is. The passable edge is the one the two halves share.
 func TestJStopsAtTheEndOfTheFileTree(t *testing.T) {
 	m := navModel(t)
 	last := lastIndexOfType(t, m, rowFile)
@@ -200,29 +197,101 @@ func TestJStopsAtTheEndOfTheFileTree(t *testing.T) {
 	}
 }
 
-// The box has the same two ends, and the same rule about the region it leaves alone.
-func TestJStopsAtTheEndOfTheChangesetBox(t *testing.T) {
+// The edge the box and the tree share is passable, because they are one list: `j` off the box's last row
+// lands on the tree's first, and `k` off the tree's top lands on the box's last. Each half keeps its own
+// cursor for the next crossing, and a step of more than a row -- a page -- stays inside the window it
+// started in, because the two halves do not have the same height to page by.
+func TestJkCrossTheEdgeBetweenTheBoxAndTheTree(t *testing.T) {
 	m := navModel(t)
-	m = focusOnRow(t, m, len(m.rows)-1)
-	at, tree := m.metaCursor, m.cursor
+	m = focusOnRow(t, m, len(m.rows)-1) // the box's last row, the one above the tree
+	boxAt := m.metaCursor
 
-	for range 3 {
-		m = press(m, tea.KeyDown)
-		if m.metaCursor != at {
-			t.Errorf("j past the box's last row moved it to %d, want %d", m.metaCursor, at)
-		}
-		if m.cursor != tree {
-			t.Errorf("j in the box moved the file tree from %d to %d", tree, m.cursor)
-		}
-		_ = m.View()
+	off := press(m, tea.KeyDown)
+	if off.focus != focusFiles {
+		t.Fatalf("j off the box's last row left the keys with %v, want the tree", off.focus)
+	}
+	if off.cursor != 0 {
+		t.Errorf("j off the box landed on tree row %d, want its first row", off.cursor)
+	}
+	if off.metaCursor != boxAt {
+		t.Errorf("j out of the box moved its cursor from %d to %d", boxAt, off.metaCursor)
+	}
+
+	// `k` back is the same edge from the other side: the box's last row is the one the tree's first
+	// sits under, so that is where the cursor goes rather than the row the box was last on.
+	back := press(off, tea.KeyUp)
+	if !back.metaHasFocus() {
+		t.Fatalf("k off the tree's top row left the keys with %v, want the box", back.focus)
+	}
+	if back.metaCursor != len(back.rows)-1 {
+		t.Errorf("k into the box landed on %d, want its last row %d", back.metaCursor, len(back.rows)-1)
+	}
+
+	// `k` again walks up inside the box rather than out of it, and `j` back down comes to the same row.
+	up := press(back, tea.KeyUp)
+	if !up.metaHasFocus() || up.metaCursor != len(up.rows)-2 {
+		t.Errorf("k inside the box gave %d with %v, want %d with the box",
+			up.metaCursor, up.focus, len(up.rows)-2)
+	}
+	down := press(up, tea.KeyDown)
+	if down.metaCursor != len(down.rows)-1 {
+		t.Errorf("j back down the box landed on %d, want its last row", down.metaCursor)
+	}
+
+	// A page is not a step: ctrl-u at the top of the tree stays in the tree.
+	here := focusOnRow(t, m, 0)
+	paged := press(here, tea.KeyCtrlU)
+	if paged.focus != focusFiles || paged.cursor != 0 {
+		t.Errorf("ctrl-u at the tree's top gave %v on row %d, want the tree on its first row",
+			paged.focus, paged.cursor)
+	}
+	// ... and the same key at the bottom of the box stays in the box.
+	here = focusOnRow(t, m, len(m.rows)-1)
+	paged = press(here, tea.KeyCtrlD)
+	if !paged.metaHasFocus() {
+		t.Errorf("ctrl-d at the box's bottom left the keys with %v, want the box", paged.focus)
+	}
+	_ = m.View()
+}
+
+// `gg` and `G` are the ends of the whole list column, which is the one list the keys are in: `gg` is the
+// box's first row and `G` the tree's last, whichever half the keys started in.
+func TestGgAndGMeanTheEndsOfTheListColumn(t *testing.T) {
+	m := withThreads(t, navModel(t), 12)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+
+	m = pressRune(pressRune(m, 'g'), 'g')
+	if !m.metaHasFocus() || m.metaCursor != m.metaStart {
+		t.Errorf("gg from the box gave %v on %d, want the box on its first row %d",
+			m.focus, m.metaCursor, m.metaStart)
+	}
+
+	m = pressRune(m, 'G')
+	if m.focus != focusFiles || m.cursor != m.metaStart-1 {
+		t.Fatalf("G from the box gave %v on %d, want the tree on its last row %d",
+			m.focus, m.cursor, m.metaStart-1)
+	}
+	boxAt := m.metaCursor
+
+	// ... and the same two keys from the tree, which is where a reviewer most often presses them.
+	m = pressRune(pressRune(m, 'g'), 'g')
+	if !m.metaHasFocus() || m.metaCursor != m.metaStart {
+		t.Errorf("gg from the tree gave %v on %d, want the box's first row", m.focus, m.metaCursor)
+	}
+	m = pressRune(m, 'G')
+	if m.focus != focusFiles || m.cursor != m.metaStart-1 {
+		t.Errorf("G from the tree gave %v on %d, want the tree's last row", m.focus, m.cursor)
+	}
+	if m.metaCursor != boxAt {
+		t.Errorf("G in the tree moved the box from %d to %d", boxAt, m.metaCursor)
 	}
 }
 
-// Tab is the ring: the file tree, the diff where there is room for one, the changeset box, round again.
-// This fixture is too narrow for the pane, so the ring here walks through the overlay: the diff is the
-// stop the pane would be. The two-target ring, where even the overlay does not fit, is
-// TestTabSkipsTheDiffWhenEvenTheOverlayDoesNotFit -- a region that cannot be drawn at all is the one
-// that stays off the ring.
+// Tab is the toggle between the two things on the screen: the list column and the diff. This fixture is
+// too narrow for the pane, so the diff's stop here is its whole-screen form --
+// TestTabSkipsTheDiffWhenEvenTheOverlayDoesNotFit is the one where the ring has a single stop, because a
+// region that cannot be drawn at all is the one that stays off the ring. The box is not a stop: it is the
+// other half of the list column, and TestJkCrossTheEdgeBetweenTheBoxAndTheTree is how it is reached.
 func TestTabWalksTheFocusRing(t *testing.T) {
 	m := navModel(t)
 	if m.paneWidth() > 0 {
@@ -239,55 +308,56 @@ func TestTabWalksTheFocusRing(t *testing.T) {
 		t.Errorf("tab moved the file tree's cursor from 2 to %d", toDiff.cursor)
 	}
 
-	toBox := press(toDiff, tea.KeyTab)
-	if !toBox.metaHasFocus() {
-		t.Fatalf("tab from the diff left the keys with %v, want the changeset box", toBox.focus)
-	}
-	if toBox.cursor != 2 {
-		t.Errorf("tab moved the file tree's cursor from 2 to %d", toBox.cursor)
-	}
-	back := press(toBox, tea.KeyTab)
-	if back.focus != focusFiles {
-		t.Errorf("tab from the box left the keys with %v, want the file tree", back.focus)
-	}
-	if back.cursor != 2 {
-		t.Errorf("tab back landed on row %d, want the row the tree was on", back.cursor)
+	// The diff is the only other stop, so tab returns to the half of the column the keys came from --
+	// the tree here, and the tree's own row.
+	back := press(toDiff, tea.KeyTab)
+	if back.focus != focusFiles || back.cursor != 2 {
+		t.Errorf("tab back from the diff left %v on row %d, want the tree on 2", back.focus, back.cursor)
 	}
 
-	// Shift-tab goes the other way round the same ring, so a terminal that sends it for the other
-	// direction does not send the reviewer the long way around.
-	if got := press(m, tea.KeyShiftTab); !got.metaHasFocus() {
-		t.Errorf("shift-tab from the tree left the keys with %v, want the box", got.focus)
-	}
-	if got := press(toBox, tea.KeyShiftTab); got.mode != modePreview {
-		t.Errorf("shift-tab from the box gave mode %v, want the diff, the stop between the two", got.mode)
-	}
-	if got := press(press(toBox, tea.KeyShiftTab), tea.KeyShiftTab); got.focus != focusFiles {
-		t.Errorf("shift-tab back round the ring left the keys with %v, want the tree", got.focus)
-	}
-
-	// f and m name a region instead of walking to the next one, from wherever the keys are.
-	if got := pressRune(toBox, 'f'); got.focus != focusFiles {
-		t.Errorf("f left the keys with %v, want the file tree", got.focus)
-	}
-	if got := pressRune(pressRune(m, 'f'), 'm'); !got.metaHasFocus() {
-		t.Errorf("m left the keys with %v, want the changeset box", got.focus)
-	}
-
-	// The box keeps the row the keys were on, so tabbing away to read a diff and back lands on the
-	// thread that was being read rather than on the top of the box.
-	at := boxIndexOf(t, m, rowThread)
-	there := press(focusOnRow(t, m, at), tea.KeyDown)
+	// From the box it is the same toggle, and the box is what tab comes back to: the half of the column
+	// that had the keys keeps them, so reading a diff from a thread returns to that thread.
+	inBox := focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	at := inBox.metaCursor
+	there := press(inBox, tea.KeyDown)
 	if there.metaCursor <= at {
 		t.Fatalf("j in the box stayed on %d rather than moving from %d", there.metaCursor, at)
 	}
-	left := press(there, tea.KeyTab)
-	if left.focus != focusFiles {
-		t.Errorf("tab left the keys with %v, want the tree", left.focus)
+	again := press(press(there, tea.KeyTab), tea.KeyTab)
+	if !again.metaHasFocus() {
+		t.Fatalf("tab back from the diff left the keys with %v, want the box", again.focus)
 	}
-	again := press(press(left, tea.KeyTab), tea.KeyTab)
 	if again.metaCursor != there.metaCursor {
 		t.Errorf("tab back into the box landed on %d, want the row it left, %d", again.metaCursor, there.metaCursor)
+	}
+
+	// Shift-tab is the same toggle in the other direction, so a terminal that sends it for the other
+	// way round does not send the reviewer the long way around.
+	if got := press(m, tea.KeyShiftTab); got.mode != modePreview {
+		t.Errorf("shift-tab from the tree gave mode %v, want the diff", got.mode)
+	}
+	if got := press(toDiff, tea.KeyShiftTab); got.focus != focusFiles {
+		t.Errorf("shift-tab from the diff left the keys with %v, want the tree", got.focus)
+	}
+
+	// `f` names the tree instead of walking to the next stop, from wherever the keys are. `m` is gone:
+	// it named a stop that no longer exists, and the box its cursor is in is reached by walking up.
+	if got := pressRune(press(there, tea.KeyTab), 'f'); got.focus != focusFiles {
+		t.Errorf("f left the keys with %v, want the file tree", got.focus)
+	}
+	if got := pressRune(m, 'm'); got.focus != focusFiles || got.mode != modeFiles {
+		t.Errorf("m moved the keys to %v in mode %v; it names nothing now", got.focus, got.mode)
+	}
+
+	// `a` and `t` are the jumps into the box: they name a row rather than a region, and the cursor goes
+	// with the keys, so the row they land on is on screen.
+	if got := pressRune(m, 'a'); !got.metaHasFocus() || got.rows[got.metaCursor].kind != rowAbout {
+		t.Errorf("a left %v with its cursor on %v, want the box on the ABOUT.md row",
+			got.focus, got.rows[got.metaCursor].kind)
+	}
+	if got := pressRune(m, 't'); !got.metaHasFocus() || got.rows[got.metaCursor].kind != rowThreadsHead {
+		t.Errorf("t left %v with its cursor on %v, want the box on the thread heading",
+			got.focus, got.rows[got.metaCursor].kind)
 	}
 }
 
@@ -297,7 +367,9 @@ func TestThreadsHeadingCollapsesAndExpands(t *testing.T) {
 	head := boxIndexOf(t, m, rowThreadsHead)
 	m = focusOnRow(t, m, head)
 
-	collapsed := pressRune(m, 'T')
+	// Enter on the heading is the key that hides the threads -- the row's own action, and the row `t`
+	// leaves the cursor on.
+	collapsed := press(m, tea.KeyEnter)
 	if collapsed.threadsOpen {
 		t.Fatal("T did not collapse the threads")
 	}
@@ -320,7 +392,7 @@ func TestThreadsHeadingCollapsesAndExpands(t *testing.T) {
 		t.Error("the expanded box does not show the nested threads")
 	}
 
-	// Enter on the heading is the same toggle, for a reviewer who never reads the hint.
+	// Enter again is the same toggle the other way, for a reviewer who never reads the hint.
 	expanded := press(collapsed, tea.KeyEnter)
 	if !expanded.threadsOpen {
 		t.Error("Enter on the heading did not expand the threads")
@@ -503,9 +575,9 @@ func indexOfName(m reviewModel, name string) (int, bool) {
 // was derived from it.
 func TestThreadPromptKeepsSpacesInATitle(t *testing.T) {
 	m := navModel(t)
-	m = pressRune(m, 't')
+	m = pressRune(m, 'T')
 	if m.mode != modePrompt {
-		t.Fatalf("t did not open the thread prompt (mode %d)", m.mode)
+		t.Fatalf("T did not open the thread prompt (mode %d)", m.mode)
 	}
 
 	for _, step := range []tea.KeyMsg{
@@ -540,9 +612,9 @@ func TestThreadPromptKeepsSpacesInATitle(t *testing.T) {
 // The prompt is one field, not two labels: the ghost title says what the field wants, so the line
 // under it carries only the keys, and neither repeats the other.
 func TestThreadPromptShowsAGhostTitleAndTheKeys(t *testing.T) {
-	m := pressRune(navModel(t), 't')
+	m := pressRune(navModel(t), 'T')
 	if m.mode != modePrompt {
-		t.Fatalf("t did not open the thread prompt (mode %d)", m.mode)
+		t.Fatalf("T did not open the thread prompt (mode %d)", m.mode)
 	}
 
 	rows := viewRows(ansiCodes.ReplaceAllString(m.View(), ""))
@@ -588,7 +660,7 @@ func TestThreadPromptShowsAGhostTitleAndTheKeys(t *testing.T) {
 // A ghost wider than the window would be cut rather than continued, and half a hint reads as a
 // rendering fault instead of an invitation, so a narrow field is left empty.
 func TestNarrowThreadPromptDropsItsGhostTitle(t *testing.T) {
-	m := pressRune(navModel(t), 't')
+	m := pressRune(navModel(t), 'T')
 	m.width = 20 // less than the label, the ghost and the caret together
 
 	view := ansiCodes.ReplaceAllString(m.View(), "")

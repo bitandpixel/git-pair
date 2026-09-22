@@ -1624,13 +1624,17 @@ with the reviewed counter under the tree. The box holds what the review is made 
 measured against, `ABOUT.md`, the thread heading, the threads nested under it, and the entry that starts
 another — so reading what the changeset says about the code and choosing the next file are motions on the
 same screen rather than modes. The heading collapses and counts what it hides — `▸ Threads (2)` collapsed,
-plain `▾ Threads` when they are on screen — so a changeset with many threads stays scannable. `Tab` moves
-the keys around the ring (tree, diff where there is room for one, box), `f` and `m` name a region instead
-of walking to the next one, and each region keeps its own cursor, so the keys return to the row they left.
-The navigation keys belong to the region holding them and mean the same thing in either: `j`/`k` a row,
-`gg`/`G` its two ends, `ctrl-d`/`ctrl-u` half a page, `ctrl-f`/`ctrl-b` a page. Each region's shortcut bar
-names the keys of that region and none of the others, which is what makes a key of the other region an
-absence a reviewer can read rather than a keystroke that vanishes. A rule separates the list from the
+plain `▾ Threads` when they are on screen — so a changeset with many threads stays scannable. `Tab` toggles
+the two stops the keys have — the list column and, where the terminal has room for one, the diff — and `f`
+names the tree instead of walking to the next stop. The box is not a third stop: `k` off the tree's top row
+steps into it and `j` off its last row steps back out, and `a` and `t` name a row of it — `ABOUT.md`, the
+thread heading — from wherever in the column the keys are. Each half keeps its own cursor, so the keys
+return to the row they left. The navigation keys belong to the half holding them and mean the same thing in
+either: `j`/`k` a row — and one step across the edge the two halves share, which is the only place a step
+leaves the half it started in; `gg`/`G` the two ends of the whole column; `ctrl-d`/`ctrl-u` half a page and
+`ctrl-f`/`ctrl-b` a page, counted in the window you are standing in. Each half's shortcut bar names the keys
+of that half and none of the others, which is what makes a key of the other half an absence a reviewer can
+read rather than a keystroke that vanishes. A rule separates the list from the
 shortcut bar. The tree is bounded by two rules of its own — the row that separated it from the box above,
 and one under its last row, with the reviewed counter below that — and those two are its focus light:
 single rules while the box or the diff holds the keys, double while the tree holds them. Two rules rather
@@ -1646,9 +1650,9 @@ over styling alone so the focus survives a terminal that renders no bold. The bo
 sides in both layouts, including the side nearest the diff column: without it the rows inside read as a
 column of loose text rather than as the changeset's own block. Its cursor row is highlighted only while
 the box holds the keys, since the borders say that already and a row that looks chosen and is not is a row
-a reviewer marks by mistake. The box opens on `ABOUT.md` the first time it takes the keys, since that is what a reviewer came to the
-box to read; the span row above it is what they change, and change least often. After the reviewer moves
-the cursor the box leaves it where they put it.
+a reviewer marks by mistake. The box keeps the row the reviewer left it on, wherever the keys went; `a` is
+the key that puts the cursor on `ABOUT.md`, since that is what a reviewer came to the box to read, and the
+span row above it is what they change — and change least often.
 
 The span is the box's one
 control: `Enter` or `Space` on its row opens the span picker, since what a review is measured against is
@@ -1711,7 +1715,7 @@ area holds the window's height and every row is padded to its width — so the s
 sits against the bottom edge rather than under a short list.
 
 The prompts ask in a line of the footer and leave the screen otherwise as it was, so the diff column
-survives a thread title being typed and a submit prompt being answered: the reviewer who pressed `t`
+survives a thread title being typed and a submit prompt being answered: the reviewer who pressed `T`
 beside a diff comes back from the editor to that diff rather than to a screen that lost it on the way.
 
 `p` moves the keys into that column and does nothing else, so a diff longer than the column is read
@@ -1787,9 +1791,10 @@ the comparison they keep. A ref that no longer resolves is not drift — there i
 Suggested bindings:
 
 ```text
-j/k      navigate the region that holds the keys
-Tab      move the keys around the ring: file tree, diff where there is room for one, changeset box
-         (shift-tab the other way); f and m name a region from wherever the keys are
+j/k      navigate the half of the list column that holds the keys, one step at a time across the edge it
+         shares with the other half; gg and G are the two ends of the whole column
+Tab      toggle the keys between the list column and the diff where there is room for one (shift-tab the
+         other way); f names the file tree from wherever the keys are
 h/l      fold and unfold the directory under the cursor (left and right arrows do the same);
          h from a file or a closed directory moves up to the directory holding it
 c        fold the whole tree, and open it again
@@ -1812,13 +1817,13 @@ In the preview column, after p:
 j/k      scroll the diff a row; ctrl-d/ctrl-u half a page, ctrl-f/ctrl-b a page,
          gg the top, G the bottom
 Enter    open the difftool on the file the pane is showing
-Esc      hand the keys back to the region that had them, leaving the pane where it is in the file
-Tab, f, m  move the keys to another region, as they do from the list
+Esc      hand the keys back to the list column, leaving the pane where it is in the file
+Tab, f   move the keys back to the list column, as they do from anywhere in it
 q        quit — from here as from anywhere else
 
-a        open ABOUT.md
-t        create a review thread
-T        collapse/expand the thread list
+a        put the cursor on ABOUT.md (e on that row opens it in the editor)
+t        put the cursor on the Threads heading (Enter collapses or expands the list)
+T        create a review thread
 
 v        step to the next span this session has been in: the span it opened on, the full
          and unreviewed presets, and any span chosen with V; from a read-only span, back to
@@ -2549,7 +2554,8 @@ Suggested defaults:
 
 ```text
 j/k      move through the region that holds the keys
-Tab      move the keys around the ring: files, diff, changeset section (f and m name one)
+Tab      toggle the keys between the list column and the diff (f names the file tree; the changeset box
+         is the other half of the list column, reached by walking up out of the tree)
 Enter    activate the selected row: diff a file, diff or read a changeset document
          (whichever gives a real comparison), collapse the thread list, create a thread
 d        open the difftool for the selected row, falling back to the editor with a note
@@ -2560,9 +2566,9 @@ ctrl-f   page the preview down
 ctrl-b   page the preview up
 Space    mark file reviewed/unreviewed
 
-a        open ABOUT.md
-t        create thread
-T        collapse/expand the thread list
+a        put the cursor on ABOUT.md
+t        put the cursor on the Threads heading
+T        create a review thread
 
 v        step through the spans this session has been in:
          opened-on, full changeset, unreviewed, then any span chosen with V;

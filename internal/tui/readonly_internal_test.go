@@ -84,8 +84,7 @@ func TestHistoricalSpanRefusesEverythingThatChangesSomething(t *testing.T) {
 	}{
 		{"space marks reviewed", tea.KeyMsg{Type: tea.KeySpace}},
 		{"e edits a file", runeKey('e')},
-		{"a edits ABOUT.md", runeKey('a')},
-		{"t starts a thread", runeKey('t')},
+		{"T starts a thread", runeKey('T')},
 		{"s submits a review", runeKey('s')},
 	}
 	for _, tc := range tests {
@@ -129,6 +128,35 @@ func TestHistoricalSpanRefusesEverythingThatChangesSomething(t *testing.T) {
 				t.Error("the refusal wrote to the working tree")
 			}
 		})
+	}
+}
+
+// The two jumps into the box name rows rather than actions, so they are the keys that came out of the
+// read-only gate: a reviewer reading history still comes to the box to read what the author said, and
+// `e` on the row they land on is the key that stays refused.
+func TestHistoricalSpanStillJumpsAroundTheBox(t *testing.T) {
+	m, _ := readonlyModel(t, historySel())
+
+	for _, tc := range []struct {
+		name string
+		key  tea.KeyMsg
+		want rowKind
+	}{
+		{"a goes to ABOUT.md", runeKey('a'), rowAbout},
+		{"t goes to the threads", runeKey('t'), rowThreadsHead},
+	} {
+		updated, cmd := m.Update(tc.key)
+		got := updated.(reviewModel)
+		if cmd != nil {
+			t.Errorf("%s handed the terminal over from a historical span", tc.name)
+		}
+		if strings.Contains(got.status, "read-only") {
+			t.Errorf("%s was refused: %q", tc.name, got.status)
+		}
+		if !got.metaHasFocus() || got.rows[got.metaCursor].kind != tc.want {
+			t.Errorf("%s left %v on a %v row, want the box on a %v row",
+				tc.name, got.focus, got.rows[got.metaCursor].kind, tc.want)
+		}
 	}
 }
 
@@ -188,7 +216,7 @@ func TestHistoricalScreenSaysWhatItIs(t *testing.T) {
 func TestHistoricalHelpBarOffersOnlyWhatItCanDo(t *testing.T) {
 	m, _ := readonlyModel(t, historySel())
 	help := m.helpText()
-	for _, absent := range []string{"space reviewed", "e edit", "a about", "t new thread", "s submit"} {
+	for _, absent := range []string{"space reviewed", "e edit", "T new thread", "s submit"} {
 		if strings.Contains(help, absent) {
 			t.Errorf("the historical shortcut bar still advertises %q:\n%s", absent, help)
 		}

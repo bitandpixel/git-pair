@@ -204,9 +204,10 @@ func TestOverlayLetsNothingElseThrough(t *testing.T) {
 		{"space marks a file the reviewer cannot see", tea.KeyMsg{Type: tea.KeySpace}},
 		{"s submits a review", runeKey('s')},
 		{"e opens an editor", runeKey('e')},
-		{"a opens ABOUT.md", runeKey('a')},
+		{"a jumps the box's cursor to ABOUT.md", runeKey('a')},
 		{"d opens the difftool", runeKey('d')},
-		{"t starts a thread", runeKey('t')},
+		{"t jumps the box's cursor to the threads", runeKey('t')},
+		{"T starts a thread", runeKey('T')},
 		{"1 votes a thread", runeKey('1')},
 		{"v walks spans", runeKey('v')},
 		{"V opens the picker", runeKey('V')},
@@ -262,9 +263,8 @@ func TestTheRegionKeysTakeTheOverlayDown(t *testing.T) {
 		wantFocus focusTarget
 	}{
 		{"f names the file tree", runeKey('f'), focusFiles},
-		{"m names the changeset box", runeKey('m'), focusMeta},
-		{"tab walks on round the ring", tea.KeyMsg{Type: tea.KeyTab}, focusMeta},
-		{"shift-tab walks back round it", tea.KeyMsg{Type: tea.KeyShiftTab}, focusFiles},
+		{"tab walks to the other stop", tea.KeyMsg{Type: tea.KeyTab}, focusFiles},
+		{"shift-tab walks back to it", tea.KeyMsg{Type: tea.KeyShiftTab}, focusFiles},
 	} {
 		base := overlayModel(t, 40)
 		wasTree, wasBox := base.regionHeights()
@@ -295,6 +295,17 @@ func TestTheRegionKeysTakeTheOverlayDown(t *testing.T) {
 			t.Errorf("%s left the tree with %d rows and the box with %d, want %d and %d", tc.name, tree, box, wasTree, wasBox)
 		}
 	}
+
+	// The other stop is the half of the list column that gave the keys up, so a reviewer who walked into
+	// the box and then into a diff comes back to the box rather than to the tree's top row.
+	base := overlayModel(t, 40)
+	inBox := focusOnRow(t, base, boxIndexOf(t, base, rowThread))
+	at := inBox.metaCursor
+	cameBack := pressOverlay(t, openOverlay(t, inBox), tea.KeyMsg{Type: tea.KeyTab})
+	if !cameBack.metaHasFocus() || cameBack.metaCursor != at {
+		t.Errorf("tab back to the box gave %v on %d, want the box on the thread at %d",
+			cameBack.focus, cameBack.metaCursor, at)
+	}
 }
 
 // The shortcut bar is what names the keys of the screen that is up, so the overlay has to name the four
@@ -307,7 +318,7 @@ func TestTheOverlayBarNamesAndFitsTheKeysThatCloseIt(t *testing.T) {
 		m := openOverlay(t, overlayModel(t, 40))
 		m.width = width
 		bar := m.helpLines()
-		for _, want := range []string{"esc enter back", "tab cycles", "f files", "m changeset"} {
+		for _, want := range []string{"esc enter back", "f tab list", "q quit"} {
 			if !strings.Contains(strings.Join(bar, " "), want) {
 				t.Errorf("at %d columns the overlay's bar does not name %q: %q", width, want, strings.Join(bar, " | "))
 			}

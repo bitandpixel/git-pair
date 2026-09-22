@@ -261,9 +261,9 @@ func TestNoteTooLongForTheBandIsCutNotStacked(t *testing.T) {
 // long as the prompt is up, so it is chrome and no clock retires it.
 func TestPromptKeepsItsHintWhileTyping(t *testing.T) {
 	m := navModel(t)
-	m = pressRune(m, 't')
+	m = pressRune(m, 'T')
 	if m.mode != modePrompt {
-		t.Fatalf("t did not open the prompt (mode %d)", m.mode)
+		t.Fatalf("T did not open the prompt (mode %d)", m.mode)
 	}
 	chrome := m.chromeRows()
 

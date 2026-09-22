@@ -39,10 +39,12 @@ const (
 	modePreview
 )
 
-// focusTarget is the part of the screen the keys belong to. The file list, the diff and the
-// changeset box are the three things a reviewer reads, and the frame says which of them holds the
-// keys rather than leaving it to be inferred: a keystroke means something different in each, and a
-// region that cannot be seen cannot be changed by one.
+// focusTarget is the part of the screen the keys belong to. `Tab` moves them between two of these: the
+// list column and the diff. The third value is the other half of the list column -- the changeset box
+// above the file tree -- which shares the column's keys and is reached by walking up out of the tree
+// rather than by a key of its own. The frame says which of them holds the keys rather than leaving it to
+// be inferred: a keystroke means something different in each, and a region that cannot be seen cannot be
+// changed by one.
 type focusTarget int
 
 const (
@@ -201,16 +203,13 @@ type reviewModel struct {
 	width  int
 	height int
 
-	// cursor and scroll belong to the file list; metaCursor and metaScroll to the changeset box.
-	// Each region keeps its own place, so handing the keys over and back returns the reviewer to the
-	// row they left rather than to the top of the other list.
+	// cursor and scroll belong to the file list; metaCursor and metaScroll to the changeset box. The two
+	// are the halves of one navigable column and each keeps its own place, so walking out of one and
+	// back into it returns the reviewer to the row they left rather than to the top of the list.
 	cursor     int
 	scroll     int
 	metaCursor int
 	metaScroll int
-	// metaHome is whether the reviewer has moved the box's cursor themselves. Until they do, the box
-	// opens on ABOUT.md wherever the keys arrived from.
-	metaHome bool
 	// focus is which region holds the keys, and prevFocus the one they were in before the preview
 	// took them, so `p` gives them back where they came from rather than always to the files.
 	focus     focusTarget
@@ -609,19 +608,24 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.togglePreview()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'f':
 		m.focusOn(focusFiles)
-	case key.Type == tea.KeyRunes && firstRune(key) == 'm':
-		m.focusOn(focusMeta)
 	case key.Type == tea.KeyRunes && firstRune(key) == 'd':
 		return m.openDiffOfSelection()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'e':
 		return m.openEditor()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'a':
-		return m.openAbout()
+		// `a` names the row rather than the editor. The box is a keystroke away from anywhere in the
+		// column now, `e` on the row it lands on is the key that hands the terminal over, and a jump
+		// is something a reviewer can press inside a read-only span.
+		if !m.gotoRow(rowAbout) {
+			m.setRefusal("no ABOUT.md row in this changeset's box")
+		}
 	case key.Type == tea.KeyRunes && firstRune(key) == 't':
+		if !m.gotoRow(rowThreadsHead) {
+			m.setRefusal("no thread heading in this changeset's box")
+		}
+	case key.Type == tea.KeyRunes && firstRune(key) == 'T':
 		m.mode, m.input, m.promptKind = modePrompt, "", promptThread
 		m.setStatus("", false)
-	case key.Type == tea.KeyRunes && firstRune(key) == 'T':
-		m.toggleThreads()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'V':
 		return m.openSpanPicker()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'v':
@@ -678,9 +682,7 @@ func mutatingKey(key tea.KeyMsg, m reviewModel) (doing string, ok bool) {
 	switch key.Runes[0] {
 	case 'e':
 		return "edit files", true
-	case 'a':
-		return "edit ABOUT.md", true
-	case 't':
+	case 'T':
 		return "start a thread", true
 	case 's':
 		return "submit a review", true
@@ -970,14 +972,15 @@ func (m reviewModel) openThreadTitle(title string) (tea.Model, tea.Cmd) {
 	if created {
 		note = "Created " + path
 	}
-	// The new file belongs in the box the reviewer was just reading, so the box's cursor goes to
-	// it. The file tree's cursor is left alone: it is the row the preview is showing, and coming
-	// back from the editor to a different diff than the one you left is the one thing a handoff
-	// should not do.
+	// The new file belongs in the box the reviewer was just reading, so the box's cursor goes to it and
+	// the keys go with it: the box draws its highlight only on the half that holds the keys, and a thread
+	// left selected in a box without the keys is a selection nobody sees. The file tree's cursor is left
+	// alone: it is the row the preview is showing, and coming back from the editor to a different diff
+	// than the one you left is the one thing a handoff should not do.
 	m.refresh()
 	for i, r := range m.rows {
 		if r.kind == rowThread && r.path == path {
-			m.metaCursor, m.metaHome = i, true
+			m.metaCursor, m.focus = i, focusMeta
 			break
 		}
 	}
@@ -1151,13 +1154,10 @@ func (m reviewModel) openEditor() (tea.Model, tea.Cmd) {
 	return m.openPath(r.path)
 }
 
-func (m reviewModel) openAbout() (tea.Model, tea.Cmd) {
-	if _, err := m.sess.Changeset().EnsureAbout(m.sess.Repo()); err != nil {
-		m.setStatus(err.Error(), true)
-		return m, nil
-	}
-	return m.openPath(m.sess.AboutPath())
-}
+// openAbout is gone, and the box's cursor is the reason: `a` used to hand the terminal to the editor from
+// wherever the keys were, which left a reviewer who had been reading the box looking at a file they had
+// not chosen. `a` now puts the cursor on the ABOUT.md row and `e` opens it, so the row the editor is about
+// to show is on screen before the handoff.
 
 func (m reviewModel) openPath(relPath string) (tea.Model, tea.Cmd) {
 	return m.openPathNoted(relPath, "")
@@ -1613,37 +1613,38 @@ func (m reviewModel) helpText() string {
 // part of the row-area budget wherever the overlay is the only form the diff can take, so that no row of
 // it is ever clipped by a bar counted from the list.
 func (m reviewModel) overlayHelp() string {
-	return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  esc enter back  " +
-		"tab cycles  f files  m changeset  q quit"
+	return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  esc enter back  f tab list  q quit"
 }
 
 // helpTextFor is the bar of one region. It names every key that region reads and none that it does not,
 // which is what makes a key that does nothing while another region holds them an explained absence
-// rather than a dropped keystroke. The keys that mean the same thing from anywhere -- tab, f, m, p --
-// are named in every bar, because a reviewer should never have to remember which bar they read a key
-// in.
+// rather than a dropped keystroke. The keys that mean the same thing from anywhere -- tab, f, p -- are
+// named in every bar, because a reviewer should never have to remember which bar they read a key in. The
+// two bars of the list column differ only in the keys of the half they name: the box's rows have no folds,
+// and the tree's rows are the ones that get marked, diffed and edited.
 //
 // The file tree's bar is the longest of the three on purpose: it is the bar the preview is cut against
 // and the one the layout budgets rows for, so the two shorter bars leave a blank row above the status
 // line rather than moving the divider when focus changes.
 func (m reviewModel) helpTextFor(target focusTarget) string {
 	page := "j/k move  gg/G ends  ctrl-d/u half page  ctrl-f/b page"
-	elsewhere := "p preview  f files  m changeset  tab focus"
+	// The keys that leave the column for the diff, and the one that names a half of it. `tab` names the
+	// stop it walks to rather than the ring: with two stops there is only one place it can go.
+	elsewhere := "p preview  f files  tab preview"
 	if target == focusPreview {
-		// The pane reads nothing that changes the review, so its bar says what its two exits are rather
-		// than pretending the rest of the screen is available.
-		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  enter diff  esc list  " +
-			"tab cycles  f files  m changeset  q quit"
+		// The diff reads nothing that changes the review, and its three ways out all mean the list
+		// column -- `esc` gives the keys back, `f` names the tree, `tab` walks the ring -- so they are
+		// one group on the bar rather than three claims on it.
+		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  enter diff  esc f tab list  q quit"
 	}
-	threads := "T show threads"
-	if m.threadsOpen {
-		threads = "T hide threads"
+	// The jumps name a row of the box from either half of the column and take the keys with them. `T`
+	// writes, so it is absent from every bar of a span that cannot.
+	jumps := "a about  t threads"
+	if m.sess.Span().Live() {
+		jumps += "  T new thread"
 	}
 	if target == focusMeta {
-		if !m.sess.Span().Live() {
-			return page + "  enter open  space span  " + threads + "  " + elsewhere + "  q quit"
-		}
-		return page + "  enter open  space span  t new thread  a about  " + threads + "  " + elsewhere + "  q quit"
+		return page + "  enter open  space span  " + jumps + "  " + elsewhere + "  q quit"
 	}
 	fold := "h/l fold  c fold all"
 	if len(treeDirs(m.sess.Files())) == 0 {
@@ -1651,11 +1652,11 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 	}
 	if !m.sess.Span().Live() {
 		// Nothing in this bar may imply the reviewer can act on history.
-		return strings.Join([]string{page, fold, "enter open  d diff  " + threads +
+		return strings.Join([]string{page, fold, "enter open  d diff  " + jumps +
 			"  v spans  V picker  " + elsewhere + "  q quit"}, "  ")
 	}
-	return strings.Join([]string{page, fold, "enter open  d diff  space reviewed  e edit  a about  " +
-		"t new thread  " + threads + "  v spans  V picker  s submit  " + elsewhere + "  q quit"}, "  ")
+	return strings.Join([]string{page, fold, "enter open  d diff  space reviewed  e edit  " + jumps +
+		"  v spans  V picker  s submit  " + elsewhere + "  q quit"}, "  ")
 }
 
 // helpLines is helpLines fitted to the terminal width. A narrow window gets the overflow on
@@ -1897,9 +1898,12 @@ func (m *reviewModel) buildRows() {
 	m.rows = rows
 }
 
-// jumpSection is gone, and Tab is the reason: a key that toggles between two halves of one list
-// cannot serve a screen with three things a reviewer moves between. The ring is focusRing, and each
-// region keeps its own cursor, so Tab returns to the row it left rather than to the top.
+// The list column is one navigable list drawn as two windows: the changeset box, then the file tree under
+// it. It used to be two stops on the ring, which made a reviewer carry the keys between two halves of one
+// screen with a key whose only other job was the diff. Now `Tab` toggles the column and the diff, and the
+// edge the two halves share is passable with `j` and `k`. Each half keeps its own cursor, so crossing and
+// coming back lands on the row the reviewer left, and each keeps its own focus light -- the box's double
+// border, the tree's double rule -- which is how one column with two halves still says where the keys are.
 
 // What one level of the file tree costs. Four cells, because a directory spends two on its fold arrow
 // and two on its mark gutter before its name, and a file only the gutter: indent two per level and every
@@ -2098,15 +2102,27 @@ func (m reviewModel) activeRow() (row, int, bool) {
 	return m.rows[m.cursor], m.cursor, true
 }
 
-// move steps the focused region's cursor, leaving the other region where it was.
+// move steps the list column's cursor. The box and the tree are one navigable list drawn as two windows,
+// and the edge they share is passable: `k` off the top of the tree lands on the box's last row, and `j`
+// off that row is back on the tree's first. Each half keeps its own cursor, so crossing and coming back
+// returns the reviewer to the row they left. A step of more than one row is a page, and a page stays
+// inside the window it started in: the two halves have different heights, so a page counted in one means
+// nothing in the other.
 func (m *reviewModel) move(delta int) {
+	if delta == 1 && m.metaHasFocus() && m.metaCursor >= len(m.rows)-1 && m.metaStart > 0 {
+		m.focus, m.cursor = focusFiles, 0
+		m.clamp()
+		return
+	}
+	if delta == -1 && m.focus == focusFiles && m.cursor <= 0 && m.metaStart < len(m.rows) {
+		m.focus, m.metaCursor = focusMeta, len(m.rows)-1
+		m.clamp()
+		return
+	}
 	if m.metaHasFocus() {
 		if m.metaStart >= len(m.rows) {
 			return
 		}
-		// From here the reviewer has put the box's cursor somewhere themselves, so the box stops
-		// returning to its default row.
-		m.metaHome = true
 		m.metaCursor += delta
 	} else {
 		if m.metaStart == 0 {
@@ -2117,35 +2133,52 @@ func (m *reviewModel) move(delta int) {
 	m.clamp()
 }
 
-// activeTop and activeBottom are what gg and G mean when there are two lists on the screen: the ends
-// of the one holding the keys, not of whichever the frame drew first.
+// activeTop and activeBottom are what gg and G mean: the two ends of the list column, which is the one
+// list the reviewer is holding the keys in even though it is drawn as two windows. `gg` is the box's
+// first row and `G` the tree's last, from whichever half the keys are in, and each takes the keys to the
+// half it names. Where a half has no rows -- an empty span, a changeset with no box -- the other one is
+// the whole column and gets the jump.
 func (m *reviewModel) activeTop() {
-	if m.metaHasFocus() {
-		m.metaCursor = m.metaStart
+	if m.metaStart < len(m.rows) {
+		m.focus, m.metaCursor = focusMeta, m.metaStart
 	} else {
-		m.cursor = 0
+		m.focus, m.cursor = focusFiles, 0
 	}
 	m.clamp()
 }
 
 func (m *reviewModel) activeBottom() {
-	if m.metaHasFocus() {
-		m.metaCursor = len(m.rows) - 1
+	if m.metaStart > 0 {
+		m.focus, m.cursor = focusFiles, m.metaStart-1
 	} else {
-		m.cursor = m.metaStart - 1
+		m.focus, m.metaCursor = focusMeta, len(m.rows)-1
 	}
 	m.clamp()
 }
 
-// focusRing is the order Tab walks: the file list, the diff wherever it can be shown, and the changeset
-// box. A terminal with room for neither the pane nor the overlay has one fewer target, because a target
-// that cannot be drawn is a target whose keys go nowhere.
+// focusRing is the order Tab walks: the list column -- the changeset box and the file tree under it, which
+// share their keys -- and the diff wherever it can be shown. A terminal with room for neither the pane nor
+// the overlay has one stop and Tab does nothing there, because a target that cannot be drawn is a target
+// whose keys go nowhere.
 func (m reviewModel) focusRing() []focusTarget {
-	ring := []focusTarget{focusFiles}
+	ring := []focusTarget{m.listFocus()}
 	if m.paneWidth() > 0 || m.previewIsOverlayOnly() {
 		ring = append(ring, focusPreview)
 	}
-	return append(ring, focusMeta)
+	return ring
+}
+
+// listFocus is the half of the list column that holds the keys -- or, while the diff holds them, the half
+// that handed them over, so Tab out of the diff returns to the box when the reviewer walked into the diff
+// from the box.
+func (m reviewModel) listFocus() focusTarget {
+	if m.focus == focusPreview {
+		if m.prevFocus == focusMeta {
+			return focusMeta
+		}
+		return focusFiles
+	}
+	return m.focus
 }
 
 // previewIsOverlayOnly is whether the diff can only be shown over the whole screen: there is no room for
@@ -2167,10 +2200,8 @@ func (m *reviewModel) focusOn(to focusTarget) {
 		}
 		// The narrow terminal's version of the same move: with no column to focus, the overlay is how the
 		// diff is drawn. Where the keys came from is not drawn while it is up, which is what `esc` -- and
-		// `f`, `m` and `tab` -- take back down on the way there.
-		if m.focus != focusPreview {
-			m.prevFocus = m.focus
-		}
+		// `f` and `tab` -- take back down on the way there.
+		m.rememberLeft()
 		m.previewOn = true
 		m.mode = modePreview
 		m.focus = focusPreview
@@ -2178,42 +2209,37 @@ func (m *reviewModel) focusOn(to focusTarget) {
 		m.setStatus("", false)
 		return
 	}
-	if to == focusMeta && !m.metaHome {
-		// The first time the box gets the keys it opens on ABOUT.md rather than on its first row.
-		m.metaCursor = m.aboutRow()
-	}
-	if to != focusPreview {
-		// The last region the keys were in, so `p` gives them back there rather than always to the
-		// files: reading a diff from the box should land back on the box.
+	if to == focusPreview {
+		m.rememberLeft()
+	} else {
+		// The last half of the column the keys were in, so the diff gives them back there rather than
+		// always to the tree: reading a diff from the box should land back on the box.
 		m.prevFocus = to
-		m.previewG = false
-		if m.mode == modePreview {
-			// The region named is only drawn once the diff stops covering the screen.
-			m.mode = modeFiles
-		}
+	}
+	m.previewG = false
+	if m.mode == modePreview && to != focusPreview {
+		// The region named is only drawn once the diff stops covering the screen.
+		m.mode = modeFiles
 	}
 	m.focus = to
 	m.clamp()
 	m.setStatus("", false)
 }
 
-// cycleFocus walks the ring; dir is -1 for shift-tab, so the ring goes both ways and a reviewer who
-// overshoots comes back rather than walking the long way round.
-// aboutRow is the changeset box's ABOUT.md row -- where the box's cursor goes the first time the box
-// gets the keys. The span row above it is the box's one control, and the span is the thing a reviewer
-// changes least often: they come to the box to read what the author said about the change.
-func (m reviewModel) aboutRow() int {
-	for i := m.metaStart; i < len(m.rows); i++ {
-		if m.rows[i].kind == rowAbout {
-			return i
-		}
+// rememberLeft notes which half of the list column is giving the keys up, so `esc` and `tab` hand them
+// back to the half they came from. It is asked on the way into the diff rather than on the way out of
+// walking-up navigation: `k` into the box changes the column's cursor without anyone calling focusOn, so
+// the half holding the keys has to be read from the focus itself.
+func (m *reviewModel) rememberLeft() {
+	if m.focus != focusPreview {
+		m.prevFocus = m.focus
 	}
-	if m.metaStart < len(m.rows) {
-		return m.metaStart
-	}
-	return 0
 }
 
+// cycleFocus walks the ring; dir is -1 for shift-tab, so the ring goes both ways and a reviewer who
+// overshoots comes back rather than walking the long way round. With two stops the two directions are the
+// same toggle, and the reviewer still lands on the half of the list column they left rather than on the
+// tree's top row.
 func (m *reviewModel) cycleFocus(dir int) {
 	ring := m.focusRing()
 	at := 0
@@ -2224,6 +2250,23 @@ func (m *reviewModel) cycleFocus(dir int) {
 		}
 	}
 	m.focusOn(ring[(at+dir+len(ring))%len(ring)])
+}
+
+// gotoRow puts the list column's cursor on the first row of a kind and returns whether there was one. The
+// box's rows are the ones worth naming from anywhere in the column: ABOUT.md is what a reviewer comes to
+// the box to read, and the thread heading is the fold that decides how much of the box they read to get
+// to it. The span row above them is the box's one control, and a reviewer changes a span least often.
+func (m *reviewModel) gotoRow(kind rowKind) bool {
+	for i := m.metaStart; i < len(m.rows); i++ {
+		if m.rows[i].kind == kind {
+			m.focus = focusMeta
+			m.metaCursor = i
+			m.clamp()
+			m.setStatus("", false)
+			return true
+		}
+	}
+	return false
 }
 
 // activeWindow is how many rows the region holding the keys draws, which is the distance a page is.
@@ -2608,11 +2651,9 @@ func (m reviewModel) togglePreview() (tea.Model, tea.Cmd) {
 		m.setRefusal(reason)
 		return m, nil
 	}
-	m.previewOn = true
-	m.mode = modePreview
-	m.focus = focusPreview
-	m.previewG = false
-	m.setStatus("", false)
+	// The overlay is the same region as the pane, so it takes the keys the same way: through focusOn,
+	// which is what remembers which half of the list column is handing them over.
+	m.focusOn(focusPreview)
 	return m, nil
 }
 
@@ -2641,7 +2682,7 @@ func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 }
 
 // handleDiffKey is everything the diff reads, in either layout: it scrolls with the vim primitives,
-// `esc` gives the keys back, `tab`/`f`/`m` move them to another region, and `q` quits the session as it
+// `esc` gives the keys back, `tab` and `f` move them to the list column, and `q` quits the session as it
 // does everywhere else. For the overlay, `esc` closes the screen as well as returning the keys.
 //
 // Nothing else reaches through. That is what a mode buys over a flag, and a focus buys over a pane that
@@ -2652,12 +2693,16 @@ func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 // reviewer can still see -- so the shortcut bar names every key this reads and none of the ones it does
 // not, and the list's own cursor goes faint until the keys come back.
 //
-// The exceptions are the keys that move the keys: tab, shift-tab, f and m. They change no part of the
+// The exceptions are the keys that move the keys: tab, shift-tab and f. They change no part of the
 // review, and a reviewer who arrived at the diff with tab has to be able to go on with it -- a ring you
 // can only leave by backing out of is not a ring. Over the overlay they do the same and take the screen
 // down with them, because the regions they name are drawn the moment the diff stops covering them. `p`
 // is not among them: it names the diff, so pressed here it is still the no-op its name promises, while
-// `tab` names the *next region*, and taking the screen down follows from going somewhere else.
+// `tab` names the *other stop*, and taking the screen down follows from going somewhere else.
+//
+// The two jumps into the box -- `a` and `t` -- are not exceptions. They move the cursor as well as the
+// keys, and a cursor that moves under a diff the reviewer is reading is the invisible action the focus is
+// there to prevent; they belong to the list column, and the bar here does not offer them.
 //
 // Keys do mean different things here than in the list -- q closes rather than quits, enter opens the
 // file being read rather than the one under the cursor, ctrl-d scrolls rather than quits -- and that
@@ -2685,9 +2730,9 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// than read. Pressed here it is the no-op its name promises.
 	case key.Type == tea.KeyEsc:
 		return m.leavePreview()
-	// The ring, from inside the diff. Over the pane the other regions are already drawn; over the
-	// overlay they are not, so these four take the screen down on the way there. On a narrow terminal the
-	// overlay is the only form the diff has, and without this the stop it is on the ring would be a hole.
+	// The ring, from inside the diff. Over the pane the other stop is already drawn; over the overlay it
+	// is not, so these take the screen down on the way there. On a narrow terminal the overlay is the only
+	// form the diff has, and without this the stop it is on the ring would be a hole.
 	case key.Type == tea.KeyTab:
 		m.cycleFocus(1)
 		return m, nil
@@ -2696,9 +2741,6 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Type == tea.KeyRunes && firstRune(key) == 'f':
 		m.focusOn(focusFiles)
-		return m, nil
-	case key.Type == tea.KeyRunes && firstRune(key) == 'm':
-		m.focusOn(focusMeta)
 		return m, nil
 	case key.Type == tea.KeyRunes && firstRune(key) == 'q':
 		// `q` quits here as it does everywhere else. It used to close the preview, which made the one

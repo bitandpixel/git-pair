@@ -85,44 +85,8 @@ func TestALongChangesetBoxStillFitsTheTerminal(t *testing.T) {
 	}
 }
 
-// gg and G mean the two ends of the region holding the keys. With two lists on the screen, "the top"
-// has to mean one of them, and the wrong one is a jump the reviewer did not ask for.
-func TestGgAndGMeanTheFocusedRegion(t *testing.T) {
-	m := withThreads(t, navModel(t), 12)
-	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
-	tree, boxAt := m.cursor, m.metaCursor
-
-	m = pressRune(pressRune(m, 'g'), 'g')
-	if m.metaCursor != m.metaStart {
-		t.Errorf("gg in the box left it on %d, want its first row %d", m.metaCursor, m.metaStart)
-	}
-	if m.cursor != tree {
-		t.Errorf("gg in the box moved the tree from %d to %d", tree, m.cursor)
-	}
-
-	m = pressRune(m, 'G')
-	if m.metaCursor != len(m.rows)-1 {
-		t.Errorf("G in the box left it on %d, want the last row %d", m.metaCursor, len(m.rows)-1)
-	}
-
-	// In the tree the same two keys mean the two ends of the tree, not of the screen.
-	boxAt = m.metaCursor
-	m = pressRune(pressRune(m, 'f'), 'g')
-	m = pressRune(m, 'g')
-	if m.cursor != 0 {
-		t.Errorf("gg in the tree left it on %d, want 0", m.cursor)
-	}
-	m = pressRune(m, 'G')
-	if m.cursor != m.metaStart-1 {
-		t.Errorf("G in the tree left it on %d, want the tree's last row %d", m.cursor, m.metaStart-1)
-	}
-	if m.metaCursor != boxAt {
-		t.Errorf("G in the tree moved the box from %d to %d", boxAt, m.metaCursor)
-	}
-}
-
 // ctrl-d used to quit, which is why paging had to be ctrl-f and ctrl-b and nothing else. It pages now,
-// in whichever region has the keys, and the two keys that quit are ctrl-c and q.
+// in whichever half of the list column has the keys, and the two keys that quit are ctrl-c and q.
 func TestCtrlDPagesTheFocusedRegionAndDoesNotQuit(t *testing.T) {
 	m := withThreads(t, navModel(t), 12)
 	m = focusOnRow(t, m, m.metaStart)
@@ -161,9 +125,10 @@ func TestMovingTheKeysDoesNotMoveTheLayout(t *testing.T) {
 	before := len(viewRows(m.View()))
 	beforeRows, _ := m.regionHeights()
 
-	// The ring here runs through the overlay, so the box is two tabs away: walking out of the diff is
-	// what the ring is for, and the screen the reviewer comes back to must be the one they left.
-	after := press(press(m, tea.KeyTab), tea.KeyTab)
+	// The box takes the keys from the tree's top row: walking up out of the tree is how the column's
+	// other half is reached, and the screen it arrives on must be the one that was left. The band is
+	// budgeted for the longest bar the session can show, so the frame may not change height on the way.
+	after := press(focusOnRow(t, m, 0), tea.KeyUp)
 	got := viewRows(after.View())
 	if len(got) != before {
 		t.Errorf("the frame was %d rows and became %d when the keys moved to the box", before, len(got))
@@ -171,25 +136,29 @@ func TestMovingTheKeysDoesNotMoveTheLayout(t *testing.T) {
 	if meta, _ := after.regionHeights(); meta != beforeRows {
 		t.Errorf("the box had %d rows and got %d when it took the keys", beforeRows, meta)
 	}
+	if !after.metaHasFocus() {
+		t.Fatalf("the keys did not cross into the box: %v", after.focus)
+	}
 	if !strings.Contains(strings.Join(got, "\n"), "space span") {
 		t.Errorf("the box's bar does not name its own keys:\n%s", strings.Join(got, "\n"))
 	}
 }
 
-// Each region's bar names what that region reads. A key that belongs to another region is not hidden
-// by an asterisk or a mode -- it is simply not offered, which is the same rule the read-only bar uses
-// for a span the reviewer cannot act on.
+// Each half of the list column has its own bar, naming what it reads. A key that belongs to the other
+// half is not hidden by an asterisk or a mode -- it is simply not offered, which is the same rule the
+// read-only bar uses for a span the reviewer cannot act on. `m` named the box while the box was a stop on
+// the ring; with the ring down to two stops there is nothing left for it to name.
 func TestEachRegionHasItsOwnShortcutBar(t *testing.T) {
 	m := navModel(t)
 	files := m.helpTextFor(focusFiles)
 	box := m.helpTextFor(focusMeta)
 
-	for _, want := range []string{"h/l fold", "space reviewed", "s submit", "m changeset", "tab focus"} {
+	for _, want := range []string{"h/l fold", "space reviewed", "s submit", "a about", "t threads", "f files", "tab preview"} {
 		if !strings.Contains(files, want) {
 			t.Errorf("the tree's bar does not mention %q: %q", want, files)
 		}
 	}
-	for _, want := range []string{"space span", "t new thread", "m changeset", "tab focus"} {
+	for _, want := range []string{"space span", "T new thread", "a about", "t threads", "f files", "tab preview"} {
 		if !strings.Contains(box, want) {
 			t.Errorf("the box's bar does not mention %q: %q", want, box)
 		}
@@ -197,6 +166,11 @@ func TestEachRegionHasItsOwnShortcutBar(t *testing.T) {
 	for _, gone := range []string{"h/l fold", "s submit", "space reviewed"} {
 		if strings.Contains(box, gone) {
 			t.Errorf("the box's bar offers %q, which it does not read: %q", gone, box)
+		}
+	}
+	for _, gone := range []string{"m changeset", "tab focus", "tab cycles"} {
+		if strings.Contains(files, gone) || strings.Contains(box, gone) {
+			t.Errorf("a bar still names %q, which is the ring the session no longer has: %q / %q", gone, files, box)
 		}
 	}
 	if files == box {
@@ -279,14 +253,15 @@ func TestTheSpanRowIsARowAndTheBaseLineIsNot(t *testing.T) {
 	}
 }
 
-// The ring does not end at the diff: a reviewer who arrived with `tab` leaves with it, and the keys that
-// name a region work from inside the pane. Over the overlay the same keys take the diff screen down on
-// their way, which is what keeps the ring walkable where there is no pane
-// (TestTabWalksTheDiffWhereThereIsNoPane).
+// The ring does not end at the diff: a reviewer who arrived with `tab` leaves with it, and `f` names the
+// tree from inside the pane. Over the overlay the same keys take the diff screen down on their way, which
+// is what keeps the ring walkable where there is no pane (TestTabWalksTheDiffWhereThereIsNoPane).
 func TestTabMovesTheKeysOutOfThePane(t *testing.T) {
-	toBox := press(focusPane(t, focusFixture(t, 40)), tea.KeyTab)
+	// The pane hands the keys back to the half of the column that gave them up -- the box, here, because
+	// that is where the reviewer was standing when they pressed `p`.
+	toBox := press(focusPane(t, boxOn(t, focusFixture(t, 40))), tea.KeyTab)
 	if !toBox.metaHasFocus() {
-		t.Errorf("tab from the pane left the keys with %v, want the changeset box", toBox.focus)
+		t.Errorf("tab from the pane left the keys with %v, want the box they came from", toBox.focus)
 	}
 	if !strings.Contains(toBox.helpText(), "space span") {
 		t.Errorf("tab from the pane did not bring the box's bar with it: %q", toBox.helpText())
@@ -296,16 +271,20 @@ func TestTabMovesTheKeysOutOfThePane(t *testing.T) {
 	if back.focus != focusFiles {
 		t.Errorf("shift-tab from the pane left the keys with %v, want the file tree", back.focus)
 	}
-	if got := pressRune(pressRune(focusPane(t, focusFixture(t, 40)), 'f'), 'm'); !got.metaHasFocus() {
-		t.Errorf("f and m from the pane left the keys with %v, want the box", got.focus)
+	if got := press(focusPane(t, focusFixture(t, 40)), tea.KeyTab); got.focus != focusFiles {
+		t.Errorf("tab from a pane opened from the tree left the keys with %v, want the tree", got.focus)
 	}
-	if !strings.Contains(focusFixture(t, 40).helpTextFor(focusPreview), "tab cycles") {
+	// `f` is the absolute version of the same move: it names the tree whatever half the keys were in.
+	if got := pressRune(focusPane(t, boxOn(t, focusFixture(t, 40))), 'f'); got.focus != focusFiles {
+		t.Errorf("f from the pane left the keys with %v, want the file tree", got.focus)
+	}
+	if !strings.Contains(focusFixture(t, 40).helpTextFor(focusPreview), "tab list") {
 		t.Error("the pane's bar does not name the key that leaves it")
 	}
 
 	overlay := openOverlay(t, overlayModel(t, 40))
-	if got := press(overlay, tea.KeyTab); got.mode != modeFiles || got.focus != focusMeta {
-		t.Errorf("tab over the overlay left mode %v with %v, want the list drawn again and the box holding the keys",
+	if got := press(overlay, tea.KeyTab); got.mode != modeFiles || got.focus != focusFiles {
+		t.Errorf("tab over the overlay left mode %v with %v, want the list drawn again and the tree holding the keys",
 			got.mode, got.focus)
 	}
 	if got := pressRune(overlay, 'f'); got.mode != modeFiles || got.focus != focusFiles {
@@ -314,10 +293,10 @@ func TestTabMovesTheKeysOutOfThePane(t *testing.T) {
 	}
 }
 
-// On a narrow terminal the diff has no column to focus, so the ring stops at the overlay rather than
-// having a hole where the diff should be: tab opens it, and tab from inside it walks on. The reviewer
-// with a small terminal then reaches the diff with the same gesture everyone else has, instead of
-// remembering that one of the three regions is a different key.
+// On a narrow terminal the diff has no column to focus, so the other stop on the ring is the overlay
+// rather than nothing: `tab` opens it from either half of the list column and closes it back onto the
+// half that opened it. The reviewer with a small terminal reaches the diff with the same gesture everyone
+// else has, instead of remembering that one of the regions is a different key.
 func TestTabWalksTheDiffWhereThereIsNoPane(t *testing.T) {
 	m := overlayModel(t, 40)
 	if m.paneWidth() != 0 {
@@ -332,38 +311,40 @@ func TestTabWalksTheDiffWhereThereIsNoPane(t *testing.T) {
 		t.Errorf("tab opened the overlay without the diff in it:\n%s", toDiff.View())
 	}
 
-	// The keys came from the tree, so `esc` returns them there rather than to wherever they last were.
+	// The keys came from the tree, so `esc` and `tab` both return them there.
 	if home := pressOverlay(t, toDiff, tea.KeyMsg{Type: tea.KeyEsc}); home.mode != modeFiles || home.focus != focusFiles {
 		t.Errorf("esc from a diff opened by tab left mode %v with %v, want the tree it came from",
 			home.mode, home.focus)
 	}
-
-	toBox := pressOverlay(t, toDiff, tea.KeyMsg{Type: tea.KeyTab})
-	if toBox.mode != modeFiles || !toBox.metaHasFocus() {
-		t.Errorf("tab from the diff left mode %v with %v, want the changeset box", toBox.mode, toBox.focus)
-	}
-	back := pressOverlay(t, toBox, tea.KeyMsg{Type: tea.KeyTab})
-	if back.mode != modeFiles || back.focus != focusFiles {
-		t.Errorf("tab from the box left mode %v with %v, want the file tree", back.mode, back.focus)
+	if home := pressOverlay(t, toDiff, tea.KeyMsg{Type: tea.KeyTab}); home.mode != modeFiles || home.focus != focusFiles {
+		t.Errorf("tab from the diff left mode %v with %v, want the tree it came from", home.mode, home.focus)
 	}
 
-	// The other way round it is the same ring: backwards from the tree is the box, and backwards from
-	// the box is the diff, so nobody walks the long way around to get to it.
-	toBoxAgain := pressOverlay(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
-	if toBoxAgain.mode != modeFiles || !toBoxAgain.metaHasFocus() {
-		t.Errorf("shift-tab from the tree left mode %v with %v, want the box", toBoxAgain.mode, toBoxAgain.focus)
+	// From the box it is the same stop -- and the box is what the keys come back to, on the row they left.
+	inBox := focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	at := inBox.metaCursor
+	fromBox := pressOverlay(t, inBox, tea.KeyMsg{Type: tea.KeyTab})
+	if fromBox.mode != modePreview {
+		t.Fatalf("tab from the box gave mode %v, want the overlay", fromBox.mode)
 	}
-	into := pressOverlay(t, toBoxAgain, tea.KeyMsg{Type: tea.KeyShiftTab})
-	if into.mode != modePreview {
-		t.Errorf("shift-tab from the box gave mode %v, want the overlay", into.mode)
+	back := pressOverlay(t, fromBox, tea.KeyMsg{Type: tea.KeyTab})
+	if back.mode != modeFiles || !back.metaHasFocus() || back.metaCursor != at {
+		t.Errorf("tab back from the diff gave %v on %d, want the box on the thread at %d",
+			back.focus, back.metaCursor, at)
 	}
-	if out := pressOverlay(t, into, tea.KeyMsg{Type: tea.KeyShiftTab}); out.mode != modeFiles || out.focus != focusFiles {
-		t.Errorf("shift-tab from the diff left mode %v with %v, want the tree", out.mode, out.focus)
+
+	// Shift-tab is the same toggle in the other direction, from either half of the column.
+	if out := pressOverlay(t, m, tea.KeyMsg{Type: tea.KeyShiftTab}); out.mode != modePreview {
+		t.Errorf("shift-tab from the tree gave mode %v, want the overlay", out.mode)
+	}
+	if out := pressOverlay(t, fromBox, tea.KeyMsg{Type: tea.KeyShiftTab}); out.mode != modeFiles || !out.metaHasFocus() {
+		t.Errorf("shift-tab from the diff gave mode %v with %v, want the box", out.mode, out.focus)
 	}
 }
 
-// A terminal too small for even the overlay has no diff to walk to, and the ring says so: the target
-// that cannot be drawn is the one whose keys would go nowhere. Tab keeps two stops here.
+// A terminal too small for even the overlay has no diff to walk to, and the ring says so: the target that
+// cannot be drawn is the one whose keys would go nowhere. With the diff gone there is one stop left, and
+// Tab has nowhere to take the keys.
 func TestTabSkipsTheDiffWhenEvenTheOverlayDoesNotFit(t *testing.T) {
 	m := overlayModel(t, 40)
 	m.width, m.height = 30, 8
@@ -371,13 +352,15 @@ func TestTabSkipsTheDiffWhenEvenTheOverlayDoesNotFit(t *testing.T) {
 		t.Fatalf("at %dx%d the overlay still fits; this is the case where nothing does", m.width, m.height)
 	}
 
-	toBox := pressOverlay(t, m, tea.KeyMsg{Type: tea.KeyTab})
-	if toBox.mode != modeFiles || !toBox.metaHasFocus() {
-		t.Errorf("tab gave mode %v with %v, want the changeset box and no overlay", toBox.mode, toBox.focus)
+	if ring := m.focusRing(); len(ring) != 1 || ring[0] != m.listFocus() {
+		t.Fatalf("the ring is %v, want the list column alone", ring)
 	}
-	if back := pressOverlay(t, toBox, tea.KeyMsg{Type: tea.KeyTab}); back.mode != modeFiles || back.focus != focusFiles {
-		t.Errorf("tab gave mode %v with %v, want the tree: the ring should stop at two places here",
-			back.mode, back.focus)
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyTab}, {Type: tea.KeyShiftTab}} {
+		still := pressOverlay(t, m, key)
+		if still.mode != modeFiles || still.focus != focusFiles {
+			t.Errorf("tab with no diff to walk to left mode %v with %v, want the list still holding the keys",
+				still.mode, still.focus)
+		}
 	}
 }
 
@@ -458,7 +441,7 @@ func TestThePreviewSurvivesANewThread(t *testing.T) {
 	file, cursor := m.previewPath, m.cursor
 
 	m = boxOn(t, m)
-	m = pressKey(t, m, runeKey('t'))
+	m = pressKey(t, m, runeKey('T'))
 	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a note about the lock")})
 	// Enter creates the thread and asks for the editor. The command is deliberately not run: it hands
 	// this process's terminal to $EDITOR. The handoff itself is tested where the editor is faked.
@@ -530,26 +513,28 @@ func countEqual(lines []string, want string) int {
 
 // --- where the box opens, and what the prompts leave on screen --------------------------------
 
-// The box opens on ABOUT.md. Its first row is the span, which is the thing the box lets a reviewer
-// *change* -- and the span is what they set when they came, not what they came to read.
-func TestTheBoxOpensOnAboutAndThenStaysWhereItWasPut(t *testing.T) {
+// The box keeps the row it was left on, wherever the keys went: it is one half of a column the reviewer
+// walks, and a cursor that reset on every visit would lose their place in a changeset with forty threads.
+// `a` is the key that names a row of it -- ABOUT.md, what a reviewer comes to the box to read.
+func TestTheBoxKeepsItsRowAndATakesTheCursorToAbout(t *testing.T) {
 	m := newFileListModel(t)
-	m.focusOn(focusMeta)
-	if kind, row := activeKind(t, m); kind != rowAbout {
-		t.Errorf("the box opened on a %v row (%q), want ABOUT.md", kind, row.name)
-	}
-
-	m = press(m, tea.KeyDown)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
 	put := m.metaCursor
+
 	m.focusOn(focusFiles)
 	m.focusOn(focusMeta)
 	if m.metaCursor != put {
-		t.Errorf("after the reviewer moved it, the box reopened on %d rather than %d", m.metaCursor, put)
+		t.Errorf("the box reopened on %d rather than the %d it was left on", m.metaCursor, put)
+	}
+
+	if got := pressRune(m, 'a'); !got.metaHasFocus() || got.rows[got.metaCursor].kind != rowAbout {
+		t.Errorf("a left %v on a %v row, want the box on ABOUT.md",
+			got.focus, got.rows[got.metaCursor].kind)
 	}
 }
 
 // The thread prompt is a line of the footer, not a screen of its own. It used to be a mode the diff
-// column refused to be drawn in, so pressing `t` next to a diff took the diff away for as long as the
+// column refused to be drawn in, so pressing `T` next to a diff took the diff away for as long as the
 // title was being typed -- and the editor then covered what was left.
 func TestThePaneSurvivesTheThreadPrompt(t *testing.T) {
 	m := previewModel(t)
@@ -561,9 +546,9 @@ func TestThePaneSurvivesTheThreadPrompt(t *testing.T) {
 		t.Fatal("the fixture has no diff column to lose")
 	}
 
-	m = pressRune(m, 't')
+	m = pressRune(m, 'T')
 	if m.mode != modePrompt {
-		t.Fatalf("`t` gave mode %v, want the title prompt", m.mode)
+		t.Fatalf("`T` gave mode %v, want the title prompt", m.mode)
 	}
 	if got := m.paneWidth(); got != wide {
 		t.Errorf("the prompt took the diff column: %d columns became %d", wide, got)

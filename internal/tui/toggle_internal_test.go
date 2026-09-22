@@ -87,60 +87,55 @@ func TestSpaceMarksTheFileAndLeavesTheCursorOnIt(t *testing.T) {
 	}
 }
 
-// k at the top of a region used to drive the cursor negative, and View indexes rows by
-// cursor, so the program died with an index-out-of-range panic. With two regions on the screen
-// the guard has to exist twice, and "both ends" means the ends of the region holding the keys.
-func TestNavigationStopsAtBothEndsOfTheList(t *testing.T) {
+// k at the top of the column used to drive the cursor negative, and View indexes rows by cursor, so the
+// program died with an index-out-of-range panic. The column is two windows over one list, so the guard is
+// the same arithmetic twice: the box's rows have a floor and a ceiling of their own, the tree's have
+// theirs, and the edge the two share is the only place a step crosses from one into the other.
+func TestNavigationStopsAtBothEndsOfTheColumn(t *testing.T) {
 	m := newFileListModel(t)
-	total := len(m.fileRows())
+	total, box := len(m.fileRows()), len(m.metaRows())
 
 	up, down := tea.KeyMsg{Type: tea.KeyUp}, tea.KeyMsg{Type: tea.KeyDown}
-	for i := 0; i < total+3; i++ {
+	// Up past the tree's top crosses into the box and then walks it: the tree's cursor stops at its first
+	// row, the box's stops at its own, and no index ever leaves the rows it belongs to.
+	for i := 0; i < total+box+3; i++ {
 		updated, _ := m.Update(up)
 		m = updated.(reviewModel)
 		if m.cursor != 0 {
 			t.Fatalf("cursor = %d after %d presses of up, want 0", m.cursor, i+1)
+		}
+		if m.focus == focusMeta && m.metaCursor < m.metaStart {
+			t.Fatalf("box cursor = %d after %d presses of up, want at least the box's first row %d",
+				m.metaCursor, i+1, m.metaStart)
 		}
 		if m.scroll < 0 {
 			t.Fatalf("scroll = %d after %d presses of up, want >= 0", m.scroll, i+1)
 		}
 		_ = m.View()
 	}
-	for i := 0; i < total+3; i++ {
+	if !m.metaHasFocus() || m.metaCursor != m.metaStart {
+		t.Errorf("up past the top of the column left %v on %d, want the box on its first row %d",
+			m.focus, m.metaCursor, m.metaStart)
+	}
+	// Down the whole thing again: the box's rows, the crossing, then the tree's, stopping on the tree's
+	// last row rather than past it.
+	for i := 0; i < total+box+3; i++ {
 		updated, _ := m.Update(down)
 		m = updated.(reviewModel)
-		if m.cursor > total-1 {
+		if m.focus == focusFiles && m.cursor > total-1 {
 			t.Fatalf("cursor = %d after %d presses of down, want at most %d", m.cursor, i+1, total-1)
 		}
+		if m.focus == focusMeta && m.metaCursor < m.metaStart {
+			t.Fatalf("box cursor = %d after %d presses of down, want a box row", m.metaCursor, i+1)
+		}
 		if m.scroll < 0 {
-			t.Fatalf("scroll = %d after %d presses of down, want >= 0", m.scroll, i+1)
+			t.Fatalf("scroll = %d after %v, want >= 0", m.scroll, down)
 		}
 		_ = m.View()
 	}
-	if m.cursor != total-1 {
-		t.Errorf("cursor = %d after pressing down past the bottom, want %d", m.cursor, total-1)
-	}
-
-	// The box is the other region, and the same two ends: it holds the keys here, so the file
-	// tree's cursor is a bystander and the box's must not walk out of its own rows.
-	m = boxOn(t, m)
-	tree, start := m.cursor, m.metaStart
-	m.metaCursor = len(m.rows) - 1
-	m.clamp()
-	for i := 0; i < total+3; i++ {
-		updated, _ := m.Update(up)
-		m = updated.(reviewModel)
-		if m.metaCursor < start {
-			t.Fatalf("box cursor = %d after %d presses of up, want at least the box's first row %d",
-				m.metaCursor, i+1, start)
-		}
-		if m.cursor != tree {
-			t.Fatalf("the box's navigation moved the file tree from %d to %d", tree, m.cursor)
-		}
-		_ = m.View()
-	}
-	if m.metaCursor != start {
-		t.Errorf("box cursor = %d after pressing up past the top, want %d", m.metaCursor, start)
+	if m.focus != focusFiles || m.cursor != total-1 {
+		t.Errorf("down past the bottom of the column left %v on %d, want the tree on %d",
+			m.focus, m.cursor, total-1)
 	}
 }
 

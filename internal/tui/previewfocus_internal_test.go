@@ -180,9 +180,11 @@ func TestNothingThatChangesTheReviewHappensWhileThePaneHasTheKeys(t *testing.T) 
 
 	// `V` is on the list's bar and opens a screen of its own, so it is the read-shaped key most
 	// likely to be pressed here by mistake. The keys that move the keys are not in this list: tab,
-	// shift-tab, f and m do leave the pane, on purpose, and TestTabMovesTheKeysOutOfThePane is
-	// where that is pinned.
-	for _, k := range []tea.KeyMsg{keyMsg(tea.KeySpace), runeKey('s'), runeKey('t'), runeKey('e'), runeKey('a'), runeKey('c'), runeKey('V')} {
+	// shift-tab and f do leave the pane, on purpose, and TestTabMovesTheKeysOutOfThePane is
+	// where that is pinned. The two jumps into the box are here, because a cursor that moved under a
+	// diff the reviewer is reading is the thing the focus is there to prevent.
+	for _, k := range []tea.KeyMsg{keyMsg(tea.KeySpace), runeKey('s'), runeKey('t'), runeKey('T'),
+		runeKey('e'), runeKey('a'), runeKey('c'), runeKey('V')} {
 		m = paneKey(t, m, k)
 	}
 
