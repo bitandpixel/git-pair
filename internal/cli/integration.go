@@ -791,7 +791,8 @@ func (l landing) reach() string {
 // because an orphan whose record is unreachable may only be unfetched. `check` no longer carries it:
 // its verdict reads the derivation and the trunk, and no ref at all.
 const namespaceAbsentWarning = "warning: this clone holds no refs/git-pair/* refs at all; " +
-	"fetch them before trusting anything that says never recorded: " + reviewref.FetchCommand + "\n"
+	"`--fetch` brings them, or run " + reviewref.FetchCommand +
+	"; trust nothing that says never recorded until they are here\n"
 
 func (a *app) runIntegrationRecord(in integrationRecordInput) error {
 	ctx := context.Background()

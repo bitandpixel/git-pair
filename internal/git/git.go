@@ -520,6 +520,27 @@ func (r *Repo) Fetch(ctx context.Context, remote string) error {
 	return err
 }
 
+// FetchRefspecs fetches explicit refspecs, pruning the namespaces they address. It is the shape
+// `--fetch` needs: several refspecs in one negotiation, and `--prune` so a mirror cannot outlive the
+// ref it mirrors.
+//
+// Pruning is scoped to what the refspecs address — measured, not assumed: a prune with the durable
+// namespace's mirror refspec leaves `refs/remotes/origin/main` and unrelated remote-tracking entries
+// alone. That is why this takes explicit refspecs rather than relying on whatever the clone has
+// configured.
+func (r *Repo) FetchRefspecs(ctx context.Context, remote string, refspecs ...string) error {
+	if len(refspecs) == 0 {
+		return errors.New("git: FetchRefspecs requires at least one refspec")
+	}
+	args := []string{"fetch", "--quiet", "--no-tags", "--prune"}
+	if remote != "" {
+		args = append(args, remote)
+	}
+	args = append(args, refspecs...)
+	_, err := r.Git(ctx, args...)
+	return err
+}
+
 func (r *Repo) ResolveRef(ctx context.Context, ref string) (string, error) {
 	return r.RevParse(ctx, ref)
 }

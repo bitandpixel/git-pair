@@ -1774,6 +1774,27 @@ either family name, because a ref cannot be a leaf and a namespace at once, and 
 refusing the create. Naming is by changeset id, never by branch, which is what keeps landed work
 findable after the branch is gone.
 
+## Reading them from another clone
+
+A clone does not fetch these refs by default — it maps `refs/heads/*` into `refs/remotes/*`, and these
+are neither — so a clone that did not perform the landing has to ask. `status`, `queue` and `check`
+accept `--fetch`, which asks once for both of:
+
+```text
+refs/git-pair/*                              → refs/git-pair/*            the records themselves
+refs/git-pair/*                              → refs/remotes/<remote>/refs/git-pair/*   mirrors
+```
+
+The two are different kinds of thing, and the difference is a rule rather than a preference. A fetched
+**record** is a record: the paper trail exists to be replicated, and a clone that has fetched one
+answers "recorded" truthfully. A **mirror** is somebody else's state seen from here — it is what
+"has this travelled yet?" is compared against, and no command answers "is this recorded" by reading a
+mirror. Pruning applies to the mirror subtree, so a mirror cannot outlive the ref it mirrors and go on
+reporting a deleted record as published.
+
+Without `--fetch` these commands do not touch the network, and they say so: an empty namespace is
+reported as a fact about the clone, never as a verdict about the work.
+
 **Neither ref exists while work is in flight.** No git-pair command writes a ref before landing:
 `change ready`, `change unready`, `change feedback`, `change wait`, `review submit` and `change abandon`
 all write commits and nothing else. While work is going on the branch is the record — it holds the chain,

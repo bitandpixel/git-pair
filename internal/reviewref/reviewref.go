@@ -75,6 +75,53 @@ const FetchRefspec = NamespaceRoot + "/*:" + NamespaceRoot + "/*"
 // a failure and the guidance in the README cannot drift.
 const FetchCommand = "git fetch origin '" + FetchRefspec + "'"
 
+// MirrorRoot is where a clone keeps its copies of *another* repository's durable refs. It sits under
+// the remote-tracking namespace on purpose: like `refs/remotes/origin/feature/x`, a mirror is somebody
+// else's state seen from here, and git's own conventions already say what happens to it on a prune.
+func MirrorRoot(remote string) string {
+	return "refs/remotes/" + remote + "/" + NamespaceRoot
+}
+
+// MirrorRefspec maps the durable namespace onto its mirror.
+//
+// The `+` is the difference between a mirror and a record. FetchRefspec has none, because the records
+// are append-only and a fetch that would have to move one is reporting a bug. A mirror exists to
+// agree with the remote or be wrong, so it is allowed to move — and it is pruned, because a mirror of
+// a deleted ref would otherwise go on reporting a record that no longer exists.
+func MirrorRefspec(remote string) string {
+	return "+" + NamespaceRoot + "/*:" + MirrorRoot(remote) + "/*"
+}
+
+// FetchRefspecs are the two refspecs to ask a remote for in one go, and they answer two different
+// questions. The first brings the records, which are records wherever they are read — a paper trail
+// that replicates is the whole point, and this is what makes `Present` and `ResolveIntegration` answer
+// properly in a clone that never did the landing. The second brings mirrors, which are not records:
+// they are what "has this travelled yet?" is compared against.
+//
+// Both in one fetch matters. Two commands would double the network for a question that is asked in a
+// single breath, and a clone that had one without the other would answer inconsistently about what it
+// knows and what it has seen.
+func FetchRefspecs(remote string) []string {
+	return []string{FetchRefspec, MirrorRefspec(remote)}
+}
+
+// MirrorIntegration and MirrorArchive name one changeset's two mirrors. They are the comparison basis
+// for published-not-published reporting, and nothing that answers "is this recorded" reads them —
+// see TestMirrorsAreNeverRecords.
+func MirrorIntegration(remote, id string) string { return MirrorRoot(remote) + "/integrations/" + id }
+func MirrorArchive(remote, id string) string     { return MirrorRoot(remote) + "/archive/" + id }
+
+// MirrorPresent reports whether this clone holds any mirror of the given remote's durable refs at
+// all. "No mirrors" is not "nothing published": it usually means the refspec was never configured,
+// which is a fact about this clone's fetch configuration and has to be reported as such.
+func MirrorPresent(ctx context.Context, repo *git.Repo, remote string) (bool, error) {
+	refs, err := repo.ForEachRef(ctx, MirrorRoot(remote)+"/")
+	if err != nil {
+		return false, err
+	}
+	return len(refs) > 0, nil
+}
+
 // Present reports whether this repository holds any durable git-pair ref at all.
 //
 // It answers a different question from ResolveArchive, and the two must not be conflated. "This

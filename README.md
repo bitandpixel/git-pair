@@ -678,7 +678,11 @@ its exit-2 "no changeset for this branch" answer, which stays exit 2 because the
 no work in progress.
 
 Both reports say "no integration record *in this clone*", and mean it: a record written where the merge
-ran arrives with `git fetch origin 'refs/git-pair/*:refs/git-pair/*'`, and an empty namespace is stated
+ran arrives with `git fetch origin 'refs/git-pair/*:refs/git-pair/*'` — or with `--fetch`, which
+`status`, `queue` and `check` all accept and which also brings the mirrors under
+`refs/remotes/<remote>/refs/git-pair/*` that "has this been published yet?" is measured against. A
+fetched record is a record; a mirror is only a comparison, and nothing answers "is this recorded" from
+one. And an empty namespace is stated
 once as one condition rather than once per changeset. A landing recorded under the retired
 `refs/git-pair/changesets/<id>/integration` path counts as recorded — the fact is written down — while an
 archive ref alone does not, because it says a chain exists rather than that a landing happened. The

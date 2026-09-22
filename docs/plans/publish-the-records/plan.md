@@ -105,18 +105,41 @@ What exists when this plan starts (`feat/two-frozen-refs`, plan `review-architec
 - [ ] `reviewref`: add `RemoteRefspec(remote)` (→ `+refs/git-pair/*:refs/remotes/<remote>/refs/git-pair/*`),
       `RemoteIntegration(remote, id)`, `RemoteArchive(remote, id)`, and a `RemoteList`/index helper. Keep
       the write-side functions untouched: this plan adds a read side, it does not broaden the write side.
-- [ ] **Correct the refspec.** Mapping the namespace onto itself
-      (`+refs/git-pair/*:refs/git-pair/*`, the shape suggested during planning discussions) would put
-      fetched copies in the namespace the tool writes records into — so a fetched integration ref would
-      satisfy `ResolveIntegration`, reserve the id in `Taken`, and count as a record for the
-      landed-unrecorded detection in a clone that never saw the landing. Remote copies go under
-      `refs/remotes/<remote>/`, matching git's own `refs/heads/*` → `refs/remotes/<remote>/*` convention.
-- [ ] `--fetch` on `status`, `queue`, `check`. Fetch failure is a warning plus the stale answer, never a
-      hard failure — the same three-way shape as everywhere else: answered, refused, cannot tell.
-- [ ] Reword `namespaceAbsentWarning` to name both remedies (`--fetch` now, `record --configure-fetch`
-      so it stops recurring) instead of only the fetch command.
-- [ ] PRD §13 gets the remote-tracking copies and the rule that they are not records; README's
-      handoff section mentions `--fetch`.
+- [x] **Two refspecs, for two different questions.** Planned as one; the spike showed it is two.
+      Fetching `refs/git-pair/*` into the namespace proper (the existing `reviewref.FetchRefspec`, the
+      one `FetchCommand` already prints) is *correct* for "give me the records": a replicated record is
+      still the record, and it is what makes `Present`, `ResolveIntegration`, `Taken` and the
+      landed-unrecorded detection answer properly in a clone that did not do the landing — which is what
+      the existing "none *in this clone*" hedge promises. What that shape cannot do is answer "what does
+      the *remote* have", because the answer needs a copy that is explicitly somebody else's. So
+      `--fetch` asks for both, in one git invocation: the namespace itself, and a mirror under
+      `refs/remotes/<remote>/refs/git-pair/*` for M2's published-not-published comparison.
+      **The invariant that matters** is not "fetched refs are not records" — it is that
+      **the write-side readers never consult the remote-tracking copies**, so a mirror can never stand
+      in for a record while pretending to be one.
+- [x] `--fetch` on `status`, `queue`, `check`: one `git fetch --quiet --no-tags --prune <remote>` with
+      both refspecs. Fetch failure is a warning plus the stale answer, never a hard failure — the same
+      three-way shape as everywhere else: answered, refused, cannot tell. Side effect worth documenting:
+      the mirrors show up in `git branch -a`, which is git being honest about remote-tracking refs.
+- [x] Reworded `namespaceAbsentWarning` to name `--fetch` as the remedy alongside the command. The
+      second remedy the task listed — `record --configure-fetch` — is M4's, so it is not named yet: a
+      message that points at a flag which does not exist is worse than one that points at a command.
+      M4 extends this line.
+- [x] PRD §13 gains "Reading them from another clone" — both refspecs, and the rule that a fetched
+      record is a record while a mirror never is; README's namespace paragraph names `--fetch` and the
+      mirrors.
+
+**What landed differently**
+
+- `remoteForDurableRefs` takes the branch as an argument rather than asking git for it, and skips the
+  `git remote` check when the branch's upstream already names a remote. Both are the difference between
+  `--fetch` costing one git invocation and costing four, and the cost test pins the number. If the
+  upstream's remote has vanished, the fetch fails and the warning says more than the lookup ever would.
+- `--fetch` costs exactly two invocations above the same command without it: one fetch carrying both
+  refspecs, one deciding which remote to ask. The assertion is on the number, not on the shape, so a
+  regression to two negotiations shows up as a failure rather than as a slower pipeline.
+- The fixture that writes a record has to run `integration record` itself: `recordFixture` lands the
+  work and stops, which is right for its own tests and was wrong for the first draft of these.
 
 **Verification**
 
@@ -265,8 +288,9 @@ What exists when this plan starts (`feat/two-frozen-refs`, plan `review-architec
 | --- | ----------------------------------------------------------------------------------------------------------------------- | ------------- |
 | S1  | Does the target forge accept client pushes of `refs/git-pair/*`, including on a repository with branch protection and no rule naming that namespace? Does anything need adding to protection or signing policy? | M3 |
 | S2  | When `git push` is given two refspecs and the server accepts one and rejects the other, what does it report, and in what order? The conflict wording needs to name both SHAs from that output. | M3 |
-| S3  | What does `git fetch --quiet <remote> <refspec>` cost on a repository with many refs and no `refs/git-pair/*` on the remote — is `--fetch` affordable in a CI loop, and does it need `--prune` semantics for deleted remote refs? | M1 |
-| S4  | Does a remote-tracking name of the shape `refs/remotes/origin/refs/git-pair/integrations/<id>` confuse any git plumbing we use (`for-each-ref`, `resolve-ref`, `check-ref-format`), and do git GC/prune rules treat it normally? | M1 |
+| Done  | Does a remote-tracking name of the shape `refs/remotes/origin/refs/git-pair/integrations/<id>` confuse the plumbing we use? No — measured on git 2.43 in a real two-repo fixture: `for-each-ref`, `rev-parse` and `check-ref-format` all handle it, `for-each-ref refs/git-pair/` does **not** see it (so mirrors cannot leak into the write namespace), and `git fetch --prune origin '+refs/git-pair/*:refs/remotes/origin/refs/git-pair/*'` prunes inside that subtree only — `refs/remotes/origin/main` and unrelated `refs/remotes/origin/*` entries survive a prune. Consequence adopted: `--fetch` uses `--prune`, because a mirror that outlives the ref it mirrors would report a deleted record as published. | M1 |
+| Done  | Does fetching with a `+` on the mirror side and none on the records side behave as intended, and does a no-op re-fetch cost anything? Yes on both: one `git fetch --quiet --no-tags --prune` with both refspecs, and a re-fetch with nothing changed exits 0 without touching refs. | M1 |
+| Open  | What does `--fetch` cost in a CI loop against a remote with many refs and no `refs/git-pair/*` at all — is it a per-tick cost worth warning about in the flag help? Measured locally at small scale only. | M1 |
 
 ## Risks
 
@@ -275,10 +299,13 @@ What exists when this plan starts (`feat/two-frozen-refs`, plan `review-architec
 permits the verb *inside one file*, `TestOnlyTheAuditedHelperPushes` fails on any other call site, and
 `TestPublishCannotLeaveTheNamespace` pins the argument-level refusals.
 
-**R2 — A fetched copy read as a local record.** The failure is quiet and bad: a clone would report a
-changeset as recorded, and would refuse to record it for itself, on the strength of somebody else's
-ref. Mitigation: remote copies live only under `refs/remotes/<remote>/`, the write-side functions never
-look there, and `TestAFetchedRecordIsNotALocalRecord` pins it.
+**R2 — A mirror read as a record.** Two distinct failure modes, and the spike separated them.
+Fetched copies *inside* `refs/git-pair/` are records — replication is the point, and `Taken` refusing a
+new id that exists remotely is correct rather than a bug. What must never happen is a mirror under
+`refs/remotes/<remote>/` standing in for a record: it is the comparison basis, not the fact.
+Mitigation: the write-side readers (`Present`, `Taken`, `ResolveIntegration`, `ResolveArchive`) read the
+namespace and nothing else — asserted by `TestMirrorsAreNeverRecords` — and `--prune` keeps the mirrors
+from outliving what they mirror.
 
 **R3 — Detection noise.** An "unpublished" warning in every clone that legitimately has no remote, or
 that simply never installed the refspec, trains people to ignore the warning that matters. Mitigation:

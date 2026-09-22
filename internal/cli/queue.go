@@ -32,7 +32,8 @@ type queueEntry struct {
 }
 
 func newQueueCommand(a *app) *cobra.Command {
-	return &cobra.Command{
+	var doFetch bool
+	cmd := &cobra.Command{
 		Use:   "queue",
 		Short: "List changesets ready for human review",
 		Long: `List every changeset in this repository whose branch is READY.
@@ -46,20 +47,29 @@ queue says the same thing on main as it does on the changeset's own branch. A
 changeset whose content has landed in its base is not listed, and says nothing.
 
 --json is the stable contract for notifications, dashboards, and agent
-supervisors.`,
+supervisors.
+
+--fetch asks the remote for the durable refs and their mirrors first, which is what makes the queue
+able to see a landing recorded in another clone. Without it the queue reads this repository and says
+so.`,
 		Example: `  git pair queue
   git pair queue --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runReviewQueue(cmd.Context(), a)
+			return runReviewQueue(cmd.Context(), a, doFetch)
 		},
 	}
+	fetchFlag(cmd, &doFetch)
+	return cmd
 }
 
-func runReviewQueue(ctx context.Context, a *app) error {
+func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 	repo, err := a.loadRepo(ctx)
 	if err != nil {
 		return err
+	}
+	if doFetch {
+		a.fetchDurableRefs(ctx, repo, "")
 	}
 	// Branches, not directories. Only a branch can be reviewed, so only a branch
 	// can be queued; a changeset directory whose branch is gone is a record rather

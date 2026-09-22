@@ -18,6 +18,7 @@ import (
 
 func newCheckCommand(a *app) *cobra.Command {
 	var allowFeedback bool
+	var doFetch bool
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Assert that this changeset is integration-ready",
@@ -63,11 +64,12 @@ Exit codes: 0 integration-ready, 1 not ready, 2 usage, 3 git failed.`,
   git pair check --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCheck(cmd.Context(), a, allowFeedback)
+			return runCheck(cmd.Context(), a, allowFeedback, doFetch)
 		},
 	}
 	cmd.Flags().BoolVar(&allowFeedback, "allow-feedback", false,
 		"accept non-blocking feedback as sufficient for integration")
+	fetchFlag(cmd, &doFetch)
 	return cmd
 }
 
@@ -109,10 +111,13 @@ type checkJSON struct {
 	NextAction string `json:"next_action,omitempty"`
 }
 
-func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
+func runCheck(ctx context.Context, a *app, allowFeedback bool, doFetch bool) error {
 	s, err := a.load(ctx)
 	if err != nil {
 		return err
+	}
+	if doFetch {
+		a.fetchDurableRefs(ctx, s.repo, s.cs.Branch)
 	}
 	// The tree question — is the reviewed content still what HEAD carries? — is the one
 	// `status` asks observationally and this command has to answer as a verdict. Asking it

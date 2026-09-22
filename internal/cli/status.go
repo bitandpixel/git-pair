@@ -18,6 +18,7 @@ import (
 
 func newStatusCommand(a *app) *cobra.Command {
 	var changesetSlug string
+	var doFetch bool
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show the effective state of a changeset",
@@ -37,17 +38,22 @@ once the work has landed. ` + "`status`" + ` reports both, beside the state, whe
 you can ask about work you do not have checked out. Reads are the only commands
 that do: a marker is a commit, and a commit lands on the branch you are standing on.
 
-With --json the output is a stable contract for agents and automation.`,
+With --json the output is a stable contract for agents and automation.
+
+--fetch asks the remote for the durable refs and their mirrors before answering, which is how you see
+a landing recorded in somebody else's clone. Without it nothing here reaches the network, and what
+status says about other clones is limited to what this one has fetched.`,
 		Example: `  git pair status
   git pair status --json
   git pair status --changeset booking-transaction`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStatus(cmd.Context(), a, changesetSlug)
+			return runStatus(cmd.Context(), a, changesetSlug, doFetch)
 		},
 	}
 	cmd.Flags().StringVar(&changesetSlug, "changeset", "",
 		"read the changeset with this slug, from whichever branch carries it")
+	fetchFlag(cmd, &doFetch)
 	return cmd
 }
 
@@ -128,10 +134,13 @@ type statusJSON struct {
 	Unrecognised              []string `json:"unrecognised_markers,omitempty"`
 }
 
-func runStatus(ctx context.Context, a *app, slug string) error {
+func runStatus(ctx context.Context, a *app, slug string, doFetch bool) error {
 	s, err := a.loadFor(ctx, slug)
 	if err != nil {
 		return a.landingsOnNoChangeset(ctx, slug, err)
+	}
+	if doFetch {
+		a.fetchDurableRefs(ctx, s.repo, s.cs.Branch)
 	}
 	view, err := buildStatus(ctx, a, s)
 	if err != nil {
