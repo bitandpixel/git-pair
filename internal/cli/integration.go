@@ -376,7 +376,11 @@ func deriveArchiveTip(ctx context.Context, repo *git.Repo, dests []string, id st
 		}
 		exclude[displayRef(dest)] = true
 	}
-	tips, err := repo.RefTips(ctx, "refs/heads/*")
+	// The pattern is a `for-each-ref` pattern, not a shell glob: it matches path-name aware, so `*` does
+	// not cross a `/`. `refs/heads/*` answers the branches whose name is one component long, which in a
+	// repository that names its branches `feat/…` is no branches at all — and the derivation would report
+	// that as no branch carrying the changeset. The trailing slash is the prefix form, which does see them.
+	tips, err := repo.RefTips(ctx, "refs/heads/")
 	if err != nil {
 		return "", err
 	}

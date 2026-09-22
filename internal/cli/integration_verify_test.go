@@ -308,6 +308,10 @@ func TestIntegrationRecordDerivesBothTips(t *testing.T) {
 	f.MustGit("checkout", source, "--", changeset.Root+"/"+slug)
 	f.Commit("booking: squash-merge the reviewed work")
 	landing := f.Head()
+	// The fixture's own landing went into release/2.x, which therefore carries the changeset directory as
+	// well. Two branches carrying it is a real ambiguity, and it has its own test below; this one asks what
+	// the repository answers when exactly one branch still holds the reviewed work.
+	f.ForceDeleteBranch("release/2.x")
 	branchTip := f.RevParse("booking")
 
 	res := runIn(t, f.Dir(), "integration", "record", "--json")
@@ -373,6 +377,35 @@ func TestIntegrationRecordDerivationRefusesToChooseBetweenTwo(t *testing.T) {
 	}
 }
 
+// The other half of the same rule. Two branches carry the directory — the reviewed one and the fixture's
+// landing on a release branch — so which of them was reviewed is not a fact the graph holds. The refusal
+// names every candidate and the flag that settles it, writes nothing, and stops being a refusal the moment
+// the caller answers. Before the branch list was fixed this path was unreachable for any nested branch
+// name, which is how a repository ended up with two carriers and no complaint from the tool.
+func TestIntegrationRecordRefusesToGuessBetweenTwoCarryingBranches(t *testing.T) {
+	f, slug, source, _ := recordFixture(t)
+	f.SwitchTo("main")
+	f.MustGit("checkout", source, "--", changeset.Root+"/"+slug)
+	f.Commit("booking: merge the reviewed work into trunk")
+	landing := f.Head()
+
+	res := runIn(t, f.Dir(), "integration", "record", "--changeset", slug)
+	if res.code != 2 {
+		t.Fatalf("two carriers exited %d, want 2\nstdout: %s\nstderr: %s", res.code, res.stdout, res.stderr)
+	}
+	mustContain(t, res.stderr, "more than one branch carries changesets/"+slug, "it says what it found")
+	mustContain(t, res.stderr, "refs/heads/booking", "and it lists the candidates")
+	mustContain(t, res.stderr, "refs/heads/release/2.x", "all of them")
+	mustContain(t, res.stderr, "--source <ref>", "and the flag that settles it")
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Errorf("an ambiguous derivation wrote %v", got)
+	}
+
+	settled := runIn(t, f.Dir(), "integration", "record", "--changeset", slug, "--source", "booking")
+	settled.mustSucceed(t, "integration", "record")
+	mustContain(t, settled.stdout, "recorded "+shortOf(landing), "naming the branch records the pair")
+}
+
 // With the branch deleted there is no derivation to make: nothing in the clone holds the reviewed head
 // unless the durable refs were fetched. The refusal says which directory it could not place, names the
 // flag, and points at the fetch — the honest version of a guess about which commit was approved.
@@ -381,6 +414,7 @@ func TestIntegrationRecordDerivationStopsWhenTheBranchIsGone(t *testing.T) {
 	f.SwitchTo("main")
 	f.MustGit("checkout", source, "--", changeset.Root+"/"+slug)
 	f.Commit("booking: squash-merge the reviewed work")
+	f.ForceDeleteBranch("release/2.x") // the fixture's other carrier; here there must be no carrier at all
 	f.ForceDeleteBranch("booking")
 
 	res := runIn(t, f.Dir(), "integration", "record")
