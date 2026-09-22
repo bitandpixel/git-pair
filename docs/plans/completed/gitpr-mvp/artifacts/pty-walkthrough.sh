@@ -186,30 +186,38 @@ expect "the counter is back where it was after v v" 2 "$T/marks.raw" "2 / 3 revi
 # The screen has two regions where the keys can be, and a real terminal is what shows whether the
 # split reads: the box's borders are its focus light, its bar is its own, and the file tree under it
 # keeps its rows while the box is being read.
-step "the changeset box: m takes the keys, and the borders say so"
-session box m,q
+step "the changeset box: a takes the keys, and the borders say so"
+# `a` is the jump that names a row of the box from wherever the keys are in the column, and it takes the
+# keys with it. `tab` no longer reaches the box from the tree — the two halves of the list column share
+# their keys and Tab walks the column and the diff — so the way in is the jump, and the bar is what says so.
+session box a,q
 expect "the box's borders turn to a double rule" 0 "$T/box.raw" $'\u2554'
 expect "the box's bar names the key its own" 0 "$T/box.raw" "space span"
 expect "the box's bar names the key that goes back" 0 "$T/box.raw" "f files"
 refuse "the tree's fold keys are off the bar while the box has them" 0 "$T/box.raw" "h/l fold"
 
-step "the changeset box: tab walks the ring to it, through the diff"
-session ring2 tab,tab,q
-expect "two tabs reach the box" 1 "$T/ring2.raw" $'\u2554'
-expect "with the box's own shortcut bar" 1 "$T/ring2.raw" "t new thread"
+step "the changeset box: tab out of the diff comes back to the box"
+# The ring is the list column and the diff, so from the box one tab lands in the diff and the next returns
+# the keys to the half that handed them over — the box, not the tree. That memory is the claim here.
+session ring2 a,tab,tab,q
+expect "the keys come back to the box" 2 "$T/ring2.raw" $'\u2554'
+# The bar of the region that holds the keys, and not the tree's: `space span` belongs to the box alone
+# (the tree's row of the same key reads `space reviewed`). `T new thread` is in both bars, and at this
+# width it wraps onto the second bar line anyway, so it would prove nothing about which region has them.
+expect "with the box's own shortcut bar" 2 "$T/ring2.raw" "space span"
 
 step "the changeset box: space on the span row opens the picker"
-# The box opens on ABOUT.md, so the scenario walks up to the span row before pressing it.
-session spanrow m,k,space,esc,q
-expect "the span row opens the span picker" 1 "$T/spanrow.raw" "Span picker"
+# The jump lands on ABOUT.md, so the scenario walks up to the span row before pressing it.
+session spanrow a,k,space,esc,q
+expect "the span row opens the span picker" 2 "$T/spanrow.raw" "Span picker"
 expect "and esc comes back to the list" 3 "$T/spanrow.raw" "reviewed"
 
 step "the changeset box: space there reads a document rather than marking one"
 # A repaint-only terminal makes "the tree is still there" an awkward thing to grep, so this checks the
 # claim the region boundary is really about: with the box holding the keys, the key that marks a file
 # marks nothing, and says which rows it does mark.
-session boxspace m,j,space,q
-expect "space in the box says what it marks instead" 2 "$T/boxspace.raw" "file rows"
+session boxspace a,space,q
+expect "space in the box says what it marks instead" 1 "$T/boxspace.raw" "file rows"
 
 # --- 6. a ref moves while the session is open (span plan M4) ---------------
 step "drift: another process moves the ref, the screen warns and r re-pins"
