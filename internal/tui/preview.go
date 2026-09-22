@@ -90,35 +90,81 @@ func yourEditsCaption(work Patch) string {
 // styles it needs and closes them again, because the renderer skips redrawing a row that has not
 // changed -- a colour left open on a skipped row would tint everything written under it.
 func previewBody(patch Patch, width int, mk marks) []previewRow {
-	numbers, max := lineNumbers(patch.Lines)
-	gutter := len(strconv.Itoa(max))
-	if gutter < 3 {
-		gutter = 3
-	}
-	body := width - gutter - 1
-	if body < 4 {
+	numbers, largest := lineNumbers(patch.Lines)
+	l, ok := layout(width, largest)
+	if !ok {
 		return nil
 	}
-
 	out := make([]previewRow, 0, len(patch.Lines))
 	for i, line := range patch.Lines {
 		number := ""
 		if numbers[i] > 0 {
 			number = strconv.Itoa(numbers[i])
 		}
-		// The marks go on git's line before it is broken into rows, so that a term the column cuts in half
-		// is marked on both halves: wrapLine carries styling across a break the way it carries git's own
-		// colours. Which line the reviewer is standing on is answered by counting the rows it will make
-		// first, and counting them is safe either way because marking a line cannot move where it breaks.
-		marked := highlightRow(line, mk.term, false)
-		rows := wrapLine(marked, body)
-		if mk.term != "" && mk.current >= len(out) && mk.current < len(out)+len(rows) {
-			rows = wrapLine(highlightRow(line, mk.term, true), body)
+		out = append(out, l.line(line, number, len(out), mk)...)
+	}
+	return out
+}
+
+// laidOut is the column the pane draws in: a gutter wide enough for the largest line number it will print,
+// and the rest for the text. A diff and a document are drawn by the same two rules, because the pane is one
+// thing the reviewer looks at and the numbers down its left edge should mean the same distance in both.
+type laidOut struct {
+	gutter int
+	body   int
+}
+
+func layout(width, largest int) (laidOut, bool) {
+	gutter := len(strconv.Itoa(largest))
+	if gutter < 3 {
+		gutter = 3
+	}
+	l := laidOut{gutter: gutter, body: width - gutter - 1}
+	return l, l.body >= 4 // below this the column shows neither the text nor its indentation
+}
+
+// line is one source line as the rows it is drawn on. first is how many rows the pane has already got, which
+// is what says whether the row the reviewer is standing on is among these: the marks go on the line before
+// it is broken up, so that a term the column cuts in half is marked on both halves -- wrapLine carries
+// styling across a break the way it carries git's own colours. Counting the rows first is safe because
+// marking a line cannot move where it breaks.
+func (l laidOut) line(text, number string, first int, mk marks) []previewRow {
+	marked := highlightRow(text, mk.term, false)
+	rows := wrapLine(marked, l.body)
+	if mk.term != "" && mk.current >= first && mk.current < first+len(rows) {
+		rows = wrapLine(highlightRow(text, mk.term, true), l.body)
+	}
+	out := make([]previewRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, previewRow{
+			text: styleDim.Render(fmt.Sprintf("%*s", l.gutter, number)) + " " + row, line: text})
+		number = "" // a wrapped line is still one line, numbered once
+	}
+	return out
+}
+
+// docRows lays a document out the way a diff is laid out, and numbers it with the file's own lines, which is
+// how a reviewer points at a paragraph. A section with a name gets the caption the diff's "you" section gets,
+// for the same reason: text with nothing above it saying where it came from reads as one document.
+func docRows(doc Document, width int, mk marks) []previewRow {
+	lines := 0
+	for _, sec := range doc.Sections {
+		lines += len(sec.Lines)
+	}
+	l, ok := layout(width, lines)
+	if !ok {
+		return nil
+	}
+	var out []previewRow
+	for _, sec := range doc.Sections {
+		if sec.Name != "" {
+			if len(out) > 0 {
+				out = append(out, previewRow{})
+			}
+			out = append(out, previewRow{text: styleDim.Render(clip("\u2500\u2500 "+sec.Name, width))})
 		}
-		for _, row := range rows {
-			out = append(out, previewRow{
-				text: styleDim.Render(fmt.Sprintf("%*s", gutter, number)) + " " + row, line: line})
-			number = "" // a wrapped line is still one line, numbered once
+		for i, line := range sec.Lines {
+			out = append(out, l.line(line, strconv.Itoa(i+1), len(out), mk)...)
 		}
 	}
 	return out

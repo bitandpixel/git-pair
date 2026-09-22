@@ -1058,6 +1058,22 @@ and a line too wide for the column is broken rather than cut, with its colour ca
 Tabs are shown as the spaces they advance to, because a tab the width maths scores as zero is a row the
 terminal wraps for you.
 
+The changeset box's rows come into the pane on the same terms: put the cursor on ABOUT.md or on a thread —
+with `a` or `t`, or by walking up out of the tree — and the pane shows the file's own text, with the file's
+own line numbers, rather than a diff of it. A diff of a document against nothing reports every line as
+added, which is true and says nothing about what the document says, and the pane is the place on this screen
+for reading text. The Threads heading is the whole conversation at once: every thread in the order the box
+lists them, each named above its own text, which is what the threads are when the list is collapsed. The
+header counts what is on show — a diff's `+N −M`, a document's lines, the heading's threads.
+
+Over a historical span the text is still the file on disk, because that is the file `e` would open, so the
+header adds `working copy` rather than letting someone read history that is not there; the editor stays
+refused over history, since reading cannot change anything and writing can. `Enter` opens what the pane is
+showing — the difftool for a diff, the editor for a document — the same choice the row makes when the key is
+pressed there, and the pane's bar says `enter open` over a document and `enter diff` over a diff. The
+search and the paging are the pane's rather than the diff's, so a name is chased through the prose the way it
+is chased through a hunk.
+
 `p` moves into the pane and does nothing else: the keys go to the diff, and it scrolls with the
 keys the whole-screen preview uses — `j`/`k` a row, `d`/`u` or `ctrl-d`/`ctrl-u` half a page,
 `ctrl-f`/`ctrl-b` a page, `gg` the top and `G` the bottom — over the file the pane was already showing. Paging a diff that

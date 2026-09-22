@@ -10,8 +10,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -492,6 +495,110 @@ func (s *Session) Patch(ctx context.Context, path string) Patch {
 // An empty patch is the ordinary case: most files carry no reviewer edits.
 func (s *Session) WorkingPatch(ctx context.Context, path string) Patch {
 	return s.diff(ctx, s.current.To, "", path)
+}
+
+// Document is one thing the reviewer reads rather than diffs: ABOUT.md, a thread, or all the threads at
+// once. Its text is the file's own lines, not a diff of them -- a changeset document is prose the reviewer
+// is being asked to read, and diffing it against nothing would show every line as added.
+//
+// The text comes from the working tree, which is the same file `e` opens. Over a historical span that is
+// not the file that span contains, so the pane says so above it rather than quietly showing history that
+// is not there -- the same reason the editor is refused over history and the diff is not.
+type Document struct {
+	Sections []DocSection
+	Capped   bool   // longer than a preview can carry
+	Err      string // why there is nothing to read, if there is none
+}
+
+// DocSection is one file's text inside a Document, with the name to write above it. A Document for a single
+// file has one section with no name, because the pane's title already says which file it is; the name is
+// for the case where several files are shown as one thing to read, where git's bytes -- and this file's --
+// would not say so themselves.
+type DocSection struct {
+	Name  string
+	Lines []string
+}
+
+// Document reads one changeset document.
+func (s *Session) Document(ctx context.Context, path string) Document {
+	return s.document([]string{path}, false)
+}
+
+// ThreadDocument is every thread in the changeset, in the order the box lists them, as one thing to read:
+// the reviewer is asking what the conversation has been, and opening each file in turn to find out is the
+// same read with more steps. Each thread is named above its own text for the same reason the pane's own
+// "you" section is captioned -- text with nothing saying where it came from reads as one document.
+func (s *Session) ThreadDocument(ctx context.Context) Document {
+	paths, err := s.cs.Threads(s.repo)
+	if err != nil {
+		return Document{Err: err.Error()}
+	}
+	return s.document(paths, true)
+}
+
+// document reads the named files, one section each, and stops at the same byte the pane stops at: a
+// document longer than that is one to open in the editor.
+func (s *Session) document(paths []string, named bool) Document {
+	var (
+		doc  Document
+		size int
+	)
+	for _, path := range paths {
+		data, err := os.ReadFile(absPath(s.repo.Dir, path))
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// Not an error worth the word: the box's ABOUT.md row offers to write the file, so
+				// "there is none yet" is the answer the reviewer was looking for.
+				doc.Err = path + " does not exist yet"
+				return doc
+			}
+			doc.Err = err.Error()
+			return doc
+		}
+		if size >= maxPreviewBytes {
+			// Nothing is left to give this file. The pane says it stopped, and the reviewer opens
+			// the rest in the editor.
+			doc.Capped = true
+			break
+		}
+		if size+len(data) > maxPreviewBytes {
+			// What fits, rather than nothing: a document the pane has part of is still the document
+			// the reviewer is deciding whether to go and open.
+			cut := strings.LastIndex(string(data[:maxPreviewBytes-size]), "\n")
+			if cut < 0 {
+				cut = maxPreviewBytes - size
+			}
+			data, doc.Capped = data[:cut], true
+		}
+		size += len(data)
+		name := ""
+		if named {
+			// The file's name is what the box calls the thread, so the pane and the list agree on what
+			// each part of this text is called.
+			name = filepath.Base(path)
+		}
+		doc.Sections = append(doc.Sections, DocSection{Name: name, Lines: splitLines(string(data))})
+	}
+	return doc
+}
+
+// docLines is how much text a Document carries, which is what the pane counts in its header.
+func docLines(doc Document) int {
+	n := 0
+	for _, sec := range doc.Sections {
+		n += len(sec.Lines)
+	}
+	return n
+}
+
+// splitLines is what a file's text becomes: a line for each line, with the empty one at the end of a file
+// ending in a newline dropped rather than drawn.
+func splitLines(text string) []string {
+	text = strings.TrimSuffix(text, "\n")
+	if text == "" {
+		return nil
+	}
+	return strings.Split(text, "\n")
 }
 
 // diff asks git for one path's two-way diff, in colour. With one revision the other side is the

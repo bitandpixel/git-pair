@@ -2,6 +2,8 @@ package tui_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -650,6 +652,68 @@ func TestSessionThreadsAndChangesetAccessors(t *testing.T) {
 	}
 	if sess.Summary().State == "" {
 		t.Error("Summary() is empty; the header needs the derived state")
+	}
+}
+
+// A changeset document is read rather than diffed, so the Session hands over the file's own lines -- the same
+// text `e` opens in an editor -- and names each thread when the question is about the whole conversation.
+func TestSessionDocumentsAreTheirOwnText(t *testing.T) {
+	e := newEnv(t)
+	sess := e.session(t, span.Full())
+
+	// "There is none yet" is the answer rather than an error to report: the box's ABOUT.md row offers to
+	// write the file, so a reviewer looking at it wants to know whether it is there.
+	if err := os.Remove(filepath.Join(e.repo.Dir, sess.AboutPath())); err != nil {
+		t.Fatalf("removing the changeset's ABOUT.md: %v", err)
+	}
+	doc := sess.Document(context.Background(), sess.AboutPath())
+	if !strings.Contains(doc.Err, "does not exist yet") {
+		t.Errorf("Document for a file that is not there = %+v, want that said plainly", doc)
+	}
+
+	e.f.WriteChangesetFile(slug, "ABOUT.md", "# booking\n\nWhy this changed.\n")
+	doc = sess.Document(context.Background(), sess.AboutPath())
+	if doc.Err != "" {
+		t.Fatalf("Document: %v", doc.Err)
+	}
+	if len(doc.Sections) != 1 || doc.Sections[0].Name != "" {
+		t.Fatalf("one file's Document = %+v, want one section with no name: the pane's title says which file",
+			doc.Sections)
+	}
+	// The blank line between a heading and its prose is part of the prose.
+	if got := strings.Join(doc.Sections[0].Lines, "|"); got != "# booking||Why this changed." {
+		t.Errorf("Document lines = %q, want the file's own lines with its blank kept", got)
+	}
+
+	e.f.WriteChangesetFile(slug, "locking.md", "# Locking\n\nWhy there?\n")
+	e.f.WriteChangesetFile(slug, "naming.md", "# Naming\n\nWhy not?\n")
+	all := sess.ThreadDocument(context.Background())
+	if len(all.Sections) != 2 {
+		t.Fatalf("ThreadDocument = %+v, want both threads", all.Sections)
+	}
+	if all.Sections[0].Name != "locking.md" || all.Sections[1].Name != "naming.md" {
+		t.Errorf("the threads are not named: %q, %q -- text with nothing saying where it came from reads as one file",
+			all.Sections[0].Name, all.Sections[1].Name)
+	}
+	if got := strings.Join(all.Sections[1].Lines, " "); !strings.Contains(got, "Why not?") {
+		t.Errorf("the second thread's text is missing: %q", got)
+	}
+}
+
+// What the pane cannot carry, it says it cannot carry: the reviewer decides whether to go and open the file,
+// rather than reading part of a document and believing it was the whole thing.
+func TestSessionDocumentStopsWhereThePaneStops(t *testing.T) {
+	e := newEnv(t)
+	sess := e.session(t, span.Full())
+	long := strings.Repeat("a line of prose\n", 40000)
+	e.f.WriteChangesetFile(slug, "ABOUT.md", long)
+
+	doc := sess.Document(context.Background(), sess.AboutPath())
+	if !doc.Capped {
+		t.Fatalf("Document of a %d KB file is not capped", len(long)>>10)
+	}
+	if len(doc.Sections) != 1 || len(doc.Sections[0].Lines) == 0 {
+		t.Error("a document too long for the pane dropped the part it could show")
 	}
 }
 

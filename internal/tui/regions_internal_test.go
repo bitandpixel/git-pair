@@ -456,15 +456,20 @@ func TestThePreviewSurvivesANewThread(t *testing.T) {
 	if m.cursor != cursor {
 		t.Errorf("the new thread moved the tree's cursor from %d to %d; the pane belongs to that row", cursor, m.cursor)
 	}
-	if m.previewPath != file {
-		t.Fatalf("the new thread changed the previewed file from %q to %q", file, m.previewPath)
+	// The pane is the row the keys are standing on, and the keys are in the box, so what is on show is the
+	// thread the editor has just been opened on -- which is the file the reviewer is coming back to write.
+	if m.previewPath == file {
+		t.Fatalf("the box has the keys and the pane is still showing %q: the pane follows the cursor", file)
 	}
 
 	updated, cmd := m.Update(externalDoneMsg{})
 	m = updated.(reviewModel)
 	m = deliver(t, m, cmd)
+	// And the diff is one key away, because the cursor it belongs to never moved.
+	m = paneKey(t, m, runeKey('f'))
 	if m.previewPath != file {
-		t.Errorf("coming back from the editor the pane shows %q, not the %q it showed going in", m.previewPath, file)
+		t.Errorf("back at the tree the pane shows %q, not the %q it showed before the box had the keys",
+			m.previewPath, file)
 	}
 	if !strings.Contains(m.View(), "+added line") {
 		t.Errorf("coming back from the editor the pane has lost its diff:\n%s", m.View())

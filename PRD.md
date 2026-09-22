@@ -1752,6 +1752,19 @@ section is diffed from the revision under review, not the span's start, so it ca
 author's changes. The reviewed counter stays the span's: a reviewer's typing does not change what has
 been reviewed.
 
+The list column's other half is documents rather than files, and the pane reads them the same way it reads
+a diff: ABOUT.md and each thread, when the box's cursor is on them, are shown as their own text with the
+file's own line numbers, and the Threads heading is every thread in the order the box lists them, each named
+above its text. The pane is the screen's place for reading text, and a changeset document is the one thing on
+this screen that is pure text to read; a diff of one against nothing would report every line as added, which
+is true and carries no information about what it says. The header counts what is on show — git's `+N −M` for
+a diff, lines for a document, threads for the heading — and the pane follows the box's cursor the way it
+follows the tree's, which is what makes the two halves one column. `Enter` in the pane opens what is on show
+with the rules the row itself would apply: the difftool for a diff, the editor for a document, and the row's
+own refusal where history makes the editor the wrong tool. Over a historical span the document is still read
+from the working tree — it is the file the editor would open — so the header says `working copy` rather than
+letting a reviewer read history that is not there.
+
 A span whose head is a commit rather than the working tree is a look at history, and the screen
 says so where the reviewer is already looking: the counter's slot carries `HISTORICAL · READ ONLY`,
 the reviewed gutter and the offer to start a thread are absent, and the shortcut bar advertises

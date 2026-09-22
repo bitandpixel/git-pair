@@ -45,7 +45,17 @@ const (
 // rather than by a key of its own. The frame says which of them holds the keys rather than leaving it to
 // be inferred: a keystroke means something different in each, and a region that cannot be seen cannot be
 // changed by one.
-type focusTarget int
+// previewKind is what the pane is a window onto: a file's diff across the span, one changeset document's
+// own text, or every thread's text as one thing to read.
+type previewKind int
+
+const (
+	previewDiff previewKind = iota
+	previewDocument
+	previewThreads
+)
+
+type focusTarget uint8
 
 const (
 	focusFiles focusTarget = iota
@@ -185,6 +195,13 @@ type previewMsg struct {
 	kind  patchKind
 }
 
+// docMsg carries a document back from the disk, alongside previewMsg. Reading a file is not git's work, but
+// it is the pane's content and it arrives the same way: off the event loop, with the cursor still moving.
+type docMsg struct {
+	path string
+	doc  Document
+}
+
 // externalDoneMsg reports that a launched editor or difftool has exited. What the caller
 // wanted read afterwards is held in reviewModel.pendingNote: a status set before the handoff
 // is buried under the child's own screen, so it has to be said on the way back.
@@ -257,6 +274,14 @@ type reviewModel struct {
 	previewG      bool
 	patches       map[string]Patch
 	working       map[string]Patch
+	// previewKind is what the pane is a window onto. The list column has two kinds of row: files, which
+	// the span changed and which the pane shows as a diff, and the changeset's own documents, which are
+	// prose the reviewer is asked to read and which the pane shows as their text.
+	previewKind previewKind
+	// docs is the cache of what has been read, one entry per path -- and one for the changeset directory,
+	// holding every thread at once, which is what the Threads heading is standing on.
+	docs   map[string]Document
+	docFor func(ctx context.Context, path string) Document // nil asks the session; tests say so instead
 	// The preview's search: the term in force, the field while it is being typed, and the row `n` landed
 	// on. Nothing here caches a match position -- the pane's rows are rebuilt from git's bytes on every
 	// draw -- it caches which match the reviewer is looking at, and which term that match belongs to, so
@@ -467,6 +492,16 @@ func (m reviewModel) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.forgetPatches()
 		m.refresh()
 		return m.ensurePreview()
+
+	case docMsg:
+		if m.docs == nil {
+			m.docs = map[string]Document{}
+		}
+		m.docs[msg.path] = msg.doc
+		if msg.path == m.previewPath {
+			m.previewOffset, m.previewMatch = 0, -1
+		}
+		return m, nil
 
 	case previewMsg:
 		m.store(msg.kind, msg.path, msg.patch)
@@ -1658,7 +1693,13 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 		// column -- `esc` gives the keys back, `f` names the tree, `tab` walks the ring -- so they are
 		// one group on the bar rather than three claims on it. `/ find` is named with the two keys that
 		// walk what it finds: a search nobody can see the keys for is a feature nobody finds.
-		return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  enter diff  esc f tab list  q quit"
+		open := "enter diff"
+		if m.previewKind != previewDiff {
+			// What is on show is a document, and `enter` opens it in the editor rather than in the
+			// difftool -- the bar says "open" because that is the truth of it.
+			open = "enter open"
+		}
+		return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " + open + "  esc f tab list  q quit"
 	}
 	// The jumps name a row of the box from either half of the column and take the keys with them. `T`
 	// writes, so it is absent from every bar of a span that cannot.
@@ -2300,6 +2341,65 @@ func (m reviewModel) activeWindow() int {
 	return m.filesWindow()
 }
 
+// previewTarget is what the pane should have in it: the row the keys are standing on while the list column
+// holds them, and what the pane is already showing while it holds them itself. The box's rows are documents,
+// and the pane is the place on this screen that shows text to read, so the pane follows the box's cursor the
+// way it has always followed the tree's -- `a` puts the cursor on ABOUT.md and ABOUT.md is what appears.
+//
+// A row with nothing to show -- the span line, "+ new thread…" -- keeps the pane where it was, the same way
+// a directory row with no diff in the span does: a pane that blanks out while the cursor passes over a
+// heading is a pane that loses the file you were reading.
+func (m reviewModel) previewTarget() (previewKind, string, bool) {
+	if m.quitting {
+		return previewDiff, "", false
+	}
+	if (m.previewHasFocus() || m.mode == modePreview) && m.previewPath != "" {
+		// Reading the diff. The row it is showing is the row it is showing: the list's cursor cannot move
+		// from here, and a pane that changed under a reviewer reading it would be the one thing a pane
+		// should not do.
+		return m.previewKind, m.previewPath, true
+	}
+	if !m.previewShowing() {
+		return previewDiff, "", false
+	}
+	// With nothing on show yet -- `p` taken the screen before a row had been chosen -- there is nothing to
+	// keep, and the row under the cursor is the answer.
+	return m.previewRowTarget()
+}
+
+// previewRowTarget is the pane's answer for the row the keys are standing on. It is what the pane follows
+// while the list column holds the keys, and what `p` asks for when it opens the screen that will show it --
+// where a narrow terminal has had no pane to keep a place in, and the row being pointed at is the only
+// answer to "show me this".
+func (m reviewModel) previewRowTarget() (previewKind, string, bool) {
+	r, _, ok := m.activeRow()
+	if !ok {
+		return previewDiff, "", false
+	}
+	switch r.kind {
+	case rowFile, rowDir:
+		return previewDiff, r.path, true
+	case rowAbout, rowThread:
+		return previewDocument, r.path, true
+	case rowThreadsHead:
+		return previewThreads, m.sess.Changeset().Dir, true
+	}
+	return m.previewKind, m.previewPath, m.previewPath != ""
+}
+
+// documentFor reads the pane's text, which is one file for a document row and the whole thread list for the
+// heading. The seam is here rather than at the two call sites so that a test says what the changeset contains
+// without saying which of the two ways it was read.
+func (m reviewModel) documentFor(ctx context.Context, path string) Document {
+	if m.docFor != nil {
+		return m.docFor(ctx, path)
+	}
+	if path == m.sess.Changeset().Dir {
+		return m.sess.ThreadDocument(ctx)
+	}
+	return m.sess.Document(ctx, path)
+}
+
 func (m reviewModel) selectedRow() (row, bool) {
 	// The file list's cursor, wherever the keys are: the preview shows the file the list is on, and a
 	// box row is not something the pane can diff. Keys that act on a row ask activeRow instead.
@@ -2549,27 +2649,30 @@ func (m reviewModel) rule() string {
 // Fetches are cached per session state, so walking a list asks git once per file per source, and a
 // span toggle or a tool handoff drops the cache rather than showing a stale diff.
 func (m reviewModel) ensurePreview() (reviewModel, tea.Cmd) {
-	path := ""
-	if m.previewShowing() && !m.quitting {
-		if r, ok := m.selectedRow(); ok {
-			path = r.path
-		}
-	}
-	if path == "" {
+	kind, path, ok := m.previewTarget()
+	if !ok || path == "" {
 		// Only "the cursor is on something with no file to show" forgets the pane. When the preview
 		// is merely off-screen -- `p` off, or the overlay closed -- the place is kept, so coming back
 		// returns to the same lines rather than to the top of the file. Keeping an out-of-date diff is
 		// forgetPatches' job, not this one's.
 		if m.previewShowing() {
-			m.previewPath, m.previewOffset, m.previewMatch = "", 0, -1
+			m.previewPath, m.previewOffset, m.previewMatch, m.previewKind = "", 0, -1, previewDiff
 		}
 		return m, nil
 	}
-	if path != m.previewPath {
+	if kind != m.previewKind || path != m.previewPath {
 		// The term is deliberately not cleared: the point of a term you have typed is that it is the
 		// next file's term too, which is how a name you are chasing across a changeset gets chased.
 		// What goes is the position in the old file, which has no meaning in this one.
-		m.previewPath, m.previewOffset, m.previewMatch, m.previewMatchTerm = path, 0, -1, ""
+		m.previewKind, m.previewPath = kind, path
+		m.previewOffset, m.previewMatch, m.previewMatchTerm = 0, -1, ""
+	}
+	if kind != previewDiff {
+		if _, cached := m.docs[path]; cached {
+			return m, nil
+		}
+		path, ctx := path, m.ctx
+		return m, func() tea.Msg { return docMsg{path: path, doc: m.documentFor(ctx, path)} }
 	}
 	var cmds []tea.Cmd
 	kinds := []patchKind{patchSpan, patchWorking}
@@ -2639,8 +2742,8 @@ func (m *reviewModel) store(kind patchKind, path string, p Patch) {
 // preview of the wrong diff is worse than no preview -- the reviewer's own edits are the ones most
 // likely to have just changed, so both sources go.
 func (m *reviewModel) forgetPatches() {
-	m.patches, m.working = nil, nil
-	m.previewPath, m.previewOffset, m.previewMatch = "", 0, -1
+	m.patches, m.working, m.docs = nil, nil, nil
+	m.previewPath, m.previewOffset, m.previewMatch, m.previewKind = "", 0, -1, previewDiff
 	// The field closes with the rows it was searching: a term typed against a diff that is gone is a
 	// field with nothing under it. The term itself stays, for the next file to be typed into.
 	m.searching, m.searchInput = false, ""
@@ -2680,6 +2783,13 @@ func (m reviewModel) togglePreview() (tea.Model, tea.Cmd) {
 	if reason := m.overlayShortfall(); reason != "" {
 		m.setRefusal(reason)
 		return m, nil
+	}
+	// What is on show is decided before the keys move: while the terminal has had no room for the pane,
+	// nothing has been deriving, and a place kept from the last shape the terminal had is not what the
+	// reviewer is pointing at with `p`. When the row is the one already remembered -- `p`, `Esc`, `p` --
+	// nothing here changes, and the place in the file is kept.
+	if kind, path, ok := m.previewRowTarget(); ok && (kind != m.previewKind || path != m.previewPath) {
+		m.previewKind, m.previewPath, m.previewOffset, m.previewMatch = kind, path, 0, -1
 	}
 	// The overlay is the same region as the pane, so it takes the keys the same way: through focusOn,
 	// which is what remembers which half of the list column is handing them over.
@@ -2738,6 +2848,42 @@ func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 // file being read rather than the one under the cursor, ctrl-d scrolls rather than quits -- and that
 // is the point: the shortcut bar names each of these keys while this screen is up, so no meaning
 // travels with a keystroke alone.
+// openPreview opens what the pane is showing with the key the list would use on it: a diff opens in the
+// difftool, and a document does whatever its own row does -- the editor, or the difftool when the span
+// changed it, and a refusal over history where only the diff is legitimate. Those rules belong to the row, so
+// the row is looked up rather than the rules being repeated here.
+func (m reviewModel) openPreview() (tea.Model, tea.Cmd) {
+	if m.previewPath == "" {
+		m.setRefusal("nothing to open: the preview has no file on show")
+		return m, nil
+	}
+	if m.previewKind == previewDiff {
+		return m.openDiff(m.previewPath)
+	}
+	if r, ok := m.previewRow(); ok {
+		return m.openArtifact(r)
+	}
+	return m, nil
+}
+
+// previewRow is the row the pane is a window onto, or false when it is no longer in the list: the rows are
+// rebuilt when a thread is created or the span changes, and the pane keeps what it was showing through that.
+func (m reviewModel) previewRow() (row, bool) {
+	for _, r := range m.rows {
+		switch r.kind {
+		case rowAbout, rowThread:
+			if m.previewKind != previewThreads && r.path == m.previewPath {
+				return r, true
+			}
+		case rowThreadsHead:
+			if m.previewKind == previewThreads {
+				return r, true
+			}
+		}
+	}
+	return row{}, false
+}
+
 func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key.Type == tea.KeyCtrlC {
 		m.quitting = true
@@ -2787,16 +2933,12 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case key.Type == tea.KeyEnter:
 		// Over the overlay enter closes: the screen is the diff already, and the difftool was what `p`
-		// was asked for. In the pane it is the key the pane's own note points at, and it opens the file
-		// being read -- the one the pane is named after, not whichever row the list's cursor sits on.
+		// was asked for. In the pane it is the key the pane's own note points at, and it opens what is
+		// being read -- the thing the pane is named after, not whichever row the list's cursor sits on.
 		if overlay {
 			return m.closePreview()
 		}
-		if m.previewPath == "" {
-			m.setRefusal("nothing to open: the preview has no file on show")
-			return m, nil
-		}
-		return m.openDiff(m.previewPath)
+		return m.openPreview()
 	case key.Type == tea.KeyDown, key.Type == tea.KeyRunes && firstRune(key) == 'j':
 		return m.scrollPreview(1, 1)
 	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
@@ -2883,12 +3025,115 @@ func (m reviewModel) previewContent(mk marks) []previewRow {
 	if m.previewPath == "" {
 		return nil
 	}
-	patch, ok := m.patches[m.previewPath]
+	if m.previewKind == previewDiff {
+		patch, ok := m.patches[m.previewPath]
+		if !ok {
+			return nil
+		}
+		work, _ := m.patch(patchWorking, m.previewPath)
+		return previewRows(patch, work, m.previewWidth(), mk)
+	}
+	doc, ok := m.docs[m.previewPath]
 	if !ok {
 		return nil
 	}
-	work, _ := m.patch(patchWorking, m.previewPath)
-	return previewRows(patch, work, m.previewWidth(), mk)
+	return docRows(doc, m.previewWidth(), mk)
+}
+
+// previewNotice is what the pane says instead of text: why it has none yet, or why it has none at all. Empty
+// means there is something to draw.
+func (m reviewModel) previewNotice() string {
+	switch m.previewKind {
+	case previewDocument, previewThreads:
+		doc, cached := m.docs[m.previewPath]
+		switch {
+		case !cached:
+			return "(reading…)"
+		case doc.Err != "":
+			return doc.Err
+		case len(doc.Sections) == 0:
+			if m.previewKind == previewThreads {
+				return "no threads yet"
+			}
+			return "nothing to read"
+		}
+	default:
+		patch, cached := m.patches[m.previewPath]
+		switch {
+		case !cached:
+			return "(reading the diff…)"
+		case patch.Err != "":
+			return patch.Err
+		case len(patch.Lines) == 0:
+			work, known := m.patch(patchWorking, m.previewPath)
+			if m.sess.Span().Live() && !known {
+				// Not "no changes" yet: the answer about the reviewer's own edits is still on its way,
+				// and saying it now would be wrong for one git call's duration.
+				return "(reading your edits…)"
+			}
+			if len(work.Lines) == 0 {
+				return "no changes in this span"
+			}
+		}
+	}
+	return ""
+}
+
+// previewTooLong is what the pane says when what it is showing does not fit in it, and "" when it does. The
+// two answers differ in more than the word: a diff too large is one to open in the difftool, and a document
+// too long is one to open in the editor.
+func (m reviewModel) previewTooLong() string {
+	switch m.previewKind {
+	case previewDocument, previewThreads:
+		if doc, ok := m.docs[m.previewPath]; ok && doc.Capped {
+			return "too long to read here"
+		}
+	default:
+		if patch, ok := m.patches[m.previewPath]; ok && patch.Capped {
+			return "diff too large to read here"
+		}
+	}
+	return ""
+}
+
+// previewTitle is the pane's own line: what is on show, and how much of it. The counts are git's for a diff;
+// a document has no additions and deletions to report, only lines, so the header counts what the thing on
+// screen actually has rather than leaving the space for a count that would mean nothing.
+func (m reviewModel) previewTitle(width int) string {
+	header := m.previewPath
+	if m.mode == modePreview {
+		// The overlay hides the list, and the list is where the span is named. Reading a historical
+		// diff with nothing on screen saying it is historical is how a reviewer reaches for a mark that
+		// cannot be set, so the span travels with the file here -- and it leads the line, so that when
+		// the line has to be clipped it loses the counts at the end rather than the answer at the front.
+		header = m.spanName(m.sess.Header().SpanLabel) + "  \u00b7  " + m.previewPath
+	}
+	switch m.previewKind {
+	case previewDocument, previewThreads:
+		if doc, cached := m.docs[m.previewPath]; cached {
+			if m.previewKind == previewThreads {
+				header = fmt.Sprintf("%s  \u00b7  %d threads", header, len(doc.Sections))
+			} else if lines := docLines(doc); lines > 0 {
+				header = fmt.Sprintf("%s  \u00b7  %d lines", header, lines)
+			}
+			if m.sess.Span().Historical() {
+				// The text is the file on disk, and a historical span does not contain that file -- it
+				// contains whatever revision of it its head happens to have. Saying which copy is being
+				// read is what keeps the two apart in a reviewer's head, and it is why the editor is
+				// refused over history while this is not: this cannot change anything.
+				header += "  \u00b7  working copy"
+			}
+		}
+	default:
+		if patch, cached := m.patches[m.previewPath]; cached && patch.Added >= 0 {
+			header = fmt.Sprintf("%s  +%d \u2212%d", header, patch.Added, patch.Deleted)
+		}
+	}
+	title := styleDim.Render
+	if m.previewHasFocus() {
+		title = styleActive.Render
+	}
+	return title(clip(header, width))
 }
 
 // searchTerm is what the pane is highlighting: what is being typed while the field is open, and the term
@@ -3033,40 +3278,10 @@ func (m reviewModel) previewLines() []string {
 	if width <= 0 || m.previewPath == "" {
 		return nil
 	}
-	header := m.previewPath
-	if m.mode == modePreview {
-		// The overlay hides the list, and the list is where the span is named. Reading a historical
-		// diff with nothing on screen saying it is historical is how a reviewer reaches for a mark that
-		// cannot be set, so the span travels with the file here -- and it leads the line, so that when
-		// the line has to be clipped it loses the counts at the end rather than the answer at the front.
-		header = m.spanName(m.sess.Header().SpanLabel) + "  \u00b7  " + m.previewPath
-	}
+	out := []string{m.previewTitle(width)}
 	body := m.previewBodyRows()
-	patch, cached := m.patches[m.previewPath]
-	if cached && patch.Added >= 0 {
-		header = fmt.Sprintf("%s  +%d \u2212%d", header, patch.Added, patch.Deleted)
-	}
-	title := styleDim.Render
-	if m.previewHasFocus() {
-		title = styleActive.Render
-	}
-	out := []string{title(clip(header, width))}
-
-	switch {
-	case !cached:
-		return append(out, styleDim.Render("(reading the diff…)"))
-	case patch.Err != "":
-		return append(out, styleDim.Render(patch.Err))
-	case len(patch.Lines) == 0:
-		work, known := m.patch(patchWorking, m.previewPath)
-		if m.sess.Span().Live() && !known {
-			// Not "no changes" yet: the answer about the reviewer's own edits is still on its way,
-			// and saying it now would be wrong for one git call's duration.
-			return append(out, styleDim.Render("(reading your edits…)"))
-		}
-		if len(work.Lines) == 0 {
-			return append(out, styleDim.Render("no changes in this span"))
-		}
+	if notice := m.previewNotice(); notice != "" {
+		return append(out, styleDim.Render(clip(notice, width)))
 	}
 
 	// Rows, not source lines: a line wider than the column is drawn as several rows, so the paging, the
@@ -3100,8 +3315,8 @@ func (m reviewModel) previewLines() []string {
 		if offset > 0 {
 			note = fmt.Sprintf("rows %d\u2013%d of %d%s%s", offset+1, end, len(rows), keys, tail)
 		}
-		if patch.Capped {
-			note = "diff too large to read here" + tail
+		if too := m.previewTooLong(); too != "" {
+			note = too + tail
 		}
 		if term := m.searchTerm(); term != "" {
 			// How many places the term has: what tells the reviewer whether `n` has anywhere left to go.
