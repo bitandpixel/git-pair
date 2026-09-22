@@ -101,26 +101,26 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
 
 **Tasks**
 
-- [ ] In `internal/cli/integration.go`, between the exact-match short circuit and
+- [x] In `internal/cli/integration.go`, between the exact-match short circuit and Done in `runIntegrationRecord`, between the exact-match short circuit and `reviewref.Conflict`. The predicate needs one condition beyond descent, found by the two backport tests: the asked commit's **first parent** must not already hold the record. Without it every commit after a landing was a carrier — a backport onto the same branch read as carrying, which is exactly the second landing §11.4 keeps out. `recordCarried` now asks both, and the carrying path runs `verifyLandingReachable` (check 3, the one claim it prints) rather than the whole verify set.
       `reviewref.Conflict`, add the carrying case: the recorded integration ref exists, differs from the
       asked commit, the recorded archive equals the asked source, the recorded commit is an ancestor of
       the asked one, and the asked commit is reachable from the destination. Reuse the containment helper
       behind `verifyIntegrationRecord`'s third check rather than writing a second ancestry expression.
-- [ ] Report it through the existing `reportIntegration` path with a `recordReportExtras` field, so the
+- [x] Report it through the existing `reportIntegration` path with a `recordReportExtras` field, so the Done: one `recordReportExtras.carried` field, one headline case, and the two ref lines now print from the `PairResult` rather than the asked pair so a carrying answer cannot display a commit no ref holds.
       no-op, the carrying answer and the write cannot drift into three wordings. Human output names both
       commits and says no ref moved; JSON gets `carried_by`, absent otherwise.
-- [ ] Keep `reviewref.Conflict` and `CreateOnly` strict, and say why in a comment at the carrying case:
+- [x] Keep `reviewref.Conflict` and `CreateOnly` strict, and say why in a comment at the carrying case: Untouched, with the reason in a comment at the carrying case.
       the write has no destination to reason about, and the race is settled by git's create-only update.
-- [ ] PRD §26/§29's create-only wording and README's record row gain the carrying case; §13's stacked
+- [x] PRD §26/§29's create-only wording and README's record row gain the carrying case; §13's stacked PRD §11.4's create-only paragraphs and README's `integration record` prose and conflict sample all gained the carrying case, including the first-parent condition and the two refusals it does not swallow.
       landing text gains the sentence that a stacked child's record names its landing on the branch it was
       based on, which is where the chain continues.
-- [ ] Tests: carrying (exit 0, refs byte-identical, `carried_by` set, `--json` shape), non-descendant
+- [x] Tests: carrying (exit 0, refs byte-identical, `carried_by` set, `--json` shape), non-descendant `internal/cli/integration_carried_test.go`: carrying (exit 0, refs unchanged by SHA and by shape, `carried_by` present and a prefix of the asked commit, `recorded` false, and the exact repeat asserting `carried_by` is *absent* — the key distinguishes the two kinds of no-op), archive-mismatch-with-descending-integration still a conflict, and a carrier the named target does not hold refused with the reachability wording.
       conflict still refused with the existing wording, archive differing while integration descends still
       refused, and the child-into-parent-then-parent-into-trunk sequence end to end.
 
 **Verification**
 
-- A regression test replays what actually happened: child merged into an interim branch, recorded, interim
+- [x] A regression test replays what actually happened: child into an interim branch, recorded there, interim into trunk, then the re-run against trunk succeeds with `carried_by` and neither ref moves. The two pre-existing backport tests are the counter-tests and pass unchanged. child merged into an interim branch, recorded, interim
   merged into trunk, then `integration record --changeset <child> --target <trunk>` answers "already
   recorded" without moving either ref.
 
@@ -204,3 +204,4 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
 | date | what | outcome |
 |---|---|---|
 | 2026-09-22 | plan written from the landing of `feat-two-frozen-refs` and `feat-publish-the-records` | not started |
+| 2026-09-22 | M1 implemented; the first-parent condition found by the two backport tests | M1 done |

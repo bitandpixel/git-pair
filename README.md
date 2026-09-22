@@ -952,8 +952,15 @@ carries and the integration branch does not, so the pipeline needs no name a hum
 settles it when the source carries two, which is what a stacked child does. A squash, a rebase and a
 cherry-pick are all recordable, and none of them leaves ancestry between the two SHAs: the record is what
 connects them. Both refs are create-only — a re-run with the same pair is a success that changed nothing,
-and asking for a different commit is refused, naming both — and once the record exists `check` refuses the
-changeset as already integrated and the commands that write markers refuse it too.
+and asking for a different commit is refused, naming both. The one exception is a commit that *carries*
+what the record already names, and only when that commit is what brought the record in: a stacked child
+lands on its base branch, that branch later lands on trunk, and the re-run against trunk names a descendant
+whose own first parent did not yet hold the record. That answers "already recorded at <the recorded commit>,
+and <this commit> carries it into <destination>", writes nothing, and reports `carried_by` in `--json`. A
+commit whose first parent already held the record is a second landing on the same branch — a backport — and
+a different reviewed head is a different claim, so both stay conflicts. Once the record
+exists `check` refuses the changeset as already integrated and the commands that write markers refuse it
+too.
 
 What the recorder refuses is what makes the pair worth reading later, and all four checks are refusals
 rather than warnings:
@@ -1429,7 +1436,8 @@ candidates; a merge, a squash or a cherry-pick of the reviewed branch is the com
 d91c21e, and 4f2b8c1 was asked for` (exit 1) — the changeset is already recorded, and git-pair never
 moves a durable ref, so there is no flag for this. A landing that needs correcting is corrected in git
 and recorded under an id with no record yet; the refusal names both commits so a re-run from a stale
-pipeline can be told from a genuine second landing.
+pipeline can be told from a genuine second landing. A re-run whose commit is a *descendant* of the
+recorded one is neither: it is the stacked landing, and it succeeds with `carried_by` instead of refusing.
 
 `warning: this clone holds no refs/git-pair/* refs at all; fetch them before trusting anything that
 says never recorded` — printed by `integration record` alongside a record it wrote anyway. The candidate

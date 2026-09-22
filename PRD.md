@@ -1600,8 +1600,21 @@ completes it; asking for a different commit is refused, and the refusal names th
 recorded and the one that was asked for. The check alone would be a race; the create-only write is what
 stops two pipelines recording the same landing from both winning (§13.3).
 
-A second landing is refused rather than recorded. A backport to a release branch is a fact about that
-branch's history, which git already records; git-pair keeps one pair per changeset, not one per landing.
+One asked-for commit is not a different pair: the one that *carries* the recorded commit. A stacked child
+lands on the branch it was based on, that branch later lands on trunk, and a run measured against trunk
+names a descendant of what the record names. The record answers "what did this changeset become" and the
+asked commit answers "what carried it here", so the run succeeds, writes nothing, and says both — naming
+the recorded commit, the carrier, and the destination the carrier was verified to be in (`carried_by` in
+`--json`, absent on every other answer). Two things keep that from being a licence to record anything
+later. The asked commit has to be what *brought* the recorded one in: if the asked commit's own first
+parent already held the record, the destination had the changeset on its line beforehand, and the asked
+commit is a second landing on that branch — a backport, refused as before. And the archive half has to
+match: a different reviewed head is a different claim about what was approved, not a later position on the
+same chain, and it stays a refusal.
+
+A second landing is otherwise refused rather than recorded. A backport to a release branch is a fact about
+that branch's history, which git already records; git-pair keeps one pair per changeset, not one per
+landing.
 
 The command needs no checkout and writes no commit: it is addressed by SHA and ref, and running it from
 the default branch, a release branch or a detached CI checkout is the same operation. Exit codes are the
@@ -1919,6 +1932,9 @@ record finishes it. Asking for a different commit is refused, and the refusal na
 commit and the one asked for, and says that git-pair never moves a durable ref. There is no flag for
 overriding it: a landing that needs correcting is corrected in git and recorded under an id that has no
 record yet, not by moving a ref out from under the readers who trusted it.
+
+The carrying case (§11.4) is the one asked-for commit that is not a conflict, and it changes nothing
+either: a descendant of the recorded commit is covered by the record rather than competing with it.
 
 The pair `archive A → integration B` is the whole product of integration recording, and everyone who
 reads it later — a release note, a bisect, an agent asked where this review went — reads it as a statement

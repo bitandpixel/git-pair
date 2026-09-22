@@ -729,6 +729,11 @@ type integrationRecordJSON struct {
 	Fetch           *fetchConfig `json:"fetch_config,omitempty"`
 	Recorded        bool         `json:"recorded"`
 	AlreadyRecorded bool         `json:"already_recorded"`
+	// CarriedBy is the commit this run asked for when the record already names one it descends from: the
+	// stacked case, where the changeset landed on its base branch and that branch later reached trunk. It
+	// is absent whenever the run wrote a record, repeated one exactly, or refused — so a pipeline can tell
+	// "the record covers this commit" from "this commit is the record" without comparing SHAs.
+	CarriedBy string `json:"carried_by,omitempty"`
 	// NextAction names the step that makes the record durable outside this clone. A record that lives
 	// only where the merge ran is a record that dies there, and the moment to say so is the moment the
 	// record was written — not a warning the reader has to run a different command to hear.
@@ -850,6 +855,32 @@ func (a *app) runIntegrationRecord(in integrationRecordInput) error {
 			IntegrationCommit: rec.Commit,
 		}, false, a.recordExtras(ctx, repo, in))
 	}
+	// A second landing that *carries* the recorded commit is the stacked case, and it is not a conflict.
+	// The child landed on the branch it was based on, that branch later landed on trunk, and a run
+	// measured against trunk names a descendant of what the record names. The record answers "what did this
+	// changeset become"; the asked commit answers "what carried it here". Both are true, so this answers
+	// with the record instead of refusing — and what the record names still does not move, because the
+	// write below is create-only and a pair that is simply different still conflicts.
+	if carried, err := recordCarried(ctx, repo, recorded, rec); err != nil {
+		return err
+	} else if carried != "" {
+		// The one landing check this answer needs is the one it prints: that the commit it calls a carrier
+		// is in the destination it names. The review and directory checks are about writing a record, and
+		// this run writes none — re-running them here would refuse a carrying answer over an assumption the
+		// original record never had to satisfy.
+		if err := verifyLandingReachable(ctx, repo, rec, in); err != nil {
+			return err
+		}
+		extras := a.recordExtras(ctx, repo, in)
+		extras.carried = carried
+		return a.reportIntegration(rec, reviewref.PairResult{
+			ArchiveRef:        reviewref.Archive(rec.ID),
+			IntegrationRef:    reviewref.Integration(rec.ID),
+			Archive:           recorded.Archive,
+			IntegrationCommit: recorded.Integration,
+		}, false, extras)
+	}
+
 	// A different pair for a changeset that already has one is refused here rather than by the write
 	// below, so the reader gets the refusal that answers the question — "what did we already say?" —
 	// instead of an incidental complaint from the landing checks, which a second landing into a branch
@@ -913,11 +944,55 @@ func (a *app) recordExtras(ctx context.Context, repo *git.Repo, in integrationRe
 
 // recordReportExtras is what the record run decided about configuration, carried to the report so the
 // answer about the refs and the answer about the clone's fetch behaviour arrive together.
+// recordCarried answers the stacked question: does the record already cover this commit? True answer is
+// the commit the caller asked for, and it holds when three things do: the record names an integration
+// commit, the asked commit descends from it, and the asked archive half is the same reviewed head the
+// record names.
+//
+// The third condition is what keeps this from swallowing a genuine mistake. A different reviewed head is a
+// different claim about what was approved, not a later position on the same chain, so an archive mismatch
+// falls through to the conflict — which is the refusal that should be loud. Nothing here compares contents:
+// a rewrite that re-creates the recorded commit under a new SHA is not a carrier and does not read like
+// one.
+func recordCarried(ctx context.Context, repo *git.Repo, recorded reviewref.Pair, rec *integrationRecord) (string, error) {
+	if recorded.Integration == "" || recorded.Integration == rec.Commit || recorded.Archive != rec.Source {
+		return "", nil
+	}
+	descends, err := repo.IsAncestor(ctx, recorded.Integration, rec.Commit)
+	if err != nil || !descends {
+		return "", err
+	}
+	// Descent alone is not enough, or every commit after a landing would be a carrier of it. The question
+	// is whether *this* commit is what brought the recorded one in: if the asked commit's own first parent
+	// already held the record, then the destination had the changeset on its line before this commit, and
+	// the asked commit is a second landing on that branch — a backport, which git-pair keeps out of the
+	// record (§11.4) because it is a fact about that branch's history and not a new arrival of the
+	// changeset. When only this commit brings the record with it, this commit is the carrier, which is what
+	// a stacked child's landing on trunk looks like from the trunk side.
+	//
+	// A commit with no first parent has no "before" to compare against. That is not a carrier, and falling
+	// through gives the caller the conflict refusal rather than a guess.
+	before, err := repo.IsAncestor(ctx, recorded.Integration, rec.Commit+"^")
+	if err != nil {
+		if errors.Is(err, git.ErrUnknownRevision) {
+			return "", nil
+		}
+		return "", err
+	}
+	if before {
+		return "", nil
+	}
+	return rec.Commit, nil
+}
+
 type recordReportExtras struct {
 	// fetch is set only when `--configure-fetch` was asked for.
 	fetch *fetchConfig
 	// hint is the one line naming the flag, for a run that did not ask.
 	hint string
+	// carried is the commit the caller asked for when it descends from what the record already names.
+	// Empty for every run that writes a record or repeats one exactly.
+	carried string
 }
 
 func (a *app) reportIntegration(rec *integrationRecord, res reviewref.PairResult, wrote bool, extras recordReportExtras) error {
@@ -933,11 +1008,19 @@ func (a *app) reportIntegration(rec *integrationRecord, res reviewref.PairResult
 			IntegrationRef:  res.IntegrationRef,
 			Recorded:        wrote,
 			AlreadyRecorded: !wrote,
+			CarriedBy:       extras.carried,
 			NextAction:      "git pair integration publish " + rec.ID,
 			Fetch:           extras.fetch,
 		})
 	}
 	switch {
+	case extras.carried != "":
+		into := ""
+		if rec.Target != "" {
+			into = " into " + displayRef(rec.Target)
+		}
+		a.printf("%s: already recorded at %s, and %s carries that commit%s\n",
+			rec.ID, short(res.IntegrationCommit), short(extras.carried), into)
 	case res.ArchiveCreated && res.IntegrationCreated:
 		a.printf("%s: recorded %s as the integration of %s\n", rec.ID, short(rec.Commit), short(rec.Source))
 	case !wrote:
@@ -949,8 +1032,11 @@ func (a *app) reportIntegration(rec *integrationRecord, res reviewref.PairResult
 		a.printf("%s: completed the record for %s (the %s ref already existed)\n",
 			rec.ID, short(rec.Source), existingHalf(res))
 	}
-	a.printf("  archive:     %s -> %s\n", res.ArchiveRef, short(rec.Source))
-	a.printf("  integration: %s -> %s\n", res.IntegrationRef, short(rec.Commit))
+	// The refs are printed from the result, not from what was asked for: for a write and for an exact
+	// repeat they are the same values, and for a carrying answer they are what the record holds while the
+	// headline names the carrier. Printing the asked pair there would show a commit no ref points at.
+	a.printf("  archive:     %s -> %s\n", res.ArchiveRef, short(res.Archive))
+	a.printf("  integration: %s -> %s\n", res.IntegrationRef, short(res.IntegrationCommit))
 	if rec.Target != "" {
 		a.printf("  verified reachable from %s%s\n", displayRef(rec.Target), derivedNote(rec))
 	}
