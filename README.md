@@ -611,7 +611,12 @@ their name is derivable from the changeset, so their existence is the only fact 
 `integrated` is true once `git pair integration record` has recorded where
 the work landed, with `integrated_commit` naming that commit and `integration_ref` the ref that holds
 it, and `state` is untouched by it: landing
-is a fact beside the state, not a sixth state value. `integrated_in_default_branch` says whether that
+is a fact beside the state, not a sixth state value. The human surface prints no "run
+`git pair integration record`" beside a ref that already exists — the finding for a landing with no record
+is `LANDED, UNRECORDED`, which names the command with the changeset in it. Reading a landed changeset by id
+(`status --changeset <id>`, no branch carrying it) keeps that split: `state` stays what the span says while
+the reviews come from the archived chain, because after a merge landing the archived head sits below the
+base and `base..head` is empty for exactly the changeset whose verdicts matter most. `integrated_in_default_branch` says whether that
 commit is in the history of the branch git-pair calls the integration branch, and
 `integrated_default_branch` names that branch — work that retired into `release/2.x` and never reached
 the default branch must not read like a default-branch landing, and what git-pair reports is the

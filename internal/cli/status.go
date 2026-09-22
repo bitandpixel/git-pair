@@ -481,7 +481,11 @@ func printStatus(a *app, v *statusView) {
 		a.printf("\nTerminal:\n  abandoned by %s (`git pair change abandon`)\n", short(j.AbandonedCommit))
 	}
 	if j.Integrated {
-		a.printf("\nIntegrated:\n  %s%s (`git pair integration record`)\n", j.IntegratedCommit, v.integratedReach)
+		// Nothing here tells the reader to run `git pair integration record`: this block prints because that
+		// command already wrote the ref, and the `--json` answer on the same facts is "nothing further is
+		// recorded for a changeset that has landed". A landing with no record anywhere is a different
+		// finding — the LANDED, UNRECORDED section, which names the command with the changeset in it.
+		a.printf("\nIntegrated:\n  %s%s\n", j.IntegratedCommit, v.integratedReach)
 		if j.IntegratedRef != "" {
 			a.printf("  %s\n", j.IntegratedRef)
 		}

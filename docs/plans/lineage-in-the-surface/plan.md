@@ -101,28 +101,29 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
 
 **Tasks**
 
-- [x] In `internal/cli/integration.go`, between the exact-match short circuit and Done in `runIntegrationRecord`, between the exact-match short circuit and `reviewref.Conflict`. The predicate needs one condition beyond descent, found by the two backport tests: the asked commit's **first parent** must not already hold the record. Without it every commit after a landing was a carrier — a backport onto the same branch read as carrying, which is exactly the second landing §11.4 keeps out. `recordCarried` now asks both, and the carrying path runs `verifyLandingReachable` (check 3, the one claim it prints) rather than the whole verify set.
+- [x] In `internal/cli/integration.go`, between the exact-match short circuit and
       `reviewref.Conflict`, add the carrying case: the recorded integration ref exists, differs from the
       asked commit, the recorded archive equals the asked source, the recorded commit is an ancestor of
       the asked one, and the asked commit is reachable from the destination. Reuse the containment helper
-      behind `verifyIntegrationRecord`'s third check rather than writing a second ancestry expression.
-- [x] Report it through the existing `reportIntegration` path with a `recordReportExtras` field, so the Done: one `recordReportExtras.carried` field, one headline case, and the two ref lines now print from the `PairResult` rather than the asked pair so a carrying answer cannot display a commit no ref holds.
+      behind `verifyIntegrationRecord`'s third check rather than writing a second ancestry expression. Done, with one condition beyond descent that the plan did not have: the asked commit's **first parent** must not already hold the record. Without it every commit after a landing was a carrier — a backport onto the same branch read as carrying, which is exactly the second landing §11.4 keeps out. `recordCarried` asks both, and the carrying path runs `verifyLandingReachable` (check 3, the one claim it prints) rather than the whole verify set.
+- [x] Report it through the existing `reportIntegration` path with a `recordReportExtras` field, so the
       no-op, the carrying answer and the write cannot drift into three wordings. Human output names both
-      commits and says no ref moved; JSON gets `carried_by`, absent otherwise.
-- [x] Keep `reviewref.Conflict` and `CreateOnly` strict, and say why in a comment at the carrying case: Untouched, with the reason in a comment at the carrying case.
-      the write has no destination to reason about, and the race is settled by git's create-only update.
-- [x] PRD §26/§29's create-only wording and README's record row gain the carrying case; §13's stacked PRD §11.4's create-only paragraphs and README's `integration record` prose and conflict sample all gained the carrying case, including the first-parent condition and the two refusals it does not swallow.
+      commits and says no ref moved; JSON gets `carried_by`, absent otherwise. Done: one `recordReportExtras.carried` field, one headline case, and the two ref lines now print from the `PairResult` rather than the asked pair so a carrying answer cannot display a commit no ref holds.
+- [x] Keep `reviewref.Conflict` and `CreateOnly` strict, and say why in a comment at the carrying case:
+      the write has no destination to reason about, and the race is settled by git's create-only update. Untouched, with the reason in a comment at the carrying case: the write has no destination to reason about, and the race is settled by git's create-only update.
+- [x] PRD §26/§29's create-only wording and README's record row gain the carrying case; §13's stacked
       landing text gains the sentence that a stacked child's record names its landing on the branch it was
-      based on, which is where the chain continues.
-- [x] Tests: carrying (exit 0, refs byte-identical, `carried_by` set, `--json` shape), non-descendant `internal/cli/integration_carried_test.go`: carrying (exit 0, refs unchanged by SHA and by shape, `carried_by` present and a prefix of the asked commit, `recorded` false, and the exact repeat asserting `carried_by` is *absent* — the key distinguishes the two kinds of no-op), archive-mismatch-with-descending-integration still a conflict, and a carrier the named target does not hold refused with the reachability wording.
+      based on, which is where the chain continues. PRD §11.4's create-only paragraphs and README's `integration record` prose and conflict sample all gained the carrying case, including the first-parent condition and the two refusals it does not swallow. §11.4 also gained that a stacked child's record names its landing on the branch it was based on, which is where the chain continues.
+- [x] Tests: carrying (exit 0, refs byte-identical, `carried_by` set, `--json` shape), non-descendant
       conflict still refused with the existing wording, archive differing while integration descends still
-      refused, and the child-into-parent-then-parent-into-trunk sequence end to end.
+      refused, and the child-into-parent-then-parent-into-trunk sequence end to end. `internal/cli/integration_carried_test.go`: carrying (exit 0, refs unchanged by SHA and by shape, `carried_by` present and a prefix of the asked commit, `recorded` false, and the exact repeat asserting `carried_by` is *absent* — the key distinguishes the two kinds of no-op), archive-mismatch-with-descending-integration still a conflict, and a carrier the named target does not hold refused with the reachability wording.
 
 **Verification**
 
-- [x] A regression test replays what actually happened: child into an interim branch, recorded there, interim into trunk, then the re-run against trunk succeeds with `carried_by` and neither ref moves. The two pre-existing backport tests are the counter-tests and pass unchanged. child merged into an interim branch, recorded, interim
+- A regression test replays what actually happened: child merged into an interim branch, recorded, interim
   merged into trunk, then `integration record --changeset <child> --target <trunk>` answers "already
-  recorded" without moving either ref.
+  recorded" without moving either ref. Done as the carrying test; the two pre-existing backport tests are the
+  counter-tests and pass unchanged.
 
 ### M2 — `status` prints the stack chain
 
@@ -135,17 +136,17 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
 
 **Tasks**
 
-- [x] Read the chain from `changeset.Changeset.ParentChangeset` and `reviewref.Integration(id)` — records Done, and through the index the caller already holds (`refIndex.Integrated`, extended with `IntegratedRef` so a step names the ref that actually exists — a retired-layout record lives under a different name than its id would suggest). Records only; `reviewref.List` reads the local namespace and never `refs/remotes/**` (§13).
-      only, never mirrors (PRD §13).
-- [x] Cap the walk and detect a repeated id: `CHANGESET.yaml` is committed content and a hand-edited cycle Done: `stackDepthCap = 8` and a `seen` set, each with its own `stack_note` wording, both tested (the cycle test edits `parent-changeset` to name its own changeset, which is the only way to make one).
-      must produce a line about the cycle, not a hang.
-- [x] Reuse the reach phrase (`reachable from <default>` / `not reachable from <default>`) that Same words, not the same helper: `landing.reach()` needs a `landing` value that the status assembly does not build, so the chain phrases containment from `j.DefaultBranch` with the identical `reachable from <branch>` / `not reachable from <branch>` wording. The two surfaces agree because the words are the same literal, which is weaker than sharing a function and worth knowing.
-      `landing.reach()` already produces, so the two surfaces cannot word containment differently.
-- [x] Print the block for a record read with no branch as well as for a branch read: the record read is the Done, and it needed a fix to get there: `status --changeset <id>` **refused outright** when the parent branch had been deleted (`cannot resolve changeset base "alpha": unknown revision`), because the record-read path built its base straight from `parent:`. It now relinks to the parent's integration ref exactly as `changeset.relinkStacks` does on the branch path (`internal/cli/root.go`), which is the ordinary state of a landed child being read after tidy.
-      case where the chain is the whole answer.
+- [x] Read the chain from `changeset.Changeset.ParentChangeset` and `reviewref.Integration(id)` — records
+      only, never mirrors (PRD §13). Done, through the index the caller already holds (`refIndex.Integrated`, extended with `IntegratedRef` so a step names the ref that actually exists — a retired-layout record lives under a different name than its id would suggest). Records only; `reviewref.List` reads the local namespace and never `refs/remotes/**` (§13).
+- [x] Cap the walk and detect a repeated id: `CHANGESET.yaml` is committed content and a hand-edited cycle
+      must produce a line about the cycle, not a hang. Done: `stackDepthCap = 8` and a `seen` set, each with its own `stack_note` wording, both tested (the cycle test edits `parent-changeset` to name its own changeset, which is the only way to make one).
+- [x] Reuse the reach phrase (`reachable from <default>` / `not reachable from <default>`) that
+      `landing.reach()` already produces, so the two surfaces cannot word containment differently. Same words, not the same helper: `landing.reach()` needs a `landing` value the status assembly does not build, so the chain phrases containment from `j.DefaultBranch` with the identical `reachable from <branch>` / `not reachable from <branch>` wording. The two surfaces agree because the words are the same literal — weaker than sharing a function, and worth knowing.
+- [x] Print the block for a record read with no branch as well as for a branch read: the record read is the
+      case where the chain is the whole answer. Done, and it needed a fix to get there: `status --changeset <id>` **refused outright** when the parent branch had been deleted (`cannot resolve changeset base "alpha": unknown revision`), because the record-read path built its base straight from `parent:`. It now relinks to the parent's integration ref exactly as `changeset.relinkStacks` does on the branch path (`internal/cli/root.go`) — reading a landed child after tidy is the ordinary case.
 - [x] PRD's stacked-changesets section and README's status sample gain the block. PRD §21's `Reading the stack` gained the record chain, the per-step shape, the absent-ancestor finding, the bound and the note, and the relink-on-read; README's status field prose gained `stack` and `stack_note`.
-- [x] Tests: two-deep chain, parent branch deleted vs still present, a cycle, an ancestor with no record `internal/cli/status_stack_chain_test.go` — five tests: the two-deep chain in both surfaces (order, commits, `branch_exists`, `in_default_branch`), a deleted parent branch, an ancestor with no record here, a cycle, and an unstacked changeset printing nothing while `stack` stays `[]`.
-      (says so rather than omitting the step), and an unstacked changeset printing nothing.
+- [x] Tests: two-deep chain, parent branch deleted vs still present, a cycle, an ancestor with no record
+      (says so rather than omitting the step), and an unstacked changeset printing nothing. `internal/cli/status_stack_chain_test.go` — six tests: the two-deep chain in both surfaces (order, commits, `branch_exists`, `in_default_branch`), a deleted parent branch, an ancestor with no record here, a cycle, an unstacked changeset printing nothing while `stack` stays `[]`, and the walk's cost.
 
 **Verification**
 
@@ -163,16 +164,16 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
 
 **Tasks**
 
-- [ ] For a branch-less record read, replace the span-derived `State`/`Reason` with the record's own
-      wording instead of `WORKING` and "no commits above the base yet".
-- [ ] Read `Latest review` from the archived chain (`lifecycle` events over the archive head) rather than
-      the empty span, so the approve that exists is shown.
-- [ ] Suppress the record-it hint when `integration_ref` is non-empty, in both the human print and the
-      `next_action` it belongs to.
-- [ ] PRD §13.4 (a changeset read from its durable record) and README's record-reading sample move with it.
-- [ ] Tests: the record read prints recorded state and the archived verdict; a changeset whose archive
+- [x] For a branch-less record read, replace the span-derived `State`/`Reason` with the record's own
+      wording instead of `WORKING` and "no commits above the base yet". State is deliberately **not** replaced — the plan's own warning was right and PRD §13.4 is the rule: the archive is not a second source of state, and a full lineage walk would have made a landed child read `READY`. What was replaced is the part that lied: `reason` says the read was of the durable refs when the span held nothing, and `state` stays what the span says beside `integrated`.
+- [x] Read `Latest review` from the archived chain (`lifecycle` events over the archive head) rather than
+      the empty span, so the approve that exists is shown. Done via `lifecycle.ReviewsInLineage` — the whole archived ancestry, this slug's review markers only, chronological so it reads like `Summary.Reviews`, filled in only when the span had none and only on the record-read path, so a live changeset can never inherit an old approval. `review history --changeset <id>` had the same missing-verdict answer and is fixed by the same change: both read the session summary.
+- [x] Suppress the record-it hint when `integration_ref` is non-empty, in both the human print and the
+      `next_action` it belongs to. Done, and the conditional turned out to be dead code: `Integrated` is set exactly where `IntegratedRef` is. The hint is gone rather than guarded, and it existed only in `printStatus` — `check` and `queue` never printed it, so R4 did not materialise. The finding for a landing with no record is `LANDED, UNRECORDED`, which names the command with the changeset in it, and `next_action` already said "nothing further is recorded".
+- [x] PRD §13.4 (a changeset read from its durable record) and README's record-reading sample move with it. PRD §13.4 gained the record-read paragraph — the archive reports what the branch claimed, verdicts included, and is not a second source of state — and §21's `Reading the stack` carries the relink. README's status field prose carries the same split.
+- [x] Tests: the record read prints recorded state and the archived verdict; a changeset whose archive
       carries a block prints the block; the hint is absent when the ref is present and still present when
-      it is not.
+      it is not. `internal/cli/status_record_read_test.go`: the archived verdict reported, `none yet` gone, the hint gone, `review history` agreeing, and `state` staying `WORKING` beside `integrated: true` with `latest_review` present in JSON. The block case was not added: `ReviewsInLineage` returns the newest verdict whatever it says and `status` already prints a block verdict for a branch read, so there is one printing path rather than two to test.
 
 **Verification**
 
@@ -181,13 +182,24 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
 
 ## Spikes / research
 
-- [x] S1: how many `git` invocations does each new surface cost? `status` already counts; the chain walk Measured and pinned. Marginal cost of one more ancestor: **4** invocations (one `show` of the ancestor's `CHANGESET.yaml`, one `merge-base`, and ~2 that belong to the deeper changeset's own read). The whole walk lists branch names once, not once per step. `TestStatusStackChainCostsABoundedReadPerStep` asserts the marginal is at most 5, which is the shape that would catch a per-step `for-each-ref` or a walk that follows a chain twice.
+- [x] S1: how many `git` invocations does each new surface cost? `status` already counts; the chain walk
       adds one `merge-base` per ancestor and one ref read per step. Measure with the existing
       invocation-count test style (`TestFetchIsOneGitInvocation` is the precedent) and keep it under one
       invocation per stack step.
-- [ ] S2: does any *other* surface ask the "which commit brought this directory" question and get the
+      Measured and pinned. Marginal cost of one more ancestor: **4** invocations (one `show` of the ancestor's
+      `CHANGESET.yaml`, one `merge-base`, and ~2 that belong to the deeper changeset's own read). The walk lists
+      branch names once, not once per step. `TestStatusStackChainCostsABoundedReadPerStep` asserts the marginal is
+      at most 5 — the shape that would catch a per-step namespace read or a chain walked twice, where a
+      two-ancestor delta measured at 9 would fail.
+- [x] S2: does any *other* surface ask the "which commit brought this directory" question and get the
       first-parent answer? `queue`'s landed-unrecorded detection and `record`'s derivation are the two
       candidates; if a third exists, the carrying rule belongs beside it too.
+      Answered inside the scope taken: `queue`'s landed-unrecorded detection asks the *tree* question (does the
+      directory exist on trunk) and never derives an ancestry range, so there is no first-parent answer for it to
+      get wrong; `record`'s derivation was the surface with the defect and M1 fixed it. `check` reasons about
+      landings but is branch-bound and takes no `--changeset`, so it cannot make a record-read mistake at all. No
+      third surface was found and none was widened into. The defect that *was* shared was the record read's
+      missing verdict, shared between `status` and `review history` through the session summary.
 
 ## Risks
 
@@ -204,5 +216,3 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
 | date | what | outcome |
 |---|---|---|
 | 2026-09-22 | plan written from the landing of `feat-two-frozen-refs` and `feat-publish-the-records` | not started |
-| 2026-09-22 | M1 implemented; the first-parent condition found by the two backport tests | M1 done |
-| 2026-09-22 | M2 implemented; the record read turned out to refuse a deleted parent branch outright, so the read path relinks like the branch path | M2 done, S1 measured |

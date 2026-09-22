@@ -1255,7 +1255,7 @@ reads:
 
 ```text
 Integrated:
-  4f2c81a, reachable from main (`git pair integration record`)
+  4f2c81a, reachable from main
   refs/git-pair/integrations/booking-transaction
 
 Review archive:
@@ -1265,9 +1265,21 @@ Next: integrated at 4f2c81a: nothing further is recorded for a changeset that ha
 ```
 
 Both families print together, because they are one record: the commit the work became, and the chain of
-what it went through to get there. The record is also what makes the changeset readable with no branch
-at all — `status --changeset <id>` after `git branch -D` says `Branch: none (read from the durable
-record)` rather than failing.
+what it went through to get there. Nothing in this block tells the reader to run
+`git pair integration record`: it prints because that command already wrote the ref, and the `--json`
+answer on the same facts is that nothing further is recorded. A landing with no record anywhere is the
+different finding `LANDED, UNRECORDED` reports, and that one names the command with the changeset in it.
+
+The record is also what makes the changeset readable with no branch at all — `status --changeset <id>`
+after `git branch -D` says `Branch: none (read from the durable record)` rather than failing. What that
+read reports follows the rule above: the archive tells what the branch claimed before it disappeared, and
+is not a second source of state. So `state` stays what the span says (`WORKING`, beside `integrated`),
+while the reviews are read from the archived chain rather than from the span — after a merge landing the
+archived head sits *below* the base, which makes `base..head` empty for exactly the changeset whose
+verdicts matter most, and "no reviews yet" about a head a reviewer approved is a wrong answer, not a
+harmless one. `reason` says the read was of the durable refs instead of reciting a span nobody asked
+about, and `review history` reports the same submissions as `status`. The stack above a recorded changeset
+is §21's `Stack:` record chain.
 
 Provide:
 
