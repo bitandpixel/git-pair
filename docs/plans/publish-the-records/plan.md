@@ -190,10 +190,9 @@ What exists when this plan starts (`feat/two-frozen-refs`, plan `review-architec
       compares `check`'s exit code and output before and after publishing and requires both to be
       identical — stronger than asserting no refusal, because `check` legitimately refuses a changeset that
       is already recorded, and the publishing must not add a second reason to that answer.
-- [ ] `record`'s post-record output names publishing (`next:  git pair integration publish`), so the
-      step is where the moment is. **Deferred to M3**, which is the commit that makes the command exist:
-      printing a `next:` line that points at nothing is the same mistake as the `--configure-fetch`
-      wording above, one milestone earlier.
+- [x] Done in M3, the commit where the command exists: `record` prints
+      `next:  git pair integration publish <id>` and carries `next_action` in its JSON. Deferring it by one
+      milestone was right — the alternative was a `next:` line pointing at a command that did not exist yet.
 
 **Verification**
 
