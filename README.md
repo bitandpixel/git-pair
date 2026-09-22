@@ -611,11 +611,22 @@ their name is derivable from the changeset, so their existence is the only fact 
 `integrated` is true once `git pair integration record` has recorded where
 the work landed, with `integrated_commit` naming that commit and `integration_ref` the ref that holds
 it, and `state` is untouched by it: landing
-is a fact beside the state, not a sixth state value. `integrated_in_default_branch` says whether that
+is a fact beside the state, not a sixth state value. The human surface prints no "run
+`git pair integration record`" beside a ref that already exists — the finding for a landing with no record
+is `LANDED, UNRECORDED`, which names the command with the changeset in it. Reading a landed changeset by id
+(`status --changeset <id>`, no branch carrying it) keeps that split: `state` stays what the span says while
+the reviews come from the archived chain, because after a merge landing the archived head sits below the
+base and `base..head` is empty for exactly the changeset whose verdicts matter most. `integrated_in_default_branch` says whether that
 commit is in the history of the branch git-pair calls the integration branch, and
 `integrated_default_branch` names that branch — work that retired into `release/2.x` and never reached
 the default branch must not read like a default-branch landing, and what git-pair reports is the
-containment it can derive rather than a branch name no ref stores. `default_branch`,
+containment it can derive rather than a branch name no ref stores. A recorded changeset's own two refs
+say what it became and not where that reached, so `stack` walks the chain the child's `parent-changeset:`
+starts: one entry per ancestor, nearest first, with the ancestor's id, the branch it was stacked on and
+whether this clone still has that branch, its recorded commit and ref, and whether that commit is in the
+integration branch's history. It is `[]` for a changeset that sat on the integration branch, and
+`stack_note` is the one sentence for where the walk stopped — a hand-edited cycle, the depth cap, or a
+read that failed — so a short list is never mistaken for the whole chain. `default_branch`,
 `default_branch_commit` and `default_branch_source` name the branch "landed" was measured against,
 the commit it pointed at, and how the run learned it (`flag`, `origin-head` or `sole-candidate`):
 a CI log that says nothing has landed has two causes, a stale fetch and a wrong trunk, and neither
@@ -952,8 +963,15 @@ carries and the integration branch does not, so the pipeline needs no name a hum
 settles it when the source carries two, which is what a stacked child does. A squash, a rebase and a
 cherry-pick are all recordable, and none of them leaves ancestry between the two SHAs: the record is what
 connects them. Both refs are create-only — a re-run with the same pair is a success that changed nothing,
-and asking for a different commit is refused, naming both — and once the record exists `check` refuses the
-changeset as already integrated and the commands that write markers refuse it too.
+and asking for a different commit is refused, naming both. The one exception is a commit that *carries*
+what the record already names, and only when that commit is what brought the record in: a stacked child
+lands on its base branch, that branch later lands on trunk, and the re-run against trunk names a descendant
+whose own first parent did not yet hold the record. That answers "already recorded at <the recorded commit>,
+and <this commit> carries it into <destination>", writes nothing, and reports `carried_by` in `--json`. A
+commit whose first parent already held the record is a second landing on the same branch — a backport — and
+a different reviewed head is a different claim, so both stay conflicts. Once the record
+exists `check` refuses the changeset as already integrated and the commands that write markers refuse it
+too.
 
 What the recorder refuses is what makes the pair worth reading later, and all four checks are refusals
 rather than warnings:
@@ -1429,7 +1447,8 @@ candidates; a merge, a squash or a cherry-pick of the reviewed branch is the com
 d91c21e, and 4f2b8c1 was asked for` (exit 1) — the changeset is already recorded, and git-pair never
 moves a durable ref, so there is no flag for this. A landing that needs correcting is corrected in git
 and recorded under an id with no record yet; the refusal names both commits so a re-run from a stale
-pipeline can be told from a genuine second landing.
+pipeline can be told from a genuine second landing. A re-run whose commit is a *descendant* of the
+recorded one is neither: it is the stacked landing, and it succeeds with `carried_by` instead of refusing.
 
 `warning: this clone holds no refs/git-pair/* refs at all; fetch them before trusting anything that
 says never recorded` — printed by `integration record` alongside a record it wrote anyway. The candidate

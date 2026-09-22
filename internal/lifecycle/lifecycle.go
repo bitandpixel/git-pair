@@ -235,6 +235,38 @@ type MarkerScan struct {
 // precisely when a record is being written. The cost is one `git log` over history the recorder runs
 // once per landing, which is why it asks for trailers only and keeps commits with no trailer out of
 // the result instead of handing back the repository.
+// ReviewsInLineage answers "which review submissions does this commit's own history carry", for a caller
+// holding a ref rather than a span.
+//
+// It exists because `base..head` is the wrong question for a changeset read from its durable record. After
+// a merge landing the archived head sits *below* the base — the landing put the reviewed work inside the
+// destination — so the range is empty precisely for the changeset whose reviews are the most interesting,
+// and a reader asking about a landed child would be told "no reviews yet" about a head its reviewer approved.
+// The walk is the whole ancestry, the same shape lifecycle.ScanLineage uses for the recorder, and events
+// come back chronological so they read like Summary.Reviews.
+//
+// State is a different question, and this does not answer it: PRD §13.4 is explicit that the archive
+// reports what the branch claimed before it disappeared, and is not a second source of state. A caller that
+// derived state from a full lineage walk would report a landed child as READY, which is a worse mistake than
+// reporting it WORKING beside an integration ref.
+func ReviewsInLineage(ctx context.Context, repo *git.Repo, slug, rev string) ([]Event, error) {
+	fields := []string{"%H", "%h", "%ct", "%an", "%s", "%(trailers:only,unfold)"}
+	records, err := repo.LogFields(ctx, rev, fields...)
+	if err != nil {
+		return nil, err
+	}
+	var out []Event
+	for _, rec := range records {
+		if len(rec) < len(fields) {
+			continue
+		}
+		if e := parseEvent(slug, rec); e.Kind == KindReview {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
 func ScanLineage(ctx context.Context, repo *git.Repo, rev string) ([]MarkerScan, error) {
 	fields := []string{"%H", "%h", "%ct", "%s", "%(trailers:only,unfold)"}
 	records, err := repo.LogFields(ctx, rev, fields...)

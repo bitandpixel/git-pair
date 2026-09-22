@@ -271,7 +271,11 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 		if err != nil {
 			return changeset.Changeset{}, lifecycle.Summary{}, "", err
 		}
-		base, err := changeset.BaseAt(ctx, repo, anchor, slug)
+		// The stack keys come from the same read as the base, because the record read needs them for the
+		// same reason a branch read does: a changeset that landed on a branch that has since been tidied
+		// away has only its yaml to say what it was stacked on, and the chain above it is the difference
+		// between "this reached trunk" and "this reached a branch that later did".
+		stack, err := changeset.StackAt(ctx, repo, anchor, slug)
 		if err != nil {
 			if errors.Is(err, git.ErrUnknownPath) {
 				return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
@@ -279,10 +283,53 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 			}
 			return changeset.Changeset{}, lifecycle.Summary{}, "", err
 		}
-		cs := changeset.Changeset{Slug: slug, Dir: filepath.Join(changeset.Root, slug), Base: base, Exists: true}
+		// A landed child is usually read after its parent branch has been tidied away, and then the base
+		// its yaml names is a revision this clone may not have — the same reason a stack is relinked on
+		// the branch path (changeset.relinkStacks). The parent's integration ref is that same boundary in
+		// the durable namespace: the commit the parent's work became. Relinking to it keeps `Base:`
+		// meaningful and lets the chain above it be read; nothing is invented, because the branch name
+		// stays in ParentBranch for anything that needs to say the parent has landed.
+		base := stack.Base
+		if stack.Parent != "" && stack.ParentChangeset != "" {
+			if _, err := repo.RevParse(ctx, "refs/heads/"+stack.Parent); err != nil {
+				if _, err := reviewref.ResolveIntegration(ctx, repo, stack.ParentChangeset); err == nil {
+					base = reviewref.Integration(stack.ParentChangeset)
+				}
+			}
+		}
+		cs := changeset.Changeset{
+			Slug:            slug,
+			Dir:             filepath.Join(changeset.Root, slug),
+			Base:            base,
+			ParentBranch:    stack.Parent,
+			ParentChangeset: stack.ParentChangeset,
+			Exists:          true,
+		}
 		summary, err := lifecycle.Summarize(ctx, repo, slug, base, anchor)
 		if err != nil {
 			return changeset.Changeset{}, lifecycle.Summary{}, "", err
+		}
+		// The reviews a record read reports come from the archived chain, not from the span. After a merge
+		// landing the archived head sits below the base — the landing put the reviewed work inside the
+		// destination — so `base..anchor` is empty for exactly the changeset whose verdicts matter most, and
+		// a reader asking about a landed child would be told "no reviews yet" about a head its reviewer
+		// approved. State is deliberately left alone: PRD §13.4 says the archive is not a second source of
+		// state, and a full lineage walk would have a landed child read as READY.
+		if len(summary.Reviews) == 0 {
+			reviews, rerr := lifecycle.ReviewsInLineage(ctx, repo, slug, anchor)
+			if rerr != nil {
+				return changeset.Changeset{}, lifecycle.Summary{}, "", rerr
+			}
+			summary.Reviews = reviews
+			if len(reviews) > 0 {
+				latest := reviews[len(reviews)-1]
+				summary.LatestReview = &latest
+			}
+		}
+		// With nothing in the span, the span's reason ("no commits above the base yet") is a true statement
+		// about a range nobody meant to ask about. Say what the read was.
+		if len(summary.Events) == 0 {
+			summary.Reason = "read from the durable refs; the archived chain is below the base, so there is no span to report"
 		}
 		// cs.Branch stays empty: there is no branch, and a reader must be able to tell.
 		return cs, summary, anchor, nil

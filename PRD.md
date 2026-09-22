@@ -1255,7 +1255,7 @@ reads:
 
 ```text
 Integrated:
-  4f2c81a, reachable from main (`git pair integration record`)
+  4f2c81a, reachable from main
   refs/git-pair/integrations/booking-transaction
 
 Review archive:
@@ -1265,9 +1265,21 @@ Next: integrated at 4f2c81a: nothing further is recorded for a changeset that ha
 ```
 
 Both families print together, because they are one record: the commit the work became, and the chain of
-what it went through to get there. The record is also what makes the changeset readable with no branch
-at all — `status --changeset <id>` after `git branch -D` says `Branch: none (read from the durable
-record)` rather than failing.
+what it went through to get there. Nothing in this block tells the reader to run
+`git pair integration record`: it prints because that command already wrote the ref, and the `--json`
+answer on the same facts is that nothing further is recorded. A landing with no record anywhere is the
+different finding `LANDED, UNRECORDED` reports, and that one names the command with the changeset in it.
+
+The record is also what makes the changeset readable with no branch at all — `status --changeset <id>`
+after `git branch -D` says `Branch: none (read from the durable record)` rather than failing. What that
+read reports follows the rule above: the archive tells what the branch claimed before it disappeared, and
+is not a second source of state. So `state` stays what the span says (`WORKING`, beside `integrated`),
+while the reviews are read from the archived chain rather than from the span — after a merge landing the
+archived head sits *below* the base, which makes `base..head` empty for exactly the changeset whose
+verdicts matter most, and "no reviews yet" about a head a reviewer approved is a wrong answer, not a
+harmless one. `reason` says the read was of the durable refs instead of reciting a span nobody asked
+about, and `review history` reports the same submissions as `status`. The stack above a recorded changeset
+is §21's `Stack:` record chain.
 
 Provide:
 
@@ -1600,8 +1612,21 @@ completes it; asking for a different commit is refused, and the refusal names th
 recorded and the one that was asked for. The check alone would be a race; the create-only write is what
 stops two pipelines recording the same landing from both winning (§13.3).
 
-A second landing is refused rather than recorded. A backport to a release branch is a fact about that
-branch's history, which git already records; git-pair keeps one pair per changeset, not one per landing.
+One asked-for commit is not a different pair: the one that *carries* the recorded commit. A stacked child
+lands on the branch it was based on, that branch later lands on trunk, and a run measured against trunk
+names a descendant of what the record names. The record answers "what did this changeset become" and the
+asked commit answers "what carried it here", so the run succeeds, writes nothing, and says both — naming
+the recorded commit, the carrier, and the destination the carrier was verified to be in (`carried_by` in
+`--json`, absent on every other answer). Two things keep that from being a licence to record anything
+later. The asked commit has to be what *brought* the recorded one in: if the asked commit's own first
+parent already held the record, the destination had the changeset on its line beforehand, and the asked
+commit is a second landing on that branch — a backport, refused as before. And the archive half has to
+match: a different reviewed head is a different claim about what was approved, not a later position on the
+same chain, and it stays a refusal.
+
+A second landing is otherwise refused rather than recorded. A backport to a release branch is a fact about
+that branch's history, which git already records; git-pair keeps one pair per changeset, not one per
+landing.
 
 The command needs no checkout and writes no commit: it is addressed by SHA and ref, and running it from
 the default branch, a release branch or a detached CI checkout is the same operation. Exit codes are the
@@ -1919,6 +1944,9 @@ record finishes it. Asking for a different commit is refused, and the refusal na
 commit and the one asked for, and says that git-pair never moves a durable ref. There is no flag for
 overriding it: a landing that needs correcting is corrected in git and recorded under an id that has no
 record yet, not by moving a ref out from under the readers who trusted it.
+
+The carrying case (§11.4) is the one asked-for commit that is not a conflict, and it changes nothing
+either: a descendant of the recorded commit is covered by the record rather than competing with it.
 
 The pair `archive A → integration B` is the whole product of integration recording, and everyone who
 reads it later — a release note, a bisect, an agent asked where this review went — reads it as a statement
@@ -2766,7 +2794,25 @@ reported the same way, because from this clone the two look alike.
 ## Reading the stack
 
 `status` prints a `Stack:` section naming the parent branch, its changeset, the tip the approval
-recorded and the parent's current tip, or the parent's absence. `queue` lists READY branches,
+recorded and the parent's current tip, or the parent's absence.
+
+Once the changeset is recorded the section gains the other half of the same question, because a child's
+own two refs say what it became and nothing about whether any of it reached the integration branch: one
+line per ancestor — nearest first, from `parent-changeset:` through each ancestor's own record — naming
+the commit that ancestor's record holds, whether that commit is in the integration branch's history, and
+whether the branch it was stacked on is still in this clone. An ancestor with no record here is printed as
+absent rather than skipped: that is the finding, and `--fetch` is the answer to it. The walk is bounded —
+`CHANGESET.yaml` is committed content, and a `parent-changeset:` edited into a loop stops the walk with a
+note rather than a hang, which is also why the note exists at all. `--json` reports the same walk as
+`stack` (never null) and `stack_note`.
+
+Reading a changeset by id from its durable record relinks the same way the branch path does
+(`changeset.relinkStacks`): where the yaml's `parent:` branch no longer exists and the parent has an
+integration ref, the base becomes that ref — the commit the parent's work became, which is the same
+boundary the branch was — because a parent's branch is normally tidied away before anyone reads the child.
+The branch name stays recorded in the changeset, so the two cases remain tellable apart.
+
+`queue` lists READY branches,
 which by definition have no approval to invalidate, so it notes instead the rows sitting on a
 parent that has moved ahead — the diff a reviewer is about to read is measured against a parent
 that is no longer current.

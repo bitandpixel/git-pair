@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"gitpair/internal/changeset"
+	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 	"gitpair/internal/reviewref"
@@ -80,6 +82,33 @@ type parentJSON struct {
 	Note      string `json:"note,omitempty"`
 }
 
+// stackStep is one changeset the reported one was stacked on. The step reports what the record and the
+// branch say from here, not what they promised at the time: a parent whose branch is gone and whose record
+// is in the integration branch's history is a landed parent, and that is the fact the reader of a child's
+// status needs.
+type stackStep struct {
+	Changeset string `json:"changeset"`
+	// Branch is the parent branch as the child's CHANGESET.yaml recorded it, empty when the yaml never
+	// named one.
+	Branch string `json:"branch,omitempty"`
+	// BranchExists says the local clone still has that branch. False is not evidence it was deleted —
+	// a clone that has never fetched it says the same thing, which is why the human wording says "is
+	// gone" only where the reader is being told about the chain, not about a verdict.
+	BranchExists bool `json:"branch_exists"`
+	// Integration and IntegrationRef are the parent's record as this clone holds it: empty when this
+	// clone has no record of that ancestor, which `--fetch` is the answer to.
+	Integration    string `json:"integration_commit,omitempty"`
+	IntegrationRef string `json:"integration_ref,omitempty"`
+	// InDefaultBranch says the parent's recorded commit is in the integration branch's history. The
+	// branch itself is reported once, at the top of the status JSON.
+	InDefaultBranch bool `json:"in_default_branch"`
+}
+
+// stackDepthCap bounds the walk. CHANGESET.yaml is committed content, so `parent-changeset` can be
+// hand-edited into a loop, and a chain is a fact about how work was organised rather than a graph the tool
+// has to terminate on.
+const stackDepthCap = 8
+
 type statusJSON struct {
 	Changeset string `json:"changeset"`
 	Branch    string `json:"branch"`
@@ -132,13 +161,22 @@ type statusJSON struct {
 	// an object id and no branch name, so the branch a landing reached is not something git-pair
 	// keeps. Work that retired into a release branch and never reached the default branch must not
 	// read like a default-branch landing, and a lone "main" that was never recorded would be worse.
-	IntegratedInDefaultBranch bool     `json:"integrated_in_default_branch"`
-	IntegratedDefaultBranch   string   `json:"integrated_default_branch,omitempty"`
-	Reviews                   int      `json:"reviews"`
-	Reason                    string   `json:"reason"`
-	Span                      string   `json:"span"`
-	NextAction                string   `json:"next_action"`
-	Unrecognised              []string `json:"unrecognised_markers,omitempty"`
+	IntegratedInDefaultBranch bool   `json:"integrated_in_default_branch"`
+	IntegratedDefaultBranch   string `json:"integrated_default_branch,omitempty"`
+	// Stack is the chain of changesets this one was stacked on, nearest first, read from
+	// `parent-changeset` and each ancestor's own record. Never null: an empty list answers "this
+	// changeset sat on the integration branch", and a missing key answers "this build cannot look".
+	// It is filled for a recorded changeset, whose chain is the difference between a landing that
+	// reached the integration branch and one that only reached a branch that later did (§11.4).
+	Stack []stackStep `json:"stack"`
+	// StackNote is the one sentence for where the walk stopped — a cycle, a depth cap, or a read that
+	// failed — rather than a silent short list that reads as the whole chain.
+	StackNote    string   `json:"stack_note,omitempty"`
+	Reviews      int      `json:"reviews"`
+	Reason       string   `json:"reason"`
+	Span         string   `json:"span"`
+	NextAction   string   `json:"next_action"`
+	Unrecognised []string `json:"unrecognised_markers,omitempty"`
 }
 
 func runStatus(ctx context.Context, a *app, slug string, doFetch bool) error {
@@ -164,6 +202,13 @@ func runStatus(ctx context.Context, a *app, slug string, doFetch bool) error {
 	}
 	view.json.Unpublished = rep.Findings
 	view.json.UnpublishedNote = rep.Note
+	// The chain is only worth walking for a changeset that has a record: before that the answer to
+	// "where does this sit" is the branch under the reader's feet, which the `parent:` line above the
+	// fold already says. Once the changeset is recorded its history is two refs and a yaml file, and the
+	// question "did any of it reach trunk" stops being answerable from the checkout.
+	if view.json.Integrated {
+		view.json.Stack, view.json.StackNote = a.stackChain(ctx, s, idx)
+	}
 	if a.json {
 		// view itself is unexported-only; emit its JSON shape.
 		return a.emitJSON(view.json)
@@ -217,6 +262,81 @@ type statusView struct {
 	// integratedReach phrases where the landing commit sits, for the text surface: the JSON
 	// surface reports the same facts as fields a consumer can branch on.
 	integratedReach string
+}
+
+// stackChain walks the changesets this one was stacked on, nearest first. Each step is read from the
+// durable records and from the ancestor's own CHANGESET.yaml, which is what makes it answer the question a
+// recorded child cannot answer from its own two refs: the child's record names the commit it became on the
+// branch it was based on, and whether any of that reached the integration branch is a fact about the
+// parent's record, not this one.
+//
+// The walk is bounded twice over — a `parent-changeset` cycle and a depth cap — because CHANGESET.yaml is
+// committed content and can say anything. A step whose ancestor has no record here is reported rather than
+// skipped: the absence is the finding, and `--fetch` is the answer to it.
+//
+// Cost: one `for-each-ref` for the branch names (the records themselves are already in the index the caller
+// holds), then one `merge-base` and one tree read per step.
+func (a *app) stackChain(ctx context.Context, s *session, idx refIndex) ([]stackStep, string) {
+	steps := []stackStep{}
+	held, err := localBranchSet(ctx, s.repo)
+	if err != nil {
+		// The chain is withheld rather than half-shown: every step would have to say "branch gone" on
+		// the strength of a read that failed, and a reader cannot tell that from a deleted parent.
+		return steps, fmt.Sprintf("this clone could not list its branches (%s), so it cannot say which parent branches still exist", err)
+	}
+	seen := map[string]bool{s.cs.Slug: true}
+	id, branch := s.cs.ParentChangeset, s.cs.ParentBranch
+	for depth := 0; id != ""; depth++ {
+		if seen[id] {
+			return steps, fmt.Sprintf("changeset %s is named twice in this chain, so the walk stops there", id)
+		}
+		seen[id] = true
+		if depth >= stackDepthCap {
+			return steps, fmt.Sprintf("the chain is deeper than %d changesets, so the walk stops there", stackDepthCap)
+		}
+		step := stackStep{Changeset: id, Branch: branch, BranchExists: branch != "" && held[branch]}
+		if sha, ok := idx.Integrated[id]; ok {
+			step.Integration = sha
+			step.IntegrationRef = idx.IntegratedRef[id]
+			if s.trunk.Ref != "" {
+				in, err := s.repo.IsAncestor(ctx, sha, s.trunk.Ref)
+				if err != nil {
+					return steps, fmt.Sprintf("the chain could not ask whether %s reaches %s (%s)", id, displayRef(s.trunk.Ref), err)
+				}
+				step.InDefaultBranch = in
+			}
+		}
+		steps = append(steps, step)
+
+		// The next hop comes from the ancestor's own yaml, read where it is known to live: its landing
+		// commit, or failing that this changeset's head, whose tree carries the directories of everything
+		// it was stacked on.
+		at := step.Integration
+		if at == "" {
+			at = s.head
+		}
+		stack, err := changeset.StackAt(ctx, s.repo, at, id)
+		if err != nil {
+			return steps, fmt.Sprintf("changesets/%s/ cannot be read at %s, so the chain above it is unread here", id, short(at))
+		}
+		id, branch = stack.ParentChangeset, stack.Parent
+	}
+	return steps, ""
+}
+
+// localBranchSet is the branch names this clone holds, as a set.
+func localBranchSet(ctx context.Context, repo *git.Repo) (map[string]bool, error) {
+	refs, err := repo.ForEachRef(ctx, "refs/heads")
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(refs))
+	for _, r := range refs {
+		if name, ok := strings.CutPrefix(r.Name, "refs/heads/"); ok {
+			out[name] = true
+		}
+	}
+	return out, nil
 }
 
 func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
@@ -361,7 +481,11 @@ func printStatus(a *app, v *statusView) {
 		a.printf("\nTerminal:\n  abandoned by %s (`git pair change abandon`)\n", short(j.AbandonedCommit))
 	}
 	if j.Integrated {
-		a.printf("\nIntegrated:\n  %s%s (`git pair integration record`)\n", j.IntegratedCommit, v.integratedReach)
+		// Nothing here tells the reader to run `git pair integration record`: this block prints because that
+		// command already wrote the ref, and the `--json` answer on the same facts is "nothing further is
+		// recorded for a changeset that has landed". A landing with no record anywhere is a different
+		// finding — the LANDED, UNRECORDED section, which names the command with the changeset in it.
+		a.printf("\nIntegrated:\n  %s%s\n", j.IntegratedCommit, v.integratedReach)
 		if j.IntegratedRef != "" {
 			a.printf("  %s\n", j.IntegratedRef)
 		}
@@ -383,31 +507,60 @@ func printStatus(a *app, v *statusView) {
 	} else {
 		a.printf("\nLatest review:\n  none yet\n")
 	}
-	if p := j.Parent; p != nil {
-		// The stack reads after the review because its whole subject is whether that review still
-		// means what it said.
+	if p := j.Parent; p != nil || len(j.Stack) > 0 || j.StackNote != "" {
+		// One section, because both halves answer the same question from the two sides available:
+		// `parent:` is the stack as the approval was recorded against it, and the records are the stack as
+		// this clone can still read it. A landed parent has no branch tip to compare an approval against,
+		// and a child's own two refs say nothing about whether the branch it landed on ever reached the
+		// integration branch — which is the question a reader of a landed child is actually asking.
 		a.printf("\nStack:\n")
-		who := p.Branch
-		if p.Changeset != "" {
-			who = fmt.Sprintf("%s (changeset %s)", p.Branch, p.Changeset)
+		if p != nil {
+			who := p.Branch
+			if p.Changeset != "" {
+				who = fmt.Sprintf("%s (changeset %s)", p.Branch, p.Changeset)
+			}
+			switch {
+			case p.Tip == "":
+				a.printf("  parent: %s — the branch is gone\n", who)
+			case p.Recorded == "":
+				a.printf("  parent: %s at %s\n", who, p.Tip)
+			case p.Recorded == p.Tip:
+				a.printf("  parent: %s at %s — unchanged since the approval\n", who, p.Tip)
+			default:
+				a.printf("  parent: %s at %s (approval recorded %s)\n", who, p.Tip, p.Recorded)
+			}
+			if p.Reason != "" {
+				// The reason already names the step — it is a refusal in another command's mouth, and a
+				// reader of `status` is the same reader — so it is printed once rather than twice.
+				a.printf("  stale:  %s\n", p.Reason)
+			}
+			if p.Note != "" {
+				a.printf("  note:   %s\n", p.Note)
+			}
 		}
-		switch {
-		case p.Tip == "":
-			a.printf("  parent: %s — the branch is gone\n", who)
-		case p.Recorded == "":
-			a.printf("  parent: %s at %s\n", who, p.Tip)
-		case p.Recorded == p.Tip:
-			a.printf("  parent: %s at %s — unchanged since the approval\n", who, p.Tip)
-		default:
-			a.printf("  parent: %s at %s (approval recorded %s)\n", who, p.Tip, p.Recorded)
+		// Each step is the ancestor's own record, which is the half the `parent:` line cannot carry: a
+		// branch tip moves, and a landed parent has no tip at all.
+		for _, st := range j.Stack {
+			who := st.Changeset
+			if st.Branch != "" {
+				if st.BranchExists {
+					who += " (branch " + st.Branch + ")"
+				} else {
+					who += " (branch " + st.Branch + " is gone)"
+				}
+			}
+			if st.Integration == "" {
+				a.printf("  record: %s — no record in this clone; `--fetch` brings what the remote holds\n", who)
+				continue
+			}
+			reach := "not reachable from " + j.DefaultBranch
+			if st.InDefaultBranch {
+				reach = "reachable from " + j.DefaultBranch
+			}
+			a.printf("  record: %s -> %s, %s\n", who, short(st.Integration), reach)
 		}
-		if p.Reason != "" {
-			// The reason already names the step — it is a refusal in another command's mouth, and a
-			// reader of `status` is the same reader — so it is printed once rather than twice.
-			a.printf("  stale:  %s\n", p.Reason)
-		}
-		if p.Note != "" {
-			a.printf("  note:   %s\n", p.Note)
+		if j.StackNote != "" {
+			a.printf("  note:   %s\n", j.StackNote)
 		}
 	}
 	if j.ArchiveRef != "" {
