@@ -1098,6 +1098,14 @@ single while the keys are in the box or the diff, double while they are in the t
 the box's borders and the divider use. Rules rather than a frame because a frame's two cells each side
 are columns, and the narrow terminal that needs the regions told apart most is the one with no columns to
 spare; the row between the box and the tree was blank, so the pair costs one row of the tree's window.
+Each rule also carries the count of what the window hides at the end that count is about — `↑ 3` on the
+top rule for the rows above the window, `↓ 11` on the bottom rule for the rows below it — with whitespace
+each side so it reads as a note pinned to the rule rather than as the last cell of a row. The two counts of
+one region share a numeric field as wide as the longer of them, so the arrows sit in one column and the
+digits line up under them (`↑  1` above `↓ 34`), and the pair reads as the two ends of one thing rather than
+as two remarks a cell apart. It goes on a
+rule because a rule is not a row: the count used to have a row of its own, which cost the window a row
+the moment the list was scrolled, and the row it cost was the one a page had just landed the cursor on.
 
 `Tab` is the toggle between the two things the screen is made of — the list column and, where the terminal
 has room for one, the diff. The box is not a third stop: it is the other half of the list column, so `k`
@@ -1107,9 +1115,13 @@ than to the top of a list. `f` names the tree from wherever the keys are, and `a
 box — `ABOUT.md`, the thread heading — and take the keys with them. Where there is no room for a column
 beside the list, the diff's half of the toggle is its whole-screen form: `Tab` opens it, and from inside it
 `Tab` and `f` close it on the way back. The navigation keys belong to the half holding them and mean the
-same thing in both: `j`/`k` a row, `gg`/`G` the two ends of the column, `ctrl-d`/`ctrl-u` half a page,
-`ctrl-f`/`ctrl-b` a page. A page is counted in the window you are standing in, which is why paging stops at
-the shared edge while a single step crosses it. (`ctrl-d` used to quit, which is why paging used to be
+same thing in both: `j`/`k` a row, `gg`/`G` the two ends of the half holding them, `ctrl-d`/`ctrl-u` half
+a page, `ctrl-f`/`ctrl-b` a page. A page is counted in the window you are standing in, which is why
+paging stops at the shared edge while a single step crosses it. A jump is counted the same way, for the
+same reason: the two halves are two windows of two heights, so `gg` and `G` stop at the ends of the half
+with the keys, and the way into the other half is `Tab`, `f`, `a` or `t` — keys that each say where they
+are going. A half with no rows has no ends of its own, and there the jump goes to the half that has them.
+(`ctrl-d` used to quit, which is why paging used to be
 `ctrl-f` and `ctrl-b` and nothing else; `ctrl-c` and `q` are what quit.) The shortcut bar is the bar of the
 half that holds the keys, which is how a key belonging to the other half is a key that is not offered rather
 than a key that quietly does nothing.
@@ -1173,8 +1185,9 @@ row: the span above it is the thing a reviewer *changes*, and the span is what t
 not what they came to read. Once the reviewer moves the cursor themselves the box leaves it where they put
 it, including across a trip to the editor. It is capped at a third of the space the terminal gives and scrolls inside its own
 borders, so forty threads are a reason to read the box rather than a reason to hide the tree behind it;
-when rows are off screen the bottom border says how many (`3 more`), which is a note inside the border
-rather than a row of its own because a note that came and went would move the whole layout. The borders
+each border says how many rows are off that end (`↑ 3` in the top border, `↓ 3` in the bottom one), which
+is a note inside the border rather than a row of its own because a note that came and went would move the
+whole layout. The borders
 are also the box's focus light: single rules while the keys are elsewhere, double rules (`╔ ═ ╗`) while
 the box holds them, the same convention the divider uses for the diff and for the same reason — bold and
 faint are the one thing a terminal is not obliged to render. The box is closed on all four sides in both
@@ -1238,7 +1251,8 @@ hands the keys back to the region that had them — the tree, or the box if the 
 and leaves the pane where it was, so coming back returns to the same lines. `p` does not do that: pressed
 where the diff already holds the keys it is the no-op its name promises, because a key that meant "the
 diff" in one region and "not the diff" in the one it just moved you to has to be remembered rather than
-read off the screen. `q` quits, as it does from every other part of the screen. `tab`, `shift-tab` and `f`
+read off the screen. `q` quits, as it does from every other part of the screen — the overlay below is
+the one place it does not, and the reason is that the list is still drawn here. `tab`, `shift-tab` and `f`
 leave the pane without quitting: the diff is one of the two stops the keys have, and a stop you can only
 leave by backing out of it is not a stop. What `p` no longer does is hide the pane — in a
 terminal with room for two columns the diff is on screen, and the key that leaves it alone is `Esc`. While the diff holds the keys nothing
@@ -1285,12 +1299,13 @@ the keyboard, and the list takes the keys back. Same git bytes, same numbers, sa
 width, with the file and the span it is measured against on the line above it (the span is named in
 the list otherwise, and the list is gone). It scrolls with `j`/`k`, `d`/`u` or `ctrl-d`/`ctrl-u` for half a page,
 `ctrl-f`/`ctrl-b` for a page, `gg` for the top and `G` for the bottom, and `/` searches it the same way the
-pane does. `Esc` or `Enter` gives the list
+pane does. `Esc`, `Enter` or `q` gives the list
 back, and so do the keys that move the keys — `tab`, `shift-tab` and `f` — since the half of the list one of
 them names is only drawn once the diff stops covering the screen. The diff is a stop on the ring here as much as anywhere, which is what lets `tab` reach it: a narrow
 terminal is the one case where the ring would otherwise have a hole where the pane cannot be. Keys mean
-what this screen's shortcut bar says they mean while it is up — including `q`, which quits here too, and
-`ctrl-d`, which pages rather than quits; nothing else reaches through, because a reviewer who cannot see
+what this screen's shortcut bar says they mean while it is up — including `q`, which gives the list back
+here as `esc` and `enter` do rather than quitting as it does in the pane, and `ctrl-d`, which pages rather
+than quits; nothing else reaches through, because a reviewer who cannot see
 the list must not be able to mark a file in it. Closing keeps the
 place however you close it: `p`, `Esc`, `p` returns to the same lines, and so does `f`, `p`.
 Reading a historical span this way works the same — reading is what a read-only span is for. Under 40

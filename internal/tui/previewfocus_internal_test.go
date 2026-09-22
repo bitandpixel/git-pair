@@ -282,10 +282,11 @@ func TestNothingThatChangesTheReviewHappensWhileThePaneHasTheKeys(t *testing.T) 
 	}
 }
 
-// `q` means leave, in the diff as everywhere else. It used to close the pane, which put a second
-// meaning on the one key a reviewer never has to think about -- and the pane it closed is one keystroke
-// away, on a session whose marks are already on disk.
-func TestQQuitsFromThePaneAsItDoesEverywhere(t *testing.T) {
+// `q` means leave from the pane, as it means it in the list: the list is still on the screen beside the
+// diff, so quitting is an action the reviewer can see the whole of. The overlay is the exception, and
+// TestQClosesTheOverlayAndPInertsOnTheOverlay is its half -- there the diff is all that is drawn, and a
+// `q` that quit would end the session for a reviewer who wanted the list back.
+func TestQQuitsFromThePaneWhereTheListIsStill(t *testing.T) {
 	m := focusPane(t, focusFixture(t, 40))
 	m = paneKey(t, m, runeKey('q'))
 

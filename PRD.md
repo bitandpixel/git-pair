@@ -2042,19 +2042,29 @@ steps into it and `j` off its last row steps back out, and `a` and `t` name a ro
 thread heading — from wherever in the column the keys are. Each half keeps its own cursor, so the keys
 return to the row they left. The navigation keys belong to the half holding them and mean the same thing in
 either: `j`/`k` a row — and one step across the edge the two halves share, which is the only place a step
-leaves the half it started in; `gg`/`G` the two ends of the whole column; `ctrl-d`/`ctrl-u` half a page and
-`ctrl-f`/`ctrl-b` a page, counted in the window you are standing in. Each half's shortcut bar names the keys
+leaves the half it started in; `gg`/`G` the two ends of the half holding them, because the two halves are
+two windows of two heights and a jump to the end of the other one lands the reviewer on a list they were
+not reading; `ctrl-d`/`ctrl-u` half a page and
+`ctrl-f`/`ctrl-b` a page, counted in the window you are standing in. A half with no rows has no ends of
+its own, and there the jump goes to the half that has them. Each half's shortcut bar names the keys
 of that half and none of the others, which is what makes a key of the other half an absence a reviewer can
 read rather than a keystroke that vanishes. A rule separates the list from the
 shortcut bar. The tree is bounded by two rules of its own — the row that separated it from the box above,
 and one under its last row, with the reviewed counter below that — and those two are its focus light:
 single rules while the box or the diff holds the keys, double while the tree holds them. Two rules rather
 than a frame because the cells a frame spends each side are columns, and the narrow terminal that needs
-the regions told apart most is the one with none to spare.
+the regions told apart most is the one with none to spare. Each rule carries the count of what the window
+hides at the end that count is about — `↑ 3` on the top rule for rows above the window, `↓ 11` on the
+bottom rule for rows below it — padded with whitespace each side. The two counts of one region share a
+numeric field as wide as the longer of them, so the two arrows sit in one column and the digits line up
+under them (`↑  1` above `↓ 34`): the pair is the two ends of one thing, not two remarks a cell apart. It rides on the rule because a rule is
+not a row: a count with a row of its own took one out of the window as soon as the list was scrolled, and
+the row it took was the one a page had just landed the cursor on.
 
 The box is capped at a third of the space the terminal gives and scrolls inside its own borders, so a
 changeset with forty threads is a reason to read the box rather than a reason to hide the tree behind it;
-rows that do not fit are counted in the bottom border (`3 more`), a note placed there because a note with
+each border counts what is off that end (`↑ 3` above the window, `↓ 3` below it), a note placed there
+because a note with
 a row of its own would move the layout as it came and went. The borders are also the box's focus light —
 single rules, double rules while it holds the keys — the convention the divider uses for the diff, chosen
 over styling alone so the focus survives a terminal that renders no bold. The box is closed on all four
@@ -2147,7 +2157,10 @@ region that had them — tree or box — and leaves the pane where it was; `tab`
 half of the column had them, because a region you can only leave by backing out of is not a stop on a ring. `p` pressed where the diff
 already holds the keys does nothing, rather than meaning the opposite of what it means in the list, and
 `q` quits from the pane as it quits from everywhere else — the pane is one `p` away and the marks are on
-disk, so nothing is at stake in the difference. While the pane holds the keys nothing that changes the review can happen —
+disk, so nothing is at stake in the difference. Over the whole-screen overlay `q` gives the list back the
+way `esc` and `enter` do, because that screen carries nothing but the diff: the list the key would leave is
+not on it, and on the narrow terminal where the overlay is all the diff can be a `q` that quit would end the
+session for a reviewer who wanted the list back. While the pane holds the keys nothing that changes the review can happen —
 marking, editing, threading and
 submitting are keys that do not occur, which is the whole-screen preview's promise extended to a
 column that never hid its list. The two jumps into the box — `a` and `t` — are not among them: they name a
@@ -2231,7 +2244,7 @@ Suggested bindings:
 
 ```text
 j/k      navigate the half of the list column that holds the keys, one step at a time across the edge it
-         shares with the other half; gg and G are the two ends of the whole column
+         shares with the other half; gg and G are the two ends of the half holding them
 Tab      toggle the keys between the list column and the diff where there is room for one (shift-tab the
          other way); f names the file tree from wherever the keys are
 h/l      fold and unfold the directory under the cursor (left and right arrows do the same);
@@ -2264,7 +2277,8 @@ a, t     put the cursor and the keys on ABOUT.md or the Threads heading, leaving
 Enter    open the difftool on the file the pane is showing
 Esc      hand the keys back to the list column, leaving the pane where it is in the file
 Tab, f   move the keys back to the list column, as they do from anywhere in it
-q        quit — from here as from anywhere else
+q        in the pane, quit — from here as from anywhere else; over the whole-screen overlay, give the
+         list back, as esc and enter do
 
 a        put the cursor on ABOUT.md (e on that row opens it in the editor)
 t        put the cursor on the Threads heading (Enter collapses or expands the list)
@@ -2277,7 +2291,8 @@ V        open the span picker: pending base and head, applied together on enter
 r        re-pin a ref endpoint that has moved (offered by the drift banner, which is only on
          screen when there is something to re-pin)
 s        submit review (block / feedback / approve)
-q        quit, from whichever region holds the keys
+q        quit, from whichever region holds the keys — except over the whole-screen preview, where it
+         gives the list back
 ```
 
 Submitting review may either occur within the TUI or through the CLI.

@@ -257,8 +257,8 @@ expectbytes "it gave the terminal back on quit" "$T/dumb.raw" $'\033[?1049l'
 # alternative is squeezing the list into a column nobody can read. A 60x14 terminal is the shape of
 # a half-width window on a laptop, which is where this layout earns its keep.
 step "small terminal: p takes the screen with the diff"
-# ctrl-c ends this one: q would quit the session (it does that on this screen now, like every other),
-# and a scenario that wants the overlay *on screen* has to leave with the key that only ever exits.
+# ctrl-c ends this one: `q` closes the overlay now, and a scenario that wants the overlay *on screen*
+# has to leave with the key that only ever exits.
 ( COLS=60 ROWS=14; session overlay p,ctrl-c )
 expect "the overlay's shortcut bar is the overlay's own" 0 "$T/overlay.raw" "ctrl-f/b page"
 expect "the overlay shows git's diff" 0 "$T/overlay.raw" "@@"
@@ -270,12 +270,13 @@ step "small terminal: esc closes the overlay and hands the list back"
 expect "esc paints the list again" 1 "$T/back.raw" "reviewed"
 expect "with the list's own shortcut bar, marks and all" 1 "$T/back.raw" "space reviewed"
 
-step "q quits from the diff, in either layout"
-# `q` used to mean "close the preview" where the preview had the keys, which put a second meaning on the
-# one key a reviewer never has to think about. It leaves the program now, from the overlay and from the pane.
-( COLS=60 ROWS=14; session qoverlay p,q )
-expectbytes "q in the overlay gave the terminal back" "$T/qoverlay.raw" $'\033[?1049l'
-refuse "and the list was never repainted under it" 1 "$T/qoverlay.raw" "space reviewed"
+step "q gives the list back over the overlay, and leaves from the pane"
+# The two layouts are read differently on purpose. The overlay is nothing but the diff, so `q` closes it
+# the way `esc` and `enter` do — a `q` that quit would end the session for a reviewer who wanted the list.
+# In the pane the list is still drawn beside the diff, so `q` means leave as it means it everywhere else.
+( COLS=60 ROWS=14; session qoverlay p,q,ctrl-c )
+expect "q in the overlay paints the list again" 1 "$T/qoverlay.raw" "space reviewed"
+expectbytes "and the session left only when ctrl-c said so" "$T/qoverlay.raw" $'\033[?1049l'
 ( COLS=140 ROWS=30; session qpane p,q )
 expectbytes "q in the pane gave the terminal back" "$T/qpane.raw" $'\033[?1049l'
 refuse "and the list's bar was never repainted under it" 1 "$T/qpane.raw" "space reviewed"

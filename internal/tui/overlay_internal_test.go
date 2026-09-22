@@ -70,7 +70,7 @@ func TestSmallTerminalGivesThePreviewTheWholeScreen(t *testing.T) {
 	}
 	// Including the search: a feature nobody can see the keys for is a feature nobody finds, and the
 	// overlay is where a narrow terminal reads a diff.
-	for _, want := range []string{"ctrl-f/b page", "q quit", "/ find", "n N next", "d/u ctrl-d/u half"} {
+	for _, want := range []string{"ctrl-f/b page", "esc enter q back", "/ find", "n N next", "d/u ctrl-d/u half"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the shortcut bar does not name %q:\n%s", want, view)
 		}
@@ -312,8 +312,8 @@ func TestTheRegionKeysTakeTheOverlayDown(t *testing.T) {
 	}
 }
 
-// The shortcut bar is what names the keys of the screen that is up, so the overlay has to name the four
-// that take it down: a key the bar does not name is a key the reviewer has to remember. And the bar has
+// The shortcut bar is what names the keys of the screen that is up, so the overlay has to name every key
+// that takes it down: a key the bar does not name is a key the reviewer has to remember. And the bar has
 // to fit the band the layout reserved for it -- a row of the bar the band cannot draw is a key offered
 // nowhere, which is why the overlay's bar counts towards the budget wherever it is the only form the
 // diff can take.
@@ -322,7 +322,7 @@ func TestTheOverlayBarNamesAndFitsTheKeysThatCloseIt(t *testing.T) {
 		m := openOverlay(t, overlayModel(t, 40))
 		m.width = width
 		bar := m.helpLines()
-		for _, want := range []string{"esc enter back", "f tab list", "q quit"} {
+		for _, want := range []string{"esc enter q back", "f tab list"} {
 			if !strings.Contains(strings.Join(bar, " "), want) {
 				t.Errorf("at %d columns the overlay's bar does not name %q: %q", width, want, strings.Join(bar, " | "))
 			}
@@ -395,10 +395,11 @@ func TestOverlayWorksOnAHistoricalSpan(t *testing.T) {
 	}
 }
 
-// `q` quits from the overlay as it does from every other part of the screen, and `p` -- whose whole
-// job is moving the keys into the diff -- does nothing where the diff already has them. Both are
-// asserted here because both were once the other thing: q closed the overlay, and p cycled it shut.
-func TestQQuitsAndPInertsOnTheOverlay(t *testing.T) {
+// `q` gives the list back from the overlay, as `esc` and `enter` do, and `p` -- whose whole job is
+// moving the keys into the diff -- does nothing where the diff already has them. Both are asserted here
+// because both were once the other thing: q quit from every screen, and p cycled the overlay shut. The
+// pane is the other half of the contract and is asserted in TestQQuitsFromThePaneWhereTheListIsStill.
+func TestQClosesTheOverlayAndPInertsOnTheOverlay(t *testing.T) {
 	m := openOverlay(t, overlayModel(t, 40))
 	again := pressKey(t, m, runeKey('p'))
 	if again.mode != modePreview || again.quitting {
@@ -408,9 +409,30 @@ func TestQQuitsAndPInertsOnTheOverlay(t *testing.T) {
 		t.Errorf("p in the overlay marked %d files", got)
 	}
 
-	m = pressKey(t, openOverlay(t, overlayModel(t, 40)), runeKey('q'))
-	if !m.quitting {
-		t.Errorf("q in the overlay did not quit (mode %v, quitting=%v)", m.mode, m.quitting)
+	// The place in the file is kept, so `p` from the list returns to the lines the reviewer had read.
+	m = pressKey(t, openOverlay(t, overlayModel(t, 40)), runeKey('j'))
+	at := m.previewOffset
+	if at == 0 {
+		t.Fatal("the overlay did not scroll, so closing it cannot be shown to keep a place")
+	}
+	closed := pressKey(t, m, runeKey('q'))
+	if closed.quitting {
+		t.Error("q in the overlay quit the session instead of giving the list back")
+	}
+	if closed.mode != modeFiles || closed.previewHasFocus() {
+		t.Errorf("q in the overlay left mode %v with the diff holding the keys", closed.mode)
+	}
+	if !strings.Contains(plainView(closed), "space reviewed") {
+		t.Errorf("q in the overlay did not bring the list back:\n%s", plainView(closed))
+	}
+	back := pressKey(t, closed, runeKey('p'))
+	if back.previewOffset != at {
+		t.Errorf("`p` after `q` reset the diff from %d to %d", at, back.previewOffset)
+	}
+
+	// ctrl-c still leaves from the same screen: the key that quits is the one key with one meaning.
+	if quit := pressKey(t, openOverlay(t, overlayModel(t, 40)), tea.KeyMsg{Type: tea.KeyCtrlC}); !quit.quitting {
+		t.Error("ctrl-c in the overlay no longer quits")
 	}
 }
 

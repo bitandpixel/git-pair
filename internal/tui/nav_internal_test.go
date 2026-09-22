@@ -254,36 +254,57 @@ func TestJkCrossTheEdgeBetweenTheBoxAndTheTree(t *testing.T) {
 	_ = m.View()
 }
 
-// `gg` and `G` are the ends of the whole list column, which is the one list the keys are in: `gg` is the
-// box's first row and `G` the tree's last, whichever half the keys started in.
-func TestGgAndGMeanTheEndsOfTheListColumn(t *testing.T) {
+// `gg` and `G` are the ends of the region holding the keys. The two halves are two windows of two
+// different heights, so the end worth jumping to is the one in the window being read -- the same reason
+// a page stays inside the window it started in. Crossing into the other half is `tab`, `f`, `a` and `t`,
+// which each name where they are going.
+func TestGgAndGMeanTheEndsOfTheRegionHoldingTheKeys(t *testing.T) {
 	m := withThreads(t, navModel(t), 12)
 	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
 
 	m = pressRune(pressRune(m, 'g'), 'g')
 	if !m.metaHasFocus() || m.metaCursor != m.metaStart {
-		t.Errorf("gg from the box gave %v on %d, want the box on its first row %d",
+		t.Errorf("gg in the box gave %v on %d, want the box on its first row %d",
 			m.focus, m.metaCursor, m.metaStart)
 	}
 
 	m = pressRune(m, 'G')
-	if m.focus != focusFiles || m.cursor != m.metaStart-1 {
-		t.Fatalf("G from the box gave %v on %d, want the tree on its last row %d",
-			m.focus, m.cursor, m.metaStart-1)
+	if !m.metaHasFocus() || m.metaCursor != len(m.rows)-1 {
+		t.Errorf("G in the box gave %v on %d, want the box on its last row %d",
+			m.focus, m.metaCursor, len(m.rows)-1)
 	}
-	boxAt := m.metaCursor
-
-	// ... and the same two keys from the tree, which is where a reviewer most often presses them.
-	m = pressRune(pressRune(m, 'g'), 'g')
-	if !m.metaHasFocus() || m.metaCursor != m.metaStart {
-		t.Errorf("gg from the tree gave %v on %d, want the box's first row", m.focus, m.metaCursor)
+	// ... and the same two keys from the tree stay in the tree, with the box keeping its own row.
+	m = pressRune(pressRune(m, 'f'), 'g')
+	if m.focus != focusFiles || m.cursor != 0 {
+		t.Fatalf("gg in the tree gave %v on %d, want the tree on its first row", m.focus, m.cursor)
 	}
 	m = pressRune(m, 'G')
 	if m.focus != focusFiles || m.cursor != m.metaStart-1 {
-		t.Errorf("G from the tree gave %v on %d, want the tree's last row", m.focus, m.cursor)
+		t.Errorf("G in the tree gave %v on %d, want the tree's last row %d", m.focus, m.cursor, m.metaStart-1)
 	}
-	if m.metaCursor != boxAt {
-		t.Errorf("G in the tree moved the box from %d to %d", boxAt, m.metaCursor)
+	if m.metaCursor != len(m.rows)-1 {
+		t.Errorf("the tree's jumps moved the box's cursor to %d, want it left on its last row", m.metaCursor)
+	}
+	assertFrameFits(t, m)
+}
+
+// A region with no rows has no ends to jump to, so the jump goes to the half that has them: a key that
+// did nothing at all would be an exception the reviewer has to remember. The two jumps are called
+// directly, because the list is rebuilt from the session on every key and an empty tree is not a state
+// this session can be put into.
+func TestGgAndGFallThroughWhenTheRegionHoldingTheKeysIsEmpty(t *testing.T) {
+	m := focusOnRow(t, withThreads(t, navModel(t), 4), 0)
+	m.rows, m.metaStart, m.cursor, m.scroll = m.rows[m.metaStart:], 0, 0, 0
+	m.focus, m.metaCursor = focusFiles, 0
+	m.clamp()
+
+	m.activeTop()
+	if !m.metaHasFocus() || m.metaCursor != 0 {
+		t.Errorf("gg with an empty tree gave %v on %d, want the box on its first row", m.focus, m.metaCursor)
+	}
+	m.activeBottom()
+	if !m.metaHasFocus() || m.metaCursor != len(m.rows)-1 {
+		t.Errorf("G with an empty tree gave %v on %d, want the box on its last row", m.focus, m.metaCursor)
 	}
 }
 
