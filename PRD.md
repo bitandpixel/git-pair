@@ -1180,8 +1180,8 @@ alive: the record may exist in the clone that ran the merge and simply not have 
 `--json` reports the same finding as `landed_unrecorded`, an array of `{"changeset", "command"}` — always
 an array, since it answers a question, and a consumer should not have to tell "none" apart from "this
 build predates the question". `unpublished` (§13) is the third list for the same reason and with the same
-rule — the record exists here and not there — and `ready_for_review` and `skipped` keep their documented
-shapes.
+rule — the record exists here and not there. Every array `--json` prints follows it. An empty list is
+`[]`, never null.
 
 The note is the record talking: `booking-transaction`'s branch may still be checked out and its directory
 still absent from trunk, and it is the integration ref that says the queue has nothing to ask of it
@@ -2871,8 +2871,16 @@ git pair change feedback
 git pair check
 ```
 
-`git pair integration record` (§11.4) is the agent's to *read about* and not to run; it belongs to
-whoever performed the landing, which is CI in the intended setup.
+`git pair integration record` (§11.4) is the agent's to *read about* and not to run. It belongs to
+whoever does the landing, which is CI in the intended setup.
+
+`--json` has one contract. Every array it prints is `[]` for "asked, and none", never null. A job then
+branches on a field, not on the presence of a key. Two fields answer null on purpose.
+
+`latest_review` is an object that does not exist before the first review. `uncommitted` reports that the
+question belongs to a checkout this command does not stand in. `git pair change feedback` and
+`git pair diff` have no JSON output at all. They print the report itself, and `--json` says on stderr that
+it changed nothing.
 
 Agent behavior:
 

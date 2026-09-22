@@ -210,6 +210,9 @@ func runStatus(ctx context.Context, a *app, slug string, doFetch bool) error {
 		view.json.Stack, view.json.StackNote = a.stackChain(ctx, s, idx)
 	}
 	if a.json {
+		// `stack` is `[]` when the walk did not run, so the key never arrives as a null: the reader cannot
+		// tell "not stacked" from "this build did not look" otherwise.
+		view.json.Stack = orEmpty(view.json.Stack)
 		// view itself is unexported-only; emit its JSON shape.
 		return a.emitJSON(view.json)
 	}

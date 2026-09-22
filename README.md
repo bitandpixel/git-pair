@@ -590,11 +590,16 @@ the invocation itself was wrong, so retrying unchanged will fail again.
 
 ## JSON contracts
 
-Output is indented two spaces, and empty lists may serialise as `null` rather than `[]`
-(`queue`'s `ready_for_review` and `skipped`, `review submit`'s `files`), so test for both. A key
-that answers a question rather than collecting notes is always an array: `queue`'s
-`landed_unrecorded` says `[]` for "asked, and none", so a consumer never has to tell that apart from a
-build old enough not to have been asked.
+Output is indented two spaces. An array is never null. It says `[]` for "asked, and none". A missing key
+then means the build did not ask.
+
+Two fields answer null on purpose, and neither is a list. `status`'s `latest_review` is an object that
+does not exist before the first review. `uncommitted` is a bool that reports the question belongs to a
+checkout this command does not stand in.
+
+`git pair change feedback` and `git pair diff` have no JSON output. `--json` is a global flag, so both
+accept it. Each now says on stderr that the flag changed nothing, because an empty stdout reads to a
+machine as an empty answer.
 
 `git pair status --json`, waiting for the first review. Once a review exists `latest_review`
 becomes `{"index": 0, "outcome": "block", "commit": "332887c", "reviewed_head": "1a2b3c4"}` —
@@ -660,7 +665,7 @@ further to record instead.
 ```
 
 `git pair queue --json` — `head` and `ready_commit` are full SHAs. `skipped` names changesets
-the queue cannot explain (`null` when empty): a branch whose metadata cannot be read, a branch the
+the queue cannot explain (`[]` when empty): a branch whose metadata cannot be read, a branch the
 resolution rule cannot settle between two changesets, a recorded changeset whose archive is in no base
 and on no branch, or a changeset whose integration ref says it landed — that one names the commit,
 because the branch is usually still here and its disappearance from the queue would otherwise be a
@@ -758,7 +763,7 @@ is none)
   "changeset": "feat",
   "commit": "941266b18686624cb624722b4e8c348bf03451a7",
   "empty": true,
-  "files": null,
+  "files": [],
   "next_action": "author: `git pair check`, then merge into main with ordinary git, then `git pair integration record`, then `git pair integration publish`",
   "outcome": "approve",
   "previous_review": "",

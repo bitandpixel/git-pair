@@ -66,8 +66,9 @@ func Execute(args []string) int {
 	root.SetOut(a.stdout)
 	root.SetErr(a.stderr)
 
-	err := root.Execute()
+	cmd, err := root.ExecuteC()
 	if err == nil {
+		a.warnUnansweredJSON(cmd)
 		return exitOK
 	}
 	if errors.Is(err, context.Canceled) {
@@ -93,6 +94,28 @@ func Execute(args []string) int {
 		fmt.Fprintf(a.stderr, "git-pair: %s\n", messageOf(err))
 	}
 	return code
+}
+
+// noJSONCommands are the commands that take the global `--json` and have no machine-readable form to
+// offer. Both are viewers: the whole answer is a patch or a report a person reads. `--json` is global
+// (PRD §8), so these commands accept the flag, and the defect was the silence after it — a machine that
+// asks for JSON and reads an empty stdout learns "nothing", not "this command has no JSON".
+var noJSONCommands = map[string]bool{
+	"change feedback": true,
+	"diff":            true,
+}
+
+// warnUnansweredJSON says out loud that `--json` changed nothing on a viewer. The note stays on stderr, so
+// a caller that pipes the report somewhere is untouched.
+func (a *app) warnUnansweredJSON(cmd *cobra.Command) {
+	if !a.json || cmd == nil {
+		return
+	}
+	path := strings.TrimPrefix(cmd.CommandPath(), cmd.Root().Name()+" ")
+	if !noJSONCommands[path] {
+		return
+	}
+	a.warn("git-pair: `git pair %s` has no --json output; what it printed is the report itself\n", path)
 }
 
 func isUsageError(err error) bool {
@@ -489,4 +512,16 @@ func (a *app) emitJSON(v any) error {
 	enc := json.NewEncoder(a.stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+// orEmpty is the empty-list half of git-pair's `--json` contract: an array is `[]` for "asked, and
+// none", never null. A null says the question was not asked, which is true of no command here — a key
+// that does not apply is left out with `omitempty`, and a field that reports it cannot answer is an
+// object or a bool (`status`'s `latest_review`, `uncommitted`). README's JSON contracts section states the
+// rule, and TestNoJSONArrayIsEverNull keeps it true for keys nobody has thought about yet.
+func orEmpty[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }
