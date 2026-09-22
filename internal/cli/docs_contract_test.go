@@ -47,6 +47,29 @@ func TestCommandsNamedInTheDocsExist(t *testing.T) {
 	}
 }
 
+// TestEveryCommandIsNamedInTheDocs is the other direction of the check above. That one stops the
+// documents promising a command the code does not have. This one stops a command leaving the documents.
+// `review reopen` is the reason: it shipped, it is in README's quickstart and command table, and the
+// spec's own command tree never listed it, because nothing looked for a name the code had and the prose
+// had dropped.
+func TestEveryCommandIsNamedInTheDocs(t *testing.T) {
+	paths := commandPaths(newRootCommand(&app{}))
+	for _, file := range docFiles {
+		text := readDoc(t, file)
+		for path := range paths {
+			// A group is documented by the commands under it, so only a leaf has to appear by name.
+			if path == "" || hasChild(paths, path) {
+				continue
+			}
+			// README's command table names a command bare and in backticks; the prose and the PRD use
+			// the `git pair` form. Either counts as naming it.
+			if !strings.Contains(text, "git pair "+path) && !strings.Contains(text, "`"+path+"`") {
+				t.Errorf("%s never names `git pair %s`", filepath.Base(file), path)
+			}
+		}
+	}
+}
+
 // TestRefPathsInTheDocsAreOnesWeWrite checks the durable namespace, where drift is expensive: a
 // document naming a ref family the code never writes teaches a reader to fetch nothing.
 func TestRefPathsInTheDocsAreOnesWeWrite(t *testing.T) {

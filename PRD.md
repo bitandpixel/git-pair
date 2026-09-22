@@ -478,11 +478,13 @@ git-pair
 │   ├── use
 │   ├── ready
 │   ├── unready
+│   ├── abandon
 │   ├── feedback
 │   └── wait
 │
 ├── review
 │   ├── open
+│   ├── reopen
 │   ├── about
 │   ├── thread
 │   ├── submit
@@ -494,7 +496,8 @@ git-pair
 ├── check
 │
 └── integration
-    └── record
+    ├── record
+    └── publish
 ```
 
 ---
@@ -1208,6 +1211,23 @@ git-pair repo list
 Global repository management is useful but may be deferred if needed.
 
 The queue command should have a stable machine-readable form suitable for automation and notifications.
+
+## 10.7 `git pair review reopen`
+
+Launches the same TUI as §10.1 on the span from the most recent review submission to the working tree.
+
+The name carries the reason it exists. `review open` shows the whole changeset, which is the right first
+read. After the author answers a block or feedback, the work to read is what arrived since the reviewer's
+own submission. `review reopen` names that span without a flag.
+
+```text
+git pair review reopen
+```
+
+It resolves the span `<last review>..current`, the same span `git pair review open --unreviewed` shows.
+An earlier review is `git pair review open --since-review=N`. Needs a terminal, like §10.1. With no
+review submission yet it exits 2 and says to run `review open` instead. The author reads a submission
+with `git pair change feedback` (§9.3). This command is the reviewer's.
 
 ---
 
