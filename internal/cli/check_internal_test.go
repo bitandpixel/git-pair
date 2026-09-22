@@ -15,11 +15,14 @@ import (
 // Each case names the condition it pins, because the point of listing every failure is that
 // each one is reported independently: a case that only counts reasons would pass if two
 // conditions were merged into one message.
+//
+// There is no archive condition any more. The gate used to ask whether a ref pointed at HEAD; it now
+// asks the derivation the same question directly — is the content the newest review spoke about still
+// what HEAD carries — which is one reading rather than two that could disagree.
 func TestIntegrationReasons(t *testing.T) {
 	const (
 		slug      = "booking"
 		head      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-		archived  = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 		landedSHA = "ffffffffffffffffffffffffffffffffffffffff"
 	)
 	approve := &lifecycle.Event{SHA: head, Short: "aaaaaaa", Kind: lifecycle.KindReview, Outcome: model.OutcomeApprove}
@@ -31,19 +34,15 @@ func TestIntegrationReasons(t *testing.T) {
 
 	tests := []struct {
 		name string
-		// terminal, summary, archive and head are the inputs the command reads; policy is
-		// the only one a caller may choose.
+		// terminal, summary and head are the inputs the command reads; policy is the only one a
+		// caller may choose.
 		terminal *lifecycle.Event
 		summary  lifecycle.Summary
-		archive  string
 		head     string
 		feedback bool
 		// landed is the integration record, if one exists — not a policy a caller may choose, but
 		// an input the command reads like the others.
 		landed landing
-		// namespaceAbsent is the clone's answer to "did you fetch the durable refs?" (§24). It only
-		// changes the wording of the missing-archive reason, and only when the archive is missing.
-		namespaceAbsent bool
 		// n is how many reasons the case must produce, so a merged or dropped condition
 		// shows up even where the wording matches; `contains` names text the reasons must
 		// carry, and one reason may satisfy more than one entry.
@@ -52,16 +51,14 @@ func TestIntegrationReasons(t *testing.T) {
 		not      []string
 	}{
 		{
-			name:    "an approved head that is archived passes",
+			name:    "an approved head passes",
 			summary: lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
-			archive: head,
 			head:    head,
 			n:       0,
 		},
 		{
 			name:     "feedback is not enough under the default policy",
 			summary:  lifecycle.Summary{Marker: feedback, LatestReview: feedback, State: model.StateFeedback},
-			archive:  head,
 			head:     head,
 			n:        1,
 			contains: []string{"the newest review is feedback", "--allow-feedback"},
@@ -69,7 +66,6 @@ func TestIntegrationReasons(t *testing.T) {
 		{
 			name:     "feedback is enough when the policy allows it",
 			summary:  lifecycle.Summary{Marker: feedback, LatestReview: feedback, State: model.StateFeedback},
-			archive:  head,
 			head:     head,
 			feedback: true,
 			n:        0,
@@ -77,7 +73,6 @@ func TestIntegrationReasons(t *testing.T) {
 		{
 			name:     "a block fails",
 			summary:  lifecycle.Summary{Marker: block, LatestReview: block, State: model.StateBlocked},
-			archive:  head,
 			head:     head,
 			n:        1,
 			contains: []string{"latest review outcome is blocking"},
@@ -87,43 +82,38 @@ func TestIntegrationReasons(t *testing.T) {
 			// infer permission from a trailer it could not read.
 			name:     "an outcome git-pair cannot read fails",
 			summary:  lifecycle.Summary{Marker: &lifecycle.Event{Short: "aaaaaaa", Kind: lifecycle.KindReview}, State: model.StateWorking},
-			archive:  head,
 			head:     head,
 			n:        1,
 			contains: []string{"latest review outcome is blocking"},
 		},
 		{
-			name:     "a changeset with no marker fails, and so does its missing archive",
+			name:     "a changeset with no marker fails",
 			summary:  lifecycle.Summary{State: model.StateWorking},
 			head:     head,
-			n:        2,
-			contains: []string{"no lifecycle marker", "does not exist"},
+			n:        1,
+			contains: []string{"no lifecycle marker"},
 		},
 		{
 			name:     "marked ready and never reviewed fails",
 			summary:  lifecycle.Summary{Marker: ready, State: model.StateReady},
-			archive:  ready.SHA,
-			head:     ready.SHA,
+			head:     head,
 			n:        1,
 			contains: []string{"marked ready and has not been reviewed since (ccccccc)"},
 		},
 		{
 			name:     "a withdrawn changeset fails",
 			summary:  lifecycle.Summary{Marker: unready, LatestReview: approve, State: model.StateWorking},
-			archive:  unready.SHA,
-			head:     unready.SHA,
+			head:     head,
 			n:        1,
 			contains: []string{"took the changeset out of review (ddddddd)"},
 		},
 		{
-			// The ending is the one condition that stops the list. Its archive is current —
-			// `change abandon` moved the ref onto the terminal marker — so a check without the
-			// terminal rule would say nothing about the changeset being finished, and one that
-			// carried on would report fixable problems on work that will never land.
+			// The ending is the one condition that stops the list. A check without the terminal rule
+			// would say nothing about the changeset being finished, and one that carried on would
+			// report fixable problems on work that will never land.
 			name:     "an abandoned changeset reports only the ending",
 			terminal: abandon,
 			summary:  lifecycle.Summary{Marker: abandon, State: model.StateWorking},
-			archive:  "",
 			head:     head,
 			n:        1,
 			contains: []string{"abandoned by eeeeeee"},
@@ -132,50 +122,25 @@ func TestIntegrationReasons(t *testing.T) {
 			name: "drift over the reviewed content fails, and names the paths",
 			summary: lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateWorking,
 				Drifted: []string{"service.go", "handler.go"}},
-			// The archive is where the review left it, and HEAD has moved past it.
-			archive: archived,
-			head:    head,
-			n:       2,
+			head: head,
+			n:    1,
 			contains: []string{
 				"content outside changesets/booking/ changed since aaaaaaa: service.go, handler.go",
-				"archive does not point to the current source commit",
 			},
 		},
 		{
 			name: "an unreadable marker after the newest marker fails",
 			summary: lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateWorking,
 				TrailingUnrecognised: 2},
-			archive:  approve.SHA,
 			head:     head,
 			n:        1,
 			contains: []string{"2 review marker(s) after aaaaaaa carry trailers git-pair cannot read"},
-		},
-		{
-			name:     "a missing archive ref fails by name",
-			summary:  lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
-			archive:  "",
-			head:     head,
-			n:        1,
-			contains: []string{"refs/git-pair/changesets/booking/archive does not exist"},
-		},
-		{
-			name:    "an archive of an ancestor fails, and says where each end is",
-			summary: lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
-			archive: archived,
-			head:    head,
-			n:       1,
-			contains: []string{
-				"archive does not point to the current source commit",
-				"bbbbbbb",
-				"aaaaaaa",
-			},
 		},
 		{
 			// The newest marker is a marker only by the derivation's definition. Anything else
 			// fails closed rather than passing an event the tool cannot interpret.
 			name:     "an unclassifiable marker fails closed",
 			summary:  lifecycle.Summary{Marker: &lifecycle.Event{Short: "aaaaaaa", Kind: lifecycle.KindImplementation}, State: model.StateWorking},
-			archive:  head,
 			head:     head,
 			n:        1,
 			contains: []string{"not one git-pair can classify"},
@@ -185,7 +150,6 @@ func TestIntegrationReasons(t *testing.T) {
 			// this gate before integrating gets a clear answer when it re-runs after integrating.
 			name:    "an integrated changeset is not integration-ready again",
 			summary: lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
-			archive: head,
 			head:    head,
 			landed:  landing{Commit: landedSHA, BranchKnown: true, DefaultBranch: "main", InDefaultBranch: true},
 			n:       1,
@@ -193,14 +157,13 @@ func TestIntegrationReasons(t *testing.T) {
 				"changeset is already integrated at " + short(landedSHA),
 				"reachable from main",
 			},
-			// The record outranks everything else: the drift and archive questions describe work
+			// The record outranks everything else: the drift question below it describes work
 			// still in progress.
-			not: []string{"changed since", "does not point"},
+			not: []string{"changed since"},
 		},
 		{
 			name:     "a landing outside the default branch says so",
 			summary:  lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
-			archive:  head,
 			head:     head,
 			landed:   landing{Commit: landedSHA, BranchKnown: true, DefaultBranch: "main", InDefaultBranch: false},
 			n:        1,
@@ -211,46 +174,17 @@ func TestIntegrationReasons(t *testing.T) {
 			// not in main": that would turn a fetching problem into a claim about the work.
 			name:     "an unknown default branch is not reported as an absence",
 			summary:  lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
-			archive:  head,
 			head:     head,
 			landed:   landing{Commit: landedSHA},
 			n:        1,
 			contains: []string{"already integrated at " + short(landedSHA)},
 			not:      []string{"reachable from"},
 		},
-		{
-			// §24: absent refs are a fetch problem, not a lifecycle verdict. Both conditions present
-			// as "no archive", and the one sent to `change ready` wastes the run.
-			name:            "an absent archive in a clone with no git-pair refs says so",
-			summary:         lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
-			head:            head,
-			namespaceAbsent: true,
-			n:               1,
-			contains: []string{
-				"does not exist",
-				"this clone has no refs/git-pair/changesets/* refs at all",
-				"fetch them before trusting this verdict",
-			},
-			not: []string{"not anchored"},
-		},
-		{
-			// The other half: with refs in the namespace, the absence belongs to the changeset, and
-			// telling the reader to fetch would send them to the wrong fix.
-			name:    "an absent archive beside other git-pair refs blames the changeset",
-			summary: lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
-			head:    head,
-			n:       1,
-			contains: []string{
-				"refs/git-pair/changesets/booking/archive does not exist",
-				"the review history is not anchored",
-			},
-			not: []string{"this clone has no"},
-		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := integrationReasons(slug, tc.terminal, tc.summary, tc.archive, tc.head, tc.feedback, tc.landed, tc.namespaceAbsent)
+			got := integrationReasons(slug, tc.terminal, tc.summary, tc.head, tc.feedback, tc.landed, "", "")
 			if len(got) != tc.n {
 				t.Fatalf("reasons = %q, want %d", got, tc.n)
 			}
@@ -270,9 +204,9 @@ func TestIntegrationReasons(t *testing.T) {
 }
 
 // The whole point of the multi-reason output is that one run names every problem. Two cases
-// that pin the shape rather than the wording: an approved head that both drifted and lost its
-// archive reports both, and the order is what a reader can act on — what the reviewers decided,
-// then what moved since, then where the archive stands.
+// that pin the shape rather than the wording: an approved head whose content both drifted and
+// picked up an unreadable marker reports both, and the order is what a reader can act on — what the
+// reviewers decided, then what moved since, the history before the content that was reviewed in it.
 func TestIntegrationReasonsReportsEveryFailureAtOnce(t *testing.T) {
 	const head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	approve := &lifecycle.Event{SHA: head, Short: "aaaaaaa", Kind: lifecycle.KindReview, Outcome: model.OutcomeApprove}
@@ -280,12 +214,12 @@ func TestIntegrationReasonsReportsEveryFailureAtOnce(t *testing.T) {
 	got := integrationReasons("booking", nil, lifecycle.Summary{
 		Marker: approve, LatestReview: approve, State: model.StateWorking,
 		Drifted: []string{"service.go"}, TrailingUnrecognised: 1,
-	}, "", head, false, landing{}, false)
+	}, head, false, landing{}, "review aaaaaaa reviewed bbbbbbb, which is no longer in this history", "")
 
 	if len(got) != 3 {
-		t.Fatalf("reasons = %q, want three: unreadable marker, drift, archive", got)
+		t.Fatalf("reasons = %q, want three: unreadable marker, rewritten history, drift", got)
 	}
-	for i, want := range []string{"cannot read", "content outside", "does not exist"} {
+	for i, want := range []string{"cannot read", "no longer in this history", "content outside"} {
 		if !strings.Contains(got[i], want) {
 			t.Errorf("reasons[%d] = %q, want it to be the one about %q", i, got[i], want)
 		}

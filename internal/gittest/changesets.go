@@ -10,12 +10,12 @@ import (
 //
 // These mirror PRD §4/§5/§7 (the `changesets/<slug>/` directory, its
 // CHANGESET.yaml, ABOUT.md and thread files) so engine tests can build a
-// scenario without running `git pair change init`. A broken `change init` must
+// scenario without running `git pair init`. A broken `init` must
 // therefore only fail the tests that exercise it. Product-written scaffolding is
 // asserted by the CLI tests in internal/cli.
 
 // DefaultAboutBody is the ABOUT.md content fixture helpers write. It is
-// deliberately not `change init`'s scaffold, because tests need an ABOUT.md that
+// deliberately not `init`'s scaffold, because tests need an ABOUT.md that
 // counts as described.
 const DefaultAboutBody = "# Changeset\n\n## Summary\n\nDescribed by the test fixture.\n"
 

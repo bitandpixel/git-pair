@@ -4,12 +4,10 @@ package model
 // State is the effective lifecycle state of a changeset, always derived from
 // commit history rather than stored.
 //
-// There is no state for an archived changeset. Archiving moves a ref
-// (`git pair change archive`) to keep the reviewed history reachable, and the
-// changeset is finished when that history is merged into the deployment branch
-// by ordinary git. git-pair derives state from a changeset's own commits, so it
-// does not derive the merge: the archive ref is reported by `status`, beside the
-// state rather than as another value of it.
+// There is no state for a landed changeset. Landing happens with ordinary git, and git-pair
+// derives state from a changeset's own markers, so it does not derive the merge: the record
+// written by `git pair integration record` is reported by `status`, beside the state rather than
+// as another value of it. Markers are the only thing that moves state.
 type State string
 
 const (
@@ -77,6 +75,17 @@ const (
 	TrailerOutcome   = "Review-Outcome"
 	TrailerState     = "Review-State"
 	TrailerChangeset = "Review-Changeset"
+	// TrailerHead is the commit a review submission spoke about, written on review
+	// commits only. It is what makes an approval about a piece of history rather than
+	// about a tree: a rebase rewrites the review commit but preserves its message, so
+	// the rewritten marker still names a head that is no longer in this line, and the
+	// ancestry test refuses it (PRD §11.3, §12).
+	TrailerHead = "Review-Head"
+	// TrailerParentHead is the tip of the branch this changeset is stacked on, at the moment a
+	// review submission was made. It is written beside `Review-Head` for a stacked changeset and
+	// nothing else: the parent branch moves under a child for reasons the child's own history
+	// cannot show (PRD §21).
+	TrailerParentHead = "Review-Parent-Head"
 
 	StateValueReady = "ready"
 	// StateValueWorking is written by `change unready`. It is not a new state: WORKING

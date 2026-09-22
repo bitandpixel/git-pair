@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -19,7 +18,6 @@ import (
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 	"gitpair/internal/reviewops"
-	"gitpair/internal/reviewref"
 	"gitpair/internal/span"
 	"gitpair/internal/tui"
 )
@@ -37,7 +35,6 @@ func newReviewCommand(a *app) *cobra.Command {
 		newReviewThreadCommand(a),
 		newReviewSubmitCommand(a),
 		newReviewHistoryCommand(a),
-		newReviewQueueCommand(a),
 	)
 	return cmd
 }
@@ -199,10 +196,15 @@ Exactly one outcome is required:
   --feedback   non-blocking observations; integration is still permitted
   --approve    the reviewer accepts the current implementation
 
-The commit carries Review-Outcome and Review-Changeset trailers, and
-refs/git-pair/changesets/<changeset>/archive is moved to the resulting HEAD in the same
-operation so
-the full unsquashed chain stays reachable.
+The commit carries Review-Outcome, Review-Changeset and Review-Head trailers, and it is the whole
+submission: no ref is written, because while work is in flight the branch is what holds
+the chain. ` + "`git pair integration record`" + ` writes the durable refs, once, at landing.
+
+Review-Head is the commit being reviewed — ` + "`HEAD`" + ` as the submission was made, which is the new
+commit's own parent. It is written down because a rebase rewrites the review commit and keeps its
+message: the marker that survives says which commit it approved, and ` + "`git pair check`" + ` refuses to
+read that approval as covering the rewritten history. Merging the base in rewrites nothing and costs
+nothing.
 
 Source edits, inline comments, ABOUT.md edits, and thread files all become part
 of the review; a review commit with no changes at all is valid, which is what
@@ -256,7 +258,15 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 	if err := a.refuseIfAbandoned(ctx, s); err != nil {
 		return err
 	}
-	result, err := reviewops.Submit(ctx, s.repo, s.cs, outcome, opts.message, !opts.noStage)
+	// A stacked changeset's submission records the parent branch's tip alongside the head it
+	// reviewed. The parent moves for reasons the child's history cannot show — its own rebases,
+	// its landing, its abandonment — and the only way to ask later whether the approval still
+	// covers the work is to have written the answer down while it was still known (PRD §21).
+	parent, err := changeset.ParentOf(ctx, s.repo, s.cs, s.trunk)
+	if err != nil {
+		return err
+	}
+	result, err := reviewops.Submit(ctx, s.repo, s.cs, outcome, opts.message, !opts.noStage, parent.Tip)
 	if err != nil {
 		return err
 	}
@@ -274,11 +284,10 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 			"outcome":         string(result.Outcome),
 			"commit":          result.Commit,
 			"short":           short(result.Commit),
-			"archive_ref":     result.Ref,
 			"files":           result.Files,
 			"empty":           result.Empty(),
 			"previous_review": previous,
-			"next_action":     nextActionFor(result.Outcome),
+			"next_action":     nextActionFor(result.Outcome, s.cs.Base),
 		})
 	}
 	a.printf("Review submitted: %s\n", s.cs.Slug)
@@ -292,27 +301,26 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 			a.printf("           %s\n", f)
 		}
 	}
-	a.printf("  ref:     %s -> %s\n", result.Ref, short(result.Commit))
 	if s.summary.LatestReview != nil {
 		a.printf("  supersedes: %s (the newest submission decides the state)\n",
 			reviewLabel(s.summary.LatestReview))
 	}
-	a.printf("  next:    %s\n", nextActionFor(result.Outcome))
+	a.printf("  next:    %s\n", nextActionFor(result.Outcome, s.cs.Base))
 	if clean, err := s.repo.IsClean(ctx); err == nil && !clean {
 		a.warn("\nwarning: the working tree is still dirty; those changes are not part of this review\n")
 	}
 	return nil
 }
 
-func nextActionFor(o model.Outcome) string {
+func nextActionFor(o model.Outcome, base string) string {
 	switch o {
 	case model.OutcomeBlock:
 		return "author: `git pair change feedback`, address it, then `git pair change ready`"
 	case model.OutcomeFeedback:
 		return "author: `git pair change feedback` to read it; feedback is non-blocking, " +
-			"`git pair change archive` when integration is due"
+			landingNextAction(base)
 	case model.OutcomeApprove:
-		return "author: `git pair change archive` before squash/merge"
+		return "author: " + landingNextAction(base)
 	}
 	return ""
 }
@@ -352,23 +360,28 @@ most recent, matching ` + "`git pair diff --since-review`" + `.
 				var out []map[string]any
 				for i, r := range s.summary.Reviews {
 					out = append(out, map[string]any{
-						"index":   i,
-						"sha":     r.SHA,
-						"short":   r.Short,
-						"outcome": string(r.Outcome),
-						"subject": r.Subject,
-						"author":  r.Author,
-						"when":    r.When.UTC().Format(time.RFC3339),
-						"age":     lifecycle.Age(r.When, now()),
+						"index": i,
+						"sha":   r.SHA,
+						"short": r.Short,
+						// reviewed_head is the commit this submission spoke about, from its
+						// `Review-Head` trailer; absent when the marker names none.
+						"reviewed_head": r.ReviewedHead,
+						"outcome":       string(r.Outcome),
+						"subject":       r.Subject,
+						"author":        r.Author,
+						"when":          r.When.UTC().Format(time.RFC3339),
+						"age":           lifecycle.Age(r.When, now()),
 					})
 				}
 				return a.emitJSON(map[string]any{"changeset": s.cs.Slug, "reviews": out})
 			}
 			w := tabwriter.NewWriter(a.stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "INDEX\tSHA\tOUTCOME\tAGE\tSUBJECT")
+			fmt.Fprintln(w, "INDEX\tSHA\tREVIEWED\tOUTCOME\tAGE\tSUBJECT")
 			for i, r := range s.summary.Reviews {
-				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n",
-					i, r.Short, r.Outcome, lifecycle.Age(r.When, now()), r.Subject)
+				// REVIEWED is the commit the submission spoke about — its `Review-Head`, which is
+				// where this commit sits in the line rather than what it changed.
+				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
+					i, r.Short, short(r.ReviewedHead), r.Outcome, lifecycle.Age(r.When, now()), r.Subject)
 			}
 			return w.Flush()
 		},
@@ -376,301 +389,6 @@ most recent, matching ` + "`git pair diff --since-review`" + `.
 	cmd.Flags().StringVar(&changesetSlug, "changeset", "",
 		"read the changeset with this slug, from whichever branch carries it")
 	return cmd
-}
-
-// --- review queue -----------------------------------------------------------
-
-type queueEntry struct {
-	Changeset   string `json:"changeset"`
-	Branch      string `json:"branch"`
-	Base        string `json:"base"`
-	State       string `json:"state"`
-	Head        string `json:"head"`
-	ReadyCommit string `json:"ready_commit"`
-	ReadyAge    string `json:"ready_age"`
-	ArchiveRef  string `json:"archive_ref"`
-}
-
-func newReviewQueueCommand(a *app) *cobra.Command {
-	return &cobra.Command{
-		Use:   "queue",
-		Short: "List changesets ready for human review",
-		Long: `List every changeset in this repository whose branch is READY.
-
-Readiness comes from commit history, not a queue file: a changeset is listed
-while its branch carries a ready marker that no review submission has answered.
-Entries are ordered longest-waiting first.
-
-Branches are read from the repository, not from the checked-out directory, so the
-queue says the same thing on main as it does on the changeset's own branch. A
-changeset whose content has landed in its base is not listed, and says nothing.
-
---json is the stable contract for notifications, dashboards, and agent
-supervisors.`,
-		Example: `  git pair review queue
-  git pair review queue --json`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runReviewQueue(cmd.Context(), a)
-		},
-	}
-}
-
-func runReviewQueue(ctx context.Context, a *app) error {
-	repo, err := a.loadRepo(ctx)
-	if err != nil {
-		return err
-	}
-	// Branches, not directories. Only a branch can be reviewed, so only a branch
-	// can be queued; a changeset directory whose branch is gone is a record rather
-	// than work, and the record gets one honest line instead of a warning per slug.
-	//
-	// One trunk listing and one ref listing serve the whole queue; per branch it costs a tree
-	// listing and one batch read. That is what makes "resolve every branch" affordable — the
-	// per-archive-ref formulation this replaced asked a question per ref for each branch.
-	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
-	if err != nil {
-		return err
-	}
-	resolutions, err := changeset.BranchResolutions(ctx, repo, db)
-	if err != nil {
-		return err
-	}
-	type found struct {
-		cs       changeset.Changeset
-		branches []string
-	}
-	var order []string
-	sets := map[string]*found{}
-	var skipped []string
-	for _, br := range resolutions {
-		if br.Err != nil {
-			skipped = append(skipped, br.Branch+" (unreadable changeset metadata: "+br.Err.Error()+")")
-			continue
-		}
-		if br.Resolution.Ambiguous {
-			skipped = append(skipped, br.Branch+" ("+changeset.AmbiguityError(br.Resolution).Error()+")")
-			continue
-		}
-		if br.Resolution.Selected == nil {
-			continue
-		}
-		cs := br.Resolution.Selected.Changeset
-		cs.Branch = br.Branch
-		f := sets[cs.Slug]
-		if f == nil {
-			f = &found{cs: cs}
-			sets[cs.Slug] = f
-			order = append(order, cs.Slug)
-		}
-		f.branches = append(f.branches, br.Branch)
-	}
-
-	var entries []queueEntry
-	for _, slug := range order {
-		f := sets[slug]
-		// A changeset with an integration ref has landed, and a review queue has nothing to ask of
-		// it. This is the case the queue could not answer before the record existed: the landing
-		// went to a branch that is not the default one, so the directory is still absent from trunk
-		// and the tree rule still reads it as live work. It is named in the skip note rather than
-		// dropped silently, because unlike a trunk landing this branch is still here and its
-		// disappearance from the queue would otherwise be a mystery.
-		if sha, err := reviewref.ResolveIntegration(ctx, repo, slug); err == nil {
-			skipped = append(skipped, fmt.Sprintf("%s (integrated at %s)", slug, short(sha)))
-			continue
-		} else if !errors.Is(err, reviewref.ErrNotIntegrated) {
-			return err
-		}
-		// A slug can match more than one branch; the one whose head carries the
-		// newest ready marker wins.
-		best, _, err := readyEntry(ctx, repo, f.cs, f.branches)
-		if err != nil {
-			skipped = append(skipped, slug+" ("+err.Error()+")")
-			continue
-		}
-		if best != nil {
-			entries = append(entries, *best)
-		}
-	}
-
-	// Directories no branch accounts for. Read from HEAD's tree, not the working
-	// tree, so the answer does not depend on what happens to be checked out.
-	head, err := repo.Head(ctx)
-	if err != nil && !git.IsUnknownRevision(err) {
-		return err
-	}
-	dirs, err := changeset.DirsAt(ctx, repo, head)
-	if err != nil {
-		return err
-	}
-	for _, slug := range dirs {
-		if _, ok := sets[slug]; ok {
-			continue
-		}
-		note, err := classifyOrphan(ctx, repo, head, slug)
-		if err != nil {
-			skipped = append(skipped, slug+" ("+err.Error()+")")
-			continue
-		}
-		if note != "" {
-			skipped = append(skipped, note)
-		}
-	}
-
-	sort.SliceStable(entries, func(i, j int) bool {
-		return ageLess(entries[i].ReadyAge, entries[j].ReadyAge)
-	})
-
-	if a.json {
-		return a.emitJSON(map[string]any{
-			"ready_for_review": entries,
-			"skipped":          skipped,
-		})
-	}
-	if len(entries) == 0 {
-		a.printf("READY FOR REVIEW\n\n  nothing is ready\n")
-		printSkipped(a, skipped)
-		return nil
-	}
-	a.printf("READY FOR REVIEW\n\n")
-	for _, e := range entries {
-		a.printf("%s\n", e.Changeset)
-		a.printf("  base: %s\n", e.Base)
-		a.printf("  ready: %s ago\n", e.ReadyAge)
-		a.printf("  head: %s\n", short(e.Head))
-		a.printf("\n")
-	}
-	printSkipped(a, skipped)
-	return nil
-}
-
-// classifyOrphan decides what to say about a changeset directory with no branch
-// behind it, and returns "" when the honest answer is nothing. Every one of them
-// used to print `note: skipped <slug> (no branch matches this changeset directory)`,
-// which gave the same warning to two opposite situations: work that was reviewed,
-// merged, and had its branch deleted — nothing left for a reviewer to do — and work
-// whose branch really did go missing.
-func classifyOrphan(ctx context.Context, repo *git.Repo, head, slug string) (string, error) {
-	anchor, err := reviewref.Resolve(ctx, repo, slug)
-	if errors.Is(err, reviewref.ErrNoArchiveRef) {
-		// Never anchored means never offered: the directory is a leftover, and the
-		// queue has nothing to offer either.
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	base, err := changeset.BaseAt(ctx, repo, head, slug)
-	if err != nil {
-		if errors.Is(err, git.ErrUnknownPath) {
-			return "", nil
-		}
-		return "", err
-	}
-	if base == "" {
-		return "", nil
-	}
-	// An integrated changeset landed, and the branch that carried it is gone. That is the merge
-	// case with a receipt: nothing is pending, and the diff would only say the work is not in its
-	// base — which the record already says better.
-	if sha, err := reviewref.ResolveIntegration(ctx, repo, slug); err == nil && sha != "" {
-		return "", nil
-	} else if err != nil && !errors.Is(err, reviewref.ErrNotIntegrated) {
-		return "", err
-	}
-	// An abandoned changeset ended on purpose, and the anchor carries the ending. That
-	// is the whole answer: nothing is pending, and the diff would only report that the
-	// work is not in its base, which is what abandoning means (PRD §9.7).
-	if summary, err := lifecycle.Summarize(ctx, repo, slug, base, anchor); err == nil && summary.Abandoned != nil {
-		return "", nil
-	}
-	// The anchor is a commit that survives the branch, so it can be compared with
-	// the base without touching the working tree: identical changeset content on
-	// both sides is what a merge leaves behind.
-	dir := filepath.Join(changeset.Root, slug)
-	changed, err := repo.PathsChanged(ctx, base, anchor, dir)
-	if err != nil {
-		return "", err
-	}
-	if len(changed) == 0 {
-		return "", nil
-	}
-	return fmt.Sprintf("%s (anchored at %s, whose %s is not in %s and no branch carries it)",
-		slug, short(anchor), dir, base), nil
-}
-
-func printSkipped(a *app, skipped []string) {
-	for _, s := range skipped {
-		a.warn("note: skipped %s\n", s)
-	}
-}
-
-// readyEntry returns the queue row for cs if one of its branches is READY.
-func readyEntry(ctx context.Context, repo *git.Repo, cs changeset.Changeset, branches []string) (*queueEntry, time.Time, error) {
-	var entry *queueEntry
-	var at time.Time
-	var firstErr error
-	for _, branch := range branches {
-		summary, err := lifecycle.Summarize(ctx, repo, cs.Slug, cs.Base, branch)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		if summary.State != model.StateReady || summary.Marker == nil {
-			continue
-		}
-		head, err := repo.RevParse(ctx, branch)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		if entry == nil || summary.Marker.When.After(at) {
-			at = summary.Marker.When
-			entry = &queueEntry{
-				Changeset:   cs.Slug,
-				Branch:      branch,
-				Base:        cs.Base,
-				State:       string(summary.State),
-				Head:        head,
-				ReadyCommit: summary.Marker.SHA,
-				ReadyAge:    lifecycle.Age(at, now()),
-				ArchiveRef:  reviewref.Archive(cs.Slug),
-			}
-		}
-	}
-	if entry == nil && firstErr != nil {
-		return nil, time.Time{}, firstErr
-	}
-	return entry, at, nil
-}
-
-// ageLess orders "18m" before "1h" before "2d" so the longest wait comes first.
-func ageLess(a, b string) bool {
-	return ageSeconds(a) > ageSeconds(b)
-}
-
-func ageSeconds(age string) int64 {
-	if age == "" {
-		return 0
-	}
-	var n int64
-	unit := age[len(age)-1]
-	fmt.Sscanf(age[:len(age)-1], "%d", &n)
-	switch unit {
-	case 's':
-		return n
-	case 'm':
-		return n * 60
-	case 'h':
-		return n * 3600
-	case 'd':
-		return n * 86400
-	}
-	return 0
 }
 
 // --- shared file helpers ----------------------------------------------------
@@ -781,7 +499,7 @@ func openSession(ctx context.Context, a *app, s *session, sel span.Selector, nam
 	if note != "" {
 		a.warn("%s\n", note)
 	}
-	err := tui.Run(ctx, tui.Options{Repo: s.repo, Changeset: s.cs, Summary: s.summary, Span: sel})
+	err := tui.Run(ctx, tui.Options{Repo: s.repo, Changeset: s.cs, Summary: s.summary, Span: sel, Trunk: s.trunk})
 	if errors.Is(err, tui.ErrQuit) {
 		return nil
 	}

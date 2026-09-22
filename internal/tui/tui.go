@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"gitpair/internal/changeset"
 	"io"
 	"os"
 	"os/exec"
@@ -967,8 +968,13 @@ func (m reviewModel) handleSubmitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.mode = modeFiles
+	parent, err := changeset.ParentOf(m.ctx, m.sess.Repo(), m.sess.Changeset(), m.sess.Trunk())
+	if err != nil {
+		m.setStatus(err.Error(), true)
+		return m, nil
+	}
 	result, err := reviewops.Submit(m.ctx, m.sess.Repo(), m.sess.Changeset(),
-		outcome, "", true)
+		outcome, "", true, parent.Tip)
 	if err != nil {
 		m.setStatus(err.Error(), true)
 		return m, nil

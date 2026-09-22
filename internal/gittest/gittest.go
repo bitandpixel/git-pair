@@ -354,10 +354,20 @@ func ReadyMessage(slug string) string {
 }
 
 // ReviewMessage is a review submission commit message (PRD §10.4). outcome is
-// "block", "feedback" or "approve".
-func ReviewMessage(slug, outcome string) string {
-	return "review: " + outcome + " " + slug + "\n\nReview-Outcome: " + outcome +
-		"\nReview-Changeset: " + slug + "\n"
+// "block", "feedback" or "approve". head is the commit the review speaks about — pass ""
+// for a marker that names none, which is the shape a submission written before `Review-Head`
+// existed has. parentHead is the tip of the branch this changeset is stacked on, or "" for an
+// unstacked one.
+func ReviewMessage(slug, outcome, head, parentHead string) string {
+	message := "review: " + outcome + " " + slug + "\n\nReview-Outcome: " + outcome +
+		"\nReview-Changeset: " + slug
+	if head != "" {
+		message += "\nReview-Head: " + head
+	}
+	if parentHead != "" {
+		message += "\nReview-Parent-Head: " + parentHead
+	}
+	return message + "\n"
 }
 
 // CommitReadyMarker commits a ready marker for slug. Markers may be empty, so
@@ -367,10 +377,29 @@ func (f *Fixture) CommitReadyMarker(slug string, opts ...CommitOpt) string {
 	return f.CommitMessage(ReadyMessage(slug), append([]CommitOpt{WithEmpty()}, opts...)...)
 }
 
-// CommitReviewMarker commits a review submission with the given outcome.
+// CommitReviewMarker commits a review submission with the given outcome. Like the product's
+// `review submit`, the marker names the commit it was made against — except in a repository with no
+// commits yet, where there is no head to name and the marker carries no `Review-Head`.
 func (f *Fixture) CommitReviewMarker(slug, outcome string, opts ...CommitOpt) string {
 	f.t.Helper()
-	return f.CommitMessage(ReviewMessage(slug, outcome), append([]CommitOpt{WithEmpty()}, opts...)...)
+	return f.CommitMessage(ReviewMessage(slug, outcome, f.reviewedHead(), ""), append([]CommitOpt{WithEmpty()}, opts...)...)
+}
+
+// CommitReviewMarkerOnParent commits a review submission that also records the tip of the branch
+// this changeset is stacked on, as `review submit` does for a stacked changeset.
+func (f *Fixture) CommitReviewMarkerOnParent(slug, outcome, parentHead string, opts ...CommitOpt) string {
+	f.t.Helper()
+	return f.CommitMessage(ReviewMessage(slug, outcome, f.reviewedHead(), parentHead), append([]CommitOpt{WithEmpty()}, opts...)...)
+}
+
+// reviewedHead is HEAD, or "" where the repository has no commits yet.
+func (f *Fixture) reviewedHead() string {
+	f.t.Helper()
+	out, err := f.Git("rev-parse", "--verify", "--quiet", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // --- branches ---------------------------------------------------------------

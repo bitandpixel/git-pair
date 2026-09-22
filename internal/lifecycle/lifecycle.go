@@ -57,6 +57,23 @@ type Event struct {
 	Outcome model.Outcome
 	// Author is the commit author name, useful when explaining a marker.
 	Author string
+	// ReviewedHead is the commit a review submission spoke about, from its
+	// `Review-Head` trailer. It is the value `check` tests ancestry against, because it is
+	// the one a rebase changes while the message survives: the rewritten marker still
+	// names a head that is no longer in this line of history (PRD §11.3, §12).
+	//
+	// Empty means the marker names nothing — written before the trailer existed, or by a
+	// hand-edited commit. That is reported rather than guessed at: the review commit's own
+	// first parent would be the same value before a rebase and a *rewritten* parent after
+	// one, so deriving it would make the rule pass in exactly the case it exists for.
+	ReviewedHead string
+	// ReviewedParentHead is the tip of the branch this changeset is stacked on, as known when a
+	// review submission was made. A parent moves for reasons invisible in the child's own history,
+	// so the only way to ask "has the parent moved since this approval?" is to have written the
+	// answer down at the time (PRD §21). Empty means the submission recorded no parent: either
+	// the changeset was not stacked, or it was approved before the trailer existed. Neither is
+	// evidence that the parent moved, so an empty value is not a refusal.
+	ReviewedParentHead string
 	// UnrecognisedMarker is true when the commit carries Review-* trailers but
 	// not a complete, valid marker for this changeset. Such a commit is
 	// treated as an implementation commit — the conservative reading, since it
@@ -161,11 +178,10 @@ func SummarizeHEAD(ctx context.Context, repo *git.Repo, slug, base string) (Summ
 // marker spoke about is still at headRef. A marker whose code has been changed
 // underneath it reads as WORKING here and nowhere else.
 //
-// `change archive` and `check` are the callers. Both decide that a head is safe to hand on —
-// one by moving the ref an agent is told to trust, one by asserting the same thing to CI — so
-// they share the reading rather than each keeping its own idea of what drift means
-// (PRD §9.5, §11.3). Everywhere else state moves when a git-pair command records a marker, not
-// when the author commits (PRD §12).
+// `check` is the caller: the gate decides that a head is safe to hand on, and it needs the
+// derivation and the drift in one reading rather than two that could disagree (PRD §9.5, §11.3).
+// Everywhere else state moves when a git-pair command records a marker, not when the author
+// commits (PRD §12).
 func SummarizeAgainstTree(ctx context.Context, repo *git.Repo, slug, base, headRef string) (Summary, error) {
 	s, err := Summarize(ctx, repo, slug, base, headRef)
 	if err != nil {
@@ -183,7 +199,8 @@ func SummarizeAgainstTreeHEAD(ctx context.Context, repo *git.Repo, slug, base st
 //
 // The range summaries answer "what happened between base and head". This answers the narrower
 // question a caller asks when it holds one commit and wants to know what that commit records —
-// the tip of an archive ref, say, which is where `change abandon` leaves the ref. It uses the same
+// the commit `integration record --source` names, or the landing whose record must not be written
+// for work that was abandoned. It uses the same
 // trailer parsing as the range walk, so the two cannot disagree about what a marker says, and it
 // needs no base: a caller holding a SHA from a ref should not have to resolve a branch that may
 // never have been fetched.
@@ -193,6 +210,56 @@ func MarkerAt(ctx context.Context, repo *git.Repo, rev string) (map[string]strin
 		return nil, err
 	}
 	return parseTrailers(block), nil
+}
+
+// MarkerScan is one commit from ScanLineage: enough to ask which changeset it speaks about and what it
+// said, without the caller re-parsing trailer syntax.
+type MarkerScan struct {
+	SHA     string
+	Short   string
+	Subject string
+	When    time.Time
+	// Trailers is the parsed trailer block, kept whole rather than reduced to a Kind. A scan answers
+	// "which changesets do the markers here name", which is a question across ids, and Summarize's
+	// single-id filter would have thrown the answer away.
+	Trailers map[string]string
+}
+
+// ScanLineage walks rev's ancestry newest-first and returns every commit carrying a marker trailer.
+//
+// Two things make this different from Summarize. It does not filter by changeset id, because the
+// disagreement between "which directory is in this commit" and "which changeset do the markers name" is
+// itself a refusal a recorder reports (PRD §11.4), and it is invisible once the scan has dropped the
+// other ids. And the walk is the whole ancestry rather than `base..rev`, because after a merge landing
+// the reviewed head is inside the destination branch: a range that excludes the destination is empty
+// precisely when a record is being written. The cost is one `git log` over history the recorder runs
+// once per landing, which is why it asks for trailers only and keeps commits with no trailer out of
+// the result instead of handing back the repository.
+func ScanLineage(ctx context.Context, repo *git.Repo, rev string) ([]MarkerScan, error) {
+	fields := []string{"%H", "%h", "%ct", "%s", "%(trailers:only,unfold)"}
+	records, err := repo.LogFields(ctx, rev, fields...)
+	if err != nil {
+		return nil, err
+	}
+	// LogFields walks oldest-first for the callers that read a story; a scan is asked about the newest
+	// verdict, so it returns the order git would have shown.
+	out := make([]MarkerScan, 0, len(records))
+	for i := len(records) - 1; i >= 0; i-- {
+		rec := records[i]
+		if len(rec) < len(fields) {
+			continue
+		}
+		trailers := parseTrailers(rec[4])
+		if len(trailers) == 0 {
+			continue
+		}
+		var when time.Time
+		if secs, err := parseInt(rec[2]); err == nil {
+			when = time.Unix(secs, 0).UTC()
+		}
+		out = append(out, MarkerScan{SHA: rec[0], Short: rec[1], Subject: rec[3], When: when, Trailers: trailers})
+	}
+	return out, nil
 }
 
 func parseEvent(slug string, rec []string) Event {
@@ -209,6 +276,8 @@ func parseEvent(slug string, rec []string) Event {
 	case hasOutcome:
 		if o, ok := model.ParseOutcome(outcome); ok && changeset == slug {
 			e.Kind, e.Outcome = KindReview, o
+			e.ReviewedHead = reviewedHead(trailers[model.TrailerHead])
+			e.ReviewedParentHead = reviewedHead(trailers[model.TrailerParentHead])
 		} else {
 			e.UnrecognisedMarker = true
 		}
@@ -231,6 +300,22 @@ func parseEvent(slug string, rec []string) Event {
 		}
 	}
 	return e
+}
+
+// reviewedHead accepts the value of a `Review-Head` trailer: a hex object id of plausible
+// length, abbreviated or full. Anything else — a branch name, a typo, an empty value — is read
+// as no head named, which `check` reports rather than resolving and hoping for the best.
+func reviewedHead(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) < 7 || len(raw) > 40 {
+		return ""
+	}
+	for _, r := range raw {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return ""
+		}
+	}
+	return raw
 }
 
 func derive(events []Event) Summary {
@@ -335,11 +420,10 @@ func markerReason(m Event) string {
 // marker spoke about been changed underneath it? Where it has, the marker no longer
 // describes HEAD and the state is WORKING.
 //
-// Only SummarizeAgainstTree calls it, and only `change archive` uses that. An archive
-// ref is a promise about reviewed content — it is what an agent is told to check before
-// squash-merging — so archiving refuses to name a head whose code moved after the
-// review (PRD §9.5). Everywhere else a commit is not something that changes state:
-// `change ready`, `change unready` and a review submission are (PRD §12).
+// Only SummarizeAgainstTree calls it, and only `check` uses that. The gate is the one place
+// git-pair asks whether reviewed content is still there, because a merge is about to act on the
+// answer (PRD §9.5). Everywhere else a commit is not something that changes state: `change ready`,
+// `change unready` and a review submission are (PRD §12).
 //
 // The verdict comes from the tree rather than from the commit count, because committing
 // a fix to ABOUT.md or a review thread is not an implementation change and the reviewer
@@ -349,6 +433,10 @@ func markerReason(m Event) string {
 // Comparing trees rather than counting commits also folds in the cases counting
 // gets wrong: a merge of the base, a rebase that rewrote every SHA, and a change
 // followed by its own revert all end at "is the approved code still here".
+//
+// That is the content question and not the lineage one. A tree-identical rebase answers this
+// check "still here" and must still refuse, because the approval was about a commit, not about a
+// tree: `check`'s ancestry condition on `Review-Head` is what catches it (PRD §12).
 func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef string, s Summary) (Summary, error) {
 	if !s.Stale || s.Marker == nil {
 		return s, nil
@@ -424,6 +512,11 @@ func (e Event) State() model.State {
 
 // parseTrailers reads `Key: value` lines from a git trailer block. The first
 // value wins, so a duplicated key cannot be smuggled past a check.
+// Trailers reads the git-pair trailer block of a commit message: only `Review-*` keys, first
+// occurrence wins, as the marker parser reads them. Exported for callers that classify a commit by
+// what it marks rather than by its subject, which anyone can rewrite.
+func Trailers(body string) map[string]string { return parseTrailers(body) }
+
 func parseTrailers(block string) map[string]string {
 	out := map[string]string{}
 	for _, line := range strings.Split(block, "\n") {

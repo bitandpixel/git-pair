@@ -9,18 +9,23 @@ import (
 )
 
 // TestPRDTwentyNineGoldenWorkflow replays PRD §29 end to end through the CLI only:
-// init, implement, ready, queue, review block, response, the surviving-additions
-// refusal, ready again, approve, complete, and the archival promise. Assertions are on
-// git state (commits, trailers, refs, reachability) rather than on formatted output.
+// init, implement, ready, queue, review block, response, the surviving-additions refusal, ready
+// again, approve, the gate, the landing, and the record. Assertions are on git state (commits,
+// trailers, refs, reachability) rather than on formatted output.
+//
+// The shape worth naming: through all of the review, nothing is written to refs/git-pair. The two
+// durable refs appear together, at landing, and the archive half is what makes the unsquashed chain
+// readable after the branch is deleted — which is the whole promise, moved from a ref maintained
+// during the work to a record written once at the end of it.
 func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	const slug = "booking-transaction"
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("main.go", "package main\n\nfunc main() {}\n"))
 	mainBefore := f.RevParse("main")
 
-	// --- author: git pair change init --base main ---------------------------------
+	// --- author: git pair init --base main ---------------------------------
 	f.CreateBranch(slug)
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 
 	metadata := filepath.Join("changesets", slug, "CHANGESET.yaml")
 	about := filepath.Join("changesets", slug, "ABOUT.md")
@@ -43,7 +48,7 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	// --- author: git pair change ready -------------------------------------------
 	ready(t, f)
 
-	queue := runIn(t, f.Dir(), "review", "queue", "--json")
+	queue := runIn(t, f.Dir(), "queue", "--json")
 	if rows := queue.jsonList(t, "ready_for_review"); len(rows) != 1 ||
 		rows[0].(map[string]any)["changeset"] != slug {
 		t.Fatalf("queue = %v, want %s waiting for review", rows, slug)
@@ -67,7 +72,7 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	if !ok || latest["outcome"] != "block" {
 		t.Fatalf("latest_review = %v, want the blocking review", status["latest_review"])
 	}
-	if rows := runIn(t, f.Dir(), "review", "queue", "--json").jsonList(t, "ready_for_review"); len(rows) != 0 {
+	if rows := runIn(t, f.Dir(), "queue", "--json").jsonList(t, "ready_for_review"); len(rows) != 0 {
 		t.Errorf("a blocked changeset is still queued: %v", rows)
 	}
 
@@ -95,7 +100,7 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	if got := f.Subject(f.Head()); strings.HasPrefix(got, "git-pair: ready") {
 		t.Error("a ready marker was created despite the surviving addition")
 	}
-	if rows := runIn(t, f.Dir(), "review", "queue", "--json").jsonList(t, "ready_for_review"); len(rows) != 0 {
+	if rows := runIn(t, f.Dir(), "queue", "--json").jsonList(t, "ready_for_review"); len(rows) != 0 {
 		t.Errorf("the refused changeset is queued: %v", rows)
 	}
 
@@ -134,20 +139,27 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 		t.Fatalf("state = %v, want APPROVED", got)
 	}
 
-	// --- author: complete ---------------------------------------------------------
-	// The chain the archive must preserve: everything committed up to the approval.
-	chain := f.RevList("HEAD")
-	completed := runIn(t, f.Dir(), "change", "archive").mustSucceed(t, "change", "archive")
-	if got := f.RefSHA(archiveRef(slug)); got != f.Head() {
-		t.Errorf("%s = %s, want the archived head %s", archiveRef(slug), got, f.Head())
-	}
-	mustContain(t, completed.stdout, archiveRef(slug), "archive must print the archive ref")
-	mustContain(t, completed.stdout, "Safe to squash/merge", "archive must report integration readiness")
-	if got := runIn(t, f.Dir(), "status", "--json").json(t)["state"]; got != "APPROVED" {
-		t.Errorf("state = %v, want APPROVED: completion records no commit and establishes no state", got)
+	// --- the gate, before anything is written -------------------------------------
+	// `check` is what a merge runs, and it needs no durable ref to answer: the approval is a commit,
+	// and the content it spoke about is the content HEAD carries.
+	check := runIn(t, f.Dir(), "check").mustSucceed(t, "check")
+	mustContain(t, check.stdout, "OK: "+slug+" is integration-ready", "the gate clears the work")
+
+	// Nothing has been written to `refs/git-pair` through the whole lifecycle so far: init, the
+	// implementation, two ready markers, a blocking review, a response, an approval. The refs are what
+	// landing records, which is the property this workflow exists to pin.
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Fatalf("durable refs before any landing: %v", got)
 	}
 
-	// The history is the noisy-but-honest lifecycle PRD §2.3 describes, in order.
+	// --- author: land it, then record it ------------------------------------------
+	// The chain the record must preserve: everything committed up to the approval, including the
+	// blocking review and the response to it — the history a squash would destroy.
+	chain := f.RevList("HEAD")
+	reviewed := f.Head()
+
+	// The history is the noisy-but-honest lifecycle PRD §2.3 describes, in order. Read before the
+	// landing, because the landing is a commit on the integration branch rather than on this one.
 	want := []string{
 		"git-pair: initialize changeset " + slug,
 		"implement booking transaction locking",
@@ -162,12 +174,42 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 		t.Errorf("commit sequence =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 
-	// The archival promise: after the branch is gone, the complete unsquashed chain is
-	// still reachable, and main was never touched.
 	f.SwitchTo("main")
+	// Squash-merged: the reviewed content arrives on main as one commit, with none of the ancestry
+	// that made it. The changeset directory is committed content, so it arrives with the work.
+	f.MustGit("checkout", reviewed, "--", filepath.Join("changesets", slug))
+	landing := f.Commit(slug+": land the reviewed work", gittest.WithFile("landed.md", "landed\n"))
+
+	recorded := runIn(t, f.Dir(), "integration", "record", "--source", reviewed, "--commit", landing,
+		"--target", "main").mustSucceed(t, "integration", "record")
+	mustContain(t, recorded.stdout, archiveRef(slug), "the record must print the archive ref it wrote")
+	mustContain(t, recorded.stdout, integrationRef(slug), "and the integration ref")
+	mustContain(t, recorded.stdout, "reachable from main", "and the reachability it verified")
+
+	if got := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").json(t)["integrated"]; got != true {
+		t.Errorf("integrated = %v, want true: the record is how a landing is known", got)
+	}
+	if got := f.RefSHA(archiveRef(slug)); got != reviewed {
+		t.Errorf("archive = %s, want the reviewed head %s", got, reviewed)
+	}
+	if got := f.RefSHA(integrationRef(slug)); got != landing {
+		t.Errorf("integration record = %s, want the landing %s", got, landing)
+	}
+	// Recording changed no lifecycle state: landing is not a marker, and a state value for it would put
+	// a derived fact inside the machine that markers move.
+	if got := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").json(t)["state"]; got != "APPROVED" {
+		t.Errorf("state = %v, want APPROVED", got)
+	}
+
+	// The archival promise: after the branch is gone, the complete unsquashed chain is still
+	// reachable — through the record, which is the only thing that was ever written to hold it. And
+	// the landing is the only thing main gained.
 	f.ForceDeleteBranch(slug)
-	if got := f.RevParse("main"); got != mainBefore {
-		t.Errorf("main moved from %s to %s", mainBefore, got)
+	if got := f.RevParse("main"); got != landing {
+		t.Errorf("main = %s, want the landing commit %s", got, landing)
+	}
+	if got := f.RevListCount(mainBefore + "..main"); got != 1 {
+		t.Errorf("main gained %d commits from this changeset, want the one landing commit", got)
 	}
 	reachable := map[string]bool{}
 	for _, sha := range f.RevList(archiveRef(slug)) {
@@ -178,10 +220,17 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 			t.Errorf("%s is not reachable from %s after `git branch -D`", sha, archiveRef(slug))
 		}
 	}
-	// The completed head stays reachable through the movable ref, which is what the
-	// author would find if they came back to the review after the branch was gone.
-	if !f.ReachableFrom(chain[len(chain)-1], archiveRef(slug)) {
-		t.Errorf("the completed head %s is not reachable from %s",
-			chain[len(chain)-1], archiveRef(slug))
+	// The reviewed head itself — the commit the approval names — is reachable, which is what a later
+	// reader follows to see what was reviewed and what the author answered.
+	if !f.ReachableFrom(reviewed, archiveRef(slug)) {
+		t.Errorf("the reviewed head %s is not reachable from %s", reviewed, archiveRef(slug))
+	}
+
+	// And the record is idempotent, because the pipeline that wrote it may run again.
+	again := runIn(t, f.Dir(), "integration", "record", "--source", reviewed, "--commit", landing,
+		"--target", "main").mustSucceed(t, "integration", "record")
+	mustContain(t, again.stdout, "already recorded", "a retry says so rather than failing or pretending")
+	if got := durableRefs(t, f); len(got) != 2 {
+		t.Errorf("durable refs at the end = %v, want exactly the pair", got)
 	}
 }

@@ -20,12 +20,11 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 	f.Write("service.go", "package main\n\n// Please use a transaction here\nfunc Lock() {}\n")
 	submit(t, f, "block")
 	lowerReview := f.Head()
-	lowerRef := f.RefSHA(archiveRef("booking-transaction"))
 
 	// Upper changeset, stacked on the lower branch.
 	f.CreateBranch("booking-transaction-tests", "booking-transaction")
-	runIn(t, f.Dir(), "change", "init", "--base", "booking-transaction").
-		mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "booking-transaction").
+		mustSucceed(t, "init")
 	f.Commit("add concurrent final-seat test", gittest.WithFile("service_test.go",
 		"package main\n\nfunc TestFinalSeat() {}\n"))
 	ready(t, f)
@@ -40,8 +39,10 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 	if status["state"] != "READY" {
 		t.Errorf("state = %v, want READY", status["state"])
 	}
-	if status["archive_ref"] != archiveRef("booking-transaction-tests") {
-		t.Errorf("archive_ref = %v, want its own ref", status["archive_ref"])
+	// No ref for either changeset: the stack is in flight, and the durable refs are what landing
+	// writes. Independence of the two changesets is not something a ref has to preserve any more.
+	if status["archive_ref"] != "" {
+		t.Errorf("archive_ref = %v, want empty: nothing has landed", status["archive_ref"])
 	}
 
 	// Independent review history: the upper changeset has never been reviewed, even
@@ -54,7 +55,7 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 	}
 
 	// Only the upper changeset is queued; the lower one is blocked.
-	queue := runIn(t, f.Dir(), "review", "queue", "--json")
+	queue := runIn(t, f.Dir(), "queue", "--json")
 	rows := queue.jsonList(t, "ready_for_review")
 	if len(rows) != 1 {
 		t.Fatalf("queue = %v, want only the ready upper changeset", rows)
@@ -87,14 +88,12 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 		t.Errorf("upper threads = %v, want its own thread file", threads)
 	}
 
-	// Independent refs: reviewing the upper changeset must not move the lower one.
+	// Reviewing the upper changeset writes a commit and no ref, so there is nothing for it to move
+	// on the lower one's behalf.
 	submit(t, f, "approve")
 	upperHead := f.Head()
-	if got := f.RefSHA(archiveRef("booking-transaction-tests")); got != upperHead {
-		t.Errorf("%s = %s, want the upper review commit %s", archiveRef("booking-transaction-tests"), got, upperHead)
-	}
-	if got := f.RefSHA(archiveRef("booking-transaction")); got != lowerRef {
-		t.Errorf("the lower changeset's ref moved from %s to %s", lowerRef, got)
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Errorf("reviewing the upper changeset wrote %v", got)
 	}
 	// Its history is now its own single approve.
 	upperHistory = runIn(t, f.Dir(), "review", "history", "--json")
@@ -103,17 +102,29 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 		t.Errorf("upper reviews = %v, want its own approve", reviews)
 	}
 
-	// Archival is per changeset too: archiving the upper changeset moves its own ref and
-	// leaves the lower one's alone.
-	runIn(t, f.Dir(), "change", "archive").mustSucceed(t, "change", "archive")
-	if got := f.RefSHA(archiveRef("booking-transaction-tests")); got != f.Head() {
-		t.Errorf("upper archive = %s, want its own head %s", got, f.Head())
+	// The record is per changeset: landing the upper one records the upper one, and the lower
+	// changeset still has nothing durable written for it. That is the independence PRD §21 asks for,
+	// held by the id being the whole name of both refs rather than by any bookkeeping at review time.
+	f.SwitchTo("main")
+	f.MustGit("checkout", upperHead, "--",
+		"changesets/booking-transaction", "changesets/booking-transaction-tests")
+	landing := f.Commit("land the upper changeset", gittest.WithFile("landed.md", "landed\n"))
+	runIn(t, f.Dir(), "integration", "record", "--source", upperHead, "--commit", landing,
+		"--changeset", "booking-transaction-tests").mustSucceed(t, "integration", "record")
+
+	if !f.HasRef(integrationRef("booking-transaction-tests")) {
+		t.Error("the upper changeset has no integration record")
 	}
-	if got := f.RefSHA(archiveRef("booking-transaction")); got != lowerRef {
-		t.Errorf("archiving the upper changeset moved the lower ref to %s, want %s", got, lowerRef)
+	for _, ref := range []string{archiveRef("booking-transaction"), integrationRef("booking-transaction")} {
+		if f.HasRef(ref) {
+			t.Errorf("%s exists: the lower changeset was never landed, and its name is not this record's", ref)
+		}
 	}
-	if !f.ReachableFrom(lowerReview, archiveRef("booking-transaction")) {
-		t.Error("the lower changeset's review commit is no longer reachable from its own archive")
+	// The upper record's chain reaches down through the stack, which is what makes the lower
+	// changeset's reviewed history readable after both branches are deleted — read through the
+	// changeset that was actually recorded.
+	if !f.ReachableFrom(lowerReview, archiveRef("booking-transaction-tests")) {
+		t.Error("the lower changeset's review commit is not reachable from the upper record")
 	}
 }
 

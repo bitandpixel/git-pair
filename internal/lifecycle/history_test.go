@@ -22,8 +22,8 @@ func summarize(t *testing.T, f *gittest.Fixture, slug, base, headRef string) lif
 	return summary
 }
 
-// summarizeAgainstTree is the derivation `change archive` uses: the marker verdict,
-// then the question of whether the content it spoke about is still at headRef.
+// summarizeAgainstTree is the derivation `git pair check` asks its verdict of: the marker
+// verdict, then the question of whether the content it spoke about is still at headRef.
 func summarizeAgainstTree(t *testing.T, f *gittest.Fixture, slug, base, headRef string) lifecycle.Summary {
 	t.Helper()
 	summary, err := lifecycle.SummarizeAgainstTree(context.Background(), repo(f), slug, base, headRef)
@@ -340,9 +340,8 @@ func subjects(events []lifecycle.Event) []string {
 	return out
 }
 
-// The tree verdict is what `change archive` asks for, and it looks past a commit that
-// touches nothing but changesets/<slug>/: that is not an implementation change, and the
-// reviewer reads ABOUT.md and threads from HEAD anyway.
+// The tree verdict looks past a commit that touches nothing but changesets/<slug>/: that is
+// not an implementation change, and the reviewer reads ABOUT.md and threads from HEAD anyway.
 func TestSummarizeAgainstTreeChangesetOnlyCommitKeepsTheMarker(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
@@ -413,5 +412,46 @@ func TestSummarizeBaseMovingUnderAReadyChangesetKeepsReady(t *testing.T) {
 
 	if got := summarize(t, f, slug, base, "HEAD"); got.State != model.StateReady {
 		t.Errorf("state = %s, want READY: the reviewed code is untouched (reason: %s)", got.State, got.Reason)
+	}
+}
+
+// TestScanLineageKeepsEveryChangesetsMarkers pins the two properties `integration record` depends on:
+// newest-first order, and no filtering by changeset id.
+//
+// Summarize filters by id because it answers one changeset's state. The scan answers a different
+// question — "which changesets do the markers in this history name" — and the disagreement between that
+// answer and the directory in the tree is a refusal the recorder reports (PRD §11.4). It is invisible
+// once the scan has dropped the ids nobody asked about, which is why the scan does not take a slug.
+func TestScanLineageKeepsEveryChangesetsMarkers(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking", "main")
+	ready := f.CommitReadyMarker("booking")
+	approval := f.CommitReviewMarker("booking", "approve")
+	feedback := f.CommitReviewMarker("other", "feedback")
+	// An ordinary commit: no trailers, so it is not a marker and does not belong in the result.
+	f.Commit("implement locking", gittest.WithFile("service.go", "package main\n\nfunc Lock() {}\n"))
+
+	scans, err := lifecycle.ScanLineage(context.Background(), repo(f), "HEAD")
+	if err != nil {
+		t.Fatalf("ScanLineage: %v", err)
+	}
+	got := make([]string, 0, len(scans))
+	for _, s := range scans {
+		got = append(got, s.Short)
+	}
+	want := []string{f.Short(feedback), f.Short(approval), f.Short(ready)}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("scan = %v, want the three markers newest-first %v", got, want)
+	}
+	// The trailers come back parsed, because the caller's question is about their values: which
+	// changeset, and what verdict.
+	newest := scans[0]
+	if newest.Trailers[model.TrailerChangeset] != "other" || newest.Trailers[model.TrailerOutcome] != string(model.OutcomeFeedback) {
+		t.Errorf("newest marker = %v, want an approval of `other` read out of the trailers", newest.Trailers)
+	}
+	if newest.SHA != feedback {
+		t.Errorf("SHA = %s, want %s", newest.SHA, feedback)
 	}
 }

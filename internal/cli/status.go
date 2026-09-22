@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"gitpair/internal/changeset"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 	"gitpair/internal/reviewref"
@@ -17,6 +18,7 @@ import (
 
 func newStatusCommand(a *app) *cobra.Command {
 	var changesetSlug string
+	var doFetch bool
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show the effective state of a changeset",
@@ -26,23 +28,32 @@ State is never stored in a file. Lifecycle markers are commits carrying
 Review-* trailers, and state moves when a git-pair command records one:
 ` + "`change ready`" + ` offers the changeset, ` + "`change unready`" + ` withdraws it, and a
 review submission answers it. Ordinary commits do not change state; they are named
-in the reason, and they are what ` + "`change archive`" + ` refuses to archive over.
+in the reason, and they are what ` + "`git pair check`" + ` refuses to pass.
+
+While work is in flight the branch is the whole story: no ref is written by any of those commands,
+and the only durable refs git-pair has are the two that ` + "`git pair integration record`" + ` writes
+once the work has landed. ` + "`status`" + ` reports both, beside the state, when they exist.
 
 --changeset reads another changeset by slug, from whichever branch carries it, so
 you can ask about work you do not have checked out. Reads are the only commands
 that do: a marker is a commit, and a commit lands on the branch you are standing on.
 
-With --json the output is a stable contract for agents and automation.`,
+With --json the output is a stable contract for agents and automation.
+
+--fetch asks the remote for the durable refs and their mirrors before answering, which is how you see
+a landing recorded in somebody else's clone. Without it nothing here reaches the network, and what
+status says about other clones is limited to what this one has fetched.`,
 		Example: `  git pair status
   git pair status --json
   git pair status --changeset booking-transaction`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStatus(cmd.Context(), a, changesetSlug)
+			return runStatus(cmd.Context(), a, changesetSlug, doFetch)
 		},
 	}
 	cmd.Flags().StringVar(&changesetSlug, "changeset", "",
 		"read the changeset with this slug, from whichever branch carries it")
+	fetchFlag(cmd, &doFetch)
 	return cmd
 }
 
@@ -50,6 +61,23 @@ type latestReviewJSON struct {
 	Index   int    `json:"index"`
 	Outcome string `json:"outcome"`
 	Commit  string `json:"commit"`
+	// ReviewedHead is the commit this submission spoke about, from its `Review-Head` trailer.
+	// It is the value `check` measures lineage against, so a reader who is told "not in this
+	// history" by the gate can see what the two ends of that comparison were (PRD §11.1).
+	ReviewedHead string `json:"reviewed_head,omitempty"`
+}
+
+// parentJSON is the stack this changeset sits on as the reader sees it now: the parent branch, where
+// its tip stands, the tip the newest approval recorded, and whether those two still agree. Absent for
+// a changeset that is not stacked (PRD §21).
+type parentJSON struct {
+	Branch    string `json:"branch"`
+	Changeset string `json:"changeset,omitempty"`
+	Tip       string `json:"tip,omitempty"`
+	Recorded  string `json:"recorded_at_approval,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Next      string `json:"next,omitempty"`
+	Note      string `json:"note,omitempty"`
 }
 
 type statusJSON struct {
@@ -70,18 +98,34 @@ type statusJSON struct {
 	Head                string            `json:"head"`
 	HeadFull            string            `json:"head_full"`
 	LatestReview        *latestReviewJSON `json:"latest_review"`
-	ArchiveRef          string            `json:"archive_ref"`
-	ArchiveCommit       string            `json:"archive_commit"`
-	Uncommitted         *bool             `json:"uncommitted"`
-	Abandoned           bool              `json:"abandoned"`
-	AbandonedCommit     string            `json:"abandoned_commit,omitempty"`
+	// Parent is the stack, and is nil for a changeset measured against the integration branch.
+	Parent *parentJSON `json:"parent,omitempty"`
+	// ArchiveRef and ArchiveCommit report the changeset's archived chain: the unsquashed
+	// implementation-and-review tip the record was made from. They are non-empty only once the
+	// changeset has been recorded, because that is the only moment git-pair writes the ref. An
+	// in-flight changeset has no archive to report — the branch holds the chain, and reporting a
+	// ref that does not exist would be reporting a fact about the tool rather than the work.
+	ArchiveRef      string `json:"archive_ref"`
+	ArchiveCommit   string `json:"archive_commit"`
+	Uncommitted     *bool  `json:"uncommitted"`
+	Abandoned       bool   `json:"abandoned"`
+	AbandonedCommit string `json:"abandoned_commit,omitempty"`
 	// Integrated reports the presence of an integration ref, which is the only record that a
 	// changeset landed: squash, rebase and cherry-pick destroy the ancestry that would otherwise
 	// answer it. Like `abandoned`, it sits beside `state` rather than inside it — the lifecycle
 	// states are what markers move, and landing is not a marker.
 	Integrated bool `json:"integrated"`
-	// IntegratedCommit is where the record points.
+	// IntegratedCommit is where the record points, and IntegratedRef is the ref that holds it — the
+	// address to fetch, diff, or hand to another person.
 	IntegratedCommit string `json:"integrated_commit,omitempty"`
+	IntegratedRef    string `json:"integration_ref,omitempty"`
+	// Unpublished lists changesets whose record this clone holds and whose remote — as this clone last
+	// fetched it — does not, or does not identically (§11.1). Never null: an empty list answers "nothing
+	// is waiting to be published" and a missing key would answer "this build does not know how to look".
+	Unpublished []unpublishedPair `json:"unpublished"`
+	// UnpublishedNote is the one sentence for why the list is empty when the question could not be asked
+	// at all — no remote, or a mirror namespace this clone has never fetched.
+	UnpublishedNote string `json:"unpublished_note,omitempty"`
 	// IntegratedInDefaultBranch says the recorded landing commit is in the history of the branch
 	// git-pair calls the integration branch, and IntegratedDefaultBranch names that branch. Both
 	// are derived at read time, and the pair rather than a single `integrated_target`: a ref stores
@@ -97,21 +141,73 @@ type statusJSON struct {
 	Unrecognised              []string `json:"unrecognised_markers,omitempty"`
 }
 
-func runStatus(ctx context.Context, a *app, slug string) error {
+func runStatus(ctx context.Context, a *app, slug string, doFetch bool) error {
 	s, err := a.loadFor(ctx, slug)
+	if err != nil {
+		return a.landingsOnNoChangeset(ctx, slug, err)
+	}
+	if doFetch {
+		a.fetchDurableRefs(ctx, s.repo, s.cs.Branch)
+	}
+	// The published-or-not comparison needs the namespace indexed by changeset, which `buildStatus`
+	// reads for its own reasons without sharing it. One extra `for-each-ref` is the price of not
+	// threading an index through a constructor that has no use for one; `queue`, where the cost actually
+	// matters, reuses the index it already has.
+	idx, err := indexDurableRefs(ctx, s.repo)
 	if err != nil {
 		return err
 	}
+	rep := a.publicationReport(ctx, s.repo, s.cs.Branch, idx, "`git pair status --fetch` asks for them", doFetch)
 	view, err := buildStatus(ctx, a, s)
 	if err != nil {
 		return err
 	}
+	view.json.Unpublished = rep.Findings
+	view.json.UnpublishedNote = rep.Note
 	if a.json {
 		// view itself is unexported-only; emit its JSON shape.
 		return a.emitJSON(view.json)
 	}
 	printStatus(a, view)
+	// Published-or-not is a separate question from anything `printStatus` answers, and it is asked of
+	// the whole namespace rather than of this changeset, so it goes after the per-changeset report rather
+	// than inside it.
+	a.printUnpublished(rep, true)
 	return nil
+}
+
+// landingsOnNoChangeset annotates the one `status` failure that has a second half to it.
+//
+// "No changeset for this branch" is true and stays the answer — exit 2, because the command asked about
+// work in progress and this branch holds none. But when the branch is the destination, the same
+// repository may also be holding directories that landed with no record written, and a reader told only
+// the first half goes looking for a branch they forgot instead of the record they did not write. The
+// finding is printed where a reader on that branch will see it, with the invocation that closes the gap
+// (PRD §22's contract, made detectable).
+//
+// Every step of the detection is best-effort: this path already has an answer, and a report about
+// landings is never a reason to fail in a new way.
+func (a *app) landingsOnNoChangeset(ctx context.Context, slug string, err error) error {
+	if slug != "" || !errors.Is(err, changeset.ErrNoChangeset) {
+		return err
+	}
+	repo, rerr := a.loadRepo(ctx)
+	if rerr != nil {
+		return err
+	}
+	db, derr := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
+	if derr != nil {
+		return err
+	}
+	dirs, derr := changeset.DirsAt(ctx, repo, db.Ref)
+	if derr != nil {
+		return err
+	}
+	durable, derr := indexDurableRefs(ctx, repo)
+	if derr != nil {
+		return err
+	}
+	return unrecordedInStatus(err, durable.unrecordedLandings(dirs), durable.NamespaceEmpty, displayRef(db.Ref))
 }
 
 type statusView struct {
@@ -135,7 +231,7 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 		Uncommitted: uncommitted(s),
 		Reviews:     len(s.summary.Reviews),
 		Reason:      s.summary.Reason,
-		NextAction:  nextAction(s.summary),
+		NextAction:  nextAction(s.summary, s.cs.Base),
 	}
 	for _, e := range s.summary.Unrecognised {
 		view.json.Unrecognised = append(view.json.Unrecognised, e.Short+" "+e.Subject)
@@ -154,16 +250,33 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 	}
 	if r := s.summary.LatestReview; r != nil {
 		view.json.LatestReview = &latestReviewJSON{
-			Index:   len(s.summary.Reviews) - 1,
-			Outcome: string(r.Outcome),
-			Commit:  short(r.SHA),
+			Index:        len(s.summary.Reviews) - 1,
+			Outcome:      string(r.Outcome),
+			Commit:       short(r.SHA),
+			ReviewedHead: short(r.ReviewedHead),
 		}
 		view.latestAge = lifecycle.Age(r.When, now())
 	}
-	if sha, err := reviewref.Resolve(ctx, s.repo, s.cs.Slug); err == nil {
+	// The stack. An approval measures itself against a parent tip as well as a head, and the parent
+	// moves in ways this branch's own history cannot show, so `status` says what the approval
+	// recorded and whether it still stands (PRD §21).
+	if ps, err := a.parentSinceApproval(ctx, s.repo, s.cs, s.trunk, s.summary.Marker); err != nil {
+		return nil, err
+	} else if ps.Branch != "" {
+		view.json.Parent = &parentJSON{
+			Branch:    ps.Branch,
+			Changeset: ps.Changeset,
+			Tip:       short(ps.Tip),
+			Recorded:  short(ps.Recorded),
+			Reason:    ps.Reason,
+			Next:      ps.Next,
+			Note:      ps.Note,
+		}
+	}
+	if sha, err := reviewref.ResolveArchive(ctx, s.repo, s.cs.Slug); err == nil {
 		// The name of the ref is derivable from the slug, so it is only worth
-		// reporting once the ref exists: its absence is the answer to "has this ever
-		// been handed to a reviewer", which a slug-derived string could never give.
+		// reporting once the ref exists: its absence is the answer to "has this ever been
+		// recorded", which a slug-derived string could never give.
 		view.json.ArchiveRef = reviewref.Archive(s.cs.Slug)
 		view.json.ArchiveCommit = short(sha)
 	} else if !errors.Is(err, reviewref.ErrNoArchiveRef) {
@@ -172,6 +285,7 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 	if integrated, err := reviewref.ResolveIntegration(ctx, s.repo, s.cs.Slug); err == nil {
 		view.json.Integrated = true
 		view.json.IntegratedCommit = short(integrated)
+		view.json.IntegratedRef = reviewref.Integration(s.cs.Slug)
 		l, err := a.describeLanding(ctx, s.repo, integrated)
 		if err != nil {
 			return nil, err
@@ -198,15 +312,6 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 		view.json.NextAction = fmt.Sprintf("give the change its own branch (`git switch -c <name>`), or set `base` in %s to an ancestor of %s",
 			s.cs.MetadataPath(), s.cs.Branch)
 	}
-	// The archive naming HEAD exactly is the one case worth calling out: it means the
-	// reviewed head is what is here, and nothing is owed but integration, which is ordinary
-	// git. When the archive names an ancestor the branch has moved on, and the state and
-	// next action above already say what that means. An abandoned changeset is asked to do
-	// nothing at all, and `nextAction` said so two paragraphs up; a ref that happens to be
-	// current does not put it back on the list.
-	if view.json.ArchiveRef != "" && view.json.ArchiveCommit == short(s.head) && !view.json.Abandoned {
-		view.json.NextAction = archivedNextAction(view.json.ArchiveRef)
-	}
 	if !s.onCurrentBranch {
 		// Every command that records something writes to the branch that is checked
 		// out, because a marker is a commit. The next step for a changeset you are
@@ -214,10 +319,9 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 		view.json.NextAction = fmt.Sprintf("`git switch %s` to act on it: git-pair records markers on the branch you have checked out", s.cs.Branch)
 	}
 	if view.json.Integrated {
-		// Last, because it supersedes both answers above. The archive line says this head is safe
-		// to hand on; once the record exists, handing it on has happened. `change archive` refuses
-		// to move the archive from here on, and no git-pair command is the next step: what is left
-		// of the branch's life is ordinary git.
+		// Last, because it supersedes both answers above. Once the record exists, handing the work
+		// on has happened: the two refs are written, nothing in git-pair moves them, and no
+		// git-pair command is the next step. What is left of the branch's life is ordinary git.
 		view.json.NextAction = fmt.Sprintf("integrated at %s: nothing further is recorded for a changeset that has landed", view.json.IntegratedCommit)
 	}
 	return view, nil
@@ -240,9 +344,9 @@ func printStatus(a *app, v *statusView) {
 	if j.Branch != "" {
 		a.printf("Branch: %s\n", j.Branch)
 	} else {
-		// A changeset read from its anchor has no branch to name; saying "Branch:" with
+		// A changeset read from its durable record has no branch to name; saying "Branch:" with
 		// nothing after it would read as a bug rather than as an absence.
-		a.printf("Branch: none (read from the review anchor)\n")
+		a.printf("Branch: none (read from the durable record)\n")
 	}
 	a.printf("Base: %s\n", j.Base)
 	a.printf("State: %s\n", j.State)
@@ -258,6 +362,9 @@ func printStatus(a *app, v *statusView) {
 	}
 	if j.Integrated {
 		a.printf("\nIntegrated:\n  %s%s (`git pair integration record`)\n", j.IntegratedCommit, v.integratedReach)
+		if j.IntegratedRef != "" {
+			a.printf("  %s\n", j.IntegratedRef)
+		}
 	}
 	if j.LatestReview != nil {
 		a.printf("\nLatest review:\n")
@@ -267,13 +374,45 @@ func printStatus(a *app, v *statusView) {
 		}
 		a.printf("  outcome: %s\n", j.LatestReview.Outcome)
 		a.printf("  commit: %s%s\n", j.LatestReview.Commit, age)
+		if j.LatestReview.ReviewedHead != "" {
+			// The commit the reviewer was looking at, which is not this commit: a review
+			// submission is a child of the head it reviewed.
+			a.printf("  reviewed: %s\n", j.LatestReview.ReviewedHead)
+		}
 		a.printf("  history: %d review(s) — `git pair review history`\n", j.Reviews)
 	} else {
 		a.printf("\nLatest review:\n  none yet\n")
 	}
+	if p := j.Parent; p != nil {
+		// The stack reads after the review because its whole subject is whether that review still
+		// means what it said.
+		a.printf("\nStack:\n")
+		who := p.Branch
+		if p.Changeset != "" {
+			who = fmt.Sprintf("%s (changeset %s)", p.Branch, p.Changeset)
+		}
+		switch {
+		case p.Tip == "":
+			a.printf("  parent: %s — the branch is gone\n", who)
+		case p.Recorded == "":
+			a.printf("  parent: %s at %s\n", who, p.Tip)
+		case p.Recorded == p.Tip:
+			a.printf("  parent: %s at %s — unchanged since the approval\n", who, p.Tip)
+		default:
+			a.printf("  parent: %s at %s (approval recorded %s)\n", who, p.Tip, p.Recorded)
+		}
+		if p.Reason != "" {
+			// The reason already names the step — it is a refusal in another command's mouth, and a
+			// reader of `status` is the same reader — so it is printed once rather than twice.
+			a.printf("  stale:  %s\n", p.Reason)
+		}
+		if p.Note != "" {
+			a.printf("  note:   %s\n", p.Note)
+		}
+	}
 	if j.ArchiveRef != "" {
-		// One ref per changeset: it anchors the review chain and is the archive at the
-		// same time, which is honest now that nothing writes a second copy of the chain.
+		// Both families belong to the record, so they read together: the commit the work became, and
+		// the chain of what it went through to get there.
 		a.printf("\nReview archive:\n  %s\n", j.ArchiveRef)
 		if j.ArchiveCommit != "" {
 			a.printf("    points at: %s\n", j.ArchiveCommit)
@@ -302,7 +441,7 @@ func yesNo(b bool) string {
 
 // nextAction tells an agent what to run next, so it does not have to re-derive
 // the lifecycle from the state name.
-func nextAction(s lifecycle.Summary) string {
+func nextAction(s lifecycle.Summary, base string) string {
 	if s.Abandoned != nil {
 		// The state is WORKING, which would otherwise read as "keep going". Nothing is
 		// owed on an abandoned changeset, and `change ready` refuses it, so the honest
@@ -321,21 +460,29 @@ func nextAction(s lifecycle.Summary) string {
 			return "the head moved since the review: read it with `git pair change feedback`, " +
 				"then `git pair change ready` to offer the new head"
 		}
-		return "optionally address feedback (read it with `git pair change feedback`), then `git pair change archive`"
+		return "optionally address feedback (read it with `git pair change feedback`), then " + landingNextAction(base)
 	case model.StateApproved:
 		if s.Stale {
-			// Completion is the one command that asks the tree, and it refuses this head
-			// (PRD §9.5). Pointing an agent at it anyway would be a surprise it cannot
-			// predict from `state`.
+			// The gate asks the tree, and it refuses this head (PRD §9.5). Pointing an agent at it
+			// anyway would be a surprise it cannot predict from `state`.
 			return "the head moved since the review: `git pair change ready` to offer it for review again"
 		}
-		return "run `git pair change archive` before squash/merge"
+		return landingNextAction(base)
 	}
 	return ""
 }
 
-// archivedNextAction replaces the next step once HEAD itself is archived:
-// there is nothing left for git-pair to do, and integration is ordinary git.
-func archivedNextAction(archiveRef string) string {
-	return fmt.Sprintf("safe to squash/merge; this head is archived at %s", archiveRef)
+// landingNextAction is the landing contract (PRD §29) in one line, spelled once because four commands tell
+// an author this same thing and a fifth spelling is how a contract drifts. git-pair performs the gate and the
+// record and nothing in between: the merge itself is ordinary git, performed by whoever owns the
+// branch, which is what keeps PRD §26's no-merge posture intact.
+func landingNextAction(base string) string {
+	if base == "" {
+		base = "the base branch"
+	}
+	// The steps are the landing contract (PRD §29): record, then publish, then the branch may go. Publish
+	// is spelled here because after the branch is deleted the refs are the only copy of the chain, and a
+	// reader told only to record has been told to leave that copy unpublished.
+	return fmt.Sprintf("`git pair check`, then merge into %s with ordinary git, then "+
+		"`git pair integration record`, then `git pair integration publish`", base)
 }

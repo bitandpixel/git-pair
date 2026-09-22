@@ -9,15 +9,20 @@
 // child branched off it resolve to the same changeset instead of one of them inventing a
 // second answer (PRD §4, §7).
 //
-// Two properties are worth keeping in mind when changing this file:
+// Three properties are worth keeping in mind when changing this file:
 //
 //   - Nothing here asks which branch is checked out. Resolution reads trees, so a detached
 //     HEAD, a CI checkout and a human's branch all answer the same question. Branch names
 //     are not part of the durable data model.
+//   - Nothing here reads a ref. Durable refs exist only once a changeset has been recorded, and
+//     the tree rule already excludes landed work, so resolution asks git about trees and commit
+//     lists and nothing else.
 //   - The cost is bounded by the changesets on this revision, not by how many changesets have
-//     ever existed. The formulation this replaces needed an ancestry test per archive ref,
-//     which measured 1,802 git invocations for one resolution at 300 refs; this one measures
-//     five or six with the same refs present.
+//     ever existed. One revision costs one tree listing and one batch read; only a revision
+//     carrying more than one unlanded changeset pays the two calls per candidate that order
+//     them, because nothing has to be decided when there is one answer. The formulation this
+//     replaces needed an ancestry test per archive ref, which measured 1,802 git invocations
+//     for one resolution at 300 refs; this one measures five or six.
 package changeset
 
 import (
@@ -30,7 +35,6 @@ import (
 	"strings"
 
 	"gitpair/internal/git"
-	"gitpair/internal/model"
 	"gitpair/internal/reviewref"
 )
 
@@ -110,7 +114,7 @@ func DefaultBranch(ctx context.Context, repo *git.Repo, override string) (Defaul
 	}
 
 	// A remote carrying both main and master is a genuine coin flip, so it is refused rather
-	// than guessed. Locally, `main` wins over `master` the way `change init`'s base default
+	// than guessed. Locally, `main` wins over `master` the way `init`'s base default
 	// has always decided it: a repository holding both almost certainly means main, and a
 	// second rule there would only make the same repository answer differently depending on
 	// which command asked.
@@ -146,17 +150,14 @@ func DefaultBranch(ctx context.Context, repo *git.Repo, override string) (Defaul
 // Candidate is one changeset directory this revision carries.
 type Candidate struct {
 	Changeset Changeset
-	// Review is the commit the changeset's review ref points at, "" when it has never had
-	// one. It is an anchor for history, not an oracle for state.
-	Review string
-	// Distance is the number of commits between the review ref and the resolved revision.
-	// -1 means there is no review ref, which sorts after every real distance rather than
-	// competing with it.
+	// Distance is the number of commits between the newest commit that touched this
+	// changeset's own directory and the resolved revision: 0 when the revision itself is such
+	// a commit. -1 means no commit on this line has touched the directory, which sorts after
+	// every real distance rather than competing with it.
+	//
+	// It is the branch's own evidence of which work is live, and it is filled in only when a
+	// revision carries more than one candidate — with one candidate there is nothing to order.
 	Distance int
-	// Terminal is true when the review ref's own commit carries a terminal marker, i.e. the
-	// changeset was abandoned. The directory is still in the tree, which is why this is a
-	// fact reported beside the candidate rather than a reason to drop it.
-	Terminal bool
 	// Ignores lists the ids this changeset declares it is merely sharing a branch with.
 	Ignores []string
 }
@@ -186,13 +187,11 @@ func Resolve(ctx context.Context, repo *git.Repo, rev string, db DefaultBranchRe
 }
 
 // resolver holds what every revision in one command compares against: the directories the
-// integration branch has, and where each changeset's review ref points. Both are the same for
-// every branch in the repository, so a command that asks about many revisions builds one of
-// these instead of re-listing the same two things once per branch.
+// integration branch has. It is the same for every branch in the repository, so a command that asks
+// about many revisions builds one of these instead of listing the same tree once per branch.
 type resolver struct {
 	db      DefaultBranchRef
 	onTrunk map[string]bool
-	tips    map[string]string
 }
 
 func newResolver(ctx context.Context, repo *git.Repo, db DefaultBranchRef) (*resolver, error) {
@@ -204,11 +203,17 @@ func newResolver(ctx context.Context, repo *git.Repo, db DefaultBranchRef) (*res
 	for _, id := range landed {
 		onTrunk[id] = true
 	}
-	tips, err := reviewTips(ctx, repo)
-	if err != nil {
-		return nil, err
+	return &resolver{db: db, onTrunk: onTrunk}, nil
+}
+
+// trunkIDs returns the destination's directories in a stable order, for callers reporting them.
+func (r *resolver) trunkIDs() []string {
+	out := make([]string, 0, len(r.onTrunk))
+	for id := range r.onTrunk {
+		out = append(out, id)
 	}
-	return &resolver{db: db, onTrunk: onTrunk, tips: tips}, nil
+	sort.Strings(out)
+	return out
 }
 
 func (r *resolver) at(ctx context.Context, repo *git.Repo, rev string) (Resolution, error) {
@@ -254,20 +259,23 @@ func (r *resolver) at(ctx context.Context, repo *git.Repo, rev string) (Resoluti
 
 	var candidates []Candidate
 	for _, id := range order {
-		c, err := candidateFor(ctx, repo, revSHA, id, mdFor[id], r.tips)
+		c, err := candidateFor(id, mdFor[id])
 		if err != nil {
 			return res, err
 		}
 		candidates = append(candidates, c)
 	}
-	res.Candidates = candidates
+	res.Candidates = relinkStacks(ctx, repo, candidates)
+	if err := nearness(ctx, repo, revSHA, res.Candidates); err != nil {
+		return res, err
+	}
 	return choose(res), nil
 }
 
 // ResolveCurrent resolves the checked-out revision.
 //
 // It adds what the working tree holds and HEAD does not, which is the difference that makes
-// `change init` usable: it scaffolds a changeset directory and leaves it for the author to
+// `init` usable: it scaffolds a changeset directory and leaves it for the author to
 // commit, and `status` has to answer about it in between. The trees are still what decide
 // everything — a directory removed from HEAD is not a candidate however it sits on disk — so
 // this is an addition of uncommitted work, not a second rule.
@@ -324,13 +332,16 @@ func ResolveCurrentOn(ctx context.Context, repo *git.Repo, db DefaultBranchRef) 
 		if err != nil {
 			return res, err
 		}
-		c, err := candidateFor(ctx, repo, head, id, md, r.tips)
+		c, err := candidateFor(id, md)
 		if err != nil {
 			return res, err
 		}
 		added = append(added, c)
 	}
 	res.Candidates = added
+	if err := nearness(ctx, repo, head, res.Candidates); err != nil {
+		return res, err
+	}
 	return choose(res), nil
 }
 
@@ -343,64 +354,66 @@ type BranchResolution struct {
 	Err        error
 }
 
-// BranchResolutions resolves every local branch against the integration branch. It is the
-// enumeration `queue` wants, and the one `--changeset <id>` filters: the branches carrying work
-// are the ones with a candidate, and a changeset with no branch behind it is reported from its
-// ref instead of invented here.
+// Scan is one pass over the repository: every local branch and what the rule says about it, plus
+// the changeset directories the destination branch carries.
+type Scan struct {
+	DefaultBranch DefaultBranchRef
+	Branches      []BranchResolution
+	// TrunkIDs names the changeset directories present in the destination branch, sorted. They are
+	// landed work whether or not anyone wrote a record — the tree rule (PRD §12) makes a directory
+	// the destination carries no claim on anything — which is why the listing travels with the scan
+	// instead of being read again by whoever asks "has anything landed unrecorded?".
+	TrunkIDs []string
+}
+
+// ScanBranches resolves every local branch against the integration branch. It is the enumeration
+// `queue` wants, and the one `--changeset <id>` filters: the branches carrying work are the ones
+// with a candidate, and a changeset with no branch behind it is a record rather than work, which is
+// where `status --changeset` goes looking instead.
 //
-// The trunk listing and the ref listing are taken once for the whole scan, so the per-branch
-// cost is a tree listing, one batch read, and a distance for whichever candidate has a ref.
-// Archive refs with no branch behind them are deliberately not included: with refs created at
-// `change init`, a branchless ref is as likely an abandoned attempt as a deleted branch.
-func BranchResolutions(ctx context.Context, repo *git.Repo, db DefaultBranchRef) ([]BranchResolution, error) {
+// The trunk listing is taken once for the whole scan and returned with the answers, so the per-branch
+// cost is a tree listing and one batch read — plus two calls per candidate on the rare branch that
+// carries more than one unlanded changeset and has to order them.
+func ScanBranches(ctx context.Context, repo *git.Repo, db DefaultBranchRef) (Scan, error) {
 	branches, err := localBranches(ctx, repo)
 	if err != nil {
-		return nil, err
+		return Scan{}, err
 	}
 	r, err := newResolver(ctx, repo, db)
 	if err != nil {
-		return nil, err
+		return Scan{}, err
 	}
-	out := make([]BranchResolution, 0, len(branches))
+	out := Scan{DefaultBranch: db, TrunkIDs: r.trunkIDs()}
+	out.Branches = make([]BranchResolution, 0, len(branches))
 	for _, b := range branches {
 		res, err := r.at(ctx, repo, "refs/heads/"+b)
-		out = append(out, BranchResolution{Branch: b, Resolution: res, Err: err})
+		out.Branches = append(out.Branches, BranchResolution{Branch: b, Resolution: res, Err: err})
 	}
 	return out, nil
 }
 
 // candidateFor turns one directory's metadata into a candidate.
-func candidateFor(ctx context.Context, repo *git.Repo, rev, id string, md map[string]string, tips map[string]string) (Candidate, error) {
+func candidateFor(id string, md map[string]string) (Candidate, error) {
 	if id2 := md["id"]; id2 != "" && id2 != id {
 		return Candidate{}, fmt.Errorf("%w: %s records id %q but sits in %q; the directory name is the id, so rename the directory or correct %s",
 			ErrIDMismatch, filepath.Join(Root, id, MetadataFile), id2, id, MetadataFile)
 	}
-	c := Candidate{
+	stack, err := stackOf(md)
+	if err != nil {
+		return Candidate{}, fmt.Errorf("%s: %w", filepath.Join(Root, id, MetadataFile), err)
+	}
+	return Candidate{
 		Changeset: Changeset{
-			Slug:   id,
-			Base:   md["base"],
-			Dir:    filepath.Join(Root, id),
-			Exists: true,
+			Slug:            id,
+			Base:            stack.Base,
+			ParentBranch:    stack.Parent,
+			ParentChangeset: stack.ParentChangeset,
+			Dir:             filepath.Join(Root, id),
+			Exists:          true,
 		},
 		Distance: -1,
 		Ignores:  strings.Fields(md[IgnoresKey]),
-	}
-	tip, ok := tips[id]
-	if !ok {
-		return c, nil
-	}
-	c.Review = tip
-	d, err := distance(ctx, repo, tip, rev)
-	if err != nil {
-		return c, err
-	}
-	c.Distance = d
-	terminal, err := refIsTerminal(ctx, repo, tip)
-	if err != nil {
-		return c, err
-	}
-	c.Terminal = terminal
-	return c, nil
+	}, nil
 }
 
 // choose orders the candidates and decides whether the answer is one of them.
@@ -411,7 +424,7 @@ func candidateFor(ctx context.Context, repo *git.Repo, rev, id string, md map[st
 // branch with — the recorded answer to an ambiguity `change use` was asked about.
 func choose(res Resolution) Resolution {
 	res.Candidates = dropNamed(res.Candidates, func(c Candidate) []string {
-		return []string{parentID(c.Changeset.Base)}
+		return []string{stackParentID(c)}
 	})
 	res.Candidates = dropNamed(res.Candidates, func(c Candidate) []string { return c.Ignores })
 
@@ -447,68 +460,93 @@ func (r Resolution) WithIgnores(id string, ignores []string) Resolution {
 	return choose(res)
 }
 
-// reviewTips maps changeset id to the commit its archive ref points at, in one call.
-func reviewTips(ctx context.Context, repo *git.Repo) (map[string]string, error) {
-	entries, err := reviewref.List(ctx, repo)
-	if err != nil {
-		return nil, err
+// nearness fills in the ordering candidates need to be sorted by. It asks git nothing at all when
+// one candidate is the whole answer, which is the case on almost every branch.
+func nearness(ctx context.Context, repo *git.Repo, rev string, candidates []Candidate) error {
+	if len(candidates) < 2 {
+		return nil
 	}
-	tips := map[string]string{}
-	for _, e := range entries {
-		tips[e.ID] = e.SHA
+	for i := range candidates {
+		d, err := distanceFromTouch(ctx, repo, rev, candidates[i].Changeset.Slug)
+		if err != nil {
+			return err
+		}
+		candidates[i].Distance = d
 	}
-	return tips, nil
+	return nil
 }
 
-// distance counts the commits between a ref's target and the revision, and answers whether
-// that target is on this line of history at the same time.
+// distanceFromTouch counts the commits between the newest commit that touched this changeset's own
+// directory and the revision, and answers whether such a commit exists on this line at all.
 //
-// `git rev-list --count <tip>..<rev>` is 0 exactly when the tip is an ancestor of, or equal
-// to, the revision: if it is not an ancestor then the revision itself is counted. So one
-// call gives the ordering the rule needs without a separate ancestry test.
-func distance(ctx context.Context, repo *git.Repo, tip, rev string) (int, error) {
-	out, err := repo.Git(ctx, "rev-list", "--count", tip+".."+rev)
+// The directory is the changeset's own content — CHANGESET.yaml, ABOUT.md, the thread files — so the
+// newest commit touching it is what this branch last did about this changeset. That is the branch's
+// reading of "which work is live here", and it is a reading that survives a fresh clone, where the
+// old formulation had nothing to read because nothing had been anchored.
+func distanceFromTouch(ctx context.Context, repo *git.Repo, rev, id string) (int, error) {
+	touched, err := repo.Git(ctx, "log", "-1", "--format=%H", rev, "--", filepath.Join(Root, id))
+	if err != nil {
+		return -1, err
+	}
+	touched = strings.TrimSpace(touched)
+	if touched == "" {
+		// The directory is in the revision's tree, so some commit created it; an empty answer
+		// means this line reaches it only through a graft or a shallow boundary. Absence is the
+		// honest answer, and it ties with other absences rather than inventing an order.
+		return -1, nil
+	}
+	out, err := repo.Git(ctx, "rev-list", "--count", touched+".."+rev)
 	if err != nil {
 		return -1, err
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(out))
 	if err != nil {
-		return -1, fmt.Errorf("counting commits from %s to %s: %w", tip, rev, err)
+		return -1, fmt.Errorf("counting commits from %s to %s: %w", touched, rev, err)
 	}
 	return n, nil
 }
 
-// refIsTerminal asks the commit the ref points at, which is where `change abandon` writes its
-// marker: the ending is the commit the ref names, so no walk is needed.
-func refIsTerminal(ctx context.Context, repo *git.Repo, sha string) (bool, error) {
-	msg, err := repo.Git(ctx, "show", "-s", "--format=%B", sha)
-	if err != nil {
-		return false, err
-	}
-	for _, line := range strings.Split(msg, "\n") {
-		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
-		if !ok || key != model.TrailerState {
-			continue
-		}
-		if strings.TrimSpace(value) == model.StateValueAbandoned {
-			return true, nil
-		}
-	}
-	return false, nil
+// parentID reads the changeset id out of a base value. A stacked base is either the parent's id or
+// the branch that carries it — `booking` or `refs/heads/booking` — and both mean the same parent, so
+// the rule reads the id out of either rather than depending on which spelling `init` was
+// handed.
+func parentID(base string) string {
+	return strings.TrimPrefix(base, "refs/heads/")
 }
 
-// parentID reads the changeset id out of a base value. A stacked base is either the parent's
-// id or the ref that names it — `booking`, `refs/heads/booking`, or
-// `refs/git-pair/changesets/booking/archive` — and all mean the same parent, so the rule reads
-// the id out of any of them rather than depending on which spelling `change init` was handed.
-func parentID(base string) string {
-	if base == "" {
-		return ""
+// stackParentID names the branch a candidate is stacked on, whether the stack recorded it as a
+// branch or the resolver redirected the measurement base to the parent's integration ref.
+func stackParentID(c Candidate) string {
+	if c.Changeset.ParentBranch != "" {
+		return c.Changeset.ParentBranch
 	}
-	if id, ok := reviewref.ChangesetID(base); ok {
-		return id
+	return parentID(c.Changeset.Base)
+}
+
+// relinkStacks points a stacked changeset at its parent's integration ref when the parent branch is
+// gone, which is the ordinary state of a child whose parent has landed and been cleaned up.
+//
+// Without this the child answers nothing at all: every command measures against the base, the base is
+// a branch that no longer exists, and the answer to "what does this changeset contain?" is an
+// unknown-revision error. The integration ref is the durable half of the relationship — the bridge
+// requirements §Stacked Changesets describes — and it holds the commit the parent's work became, which
+// is what the child should be measured against now. Nothing is invented: the branch name stays in
+// ParentBranch, so the child can still be told its parent has landed rather than merely moved.
+func relinkStacks(ctx context.Context, repo *git.Repo, candidates []Candidate) []Candidate {
+	for i, c := range candidates {
+		if c.Changeset.ParentBranch == "" || c.Changeset.ParentChangeset == "" {
+			continue
+		}
+		if _, err := repo.RevParse(ctx, "refs/heads/"+c.Changeset.ParentBranch); err == nil {
+			continue
+		}
+		ref := reviewref.Integration(c.Changeset.ParentChangeset)
+		if _, err := repo.RevParse(ctx, ref); err != nil {
+			continue
+		}
+		candidates[i].Changeset.Base = ref
 	}
-	return strings.TrimPrefix(base, "refs/heads/")
+	return candidates
 }
 
 // dropNamed removes the candidates that another candidate names, keeping the list untouched
@@ -557,11 +595,11 @@ func sortCandidates(candidates []Candidate) {
 	})
 }
 
-// equalDistance reports whether the top of the ordering is undecided. One comparison does the
-// work because of how the sentinel is set: absence (-1) equals absence, so two candidates that
-// were never archived tie rather than being split by the order `ls-tree` happens to list them
-// in — which is what decides a fresh clone, where there are no refs at all. Absence does not
-// equal a distance, so a candidate that has been sent for review beats one that never has.
+// equalDistance reports whether the top of the ordering is undecided. Absence (-1) equals absence,
+// so two candidates that no commit on this line has touched tie rather than being split by the order
+// `ls-tree` happens to list them in — which is what decides a branch onto which two changeset
+// directories were dropped by one merge. Absence does not equal a distance, so a changeset this
+// branch has actually worked on beats one it is only carrying.
 func equalDistance(a, b Candidate) bool {
 	return a.Distance == b.Distance
 }

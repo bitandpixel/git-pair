@@ -92,14 +92,33 @@ func UnreadyMessage(slug string) Message {
 }
 
 // ReviewMessage describes a review submission with the given outcome.
-func ReviewMessage(slug string, outcome model.Outcome, body string) Message {
+//
+// head is the commit the reviewer was looking at — HEAD at the moment of the submission, which is the
+// new commit's first parent. It is recorded rather than left implicit because a rebase rewrites the
+// review commit while preserving its message: the rewritten marker still names the head that is gone
+// from this line, which is what lets `check` refuse to read an approval as approval of rewritten history
+// (PRD §10.4, §11.3).
+func ReviewMessage(slug string, outcome model.Outcome, head, parentHead, body string) Message {
+	trailers := []string{
+		"Review-Outcome=" + string(outcome),
+		"Review-Changeset=" + slug,
+	}
+	// An unknown head is recorded as no trailer rather than as an empty one: a marker
+	// that names nothing is readable as "this review does not say what it reviewed",
+	// which is what the gate then reports, while `Review-Head:` with nothing after it
+	// is a malformed trailer block to every other reader.
+	if head != "" {
+		trailers = append(trailers, "Review-Head="+head)
+	}
+	// The same for a stacked changeset's parent: an unstacked changeset writes nothing, because
+	// `Review-Parent-Head=` with no value would claim a parent with no name.
+	if parentHead != "" {
+		trailers = append(trailers, "Review-Parent-Head="+parentHead)
+	}
 	return Message{
-		Subject: fmt.Sprintf("review: %s %s", outcome, slug),
-		Body:    body,
-		Trailers: []string{
-			"Review-Outcome=" + string(outcome),
-			"Review-Changeset=" + slug,
-		},
+		Subject:  fmt.Sprintf("review: %s %s", outcome, slug),
+		Body:     body,
+		Trailers: trailers,
 	}
 }
 
@@ -139,21 +158,42 @@ func CommitPaths(ctx context.Context, repo *git.Repo, msg Message, paths []strin
 // refuseIfIntegrated is the write gate: once a changeset's integration record exists, git-pair
 // writes no marker for it.
 //
-// The check is here rather than in each command because a marker commit and the archive move that
-// follows it are one operation. A command that committed first and then learned the ref was frozen
-// would leave a marker on the branch with nothing pointing at it — a half-write the author can only
-// undo by rewriting history. `reviewref.Update` refuses too, so a caller that reaches the ref
-// without coming through a marker still meets the rule (PRD §13, requirements §23).
+// The record closes the paper trail, so a marker after it would be a claim about a review that
+// cannot happen. The gate also keeps a stale checkout honest: an author who forgot the branch was
+// left behind cannot put a landed changeset back in the queue, and a reviewer working from an old
+// clone cannot approve work that has already become something else.
 func refuseIfIntegrated(ctx context.Context, repo *git.Repo, msg Message) error {
-	id := msg.changesetID()
+	return RefuseIntegrated(ctx, repo, msg.changesetID())
+}
+
+// RefuseIntegrated is the same gate for a caller that is about to write nothing. `marker.Commit`
+// cannot produce a marker for a recorded changeset, but a command can decide on its own that there is
+// nothing to record and report success — and `change unready` on a changeset its author has already
+// merged is not a no-op, it is a mistake. The answer to both is the same sentence.
+func RefuseIntegrated(ctx context.Context, repo *git.Repo, id string) error {
 	if id == "" {
 		return nil
 	}
-	return reviewref.RefuseIntegrated(ctx, repo, id)
+	at, err := reviewref.ResolveIntegration(ctx, repo, id)
+	if errors.Is(err, reviewref.ErrNotIntegrated) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("changeset %s is recorded as integrated at %s, so git-pair records nothing further for it",
+		id, short(at))
+}
+
+func short(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 // changesetID is the changeset a marker speaks about, read from the trailer that exists to answer
-// exactly that. A message naming no changeset freezes nothing.
+// exactly that. A message naming no changeset belongs to no record.
 func (m Message) changesetID() string {
 	for _, t := range m.Trailers {
 		if key, value, ok := strings.Cut(t, "="); ok && strings.TrimSpace(key) == model.TrailerChangeset {

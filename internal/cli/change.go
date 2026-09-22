@@ -30,305 +30,9 @@ func newChangeCommand(a *app) *cobra.Command {
 		// agent that typo'd the verb.
 		RunE: groupUsage("change"),
 	}
-	cmd.AddCommand(newChangeInitCommand(a), newChangeUseCommand(a), newChangeReadyCommand(a), newChangeUnreadyCommand(a),
-		newChangeAbandonCommand(a), newChangeFeedbackCommand(a), newChangeWaitCommand(a),
-		newChangeArchiveCommand(a))
+	cmd.AddCommand(newChangeUseCommand(a), newChangeReadyCommand(a), newChangeUnreadyCommand(a),
+		newChangeAbandonCommand(a), newChangeFeedbackCommand(a), newChangeWaitCommand(a))
 	return cmd
-}
-
-// --- change init ------------------------------------------------------------
-
-type initOptions struct {
-	base     string
-	setBase  bool
-	id       string
-	about    string
-	setAbout bool
-	noCommit bool
-}
-
-func newChangeInitCommand(a *app) *cobra.Command {
-	opts := &initOptions{}
-	cmd := &cobra.Command{
-		Use:   "init",
-		Short: "Create review scaffolding for the current branch",
-		Long: `Create changesets/<id>/ with CHANGESET.yaml and ABOUT.md, then commit it.
-
-The changeset ID is what git-pair calls the work from here on: it names the directory, and
-once refs exist it names those too. The branch name is only where the default comes from,
-so feature/booking-transaction becomes changesets/feature-booking-transaction/ unless you
-say otherwise:
-
-  git pair change init --id booking-transaction-v2
-
-An ID is chosen, not derived, so it is never rewritten to fit: --id booking\ v2 is refused
-rather than quietly turned into booking-v2, because refs named after a string nobody typed
-are not findable by the person who typed it. IDs are unique in git-pair's namespace, and a
-collision stops the command instead of appending a suffix.
-
-The commit covers the changeset directory only, so whatever else is staged on
-your index stays there. Use --no-commit to leave the scaffolding in the working
-tree for your first implementation commit instead.
-
-ABOUT.md gets a scaffold with the standard review headings unless you supply
-content, which makes describe-and-initialise a single non-interactive call:
-
-  git pair change init --base main --about "$DESCRIPTION"
-  git pair change init --base main --about - < about.md
-  cat about.md | git pair change init --base main
-
-Existing content is never overwritten silently: replacing a populated ABOUT.md
-takes --set-about, the same way changing a base takes --set-base.`,
-		Example: `  git pair change init --base main
-  git pair change init --base main --id booking-transaction-v2
-  git pair change init --base booking-transaction   # stacked branch
-  git pair change init --base main --about - < draft.md`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChangeInit(cmd.Context(), a, opts)
-		},
-	}
-	cmd.Flags().StringVar(&opts.base, "base", "", "ref this changeset is stacked on (default: main, then master)")
-	cmd.Flags().StringVar(&opts.id, "id", "", "changeset ID (default: the branch name, normalised)")
-	cmd.Flags().BoolVar(&opts.setBase, "set-base", false, "overwrite an existing base value")
-	cmd.Flags().StringVar(&opts.about, "about", "", "ABOUT.md content; - reads it from stdin")
-	cmd.Flags().BoolVar(&opts.setAbout, "set-about", false, "overwrite an existing ABOUT.md")
-	cmd.Flags().BoolVar(&opts.noCommit, "no-commit", false, "leave the scaffolding uncommitted")
-	return cmd
-}
-
-func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
-	repo, err := a.loadRepo(ctx)
-	if err != nil {
-		return err
-	}
-	branch, err := repo.CurrentBranch(ctx)
-	if err != nil {
-		return err
-	}
-	if branch == "" {
-		return &usageError{fmt.Errorf("%w: run `git switch -c <branch>` before `git pair change init`", changeset.ErrDetachedHead)}
-	}
-	// Starting a changeset on the integration branch is refused for clarity, not correctness:
-	// a changeset is measured against that branch, so one started on it is inert — every
-	// directory it carries is already landed. Saying so where the mistake is made beats a
-	// status line that never shows the changeset.
-	if db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch); err == nil && branch == db.LocalName() {
-		return &usageError{fmt.Errorf("%s is the integration branch, so a changeset started on it can never contain anything: `git switch -c <branch>` first", branch)}
-	}
-	base := opts.base
-	if base == "" {
-		// Resolved before the changeset itself. When there is no trunk to infer a base from,
-		// the advice the caller needs is `--base <ref>`, and that has to be the error they
-		// see rather than the generic "which branch is the integration branch" refusal.
-		if base, err = defaultBase(ctx, repo, a.defaultBranch); err != nil {
-			return &usageError{err}
-		}
-		a.warn("base: %s (pass --base to choose a different ref)\n", base)
-	}
-
-	// `change init` creates a directory, which is not a resolution question. A stacked branch
-	// carries its parent's changeset directory, and that inherited directory must not stop the
-	// child from starting its own: once both exist, `base:` says which is which.
-	id := opts.id
-	if id == "" {
-		if id, err = changeset.SlugFromBranch(branch); err != nil {
-			return &usageError{err}
-		}
-	}
-	cs, err := changeset.ForID(id)
-	if err != nil {
-		return &usageError{err}
-	}
-	cs.Branch = branch
-	dir, err := changeset.DirectoryAt(ctx, repo, id)
-	if err != nil {
-		return err
-	}
-	if dir.Committed && !dir.Worktree {
-		// Retiring a changeset is a commit. Until the deletion is committed the directory's
-		// history is still live here, so the name is not free yet.
-		return &usageError{fmt.Errorf("changesets/%s/ is deleted in your working tree but the deletion is not committed; commit the deletion before starting a changeset with that name again", id)}
-	}
-	cs.Exists = dir.Worktree
-	if !cs.Exists {
-		if err := refuseTakenID(ctx, repo, id); err != nil {
-			return err
-		}
-		if res, err := changeset.ResolveCurrent(ctx, repo, a.defaultBranch); err == nil &&
-			res.Selected != nil && res.Selected.Changeset.Slug != id {
-			a.warn("warning: %s already carries changeset %q; this branch will hold two changesets, so commands that act on one accept --changeset <id>\n",
-				branch, res.Selected.Changeset.Slug)
-		}
-	}
-	if _, err := repo.RevParse(ctx, base); err != nil {
-		a.warn("warning: base %q does not resolve yet; spans and status will fail until it does\n", base)
-	}
-
-	if own, err := changeset.BaseIsOwnBranch(ctx, repo, base, branch); err != nil {
-		return err
-	} else if own {
-		return &usageError{fmt.Errorf("%w: changeset %q cannot be based on %s, the branch it lives on. The base would move with every commit, so the changeset could never contain anything. Create a branch for the change (`git switch -c <name>`) or pass --base <ancestor-ref>",
-			changeset.ErrBaseIsOwnBranch, cs.Slug, base)}
-	}
-
-	about, err := aboutContent(opts)
-	if err != nil {
-		return err
-	}
-
-	written, err := changeset.Write(repo, cs, changeset.WriteOptions{
-		Base:     base,
-		SetBase:  opts.setBase,
-		About:    about,
-		SetAbout: opts.setAbout,
-	})
-	if err != nil {
-		// These are all "your arguments describe something that already exists"
-		// errors rather than repository states, so they exit 2.
-		switch {
-		case errors.Is(err, changeset.ErrBaseConflict),
-			errors.Is(err, changeset.ErrAboutConflict),
-			errors.Is(err, changeset.ErrIDMismatch):
-			return &usageError{err}
-		}
-		return err
-	}
-	for _, w := range written {
-		a.printf("created %s\n", w)
-	}
-	if len(written) == 0 {
-		a.printf("unchanged %s (already initialised)\n", cs.Dir)
-	}
-
-	described := about != "" || !aboutIsTemplate(ctx, repo, cs)
-	if opts.noCommit {
-		a.printf("not committed (--no-commit)\n")
-		printInitNext(a, cs, described)
-		return nil
-	}
-
-	// Stage first, then commit with --only: git needs the files in the index to
-	// accept them as pathspecs, and --only keeps the rest of the index out of
-	// this commit.
-	if err := repo.StagePaths(ctx, cs.Dir); err != nil {
-		return err
-	}
-	staged, err := repo.HasStagedChanges(ctx, cs.Dir)
-	if err != nil {
-		// A failure here is not worth inventing a new way for `init` to die:
-		// fall through and let the commit itself report.
-		staged = true
-	}
-	if !staged {
-		a.printf("nothing to commit (scaffolding is already tracked)\n")
-		printInitNext(a, cs, described)
-		return nil
-	}
-	sha, err := marker.CommitPaths(ctx, repo, marker.Message{
-		Subject:  fmt.Sprintf("git-pair: initialize changeset %s", cs.Slug),
-		Trailers: []string{"Review-Changeset=" + cs.Slug},
-	}, []string{cs.Dir})
-	if err != nil {
-		if isNothingToCommit(err) {
-			a.printf("nothing to commit (scaffolding is already tracked)\n")
-			printInitNext(a, cs, described)
-			return nil
-		}
-		return err
-	}
-	a.printf("committed %s\n", short(sha))
-	if status, err := repo.StatusPorcelain(ctx); err == nil && strings.TrimSpace(status) != "" {
-		a.printf("left %s uncommitted (not part of the scaffold)\n",
-			plural(len(strings.Split(strings.TrimSpace(status), "\n")), "path", "paths"))
-	}
-	printInitNext(a, cs, described)
-	return nil
-}
-
-// refuseTakenID enforces the uniqueness PRD §5 asks for: an id may not already be in
-// use, as a directory or as a ref. Nothing is suffixed to dodge a collision — an id
-// chosen for you is an id nobody chose, and it is baked into refs the moment the
-// changeset is readied. A suggestion is offered only when the candidate is itself free.
-func refuseTakenID(ctx context.Context, repo *git.Repo, id string) error {
-	if taken, err := reviewref.Taken(ctx, repo, id); err != nil {
-		return err
-	} else if taken {
-		return idTakenError(ctx, repo, id, "git-pair refs already exist for it")
-	}
-	if dir, err := changeset.DirectoryAt(ctx, repo, id); err != nil {
-		return err
-	} else if dir.Worktree || dir.Committed {
-		return idTakenError(ctx, repo, id, "changesets/"+id+" already exists, possibly left behind by a changeset that has landed")
-	}
-	return nil
-}
-
-func idTakenError(ctx context.Context, repo *git.Repo, id, why string) error {
-	if free := freeID(ctx, repo, id); free != "" {
-		return &usageError{fmt.Errorf("changeset ID %q is already in use: %s.\n\nChoose another ID:\n\n  git pair change init --id %s", id, why, free)}
-	}
-	return &usageError{fmt.Errorf("changeset ID %q is already in use: %s. Choose another ID with --id", id, why)}
-}
-
-// freeID returns the first unused <id>-<n>, or "" when none of the obvious candidates is
-// free or the repository could not be asked.
-func freeID(ctx context.Context, repo *git.Repo, id string) string {
-	for n := 2; n <= 9; n++ {
-		candidate := fmt.Sprintf("%s-%d", id, n)
-		if err := refuseTakenID(ctx, repo, candidate); err == nil {
-			return candidate
-		}
-	}
-	return ""
-}
-
-// aboutContent resolves the ABOUT.md body from --about or piped stdin.
-//
-// An explicit --about wins. Without it, a pipe is treated as an deliberate act
-// and its content is used; a terminal, or a pipe carrying nothing (including
-// </dev/null), means "no content was supplied" and the scaffold is written.
-func aboutContent(opts *initOptions) (string, error) {
-	switch {
-	case opts.about == "-":
-		piped := console.ReadPipedStdin()
-		if piped == "" {
-			return "", &usageError{errors.New("--about - needs content on stdin, and stdin is empty")}
-		}
-		return piped, nil
-	case opts.about != "":
-		return opts.about, nil
-	default:
-		return console.ReadPipedStdin(), nil
-	}
-}
-
-func printInitNext(a *app, cs changeset.Changeset, described bool) {
-	if described {
-		a.printf("\nNext: implement, commit, then run `git pair change ready`.\n")
-		return
-	}
-	a.printf("\nNext: fill in %s, commit it with your implementation, then run `git pair change ready`.\n", cs.AboutPath())
-}
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, one)
-	}
-	return fmt.Sprintf("%d %s", n, many)
-}
-
-// defaultBase picks the repository's trunk without guessing wildly.
-// defaultBase is the base `change init` records when the author does not name one. It is the
-// integration branch — the same ref the landed test compares trees against — so a changeset
-// cannot be measured against one branch while being judged landed by another. The spelling is
-// the short branch name, because that is what a person reads in CHANGESET.yaml.
-func defaultBase(ctx context.Context, repo *git.Repo, override string) (string, error) {
-	db, err := changeset.DefaultBranch(ctx, repo, override)
-	if err != nil {
-		return "", fmt.Errorf("cannot infer a base: %v; pass --base <ref>", err)
-	}
-	return db.LocalName(), nil
 }
 
 // --- change use -------------------------------------------------------------
@@ -342,7 +46,7 @@ directories on this branch are ones it is only sharing a branch with.
 
 A branch normally carries one unlanded changeset. It carries more when a sibling's branch was
 merged into this one, or when a branch created off a sibling started its own work without naming
-that stack with ` + "`change init --base`" + `. git-pair orders what it can — the nearest review ref,
+that stack with ` + "`init --base`" + `. git-pair orders what it can — the nearest review ref,
 then the base of a stack — and refuses rather than guessing between the rest, because picking one
 silently means reading the wrong diff base.
 
@@ -383,7 +87,7 @@ func runChangeUse(ctx context.Context, a *app, id string) error {
 		return nil
 	}
 	if len(res.Candidates) == 0 {
-		return &usageError{fmt.Errorf("no changeset is in progress on this branch; `git pair change init` starts one")}
+		return &usageError{fmt.Errorf("no changeset is in progress on this branch; `git pair init` starts one")}
 	}
 	chosen := false
 	for _, n := range names {
@@ -530,7 +234,7 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 	// that never described the change is the most common cause of a confused
 	// reviewer. Informational only, so it cannot block automation.
 	if aboutIsTemplate(ctx, s.repo, s.cs) {
-		a.warn("warning: %s still has the empty `change init` template; describe the change for the reviewer\n",
+		a.warn("warning: %s still has the empty `init` template; describe the change for the reviewer\n",
 			s.cs.AboutPath())
 	}
 
@@ -538,15 +242,9 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 	if err != nil {
 		return fmt.Errorf("creating ready marker: %w", err)
 	}
-	// Offering the changeset is the moment its commits stop being disposable. Until
-	// now only a review submission anchored them, so work that was offered and never
-	// reviewed — or work whose branch exists only in the reflog — could be pruned with
-	// its ready marker, and the history the archive is supposed to preserve would be
-	// gone before anyone read it. The move is a warning rather than a guarantee, like
-	// every review ref: nothing here stops a later `git push --delete` (PRD §13).
-	if _, err := reviewref.Update(ctx, s.repo, s.cs.Slug, sha); err != nil {
-		return fmt.Errorf("anchoring the ready marker: %w", err)
-	}
+	// The marker commit is the whole operation: no ref is written, and nothing is anchored. The
+	// branch holds the chain from here, and it is the only thing that does until landing — which is
+	// why `integration record` runs before the branch goes away rather than after (PRD §13).
 	printReady(a, s, sha, report, opts.allowSurviving)
 	return nil
 }
@@ -577,7 +275,7 @@ func printReady(a *app, s *session, sha string, report *survival.Report, acknowl
 	a.printf("Ready: %s\n", s.cs.Slug)
 	a.printf("  head:  %s\n", short(sha))
 	a.printf("  base:  %s\n", s.cs.Base)
-	a.printf("  queue: `git pair review queue` now lists this changeset\n")
+	a.printf("  queue: `git pair queue` now lists this changeset\n")
 }
 
 // aboutIsTemplate reports whether ABOUT.md is byte-identical to the scaffold,
@@ -629,14 +327,17 @@ The changeset returns to WORKING, and a later ` + "`git pair change ready`" + ` 
 queue under the same gate as the first time: review additions that still survive unchanged have to be
 resolved or acknowledged.
 
-The archive ref moves onto the withdrawal, as it does for every state a command records, so the
-retraction is still there to read after the branch is deleted. Otherwise the durable record would name
-the offer and only the offer, and a changeset read from the anchor would look like it was still waiting
-for a reviewer.
-
 The marker is written only when the changeset is actually in review — READY, APPROVED or FEEDBACK. On
 a changeset that is WORKING or BLOCKED there is nothing to withdraw, so the command succeeds without
-recording anything and a script can unready unconditionally.`,
+recording anything and a script can unready unconditionally.
+
+It records a marker and nothing else. There is no ref to move: the retraction lives on the branch
+beside the offer it withdraws, and ` + "`git pair integration record`" + ` is what makes a changeset's
+history permanent — for the work that lands.
+
+Once the changeset has an integration record, this refuses. A changeset that has landed has no readiness
+to withdraw, and "nothing to withdraw" would be an answer about the branch rather than about the work
+being finished.`,
 		Example: `  git pair change unready
   git pair change unready --json`,
 		Args: cobra.NoArgs,
@@ -658,22 +359,15 @@ func runChangeUnready(ctx context.Context, a *app) error {
 	if err := a.refuseIfAbandoned(ctx, s); err != nil {
 		return err
 	}
+	if err := marker.RefuseIntegrated(ctx, s.repo, s.cs.Slug); err != nil {
+		return err
+	}
 	if !inReview(s.summary.State) {
 		return printUnready(a, s, "")
 	}
 	sha, err := marker.Commit(ctx, s.repo, marker.UnreadyMessage(s.cs.Slug))
 	if err != nil {
 		return fmt.Errorf("creating unready marker: %w", err)
-	}
-	// The archive follows the withdrawal for the same reason it follows every other state a command
-	// records: the branch is the thing that gets deleted. A retraction that lives only on the branch
-	// is a retraction the durable record never received — the ref would keep naming the offer, and a
-	// changeset read from the anchor after `git branch -D` would report work the author had explicitly
-	// taken back as still waiting for a reviewer. `reviewref.Update` is the one path that moves the
-	// ref, and it refuses once the changeset is integrated (§13.3); `marker.Commit` had already refused
-	// before the commit, so a landed changeset gets neither a marker nor a move.
-	if _, err := reviewref.Update(ctx, s.repo, s.cs.Slug, sha); err != nil {
-		return fmt.Errorf("anchoring the unready marker: %w", err)
 	}
 	return printUnready(a, s, sha)
 }
@@ -719,7 +413,7 @@ func printUnready(a *app, s *session, sha string) error {
 	a.printf("Unready: %s\n", s.cs.Slug)
 	a.printf("  head:    %s\n", short(sha))
 	a.printf("  was:     %s\n", s.summary.State)
-	a.printf("  queue:   `git pair review queue` no longer lists this changeset\n")
+	a.printf("  queue:   `git pair queue` no longer lists this changeset\n")
 	a.printf("  next:    `git pair change ready` puts it back once the work is done\n")
 	return nil
 }
@@ -729,25 +423,29 @@ func printUnready(a *app, s *session, sha string) error {
 func newChangeAbandonCommand(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "abandon",
-		Short: "End the current changeset and keep its history reachable",
-		Long: `Record that this changeset will not be taken forward, and anchor the record.
+		Short: "End the current changeset",
+		Long: `Record that this changeset will not be taken forward.
 
-Abandoning is a decision about work that is still here, which is why the command needs the branch:
-the terminal marker is an ordinary commit on it, and the movable ref moves to that commit, which is
-what keeps the whole chain reachable after ` + "`git branch -D`" + `. Once the ref holds the marker,
-` + "`git pair review queue`" + ` can stay silent about the changeset even with no branch left — it can
-read the ending from the anchor.
+Abandoning is a decision about work that is still here, which is why the command needs the branch: the
+terminal marker is an ordinary commit on it, carrying ` + "`Review-State: abandoned" + `. That commit is
+the record — ` + "`git log`" + ` shows it, ` + "`git pair status`" + ` reports it as abandoned, and
+` + "`git pair queue`" + ` stops listing the changeset because the newest marker says the work
+ended.
+
+Nothing is anchored and no ref is written. The chain stays on the branch, so deleting the branch loses
+it: ` + "`git pair integration record`" + ` is what makes a changeset's history permanent, and it applies
+to work that landed. Abandoning is the case where it does not, and that is accepted — an ending nobody
+integrated has no landing to point at.
 
 Unlike ` + "`change unready`" + `, which withdraws an offer for now, this one closes the changeset:
 ` + "`change ready`" + `, ` + "`change unready`" + ` and ` + "`review submit`" + ` refuse against it
-afterwards, whether they meet it on the branch or on the anchor. That is also what stops a new branch
-reusing the name of a changeset that ended.
+afterwards. That is also what stops a new branch reusing the name of a changeset that ended.
 
 The state stays WORKING and no state value is added: the ending is reported as
 ` + "`abandoned_commit`" + ` in ` + "`status --json`" + `, beside the state rather than inside it.
 
 Re-running the command changes nothing and succeeds. Abandoning work whose branch is already gone
-refuses: post-merge bookkeeping is not a lifecycle act.`,
+refuses: post-landing bookkeeping is not a lifecycle act.`,
 		Example: `  git pair change abandon
   git pair change abandon --json`,
 		Args: cobra.NoArgs,
@@ -766,6 +464,9 @@ func runChangeAbandon(ctx context.Context, a *app) error {
 	if !s.clean {
 		return fmt.Errorf("working tree must be clean before abandoning %s; commit or stash your changes first", s.cs.Slug)
 	}
+	if err := marker.RefuseIntegrated(ctx, s.repo, s.cs.Slug); err != nil {
+		return err
+	}
 	at, err := terminalRecord(ctx, s.repo, s.cs.Slug, s.cs.Base, s.summary)
 	if err != nil {
 		return err
@@ -779,11 +480,6 @@ func runChangeAbandon(ctx context.Context, a *app) error {
 	sha, err := marker.Commit(ctx, s.repo, marker.AbandonedMessage(s.cs.Slug))
 	if err != nil {
 		return fmt.Errorf("creating abandon marker: %w", err)
-	}
-	// The ref is the point of the whole operation: a terminal record on a branch that
-	// gets deleted is a record that disappears with it.
-	if _, err := reviewref.Update(ctx, s.repo, s.cs.Slug, sha); err != nil {
-		return fmt.Errorf("anchoring the abandon marker: %w", err)
 	}
 	return printAbandoned(a, s, &lifecycle.Event{SHA: sha, Short: short(sha), Kind: lifecycle.KindAbandoned}, sha)
 }
@@ -799,7 +495,6 @@ func printAbandoned(a *app, s *session, at *lifecycle.Event, sha string) error {
 			"was":              string(s.summary.State),
 			"recorded":         sha != "",
 			"abandoned_commit": at.SHA,
-			"archive_ref":      reviewref.Archive(s.cs.Slug),
 		})
 	}
 	if sha == "" {
@@ -808,19 +503,33 @@ func printAbandoned(a *app, s *session, at *lifecycle.Event, sha string) error {
 	}
 	a.printf("Abandoned changeset %s\n\n", s.cs.Slug)
 	a.printf("Terminal marker: %s\n", sha)
-	a.printf("Review history stays reachable at %s\n", reviewref.Archive(s.cs.Slug))
+	a.printf("Nothing further is recorded for it; the history stays on %s\n", branchOrHead(s))
 	return nil
 }
 
-// terminalRecord returns the newest abandon marker for a changeset, looking at the
-// branch chain it was derived from and then at the anchor. Both have to be consulted:
-// the branch is the thing that gets deleted, and a slug recreated after `git branch -D`
-// carries no markers at all, so only the anchor still says the work ended.
+// branchOrHead names where a changeset's history currently lives, for a message that has to say
+// which ref is holding the chain: the branch while it exists, and HEAD when the caller is detached.
+func branchOrHead(s *session) string {
+	if s.cs.Branch == "" {
+		return "HEAD"
+	}
+	return s.cs.Branch
+}
+
+// terminalRecord returns the newest abandon marker for a changeset, looking at the branch chain it
+// was derived from and then at the archive ref. Both have to be consulted, for different reasons: the
+// branch is where an ending is written, and the archive ref is what a recorded changeset leaves behind
+// after the branch is gone — so a slug recreated after `git branch -D` still cannot be reopened, and
+// an ending on a landed changeset still reads as an ending.
+//
+// Before landing there is no archive ref to consult, which is the accepted shape of the trade: an
+// abandoned changeset has no landing to be recorded against, so whether it ended is knowledge that
+// lives on its branch.
 func terminalRecord(ctx context.Context, repo *git.Repo, slug, base string, derived lifecycle.Summary) (*lifecycle.Event, error) {
 	if derived.Abandoned != nil {
 		return derived.Abandoned, nil
 	}
-	anchor, err := reviewref.Resolve(ctx, repo, slug)
+	anchor, err := reviewref.ResolveArchive(ctx, repo, slug)
 	if errors.Is(err, reviewref.ErrNoArchiveRef) {
 		return nil, nil
 	}
@@ -846,215 +555,6 @@ func (a *app) refuseIfAbandoned(ctx context.Context, s *session) error {
 		return fmt.Errorf("changeset %s was abandoned by %s; git-pair records nothing further for it",
 			s.cs.Slug, at.Short)
 	}
-	return nil
-}
-
-// --- change archive ---------------------------------------------------------
-
-type archiveOptions struct {
-	allowSurviving  bool
-	allowUnreviewed bool
-}
-
-func newChangeArchiveCommand(a *app) *cobra.Command {
-	opts := &archiveOptions{}
-	cmd := &cobra.Command{
-		Use:   "archive",
-		Short: "Advance the changeset's archive ref to HEAD",
-		Long: `Advance the archive ref — the durable ref holding the whole unsquashed chain of
-implementation commits, ready markers, review submissions, replies and approvals — to HEAD.
-
-Review submission already moves the ref, so an approval usually leaves it current. What this
-command is for is what comes after the review: a reply in a thread, a rewritten ABOUT.md, another
-note in the changeset directory. Those are review artifacts, not implementation, and the archive
-should not stop where the last review marker happened to fall.
-
-Checks, in order: the working tree is clean; the newest review at HEAD permits integration
-(approve or feedback) and still describes what HEAD carries — the tree is compared between that
-marker and HEAD, ignoring changesets/<changeset>/, which is why a thread reply does not invalidate
-an approval; and no non-blank addition from the most recent review survives unchanged. Then the
-ref moves.
-
-Archiving records no commit and moves no state. A reviewer's approve is a judgement about the
-code; this is the owner's decision that the reviewed state is what they are taking forward, so the
-changeset stays whatever the markers say it is, and it is finished when that archived history is
-merged into the deployment branch — ordinary git, which stays yours. ` + "`git pair status`" + `
-reports where the archive points.
-
-Already at HEAD, it succeeds and writes nothing. It will not move the archive to a commit behind
-its current tip: that would drop archived history from the only ref guaranteeing it stays
-reachable, and the refusal names both commits. It never merges, pushes, or squashes.`,
-		Example: `  git pair change archive
-  git pair change archive --allow-surviving-review-additions
-  git pair change archive --json`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChangeArchive(cmd.Context(), a, opts)
-		},
-	}
-	cmd.Flags().BoolVar(&opts.allowSurviving, "allow-surviving-review-additions", false,
-		"acknowledge surviving review additions and archive anyway")
-	cmd.Flags().BoolVar(&opts.allowUnreviewed, "allow-unreviewed-changes", false,
-		"acknowledge that HEAD carries content beyond the reviewed marker and archive anyway")
-	return cmd
-}
-
-func runChangeArchive(ctx context.Context, a *app, opts *archiveOptions) error {
-	s, err := a.load(ctx)
-	if err != nil {
-		return err
-	}
-	if !s.clean {
-		return fmt.Errorf("working tree must be clean before archiving %s; commit or stash your changes first", s.cs.Slug)
-	}
-	// Before the review gate, because the gate would refuse an abandoned changeset too
-	// — it derives WORKING — and say the wrong thing about why. This refusal also closes
-	// a hazard: archiving reports squash-safety, and an abandoned changeset is one whose
-	// archive happens to be current because `change abandon` moved the ref there. There is
-	// nothing to take forward, so there is nothing to archive.
-	if err := a.refuseIfAbandoned(ctx, s); err != nil {
-		return err
-	}
-	// §13.3: an integrated changeset's archive is frozen. The check is here rather than left to
-	// `reviewref.Update` because of the already-there shortcut further down: "the archive points
-	// here already, nothing moved" is true and useless to whoever is standing on a changeset that
-	// has landed, when the thing they need to hear is that the record exists and the review is over.
-	if err := reviewref.RefuseIntegrated(ctx, s.repo, s.cs.Slug); err != nil {
-		return err
-	}
-	// Archiving is the one command that asks whether the reviewed content is still
-	// here. The archive it writes is a promise about a reviewed head — it is what an
-	// agent is told to trust before squash-merging — so an approval with fresh
-	// implementation work stacked on top of it must not be archived (PRD §9.5, §12).
-	// Everywhere else a commit after a marker is an observation, not a verdict.
-	//
-	// The gate is the review at HEAD rather than a lifecycle state named
-	// "archivable": archiving records no commit, so there is no state for it to
-	// move the changeset into.
-	reviewed, err := lifecycle.SummarizeAgainstTreeHEAD(ctx, s.repo, s.cs.Slug, s.cs.Base)
-	if err != nil {
-		return err
-	}
-	switch {
-	case reviewed.State == model.StateApproved || reviewed.State == model.StateFeedback:
-		// Integration is permitted at this head.
-	case opts.allowUnreviewed && driftOverWhichToProceed(reviewed):
-		// Acknowledged in the output, not hidden: the archive still names this head.
-	default:
-		return fmt.Errorf("cannot archive %s: latest outcome is %s (%s); archiving needs an approve or feedback at HEAD",
-			s.cs.Slug, reviewed.State, reviewed.Reason)
-	}
-
-	report, err := survivalCheck(ctx, s)
-	if err != nil {
-		return err
-	}
-	if report != nil && !report.Clean() && !opts.allowSurviving {
-		printSurvivalReport(a.stderr, *report,
-			fmt.Sprintf("Cannot archive changeset %s.", s.cs.Slug),
-			"git pair change archive --allow-surviving-review-additions")
-		printArtifactSurvivals(a.stderr, *report)
-		return fmt.Errorf("cannot archive %s: %d review addition(s) from %s still survive unchanged",
-			s.cs.Slug, len(report.Code), report.ReviewShort)
-	}
-
-	head, err := s.repo.Head(ctx)
-	if err != nil {
-		return err
-	}
-	// Where the archive stands now. Before the first handoff there is no ref at all: the
-	// archive comes into existence with the first ready or review submission, which is the
-	// point from which there is review history worth keeping.
-	was, err := reviewref.Resolve(ctx, s.repo, s.cs.Slug)
-	if err != nil && !errors.Is(err, reviewref.ErrNoArchiveRef) {
-		return err
-	}
-	if was == head {
-		return printArchive(a, s, reviewed, head, was, report, opts.allowSurviving)
-	}
-	// Forward only. A target behind the current tip would drop the archived chain from the
-	// one ref that keeps it reachable — the case is an author archiving from an old checkout,
-	// or after winding their branch back, and in both what gets dropped is the history a
-	// squash merge would silently lose. A rebase is not this: rewritten history is neither
-	// ahead nor behind, and its markers moved with it.
-	if was != "" {
-		backwards, err := s.repo.IsAncestor(ctx, head, was)
-		if err != nil {
-			return err
-		}
-		if backwards {
-			return fmt.Errorf("cannot archive %s at %s: %s is at %s, which is ahead of it. The archive only moves forward; bring this branch up to it, or archive the commit you mean from there",
-				s.cs.Slug, short(head), reviewref.Archive(s.cs.Slug), short(was))
-		}
-	}
-	if _, err := reviewref.Update(ctx, s.repo, s.cs.Slug, head); err != nil {
-		return err
-	}
-	return printArchive(a, s, reviewed, head, was, report, opts.allowSurviving)
-}
-
-// driftOverWhichToProceed reports the one refusal an author may acknowledge: the newest
-// marker is a review permitting integration, and content outside changesets/<slug>/ has
-// arrived on top of it — a README typo fixed after the approval is the case this is for.
-// Only `Outcome` picks the marker: non-review markers carry the zero outcome, so a `block`
-// and a `change unready` fall through without a special case, and the drift requirement
-// keeps the hatch from swallowing a marker git-pair cannot read.
-func driftOverWhichToProceed(s lifecycle.Summary) bool {
-	m := s.Marker
-	return m != nil && m.Outcome.PermitsIntegration() && len(s.Drifted) > 0
-}
-
-// printArchive reports where the archive now stands. `was` is the commit the ref pointed at
-// before this call, and empty when it did not exist: both are worth distinguishing from a move,
-// because "nothing to do" and "created the ref" are different answers to why HEAD is archived.
-func printArchive(a *app, s *session, reviewed lifecycle.Summary, head, was string,
-	report *survival.Report, acknowledged bool) error {
-	archiveRef := reviewref.Archive(s.cs.Slug)
-	advanced := was != head
-	if a.json {
-		out := map[string]any{
-			"changeset":                     s.cs.Slug,
-			"state":                         string(reviewed.State),
-			"acknowledged_unreviewed_paths": len(reviewed.Drifted),
-			"head":                          head,
-			"short":                         short(head),
-			"base":                          s.cs.Base,
-			"archive_ref":                   archiveRef,
-			"archive_was":                   was,
-			"archive_advanced":              advanced,
-			"squash_safe":                   true,
-			"acknowledged_survivors":        0,
-			"surviving_review_artifacts":    0,
-		}
-		if report != nil {
-			out["acknowledged_survivors"] = len(report.Code)
-			out["surviving_review_artifacts"] = len(report.Artifacts)
-		}
-		return a.emitJSON(out)
-	}
-	if acknowledged && report != nil && !report.Clean() {
-		a.printf("Acknowledged %d surviving review addition(s) from review %s.\n\n",
-			len(report.Code), report.ReviewShort)
-	}
-	if len(reviewed.Drifted) > 0 {
-		// The archive names this head, so the author is told plainly that it carries
-		// content the review did not see.
-		a.printf("Acknowledged %d path(s) outside changesets/%s/: %s.\n\n",
-			len(reviewed.Drifted), s.cs.Slug, strings.TrimSuffix(reviewed.Reason, "."))
-	}
-	if !advanced {
-		a.printf("Changeset %s is already archived at %s\n\n", s.cs.Slug, short(head))
-		a.printf("%s already points there; nothing moved.\n\n", archiveRef)
-	} else {
-		a.printf("Archived changeset %s at %s\n\n", s.cs.Slug, short(head))
-		if was == "" {
-			a.printf("%s created\n\n", archiveRef)
-		} else {
-			a.printf("%s: %s → %s\n\n", archiveRef, short(was), short(head))
-		}
-	}
-	a.printf("Safe to squash/merge.\n")
-	a.printf("Review history stays reachable at %s\n", archiveRef)
 	return nil
 }
 
@@ -1311,7 +811,7 @@ func runChangeWait(ctx context.Context, a *app, opts *waitOptions) error {
 		return err
 	}
 	seen.TimedOut = !found
-	return reportWait(a, s.cs.Slug, seen)
+	return reportWait(a, s.cs.Slug, s.cs.Base, seen)
 }
 
 // pollUntil calls check every interval until it reports a result, the timeout elapses,
@@ -1401,7 +901,7 @@ func (s *session) observeReview(ctx context.Context, branch string, includeRemot
 	return seen, nil
 }
 
-func reportWait(a *app, slug string, r waitInput) error {
+func reportWait(a *app, slug, base string, r waitInput) error {
 	out := waitResult{
 		Changeset: slug, PreviousState: r.PreviousState, State: stateName(r.State),
 		Ref: r.Ref, Fetches: r.Fetches, WaitedSeconds: r.Waited, TimedOut: r.TimedOut,
@@ -1410,7 +910,7 @@ func reportWait(a *app, slug string, r waitInput) error {
 		out.ReviewCommit = r.Review.Short
 		out.ReviewCommitFull = r.Review.SHA
 	}
-	out.NextAction = waitNextAction(r.State, r.Ref)
+	out.NextAction = waitNextAction(r.State, r.Ref, base)
 
 	if a.json {
 		if err := a.emitJSON(out); err != nil {
@@ -1454,7 +954,7 @@ func stateName(s model.State) string {
 	return string(s)
 }
 
-func waitNextAction(s model.State, ref string) string {
+func waitNextAction(s model.State, ref, base string) string {
 	if s == "" {
 		return "nothing has changed yet; run `git pair status --json` to see where things stand"
 	}
@@ -1471,9 +971,9 @@ func waitNextAction(s model.State, ref string) string {
 			return fmt.Sprintf("the review landed on %s; bring it into this branch with ordinary "+
 				"Git, then `git pair change feedback`", ref)
 		}
-		return "`git pair change feedback`; feedback is non-blocking, `git pair change archive` when integration is due"
+		return "`git pair change feedback`; feedback is non-blocking, " + landingNextAction(base)
 	case model.StateApproved:
-		return "`git pair change archive` before squash/merge"
+		return landingNextAction(base)
 	case model.StateReady, model.StateWorking:
 		// Only reachable on a timeout: nothing became actionable.
 		return "still waiting for review activity; run `git pair change wait` again or check `git pair status --json`"

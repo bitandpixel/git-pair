@@ -179,7 +179,7 @@ func newRepo(t *testing.T) *gittest.Fixture {
 // newChangeset builds a repository whose branch has a committed changeset directory
 // and one implementation commit, ready for `git pair change ready`.
 //
-// The scaffolding is written by the fixture rather than by `git pair change init` so
+// The scaffolding is written by the fixture rather than by `git pair init` so
 // that a broken init only fails the tests that exercise it. change_test.go covers
 // the product's own scaffolding.
 func newChangeset(t *testing.T, branch, base string) (*gittest.Fixture, string) {
@@ -216,10 +216,30 @@ func submit(t *testing.T, f *gittest.Fixture, outcome string) result {
 	return runIn(t, f.Dir(), "review", "submit", "--"+outcome).mustSucceed(t, "review", "submit", "--"+outcome)
 }
 
-// reviewRef is the movable review ref for a changeset.
-// archiveRef names the changeset's durable ref. It asks the package rather than spelling the
-// path out, so a change of layout is one line here and not a grep across the suite.
-func archiveRef(slug string) string { return reviewref.Archive(slug) }
+// approvedChangeset drives a changeset to APPROVED on a clean tree and returns the fixture, the
+// slug, the reviewed HEAD and the approval commit. It writes no durable ref: the refs are what
+// landing records, and work in flight has nothing to record.
+func approvedChangeset(t *testing.T) (*gittest.Fixture, string, string, string) {
+	t.Helper()
+	f, slug := newChangeset(t, "booking-transaction", "main")
+	ready(t, f)
+	reviewed := f.Head()
+	submit(t, f, "approve")
+	return f, slug, reviewed, f.Head()
+}
+
+// archiveRef and integrationRef name the two durable refs for a changeset. They ask the package
+// rather than spelling the paths out, so a change of layout is one line here and not a grep across
+// the suite. Neither exists while work is in flight: both are written by `integration record`.
+func archiveRef(slug string) string     { return reviewref.Archive(slug) }
+func integrationRef(slug string) string { return reviewref.Integration(slug) }
+
+// durableRefs are every ref git-pair ever writes, which is the set a test asserts is empty when a
+// command claims to write no refs.
+func durableRefs(t *testing.T, f *gittest.Fixture) []string {
+	t.Helper()
+	return f.RefNames(reviewref.NamespaceRoot)
+}
 
 func mustContain(t *testing.T, haystack, needle, what string) {
 	t.Helper()

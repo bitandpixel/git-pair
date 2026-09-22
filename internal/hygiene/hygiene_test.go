@@ -20,7 +20,7 @@ import (
 //
 // A substring grep cannot express that. `git.MergeBase` legitimately passes
 // "merge-base", `--json` output legitimately has a "branch" key, and
-// `change init` tells the user to "run `git switch -c <branch>`" — all three contain
+// `init` tells the user to "run `git switch -c <branch>`" — all three contain
 // forbidden words while invoking nothing forbidden. So this test reads the source as
 // syntax and only looks at *git invocations*: the argument slices handed to the
 // helpers in internal/git, to repo.Git/GitStdin/GitInherit, and to exec.Command.
@@ -68,7 +68,9 @@ var productArgvVerbs = map[string]string{
 // destructiveVerbs are forbidden even as bare strings, because a verb hidden behind a
 // spread slice would otherwise be invisible to the argv layer.
 var destructiveVerbs = map[string]string{
-	"push":   "PRD §26: git-pair does not push",
+	// `push` keeps its citation to §26, where the exception now lives: the verb is forbidden everywhere
+	// except the audited helper that clause describes.
+	"push":   "PRD §26: git-pair does not push, except the audited helper for refs/git-pair/*",
 	"merge":  "PRD §26: git-pair does not merge",
 	"rebase": "PRD §26: git-pair does not rewrite history",
 	"reset":  "PRD §26: git-pair does not reset the working tree or index",
@@ -85,7 +87,7 @@ var branchDeletion = regexp.MustCompile(`(?i)\bgit\s+branch\s+(-[Dd]|--delete)\b
 
 // forbiddenFuncNames are wrapper names that would put a destructive verb behind an API.
 var forbiddenFuncNames = map[string]string{
-	"Push":              "git-pair must not push",
+	"Push":              "git-pair must not push; the audited helper is PushDurableRefs in internal/git/push.go",
 	"Merge":             "git-pair must not merge",
 	"Rebase":            "git-pair must not rebase",
 	"Reset":             "git-pair must not reset",
@@ -95,6 +97,103 @@ var forbiddenFuncNames = map[string]string{
 	"CreateBranch":      "git-pair must not create branches",
 	"CheckoutBranch":    "git-pair must not switch branches",
 	"ForceDeleteBranch": "git-pair must not delete branches",
+}
+
+// auditedPushFile is the one shipped file permitted to invoke `git push`, and PRD §26 is the reason:
+// the durable refs (§13) have to reach the shared remote or they die in the clone that wrote them. The
+// permission is a file path rather than a verb because a verb-level exception would let push spread.
+const auditedPushFile = "internal/git/push.go"
+
+// auditedPushCaller is the only shipped file permitted to call the audited helper. Push exists for one
+// command; if a second command reaches for it, that is a design decision and it has to be made in the
+// open, in this file's neighbourhood.
+const auditedPushCaller = "internal/cli/publish.go"
+
+// auditedPushCallName is the primitive whose call sites are counted.
+const auditedPushCallName = "PushDurableRefs("
+
+func withoutVerb(m map[string]string, verb string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if k != verb {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// TestPushIsConfinedToTheAuditedFile is the other half of the §26 exception: the audited file may push,
+// and nothing else may. It scans with the exception removed, so the finding it expects is the real one.
+func TestPushIsConfinedToTheAuditedFile(t *testing.T) {
+	root := moduleRoot(t)
+	pushOnly := rules{
+		argv:      map[string]string{"push": "PRD §26: only the audited helper may push"},
+		bare:      map[string]string{"push": "PRD §26: only the audited helper may push"},
+		funcNames: nil,
+		dirs:      []string{"cmd", "internal"},
+		exclude:   []string{"internal/gittest", "internal/hygiene"},
+	}
+	var files []string
+	for _, dir := range pushOnly.dirs {
+		for _, path := range goSourceFiles(t, filepath.Join(root, dir), pushOnly.exclude) {
+			for _, f := range checkFile(t, path, pushOnly.argv, pushOnly.bare, pushOnly.funcNames) {
+				files = append(files, f.File)
+			}
+		}
+	}
+	files = dedupeStrings(files)
+	if len(files) != 1 || files[0] != auditedPushFile {
+		t.Fatalf("`push` invoked outside %s: %v — the §26 exception is one file, not a permission that spreads",
+			auditedPushFile, files)
+	}
+	src, err := os.ReadFile(filepath.Join(root, auditedPushFile))
+	if err != nil {
+		t.Fatalf("the audited push helper is missing: %v", err)
+	}
+	// The marker is in the test as well as the file so moving the comment is a deliberate act in two
+	// places rather than a silent one in one.
+	if !strings.Contains(string(src), "AUDITED: PRD §26") {
+		t.Fatalf("%s must carry the AUDITED marker naming the clause that permits it", auditedPushFile)
+	}
+}
+
+// TestPushHelperHasOneCaller counts the callers of the audited primitive. Two callers would be two
+// commands able to write the shared namespace, and §26 grants the exception for one.
+func TestPushHelperHasOneCaller(t *testing.T) {
+	root := moduleRoot(t)
+	var callers []string
+	for _, dir := range []string{"cmd", "internal"} {
+		for _, path := range goSourceFiles(t, filepath.Join(root, dir), []string{"internal/gittest", "internal/hygiene", "internal/git"}) {
+			src, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			if strings.Contains(string(src), auditedPushCallName) {
+				rel, _ := filepath.Rel(root, path)
+				callers = append(callers, rel)
+			}
+		}
+	}
+	callers = dedupeStrings(callers)
+	if len(callers) != 1 || callers[0] != auditedPushCaller {
+		t.Fatalf("`%s` called outside %s: %v — publishing the durable refs is one command's job",
+			auditedPushCallName, auditedPushCaller, callers)
+	}
+}
+
+func dedupeStrings(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // rules is one policy: which verbs are forbidden where.
@@ -260,7 +359,16 @@ func scan(t *testing.T, r rules) []string {
 	for _, dir := range r.dirs {
 		for _, path := range goSourceFiles(t, filepath.Join(root, dir), r.exclude) {
 			count++
-			findings = append(findings, checkFile(t, path, r.argv, r.bare, r.funcNames)...)
+			argv, bare := r.argv, r.bare
+			if rel, err := filepath.Rel(root, path); err == nil && rel == auditedPushFile {
+				// The one exception §26 grants, and it is granted by *location*: `push` is legal only
+				// in the audited helper, and nowhere else in shipped source. `TestPushIsConfinedToThe
+				// AuditedFile` reads the same tree with the exception removed and requires the audited
+				// file to be the only one that would have failed — an exception with nothing
+				// constraining its edges is just a hole with a name.
+				argv, bare = withoutVerb(r.argv, "push"), withoutVerb(r.bare, "push")
+			}
+			findings = append(findings, checkFile(t, path, argv, bare, r.funcNames)...)
 		}
 	}
 	if count == 0 {
@@ -533,4 +641,98 @@ func goSourceFiles(t *testing.T, dir string, excludeDirs []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// TestDurableRefsAreOnlyEverCreated is the mechanical half of "no command can move or delete a
+// durable ref". The verb list cannot express it: `git update-ref <ref> <sha> <old>` is an ordinary git
+// command, and it is precisely the operation git-pair must never perform, because the two families
+// under refs/git-pair are records rather than pointers — the answer to "what was reviewed, and what did
+// it become", written once, at landing.
+//
+// So this asks a narrower question of every non-test source: where does git-pair invoke `update-ref`
+// at all, and with what? The answer has to be one call, inside internal/git, passing git's all-zeros
+// old value — the form that asks git to fail if the name is already taken. There is no second write,
+// and so no way for a command written next year to move a record while believing it is creating one.
+func TestDurableRefsAreOnlyEverCreated(t *testing.T) {
+	root := moduleRoot(t)
+	const createOnly = "zeroOID"
+
+	var sites []string
+	var zeroValue string
+	moved := 0
+	for _, path := range goSourceFiles(t, filepath.Join(root, "internal"), nil) {
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			rel = path
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		fileSet := token.NewFileSet()
+		file, err := parser.ParseFile(fileSet, path, src, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			switch n := node.(type) {
+			case *ast.ValueSpec:
+				// The old value the one allowed write passes. Its value is the whole
+				// difference between creating a ref and moving one, so it is checked rather
+				// than trusted.
+				for _, name := range n.Names {
+					if name.Name != createOnly {
+						continue
+					}
+					for _, value := range n.Values {
+						if lit, ok := value.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+							zeroValue = unquote(lit.Value)
+						}
+					}
+				}
+			case *ast.CallExpr:
+				if classify(n) != callGit {
+					return true
+				}
+				namesRef := false
+				for _, lit := range stringLiterals(n.Args...) {
+					if lit.value == "update-ref" {
+						namesRef = true
+					}
+				}
+				if !namesRef {
+					return true
+				}
+				sites = append(sites, rel+":"+strconv.Itoa(fileSet.Position(n.Pos()).Line))
+				passesZeroOld := false
+				for _, arg := range n.Args {
+					if ident, ok := arg.(*ast.Ident); ok && ident.Name == createOnly {
+						passesZeroOld = true
+					}
+				}
+				if !passesZeroOld {
+					moved++
+				}
+			}
+			return true
+		})
+	}
+
+	if len(sites) != 1 {
+		t.Fatalf("shipped code invokes `git update-ref` at %v; want exactly one call site, the create-only write in internal/git",
+			sites)
+	}
+	if want := filepath.Join("internal", "git") + string(filepath.Separator); !strings.HasPrefix(sites[0], want) {
+		t.Errorf("the only `update-ref` call is at %s, want it in %s, which owns every ref write", sites[0], want)
+	}
+	if moved > 0 {
+		t.Errorf("%d of the %d `update-ref` calls pass no all-zeros old value, so they can move a durable ref; neither family may be moved",
+			moved, len(sites))
+	}
+	if zeroValue == "" {
+		t.Fatal("no all-zeros old-value constant was found; the one allowed write cannot be create-only without it")
+	}
+	if len(zeroValue) != 40 || strings.Trim(zeroValue, "0") != "" {
+		t.Errorf("the old value passed to `update-ref` is %q, want git's 40-zero all-zeros object id", zeroValue)
+	}
 }

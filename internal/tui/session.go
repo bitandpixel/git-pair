@@ -22,7 +22,6 @@ import (
 	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/reviewmark"
-	"gitpair/internal/reviewref"
 	"gitpair/internal/span"
 )
 
@@ -38,6 +37,10 @@ type Options struct {
 	// submission is visible in the normal screen once the alt screen is gone.
 	// Defaults to os.Stdout.
 	Out io.Writer
+	// Trunk is the integration branch, passed so a stacked changeset's review submission can tell
+	// a parent branch from the branch everything is measured against. The zero value says
+	// "nobody resolved it", which records no parent rather than guessing one.
+	Trunk changeset.DefaultBranchRef
 }
 
 // Header is the session's identity line.
@@ -58,13 +61,14 @@ type File struct {
 
 // Session is the review state the TUI renders.
 type Session struct {
-	repo       *git.Repo
-	cs         changeset.Changeset
-	summary    lifecycle.Summary
-	sel        span.Selector
-	current    span.Span
-	files      []File
-	archiveRef string
+	repo    *git.Repo
+	cs      changeset.Changeset
+	summary lifecycle.Summary
+	sel     span.Selector
+	// trunk is the integration branch, kept so a submission can record a parent tip (PRD §21).
+	trunk   changeset.DefaultBranchRef
+	current span.Span
+	files   []File
 
 	// marks and markErr hold the resolved store, so a repository without a usable git directory
 	// does not pay for it on every toggle.
@@ -95,8 +99,7 @@ type Session struct {
 // NewSession resolves the span and scans the changed files.
 func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	s := &Session{
-		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span,
-		archiveRef: reviewref.Archive(opts.Changeset.Slug),
+		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span, trunk: opts.Trunk,
 	}
 	if err := s.Rescan(ctx); err != nil {
 		return nil, err
@@ -241,12 +244,18 @@ func (s *Session) Reload(ctx context.Context) error {
 // unpredictability with extra steps. Reaching a span you can review is `V`'s job -- its head column
 // always offers `Current` -- and the walk reaches every live stop anyway.
 //
-// A stop that no longer resolves -- the tag it named was deleted, the review ref is gone, the branch
-// was force-pushed away -- is passed over, and reported in StepResult.Skipped. Blocking there would
+// A stop that no longer resolves -- the tag it named was deleted, the branch was force-pushed away,
+// the review commit was rewritten off the branch by a rebase -- is passed over, and reported in
+// StepResult.Skipped. Blocking there would
 // make one dead stop a wall: the same press would fail the same way forever, with `V` the only way
 // past. Skipping is safe because SetSpan resolves before it replaces anything, so a stop that fails
 // leaves the session exactly where it was and the next candidate is a whole span, never half of one.
 // The stop stays on the ring: a tag that comes back is a stop again.
+//
+// What this does not do is tolerate the rewrite. A session can be asked to paint history that no
+// longer belongs to the branch, and it will -- painting a span is not a verdict. The gate is what
+// refuses rewritten history: `git pair check` tests the approved `Review-Head` against this line
+// before a merge is licensed (PRD §12).
 func (s *Session) StepSpan(ctx context.Context) (StepResult, error) {
 	total := len(s.ring)
 	res := StepResult{Pos: s.ringIdx + 1, Total: total}
@@ -666,11 +675,11 @@ func (s *Session) Changeset() changeset.Changeset { return s.cs }
 // Repo is the repository under review.
 func (s *Session) Repo() *git.Repo { return s.repo }
 
+// Trunk is the integration branch as the caller resolved it, possibly the zero value.
+func (s *Session) Trunk() changeset.DefaultBranchRef { return s.trunk }
+
 // Summary is the derived lifecycle state, needed to submit from the TUI.
 func (s *Session) Summary() lifecycle.Summary { return s.summary }
-
-// ArchiveRef is the ref holding this changeset's review history reachable.
-func (s *Session) ArchiveRef() string { return s.archiveRef }
 
 // UnreviewedCount is how many files still need attention.
 func (s *Session) UnreviewedCount() int {

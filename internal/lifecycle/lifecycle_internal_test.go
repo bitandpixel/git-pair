@@ -135,8 +135,8 @@ func TestDeriveImplementationCommitAfterApproveKeepsTheMarker(t *testing.T) {
 	}
 }
 
-// The close marker is retired: completion is an archive ref written by
-// `git pair change archive`, so nothing writes `Review-State: closed` any more,
+// The close marker is retired: completion is the pair of refs `git pair integration record`
+// writes at landing, so nothing writes `Review-State: closed` any more,
 // and reading it is not part of the model. What a repository that already carries
 // one gets is the same conservative reading as any other unreadable trailer set.
 func TestRetiredCloseMarkerIsAnUnrecognisedImplementationCommit(t *testing.T) {
@@ -310,6 +310,44 @@ func TestParseEventClassifiesMarkers(t *testing.T) {
 				t.Errorf("Marker() = %v for kind %s", got.Marker(), got.Kind)
 			}
 		})
+	}
+}
+
+// `Review-Head` is the value the rebase rule measures, so what counts as one is worth pinning: a
+// hex object id, full or abbreviated, on a review submission and nowhere else. A value that is not
+// one is read as no head named — the gate reports that rather than resolving a branch name and
+// hoping it still means the same thing.
+func TestParseEventReadsTheReviewedHead(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra string
+		want  string
+	}{
+		{"full sha", "Review-Head: 1234567890abcdef1234567890abcdef12345678\n", "1234567890abcdef1234567890abcdef12345678"},
+		{"abbreviated", "Review-Head: 1234567\n", "1234567"},
+		{"absent", "", ""},
+		{"empty value", "Review-Head:\n", ""},
+		{"a branch name", "Review-Head: main\n", ""},
+		{"too long to be an object id", "Review-Head: 1234567890abcdef1234567890abcdef12345678901234567890\n", ""},
+		{"too short to resolve", "Review-Head: 1234\n", ""},
+		{"non-hex", "Review-Head: zzzzzzz\n", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := []string{"c1", "c1", "0", "author", "review: approve booking",
+				"Review-Outcome: approve\nReview-Changeset: booking\n" + tc.extra}
+			if got := parseEvent("booking", rec).ReviewedHead; got != tc.want {
+				t.Errorf("ReviewedHead = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// A state marker naming a head means nothing: readiness is an offer about the branch it sits
+	// on, not a judgement about a commit, and the gate asks the lineage question of approvals only.
+	rec := []string{"c1", "c1", "0", "author", "git-pair: ready booking",
+		"Review-State: ready\nReview-Changeset: booking\nReview-Head: 1234567890abcdef1234567890abcdef12345678\n"}
+	if got := parseEvent("booking", rec); got.ReviewedHead != "" {
+		t.Errorf("ReviewedHead = %q on a ready marker, want it unread", got.ReviewedHead)
 	}
 }
 

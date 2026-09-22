@@ -50,6 +50,12 @@ type app struct {
 	// landed?" needs the integration branch to answer, and CI passes this because a checkout
 	// built with `init` and one `fetch` has no recorded remote default to read.
 	defaultBranch string
+	// durableRemote and durableRemoteKnown cache which remote the durable refs belong to. One run asks
+	// twice — `--fetch` wants the one to fetch, the published-or-not comparison wants the one whose
+	// mirrors to read — and the answer cannot change mid-command. A third `git rev-parse` for the same
+	// string is the kind of cost that grows silently, so it is remembered rather than re-derived.
+	durableRemote      string
+	durableRemoteKnown bool
 }
 
 // Execute builds the command tree and runs it, returning the process exit code.
@@ -118,12 +124,12 @@ refs. It does not replace git, your editor, your difftool, or your forge.
 
 Review state lives in the repository: a changeset directory holds ABOUT.md and
 review threads, lifecycle markers are commits carrying Review-* trailers, and
-refs/git-pair/changesets/* keeps the complete unsquashed history reachable.
+refs/git-pair/* holds the two durable refs written when a changeset lands.
 
-Author commands:   git pair change init | use | ready | unready | abandon | archive
-Reviewer commands: git pair review open | about | thread | submit | history | queue
-Inspection:        git pair status | diff
-Gates:             git pair check`,
+Author commands:   git pair init, then git pair change use | ready | unready | abandon
+Reviewer commands: git pair review open | about | thread | submit | history
+Reading state:     git pair queue | status | diff
+Gates and record:  git pair check, then git pair integration record`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if jsonFlag, err := cmd.Flags().GetBool("json"); err == nil {
 				a.json = jsonFlag
@@ -141,8 +147,10 @@ Gates:             git pair check`,
 	root.PersistentFlags().StringVar(&a.defaultBranch, "default-branch", "",
 		"ref of the integration branch; otherwise git-pair reads git's own answer (origin/HEAD, then a sole main/master)")
 	root.AddCommand(
+		newInitCommand(a),
 		newChangeCommand(a),
 		newReviewCommand(a),
+		newQueueCommand(a),
 		newStatusCommand(a),
 		newDiffCommand(a),
 		newCheckCommand(a),
@@ -234,13 +242,13 @@ func (a *app) loadNamed(ctx context.Context, slug string) (*session, error) {
 // one whose history is furthest along, and the branch that answer came from is returned so
 // callers can print it.
 func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db changeset.DefaultBranchRef) (changeset.Changeset, lifecycle.Summary, string, error) {
-	resolutions, err := changeset.BranchResolutions(ctx, repo, db)
+	scan, err := changeset.ScanBranches(ctx, repo, db)
 	if err != nil {
 		return changeset.Changeset{}, lifecycle.Summary{}, "", err
 	}
 	var branches []string
 	selected := map[string]changeset.Candidate{}
-	for _, br := range resolutions {
+	for _, br := range scan.Branches {
 		if br.Err != nil || br.Resolution.Selected == nil {
 			continue
 		}
@@ -250,15 +258,15 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 		}
 	}
 	if len(branches) == 0 {
-		// No branch carries the slug. The anchor is the last place its history can be
-		// read, and for a changeset that ended or landed that is exactly what a reader is
-		// asking about. Deriving from the anchor can only report what the branch claimed
-		// before it disappeared, which is why it is a fallback and not a second source of
-		// state (PRD §12).
-		anchor, err := reviewref.Resolve(ctx, repo, slug)
+		// No branch carries the slug, so the durable pair is the only place its history can be
+		// read — which is exactly what a reader asking about a landed changeset wants. For a
+		// changeset that never landed there is nothing to read: the branch was the record, and it
+		// is gone. Deriving from the archive can only report what the branch claimed before it
+		// disappeared, which is why it is a fallback and not a second source of state (PRD §12).
+		anchor, err := reviewref.ResolveArchive(ctx, repo, slug)
 		if errors.Is(err, reviewref.ErrNoArchiveRef) {
 			return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
-				fmt.Errorf("no branch carries changeset %q; `git pair review queue` lists what this repository has", slug)}
+				fmt.Errorf("no branch carries changeset %q; `git pair queue` lists what this repository has", slug)}
 		}
 		if err != nil {
 			return changeset.Changeset{}, lifecycle.Summary{}, "", err
@@ -267,7 +275,7 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 		if err != nil {
 			if errors.Is(err, git.ErrUnknownPath) {
 				return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
-					fmt.Errorf("changeset %q is anchored at %s but carries no %s", slug, short(anchor), changeset.MetadataFile)}
+					fmt.Errorf("changeset %q is recorded at %s but carries no %s", slug, short(anchor), changeset.MetadataFile)}
 			}
 			return changeset.Changeset{}, lifecycle.Summary{}, "", err
 		}
@@ -328,7 +336,33 @@ func (a *app) load(ctx context.Context) (*session, error) {
 	if err != nil {
 		return nil, usageWrap(err)
 	}
-	return a.sessionFor(ctx, repo, cs, db)
+	s, err := a.sessionFor(ctx, repo, cs, db)
+	if err != nil {
+		return nil, a.explainBrokenStack(ctx, repo, cs, db, err)
+	}
+	return s, nil
+}
+
+// explainBrokenStack turns "the base does not resolve" into what that means for a stack. A child is
+// measured against its parent branch; when that branch is gone and there is no integration ref to
+// relink the stack to, every command that measures answers with git's own unknown-revision error,
+// which names neither the parent nor the way out. The stack needs a decision from its author, so the
+// message says so (PRD §21).
+func (a *app) explainBrokenStack(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
+	db changeset.DefaultBranchRef, err error) error {
+	if cs.ParentBranch == "" || !errors.Is(err, git.ErrUnknownRevision) {
+		return err
+	}
+	if _, e := repo.RevParse(ctx, "refs/heads/"+cs.ParentBranch); e == nil {
+		return err
+	}
+	if cs.ParentChangeset != "" {
+		if _, e := reviewref.ResolveIntegration(ctx, repo, cs.ParentChangeset); e == nil {
+			return err
+		}
+	}
+	return fmt.Errorf("%s is stacked on %s, which is gone with no integration record: the stack is unreconciled — choose a new base with `git pair init --parent <branch> --set-parent`, or land the parent and record it: %w",
+		cs.Slug, cs.ParentBranch, err)
 }
 
 // loadRepo resolves the repository without requiring a changeset.

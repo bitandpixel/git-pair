@@ -12,23 +12,45 @@ import (
 // the shape of the two outputs, the policy switch — while check_internal_test.go pins the
 // conditions themselves.
 
-func TestCheckPassesOnAnArchivedApprovedHead(t *testing.T) {
+// An approved head on a clean tree passes, and no durable ref has to exist for the gate to say so.
+// The old version of this test needed an archive ref: the gate asked a ref whether it pointed at HEAD,
+// which was the same fact the derivation already had, read twice through something that could disagree.
+func TestCheckPassesOnAnApprovedHead(t *testing.T) {
 	f, slug, _, approved := approvedChangeset(t)
 
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Fatalf("durable refs for in-flight work: %v", got)
+	}
 	res := runIn(t, f.Dir(), "check").mustSucceed(t, "check")
 	mustContain(t, res.stdout, "OK: "+slug+" is integration-ready",
 		"the success line must name the changeset the gate just cleared")
-	mustContain(t, res.stdout, "archive: "+f.Short(approved),
-		"the success line must name the archived commit, so the log says what was gated")
+	mustContain(t, res.stdout, "head:  "+f.Short(approved),
+		"and the commit it cleared, so the log says what was gated")
 	if res.stderr != "" {
 		t.Errorf("a passing check wrote to stderr: %q", res.stderr)
 	}
 }
 
+// The gate reads commits, not refs — so a ref that disagrees with the history changes nothing. This is
+// the assertion the other way: `check` cannot be made to pass or fail by writing a durable ref by hand,
+// because it never looks at one.
+func TestCheckVerdictDoesNotReadDurableRefs(t *testing.T) {
+	f, _, _, approved := approvedChangeset(t)
+
+	f.MustGit("update-ref", archiveRef("booking-transaction"), f.RevParse("main"))
+	res := runIn(t, f.Dir(), "check").mustSucceed(t, "check")
+	mustContain(t, res.stdout, "head:  "+f.Short(approved),
+		"the verdict is the history's, with a ref in the way that says otherwise")
+}
+
 // The failure output is a list, not the first refusal: one run has to name every problem, or the
 // fix costs a round trip per problem.
 func TestCheckListsEveryFailure(t *testing.T) {
-	f, _, _, _ := approvedChangeset(t)
+	// Feedback under the default policy, plus drift over the content it was given on: two
+	// independent reasons, one run.
+	f, _ := newChangeset(t, "booking-transaction", "main")
+	ready(t, f)
+	submit(t, f, "feedback")
 	f.Commit("author response", gittest.WithFile("service.go", "package main\n\nfunc Lock() { transaction() }\n"))
 
 	res := runIn(t, f.Dir(), "check")
@@ -41,8 +63,8 @@ func TestCheckListsEveryFailure(t *testing.T) {
 	mustContain(t, res.stdout, "- content outside changesets/booking-transaction/ changed since",
 		"the drift condition must name the paths that moved")
 	mustContain(t, res.stdout, "service.go", "the drift bullet must name the file")
-	mustContain(t, res.stdout, "- archive does not point to the current source commit",
-		"the archive condition must be reported alongside the drift, not instead of it")
+	mustContain(t, res.stdout, "- the newest review is feedback",
+		"the policy condition must be reported alongside the drift, not instead of it")
 
 	lines := strings.Split(strings.TrimSpace(res.stdout), "\n")
 	if got := len(lines) - 1; got != 2 {
@@ -166,25 +188,21 @@ func TestCheckRefusesWhatTheGateMustRefuse(t *testing.T) {
 	})
 }
 
-// The archive condition is the one `change archive` exists to clear: a changeset-only commit is
-// not drift, so the review still stands and the only thing missing is moving the archive.
-func TestCheckWaitsForTheArchiveToFollowTheBranch(t *testing.T) {
+// A changeset-only commit after the approval is not drift: the review still stands over the content it
+// spoke about, and what changed is the paper describing the work. Under the moving-ref model this
+// state had a second failure — the archive pointed at an ancestor — and clearing it meant running a
+// command that existed only to move a ref. Now the note costs nothing.
+func TestCheckPassesOverChangesetOnlyCommits(t *testing.T) {
 	f, slug, _, _ := approvedChangeset(t)
 	f.Write(f.ChangesetPath(slug, "ABOUT.md"), "Decided to keep the retry budget at three.\n")
 	f.Commit("record the decision in the changeset")
 
-	res := runIn(t, f.Dir(), "check")
-	if res.code != exitRefusal {
-		t.Fatalf("check exited %d, want %d\nstdout: %s", res.code, exitRefusal, res.stdout)
+	res := runIn(t, f.Dir(), "check").mustSucceed(t, "check")
+	mustContain(t, res.stdout, "head:  "+f.Short(f.Head()),
+		"the gate cleared the commit that carries the note, not the one the review sat on")
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Errorf("durable refs after a changeset-only commit: %v", got)
 	}
-	if lines := strings.Split(strings.TrimSpace(res.stdout), "\n"); len(lines) != 2 {
-		t.Fatalf("want exactly the archive bullet, got:\n%s", res.stdout)
-	}
-	mustContain(t, res.stdout, "archive does not point to the current source commit",
-		"the archive naming an ancestor is the one thing left to do here")
-
-	runIn(t, f.Dir(), "change", "archive").mustSucceed(t, "change", "archive")
-	runIn(t, f.Dir(), "check").mustSucceed(t, "check")
 }
 
 // The assertion is about the commit under review. Uncommitted edits are not in HEAD, so they
@@ -247,11 +265,11 @@ func TestCheckUsageErrors(t *testing.T) {
 // against the revision it built, and `reasons` always an array so a consumer never has to
 // handle "empty means a different type".
 func TestCheckJSONContract(t *testing.T) {
-	f, slug, _, approved := approvedChangeset(t)
+	f, slug, reviewed, approved := approvedChangeset(t)
 	args := []string{"check", "--json"}
 	out := runIn(t, f.Dir(), args...).mustSucceed(t, args...).json(t)
 
-	assertKeys(t, out, "changeset", "ready", "state", "head", "archive", "archive_current", "reasons", "policy")
+	assertKeys(t, out, "changeset", "ready", "state", "head", "reasons", "policy", "reviewed_head")
 	if out["changeset"] != slug {
 		t.Errorf("changeset = %v, want %q", out["changeset"], slug)
 	}
@@ -261,15 +279,20 @@ func TestCheckJSONContract(t *testing.T) {
 	if out["state"] != "APPROVED" {
 		t.Errorf("state = %v, want APPROVED", out["state"])
 	}
-	if out["archive"] != approved || out["head"] != approved {
-		t.Errorf("head/archive = %v/%v, want both the approved commit %s", out["head"], out["archive"], approved)
+	if out["head"] != approved {
+		t.Errorf("head = %v, want the approved commit %s", out["head"], approved)
 	}
 	if len(out["head"].(string)) != 40 {
 		t.Errorf("head = %v, want the full SHA a CI job can compare against its build", out["head"])
 	}
-	if out["archive_current"] != true {
-		t.Errorf("archive_current = %v, want true", out["archive_current"])
+	// The other end of the lineage comparison, resolved to a full SHA: a log that refuses a merge
+	// because the approved commit is gone has to name both commits, not just the one still here.
+	if out["reviewed_head"] != reviewed {
+		t.Errorf("reviewed_head = %v, want the commit the approval spoke about (%s)", out["reviewed_head"], reviewed)
 	}
+	// No archive key: the gate reads the derivation and the trunk, and a field naming a durable ref
+	// would invite a consumer to treat the refs as part of the verdict — when the refs are only ever
+	// written at landing.
 	if reasons, ok := out["reasons"].([]any); !ok || len(reasons) != 0 {
 		t.Errorf("reasons = %v, want an empty array", out["reasons"])
 	}
@@ -291,9 +314,6 @@ func TestCheckJSONContract(t *testing.T) {
 	reasons, ok := bad["reasons"].([]any)
 	if !ok || len(reasons) == 0 {
 		t.Fatalf("reasons = %v, want the reasons the human output lists", bad["reasons"])
-	}
-	if bad["archive_current"] != false {
-		t.Errorf("archive_current = %v, want false", bad["archive_current"])
 	}
 	if bad["state"] != "WORKING" {
 		t.Errorf("state = %v, want WORKING: the approval no longer describes HEAD", bad["state"])

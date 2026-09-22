@@ -13,8 +13,8 @@ func TestChangeInitHonoursAnExplicitID(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("feature/booking-transaction")
 
-	res := runIn(t, f.Dir(), "change", "init", "--id", "booking-transaction-v2", "--base", "main").
-		mustSucceed(t, "change", "init")
+	res := runIn(t, f.Dir(), "init", "--id", "booking-transaction-v2", "--base", "main").
+		mustSucceed(t, "init")
 	mustContain(t, res.stdout, filepath.Join("changesets", "booking-transaction-v2"), "init reports the directory it created")
 
 	if got := f.MetadataID("booking-transaction-v2"); got != "booking-transaction-v2" {
@@ -34,7 +34,7 @@ func TestChangeInitHonoursAnExplicitID(t *testing.T) {
 	if status["changeset"] != "booking-transaction-v2" {
 		t.Errorf("status changeset = %v, want booking-transaction-v2", status["changeset"])
 	}
-	queue := runIn(t, f.Dir(), "review", "queue", "--json").mustSucceed(t, "review", "queue")
+	queue := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue")
 	if !queueListsChangeset(t, queue, "booking-transaction-v2") {
 		t.Errorf("the queue does not carry the id:\n%s", queue.stdout)
 	}
@@ -49,44 +49,60 @@ func TestChangeInitHonoursAnExplicitID(t *testing.T) {
 // in use yet, and refusing them would invent a conflict git has not been asked about.
 // A branch created off a sibling inherits that sibling's changeset directory. When the
 // inherited directory's name is also this branch's default id, the branch is that changeset:
-// the directory is the identity, so `change init` says it is already initialised rather than
+// the directory is the identity, so `init` says it is already initialised rather than
 // refusing a collision between a changeset and itself. Asking for a separate identity is what
 // --id is for, and nothing is ever suffixed to dodge a collision.
 func TestChangeInitAdoptsTheDirectoryItInherits(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("feature/booking")
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 
 	f.CreateBranch("feature-booking")
 
-	r := runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	r := runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 	mustContain(t, r.stdout, "already initialised", "the inherited directory must be named as the answer")
 
 	// A genuinely second changeset still gets its own identity when it asks for one.
-	runIn(t, f.Dir(), "change", "init", "--id", "feature-booking-2", "--base", "main").
-		mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--id", "feature-booking-2", "--base", "main").
+		mustSucceed(t, "init")
 	if !f.HasWorktreeFile(filepath.Join("changesets", "feature-booking-2", "CHANGESET.yaml")) {
 		t.Error("an explicit id was not usable")
 	}
 }
 
-// A ref outlives its branch, so a name whose refs exist is spoken for even with no
-// directory anywhere. Matching must be exact: `booking-transaction` may not be blocked by
+// A durable ref outlives its branch, so a name one of the two families holds is spoken for even with
+// no directory anywhere. Matching is on the two exact paths, so `booking-transaction` is not blocked by
 // `booking-transaction-v2`, which shares its prefix.
+//
+// The two families block equally: a changeset with only an archive ref is a record half-written, and
+// handing its id to a new changeset would strand that chain on a stranger's work.
 func TestChangeInitRefusesAnIDItsRefsAlreadyUse(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
-	f.MustGit("update-ref", "refs/git-pair/changesets/booking-transaction-v2/archive", f.Head())
+	f.MustGit("update-ref", "refs/git-pair/integrations/booking-transaction-v2", f.Head())
+	// A ref from the retired `refs/git-pair/changesets/<id>/archive` layout reserves nothing: its id
+	// is not readable as a component of either family, so treating it as a claim would block names
+	// that no longer belong to anything.
+	f.MustGit("update-ref", "refs/git-pair/changesets/legacy/archive", f.Head())
 
-	runIn(t, f.Dir(), "change", "init", "--id", "booking-transaction", "--base", "main").
-		mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--id", "booking-transaction", "--base", "main").
+		mustSucceed(t, "init")
+	runIn(t, f.Dir(), "init", "--id", "legacy", "--base", "main").mustSucceed(t, "init")
 
 	f.CreateBranch("second")
-	r := runIn(t, f.Dir(), "change", "init", "--id", "booking-transaction-v2", "--base", "main")
+	r := runIn(t, f.Dir(), "init", "--id", "booking-transaction-v2", "--base", "main")
 	if r.code != exitUsage {
-		t.Fatalf("reusing a name with refs exited %d, want %d\nstderr: %s", r.code, exitUsage, r.stderr)
+		t.Fatalf("reusing a name with a record exited %d, want %d\nstderr: %s", r.code, exitUsage, r.stderr)
 	}
 	mustContain(t, r.stderr, "refs already exist", "the refusal must say what holds the name")
+
+	// The other family the same way.
+	f.CreateBranch("third")
+	f.MustGit("update-ref", "refs/git-pair/archive/half-written", f.Head())
+	r = runIn(t, f.Dir(), "init", "--id", "half-written", "--base", "main")
+	if r.code != exitUsage {
+		t.Errorf("reusing a name with an archive ref only exited %d, want %d\nstderr: %s", r.code, exitUsage, r.stderr)
+	}
 }
 
 // A branch may hold more than one changeset — that is what a stacked branch that starts its
@@ -95,10 +111,10 @@ func TestChangeInitRefusesAnIDItsRefsAlreadyUse(t *testing.T) {
 func TestChangeInitWarnsWhenABranchTakesASecondChangeset(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
-	runIn(t, f.Dir(), "change", "init", "--id", "booking-work", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--id", "booking-work", "--base", "main").mustSucceed(t, "init")
 
-	r := runIn(t, f.Dir(), "change", "init", "--id", "booking-work-v2", "--base", "main").
-		mustSucceed(t, "change", "init")
+	r := runIn(t, f.Dir(), "init", "--id", "booking-work-v2", "--base", "main").
+		mustSucceed(t, "init")
 	mustContain(t, r.stderr, `already carries changeset "booking-work"`, "the warning must name what is already here")
 	mustContain(t, r.stderr, "--changeset", "the warning must say how to disambiguate")
 	for _, id := range []string{"booking-work", "booking-work-v2"} {
@@ -115,7 +131,7 @@ func TestChangeInitRejectsAnUnusableID(t *testing.T) {
 	f.CreateBranch("booking")
 
 	for _, id := range []string{"booking v2", "feature/booking", "..", "-booking", "booking--v2"} {
-		r := runIn(t, f.Dir(), "change", "init", "--id", id, "--base", "main")
+		r := runIn(t, f.Dir(), "init", "--id", id, "--base", "main")
 		if r.code != exitUsage {
 			t.Errorf("`--id %q` exited %d, want %d\nstderr: %s", id, r.code, exitUsage, r.stderr)
 			continue
@@ -141,7 +157,7 @@ func TestChangeInitRejectsAnUnusableID(t *testing.T) {
 func TestRenamingABranchDoesNotStrandItsChangeset(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 
 	f.MustGit("branch", "-m", "booking", "booking-renamed")
 
@@ -160,15 +176,15 @@ func TestRenamingABranchDoesNotStrandItsChangeset(t *testing.T) {
 func TestChangeInitReleasesAnIDOnlyWhenTheDeletionIsCommitted(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 
 	f.MustGit("rm", "-r", filepath.Join("changesets", "booking"))
-	r := runIn(t, f.Dir(), "change", "init", "--base", "main")
+	r := runIn(t, f.Dir(), "init", "--base", "main")
 	if r.code != exitUsage {
 		t.Fatalf("init after an uncommitted deletion exited %d, want %d\nstdout: %s", r.code, exitUsage, r.stdout)
 	}
 	mustContain(t, r.stderr, "deletion is not committed", "a deletion that is not committed has not released the name")
 
 	f.Commit("retire the booking changeset notes")
-	runIn(t, f.Dir(), "change", "init", "--base", "main").mustSucceed(t, "change", "init")
+	runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 }
