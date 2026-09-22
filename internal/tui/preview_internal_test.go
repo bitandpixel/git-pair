@@ -469,7 +469,7 @@ func TestPreviewNumbersTheLinesItCan(t *testing.T) {
 		t.Errorf("the largest number is %d, want 12, which sets the gutter width", max)
 	}
 
-	rows := strings.Join(previewBody(patch, 60), "\n")
+	rows := strings.Join(rowTexts(previewBody(patch, 60, unmarked)), "\n")
 	if !strings.Contains(ansi.Strip(rows), "10  func a() {") {
 		t.Errorf("a context line does not carry its number on the side being reviewed:\n%s", ansi.Strip(rows))
 	}

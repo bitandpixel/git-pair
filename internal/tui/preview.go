@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
@@ -19,23 +20,60 @@ import (
 const (
 	sgrReset        = "\x1b[0m"
 	previewTabWidth = 8 // what a tab advances to, as in a terminal's own default
+	// The pane's search marks its matches with these rather than with colour: reverse video for the one
+	// `n` landed on, underline for the rest. Colour is git's -- the green and red of a diff are its bytes
+	// -- and a highlight that painted over them would hide which kind of line the match is on.
+	sgrReverse      = "\x1b[7m"
+	sgrReverseOff   = "\x1b[27m"
+	sgrUnderline    = "\x1b[4m"
+	sgrUnderlineOff = "\x1b[24m"
 )
+
+// previewRow is one drawn row of the pane: the cells to write, and the git line they were rendered
+// from. The line travels with the row because the search looks for a term in git's line rather than in
+// the row it produced: a line wider than the column is drawn as several rows, and a term the break cut
+// in half is still a term the reviewer is looking for.
+type previewRow struct {
+	text string
+	line string
+}
+
+// rowTexts is the rows as the pane writes them, without the line each came from.
+func rowTexts(rows []previewRow) []string {
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		out[i] = r.text
+	}
+	return out
+}
+
+// marks is what the pane is highlighting: the term, and which row `n` landed on. The paging and the match
+// list count rows with no marks at all, because marking a line cannot change how many rows it is drawn as.
+type marks struct {
+	term    string
+	current int // the row to pick out in reverse video; -1 when there is none
+}
+
+// unmarked is what counting asks for.
+var unmarked = marks{current: -1}
 
 // previewRows assembles the pane's body: the author's span, and below it -- when there are any --
 // the reviewer's own uncommitted edits under a caption naming who they came from. Both sections are
 // git's bytes, and git's bytes do not say who typed them: an added line the reviewer wrote and one
 // the author wrote are the same green. The caption is what keeps the reviewer's edits from reading
-// as the author's.
-func previewRows(span, work Patch, width int) []string {
-	rows := previewBody(span, width)
+// as the author's. The caption and the blank above it carry no line: the search looks for the diff,
+// not for the chrome drawn over it.
+func previewRows(span, work Patch, width int, mk marks) []previewRow {
+	rows := previewBody(span, width, mk)
 	if len(work.Lines) == 0 {
 		return rows
 	}
 	if len(rows) > 0 {
-		rows = append(rows, "")
+		rows = append(rows, previewRow{})
 	}
-	rows = append(rows, styleDim.Render(clip(yourEditsCaption(work), width)))
-	return append(rows, previewBody(work, width)...)
+	rows = append(rows, previewRow{text: styleDim.Render(clip(yourEditsCaption(work), width))})
+	// The row the reviewer is standing on, counted from here rather than from the top of the pane.
+	return append(rows, previewBody(work, width, marks{term: mk.term, current: mk.current - len(rows)})...)
 }
 
 // yourEditsCaption labels the reviewer's own section, with git's counts for it rather than the
@@ -51,7 +89,7 @@ func yourEditsCaption(work Patch) string {
 // space, then git's own text, wrapped when it is too long for the column. Every row opens the
 // styles it needs and closes them again, because the renderer skips redrawing a row that has not
 // changed -- a colour left open on a skipped row would tint everything written under it.
-func previewBody(patch Patch, width int) []string {
+func previewBody(patch Patch, width int, mk marks) []previewRow {
 	numbers, max := lineNumbers(patch.Lines)
 	gutter := len(strconv.Itoa(max))
 	if gutter < 3 {
@@ -62,18 +100,141 @@ func previewBody(patch Patch, width int) []string {
 		return nil
 	}
 
-	out := make([]string, 0, len(patch.Lines))
+	out := make([]previewRow, 0, len(patch.Lines))
 	for i, line := range patch.Lines {
 		number := ""
 		if numbers[i] > 0 {
 			number = strconv.Itoa(numbers[i])
 		}
-		for _, row := range wrapLine(line, body) {
-			out = append(out, styleDim.Render(fmt.Sprintf("%*s", gutter, number))+" "+row)
+		// The marks go on git's line before it is broken into rows, so that a term the column cuts in half
+		// is marked on both halves: wrapLine carries styling across a break the way it carries git's own
+		// colours. Which line the reviewer is standing on is answered by counting the rows it will make
+		// first, and counting them is safe either way because marking a line cannot move where it breaks.
+		marked := highlightRow(line, mk.term, false)
+		rows := wrapLine(marked, body)
+		if mk.term != "" && mk.current >= len(out) && mk.current < len(out)+len(rows) {
+			rows = wrapLine(highlightRow(line, mk.term, true), body)
+		}
+		for _, row := range rows {
+			out = append(out, previewRow{
+				text: styleDim.Render(fmt.Sprintf("%*s", gutter, number)) + " " + row, line: line})
 			number = "" // a wrapped line is still one line, numbered once
 		}
 	}
 	return out
+}
+
+// --- searching the pane ------------------------------------------------------
+
+// foldSearch is the smart-case rule `less` and `vim` use: a term written entirely in lower case is
+// looked for in any case, and one with a capital in it is looked for exactly. It is what lets `/lock`
+// find LockManager while `/Lock` does not find lock.
+func foldSearch(term string) bool { return term == strings.ToLower(term) }
+
+// containsTerm is the search's match, asked of a line with its escapes stripped -- the colour git put
+// between two letters of a word is not part of the word.
+func containsTerm(plain, term string) bool {
+	if term == "" {
+		return false
+	}
+	if foldSearch(term) {
+		return strings.Contains(strings.ToLower(plain), strings.ToLower(term))
+	}
+	return strings.Contains(plain, term)
+}
+
+// matchRows returns the rows to jump between: one entry for each git line that carries an occurrence of
+// term, given as the first row that line is drawn on. Matching a whole git line rather than a drawn row
+// is what makes a term the column broke in half findable; the highlight is still per row, so each half
+// of that term lights up on the row it is on.
+func matchRows(rows []previewRow, term string) []int {
+	if term == "" {
+		return nil
+	}
+	var out []int
+	for i, r := range rows {
+		if !containsTerm(ansi.Strip(r.line), term) {
+			continue
+		}
+		// The continuation rows of one line carry the same line, and the line is one match.
+		if i > 0 && rows[i-1].line == r.line {
+			continue
+		}
+		out = append(out, i)
+	}
+	return out
+}
+
+// highlightRow wraps every occurrence of term in the row's own cells: reverse video for the match the
+// reviewer is on and underline for the others. It finds the matches in the row's visible cells and
+// splices the escapes into the string that carries git's colours, because rebuilding the row from its
+// plain text is how a highlight ends up drawing the diff in white.
+func highlightRow(row, term string, current bool) string {
+	if term == "" {
+		return row
+	}
+	on, off := sgrUnderline, sgrUnderlineOff
+	if current {
+		on, off = sgrReverse, sgrReverseOff
+	}
+
+	var (
+		visible []rune
+		starts  []int // the byte each visible rune starts at, and where the row's text ends
+	)
+	for i := 0; i < len(row); {
+		if row[i] == 0x1b {
+			i += escapeLen(row[i:])
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(row[i:])
+		visible, starts = append(visible, r), append(starts, i)
+		i += size
+	}
+	starts = append(starts, len(row))
+
+	fold := foldSearch(term)
+	needle := []rune(term)
+	var (
+		b     strings.Builder
+		last  int
+		found bool
+	)
+	for i := 0; i+len(needle) <= len(visible); {
+		if !matchesAt(visible[i:], needle, fold) {
+			i++
+			continue
+		}
+		// The match's bytes are the span from its first rune to the byte the rune after it starts at,
+		// which is why `starts` has one entry past the last rune.
+		from, to := starts[i], starts[i+len(needle)]
+		b.WriteString(row[last:from])
+		b.WriteString(on + row[from:to] + off)
+		last, found, i = to, true, i+len(needle)
+	}
+	if !found {
+		return row
+	}
+	b.WriteString(row[last:])
+	return b.String()
+}
+
+// matchesAt is the same comparison containsTerm makes, over runes, so a highlight and a jump cannot
+// disagree about what a match is.
+func matchesAt(hay, needle []rune, fold bool) bool {
+	if len(needle) > len(hay) {
+		return false
+	}
+	for i, r := range needle {
+		other := hay[i]
+		if fold {
+			r, other = unicode.ToLower(r), unicode.ToLower(other)
+		}
+		if r != other {
+			return false
+		}
+	}
+	return true
 }
 
 // lineNumbers returns the number each line of the patch carries on the side being reviewed, and

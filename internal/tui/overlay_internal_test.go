@@ -68,8 +68,12 @@ func TestSmallTerminalGivesThePreviewTheWholeScreen(t *testing.T) {
 			t.Errorf("the overlay still draws the list's %q:\n%s", absent, view)
 		}
 	}
-	if !strings.Contains(view, "ctrl-f/b page") || !strings.Contains(view, "q quit") {
-		t.Errorf("the shortcut bar does not name the keys this screen answers:\n%s", view)
+	// Including the search: a feature nobody can see the keys for is a feature nobody finds, and the
+	// overlay is where a narrow terminal reads a diff.
+	for _, want := range []string{"ctrl-f/b page", "q quit", "/ find", "n N next", "d/u ctrl-d/u half"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the shortcut bar does not name %q:\n%s", want, view)
+		}
 	}
 }
 
@@ -365,19 +369,22 @@ func TestOverlayWorksOnAHistoricalSpan(t *testing.T) {
 	m.previewOn = false
 	m = openOverlay(t, m)
 
-	view := m.View()
-	for _, want := range []string{"main...last review", "@@"} {
-		if !strings.Contains(view, want) {
-			t.Errorf("the historical overlay never shows %q:\n%s", want, view)
-		}
+	if view := m.View(); !strings.Contains(view, "main...last review") {
+		t.Errorf("the historical overlay does not name its span:\n%s", view)
 	}
 	total, body := m.previewRowsTouched()
 	if total <= body {
 		t.Fatalf("the fixture's diff (%d rows) fits the overlay (%d): nothing to scroll", total, body)
 	}
+	// The hunk header is a row below what the floor shows, because the overlay's own bar is counted
+	// against these rows -- which is also why this test is the one that checks the overlay scrolls. One
+	// `j` is what it takes, and the diff's bytes are what arrives.
 	m = pressKey(t, m, runeKey('j'))
 	if m.previewOffset != 1 {
 		t.Errorf("a historical overlay scrolls to offset %d, want 1", m.previewOffset)
+	}
+	if view := m.View(); !strings.Contains(view, "@@") {
+		t.Errorf("the historical overlay never shows the hunk header:\n%s", view)
 	}
 	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.mode != modeFiles {

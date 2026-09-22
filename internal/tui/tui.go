@@ -257,6 +257,15 @@ type reviewModel struct {
 	previewG      bool
 	patches       map[string]Patch
 	working       map[string]Patch
+	// The preview's search: the term in force, the field while it is being typed, and the row `n` landed
+	// on. Nothing here caches a match position -- the pane's rows are rebuilt from git's bytes on every
+	// draw -- it caches which match the reviewer is looking at, and which term that match belongs to, so
+	// a row that is no longer a match cannot be left picked out in reverse video.
+	previewSearch    string
+	searchInput      string
+	searching        bool
+	previewMatch     int // -1 while there is no match to pick out
+	previewMatchTerm string
 	// pendingNote is what goes in the status line when the editor or difftool currently
 	// holding the terminal exits. Every handoff assigns it, so a note can never outlive the
 	// child it was written for.
@@ -303,7 +312,12 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}()
 
-	m := reviewModel{ctx: ctx, sess: sess, out: out, width: 80, height: 24, threadsOpen: true, previewOn: true}
+	m := reviewModel{
+		ctx: ctx, sess: sess, out: out, width: 80, height: 24, threadsOpen: true, previewOn: true,
+		// There is no match to pick out until `n` or `enter` says there is. Zero would be row zero,
+		// which is a row the reviewer never asked to be standing on.
+		previewMatch: -1,
+	}
 	m.refresh()
 	if n := sess.Resumed(); n > 0 {
 		m.setStatus(fmt.Sprintf("resumed %d reviewed mark%s from an earlier session", n, plural(n)), false)
@@ -457,7 +471,10 @@ func (m reviewModel) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case previewMsg:
 		m.store(msg.kind, msg.path, msg.patch)
 		if msg.path == m.previewPath {
-			m.previewOffset = 0
+			// The rows have changed underneath the marks: a second section arriving adds a caption and
+			// pushes everything below it. The term keeps highlighting, but no row claims to be the one
+			// the reviewer was on until `n` finds it again.
+			m.previewOffset, m.previewMatch = 0, -1
 		}
 		return m, nil
 
@@ -536,6 +553,11 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDiffKey(key)
 	}
 	m.refresh()
+
+	// The search field belongs to the diff's keys and does not follow the reviewer into the list. What is
+	// highlighted stays highlighted; what was typed and not committed is dropped, because a field that
+	// reappears later with half a word in it is a field the reviewer has to inspect before typing again.
+	m.searching, m.searchInput = false, ""
 
 	// Every action that changes something goes through one gate. Read-only-ness is a
 	// property of the span's head, not of each command, and a screen that grows a new
@@ -1613,7 +1635,7 @@ func (m reviewModel) helpText() string {
 // part of the row-area budget wherever the overlay is the only form the diff can take, so that no row of
 // it is ever clipped by a bar counted from the list.
 func (m reviewModel) overlayHelp() string {
-	return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  esc enter back  f tab list  q quit"
+	return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  esc enter back  f tab list  q quit"
 }
 
 // helpTextFor is the bar of one region. It names every key that region reads and none that it does not,
@@ -1634,8 +1656,9 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 	if target == focusPreview {
 		// The diff reads nothing that changes the review, and its three ways out all mean the list
 		// column -- `esc` gives the keys back, `f` names the tree, `tab` walks the ring -- so they are
-		// one group on the bar rather than three claims on it.
-		return "j k line  ctrl-d/u half  ctrl-f/b page  gg top  G bottom  enter diff  esc f tab list  q quit"
+		// one group on the bar rather than three claims on it. `/ find` is named with the two keys that
+		// walk what it finds: a search nobody can see the keys for is a feature nobody finds.
+		return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  enter diff  esc f tab list  q quit"
 	}
 	// The jumps name a row of the box from either half of the column and take the keys with them. `T`
 	// writes, so it is absent from every bar of a span that cannot.
@@ -2334,9 +2357,10 @@ func visibleRows(start, end, scroll, window int) []int {
 // TestOverlayFloorHasRoomToRead asserts the arithmetic rather than trusting it.
 const (
 	previewOverlayMinWidth = 40
-	// The bar is what sets this, not the diff: at the floor's 40 columns the overlay's own bar wraps
-	// to three rows, and a bar whose rows the band cannot draw is a key offered nowhere. The body gets
-	// what is left, so a row added to that bar is a row the floor has to grow by.
+	// The bar is what sets this, not the diff: at the floor's 40 columns the overlay's own bar wraps to
+	// four rows, and a bar whose rows the band cannot draw is a key offered nowhere. The body gets what is
+	// left, so a row added to that bar is a row the floor has to grow by -- TestOverlayFloorHasRoomToRead
+	// does that arithmetic rather than trusting this number.
 	previewOverlayMinHeight = 13
 )
 
@@ -2537,12 +2561,15 @@ func (m reviewModel) ensurePreview() (reviewModel, tea.Cmd) {
 		// returns to the same lines rather than to the top of the file. Keeping an out-of-date diff is
 		// forgetPatches' job, not this one's.
 		if m.previewShowing() {
-			m.previewPath, m.previewOffset = "", 0
+			m.previewPath, m.previewOffset, m.previewMatch = "", 0, -1
 		}
 		return m, nil
 	}
 	if path != m.previewPath {
-		m.previewPath, m.previewOffset = path, 0
+		// The term is deliberately not cleared: the point of a term you have typed is that it is the
+		// next file's term too, which is how a name you are chasing across a changeset gets chased.
+		// What goes is the position in the old file, which has no meaning in this one.
+		m.previewPath, m.previewOffset, m.previewMatch, m.previewMatchTerm = path, 0, -1, ""
 	}
 	var cmds []tea.Cmd
 	kinds := []patchKind{patchSpan, patchWorking}
@@ -2613,7 +2640,10 @@ func (m *reviewModel) store(kind patchKind, path string, p Patch) {
 // likely to have just changed, so both sources go.
 func (m *reviewModel) forgetPatches() {
 	m.patches, m.working = nil, nil
-	m.previewPath, m.previewOffset = "", 0
+	m.previewPath, m.previewOffset, m.previewMatch = "", 0, -1
+	// The field closes with the rows it was searching: a term typed against a diff that is gone is a
+	// field with nothing under it. The term itself stays, for the next file to be typed into.
+	m.searching, m.searchInput = false, ""
 }
 
 // togglePreview is `p`. A terminal with room for two columns gets the pane beside the list. A
@@ -2713,6 +2743,12 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 	}
+	// The search field is read before anything else, because while it is open the pane's keys are not the
+	// pane's keys: `d` is a d, `q` is a q, and the diff is not going anywhere until `enter` or `esc` says
+	// otherwise.
+	if m.searching {
+		return m.handleSearchKey(key)
+	}
 	// `g` waits for its partner, as it does in the list. The guard on previewG is what makes the
 	// pair possible at all: without it the second `g` would be read as another prefix and the jump
 	// would never happen.
@@ -2765,10 +2801,23 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.scrollPreview(1, 1)
 	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
 		return m.scrollPreview(-1, 1)
-	case key.Type == tea.KeyCtrlD:
+	// Half a page, three ways: `less`'s `d` and `u`, and the ctrl pairs the list column already uses for
+	// the same distance. The half is what makes it a reading key rather than a paging key -- consecutive
+	// presses keep a line of context, so the line you were reading is still on screen.
+	case key.Type == tea.KeyCtrlD, key.Type == tea.KeyRunes && firstRune(key) == 'd':
 		return m.scrollPreview(1, m.previewBodyRows()/2)
-	case key.Type == tea.KeyCtrlU:
+	case key.Type == tea.KeyCtrlU, key.Type == tea.KeyRunes && firstRune(key) == 'u':
 		return m.scrollPreview(-1, m.previewBodyRows()/2)
+	// `/` searches the file on screen, and the field opens with the last term already in it: `less` and
+	// `vim` both keep it, and for the same reason -- the second search is nearly always the first one
+	// again, which makes `enter` on an untouched field mean "the next one".
+	case key.Type == tea.KeyRunes && firstRune(key) == '/':
+		m.searching, m.searchInput = true, m.previewSearch
+		return m, nil
+	case key.Type == tea.KeyRunes && firstRune(key) == 'n':
+		return m.searchStep(1)
+	case key.Type == tea.KeyRunes && firstRune(key) == 'N':
+		return m.searchStep(-1)
 	case key.Type == tea.KeyCtrlF:
 		return m.scrollPreview(1, m.previewBodyRows())
 	case key.Type == tea.KeyCtrlB:
@@ -2787,16 +2836,7 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 // Paging, the top and the bottom all count rows rather than source lines, because a line wider than
 // the column is drawn as several rows: paging by lines would page an unpredictable distance.
 func (m reviewModel) previewRowsTouched() (total, body int) {
-	body = m.previewBodyRows()
-	if m.previewPath == "" {
-		return 0, body
-	}
-	patch, ok := m.patches[m.previewPath]
-	if !ok {
-		return 0, body
-	}
-	work, _ := m.patch(patchWorking, m.previewPath)
-	return len(previewRows(patch, work, m.previewWidth())), body
+	return len(m.previewContent(unmarked)), m.previewBodyRows()
 }
 
 // scrollPreview moves the diff by step rows in direction dir, clamped at both ends. A reviewer at
@@ -2836,6 +2876,158 @@ func (m reviewModel) pagePreview(dir int) (tea.Model, tea.Cmd) {
 // about the part that is not on show. Everything between the first line and the note is git's
 // bytes with nothing added — PRD §3 rules out a diff renderer, and this is the alternative to
 // building one: a window onto what git printed.
+// previewContent renders what the pane is showing as the rows it draws, with the marks it should carry.
+// It sits apart from the pane's chrome so the search, the paging and the note all count the same rows the
+// reviewer is looking at. Nil for a file with nothing cached yet.
+func (m reviewModel) previewContent(mk marks) []previewRow {
+	if m.previewPath == "" {
+		return nil
+	}
+	patch, ok := m.patches[m.previewPath]
+	if !ok {
+		return nil
+	}
+	work, _ := m.patch(patchWorking, m.previewPath)
+	return previewRows(patch, work, m.previewWidth(), mk)
+}
+
+// searchTerm is what the pane is highlighting: what is being typed while the field is open, and the term
+// `enter` committed the rest of the time.
+func (m reviewModel) searchTerm() string {
+	if m.searching {
+		return m.searchInput
+	}
+	return m.previewSearch
+}
+
+// currentMatch is the row `n` last landed on, or -1 when there is no match for the term in force. That is
+// also the answer while a new term is being typed: nothing is picked out in reverse video until `enter`
+// says which match the reviewer means.
+func (m reviewModel) currentMatch() int {
+	if m.previewMatch < 0 || m.previewMatchTerm == "" || m.previewMatchTerm != m.previewSearch {
+		return -1
+	}
+	return m.previewMatch
+}
+
+// clampPreviewOffset is the one rule about where the pane's top row may sit: it cannot be negative, and it
+// cannot show more blank rows than there are. The draw, the paging and a jump to a match all ask for it,
+// and they have to agree or the pane scrolls to a row it then refuses to show.
+func clampPreviewOffset(off, total, body int) int {
+	if max := total - body; off > max {
+		off = max
+	}
+	if off < 0 {
+		return 0
+	}
+	return off
+}
+
+// scrollToRow moves the pane the least distance that puts the row on screen. Centreing every jump would
+// move lines the reviewer was reading off the top to make room for one they have not read yet.
+func (m *reviewModel) scrollToRow(row, total int) {
+	body := m.previewBodyRows()
+	if row < m.previewOffset {
+		m.previewOffset = row
+	}
+	if row >= m.previewOffset+body {
+		m.previewOffset = row - body + 1
+	}
+	m.previewOffset = clampPreviewOffset(m.previewOffset, total, body)
+}
+
+// searchStep walks to the next match (dir > 0) or the previous one, wrapping at both ends. It wraps where
+// the pane's own paging does not: a term with one match in the file has to be reachable from anywhere, and
+// a reviewer at the bottom of a long diff should find the match at the top rather than a status line.
+func (m reviewModel) searchStep(dir int) (tea.Model, tea.Cmd) {
+	term := m.previewSearch
+	rows := m.previewContent(unmarked)
+	matches := matchRows(rows, term)
+	if len(matches) == 0 {
+		if term == "" {
+			return m, nil // `n` before anything has been searched for has nothing to say
+		}
+		m.setStatus(fmt.Sprintf("no match for %q in this file", term), true)
+		return m, nil
+	}
+
+	// With no match to work from, the window's own top row is the starting point, so `enter` on a typed
+	// term lands on the first match at or below what is already on screen rather than jumping to the top of
+	// the file.
+	at := m.previewOffset - 1
+	if cur := m.currentMatch(); cur >= 0 {
+		at = cur
+	}
+	pick := 0
+	if dir > 0 {
+		for i, row := range matches {
+			if row > at {
+				pick = i
+				break
+			}
+		}
+	} else {
+		pick = len(matches) - 1
+		for i := len(matches) - 1; i >= 0; i-- {
+			if matches[i] < at {
+				pick = i
+				break
+			}
+		}
+	}
+
+	m.setStatus("", false)
+	m.previewMatch, m.previewMatchTerm = matches[pick], term
+	m.scrollToRow(matches[pick], len(rows))
+	return m, nil
+}
+
+// handleSearchKey is the field: it reads the term and the two keys that end it, and nothing else. The
+// scrolling keys are not read here for the same reason they are not read in the thread title, and for a
+// better one: the highlights move under the reviewer's fingers as they type, so the pane is already saying
+// what the term means without moving. `q` types a q rather than quitting -- the field is where the
+// reviewer is, not the pane.
+func (m reviewModel) handleSearchKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Type == tea.KeyCtrlC:
+		m.quitting = true
+		return m, tea.Quit
+
+	case key.Type == tea.KeyEnter:
+		// The field closes and what was typed becomes the term, and `enter` then means "this one": the walk
+		// `n` does. Typing a term and pressing `enter` twice lands on the same two matches as typing it and
+		// pressing `n` twice.
+		m.previewSearch, m.searching, m.searchInput = m.searchInput, false, ""
+		if m.previewSearch == "" {
+			m.previewMatch, m.previewMatchTerm = -1, "" // an empty term is a clear, not a search
+			return m, nil
+		}
+		return m.searchStep(1)
+
+	case key.Type == tea.KeyEsc:
+		// The field closes and the term already committed stays where it was: a reviewer who mistypes
+		// should not lose the match they were reading.
+		m.searching, m.searchInput = false, ""
+		return m, nil
+
+	case key.Type == tea.KeyBackspace, key.Type == tea.KeyCtrlH:
+		runes := []rune(m.searchInput)
+		if len(runes) > 0 {
+			m.searchInput = string(runes[:len(runes)-1])
+		}
+		return m, nil
+
+	case key.Type == tea.KeySpace:
+		m.searchInput += " "
+		return m, nil
+
+	case key.Type == tea.KeyRunes:
+		m.searchInput += string(key.Runes)
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m reviewModel) previewLines() []string {
 	width := m.previewWidth()
 	if width <= 0 || m.previewPath == "" {
@@ -2877,23 +3069,26 @@ func (m reviewModel) previewLines() []string {
 		}
 	}
 
-	// Rows, not source lines: a line wider than the column is drawn as several rows, so paging
-	// and the note have to count what is actually on screen.
-	work, _ := m.patch(patchWorking, m.previewPath)
-	lines := previewRows(patch, work, width)
-	offset := m.previewOffset
-	if max := len(lines) - body; offset > max {
-		offset = max
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	// Rows, not source lines: a line wider than the column is drawn as several rows, so the paging, the
+	// note and the search all count what is actually on screen.
+	// The marks are asked for as the rows are made rather than written over them afterwards: a term the
+	// column breaks in half is one term, and it has to be marked on both of the rows it is drawn on.
+	rows := m.previewContent(marks{term: m.searchTerm(), current: m.currentMatch()})
+	offset := clampPreviewOffset(m.previewOffset, len(rows), body)
 	end := offset + body
-	if end > len(lines) {
-		end = len(lines)
+	if end > len(rows) {
+		end = len(rows)
 	}
-	out = append(out, lines[offset:end]...)
-	if end < len(lines) || offset > 0 {
+	out = append(out, rowTexts(rows[offset:end])...)
+
+	switch {
+	case m.searching:
+		// The field goes on the note's row: it is the pane's own bottom line, the line `less` puts its
+		// prompt on, and the layout has already counted a row there, so the field can arrive and leave
+		// without moving anything above it. The caret is the block the thread prompt uses, for the same
+		// reason it does: a field that looks like prose gets typed into by accident.
+		out = append(out, clip("/ "+m.searchInput+threadPromptCursor, width))
+	case end < len(rows) || offset > 0:
 		// The keys the note may point at. In the pane ctrl-b/ctrl-f page it and enter opens the
 		// difftool; in the overlay the whole screen is already the diff, enter closes it, and a note
 		// that promised "enter opens" would promise the opposite of what the key now does.
@@ -2901,12 +3096,16 @@ func (m reviewModel) previewLines() []string {
 		if m.mode == modePreview {
 			tail, keys = "", ""
 		}
-		note := fmt.Sprintf("… %s%s", rowsMore(len(lines)-end), tail)
+		note := fmt.Sprintf("… %s%s", rowsMore(len(rows)-end), tail)
 		if offset > 0 {
-			note = fmt.Sprintf("rows %d\u2013%d of %d%s%s", offset+1, end, len(lines), keys, tail)
+			note = fmt.Sprintf("rows %d\u2013%d of %d%s%s", offset+1, end, len(rows), keys, tail)
 		}
 		if patch.Capped {
 			note = "diff too large to read here" + tail
+		}
+		if term := m.searchTerm(); term != "" {
+			// How many places the term has: what tells the reviewer whether `n` has anywhere left to go.
+			note = fmt.Sprintf("%s  \u00b7  %d for %q", note, len(matchRows(rows, term)), term)
 		}
 		out = append(out, styleDim.Render(clip(note, width)))
 	}

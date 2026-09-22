@@ -1059,8 +1059,8 @@ Tabs are shown as the spaces they advance to, because a tab the width maths scor
 terminal wraps for you.
 
 `p` moves into the pane and does nothing else: the keys go to the diff, and it scrolls with the
-keys the whole-screen preview uses — `j`/`k` a row, `ctrl-d`/`ctrl-u` half a page, `ctrl-f`/`ctrl-b` a
-page, `gg` the top and `G` the bottom — over the file the pane was already showing. Paging a diff that
+keys the whole-screen preview uses — `j`/`k` a row, `d`/`u` or `ctrl-d`/`ctrl-u` half a page,
+`ctrl-f`/`ctrl-b` a page, `gg` the top and `G` the bottom — over the file the pane was already showing. Paging a diff that
 way is the whole point: the four page keys belong to whichever region holds them, so a diff too long to
 fit is paged by moving into it rather than by borrowing the list's keys from across the screen.
 `Enter` there opens the difftool on that file, which is the key the pane's own note points at. `Esc`
@@ -1083,14 +1083,34 @@ two cursors. The first two are glyphs and text, so they survive a terminal that 
 all. The shortcut bar becomes the pane's own, which names every key the pane reads and none of the ones
 it does not.
 
+Searching the file on screen is `/`, which reads a term in the pane's bottom row — the row the note
+about the rest of the file uses, so the field costs no rows and moves nothing. Every match is marked as
+the term is typed, and the marks are SGR rather than colour: underline for the matches, reverse video for
+the one you are on, because the diff's green and red are git's and a highlight that painted over them
+would hide which kind of line a match sits on. `Enter` closes the field and jumps to the first match at or
+below what was already on screen; `n` and `N` walk the matches and wrap at both ends, moving the pane only
+as far as it has to to keep the match visible. A term written entirely in lower case is looked for in any
+case, and one with a capital in it exactly, so `/lock` finds `LockManager` while `/Lock` does not find
+`lock`. The term is looked for in git's line rather than in the row it was drawn on, so a term the column
+broke in half is still found — and marked on both halves. The bottom row counts the matches while the pane
+is scrolled, which is what says whether `n` has anywhere left to go. `Enter` on an empty term clears the
+marks, and `Esc` closes the field and keeps the term that was already committed, because a mistyped
+search should not cost you the match you were reading; the second `Esc` gives the keys back, as it did
+before the field existed. While the field is open it owns the keys — `q` types a `q` rather than quitting,
+and the pane's scrolling keys wait — which is the same promise the thread title makes. The term outlives the
+file it was typed in: move to another row and the same term marks that one too, which is how a name you are
+chasing across a changeset gets chased; the row it had landed on does not travel, because it means nothing
+in the new file.
+
 Below those dimensions there is no room for two columns, and the person who pressed `p` wanted the
 diff — so `p` gives the diff the whole screen, which is the same request answered as well as the window
 allows. Pressed there it is inert, since the diff already has the screen and the keys. A terminal dragged
 below those dimensions while the pane has the keys loses both — a column that is not drawn cannot hold
 the keyboard, and the list takes the keys back. Same git bytes, same numbers, same wrapping, full
 width, with the file and the span it is measured against on the line above it (the span is named in
-the list otherwise, and the list is gone). It scrolls with `j`/`k`, `ctrl-d`/`ctrl-u` for half a page,
-`ctrl-f`/`ctrl-b` for a page, `gg` for the top and `G` for the bottom. `Esc` or `Enter` gives the list
+the list otherwise, and the list is gone). It scrolls with `j`/`k`, `d`/`u` or `ctrl-d`/`ctrl-u` for half a page,
+`ctrl-f`/`ctrl-b` for a page, `gg` for the top and `G` for the bottom, and `/` searches it the same way the
+pane does. `Esc` or `Enter` gives the list
 back, and so do the keys that move the keys — `tab`, `shift-tab` and `f` — since the half of the list one of
 them names is only drawn once the diff stops covering the screen. The diff is a stop on the ring here as much as anywhere, which is what lets `tab` reach it: a narrow
 terminal is the one case where the ring would otherwise have a hole where the pane cannot be. Keys mean

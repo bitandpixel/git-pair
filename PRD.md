@@ -1719,10 +1719,21 @@ survives a thread title being typed and a submit prompt being answered: the revi
 beside a diff comes back from the editor to that diff rather than to a screen that lost it on the way.
 
 `p` moves the keys into that column and does nothing else, so a diff longer than the column is read
-with the keys a diff is read with: `j`/`k`, `ctrl-d`/`ctrl-u`, `ctrl-f`/`ctrl-b`, `gg` and `G` scroll
-the file already on show, and `Enter` opens the difftool on it. `Esc` hands the keys back to the
-region that had them — tree or box — and leaves the pane where it was; `tab` moves them on to the box,
-because a region you can only leave by backing out of is not a stop on a ring. `p` pressed where the diff
+with the keys a diff is read with: `j`/`k`, `d`/`u` or `ctrl-d`/`ctrl-u`, `ctrl-f`/`ctrl-b`, `gg` and `G`
+scroll the file already on show (`d`/`u` being `less`'s spelling of the same half page, kept because a
+reviewer who reaches for it in a diff is reaching for something they know), `Enter` opens the difftool on
+it, and `/` searches it. The search reads a term in the pane's bottom row — the row the note about the
+rest of the file uses, so the field costs no rows — marks every match as the term is typed, and marks them
+with SGR rather than colour: the diff's green and red are git's bytes, and a highlight that painted over
+them would hide which kind of line a match sits on. `Enter` jumps to the first match at or below the
+screen and `n`/`N` walk them, wrapping at both ends and moving the pane only as far as the match needs.
+The term is looked for in git's line rather than in the row it was drawn on, so a term the column broke in
+half is found and marked on both halves; a term written entirely in lower case is looked for in any case,
+and one with a capital in it exactly. `Esc` closes the field and keeps the term already committed, and the
+term outlives the file it was typed in, because the name being chased across a changeset is the same name
+in the next file. `Esc` on the closed field hands the keys back to the
+region that had them — tree or box — and leaves the pane where it was; `tab` moves them back to whichever
+half of the column had them, because a region you can only leave by backing out of is not a stop on a ring. `p` pressed where the diff
 already holds the keys does nothing, rather than meaning the opposite of what it means in the list, and
 `q` quits from the pane as it quits from everywhere else — the pane is one `p` away and the marks are on
 disk, so nothing is at stake in the difference. While the pane holds the keys nothing that changes the review can happen —
@@ -1814,8 +1825,11 @@ ctrl-b   page the preview up
 Space    toggle reviewed for a file row, or for every file under a directory row
 
 In the preview column, after p:
-j/k      scroll the diff a row; ctrl-d/ctrl-u half a page, ctrl-f/ctrl-b a page,
+j/k      scroll the diff a row; d/u or ctrl-d/ctrl-u half a page, ctrl-f/ctrl-b a page,
          gg the top, G the bottom
+/        search the file on show: the term marks its matches as it is typed, enter closes the
+         field and jumps to the first match at or below the screen, n and N walk the matches
+         (wrapping), and esc closes the field keeping the term already committed
 Enter    open the difftool on the file the pane is showing
 Esc      hand the keys back to the list column, leaving the pane where it is in the file
 Tab, f   move the keys back to the list column, as they do from anywhere in it
@@ -2564,6 +2578,7 @@ p        move the keys into the diff preview column; inert where the diff alread
          Where there is no second column, it takes the screen for the diff
 ctrl-f   page the preview down
 ctrl-b   page the preview up
+/        search the diff the preview column (or the whole screen) is showing; n/N walk the matches
 Space    mark file reviewed/unreviewed
 
 a        put the cursor on ABOUT.md
