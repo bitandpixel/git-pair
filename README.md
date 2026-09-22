@@ -715,6 +715,10 @@ trunk, so the rules that find work in progress stop seeing it, and the branch ma
 its exit-2 "no changeset for this branch" answer, which stays exit 2 because the branch really does hold
 no work in progress.
 
+When the destination already holds the directory, the answer says the changeset landed. It then names
+`git pair status --changeset <id>` rather than telling you to run `git pair init` over work that has a
+record.
+
 Both reports say "no integration record *in this clone*", and mean it: a record written where the merge
 ran arrives with `git fetch origin 'refs/git-pair/*:refs/git-pair/*'` — or with `--fetch`, which
 `status`, `queue` and `check` all accept and which also brings the mirrors under

@@ -208,3 +208,23 @@ func TestQueueDoesNotReportALandingOnAnotherBranch(t *testing.T) {
 	mustNotContain(t, q.stdout, "LANDED, UNRECORDED", "a landing outside the destination is not this finding")
 	mustNotContain(t, q.stdout, slug, "and the changeset is not named")
 }
+
+// A merged branch is where a reader often still stands when the merge happened, and `status` there is the
+// ordinary way to meet this answer. The hint used to say "run `git pair init`", which starts a second
+// changeset over work that already has a record.
+func TestStatusOnALandedChangesetsOwnBranchSaysItLanded(t *testing.T) {
+	f, slug, _ := landedFixture(t)
+	f.SwitchTo(slug) // the changeset branch, still carrying its own directory
+
+	res := runIn(t, f.Dir(), "status")
+	if res.code != exitUsage {
+		t.Fatalf("status exited %d, want %d\nstderr: %s", res.code, exitUsage, res.stderr)
+	}
+	combined := res.stdout + res.stderr
+	mustContain(t, combined, "no changeset for this branch", "the branch holds no work in progress")
+	mustContain(t, combined, "that changeset landed", "and the answer says what happened")
+	mustContain(t, combined, "git pair status --changeset "+slug, "and names the read that answers")
+	if strings.Contains(combined, "run `git pair init") {
+		t.Errorf("the answer sends the reader to init over work with a record\n%s", combined)
+	}
+}
