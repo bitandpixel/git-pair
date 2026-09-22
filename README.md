@@ -1100,7 +1100,10 @@ are columns, and the narrow terminal that needs the regions told apart most is t
 spare; the row between the box and the tree was blank, so the pair costs one row of the tree's window.
 Each rule also carries the count of what the window hides at the end that count is about — `↑ 3` on the
 top rule for the rows above the window, `↓ 11` on the bottom rule for the rows below it — with whitespace
-each side so it reads as a note pinned to the rule rather than as the last cell of a row. It goes on a
+each side so it reads as a note pinned to the rule rather than as the last cell of a row. The two counts of
+one region share a numeric field as wide as the longer of them, so the arrows sit in one column and the
+digits line up under them (`↑  1` above `↓ 34`), and the pair reads as the two ends of one thing rather than
+as two remarks a cell apart. It goes on a
 rule because a rule is not a row: the count used to have a row of its own, which cost the window a row
 the moment the list was scrolled, and the row it cost was the one a page had just landed the cursor on.
 

@@ -42,11 +42,14 @@ the other region's cursor. A region with no rows has no ends, so the jump goes t
 an empty span or a box-less changeset keeps the behaviour the keys had before.
 
 **The scroll counts live on the rules and borders** (`treeSpine`, `boxEdge`, `boxLines`, `listBlock`,
-`hiddenAround`, `scrollHint`). `filesHidden` and `metaHidden` count each region's rows off screen above and
+`hiddenAround`, `scrollHints`). `filesHidden` and `metaHidden` count each region's rows off screen above and
 below, read off the same `visibleRows` arithmetic that draws them, so the number and the rows cannot
-disagree. `scrollHint` renders one as `  ↑ 3 ` or `  ↓ 11 `; `treeSpine` puts it at the end of the rule it
-belongs to, faint while the rule carries the focus light, and `boxEdge` gained a right-hand label so the box
-can count both directions from inside its borders. The box's old one-directional `3 more` is gone.
+disagree. `scrollHints` renders a region's pair as `  ↑  1 ` and `  ↓ 34 `, both counts in one numeric field
+as wide as the longer of them, so the two arrows of a region share a column and its digits line up. The field
+width is shared because the two arrows are the pair a reviewer reads together, and one that moved a cell when
+its count grew past 9 would make the pair read as two unrelated notes. `treeSpine` puts a count at the end of
+the rule it belongs to, faint while the rule carries the focus light, and `boxEdge` gained a right-hand label
+so the box can count both directions from inside its borders. The box's old one-directional `3 more` is gone.
 
 **The row budget no longer depends on the scroll** (`chromeRows`). It grew by one whenever the tree was
 scrolled, to pay for the note; that row is now the tree's to page with, and the frame is the same height
@@ -101,7 +104,12 @@ count from ever sitting over the row the cursor is on.
 
 - `mise run check` (gofmt, `go vet ./...`, `go test ./...`) — clean.
 - `mise run build`, then the pty walkthrough (`bash docs/plans/completed/gitpr-mvp/artifacts/pty-walkthrough.sh`)
-  against the binary this branch installs — all checks passed, including the rewritten `q` step.
+  against the binary this branch installs — 89 checks, `PTY: all checks passed`, including the rewritten `q`
+  step. It has to be run in the foreground: started under the agent's process manager the same script stalls
+  in its first pty steps and reports failures no foreground run reproduces.
+- `TestTheTreeCountsWhatItHidesInEachDirection` asserts the alignment directly: with one count one digit wide
+  and the other two, the two arrows must sit in the same cell of their own rules, and the fixture fails the
+  test rather than passing quietly if it ever stops producing counts of different widths.
 
 ## Known limitations
 
@@ -111,6 +119,10 @@ count from ever sitting over the row the cursor is on.
 - The counts are per region, so a reviewer who has folded half a tree sees the count of rows the window
   hides rather than a count that also accounts for what the fold hides. That is what the fold arrow already
   says, and the two would be harder to read together than apart.
+- The numeric field is sized from the two counts of one region rather than from the screen, so the box's
+  arrows and the tree's arrows can sit in different columns when one region hides hundreds of rows and the
+  other hides single digits. Each pair is read on its own, and no case short of a three-digit count moves an
+  arrow inside a pair.
 
 ## Open questions
 

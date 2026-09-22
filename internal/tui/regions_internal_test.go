@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // The row area is shared by two regions, and the split is the feature: a changeset with forty threads
@@ -640,6 +641,21 @@ func TestTheBoxCountsWhatItHidesFromItsOwnStart(t *testing.T) {
 	}
 }
 
+// countRows are the frame rows carrying the two scroll counts, with the styling stripped: the arrows are
+// meant to sit in one column, and a test cannot count cells through escape codes.
+func countRows(m reviewModel) (up, down string) {
+	for _, row := range viewRows(m.View()) {
+		plain := ansi.Strip(row)
+		if strings.Contains(plain, "\u2191") {
+			up = plain
+		}
+		if strings.Contains(plain, "\u2193") {
+			down = plain
+		}
+	}
+	return up, down
+}
+
 // The tree counts what its window hides on its own two rules, one count at each end. It counts them
 // there because a rule is not a row: the count used to be a row of its own, which cost the window a row
 // the moment the list was scrolled -- and the row it cost was the one a page had just landed the cursor
@@ -660,6 +676,10 @@ func TestTheTreeCountsWhatItHidesInEachDirection(t *testing.T) {
 		t.Fatalf("a page down left %d rows above the window and %d below, want rows hidden both ways",
 			above, below)
 	}
+	if len(fmt.Sprint(above)) == len(fmt.Sprint(below)) {
+		t.Fatalf("the fixture counts %d above and %d below, the same number of digits each, so "+
+			"nothing here would show the arrows failing to line up", above, below)
+	}
 	if m.cursor != m.scroll+window-1 {
 		t.Errorf("the page left the cursor on %d with the window at %d, want the window's last row %d",
 			m.cursor, m.scroll, m.scroll+window-1)
@@ -669,10 +689,23 @@ func TestTheTreeCountsWhatItHidesInEachDirection(t *testing.T) {
 	}
 
 	view := strings.Join(viewRows(m.View()), "\n")
-	for _, want := range []string{fmt.Sprintf("\u2191 %d", above), fmt.Sprintf("\u2193 %d", below)} {
-		if !strings.Contains(view, want) {
-			t.Errorf("the tree's rules do not say %q:\n%s", want, view)
+	up, down := countRows(m)
+	if up == "" || down == "" {
+		t.Fatalf("the tree's rules do not count both ways (above %q, below %q):\n%s", up, down, view)
+	}
+	for _, want := range []struct {
+		row   string
+		count int
+	}{{up, above}, {down, below}} {
+		if !strings.Contains(want.row, fmt.Sprintf("%d", want.count)) {
+			t.Errorf("a rule of the tree does not say %d:\n%s\n%s", want.count, want.row, view)
 		}
+	}
+	// The two counts share a numeric field the width of the longer of them, so the arrows line up however
+	// many digits each has: two notes a cell apart read as two unrelated remarks.
+	if at, to := strings.Index(up, "\u2191"), strings.Index(down, "\u2193"); at != to {
+		t.Errorf("the tree hides %d rows above and %d below, and its arrows sit at cells %d and %d, want one column:\n%s\n%s",
+			above, below, at, to, up, down)
 	}
 	if strings.Contains(view, "hidden above") {
 		t.Errorf("the tree still spends a row on its scroll note:\n%s", view)

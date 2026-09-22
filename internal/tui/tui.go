@@ -1351,8 +1351,9 @@ func (m reviewModel) boxLines(section []renderedRow) []string {
 	}
 	width := m.listWidth()
 	above, below := m.metaHidden()
+	up, down := scrollHints(above, below)
 	out := []string{frame(boxEdge(f.cornerTopLeft, f.cornerTopRight, f.edge,
-		clip(m.sess.Header().Title, m.boxInner()), scrollHint(above, true), width))}
+		clip(m.sess.Header().Title, m.boxInner()), up, width))}
 	out = append(out, m.boxLine(f, m.baseLine(), false))
 	for _, r := range section {
 		out = append(out, m.boxLine(f, m.rowText(r.row), m.metaCursor == r.index))
@@ -1360,7 +1361,7 @@ func (m reviewModel) boxLines(section []renderedRow) []string {
 	// The box's scroll counts go inside its own borders rather than on a row of their own: a note that
 	// arrived and left would change the height of the column, which is what the box is here to stop.
 	return append(out, frame(boxEdge(f.cornerBottomLeft, f.cornerBottomRight, f.edge,
-		"", scrollHint(below, false), width)))
+		"", down, width)))
 }
 
 // boxFrame is the changeset box's border set, which is also the box's focus light: single rules while
@@ -1466,19 +1467,19 @@ func (m reviewModel) listBlock() string {
 	files, section := m.window()
 
 	lines := m.boxLines(section)
-	above, below := m.filesHidden()
+	up, down := scrollHints(m.filesHidden())
 	// The row that used to separate the box from the tree is the tree's own top spine, and the tree
 	// gets a matching one under its last row: a reviewer on a narrow terminal has rows to spend and
 	// no columns to spare, which is the opposite trade to a frame. Each carries the count of what the
 	// window hides in its own direction, so nothing here is a row that arrives late.
-	lines = append(lines, m.treeSpine(scrollHint(above, true)))
+	lines = append(lines, m.treeSpine(up))
 	if total == 0 {
 		lines = append(lines, styleDim.Render("(no changed files in this span)"))
 	}
 	for _, r := range files {
 		lines = append(lines, m.line(r))
 	}
-	lines = append(lines, m.treeSpine(scrollHint(below, false)), m.counterLine(reviewed, total))
+	lines = append(lines, m.treeSpine(down), m.counterLine(reviewed, total))
 	for len(lines) < m.listColumnRows() {
 		lines = append(lines, "")
 	}
@@ -2507,11 +2508,26 @@ func hiddenAround(start, end, scroll, window int) (above, below int) {
 	return above, below
 }
 
-// scrollHint is the count of what a window hides, for the end of the region's own rule: an up arrow with
-// what is above the window, a down arrow with what is below it. It is padded with whitespace on both
-// sides so it reads as a note pinned to the rule rather than as the last cell of whatever sits beside
-// it, and it is empty when there is nothing that way to count.
-func scrollHint(hidden int, above bool) string {
+// scrollHints is one region's pair of counts, for the two ends of the region's own rule: the rows above
+// the window and the rows below it. The two are rendered into the same numeric field -- as wide as the
+// longer of the two numbers -- so the two arrows sit in the same column whatever the counts say, and the
+// digits line up under it. An arrow that moved a cell because its count grew past 9 would make the pair
+// read as two unrelated notes rather than as the two ends of one thing.
+func scrollHints(above, below int) (top, bottom string) {
+	digits := 1
+	for _, n := range []int{above, below} {
+		if d := len(fmt.Sprint(max(n, 0))); d > digits {
+			digits = d
+		}
+	}
+	return scrollHint(above, true, digits), scrollHint(below, false, digits)
+}
+
+// scrollHint is one of those counts: an up arrow with what is above the window, a down arrow with what is
+// below it, the number padded to `digits` cells. It is padded with whitespace on both sides so it reads as
+// a note pinned to the rule rather than as the last cell of whatever sits beside it, and it is empty when
+// there is nothing that way to count.
+func scrollHint(hidden int, above bool, digits int) string {
 	if hidden <= 0 {
 		return ""
 	}
@@ -2519,7 +2535,7 @@ func scrollHint(hidden int, above bool) string {
 	if above {
 		arrow = "\u2191" // up: what is above it
 	}
-	return fmt.Sprintf("  %s %d ", arrow, hidden)
+	return fmt.Sprintf("  %s %*d ", arrow, digits, hidden)
 }
 
 // The preview pane is a wide-terminal luxury, so it has an entry condition rather than a squeeze:

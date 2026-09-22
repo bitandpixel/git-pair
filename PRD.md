@@ -2055,7 +2055,9 @@ single rules while the box or the diff holds the keys, double while the tree hol
 than a frame because the cells a frame spends each side are columns, and the narrow terminal that needs
 the regions told apart most is the one with none to spare. Each rule carries the count of what the window
 hides at the end that count is about — `↑ 3` on the top rule for rows above the window, `↓ 11` on the
-bottom rule for rows below it — padded with whitespace each side. It rides on the rule because a rule is
+bottom rule for rows below it — padded with whitespace each side. The two counts of one region share a
+numeric field as wide as the longer of them, so the two arrows sit in one column and the digits line up
+under them (`↑  1` above `↓ 34`): the pair is the two ends of one thing, not two remarks a cell apart. It rides on the rule because a rule is
 not a row: a count with a row of its own took one out of the window as soon as the list was scrolled, and
 the row it took was the one a page had just landed the cursor on.
 
