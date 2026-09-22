@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end replay of the PRD §29 success workflow against a scratch repo.
-# Usage: bash docs/plans/completed/gitpr-mvp/artifacts/e2e-29.sh [/path/to/git-pair]
+# Usage: bash scripts/gates/e2e-29.sh [/path/to/git-pair]
 #        (default: the name `mise run build` installs from this repository — the shared
 #        ~/.local/bin/git-pair on trunk, a branch-namespaced one anywhere else)
 set -uo pipefail
@@ -8,13 +8,17 @@ set -uo pipefail
 # same rule `mise run build` uses: this replay cd's into a scratch repo, and the binary
 # under test has to be the one built from *this* repository. Falling back to the shared
 # name instead would replay whatever another worktree last installed.
-ROOT=$(cd "$(dirname "$0")/../../../../.." && pwd)
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 G=${1:-$HOME/.local/bin/$(sh "$ROOT/scripts/install-name.sh" "$ROOT")}
 if [ ! -x "$G" ]; then
   printf 'no binary at %s - run `mise run build` in %s first\n' "$G" "$ROOT" >&2
   exit 1
 fi
 T=$(mktemp -d /tmp/git-pair-e2e.XXXXXX)
+# Every command here runs with stdin at /dev/null. `git pair init` reads a pipe as piped `--about`
+# content, so a harness that leaves stdin open — CI, an agent runner, tmux — would leave the first `init`
+# blocked in a read that never ends. Nothing in this replay pipes anything in.
+exec < /dev/null
 trap 'rm -rf "$T"' EXIT
 cd "$T" || exit 1
 git init -q -b main .

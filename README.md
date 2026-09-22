@@ -1030,8 +1030,7 @@ missing refs is describing exactly that.
 
 The editor is whatever git would use: git-pair asks git with `git var GIT_EDITOR`, so the
 precedence is git's — `GIT_EDITOR`, then `core.editor`, then `VISUAL`, then `EDITOR`, then
-whatever fallback the git build was configured with. `git config core.editor vim` is therefore
-enough, including when it is set in the repository rather than globally, and a caller that
+whatever fallback the git build was configured with. `git config core.editor vim` is enough, including when it is set in the repository rather than globally, and a caller that
 injects `GIT_EDITOR` (a hook, another tool) is honoured the way every other git consumer
 honours it. Only when git cannot answer does git-pair fall back to `$VISUAL`, then `$EDITOR`, then
 `vi`. Automated harnesses must clear `GIT_EDITOR` along with `VISUAL`/`EDITOR`, and every editor
@@ -1411,6 +1410,31 @@ like. Nothing is committed or shared — `git status` cannot see the
 directory and `git add` cannot stage it — and no command reports marks, so derived state is
 unaffected. Deleting that directory forgets the marks; the newest 12 commits per changeset are
 kept.
+
+## Development
+
+`mise run check` is the gate: gofmt, `go vet`, then the Go test suite. Run it before you call a
+change done.
+
+Two scripted replays sit above it. Each one runs the installed binary as a subprocess, so it reaches
+what a Go test cannot:
+
+| Gate | What it proves | Needs |
+| --- | --- | --- |
+| `scripts/gates/e2e-29.sh` | The PRD §29 loop end to end in a scratch repo, through review, approve, `check`, record, publish and `--fetch` | `git` |
+| `scripts/gates/pty-walkthrough.sh` | The review TUI under a real pty: first paint, the file tree, marks, the span walk, the difftool handoff | `git`, `python3` |
+
+`mise run gates` builds the binary, then runs both. Each script also takes a binary path as its first
+argument. A pipeline that installs the build elsewhere passes its own path.
+
+Both scripts resolve the default binary by the rule `mise run build` uses. A branch installs and tests
+its own namespaced name, rather than a build another worktree left behind. See
+`scripts/install-name.sh`.
+
+Work here is planned in `docs/plans/<name>/plan.md`, and a finished plan moves to
+`docs/plans/completed/`. Each change carries its own directory under `changesets/`. The tool reviews
+itself. `git pair change ready` offers the change, and `git pair review open` opens it for a
+reviewer.
 
 ## Troubleshooting
 

@@ -5,7 +5,7 @@
 # start without a terminal, and a ref moved by another process only moves while something is
 # watching.
 #
-# Usage: bash docs/plans/completed/gitpr-mvp/artifacts/pty-walkthrough.sh [/path/to/git-pair]
+# Usage: bash scripts/gates/pty-walkthrough.sh [/path/to/git-pair]
 #        (default: the name `mise run build` installs from this repository — the shared
 #        ~/.local/bin/git-pair on trunk, a branch-namespaced one anywhere else)
 #
@@ -18,7 +18,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # rule `mise run build` uses. This walkthrough paints the TUI and checks what came out, so the
 # binary under test has to be the one built from *this* repository — the shared name would
 # paint whatever another worktree last installed, and the checks would pass or fail on it.
-ROOT=$(cd "$HERE/../../../../.." && pwd)
+ROOT=$(cd "$HERE/../.." && pwd)
 G=${1:-$HOME/.local/bin/$(sh "$ROOT/scripts/install-name.sh" "$ROOT")}
 if [ ! -x "$G" ]; then
   printf 'no binary at %s - run `mise run build` in %s first\n' "$G" "$ROOT" >&2
@@ -27,6 +27,10 @@ fi
 DRIVER="$HERE/pty-tui.py"
 PLAIN="$HERE/pty-plain.py"
 T=$(mktemp -d /tmp/git-pair-pty.XXXXXX)
+# The replayed commands get stdin from /dev/null. `git pair init` reads a pipe as piped `--about` content,
+# so a harness that leaves stdin open would leave a fixture `init` blocked forever. The pty drivers build
+# their own terminal for the program they run, so this does not touch what the TUI reads.
+exec < /dev/null
 trap 'rm -rf "$T"' EXIT
 FAILED=0
 COLS=100
