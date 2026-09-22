@@ -1,0 +1,3 @@
+id: fix-legacy-refs-and-remote-branches
+parent: fix/for-each-ref-glob
+parent-changeset: fix-for-each-ref-glob
