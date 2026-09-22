@@ -615,7 +615,13 @@ is a fact beside the state, not a sixth state value. `integrated_in_default_bran
 commit is in the history of the branch git-pair calls the integration branch, and
 `integrated_default_branch` names that branch — work that retired into `release/2.x` and never reached
 the default branch must not read like a default-branch landing, and what git-pair reports is the
-containment it can derive rather than a branch name no ref stores. `default_branch`,
+containment it can derive rather than a branch name no ref stores. A recorded changeset's own two refs
+say what it became and not where that reached, so `stack` walks the chain the child's `parent-changeset:`
+starts: one entry per ancestor, nearest first, with the ancestor's id, the branch it was stacked on and
+whether this clone still has that branch, its recorded commit and ref, and whether that commit is in the
+integration branch's history. It is `[]` for a changeset that sat on the integration branch, and
+`stack_note` is the one sentence for where the walk stopped — a hand-edited cycle, the depth cap, or a
+read that failed — so a short list is never mistaken for the whole chain. `default_branch`,
 `default_branch_commit` and `default_branch_source` name the branch "landed" was measured against,
 the commit it pointed at, and how the run learned it (`flag`, `origin-head` or `sole-candidate`):
 a CI log that says nothing has landed has two causes, a stale fetch and a wrong trunk, and neither

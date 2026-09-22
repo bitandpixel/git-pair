@@ -135,16 +135,16 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
 
 **Tasks**
 
-- [ ] Read the chain from `changeset.Changeset.ParentChangeset` and `reviewref.Integration(id)` — records
+- [x] Read the chain from `changeset.Changeset.ParentChangeset` and `reviewref.Integration(id)` — records Done, and through the index the caller already holds (`refIndex.Integrated`, extended with `IntegratedRef` so a step names the ref that actually exists — a retired-layout record lives under a different name than its id would suggest). Records only; `reviewref.List` reads the local namespace and never `refs/remotes/**` (§13).
       only, never mirrors (PRD §13).
-- [ ] Cap the walk and detect a repeated id: `CHANGESET.yaml` is committed content and a hand-edited cycle
+- [x] Cap the walk and detect a repeated id: `CHANGESET.yaml` is committed content and a hand-edited cycle Done: `stackDepthCap = 8` and a `seen` set, each with its own `stack_note` wording, both tested (the cycle test edits `parent-changeset` to name its own changeset, which is the only way to make one).
       must produce a line about the cycle, not a hang.
-- [ ] Reuse the reach phrase (`reachable from <default>` / `not reachable from <default>`) that
+- [x] Reuse the reach phrase (`reachable from <default>` / `not reachable from <default>`) that Same words, not the same helper: `landing.reach()` needs a `landing` value that the status assembly does not build, so the chain phrases containment from `j.DefaultBranch` with the identical `reachable from <branch>` / `not reachable from <branch>` wording. The two surfaces agree because the words are the same literal, which is weaker than sharing a function and worth knowing.
       `landing.reach()` already produces, so the two surfaces cannot word containment differently.
-- [ ] Print the block for a record read with no branch as well as for a branch read: the record read is the
+- [x] Print the block for a record read with no branch as well as for a branch read: the record read is the Done, and it needed a fix to get there: `status --changeset <id>` **refused outright** when the parent branch had been deleted (`cannot resolve changeset base "alpha": unknown revision`), because the record-read path built its base straight from `parent:`. It now relinks to the parent's integration ref exactly as `changeset.relinkStacks` does on the branch path (`internal/cli/root.go`), which is the ordinary state of a landed child being read after tidy.
       case where the chain is the whole answer.
-- [ ] PRD's stacked-changesets section and README's status sample gain the block.
-- [ ] Tests: two-deep chain, parent branch deleted vs still present, a cycle, an ancestor with no record
+- [x] PRD's stacked-changesets section and README's status sample gain the block. PRD §21's `Reading the stack` gained the record chain, the per-step shape, the absent-ancestor finding, the bound and the note, and the relink-on-read; README's status field prose gained `stack` and `stack_note`.
+- [x] Tests: two-deep chain, parent branch deleted vs still present, a cycle, an ancestor with no record `internal/cli/status_stack_chain_test.go` — five tests: the two-deep chain in both surfaces (order, commits, `branch_exists`, `in_default_branch`), a deleted parent branch, an ancestor with no record here, a cycle, and an unstacked changeset printing nothing while `stack` stays `[]`.
       (says so rather than omitting the step), and an unstacked changeset printing nothing.
 
 **Verification**
@@ -181,7 +181,7 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
 
 ## Spikes / research
 
-- [ ] S1: how many `git` invocations does each new surface cost? `status` already counts; the chain walk
+- [x] S1: how many `git` invocations does each new surface cost? `status` already counts; the chain walk Measured and pinned. Marginal cost of one more ancestor: **4** invocations (one `show` of the ancestor's `CHANGESET.yaml`, one `merge-base`, and ~2 that belong to the deeper changeset's own read). The whole walk lists branch names once, not once per step. `TestStatusStackChainCostsABoundedReadPerStep` asserts the marginal is at most 5, which is the shape that would catch a per-step `for-each-ref` or a walk that follows a chain twice.
       adds one `merge-base` per ancestor and one ref read per step. Measure with the existing
       invocation-count test style (`TestFetchIsOneGitInvocation` is the precedent) and keep it under one
       invocation per stack step.
@@ -205,3 +205,4 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
 |---|---|---|
 | 2026-09-22 | plan written from the landing of `feat-two-frozen-refs` and `feat-publish-the-records` | not started |
 | 2026-09-22 | M1 implemented; the first-parent condition found by the two backport tests | M1 done |
+| 2026-09-22 | M2 implemented; the record read turned out to refuse a deleted parent branch outright, so the read path relinks like the branch path | M2 done, S1 measured |

@@ -2782,7 +2782,25 @@ reported the same way, because from this clone the two look alike.
 ## Reading the stack
 
 `status` prints a `Stack:` section naming the parent branch, its changeset, the tip the approval
-recorded and the parent's current tip, or the parent's absence. `queue` lists READY branches,
+recorded and the parent's current tip, or the parent's absence.
+
+Once the changeset is recorded the section gains the other half of the same question, because a child's
+own two refs say what it became and nothing about whether any of it reached the integration branch: one
+line per ancestor — nearest first, from `parent-changeset:` through each ancestor's own record — naming
+the commit that ancestor's record holds, whether that commit is in the integration branch's history, and
+whether the branch it was stacked on is still in this clone. An ancestor with no record here is printed as
+absent rather than skipped: that is the finding, and `--fetch` is the answer to it. The walk is bounded —
+`CHANGESET.yaml` is committed content, and a `parent-changeset:` edited into a loop stops the walk with a
+note rather than a hang, which is also why the note exists at all. `--json` reports the same walk as
+`stack` (never null) and `stack_note`.
+
+Reading a changeset by id from its durable record relinks the same way the branch path does
+(`changeset.relinkStacks`): where the yaml's `parent:` branch no longer exists and the parent has an
+integration ref, the base becomes that ref — the commit the parent's work became, which is the same
+boundary the branch was — because a parent's branch is normally tidied away before anyone reads the child.
+The branch name stays recorded in the changeset, so the two cases remain tellable apart.
+
+`queue` lists READY branches,
 which by definition have no approval to invalidate, so it notes instead the rows sitting on a
 parent that has moved ahead — the diff a reviewer is about to read is measured against a parent
 that is no longer current.

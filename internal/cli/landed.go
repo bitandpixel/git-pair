@@ -51,6 +51,10 @@ type refIndex struct {
 	// record names. It is keyed on the fact rather than the layout: a landing written down under the
 	// retired `refs/git-pair/changesets/<id>/integration` name is written down (see KindLegacyIntegration).
 	Integrated map[string]string
+	// IntegratedRef is the ref that holds each of those records, keyed the same way. It is in the index
+	// because the layout is not uniform — a retired-layout record lives under a different name than the
+	// one its id would suggest — and a surface that names a ref has to name the one that exists.
+	IntegratedRef map[string]string
 	// NamespaceEmpty says this clone holds no durable git-pair ref of any kind. That is a fact about the
 	// fetch, not about any changeset (PRD §13.4), and it belongs in the index because the read that
 	// produced the answers already knows it — a caller that printed a fetch hint per changeset would be
@@ -60,8 +64,9 @@ type refIndex struct {
 
 func indexDurableRefs(ctx context.Context, repo *git.Repo) (refIndex, error) {
 	idx := refIndex{
-		Archive:    map[string]string{},
-		Integrated: map[string]string{},
+		Archive:       map[string]string{},
+		Integrated:    map[string]string{},
+		IntegratedRef: map[string]string{},
 	}
 	entries, err := reviewref.List(ctx, repo)
 	if err != nil {
@@ -74,6 +79,7 @@ func indexDurableRefs(ctx context.Context, repo *git.Repo) (refIndex, error) {
 			idx.Archive[e.ID] = e.SHA
 		case reviewref.KindIntegration, reviewref.KindLegacyIntegration:
 			idx.Integrated[e.ID] = e.SHA
+			idx.IntegratedRef[e.ID] = e.Ref
 		}
 	}
 	return idx, nil
