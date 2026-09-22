@@ -1825,8 +1825,8 @@ Three rules shape it:
 
 `git pair check` deliberately does not refuse on it. A record that has not travelled is a durability risk,
 and blocking the work because of it would hold the present hostage to the archive. Publishing the
-namespace is ordinary git — `git push origin 'refs/git-pair/*:refs/git-pair/*'` — and §29 is the contract
-that says it happens before the branch is deleted.
+namespace is `git pair integration publish` (§11.4), and §29 is the contract that says it happens before
+the branch is deleted.
 
 Without `--fetch` these commands do not touch the network, and they say so: an empty namespace is
 reported as a fact about the clone, never as a verdict about the work.
@@ -1862,7 +1862,9 @@ to a landed changeset's history. The check is of those two exact paths, so an un
 `refs/git-pair` — a nested name git-pair no longer uses — does not reserve anything.
 
 As with every durable ref this is a warning rather than a guarantee: nothing here stops a later
-`git push --delete`, and git-pair runs no `push` at all (§26).
+`git push --delete` from outside git-pair. git-pair's own push is the carve-out in §26 — creating refs
+under `refs/git-pair/`, unforced, with no options — so the one thing this tool cannot do to the pair is
+move it or delete it (§11.4).
 
 The invariant the pair exists to hold:
 
@@ -1941,16 +1943,21 @@ namespace changes nothing about what it writes and everything about what a reade
 `queue` prints no warning at all, which is the one silence to be careful with: work recorded in
 another clone is simply absent from a queue that never fetched (§10.6).
 
-Publishing is configuration, not behaviour. git-pair runs no `push` — the hygiene test forbids it, and
-publishing review history is a decision about who gets to read it — so the refs stay local until a
-repository configures
+Publishing is a command, and it is opt-in: `git pair integration publish` (§11.4) sends a pair to the
+shared remote, unforced, and verifies afterwards by re-reading the remote's copies. It is a command rather
+than a flag on `record` because the two acts have different permissions and sometimes different owners — a
+pipeline may record in a job that can read the repository and publish in one that can write it, and
+`record` stays network-free either way.
+
+A repository can also make publishing automatic with git's own configuration:
 
 ```bash
 git config --add remote.origin.push '+refs/git-pair/*:refs/git-pair/*'
 ```
 
-Until then the landing machine's clone holds the only copy, and the command that says so is reporting the
-truth rather than failing.
+Which is configuration rather than behaviour, and stays the repository's decision: publishing review
+history is a statement about who gets to read it. Before either happens the landing machine's clone holds
+the only copy, and `RECORDED, NOT PUBLISHED` (§13) reports the truth rather than failing.
 
 The same section of the README covers the fetch a CI job needs for the *default branch* as well: the tree
 rule (§4) compares the revision against trunk's tree, so a one-branch checkout has nothing to compare
@@ -2967,6 +2974,21 @@ The MVP should explicitly not attempt to:
 -   semantically distinguish human code edits from human comments,
 -   implement notifications directly,
 -   implement remote review-ref enforcement initially.
+
+The list has exactly one carve-out, and it is stated narrowly on purpose: **git-pair may push refs under
+`refs/git-pair/`, and nothing else.** The durable refs (§13) are the memory of a landing, and a memory that
+never leaves the clone that wrote it ends with the laptop; `git pair integration publish` (§11.4) is the
+command that discharges it. The carve-out grants a namespace, not a verb:
+
+- the audited helper takes no options at all, and refuses anything option-shaped before git sees it;
+- it never forces, so a remote holding a different value rejects the push instead of being overwritten —
+  which is the create-only rule (§11.4) surviving the trip to a forge rather than being local to it;
+- it cannot delete a ref, so what §13 warns about `git push --delete` still holds against everything
+  outside git-pair;
+- `merge`, `rebase`, `reset`, `switch`, `checkout` and branch management stay forbidden exactly as above,
+  and the hygiene test enforces the carve-out as a *location*: `internal/git/push.go` is the only shipped
+  file that may invoke `push`, `internal/cli/publish.go` is the only file that may call it, and a planted
+  call site anywhere else fails the build.
 
 ---
 

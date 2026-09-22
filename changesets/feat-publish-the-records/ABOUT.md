@@ -5,9 +5,9 @@ today they exist only in the clone that wrote them: nothing publishes them, noth
 have not been published, and a clone that wants to know what other clones did has to be handed a
 refspec by hand. This changeset makes the gap visible and the remedies explicit.
 
-**M1 and M2 are done** — the read side, and the finding that reads it. **M3–M4 are pending**: `git pair
-integration publish` with the PRD §26 amendment it needs, and `record --configure-fetch` with
-"record, publish, then delete the branch" in the landing contract.
+**M1, M2 and M3 are done** — the read side, the finding that reads it, and the command that publishes.
+**M4 is pending**: `--configure-fetch` as consented configuration, and "record, publish, then delete the
+branch" in the landing contract.
 
 ## What changed (M1)
 
@@ -33,6 +33,36 @@ integration publish` with the PRD §26 amendment it needs, and `record --configu
 - `--fetch` is now **two** fetches: records without `--prune`, mirrors with it. `git.Repo.FetchRefs` and
   `FetchPruned`, `reviewref.FetchPlanFor`.
 - `app` caches which remote the durable refs belong to, so the fetch and the comparison share one lookup.
+
+## What changed (M3)
+
+- `git pair integration publish [<changeset>…] [--remote <name>]`: sends a pair to the shared remote in one
+  unforced push, then re-reads the remote's copies and reports what is actually there. Idempotent, so CI can
+  run it every build. `--json` carries `published`, `already_published` and `failed` (never null), with
+  `half_state` on a pair the remote took only half of.
+- `internal/git/push.go`: **the audited push helper**, and the only place in shipped source that may invoke
+  `git push`. It takes no options, cannot force, cannot delete, and refuses anything option-shaped before git
+  sees it. PRD §26 now carries the carve-out — a namespace, not a verb.
+- Hygiene enforces the carve-out as a location: `push` is exempted only for that file path,
+  `TestPushIsConfinedToTheAuditedFile` rescans with the exemption removed, and
+  `TestPushHelperHasOneCaller` allows one caller (`internal/cli/publish.go`). A planted `push` call site fails
+  all three, and the planted file is gone.
+- `internal/git` gained `FetchRefs`/`FetchPruned` in M2 and `PushDurableRefs`/`PushReport` here;
+  `integration record` now prints `next:  git pair integration publish <id>` and `next_action` in JSON.
+
+## Spike results (M3)
+
+- **S1, on GitHub (February 2026, throwaway repository):** client pushes of `refs/git-pair/*` are accepted,
+  with branch protection enabled on `main` and no rule naming the namespace, and no forge configuration is
+  needed. Unforced non-fast-forward updates of an existing `refs/git-pair/*` ref are **rejected** — by
+  GitHub and by local git 2.43 — so create-only holds at the forge and publish never needs a `+`. Caveat: the
+  protection baseline did not refuse the owner's own push (`enforce_admins` off), so the spike shows
+  protection does not block the namespace; the non-admin case was not measured. The throwaway repository
+  `dcasper/git-pair-spike-refs` is private and still exists — deleting it needs the `delete_repo` scope.
+- **S2, both servers:** when one refspec is accepted and one rejected, the accepted one **is applied** and git
+  exits 1; the rejection lines name refs but no SHAs. So publish pushes with `--porcelain`, branches on
+  per-refspec status, and takes both SHAs in the conflict message from its own knowledge — the local value and
+  the remote's copy after re-fetching.
 
 ## Design decisions
 
@@ -62,12 +92,55 @@ missing. The M1 spike had measured that prune was scoped to the refspec's subtre
 against a clone with something to lose. Records are fetched unpruned now, mirrors pruned, at the cost of
 one extra git call per `--fetch`.
 
+## What changed (M3)
+
+- `git pair integration publish [<changeset>…] [--remote <name>]`: sends a pair to the shared remote in one
+  unforced push, then re-reads the remote's copies and reports what is actually there. Idempotent, so CI can
+  run it every build. `--json` carries `published`, `already_published` and `failed` (never null), with
+  `half_state` on a pair the remote took only half of.
+- `internal/git/push.go`: **the audited push helper**, and the only place in shipped source that may invoke
+  `git push`. It takes no options, cannot force, cannot delete, and refuses anything option-shaped before git
+  sees it. PRD §26 now carries the carve-out — a namespace, not a verb.
+- Hygiene enforces the carve-out as a location: `push` is exempted only for that file path,
+  `TestPushIsConfinedToTheAuditedFile` rescans with the exemption removed, and
+  `TestPushHelperHasOneCaller` allows one caller (`internal/cli/publish.go`). A planted `push` call site fails
+  all three, and the planted file is gone.
+- `internal/git` gained `FetchRefs`/`FetchPruned` in M2 and `PushDurableRefs`/`PushReport` here;
+  `integration record` now prints `next:  git pair integration publish <id>` and `next_action` in JSON.
+
+## Spike results (M3)
+
+- **S1, on GitHub (February 2026, throwaway repository):** client pushes of `refs/git-pair/*` are accepted,
+  with branch protection enabled on `main` and no rule naming the namespace, and no forge configuration is
+  needed. Unforced non-fast-forward updates of an existing `refs/git-pair/*` ref are **rejected** — by
+  GitHub and by local git 2.43 — so create-only holds at the forge and publish never needs a `+`. Caveat: the
+  protection baseline did not refuse the owner's own push (`enforce_admins` off), so the spike shows
+  protection does not block the namespace; the non-admin case was not measured. The throwaway repository
+  `dcasper/git-pair-spike-refs` is private and still exists — deleting it needs the `delete_repo` scope.
+- **S2, both servers:** when one refspec is accepted and one rejected, the accepted one **is applied** and git
+  exits 1; the rejection lines name refs but no SHAs. So publish pushes with `--porcelain`, branches on
+  per-refspec status, and takes both SHAs in the conflict message from its own knowledge — the local value and
+  the remote's copy after re-fetching.
+
 ## Design decisions (M1)
 
 Spike S4 ran against git 2.43 in a real two-repo fixture: `for-each-ref` keeps the mirror subtree away
 from the record namespace; `--prune` with an explicit refspec prunes only that subtree and leaves
 `refs/remotes/origin/main` and unrelated remote-tracking entries alone; a no-op re-fetch costs one
 invocation and touches nothing.
+
+## Design decisions (M3)
+
+- **Publishing is a command, not `record --push`.** The two acts have different permissions and sometimes
+  different owners: a pipeline may record in a job that can read the repository and publish in one that can
+  write it, and `record` stays network-free either way.
+- **No arguments publishes every pair this clone holds**, not the pairs the finding calls unpublished. The
+  finding compares against mirrors — a memory of the last fetch — and a publish that trusts a stale mirror can
+  skip a ref the remote lost. Publishing everything is idempotent and cannot be wrong about the remote.
+- **A named id with no record is a refusal**, not a successful no-op: a typo or a record made elsewhere should
+  not exit 0.
+- **No `integration pull` / `integration fetch`.** `--fetch` and the configuration line are the read side; a
+  wrapper around `git fetch <refspec>` would be a second spelling of something already printed.
 
 ## Validation
 
@@ -78,4 +151,8 @@ invocation and touches nothing.
 M2: six in `internal/cli/published_test.go` — the record/publish/clear walk, the cannot-tell line with no
 remote and with mirrors never fetched, the unreachable-remote case, `check` answering identically before
 and after publishing, `unpublished` present and `[]` on both commands, and a cost test comparing one
-recorded pair against fifty-one. `e2e-29.sh` and `pty-walkthrough.sh` pass.
+recorded pair against fifty-one. M3: seven in `internal/cli/publish_test.go` — publish-then-read-from-another-clone, idempotence asserted
+against the remote's SHAs, the conflict refusal (both values named, the word "force" absent, the remote
+unchanged), the half-state with a server-side hook, both remote refusals, the never-null JSON shape, and the
+named-id refusal — plus `internal/git/push_guard_test.go` asserting the guard per argument and the porcelain
+parser against git 2.43's real half-state output. `e2e-29.sh` and `pty-walkthrough.sh` pass.

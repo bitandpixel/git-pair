@@ -102,9 +102,12 @@ What exists when this plan starts (`feat/two-frozen-refs`, plan `review-architec
 
 **Tasks**
 
-- [ ] `reviewref`: add `RemoteRefspec(remote)` (→ `+refs/git-pair/*:refs/remotes/<remote>/refs/git-pair/*`),
-      `RemoteIntegration(remote, id)`, `RemoteArchive(remote, id)`, and a `RemoteList`/index helper. Keep
-      the write-side functions untouched: this plan adds a read side, it does not broaden the write side.
+- [x] `reviewref` gained the mirror vocabulary: `MirrorRoot`, `MirrorRefspec` (→
+      `+refs/git-pair/*:refs/remotes/<remote>/refs/git-pair/*`), `MirrorIntegration`, `MirrorArchive`,
+      `MirrorPresent`, `RemoteList`, and `FetchPlanFor` (M2's correction: two fetches, records unpruned and
+      mirrors pruned). `Remote*` became `Mirror*` — the noun a reader reaches for is what the thing is for.
+      The write-side functions are untouched: this plan added a read side, and M3's push is a separate,
+      audited exception (§26), not a broadening of these.
 - [x] **Two refspecs, for two different questions.** Planned as one; the spike showed it is two.
       Fetching `refs/git-pair/*` into the namespace proper (the existing `reviewref.FetchRefspec`, the
       one `FetchCommand` already prints) is *correct* for "give me the records": a replicated record is
@@ -231,27 +234,38 @@ What exists when this plan starts (`feat/two-frozen-refs`, plan `review-architec
 
 **Tasks**
 
-- [ ] PRD §26 first: git-pair may push refs under `refs/git-pair/` and nothing else; every other
-      push/merge/rebase/reset/branch-mutating verb stays forbidden. Then amend
-      `internal/hygiene/hygiene_test.go` so `push` is permitted **only** inside the audited push helper
-      in `internal/git/`, and add `TestOnlyTheAuditedHelperPushes` (every other non-test call site of
-      the push primitive is a failure) plus `TestPublishCannotLeaveTheNamespace` (the helper refuses a
-      refspec outside `refs/git-pair/`, and refuses `--force`, `--force-with-lease`, `--delete`,
-      `--mirror`, `--all`, `--tags`, and any `--receive-pack`-style argument).
-- [ ] `git pair integration publish [<changeset>…]`. No arguments publishes every pair M2 calls
-      unpublished — that is the shape CI wants and the shape that makes forgetting impossible. Named
-      ids publish just those. `--remote <name>` defaults to `origin`; no remote resolves to a refusal
-      that says what it looked for.
-- [ ] Both refs of a pair in one `git push` invocation, non-forced, so an existing remote value that
-      differs is a rejection rather than an overwrite. Re-running after success reports "already
-      published" and changes nothing, mirroring `record`'s idempotence.
-- [ ] Conflict wording names both values, the way `reviewref.ErrRefConflict` does locally: what the
-      remote holds, what this clone holds, and that the difference is a finding about two recorders —
-      never "pass --force".
-- [ ] Post-publish verification by reading the remote-tracking copies after a `--fetch`, so the command
-      confirms its own claim rather than trusting the push's exit status.
-- [ ] No `integration pull`, no `integration fetch`: the read side is `--fetch` and the config line, and
-      a wrapper around `git fetch <refspec>` would be a second spelling of something already printed.
+- [x] PRD §26 amended first, as a carve-out that grants a namespace rather than a verb. The hygiene test
+      permits `push` in exactly one file (`internal/git/push.go`, exempted by path rather than by verb) and
+      adds `TestPushIsConfinedToTheAuditedFile` — which rescans with the exception *removed*, so the finding
+      it expects is the real one, and requires the audited file to carry the `AUDITED: PRD §26` marker — and
+      `TestPushHelperHasOneCaller`, which allows `PushDurableRefs` to be called from
+      `internal/cli/publish.go` and nowhere else. `TestPublishCannotLeaveTheNamespace` in
+      `internal/git/push_guard_test.go` asserts the refusals per argument: each of `--force`,
+      `--force-with-lease`, `--delete`, `--mirror`, `--all`, `--tags`, `--receive-pack` and the rest by
+      name, plus anything option-shaped, a `+` prefix, a delete or create-from-nothing refspec, whitespace
+      smuggling, the namespace root itself, a near-neighbour namespace like `refs/git-pair-evil/`, and the
+      remote name as an injection channel.
+- [x] `git pair integration publish [<changeset>…] [--remote <name>]`. One deliberate deviation: with no
+      arguments it publishes **every pair this clone holds**, not the pairs M2's finding calls unpublished.
+      The finding compares against mirrors, which are a memory of the last fetch, and a publish that trusts a
+      stale mirror can skip a ref the remote has since lost; publishing everything is idempotent, costs one
+      no-op push, and cannot be wrong about the remote. A named id with no record in this clone is a refusal
+      rather than a successful no-op — the likeliest causes are a typo or a record made elsewhere, and
+      silence would be the worst answer to either. `--remote` is validated against `git remote`, and the two
+      refusals are different sentences: "this repository has no remote" versus `no remote "nowhere"`.
+- [x] Both refs of a pair in one push, unforced — and every candidate pair in the *same* invocation, which
+      is cheaper and still reports per ref because `--porcelain` answers per refspec. A remote that disagrees
+      rejects; a re-run says "already published" and writes nothing, asserted by comparing the remote's SHAs
+      before and after.
+- [x] `booking: NOT published to origin — origin holds <sha> and this clone holds <sha>`. The word "force"
+      appears nowhere in the output or the JSON, which `TestPublishRefusesWhereTheRemoteDisagrees` asserts
+      both ways, along with the remote's value being unchanged afterwards.
+- [x] After the push, `publish` re-fetches the mirrors (pruned) and classifies each ref from what the remote
+      holds *now*: already (matched before and after), published (matches now), or failed. A push that exits 1
+      with one ref accepted is therefore reported accurately, and the half-state is asserted with a
+      server-side hook that accepts the archive and refuses the integration ref.
+- [x] Not built. `--fetch` and the configuration line remain the read side; `publish` shares nothing with
+      them beyond the remote resolution it already had.
 
 **Verification**
 
@@ -259,8 +273,24 @@ What exists when this plan starts (`feat/two-frozen-refs`, plan `review-architec
 - Idempotence: publish twice, second says already published and writes nothing.
 - Conflict: remote ref moved by hand → refusal naming both SHAs, exit non-zero, nothing pushed.
 - The helper refuses everything the hygiene amendment says it must, asserted per argument.
-- `mise run check` green with the amended hygiene test, including a deliberately planted illegal
-  `push` call site failing the new invariant test and being removed again.
+- `mise run check` green with the amended hygiene test, including a deliberately planted illegal `push`
+  call site: a scratch `internal/cli/zz_planted.go` with a raw `Git(ctx, "push", …)` and a second
+  `PushDurableRefs` caller made all three of `TestPushIsConfinedToTheAuditedFile`,
+  `TestPushHelperHasOneCaller` and `TestSourceNeverInvokesDestructiveGitVerbs` fail, and the tree went green
+  again once the file was deleted.
+
+**What landed differently**
+
+- The index that classifies published-from-not-published must be keyed by the ref a mirror *mirrors*
+  (`refs/git-pair/integrations/x`), not by the `refs/remotes/<remote>/…` name it lives under. Keyed the
+  other way, every published ref reads as unpublished and the command refuses its own success — caught by
+  the happy-path test, which is the sort of bug worth a test having.
+- Conflict wording cannot come from git's output: the rejection lines name refs, not values (S2). Both SHAs
+  in the message are git-pair's own knowledge — the local value, and the remote's copy after re-fetching.
+- `internal/git/push.go` builds its own argument vector from refspecs and refuses anything option-shaped, so
+  "no flags" holds even if a future caller builds its list from user input. `--porcelain` and `--quiet` are in
+  that file's forbidden-argument list as *caller-facing* tokens, which is intentional: the helper uses them,
+  the caller may not.
 
 ---
 
@@ -315,8 +345,8 @@ What exists when this plan starts (`feat/two-frozen-refs`, plan `review-architec
 
 | ID  | Question                                                                                                                | Needed before |
 | --- | ----------------------------------------------------------------------------------------------------------------------- | ------------- |
-| S1  | Does the target forge accept client pushes of `refs/git-pair/*`, including on a repository with branch protection and no rule naming that namespace? Does anything need adding to protection or signing policy? | M3 |
-| S2  | When `git push` is given two refspecs and the server accepts one and rejects the other, what does it report, and in what order? The conflict wording needs to name both SHAs from that output. | M3 |
+| Done  | Does the target forge accept client pushes of `refs/git-pair/*`, including on a repository with branch protection and no rule naming that namespace? Yes, measured on GitHub (February 2026) against a throwaway repository created for the spike: creating `refs/git-pair/archive/*` and `refs/git-pair/integrations/*` from a client succeeds, and succeeds again with branch protection enabled on `main` and no rule naming the namespace. Nothing needs adding to protection or signing policy. **Unforced non-fast-forward updates of an existing `refs/git-pair/*` ref are rejected** — by GitHub, and by a local bare repository on git 2.43 — so §11.4's create-only rule survives the trip to the forge and publish never needs a `+`. Caveat worth recording: the protection baseline did not refuse the owner's push to `main` because `enforce_admins` was off, so what the spike shows is that protection does not *block* the namespace; the non-admin case was not measured. The throwaway repository (`dcasper/git-pair-spike-refs`) is private and undeleted — deletion needs the `delete_repo` scope, which this credential lacks. | M3 |
+| Done  | When `git push` is given two refspecs and the server accepts one and rejects the other, what does it report, and in what order? Measured on both GitHub and a local bare repository (git 2.43): **the accepted refspecs are applied**, and git exits 1 for the command. Human output is `To <url>`, then ` * [new reference] <src> -> <dst>` for the accepted, then ` ! [rejected] <src> -> <dst> (non-fast-forward)` or ` ! [remote rejected] … (hook declined)` for the refused, then `error: failed to push some refs to '<url>'`. The rejection names the refs but **no SHAs**, so the conflict wording cannot come from git: `publish` names the values it knows — what this clone holds, and what the remote's copies hold after re-fetching. Adopted `git push --porcelain`, whose per-refspec lines (`*`, `!`, `=`, tab-separated `src:dst` then `[flag] (reason)`) are what the half-state reporting branches on instead of the human format. | M3 |
 | Done  | Does a remote-tracking name of the shape `refs/remotes/origin/refs/git-pair/integrations/<id>` confuse the plumbing we use? No — measured on git 2.43 in a real two-repo fixture: `for-each-ref`, `rev-parse` and `check-ref-format` all handle it, `for-each-ref refs/git-pair/` does **not** see it (so mirrors cannot leak into the write namespace), and `git fetch --prune origin '+refs/git-pair/*:refs/remotes/origin/refs/git-pair/*'` prunes inside that subtree only — `refs/remotes/origin/main` and unrelated `refs/remotes/origin/*` entries survive a prune. Consequence adopted: `--fetch` uses `--prune`, because a mirror that outlives the ref it mirrors would report a deleted record as published. | M1 |
 | Done  | Does fetching with a `+` on the mirror side and none on the records side behave as intended, and does a no-op re-fetch cost anything? Yes on both: one `git fetch --quiet --no-tags --prune` with both refspecs, and a re-fetch with nothing changed exits 0 without touching refs. | M1 |
 | Open  | What does `--fetch` cost in a CI loop against a remote with many refs and no `refs/git-pair/*` at all — is it a per-tick cost worth warning about in the flag help? Measured locally at small scale only. | M1 |

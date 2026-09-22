@@ -38,6 +38,7 @@ chain, and a ref that tracked it would be a staler copy of a story the branch te
 		RunE: groupUsage("integration"),
 	}
 	cmd.AddCommand(newIntegrationRecordCommand(a))
+	cmd.AddCommand(newIntegrationPublishCommand(a))
 	return cmd
 }
 
@@ -714,6 +715,10 @@ type integrationRecordJSON struct {
 	IntegrationRef  string   `json:"integration_ref"`
 	Recorded        bool     `json:"recorded"`
 	AlreadyRecorded bool     `json:"already_recorded"`
+	// NextAction names the step that makes the record durable outside this clone. A record that lives
+	// only where the merge ran is a record that dies there, and the moment to say so is the moment the
+	// record was written — not a warning the reader has to run a different command to hear.
+	NextAction string `json:"next_action,omitempty"`
 }
 
 // landing is what git-pair can honestly say about a recorded integration commit.
@@ -862,6 +867,7 @@ func (a *app) reportIntegration(rec *integrationRecord, res reviewref.PairResult
 			IntegrationRef:  res.IntegrationRef,
 			Recorded:        wrote,
 			AlreadyRecorded: !wrote,
+			NextAction:      "git pair integration publish " + rec.ID,
 		})
 	}
 	switch {
@@ -878,6 +884,9 @@ func (a *app) reportIntegration(rec *integrationRecord, res reviewref.PairResult
 	}
 	a.printf("  archive:     %s -> %s\n", res.ArchiveRef, short(rec.Source))
 	a.printf("  integration: %s -> %s\n", res.IntegrationRef, short(rec.Commit))
+	if wrote {
+		a.printf("  next:        git pair integration publish %s\n", rec.ID)
+	}
 	if rec.Target != "" {
 		a.printf("  verified reachable from %s%s\n", displayRef(rec.Target), derivedNote(rec))
 	}
