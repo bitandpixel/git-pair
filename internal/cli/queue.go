@@ -32,7 +32,8 @@ type queueEntry struct {
 }
 
 func newQueueCommand(a *app) *cobra.Command {
-	return &cobra.Command{
+	var doFetch bool
+	cmd := &cobra.Command{
 		Use:   "queue",
 		Short: "List changesets ready for human review",
 		Long: `List every changeset in this repository whose branch is READY.
@@ -46,20 +47,29 @@ queue says the same thing on main as it does on the changeset's own branch. A
 changeset whose content has landed in its base is not listed, and says nothing.
 
 --json is the stable contract for notifications, dashboards, and agent
-supervisors.`,
+supervisors.
+
+--fetch asks the remote for the durable refs and their mirrors first, which is what makes the queue
+able to see a landing recorded in another clone. Without it the queue reads this repository and says
+so.`,
 		Example: `  git pair queue
   git pair queue --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runReviewQueue(cmd.Context(), a)
+			return runReviewQueue(cmd.Context(), a, doFetch)
 		},
 	}
+	fetchFlag(cmd, &doFetch)
+	return cmd
 }
 
-func runReviewQueue(ctx context.Context, a *app) error {
+func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 	repo, err := a.loadRepo(ctx)
 	if err != nil {
 		return err
+	}
+	if doFetch {
+		a.fetchDurableRefs(ctx, repo, "")
 	}
 	// Branches, not directories. Only a branch can be reviewed, so only a branch
 	// can be queued; a changeset directory whose branch is gone is a record rather
@@ -91,6 +101,10 @@ func runReviewQueue(ctx context.Context, a *app) error {
 		return err
 	}
 	unrecorded := durable.unrecordedLandings(scan.TrunkIDs)
+	// The same one read of the namespace answers both halves of "did the paper trail survive": is there a
+	// record, and did the record get anywhere. The branch is empty here because the queue spans branches,
+	// so no branch's upstream is the right answer and the repository's origin is.
+	rep := a.publicationReport(ctx, repo, "", durable, "`git pair queue --fetch` asks for them", doFetch)
 	for _, br := range scan.Branches {
 		if br.Err != nil {
 			skipped = append(skipped, br.Branch+" (unreadable changeset metadata: "+br.Err.Error()+")")
@@ -179,15 +193,23 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	})
 
 	if a.json {
-		return a.emitJSON(map[string]any{
+		out := map[string]any{
 			"ready_for_review":  entries,
 			"skipped":           skipped,
 			"landed_unrecorded": unrecorded,
-		})
+			// Never null, for the reason `landed_unrecorded` is never null: an empty list is the answer
+			// "nothing is waiting to be published" and a missing key is "this build did not look".
+			"unpublished": rep.Findings,
+		}
+		if rep.Note != "" {
+			out["unpublished_note"] = rep.Note
+		}
+		return a.emitJSON(out)
 	}
 	if len(entries) == 0 {
 		a.printf("READY FOR REVIEW\n\n  nothing is ready\n")
 		a.printUnrecorded(unrecorded, durable.NamespaceEmpty, displayRef(db.Ref), true)
+		a.printUnpublished(rep, true)
 		printSkipped(a, skipped)
 		printBehindParent(a, stale)
 		return nil
@@ -204,6 +226,7 @@ func runReviewQueue(ctx context.Context, a *app) error {
 		a.printf("\n")
 	}
 	a.printUnrecorded(unrecorded, durable.NamespaceEmpty, displayRef(db.Ref), false)
+	a.printUnpublished(rep, false)
 	printSkipped(a, skipped)
 	printBehindParent(a, stale)
 	return nil

@@ -68,7 +68,9 @@ var productArgvVerbs = map[string]string{
 // destructiveVerbs are forbidden even as bare strings, because a verb hidden behind a
 // spread slice would otherwise be invisible to the argv layer.
 var destructiveVerbs = map[string]string{
-	"push":   "PRD §26: git-pair does not push",
+	// `push` keeps its citation to §26, where the exception now lives: the verb is forbidden everywhere
+	// except the audited helper that clause describes.
+	"push":   "PRD §26: git-pair does not push, except the audited helper for refs/git-pair/*",
 	"merge":  "PRD §26: git-pair does not merge",
 	"rebase": "PRD §26: git-pair does not rewrite history",
 	"reset":  "PRD §26: git-pair does not reset the working tree or index",
@@ -85,7 +87,7 @@ var branchDeletion = regexp.MustCompile(`(?i)\bgit\s+branch\s+(-[Dd]|--delete)\b
 
 // forbiddenFuncNames are wrapper names that would put a destructive verb behind an API.
 var forbiddenFuncNames = map[string]string{
-	"Push":              "git-pair must not push",
+	"Push":              "git-pair must not push; the audited helper is PushDurableRefs in internal/git/push.go",
 	"Merge":             "git-pair must not merge",
 	"Rebase":            "git-pair must not rebase",
 	"Reset":             "git-pair must not reset",
@@ -95,6 +97,103 @@ var forbiddenFuncNames = map[string]string{
 	"CreateBranch":      "git-pair must not create branches",
 	"CheckoutBranch":    "git-pair must not switch branches",
 	"ForceDeleteBranch": "git-pair must not delete branches",
+}
+
+// auditedPushFile is the one shipped file permitted to invoke `git push`, and PRD §26 is the reason:
+// the durable refs (§13) have to reach the shared remote or they die in the clone that wrote them. The
+// permission is a file path rather than a verb because a verb-level exception would let push spread.
+const auditedPushFile = "internal/git/push.go"
+
+// auditedPushCaller is the only shipped file permitted to call the audited helper. Push exists for one
+// command; if a second command reaches for it, that is a design decision and it has to be made in the
+// open, in this file's neighbourhood.
+const auditedPushCaller = "internal/cli/publish.go"
+
+// auditedPushCallName is the primitive whose call sites are counted.
+const auditedPushCallName = "PushDurableRefs("
+
+func withoutVerb(m map[string]string, verb string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if k != verb {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// TestPushIsConfinedToTheAuditedFile is the other half of the §26 exception: the audited file may push,
+// and nothing else may. It scans with the exception removed, so the finding it expects is the real one.
+func TestPushIsConfinedToTheAuditedFile(t *testing.T) {
+	root := moduleRoot(t)
+	pushOnly := rules{
+		argv:      map[string]string{"push": "PRD §26: only the audited helper may push"},
+		bare:      map[string]string{"push": "PRD §26: only the audited helper may push"},
+		funcNames: nil,
+		dirs:      []string{"cmd", "internal"},
+		exclude:   []string{"internal/gittest", "internal/hygiene"},
+	}
+	var files []string
+	for _, dir := range pushOnly.dirs {
+		for _, path := range goSourceFiles(t, filepath.Join(root, dir), pushOnly.exclude) {
+			for _, f := range checkFile(t, path, pushOnly.argv, pushOnly.bare, pushOnly.funcNames) {
+				files = append(files, f.File)
+			}
+		}
+	}
+	files = dedupeStrings(files)
+	if len(files) != 1 || files[0] != auditedPushFile {
+		t.Fatalf("`push` invoked outside %s: %v — the §26 exception is one file, not a permission that spreads",
+			auditedPushFile, files)
+	}
+	src, err := os.ReadFile(filepath.Join(root, auditedPushFile))
+	if err != nil {
+		t.Fatalf("the audited push helper is missing: %v", err)
+	}
+	// The marker is in the test as well as the file so moving the comment is a deliberate act in two
+	// places rather than a silent one in one.
+	if !strings.Contains(string(src), "AUDITED: PRD §26") {
+		t.Fatalf("%s must carry the AUDITED marker naming the clause that permits it", auditedPushFile)
+	}
+}
+
+// TestPushHelperHasOneCaller counts the callers of the audited primitive. Two callers would be two
+// commands able to write the shared namespace, and §26 grants the exception for one.
+func TestPushHelperHasOneCaller(t *testing.T) {
+	root := moduleRoot(t)
+	var callers []string
+	for _, dir := range []string{"cmd", "internal"} {
+		for _, path := range goSourceFiles(t, filepath.Join(root, dir), []string{"internal/gittest", "internal/hygiene", "internal/git"}) {
+			src, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			if strings.Contains(string(src), auditedPushCallName) {
+				rel, _ := filepath.Rel(root, path)
+				callers = append(callers, rel)
+			}
+		}
+	}
+	callers = dedupeStrings(callers)
+	if len(callers) != 1 || callers[0] != auditedPushCaller {
+		t.Fatalf("`%s` called outside %s: %v — publishing the durable refs is one command's job",
+			auditedPushCallName, auditedPushCaller, callers)
+	}
+}
+
+func dedupeStrings(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // rules is one policy: which verbs are forbidden where.
@@ -260,7 +359,16 @@ func scan(t *testing.T, r rules) []string {
 	for _, dir := range r.dirs {
 		for _, path := range goSourceFiles(t, filepath.Join(root, dir), r.exclude) {
 			count++
-			findings = append(findings, checkFile(t, path, r.argv, r.bare, r.funcNames)...)
+			argv, bare := r.argv, r.bare
+			if rel, err := filepath.Rel(root, path); err == nil && rel == auditedPushFile {
+				// The one exception §26 grants, and it is granted by *location*: `push` is legal only
+				// in the audited helper, and nowhere else in shipped source. `TestPushIsConfinedToThe
+				// AuditedFile` reads the same tree with the exception removed and requires the audited
+				// file to be the only one that would have failed — an exception with nothing
+				// constraining its edges is just a hole with a name.
+				argv, bare = withoutVerb(r.argv, "push"), withoutVerb(r.bare, "push")
+			}
+			findings = append(findings, checkFile(t, path, argv, bare, r.funcNames)...)
 		}
 	}
 	if count == 0 {

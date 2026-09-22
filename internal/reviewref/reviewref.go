@@ -75,6 +75,93 @@ const FetchRefspec = NamespaceRoot + "/*:" + NamespaceRoot + "/*"
 // a failure and the guidance in the README cannot drift.
 const FetchCommand = "git fetch origin '" + FetchRefspec + "'"
 
+// MirrorRoot is where a clone keeps its copies of *another* repository's durable refs. It sits under
+// the remote-tracking namespace on purpose: like `refs/remotes/origin/feature/x`, a mirror is somebody
+// else's state seen from here, and git's own conventions already say what happens to it on a prune.
+func MirrorRoot(remote string) string {
+	return "refs/remotes/" + remote + "/" + NamespaceRoot
+}
+
+// MirrorRefspec maps the durable namespace onto its mirror.
+//
+// The `+` is the difference between a mirror and a record. FetchRefspec has none, because the records
+// are append-only and a fetch that would have to move one is reporting a bug. A mirror exists to
+// agree with the remote or be wrong, so it is allowed to move — and it is pruned, because a mirror of
+// a deleted ref would otherwise go on reporting a record that no longer exists.
+func MirrorRefspec(remote string) string {
+	return "+" + NamespaceRoot + "/*:" + MirrorRoot(remote) + "/*"
+}
+
+// FetchPlan is what `--fetch` asks a remote for, split into the two asks because the two halves must be
+// fetched differently and one `git fetch` cannot say both.
+//
+// Records come first and without `--prune`: they are records wherever they are read — a paper trail that
+// replicates is the whole point, and this is what makes `Present` and `ResolveIntegration` answer
+// properly in a clone that never did the landing — and pruning their destination would delete the local
+// records of a landing that has not been published yet. Mirrors come with `--prune`, because a mirror is
+// not a record and exists to agree with the remote or be wrong.
+//
+// This is two fetches where the first draft of the design wanted one. The cost is one extra git call per
+// `--fetch`; the alternative is a read command that deletes the paper trail it came to read.
+type FetchPlan struct {
+	Records []string
+	Mirrors []string
+}
+
+// FetchPlanFor is the plan for one remote.
+func FetchPlanFor(remote string) FetchPlan {
+	return FetchPlan{Records: []string{FetchRefspec}, Mirrors: []string{MirrorRefspec(remote)}}
+}
+
+// MirrorIntegration and MirrorArchive name one changeset's two mirrors. They are the comparison basis
+// for published-not-published reporting, and nothing that answers "is this recorded" reads them —
+// see TestMirrorsAreNeverRecords.
+func MirrorIntegration(remote, id string) string { return MirrorRoot(remote) + "/integrations/" + id }
+func MirrorArchive(remote, id string) string     { return MirrorRoot(remote) + "/archive/" + id }
+
+// MirrorPresent reports whether this clone holds any mirror of the given remote's durable refs at
+// all. "No mirrors" is not "nothing published": it usually means the refspec was never configured,
+// which is a fact about this clone's fetch configuration and has to be reported as such.
+func MirrorPresent(ctx context.Context, repo *git.Repo, remote string) (bool, error) {
+	refs, err := repo.ForEachRef(ctx, MirrorRoot(remote)+"/")
+	if err != nil {
+		return false, err
+	}
+	return len(refs) > 0, nil
+}
+
+// RemoteList reads this clone's mirrors of a remote's durable refs, under
+// `refs/remotes/<remote>/refs/git-pair/`.
+//
+// It is the comparison basis for "has the record travelled", and the only place mirrors are read. The
+// rule it exists to keep out is the expensive one: nothing that answers "is this recorded" may consult
+// it, because a remote-tracking copy is somebody else's state seen from here and not a fact about this
+// repository (PRD §13).
+func RemoteList(ctx context.Context, repo *git.Repo, remote string) ([]Entry, error) {
+	root := MirrorRoot(remote)
+	refs, err := repo.ForEachRef(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	var out []Entry
+	prefix := root + "/"
+	for _, r := range refs {
+		// The name under the mirror root is the same shape git-pair writes at home, so the same
+		// identification applies once the `refs/remotes/<remote>/` head is trimmed.
+		rest, ok := strings.CutPrefix(r.Name, "refs/remotes/"+remote+"/")
+		if !ok {
+			continue
+		}
+		id, kind, ok := identify(rest)
+		if !ok {
+			continue
+		}
+		out = append(out, Entry{Ref: r.Name, SHA: r.SHA, ID: id, Kind: kind})
+	}
+	_ = prefix
+	return out, nil
+}
+
 // Present reports whether this repository holds any durable git-pair ref at all.
 //
 // It answers a different question from ResolveArchive, and the two must not be conflated. "This

@@ -1176,7 +1176,9 @@ The heading is the merge somebody made and nobody recorded (§22). The note keep
 alive: the record may exist in the clone that ran the merge and simply not have been fetched here.
 `--json` reports the same finding as `landed_unrecorded`, an array of `{"changeset", "command"}` — always
 an array, since it answers a question, and a consumer should not have to tell "none" apart from "this
-build predates the question". `ready_for_review` and `skipped` keep their documented shapes.
+build predates the question". `unpublished` (§13) is the third list for the same reason and with the same
+rule — the record exists here and not there — and `ready_for_review` and `skipped` keep their documented
+shapes.
 
 The note is the record talking: `booking-transaction`'s branch may still be checked out and its directory
 still absent from trunk, and it is the integration ref that says the queue has nothing to ask of it
@@ -1244,7 +1246,7 @@ Latest review:
   history: 3 review(s) — `git pair review history`
 
 Uncommitted changes: no
-Next: `git pair check`, then merge into main with ordinary git, then `git pair integration record`
+Next: `git pair check`, then merge into main with ordinary git, then `git pair integration record`, then `git pair integration publish`
 ```
 
 Nothing durable is reported, because nothing durable exists yet: the branch holds the history and no
@@ -1393,7 +1395,7 @@ $ git pair check
 
 OK: booking-transaction is integration-ready
 head:  91bf204
-next:  `git pair check`, then merge into main with ordinary git, then `git pair integration record`
+next:  `git pair check`, then merge into main with ordinary git, then `git pair integration record`, then `git pair integration publish`
 
 $ git pair check
 
@@ -1774,6 +1776,69 @@ either family name, because a ref cannot be a leaf and a namespace at once, and 
 refusing the create. Naming is by changeset id, never by branch, which is what keeps landed work
 findable after the branch is gone.
 
+## Reading them from another clone
+
+A clone does not fetch these refs by default — it maps `refs/heads/*` into `refs/remotes/*`, and these
+are neither — so a clone that did not perform the landing has to ask. `status`, `queue` and `check`
+accept `--fetch`, which asks for two things, in that order, in two fetches:
+
+```text
+refs/git-pair/*                              → refs/git-pair/*            the records themselves
+refs/git-pair/*                              → refs/remotes/<remote>/refs/git-pair/*   mirrors
+```
+
+The two are different kinds of thing, and the difference is a rule rather than a preference. A fetched
+**record** is a record: the paper trail exists to be replicated, and a clone that has fetched one
+answers "recorded" truthfully. A **mirror** is somebody else's state seen from here — it is what
+"has this travelled yet?" is compared against, and no command answers "is this recorded" by reading a
+mirror.
+
+They are two fetches rather than one because `--prune` applies to the destination of *every* refspec in
+a `git fetch`, and the two destinations need opposite answers. The mirror subtree is pruned, so a mirror
+cannot outlive the ref it mirrors and go on reporting a deleted record as published. The record namespace
+is never pruned: pruning it deletes this clone's own records whenever the remote lacks them, which is
+exactly the state of a clone that recorded a landing and has not published it. A read that quietly deletes
+the paper trail it came to read is worse than a read that misses something, and this was not theoretical —
+the fixture that found it recorded a landing, fetched, and reported its own record as missing.
+
+## Recorded, not published
+
+A record that exists only in one clone is the state where the paper trail is complete and still worthless.
+`queue` prints it under its own `RECORDED, NOT PUBLISHED` heading, beside `LANDED, UNRECORDED` and styled
+like it — the two read alike because they are the two halves of one question, and they differ in exactly
+the word that matters. `status` prints the same finding after its report. `--json` carries it as
+`unpublished`, an array of `{"changeset", "missing", "diverged"}` and never null, plus `unpublished_note`
+when nothing could be compared.
+
+Three rules shape it:
+
+- **The comparison is against mirrors, never the remote.** The claim is "as far as this clone knows, as of
+  the last fetch"; asking the network is `--fetch`'s job, and a detector that phoned home would turn an
+  offline review into a report that says nothing. With `origin` unreachable, the finding still arrives.
+- **Half a pair is a distinct, louder case.** One family on the remote leaves a hint that something
+  happened with no way to reconstruct what: `archive` alone proves a chain existed, `integration` alone
+  names a commit nobody can tie to reviewed work. The report says so rather than leaving it to be inferred
+  from a line that is missing.
+- **When nothing can be compared, one sentence says so.** No remote, or a mirror namespace this clone has
+  never fetched and did not just fetch, is one condition about the clone — never a per-changeset
+  accusation. An empty list means nothing is waiting to be published; a note means nobody could know.
+
+`git pair check` deliberately does not refuse on it. A record that has not travelled is a durability risk,
+and blocking the work because of it would hold the present hostage to the archive. Publishing the
+namespace is `git pair integration publish` (§11.4), and §29 is the contract that says it happens before
+the branch is deleted.
+
+Without `--fetch` these commands do not touch the network, and they say so: an empty namespace is
+reported as a fact about the clone, never as a verdict about the work.
+
+A repository that wants the *comparison* without asking every time configures it once, with consent:
+`git pair integration record --configure-fetch` appends the mirror refspec to `remote.<remote>.fetch`,
+idempotently, and prints the key and the value it wrote. The records stay behind `--fetch`: a record is a
+claim that a landing happened, and a clone should acquire claims by asking rather than because a
+configuration line written weeks earlier keeps delivering them. Consent is a flag rather than a question
+because §22 makes this CLI the agent surface — a prompt makes one command line mean two things, and an
+unanswered prompt in CI is indistinguishable from a declined one.
+
 **Neither ref exists while work is in flight.** No git-pair command writes a ref before landing:
 `change ready`, `change unready`, `change feedback`, `change wait`, `review submit` and `change abandon`
 all write commits and nothing else. While work is going on the branch is the record — it holds the chain,
@@ -1805,7 +1870,9 @@ to a landed changeset's history. The check is of those two exact paths, so an un
 `refs/git-pair` — a nested name git-pair no longer uses — does not reserve anything.
 
 As with every durable ref this is a warning rather than a guarantee: nothing here stops a later
-`git push --delete`, and git-pair runs no `push` at all (§26).
+`git push --delete` from outside git-pair. git-pair's own push is the carve-out in §26 — creating refs
+under `refs/git-pair/`, unforced, with no options — so the one thing this tool cannot do to the pair is
+move it or delete it (§11.4).
 
 The invariant the pair exists to hold:
 
@@ -1884,16 +1951,21 @@ namespace changes nothing about what it writes and everything about what a reade
 `queue` prints no warning at all, which is the one silence to be careful with: work recorded in
 another clone is simply absent from a queue that never fetched (§10.6).
 
-Publishing is configuration, not behaviour. git-pair runs no `push` — the hygiene test forbids it, and
-publishing review history is a decision about who gets to read it — so the refs stay local until a
-repository configures
+Publishing is a command, and it is opt-in: `git pair integration publish` (§11.4) sends a pair to the
+shared remote, unforced, and verifies afterwards by re-reading the remote's copies. It is a command rather
+than a flag on `record` because the two acts have different permissions and sometimes different owners — a
+pipeline may record in a job that can read the repository and publish in one that can write it, and
+`record` stays network-free either way.
+
+A repository can also make publishing automatic with git's own configuration:
 
 ```bash
 git config --add remote.origin.push '+refs/git-pair/*:refs/git-pair/*'
 ```
 
-Until then the landing machine's clone holds the only copy, and the command that says so is reporting the
-truth rather than failing.
+Which is configuration rather than behaviour, and stays the repository's decision: publishing review
+history is a statement about who gets to read it. Before either happens the landing machine's clone holds
+the only copy, and `RECORDED, NOT PUBLISHED` (§13) reports the truth rather than failing.
 
 The same section of the README covers the fetch a CI job needs for the *default branch* as well: the tree
 rule (§4) compares the revision against trunk's tree, so a one-branch checkout has nothing to compare
@@ -2739,7 +2811,8 @@ Agent behavior:
     asked to confirm that a changeset may land should call it rather than read `status` output,
     because `status` is observing and `check` is deciding (§11.3),
 14. stop there. Landing is not the agent's step: the merge is ordinary git run by whoever owns the
-    destination branch, and `git pair integration record` (§11.4) follows it.
+    destination branch, and `git pair integration record` then `git pair integration publish` (§11.4, §13)
+    follow it — in that order, and before the branch is deleted (§29).
 
 An agent that rebases a branch after an approval has invalidated it, and `check` will say so (§12). The
 response is to re-offer the work — `change ready`, then wait for a reviewer — and not to argue with the
@@ -2911,6 +2984,21 @@ The MVP should explicitly not attempt to:
 -   implement notifications directly,
 -   implement remote review-ref enforcement initially.
 
+The list has exactly one carve-out, and it is stated narrowly on purpose: **git-pair may push refs under
+`refs/git-pair/`, and nothing else.** The durable refs (§13) are the memory of a landing, and a memory that
+never leaves the clone that wrote it ends with the laptop; `git pair integration publish` (§11.4) is the
+command that discharges it. The carve-out grants a namespace, not a verb:
+
+- the audited helper takes no options at all, and refuses anything option-shaped before git sees it;
+- it never forces, so a remote holding a different value rejects the push instead of being overwritten —
+  which is the create-only rule (§11.4) surviving the trip to a forge rather than being local to it;
+- it cannot delete a ref, so what §13 warns about `git push --delete` still holds against everything
+  outside git-pair;
+- `merge`, `rebase`, `reset`, `switch`, `checkout` and branch management stay forbidden exactly as above,
+  and the hygiene test enforces the carve-out as a *location*: `internal/git/push.go` is the only shipped
+  file that may invoke `push`, `internal/cli/publish.go` is the only file that may call it, and a planted
+  call site anywhere else fails the build.
+
 ---
 
 # 27. Likely Post-MVP Features
@@ -2982,10 +3070,19 @@ git pair queue --global
 
 ## Remote record enforcement
 
+`git pair integration publish` (§13) closed part of this list: the refs reach the shared remote, they
+reach it unforced, and a remote holding a different value rejects the push rather than being overwritten.
+What this plan deliberately did not take on stays here, and the reason is the same as before — each of these
+would make git-pair responsible for a forge or a server rather than for a repository:
+
 -   pre-push hooks,
 -   server-side validation,
--   automatic pushing of `refs/git-pair/*`,
--   protection against destructive rewrites of a changeset whose record has been written.
+-   **automatic** pushing of `refs/git-pair/*` — publishing is a command somebody runs, or a line in the
+    repository's own git configuration (§13), never a side effect of an unrelated command,
+-   forge-level protection of the namespace, and any variant of it that depends on a forge honouring
+    protection rules outside `refs/heads/*` and `refs/tags/*`,
+-   protection against destructive rewrites of a changeset whose record has been written: the client
+    refuses to force one, which is not the same as being unable to.
 
 ## Forge projection
 
@@ -3147,24 +3244,32 @@ The owner lands it with ordinary git and git-pair records where it went:
 
 ```bash
 git pair integration record --source <approved-head> --commit <landing-commit> --target main
+git pair integration publish
 ```
 
 ## The landing contract
 
-The agent's part in landing is three steps, in this order, and nothing else:
+Landing is four steps, in this order, and nothing else:
 
 1.  `git pair check` — the gate, run by the author and by CI alike.
 2.  The landing itself, with **ordinary git**: merge, squash-merge, or whatever forge button the
-    repository uses. git-pair writes no merge, no push, and no ref while work is in flight.
+    repository uses. git-pair writes no merge, and no ref at all while work is in flight.
 3.  `git pair integration record` — the one command that writes the two durable refs, and the only
     place in git-pair that writes a ref at all (§13.4).
+4.  `git pair integration publish` — the refs sent to the shared remote (§13), unforced.
 
-**Record before tidy.** The record is written before the branch is deleted or the working copy is
-cleaned up. It is asked of the branch that still carries the reviewed head and the changeset
-directory, so running it first means reading rather than reconstructing: with the branch present the
-command needs no flags at all, and after the branch is gone it can only be told. A landing that was
-tidied first is still recordable — with `--source` and `--commit`, or not at all if the reviewed head
-was never pushed — but that is recovery, not the loop.
+**Record and publish before tidy.** The record is written before the branch is deleted or the working copy
+is cleaned up. It is asked of the branch that still carries the reviewed head and the changeset directory,
+so running it first means reading rather than reconstructing: with the branch present the command needs no
+flags at all, and after the branch is gone it can only be told. A landing that was tidied first is still
+recordable — with `--source` and `--commit`, or not at all if the reviewed head was never pushed — but that
+is recovery, not the loop.
+
+Publishing belongs in the same sentence as recording, for a reason that is not about tidiness: once the
+branch is deleted, the refs are the only copy of the archive chain. A delete that happens before a publish
+leaves the chain reachable from nothing outside the laptop that recorded it, and "we had a review history
+for that" becomes a claim nobody can check. `git pair status` and `git pair queue` report the state as
+`RECORDED, NOT PUBLISHED` (§13), and the finding exists because the ordering is the part people forget.
 
 From then on the durable pair holds the story: the complete unsquashed history is reachable from
 `refs/git-pair/archive/<id>`, the landing is `refs/git-pair/integrations/<id>`, and the branch can be
