@@ -1176,7 +1176,9 @@ The heading is the merge somebody made and nobody recorded (§22). The note keep
 alive: the record may exist in the clone that ran the merge and simply not have been fetched here.
 `--json` reports the same finding as `landed_unrecorded`, an array of `{"changeset", "command"}` — always
 an array, since it answers a question, and a consumer should not have to tell "none" apart from "this
-build predates the question". `ready_for_review` and `skipped` keep their documented shapes.
+build predates the question". `unpublished` (§13) is the third list for the same reason and with the same
+rule — the record exists here and not there — and `ready_for_review` and `skipped` keep their documented
+shapes.
 
 The note is the record talking: `booking-transaction`'s branch may still be checked out and its directory
 still absent from trunk, and it is the integration ref that says the queue has nothing to ask of it
@@ -1778,7 +1780,7 @@ findable after the branch is gone.
 
 A clone does not fetch these refs by default — it maps `refs/heads/*` into `refs/remotes/*`, and these
 are neither — so a clone that did not perform the landing has to ask. `status`, `queue` and `check`
-accept `--fetch`, which asks once for both of:
+accept `--fetch`, which asks for two things, in that order, in two fetches:
 
 ```text
 refs/git-pair/*                              → refs/git-pair/*            the records themselves
@@ -1789,8 +1791,42 @@ The two are different kinds of thing, and the difference is a rule rather than a
 **record** is a record: the paper trail exists to be replicated, and a clone that has fetched one
 answers "recorded" truthfully. A **mirror** is somebody else's state seen from here — it is what
 "has this travelled yet?" is compared against, and no command answers "is this recorded" by reading a
-mirror. Pruning applies to the mirror subtree, so a mirror cannot outlive the ref it mirrors and go on
-reporting a deleted record as published.
+mirror.
+
+They are two fetches rather than one because `--prune` applies to the destination of *every* refspec in
+a `git fetch`, and the two destinations need opposite answers. The mirror subtree is pruned, so a mirror
+cannot outlive the ref it mirrors and go on reporting a deleted record as published. The record namespace
+is never pruned: pruning it deletes this clone's own records whenever the remote lacks them, which is
+exactly the state of a clone that recorded a landing and has not published it. A read that quietly deletes
+the paper trail it came to read is worse than a read that misses something, and this was not theoretical —
+the fixture that found it recorded a landing, fetched, and reported its own record as missing.
+
+## Recorded, not published
+
+A record that exists only in one clone is the state where the paper trail is complete and still worthless.
+`queue` prints it under its own `RECORDED, NOT PUBLISHED` heading, beside `LANDED, UNRECORDED` and styled
+like it — the two read alike because they are the two halves of one question, and they differ in exactly
+the word that matters. `status` prints the same finding after its report. `--json` carries it as
+`unpublished`, an array of `{"changeset", "missing", "diverged"}` and never null, plus `unpublished_note`
+when nothing could be compared.
+
+Three rules shape it:
+
+- **The comparison is against mirrors, never the remote.** The claim is "as far as this clone knows, as of
+  the last fetch"; asking the network is `--fetch`'s job, and a detector that phoned home would turn an
+  offline review into a report that says nothing. With `origin` unreachable, the finding still arrives.
+- **Half a pair is a distinct, louder case.** One family on the remote leaves a hint that something
+  happened with no way to reconstruct what: `archive` alone proves a chain existed, `integration` alone
+  names a commit nobody can tie to reviewed work. The report says so rather than leaving it to be inferred
+  from a line that is missing.
+- **When nothing can be compared, one sentence says so.** No remote, or a mirror namespace this clone has
+  never fetched and did not just fetch, is one condition about the clone — never a per-changeset
+  accusation. An empty list means nothing is waiting to be published; a note means nobody could know.
+
+`git pair check` deliberately does not refuse on it. A record that has not travelled is a durability risk,
+and blocking the work because of it would hold the present hostage to the archive. Publishing the
+namespace is ordinary git — `git push origin 'refs/git-pair/*:refs/git-pair/*'` — and §29 is the contract
+that says it happens before the branch is deleted.
 
 Without `--fetch` these commands do not touch the network, and they say so: an empty namespace is
 reported as a fact about the clone, never as a verdict about the work.

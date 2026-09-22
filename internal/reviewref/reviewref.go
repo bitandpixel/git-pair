@@ -92,17 +92,25 @@ func MirrorRefspec(remote string) string {
 	return "+" + NamespaceRoot + "/*:" + MirrorRoot(remote) + "/*"
 }
 
-// FetchRefspecs are the two refspecs to ask a remote for in one go, and they answer two different
-// questions. The first brings the records, which are records wherever they are read — a paper trail
-// that replicates is the whole point, and this is what makes `Present` and `ResolveIntegration` answer
-// properly in a clone that never did the landing. The second brings mirrors, which are not records:
-// they are what "has this travelled yet?" is compared against.
+// FetchPlan is what `--fetch` asks a remote for, split into the two asks because the two halves must be
+// fetched differently and one `git fetch` cannot say both.
 //
-// Both in one fetch matters. Two commands would double the network for a question that is asked in a
-// single breath, and a clone that had one without the other would answer inconsistently about what it
-// knows and what it has seen.
-func FetchRefspecs(remote string) []string {
-	return []string{FetchRefspec, MirrorRefspec(remote)}
+// Records come first and without `--prune`: they are records wherever they are read — a paper trail that
+// replicates is the whole point, and this is what makes `Present` and `ResolveIntegration` answer
+// properly in a clone that never did the landing — and pruning their destination would delete the local
+// records of a landing that has not been published yet. Mirrors come with `--prune`, because a mirror is
+// not a record and exists to agree with the remote or be wrong.
+//
+// This is two fetches where the first draft of the design wanted one. The cost is one extra git call per
+// `--fetch`; the alternative is a read command that deletes the paper trail it came to read.
+type FetchPlan struct {
+	Records []string
+	Mirrors []string
+}
+
+// FetchPlanFor is the plan for one remote.
+func FetchPlanFor(remote string) FetchPlan {
+	return FetchPlan{Records: []string{FetchRefspec}, Mirrors: []string{MirrorRefspec(remote)}}
 }
 
 // MirrorIntegration and MirrorArchive name one changeset's two mirrors. They are the comparison basis
@@ -120,6 +128,38 @@ func MirrorPresent(ctx context.Context, repo *git.Repo, remote string) (bool, er
 		return false, err
 	}
 	return len(refs) > 0, nil
+}
+
+// RemoteList reads this clone's mirrors of a remote's durable refs, under
+// `refs/remotes/<remote>/refs/git-pair/`.
+//
+// It is the comparison basis for "has the record travelled", and the only place mirrors are read. The
+// rule it exists to keep out is the expensive one: nothing that answers "is this recorded" may consult
+// it, because a remote-tracking copy is somebody else's state seen from here and not a fact about this
+// repository (PRD §13).
+func RemoteList(ctx context.Context, repo *git.Repo, remote string) ([]Entry, error) {
+	root := MirrorRoot(remote)
+	refs, err := repo.ForEachRef(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	var out []Entry
+	prefix := root + "/"
+	for _, r := range refs {
+		// The name under the mirror root is the same shape git-pair writes at home, so the same
+		// identification applies once the `refs/remotes/<remote>/` head is trimmed.
+		rest, ok := strings.CutPrefix(r.Name, "refs/remotes/"+remote+"/")
+		if !ok {
+			continue
+		}
+		id, kind, ok := identify(rest)
+		if !ok {
+			continue
+		}
+		out = append(out, Entry{Ref: r.Name, SHA: r.SHA, ID: id, Kind: kind})
+	}
+	_ = prefix
+	return out, nil
 }
 
 // Present reports whether this repository holds any durable git-pair ref at all.

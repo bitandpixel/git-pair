@@ -50,6 +50,12 @@ type app struct {
 	// landed?" needs the integration branch to answer, and CI passes this because a checkout
 	// built with `init` and one `fetch` has no recorded remote default to read.
 	defaultBranch string
+	// durableRemote and durableRemoteKnown cache which remote the durable refs belong to. One run asks
+	// twice — `--fetch` wants the one to fetch, the published-or-not comparison wants the one whose
+	// mirrors to read — and the answer cannot change mid-command. A third `git rev-parse` for the same
+	// string is the kind of cost that grows silently, so it is remembered rather than re-derived.
+	durableRemote      string
+	durableRemoteKnown bool
 }
 
 // Execute builds the command tree and runs it, returning the process exit code.

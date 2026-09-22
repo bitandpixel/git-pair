@@ -119,6 +119,13 @@ type statusJSON struct {
 	// address to fetch, diff, or hand to another person.
 	IntegratedCommit string `json:"integrated_commit,omitempty"`
 	IntegratedRef    string `json:"integration_ref,omitempty"`
+	// Unpublished lists changesets whose record this clone holds and whose remote — as this clone last
+	// fetched it — does not, or does not identically (§11.1). Never null: an empty list answers "nothing
+	// is waiting to be published" and a missing key would answer "this build does not know how to look".
+	Unpublished []unpublishedPair `json:"unpublished"`
+	// UnpublishedNote is the one sentence for why the list is empty when the question could not be asked
+	// at all — no remote, or a mirror namespace this clone has never fetched.
+	UnpublishedNote string `json:"unpublished_note,omitempty"`
 	// IntegratedInDefaultBranch says the recorded landing commit is in the history of the branch
 	// git-pair calls the integration branch, and IntegratedDefaultBranch names that branch. Both
 	// are derived at read time, and the pair rather than a single `integrated_target`: a ref stores
@@ -142,15 +149,30 @@ func runStatus(ctx context.Context, a *app, slug string, doFetch bool) error {
 	if doFetch {
 		a.fetchDurableRefs(ctx, s.repo, s.cs.Branch)
 	}
+	// The published-or-not comparison needs the namespace indexed by changeset, which `buildStatus`
+	// reads for its own reasons without sharing it. One extra `for-each-ref` is the price of not
+	// threading an index through a constructor that has no use for one; `queue`, where the cost actually
+	// matters, reuses the index it already has.
+	idx, err := indexDurableRefs(ctx, s.repo)
+	if err != nil {
+		return err
+	}
+	rep := a.publicationReport(ctx, s.repo, s.cs.Branch, idx, "`git pair status --fetch` asks for them", doFetch)
 	view, err := buildStatus(ctx, a, s)
 	if err != nil {
 		return err
 	}
+	view.json.Unpublished = rep.Findings
+	view.json.UnpublishedNote = rep.Note
 	if a.json {
 		// view itself is unexported-only; emit its JSON shape.
 		return a.emitJSON(view.json)
 	}
 	printStatus(a, view)
+	// Published-or-not is a separate question from anything `printStatus` answers, and it is asked of
+	// the whole namespace rather than of this changeset, so it goes after the per-changeset report rather
+	// than inside it.
+	a.printUnpublished(rep, true)
 	return nil
 }
 

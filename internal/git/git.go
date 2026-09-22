@@ -520,19 +520,38 @@ func (r *Repo) Fetch(ctx context.Context, remote string) error {
 	return err
 }
 
-// FetchRefspecs fetches explicit refspecs, pruning the namespaces they address. It is the shape
-// `--fetch` needs: several refspecs in one negotiation, and `--prune` so a mirror cannot outlive the
-// ref it mirrors.
+// FetchRefs brings explicit refspecs and prunes nothing.
 //
-// Pruning is scoped to what the refspecs address — measured, not assumed: a prune with the durable
+// The absence of `--prune` is load-bearing, not an oversight. git prunes the destination subtree of
+// *every* refspec in the command, so fetching `refs/git-pair/*:refs/git-pair/*` with `--prune` deletes
+// this clone's own records whenever the remote lacks them — which is exactly the state of a clone that
+// recorded a landing and has not published it. A read that quietly deletes the paper trail it came to
+// read is worse than a read that misses something. (Found by a test: the fixture recorded, fetched, and
+// arrived at its own report with the record gone.)
+func (r *Repo) FetchRefs(ctx context.Context, remote string, refspecs ...string) error {
+	return r.fetch(ctx, false, remote, refspecs...)
+}
+
+// FetchPruned fetches explicit refspecs and prunes the namespaces they address. It is the shape the
+// mirror side of `--fetch` needs: `--prune` so a mirror cannot outlive the ref it mirrors and keep
+// reporting a deleted record as published.
+//
+// Pruning stays scoped to what the refspecs address — measured, not assumed: a prune with the durable
 // namespace's mirror refspec leaves `refs/remotes/origin/main` and unrelated remote-tracking entries
-// alone. That is why this takes explicit refspecs rather than relying on whatever the clone has
-// configured.
-func (r *Repo) FetchRefspecs(ctx context.Context, remote string, refspecs ...string) error {
+// alone. That scoping is why the two sides are separate calls: the mirror wants it and the record
+// namespace must never get it.
+func (r *Repo) FetchPruned(ctx context.Context, remote string, refspecs ...string) error {
+	return r.fetch(ctx, true, remote, refspecs...)
+}
+
+func (r *Repo) fetch(ctx context.Context, prune bool, remote string, refspecs ...string) error {
 	if len(refspecs) == 0 {
-		return errors.New("git: FetchRefspecs requires at least one refspec")
+		return errors.New("git: fetch requires at least one refspec")
 	}
-	args := []string{"fetch", "--quiet", "--no-tags", "--prune"}
+	args := []string{"fetch", "--quiet", "--no-tags"}
+	if prune {
+		args = append(args, "--prune")
+	}
 	if remote != "" {
 		args = append(args, remote)
 	}

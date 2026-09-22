@@ -133,9 +133,13 @@ func TestFetchIsOneGitInvocation(t *testing.T) {
 	runIn(t, f.Dir(), "queue", "--fetch", "--json").mustSucceed(t, "queue", "--fetch", "--json")
 	withFetch := count() - before
 
-	// +2, not +1: one `git fetch` for both refspecs, plus the one call that decides which remote
-	// to ask. Two negotiations would be +3, and the number a regression here produces is the point.
-	if withFetch != plain+2 {
+	// +3, and each unit is accounted for: one `git fetch` for the records, one for the mirrors, and the
+	// one call that decides which remote to ask (cached, so the second fetch does not repeat it). The
+	// records and the mirrors are two fetches because `--prune` applies to every destination in a command
+	// and pruning the record namespace would delete this clone's own unpublished records — see
+	// Repo.FetchRefs. The assertion is on the exact number so a third negotiation for the same answer, or
+	// a lookup per fetch, shows up as a failure.
+	if withFetch != plain+3 {
 		t.Fatalf("`queue --fetch` cost %d git invocations against %d for the same queue: expected exactly +2 (one fetch carrying both refspecs, one remote lookup)",
 			withFetch, plain)
 	}

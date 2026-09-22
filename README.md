@@ -682,7 +682,14 @@ ran arrives with `git fetch origin 'refs/git-pair/*:refs/git-pair/*'` — or wit
 `status`, `queue` and `check` all accept and which also brings the mirrors under
 `refs/remotes/<remote>/refs/git-pair/*` that "has this been published yet?" is measured against. A
 fetched record is a record; a mirror is only a comparison, and nothing answers "is this recorded" from
-one. And an empty namespace is stated
+one — and they are two fetches, because the mirror side is pruned and the record side must never be.
+What the mirrors are for is the finding `queue` prints as `RECORDED, NOT PUBLISHED`, beside
+`LANDED, UNRECORDED`: changesets whose record this clone holds and the remote, as last fetched, does not.
+Half a pair on the remote is its own, louder case — the remote has a hint and no way to reconstruct the
+record from it. `--json` reports it as `unpublished`, and `unpublished_note` when there was nothing to
+compare against. `check` does not refuse on it: a record that has not travelled is a durability risk, not
+a bad verdict. Publishing is ordinary git — `git push origin 'refs/git-pair/*:refs/git-pair/*'`. And an
+empty namespace is stated
 once as one condition rather than once per changeset. A landing recorded under the retired
 `refs/git-pair/changesets/<id>/integration` path counts as recorded — the fact is written down — while an
 archive ref alone does not, because it says a chain exists rather than that a landing happened. The

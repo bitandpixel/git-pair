@@ -37,7 +37,18 @@ func fetchFlag(cmd *cobra.Command, into *bool) {
 // right answer for keeping a branch current and the wrong one here: the mirror namespace is per-remote,
 // and picking whichever remote sorted first would compare a record against a remote nobody intended to
 // publish to. No answer is the honest answer, and the caller says so.
-func remoteForDurableRefs(ctx context.Context, repo *git.Repo, branch string) (string, error) {
+func (a *app) remoteForDurableRefs(ctx context.Context, repo *git.Repo, branch string) (string, error) {
+	if a.durableRemoteKnown {
+		return a.durableRemote, nil
+	}
+	remote, err := lookupDurableRemote(ctx, repo, branch)
+	if err == nil {
+		a.durableRemote, a.durableRemoteKnown = remote, true
+	}
+	return remote, err
+}
+
+func lookupDurableRemote(ctx context.Context, repo *git.Repo, branch string) (string, error) {
 	// The caller names the branch it is standing on, because asking git for it is another
 	// invocation and the caller always knows it. An empty branch means "no particular branch",
 	// which is `queue`'s answer: the queue spans every branch, so no branch's upstream is the
@@ -67,7 +78,7 @@ func remoteForDurableRefs(ctx context.Context, repo *git.Repo, branch string) (s
 // could not do. The answer it produces is the warning stream's; the command goes on to answer from
 // whatever the clone now holds.
 func (a *app) fetchDurableRefs(ctx context.Context, repo *git.Repo, branch string) {
-	remote, err := remoteForDurableRefs(ctx, repo, branch)
+	remote, err := a.remoteForDurableRefs(ctx, repo, branch)
 
 	if err != nil {
 		a.warn("warning: cannot tell which remote to ask for the durable refs: %v — answering from this clone\n", err)
@@ -77,8 +88,17 @@ func (a *app) fetchDurableRefs(ctx context.Context, repo *git.Repo, branch strin
 		a.warn("warning: this repository has no remote to ask, so nothing reported here can be about one\n")
 		return
 	}
-	if err := repo.FetchRefspecs(ctx, remote, reviewref.FetchRefspecs(remote)...); err != nil {
+	// Records first, then the mirrors they are compared against: if the first fetch cannot reach the
+	// remote there is nothing to refresh, and if only the second fails the records are already home and
+	// the reader is told which half of the answer is stale.
+	plan := reviewref.FetchPlanFor(remote)
+	if err := repo.FetchRefs(ctx, remote, plan.Records...); err != nil {
 		a.warn("warning: fetching the durable refs from %s failed: %v — answering from this clone\n", remote, err)
+		return
+	}
+	if err := repo.FetchPruned(ctx, remote, plan.Mirrors...); err != nil {
+		a.warn("warning: the durable refs arrived from %s, but its copies could not be refreshed (%v) — "+
+			"published\", if reported, is reported against the last answer\n", remote, err)
 	}
 }
 

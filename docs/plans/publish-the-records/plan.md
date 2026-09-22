@@ -165,21 +165,32 @@ What exists when this plan starts (`feat/two-frozen-refs`, plan `review-architec
 
 **Tasks**
 
-- [ ] New finding in `internal/cli` beside `landed.go`: a pair whose two local refs exist and whose
-      remote-tracking copies are absent or hold different values. Reuse the display cap, the
-      once-per-run hedge, and the "in this clone" wording.
-- [ ] Half-published remotes (one of the two refs accepted, the other rejected) are reported as a
-      distinct, louder case: the remote is a place where a pair can be split, and a reader should know.
-- [ ] Detection reads remote-tracking refs only — no `ls-remote`, no network. Refreshing is `--fetch`'s
-      job (M1), which keeps the "no network unless asked" rule intact and the cost zero.
-- [ ] Cannot-tell cases: no remote at all (a local-only repository is legitimate), and remote exists
-      but nothing under `refs/remotes/<remote>/refs/git-pair/` has ever been fetched, which is the
-      refspec-not-installed case and gets the `--configure-fetch` advice rather than a false alarm.
-- [ ] `check` deliberately does **not** refuse on this. The gate is a verdict about the work; a record
-      that has not travelled is an operational gap, reported by `status`, `queue` and `record`'s own
-      output. If `check` refused, CI without credentials would fail every landing.
+- [x] New finding in `internal/cli/published.go`, beside `landed.go` and styled like it: a pair whose
+      local refs exist and whose mirror copies are absent (`missing`) or hold different values
+      (`diverged`). Reuses `unrecordedDisplayCap`, prints once per run, and shares the "as this clone last
+      fetched it" framing. `queue` gets its own `RECORDED, NOT PUBLISHED` heading; `status` prints the same
+      section after its report.
+- [x] Half-published is its own line: with exactly one family on the remote the report says
+      "half published: <remote> holds <the other> and not <this one>, so the record cannot be
+      reconstructed there". In `--json` it is distinguishable by `missing` having one entry.
+- [x] Detection reads `refs/remotes/<remote>/refs/git-pair/*` and nothing else — no `ls-remote`, no
+      network. `TestDetectionNeedsNoNetwork` makes `origin` unreachable mid-test and asserts the finding
+      still arrives, which is the property rather than the command list.
+- [x] Cannot-tell is one sentence in `unpublished_note` and no section: no remote, or a mirror namespace
+      this clone has never fetched. It names `--fetch` as the remedy; `--configure-fetch` is M4's, and a
+      message pointing at a flag that does not exist is worse than one that points at the flag that does.
+      One deviation from the wording above, and it needed thinking through: an *empty* mirror namespace is
+      ambiguous — either the remote has no durable refs (the loudest finding there is) or nobody asked.
+      Nothing but the run itself can tell those apart, so `--fetch` passing `asked` to the report is the
+      disambiguator: mirrors present means compare, just-fetched means compare, otherwise say nothing.
+- [x] `check` is untouched by the finding. `TestCheckAnswersTheSameWhicheverWayTheRecordTravelled`
+      compares `check`'s exit code and output before and after publishing and requires both to be
+      identical — stronger than asserting no refusal, because `check` legitimately refuses a changeset that
+      is already recorded, and the publishing must not add a second reason to that answer.
 - [ ] `record`'s post-record output names publishing (`next:  git pair integration publish`), so the
-      step is where the moment is.
+      step is where the moment is. **Deferred to M3**, which is the commit that makes the command exist:
+      printing a `next:` line that points at nothing is the same mistake as the `--configure-fetch`
+      wording above, one milestone earlier.
 
 **Verification**
 
@@ -188,8 +199,26 @@ What exists when this plan starts (`feat/two-frozen-refs`, plan `review-architec
 - A clone with no remote configured prints the cannot-tell line once, and no per-changeset warnings —
   the M4 (v2 plan) noise lesson, re-asserted for this finding.
 - Half-published remote is distinguished from fully unpublished.
-- A cost test: detection cost does not grow with the number of refs in the namespace.
-- `--json` shape test: `unpublished` present and `[]` when empty.
+- A cost test: detection cost does not grow with the number of refs in the namespace —
+  `TestDetectionCostDoesNotGrowWithTheNamespace` compares `queue`'s git invocations with 1 and with 51
+  recorded pairs (equal) and asserts 51 findings, so a constant cost that found nothing cannot pass.
+- `--json` shape test: `unpublished` present and `[]` when empty, on both `status` and `queue`.
+
+**What landed differently**
+
+- **M1's prune decision was destructive and a test found it.** `git fetch --prune` prunes the destination
+  subtree of *every* refspec in the command, so the single fetch carrying both `refs/git-pair/*` and the
+  mirror refspec deleted the local records of a clone that had recorded a landing and not published it —
+  the exact state M2 exists to report. The fixture recorded, fetched, and then reported its own record as
+  missing. `reviewref.FetchPlanFor` now returns the two asks separately (`Records` unpruned,
+  `Mirrors` pruned), `git.Repo` has `FetchRefs` and `FetchPruned` rather than one `FetchRefspecs`, and
+  `--fetch` costs three invocations rather than two. The M1 spike had measured that prune was *scoped*; it
+  had not measured it against a clone that had something to lose.
+- The remote is resolved once per run and cached on `app`, because `--fetch` and the comparison ask the
+  same question in the same command.
+- PRD §13 now documents both the two-fetch split and why, plus the three rules of the finding; README's
+  namespace paragraph carries the same shape in fewer words. PRD says publishing is ordinary git for now;
+  M3 replaces that sentence with the command.
 
 ---
 

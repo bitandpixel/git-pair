@@ -101,6 +101,10 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 		return err
 	}
 	unrecorded := durable.unrecordedLandings(scan.TrunkIDs)
+	// The same one read of the namespace answers both halves of "did the paper trail survive": is there a
+	// record, and did the record get anywhere. The branch is empty here because the queue spans branches,
+	// so no branch's upstream is the right answer and the repository's origin is.
+	rep := a.publicationReport(ctx, repo, "", durable, "`git pair queue --fetch` asks for them", doFetch)
 	for _, br := range scan.Branches {
 		if br.Err != nil {
 			skipped = append(skipped, br.Branch+" (unreadable changeset metadata: "+br.Err.Error()+")")
@@ -189,15 +193,23 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 	})
 
 	if a.json {
-		return a.emitJSON(map[string]any{
+		out := map[string]any{
 			"ready_for_review":  entries,
 			"skipped":           skipped,
 			"landed_unrecorded": unrecorded,
-		})
+			// Never null, for the reason `landed_unrecorded` is never null: an empty list is the answer
+			// "nothing is waiting to be published" and a missing key is "this build did not look".
+			"unpublished": rep.Findings,
+		}
+		if rep.Note != "" {
+			out["unpublished_note"] = rep.Note
+		}
+		return a.emitJSON(out)
 	}
 	if len(entries) == 0 {
 		a.printf("READY FOR REVIEW\n\n  nothing is ready\n")
 		a.printUnrecorded(unrecorded, durable.NamespaceEmpty, displayRef(db.Ref), true)
+		a.printUnpublished(rep, true)
 		printSkipped(a, skipped)
 		printBehindParent(a, stale)
 		return nil
@@ -214,6 +226,7 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 		a.printf("\n")
 	}
 	a.printUnrecorded(unrecorded, durable.NamespaceEmpty, displayRef(db.Ref), false)
+	a.printUnpublished(rep, false)
 	printSkipped(a, skipped)
 	printBehindParent(a, stale)
 	return nil
