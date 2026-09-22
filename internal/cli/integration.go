@@ -45,6 +45,7 @@ chain, and a ref that tracked it would be a staler copy of a story the branch te
 func newIntegrationRecordCommand(a *app) *cobra.Command {
 	var source, commit, target, id string
 	var allowFeedback bool
+	var configureFetch bool
 	cmd := &cobra.Command{
 		Use:   "record",
 		Short: "Write the two refs that make a changeset permanent",
@@ -94,19 +95,29 @@ git-pair performs no merge. The contract is ` + "`git pair check`" + `, then an 
 the base branch by whoever owns it, then this command.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return a.runIntegrationRecord(integrationRecordInput{source: source, commit: commit, target: target, changeset: id, allowFeedback: allowFeedback})
+			return a.runIntegrationRecord(integrationRecordInput{
+				source: source, commit: commit, target: target, changeset: id,
+				allowFeedback: allowFeedback, configureFetch: configureFetch,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&source, "source", "", "the unsquashed tip that was reviewed (the head `change ready` and `review submit` were writing on)")
 	cmd.Flags().StringVar(&commit, "commit", "", "the commit the changeset became in the destination branch")
 	cmd.Flags().StringVar(&target, "target", "", "ref the landing commit must be reachable from; defaults to the changeset's base branch")
 	cmd.Flags().StringVar(&id, "changeset", "", "which changeset to record, when --source carries more than one changeset directory")
+	cmd.Flags().BoolVar(&configureFetch, "configure-fetch", false,
+		"also add the durable-refs mirror refspec to remote.<name>.fetch, so ordinary fetches keep this "+
+			"clone able to tell published from unpublished")
 	cmd.Flags().BoolVar(&allowFeedback, "allow-feedback", false, "accept a changeset whose newest verdict is non-blocking feedback, as `git pair check --allow-feedback` does")
 	return cmd
 }
 
 // integrationRecordInput is what the caller supplied.
 type integrationRecordInput struct {
+	// configureFetch is consent to write the durable-refs fetch refspec into this clone's config. It is an
+	// argument and never a question, for the reason PRD §22 gives: this CLI is the agent surface, and a
+	// prompt that goes unanswered in CI reads exactly like a prompt that was declined.
+	configureFetch                    bool
 	source, commit, target, changeset string
 	// allowFeedback is the recorder's copy of `git pair check --allow-feedback`: a changeset whose newest
 	// verdict is feedback may be recorded. Without it the recorder is as strict as check's default policy,
@@ -705,16 +716,19 @@ func resolveCommit(ctx context.Context, repo *git.Repo, flag, rev string) (strin
 // destination and so no reachability check was made; `target_derived` says git-pair chose it (the
 // changeset's `base:`, else the default branch) rather than the caller naming it.
 type integrationRecordJSON struct {
-	Changeset       string   `json:"changeset"`
-	Source          string   `json:"source"`
-	Commit          string   `json:"commit"`
-	Target          string   `json:"target"`
-	TargetDerived   bool     `json:"target_derived,omitempty"`
-	Derived         []string `json:"derived,omitempty"`
-	ArchiveRef      string   `json:"archive_ref"`
-	IntegrationRef  string   `json:"integration_ref"`
-	Recorded        bool     `json:"recorded"`
-	AlreadyRecorded bool     `json:"already_recorded"`
+	Changeset      string   `json:"changeset"`
+	Source         string   `json:"source"`
+	Commit         string   `json:"commit"`
+	Target         string   `json:"target"`
+	TargetDerived  bool     `json:"target_derived,omitempty"`
+	Derived        []string `json:"derived,omitempty"`
+	ArchiveRef     string   `json:"archive_ref"`
+	IntegrationRef string   `json:"integration_ref"`
+	// Fetch reports what `--configure-fetch` did, and is absent when the flag was not given: a pipeline
+	// that asked should be able to see whether the line was written or was already there.
+	Fetch           *fetchConfig `json:"fetch_config,omitempty"`
+	Recorded        bool         `json:"recorded"`
+	AlreadyRecorded bool         `json:"already_recorded"`
 	// NextAction names the step that makes the record durable outside this clone. A record that lives
 	// only where the merge ran is a record that dies there, and the moment to say so is the moment the
 	// record was written — not a warning the reader has to run a different command to hear.
@@ -797,7 +811,8 @@ func (l landing) reach() string {
 // its verdict reads the derivation and the trunk, and no ref at all.
 const namespaceAbsentWarning = "warning: this clone holds no refs/git-pair/* refs at all; " +
 	"`--fetch` brings them, or run " + reviewref.FetchCommand +
-	"; trust nothing that says never recorded until they are here\n"
+	"; `--configure-fetch` makes an ordinary fetch keep bringing them — and trust nothing that says " +
+	"never recorded until they are here\n"
 
 func (a *app) runIntegrationRecord(in integrationRecordInput) error {
 	ctx := context.Background()
@@ -810,6 +825,14 @@ func (a *app) runIntegrationRecord(in integrationRecordInput) error {
 	if err != nil {
 		return err
 	}
+	// Fail the optional half before the irreversible one: if the caller asked for configuration and this
+	// repository has nowhere to put it, nothing is written and the exit code says so.
+	if in.configureFetch {
+		if _, err := a.requireConfigurableRemote(ctx, repo); err != nil {
+			return err
+		}
+	}
+
 	pair := reviewref.Pair{ID: rec.ID, Archive: rec.Source, Integration: rec.Commit}
 	recorded, err := reviewref.RecordedPair(ctx, repo, rec.ID)
 	if err != nil {
@@ -825,7 +848,7 @@ func (a *app) runIntegrationRecord(in integrationRecordInput) error {
 			IntegrationRef:    reviewref.Integration(rec.ID),
 			Archive:           rec.Source,
 			IntegrationCommit: rec.Commit,
-		}, false)
+		}, false, a.recordExtras(ctx, repo, in))
 	}
 	// A different pair for a changeset that already has one is refused here rather than by the write
 	// below, so the reader gets the refusal that answers the question — "what did we already say?" —
@@ -849,12 +872,55 @@ func (a *app) runIntegrationRecord(in integrationRecordInput) error {
 	if err != nil {
 		return err
 	}
-	return a.reportIntegration(rec, res, res.ArchiveCreated || res.IntegrationCreated)
+	// Configuration follows the refs. A refused record leaves the repository as it found it — including
+	// its config, which the caller asked to change but did not get to yet: `record` is idempotent, so the
+	// next run writes the refs it refused and the line together. Writing config first would let a refusal
+	// about the review still mutate the clone's fetch behaviour, which is a side effect nobody invoking
+	// `record` agreed to.
+	return a.reportIntegration(rec, res, res.ArchiveCreated || res.IntegrationCreated, a.recordExtras(ctx, repo, in))
 }
 
 // reportIntegration is the answer, in whichever shape was asked for. It is one function so the no-op
 // short-circuit above and the write below cannot drift into saying different things about the same pair.
-func (a *app) reportIntegration(rec *integrationRecord, res reviewref.PairResult, wrote bool) error {
+// recordExtras resolves the configuration half of a record run, once the refs are settled.
+func (a *app) recordExtras(ctx context.Context, repo *git.Repo, in integrationRecordInput) recordReportExtras {
+	var extras recordReportExtras
+	remote, err := a.remoteForDurableRefs(ctx, repo, "")
+	if err != nil {
+		return extras
+	}
+	if in.configureFetch {
+		fc, err := a.configureFetchRefSpecs(ctx, repo, remote)
+		if err != nil {
+			// A record that succeeded and could not configure says so rather than pretending the
+			// invocation did everything: the refs are the durable half, and they are already written.
+			a.warn("warning: %v\n", err)
+			return extras
+		}
+		extras.fetch = fc
+		return extras
+	}
+	// Not configured, and nothing will be unless the caller says so — but the reader should know the
+	// option exists, since the alternative to naming it is a clone that keeps answering from a namespace
+	// it never fetches. Except in the clone where it is already configured: reminding someone of a thing
+	// they already did is how a hint becomes noise.
+	if configuredAlready(ctx, repo, remote) {
+		return extras
+	}
+	extras.hint = fetchHint(remote)
+	return extras
+}
+
+// recordReportExtras is what the record run decided about configuration, carried to the report so the
+// answer about the refs and the answer about the clone's fetch behaviour arrive together.
+type recordReportExtras struct {
+	// fetch is set only when `--configure-fetch` was asked for.
+	fetch *fetchConfig
+	// hint is the one line naming the flag, for a run that did not ask.
+	hint string
+}
+
+func (a *app) reportIntegration(rec *integrationRecord, res reviewref.PairResult, wrote bool, extras recordReportExtras) error {
 	if a.json {
 		return a.emitJSON(integrationRecordJSON{
 			Changeset:       rec.ID,
@@ -868,6 +934,7 @@ func (a *app) reportIntegration(rec *integrationRecord, res reviewref.PairResult
 			Recorded:        wrote,
 			AlreadyRecorded: !wrote,
 			NextAction:      "git pair integration publish " + rec.ID,
+			Fetch:           extras.fetch,
 		})
 	}
 	switch {
@@ -884,9 +951,6 @@ func (a *app) reportIntegration(rec *integrationRecord, res reviewref.PairResult
 	}
 	a.printf("  archive:     %s -> %s\n", res.ArchiveRef, short(rec.Source))
 	a.printf("  integration: %s -> %s\n", res.IntegrationRef, short(rec.Commit))
-	if wrote {
-		a.printf("  next:        git pair integration publish %s\n", rec.ID)
-	}
 	if rec.Target != "" {
 		a.printf("  verified reachable from %s%s\n", displayRef(rec.Target), derivedNote(rec))
 	}
@@ -896,6 +960,18 @@ func (a *app) reportIntegration(rec *integrationRecord, res reviewref.PairResult
 		// graph is a different act of writing than one whose SHAs were typed, and a reader auditing it
 		// later should know which they are looking at.
 		a.printf("  derived:     --%s\n", strings.Join(rec.Derived, " and --"))
+	}
+
+	switch {
+	case extras.fetch != nil && extras.fetch.Already:
+		a.printf("  fetch:         %s already fetches the durable mirrors; nothing changed\n", extras.fetch.Key)
+	case extras.fetch != nil:
+		a.printf("  fetch:         added %s to %s\n", extras.fetch.Refspec, extras.fetch.Key)
+	case extras.hint != "":
+		a.printf("%s", extras.hint)
+	}
+	if wrote {
+		a.printf("  next:        git pair integration publish %s, then the branch can go\n", rec.ID)
 	}
 	return nil
 }

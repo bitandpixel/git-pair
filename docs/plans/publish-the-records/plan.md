@@ -303,40 +303,76 @@ What exists when this plan starts (`feat/two-frozen-refs`, plan `review-architec
 
 **Tasks**
 
-- [ ] **Decided: no prompts.** `record`'s default writes refs and nothing else, and prints one short
-      line naming the flag that would configure the fetch refspec. `--configure-fetch` writes it
-      (idempotent: already present reports that and changes nothing) and prints the key and value it
-      wrote. Rationale for rejecting the interactive version: PRD §22 makes this CLI the agent surface,
-      a TTY-dependent prompt makes one command line mean two things, and an unanswered prompt in CI is
-      indistinguishable from a declined one — which would silently skip the very step that protects the
-      paper trail. Consent belongs in the invocation, where it is visible in a pipeline definition and
-      greppable in a log. If interactive confirmation is wanted later it belongs in the TUI, which is
-      already a conversation.
-- [ ] The refspec written is M1's `+refs/git-pair/*:refs/remotes/<remote>/refs/git-pair/*`, into
-      `remote.<remote>.fetch` of the local config. Never `remote.origin.push`: a push refspec replaces
-      the default push behaviour for the whole clone, which is a surprising side effect to acquire from
-      a record command, and `publish` passes its refspecs explicitly.
-- [ ] PRD §29's landing contract gains the ordering: record, publish, then delete the branch — with the
-      reason, that after the branch is deleted the refs are the only copy of the archive chain, so a
-      delete before a publish is how the history dies. README's handoff section and the `integration
-      record` row of the command table move with it.
-- [ ] `landingNextAction` and `record`'s trailing advice gain the publish step; §22's agent loop and
-      §29's loop text reflect it.
-- [ ] PRD §27's "publishing the two ref families" deferral is amended, not deleted: what this plan
-      gives up is still given up — forge-level protection and namespace-protected variants stay out — and
-      the text should say so rather than look contradicted.
-- [ ] Extend `docs_contract_test.go` to the new command and the new ref paths.
-- [ ] One spelling rule honoured: no `mise` task, no alias, no second flag for the same config write.
+- [x] No prompts, as decided. `record` without the flag writes refs and one line naming the flag it did
+      not take; `--configure-fetch` writes the line idempotently and prints the key and the value, or
+      reports "already fetches the durable mirrors" and changes nothing. Two refinements the tests forced:
+      a run in a clone where the refspec is *already* configured prints no hint (reminding someone of a
+      thing they already did is how a hint becomes noise), and the flag is **preflighted** — a repository
+      with no remote is a refusal with an exit code before anything is written, not a warning afterwards,
+      because "succeeded, but the thing you asked for did not happen" is not something a pipeline can
+      branch on.
+- [x] The mirror refspec, into `remote.<remote>.fetch`, written with `--add` (the key is a list, and
+      replacing it would leave the clone unable to fetch its own branches — asserted by a test that checks
+      the clone's original refspecs survive). Never a push refspec, for the reason planned. Also only the
+      mirror half, and that needs saying out loud: a record is a *claim* that a landing happened, so a clone
+      acquires records by asking (`--fetch`) rather than because a config line written weeks ago keeps
+      delivering them. The mirrors are the comparison, and the comparison is what an ordinary fetch should
+      always be able to make.
+- [x] §29's contract is four steps — check, land, record, publish — and "Record before tidy" became
+      "Record and publish before tidy", with the reason: once the branch is deleted the refs are the only
+      copy of the chain, so a delete before a publish is how the history dies. README's handoff section
+      gained the publish step and its output, and the `integration record` row of the command table
+      carries `--configure-fetch` with its consent rationale.
+- [x] `landingNextAction` now ends with "then `git pair integration record`, then `git pair integration
+      publish`", which moves every command that offers it (status, queue, check, review) in one edit;
+      `record`'s own line reads `next: git pair integration publish <id>, then the branch can go`. §22's
+      agent loop step 14 names both steps and the ordering. `internal/cli/contract_test.go` pins the whole
+      sentence *and* asserts record precedes publish, so the ordering cannot silently swap.
+- [x] §27's "Remote record enforcement" list now opens by saying what M3 closed and then keeps the rest,
+      named: pre-push hooks, server-side validation, **automatic** pushing (publishing stays a command
+      somebody runs, or the repository's own git configuration), forge-level namespace protection and its
+      variants, and protection against destructive rewrites — "the client refuses to force one, which is
+      not the same as being unable to".
+- [x] No new case was needed: the test derives the names from PRD and README and resolves them against
+      the command tree and `reviewref`, so `git pair integration publish` and the `--configure-fetch`
+      prose were checked the moment they were written. Verified rather than assumed — the test runs in
+      `go test ./internal/cli/`, and a name that did not resolve would fail it.
+- [x] One flag (`--configure-fetch`), one writer (`internal/cli/configure.go`), one key
+      (`remote.<name>.fetch`), no mise task, no alias, no environment variable.
 
 **Verification**
 
-- `record` in a pipe (no TTY) and at a terminal produce byte-identical output, and neither blocks.
+- `record --configure-fetch` at a terminal finishes with nobody typing (the pty harness sends no
+      keystrokes and times out at 20s), paints the key, the value and the next step, and the config file
+      really holds it; the same invocation through a pipe then reports it wrote nothing and the refspec is
+      in the config exactly once. Byte-identical output between the two worlds is asserted by construction
+      rather than by comparing two repositories with matched SHAs: no command in git-pair reads a terminal,
+      and `GitInherit` — the only place the tool attaches to one — is used by the TUI and the difftool.
 - `record --configure-fetch` twice: the second says already configured and leaves the file unchanged
   (asserted on the config file, not on the message).
 - A clone configured by `--configure-fetch` needs no `--fetch` flag to answer correctly about a peer
   clone's publish after an ordinary `git fetch`.
-- The §29 loop is replayed against the prose: `pty-walkthrough.sh`, plus an e2e step that records,
-  publishes from clone A, and detects publication from clone B.
+- The §29 loop is replayed against the prose: `pty-walkthrough.sh` gained the terminal step above, and
+      `e2e-29.sh` gained a publish step that records, publishes to a second remote from the authoring clone,
+      asserts both families arrived, asserts a re-run says "already published", and asserts a fresh clone's
+      `--fetch` brings the record into its own namespace — checked with plumbing, because every changeset in
+      that scratch repository has landed and so has no live `status` to speak about; the claims about what a
+      fetched record answers live in `fetch_test.go`, where a live changeset can be staged.
+
+**What landed differently**
+
+- **Config is written after the refs, not before.** The first draft wrote it first on the theory that an
+  additive config line is the reversible half. The pty walkthrough's fixture disproved the theory by
+  accident: its changeset was blocked, `record` refused, and the config line was there anyway — a refused
+  record that still mutates the clone's fetch behaviour, which nobody invoking `record` agreed to. Now the
+  flag is preflighted (no remote means a refusal with an exit code before anything is written) and the write
+  follows a successful record, so a refusal leaves the repository as it found it.
+- **The hint stays quiet when the clone is already configured.** "Run `--configure-fetch`" in a clone that
+  ran it months ago is noise, and noise in the one line every record prints is the kind that trains people
+  to skim the rest.
+- The e2e assertion for "the published record is readable elsewhere" is a plumbing assertion: the scratch
+  repository's changesets have all landed, so a fresh clone has no live changeset for `status` to report on.
+  What a fetched record then *answers* is left to `fetch_test.go`, which can stage one.
 
 ---
 

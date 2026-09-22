@@ -346,6 +346,59 @@ else
   echo "  ok: and the report goes quiet once the record exists"
 fi
 
+step "publish: the refs leave the clone that wrote them"
+# The landing contract (PRD §29) is record, publish, then delete. This step walks the second step and
+# then checks it from somewhere else, because "published" means a different clone can read it — the
+# claim cannot be checked from the machine that made it.
+PUBDIR=$(mktemp -d /tmp/git-pair-pub.XXXXXX)
+PUBREMOTE="$PUBDIR/remote.git"
+git init -q --bare -b main "$PUBREMOTE"
+git remote add pub "$PUBREMOTE"
+git push -q pub --all
+out=$($G integration publish --remote pub 2>&1); code=$?
+check "integration publish" 0 $code
+printf '%s' "$out" | grep -q "unrecorded-landing: published to pub" \
+  && echo "  ok: it says what it published" \
+  || { echo "  FAIL: publish did not report the pair: $out"; FAILED=1; }
+for family in integrations archive; do
+  if git --git-dir="$PUBREMOTE" for-each-ref --format='%(refname)' \
+       "refs/git-pair/$family/unrecorded-landing" | grep -q .; then
+    echo "  ok: refs/git-pair/$family/unrecorded-landing reached the remote"
+  else
+    echo "  FAIL: refs/git-pair/$family/unrecorded-landing never arrived"; FAILED=1
+  fi
+done
+out=$($G integration publish --remote pub 2>&1)
+printf '%s' "$out" | grep -q "already published" \
+  && echo "  ok: re-running publishes nothing and says so" \
+  || { echo "  FAIL: a second publish did not report idempotence: $out"; FAILED=1; }
+
+git clone -q "$PUBREMOTE" "$PUBDIR/reader"
+(cd "$PUBDIR/reader" && git switch -q unrecorded-landing)
+# `--fetch` is the read side, and the check is that the record arrives in the reader's own namespace —
+# checked with plumbing here because every changeset in this scratch repository has landed, so `status`
+# has no live changeset to speak about. The claims about what a fetched record then *answers* live in
+# internal/cli/fetch_test.go, where a live changeset can be staged.
+out=$(cd "$PUBDIR/reader" && $G queue --fetch --json 2>&1); code=$?
+check "--fetch works from a clone that never saw the landing" 0 $code
+for family in integrations archive; do
+  if git -C "$PUBDIR/reader" for-each-ref --format='%(refname)' \
+       "refs/git-pair/$family/unrecorded-landing" | grep -q .; then
+    echo "  ok: --fetch brought refs/git-pair/$family/unrecorded-landing to a fresh clone"
+  else
+    echo "  FAIL: the published record is not readable elsewhere"; FAILED=1
+  fi
+done
+# A clone that holds no pairs of its own still answers the question, with an empty list rather than a
+# missing key: `[]` means "nothing here is waiting to be published" and nothing else. The finding itself —
+# a record that exists only locally, and half a pair — is covered by internal/cli/published_test.go, which
+# can stage those states without pretending a fresh clone holds records it never wrote.
+out=$(cd "$PUBDIR/reader" && $G queue --fetch --json 2>&1)
+printf '%s' "$out" | grep -q '"unpublished": \[\]' \
+  && echo "  ok: a clone with nothing to publish answers with an empty list, not an absent key" \
+  || { echo "  FAIL: the queue JSON omitted the answer: $out"; FAILED=1; }
+rm -rf "$PUBDIR"
+
 step "queue is empty again"
 $G queue | sed 's/^/  /'
 

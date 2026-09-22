@@ -191,7 +191,7 @@ Review submitted: booking-transaction
   outcome: approve
   commit:  0eaad3b
   files:   none (recorded as an empty review commit)
-  next:    author: `git pair check`, then merge into main with ordinary git, then `git pair integration record`
+  next:    author: `git pair check`, then merge into main with ordinary git, then `git pair integration record`, then `git pair integration publish`
 ```
 
 The submission is a marker commit and nothing else. No git-pair ref is written while work is in
@@ -205,7 +205,7 @@ what the history says, `check` asserts it, and CI reads the exit code.
 $ git pair check
 OK: booking-transaction is integration-ready
 head:  0eaad3b
-next:  `git pair check`, then merge into main with ordinary git, then `git pair integration record`
+next:  `git pair check`, then merge into main with ordinary git, then `git pair integration record`, then `git pair integration publish`
 ```
 
 Then the owner lands it, with ordinary git. Squash, rebase-merge, plain merge — git-pair has no
@@ -218,7 +218,7 @@ the branch that still carries the reviewed head and the changeset directory, whi
 no flags when the branch is there and needs two SHAs when it is not. Delete the branch first and
 the same fact has to be supplied by hand, or fetched back, or it is gone.
 
-One command records where the work went, and it is the only git-pair write in the whole handoff:
+One command records where the work went, and it is the only git-pair ref write in the whole handoff:
 
 ```bash
 $ git pair integration record --source 0eaad3b --commit 4f2b8c1 --target main
@@ -226,7 +226,21 @@ booking-transaction: recorded 4f2b8c1 as the integration of 0eaad3b
   archive:     refs/git-pair/archive/booking-transaction -> 0eaad3b
   integration: refs/git-pair/integrations/booking-transaction -> 4f2b8c1
   verified reachable from main
+  configure:   --configure-fetch adds +refs/git-pair/*:refs/remotes/origin/refs/git-pair/* to remote.origin.fetch, so an ordinary fetch keeps this clone able to tell published from unpublished
+  next:        git pair integration publish booking-transaction, then the branch can go
 ```
+
+Then publish, and only then tidy:
+
+```bash
+$ git pair integration publish
+booking-transaction: published to origin (archive + integration)
+```
+
+The order is the contract (§PRD §29). Once the branch is deleted the refs are the only copy of the archive
+chain, so a delete that lands before a publish leaves the chain reachable from nothing outside the machine
+that recorded it — which is why `status` and `queue` print `RECORDED, NOT PUBLISHED` rather than trusting
+anyone to remember.
 
 Two refs, written once, and never moved: the chain that was reviewed, and the commit it became. The
 changeset is discovered from the directories `--source` carries rather than from a ref someone had to
@@ -540,7 +554,7 @@ landed.
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug |
 | `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition — the review's outcome, whether the commit it approved is still in this history, and whether the content still matches; no `--changeset`, because it is the gate a forge runs *on* a revision |
 | `integration publish` | `[<changeset>…]`, `--remote <name>` | sends a changeset's two durable refs to the shared remote, unforced, in one push — the only git-pair command that pushes, and the only thing git-pair may push is `refs/git-pair/*` (§26). No arguments publishes every pair this clone holds; named ids publish just those, and a name with no record here is a refusal rather than a silent no-op. No `+` and no options: a remote that holds a different value rejects the push, and the refusal names both values, because two people recording one landing is a decision rather than a race to win. It then re-reads the remote's copies and reports what is actually there, so one ref arriving while the other is refused is reported as the half-state it is rather than as a single failure. Idempotent — a pair the remote already holds is "already published" and nothing is written, which is what lets CI run it every build |
-| `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>`, `--allow-feedback` (all optional) | writes both durable refs for one changeset, create-only: the archive at `--source` and the integration at `--commit`. The changeset is discovered from the `changesets/<id>/` directories `--source` carries and the integration branch does not, so a pipeline needs the two SHAs it already holds and not the changeset name; `--changeset` disambiguates a stacked child. Before it writes: the source's history must name this changeset and its newest verdict must permit integration (`approve`, or `feedback` with `--allow-feedback`); `--commit` must be in the destination branch's history (the `--target` you name, else the changeset's `base:`, else the default branch) and must be the commit that added `changesets/<id>/` there. Name neither SHA and the repository is asked — the landing is the first-parent commit on the destination that added the directory, the reviewed head is the branch still carrying it — and anything ambiguous is a usage error naming the candidates. Needs no checkout and writes no commit; re-running it with the same pair succeeds and changes nothing |
+| `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>`, `--allow-feedback`, `--configure-fetch` (all optional) | writes both durable refs for one changeset, create-only: the archive at `--source` and the integration at `--commit`. The changeset is discovered from the `changesets/<id>/` directories `--source` carries and the integration branch does not, so a pipeline needs the two SHAs it already holds and not the changeset name; `--changeset` disambiguates a stacked child. Before it writes: the source's history must name this changeset and its newest verdict must permit integration (`approve`, or `feedback` with `--allow-feedback`); `--commit` must be in the destination branch's history (the `--target` you name, else the changeset's `base:`, else the default branch) and must be the commit that added `changesets/<id>/` there. Name neither SHA and the repository is asked — the landing is the first-parent commit on the destination that added the directory, the reviewed head is the branch still carrying it — and anything ambiguous is a usage error naming the candidates. Needs no checkout and writes no commit; re-running it with the same pair succeeds and changes nothing. `--configure-fetch` is consent for the one thing git-pair ever writes outside a ref: it appends the mirror refspec to `remote.<name>.fetch` — idempotently, printing the key and the value, and reporting "already there" when it was — so an ordinary `git fetch` keeps this clone able to tell published from unpublished. It is a flag rather than a question because this CLI is the agent surface (§PRD §22): a prompt would make one command line mean two things, and an unanswered prompt in CI reads exactly like a declined one. The records themselves stay behind `--fetch`: a record is a claim, and a clone should acquire claims by asking |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
@@ -606,8 +620,9 @@ containment it can derive rather than a branch name no ref stores. `default_bran
 the commit it pointed at, and how the run learned it (`flag`, `origin-head` or `sole-candidate`):
 a CI log that says nothing has landed has two causes, a stale fetch and a wrong trunk, and neither
 one is visible in a sentence about the changeset.
-`next_action` is the handoff (§PRD §9.5): `check`, then the merge with ordinary git, then
-`integration record`. Once the record exists it says there is nothing further to record instead.
+`next_action` is the landing contract (§PRD §29) in one line: `check`, then the merge with ordinary git,
+then `integration record`, then `integration publish`. Once the record exists it says there is nothing
+further to record instead.
 
 ```json
 {
@@ -733,7 +748,7 @@ is none)
   "commit": "941266b18686624cb624722b4e8c348bf03451a7",
   "empty": true,
   "files": null,
-  "next_action": "author: `git pair check`, then merge into main with ordinary git, then `git pair integration record`",
+  "next_action": "author: `git pair check`, then merge into main with ordinary git, then `git pair integration record`, then `git pair integration publish`",
   "outcome": "approve",
   "previous_review": "",
   "short": "941266b"

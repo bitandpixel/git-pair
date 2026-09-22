@@ -509,6 +509,40 @@ func (r *Repo) Upstream(ctx context.Context, branch string) (string, error) {
 	return up, nil
 }
 
+// ConfigValues reads one key with `--get-all`, which is how a multi-valued key has to be read: a
+// single-valued read of `remote.origin.fetch` returns the first line and hides the rest, and the keys
+// git-pair writes are lists by construction.
+//
+// A key that is not set is an empty answer rather than an error. git exits 1 for it, and every caller of a
+// config read wants "not configured" to be an ordinary value rather than a failure to interpret.
+func (r *Repo) ConfigValues(ctx context.Context, key string) ([]string, error) {
+	out, err := r.Git(ctx, "config", "--local", "--get-all", key)
+	if err != nil {
+		var ge *Error
+		if errors.As(err, &ge) && ge.ExitCode == 1 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var values []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimRight(line, "\r"); line != "" {
+			values = append(values, line)
+		}
+	}
+	return values, nil
+}
+
+// ConfigAdd appends one value to a key in the repository's local config.
+//
+// `--add`, deliberately: `remote.<name>.fetch` is a list, and writing it with a plain `git config` would
+// replace the clone's branch fetch refspec — a repository silently losing its own configuration because a
+// review tool recorded a landing.
+func (r *Repo) ConfigAdd(ctx context.Context, key, value string) error {
+	_, err := r.Git(ctx, "config", "--local", "--add", key, value)
+	return err
+}
+
 // Fetch refreshes remote-tracking refs. It changes nothing in the working tree or index,
 // which is what makes it safe for `change wait` to run unattended.
 func (r *Repo) Fetch(ctx context.Context, remote string) error {

@@ -5,9 +5,10 @@ today they exist only in the clone that wrote them: nothing publishes them, noth
 have not been published, and a clone that wants to know what other clones did has to be handed a
 refspec by hand. This changeset makes the gap visible and the remedies explicit.
 
-**M1, M2 and M3 are done** — the read side, the finding that reads it, and the command that publishes.
-**M4 is pending**: `--configure-fetch` as consented configuration, and "record, publish, then delete the
-branch" in the landing contract.
+**All four milestones are done.** The refs are readable from another clone (`--fetch`), a record that has
+not travelled is reported (`RECORDED, NOT PUBLISHED`), publishing is a command with an audited call site
+(`git pair integration publish`), and the configuration and the ordering are in the contract
+(`--configure-fetch`, and "record, publish, then delete the branch").
 
 ## What changed (M1)
 
@@ -129,6 +130,23 @@ from the record namespace; `--prune` with an explicit refspec prunes only that s
 `refs/remotes/origin/main` and unrelated remote-tracking entries alone; a no-op re-fetch costs one
 invocation and touches nothing.
 
+## What changed (M4)
+
+- `integration record --configure-fetch` appends `+refs/git-pair/*:refs/remotes/<origin>/refs/git-pair/*` to
+  `remote.<name>.fetch` — `--add`, idempotent, printing the key and the value, or "already fetches the
+  durable mirrors". It is the only configuration git-pair ever writes, and it is consent spelled as an
+  argument: no prompt, anywhere, because §22 makes this CLI the agent surface.
+- Without the flag, `record` writes no config and prints one line naming it — in a clone that already has
+  the line, it prints nothing.
+- `remote.<name>.fetch` gets the **mirror** refspec only. A record is a claim that a landing happened; a
+  clone acquires claims by asking (`--fetch`), not from a config line written weeks earlier.
+- PRD §29's contract is now check → land → record → **publish** → tidy, with the reason: after the branch is
+  deleted the refs are the only copy of the chain. `landingNextAction`, `record`'s `next:` line, §22's agent
+  loop and README's handoff all carry it; `contract_test.go` pins the sentence and asserts record precedes
+  publish.
+- §27's remote-enforcement deferral is amended rather than deleted: automatic pushing, forge-level namespace
+  protection and server-side validation stay out, and the text says what M3 did take on.
+
 ## Design decisions (M3)
 
 - **Publishing is a command, not `record --push`.** The two acts have different permissions and sometimes
@@ -142,6 +160,15 @@ invocation and touches nothing.
 - **No `integration pull` / `integration fetch`.** `--fetch` and the configuration line are the read side; a
   wrapper around `git fetch <refspec>` would be a second spelling of something already printed.
 
+## What M4's own gates caught
+
+The first draft wrote the config line *before* the refs, reasoning that an additive config line is the
+reversible half. The pty walkthrough's fixture — whose changeset ends its scenarios blocked — made `record`
+refuse, and the config line was written anyway: a refused record mutating the clone's fetch behaviour. Now
+the flag is preflighted (no remote is a refusal with an exit code, before anything is written) and the write
+follows a successful record, so a refusal leaves the repository as it found it. The same run then prints no
+hint about a flag the clone already used.
+
 ## Validation
 
 `mise run check` green. M1: five tests in `internal/cli/fetch_test.go`
@@ -154,5 +181,4 @@ and after publishing, `unpublished` present and `[]` on both commands, and a cos
 recorded pair against fifty-one. M3: seven in `internal/cli/publish_test.go` — publish-then-read-from-another-clone, idempotence asserted
 against the remote's SHAs, the conflict refusal (both values named, the word "force" absent, the remote
 unchanged), the half-state with a server-side hook, both remote refusals, the never-null JSON shape, and the
-named-id refusal — plus `internal/git/push_guard_test.go` asserting the guard per argument and the porcelain
-parser against git 2.43's real half-state output. `e2e-29.sh` and `pty-walkthrough.sh` pass.
+named-id refusal. `e2e-29.sh` and `pty-walkthrough.sh` pass.

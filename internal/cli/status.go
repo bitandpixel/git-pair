@@ -472,13 +472,17 @@ func nextAction(s lifecycle.Summary, base string) string {
 	return ""
 }
 
-// landingNextAction is the step after an approval, spelled once because four commands tell an author
-// this same thing and a fifth spelling is how a contract drifts. git-pair performs the gate and the
+// landingNextAction is the landing contract (PRD §29) in one line, spelled once because four commands tell
+// an author this same thing and a fifth spelling is how a contract drifts. git-pair performs the gate and the
 // record and nothing in between: the merge itself is ordinary git, performed by whoever owns the
 // branch, which is what keeps PRD §26's no-merge posture intact.
 func landingNextAction(base string) string {
 	if base == "" {
 		base = "the base branch"
 	}
-	return fmt.Sprintf("`git pair check`, then merge into %s with ordinary git, then `git pair integration record`", base)
+	// The steps are the landing contract (PRD §29): record, then publish, then the branch may go. Publish
+	// is spelled here because after the branch is deleted the refs are the only copy of the chain, and a
+	// reader told only to record has been told to leave that copy unpublished.
+	return fmt.Sprintf("`git pair check`, then merge into %s with ordinary git, then "+
+		"`git pair integration record`, then `git pair integration publish`", base)
 }

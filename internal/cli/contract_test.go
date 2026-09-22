@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"strings"
 	"testing"
 
 	"gitpair/internal/gittest"
@@ -114,9 +115,16 @@ func TestApprovedStateNamesTheLandingAndTheRecord(t *testing.T) {
 	if st["head_full"] != head {
 		t.Errorf("status head_full = %v, want the approved head %s", st["head_full"], head)
 	}
-	want := "`git pair check`, then merge into main with ordinary git, then `git pair integration record`"
+	// The landing contract (PRD §29) in one string, asserted as a whole because the *order* is the
+	// contract: record, then publish, and only then may the branch go. Spelled once in
+	// `landingNextAction`, and every command that offers it has to offer the same sentence.
+	want := "`git pair check`, then merge into main with ordinary git, then " +
+		"`git pair integration record`, then `git pair integration publish`"
 	if st["next_action"] != want {
 		t.Errorf("status next_action = %v, want %q", st["next_action"], want)
+	}
+	if i, j := strings.Index(want, "integration record"), strings.Index(want, "integration publish"); i < 0 || j < 0 || i > j {
+		t.Errorf("the landing contract must read record before publish: %q", want)
 	}
 	// The next step is landing, so nothing may report it already done — and the two halves of the
 	// record are reported differently on purpose, which is worth pinning rather than rediscovering:
