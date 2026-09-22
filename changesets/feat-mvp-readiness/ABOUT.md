@@ -2,12 +2,72 @@
 
 ## Summary
 
+Four gaps sit between "the plans are done" and "this is releasable". None is a missing feature.
+
+1. The two end-to-end gate scripts sat under a completed plan's `artifacts/` directory. A pipeline could
+   not name them and a contributor would not find them.
+2. Three `--json` arrays printed `null` when empty, against the rule the durable-records plan adopted.
+3. PRD §8's command tree missed `change abandon`, `review reopen` and `integration publish`. `review
+   reopen` has no PRD section at all.
+4. `status` on a branch whose changeset landed told the reader to run `git pair init`.
+
 ## What changed
+
+- `e2e-29.sh`, `pty-walkthrough.sh` and their two python helpers are `scripts/gates/` now. `mise run
+  gates` builds the binary and runs both. README gained a Development section that says what each gate
+  covers and what it needs. The old directory keeps a README that maps each historical path to the new
+  one. The commands quoted inside finished plans and audits still resolve.
+- Both scripts run every command with stdin at `/dev/null`. `git pair init` reads an open pipe as
+  `--about` content, so a harness that leaves stdin open blocks the first `init` forever. That is why this
+  replay hung under a process runner and nothing printed.
+- `queue`'s `ready_for_review` and `skipped`, `review submit`'s `files` and `status`'s `stack` are `[]`
+  when empty. PRD §22 and README's JSON contracts state the rule in one place. Both documents name
+  `latest_review` and `uncommitted` as the two fields that answer null on purpose.
+- `change feedback` and `diff` accept the global `--json` and have none. Each says so on stderr, so an
+  empty stdout stops reading as an empty answer.
+- PRD §8's tree gained the three missing commands, §10.7 documents `review reopen`, and
+  `TestEveryCommandIsNamedInTheDocs` checks the other direction of the docs contract.
+- `status` on a branch whose directory the integration branch already holds says the changeset landed and
+  names `git pair status --changeset <id>`. The `init` hint stays for a branch where nothing happened yet.
 
 ## Design decisions
 
+- The empty-array rule lives at the emit boundary. `orEmpty` in `internal/cli/root.go` turns a nil slice
+  into `[]` where a command builds its JSON, which is where the contract lives. The alternative was a
+  reflection pass inside `emitJSON`. That would cover every future command. It would also rewrite any
+  slice field a later command meant to be absent. `omitempty` and pointers stay the way to say "not
+  applicable".
+- The harness stopped accepting null as empty. `jsonList` fails on a null now. Six tests read `skipped` as
+  `nil` to mean "nothing skipped". They assert emptiness instead. That is the claim they meant to make. A
+  helper that forgives the violation is how two of `queue`'s lists stayed null while the suite passed.
+- The viewers get a sentence rather than a JSON mode. `change feedback` and `diff` print a report. A
+  machine-readable form for both is a design task, not a fix. PRD §22 names `change feedback` as a primary
+  agent command, so silence was the wrong third state.
+- The gate scripts moved, and the old path keeps a pointer. Finished plans and their audits name
+  `artifacts/e2e-29.sh` in text nobody should rewrite after the fact. A two-line map keeps those commands
+  runnable without editing a record.
+
 ## Validation
+
+- `mise run check` — gofmt, vet, the whole Go suite.
+- `scripts/gates/e2e-29.sh` and `scripts/gates/pty-walkthrough.sh`, both from the new path, both green.
+- New tests: `TestEmptyListsAreEmptyArrays`, `TestNoJSONArrayIsEverNull`,
+  `TestJSONOnAViewerSaysTheFlagChangedNothing`, `TestEveryCommandIsNamedInTheDocs`,
+  `TestStatusOnALandedChangesetsOwnBranchSaysItLanded`. The second runs every `--json` surface in six
+  repository states, with the permitted nulls named.
+- The carrying rule, the stack chain and the record read from the last three plans stay untouched, and
+  their tests are the check that it stayed that way.
 
 ## Known limitations
 
+- `change feedback` and `diff` still have no machine-readable output. The note is an apology, not a
+  feature.
+- `TestNoJSONArrayIsEverNull` runs the surfaces the suite can reach without a terminal. `review open`,
+  `review reopen`, `review about` and `review thread` are not in it, and none of them has JSON to check.
+- The null allowlist is a list, not a type system. A new null key fails the test until someone writes it
+  down with a reason. That is the whole of the protection.
+
 ## Open questions
+
+- Should `change feedback --json` exist? PRD §22 tells an agent to read the submission with it, and today
+  that means parsing prose off stderr.
