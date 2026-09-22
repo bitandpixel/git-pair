@@ -18,16 +18,24 @@ import (
 // behaviour can be tested against the model directly.
 func newFileListModel(t *testing.T) reviewModel {
 	t.Helper()
+	return newFileListModelWith(t, map[string]string{
+		"service.go": "package main\n\nfunc Lock() {}\n",
+		"handler.go": "package main\n\nfunc Serve() {}\n",
+	})
+}
+
+// newFileListModelWith is that fixture with the span's files chosen: a test that needs a tree of forty
+// rows says so, and gets a real repository for them. Rows are rebuilt from the session on every key,
+// so rows added to the model by hand are gone before the key arrives.
+func newFileListModelWith(t *testing.T, files map[string]string) reviewModel {
+	t.Helper()
 	ctx := context.Background()
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("main.go", "package main\n\nfunc main() {}\n"))
 	const slug = "booking"
 	f.CreateBranch(slug)
 	f.CommitChangeset(slug, "main")
-	f.Commit("implement", gittest.WithFiles(map[string]string{
-		"service.go": "package main\n\nfunc Lock() {}\n",
-		"handler.go": "package main\n\nfunc Serve() {}\n",
-	}))
+	f.Commit("implement", gittest.WithFiles(files))
 	// Two threads exist as working files, which is how a reviewer leaves them between
 	// sessions: untracked until the review is submitted, listed either way.
 	f.Write(filepath.Join("changesets", slug, "locking.md"), "# Thread: locking\n\nWhy the mutex?\n")

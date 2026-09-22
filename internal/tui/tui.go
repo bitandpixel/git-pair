@@ -1350,20 +1350,17 @@ func (m reviewModel) boxLines(section []renderedRow) []string {
 		frame = styleActive.Render
 	}
 	width := m.listWidth()
-	out := []string{frame(boxEdge(f.cornerTopLeft, f.cornerTopRight, f.edge, clip(m.sess.Header().Title, m.boxInner()), width))}
+	above, below := m.metaHidden()
+	out := []string{frame(boxEdge(f.cornerTopLeft, f.cornerTopRight, f.edge,
+		clip(m.sess.Header().Title, m.boxInner()), scrollHint(above, true), width))}
 	out = append(out, m.boxLine(f, m.baseLine(), false))
 	for _, r := range section {
 		out = append(out, m.boxLine(f, m.rowText(r.row), m.metaCursor == r.index))
 	}
-	// The box's scroll note goes inside its own bottom border rather than on a row of its own: a note
-	// that arrived and left would change the height of the column, which is what the box is here to stop.
-	more := ""
-	// Measured from the region's own start: the scroll is an index into the whole list, and the rows
-	// above it belong to the tree.
-	if hidden := len(m.metaRows()) - (m.metaScroll - m.metaStart) - m.metaWindow(); hidden > 0 {
-		more = fmt.Sprintf("%d more", hidden)
-	}
-	return append(out, frame(boxEdge(f.cornerBottomLeft, f.cornerBottomRight, f.edge, more, width)))
+	// The box's scroll counts go inside its own borders rather than on a row of their own: a note that
+	// arrived and left would change the height of the column, which is what the box is here to stop.
+	return append(out, frame(boxEdge(f.cornerBottomLeft, f.cornerBottomRight, f.edge,
+		"", scrollHint(below, false), width)))
 }
 
 // boxFrame is the changeset box's border set, which is also the box's focus light: single rules while
@@ -1402,18 +1399,23 @@ func (m reviewModel) boxFrame() boxFrame {
 	return frameIdle
 }
 
-// boxEdge is one border of the box, with a label in it where there is one to say. The rule between the
-// corners is what says the line is a border rather than a row.
-func boxEdge(left, right, rule, label string, width int) string {
+// boxEdge is one border of the box: a label in it where there is one to say, at the left, and a scroll
+// count at its right end where the region has rows off the screen. The rule between the two is what says
+// the line is a border rather than a row. The label is dropped before the count -- the count is the thing
+// there is no other way to see.
+func boxEdge(left, right, rule, label, hint string, width int) string {
 	body := ""
 	if label != "" {
 		body = " " + label + " "
 	}
-	fill := width - 2 - lipgloss.Width(body)
+	fill := width - 2 - lipgloss.Width(body) - lipgloss.Width(hint)
 	if fill < 0 {
-		fill, body = 0, ""
+		body, fill = "", width-2-lipgloss.Width(hint)
 	}
-	return left + body + strings.Repeat(rule, fill) + right
+	if fill < 0 {
+		hint, fill = "", width-2
+	}
+	return left + body + strings.Repeat(rule, fill) + hint + right
 }
 
 // boxLine is one row inside the box. The cursor is highlighted only while the box holds the keys: the
@@ -1435,13 +1437,25 @@ func (m reviewModel) boxLine(f boxFrame, text string, cursor bool) string {
 // the box's borders and the pane's divider already use, chosen over styling alone so it survives a
 // terminal that renders no bold. Two horizontal rules rather than a frame, because a frame's two cells
 // each side are columns, and the narrow terminal that needs the region marked most is the one with no
-// columns to give.
-func (m reviewModel) treeSpine() string {
+// columns to give. The count of what the window hides goes at the end of the rule it belongs to: the
+// rule is the region's decoration rather than one of its rows, so the number costs the tree a row of
+// nothing and never sits over the row the cursor is on.
+func (m reviewModel) treeSpine(hint string) string {
 	rule, paint := "\u2500", styleDim.Render
 	if m.focus == focusFiles {
 		rule, paint = "\u2550", styleActive.Render
 	}
-	return paint(strings.Repeat(rule, m.listWidth()))
+	width := m.listWidth()
+	if lipgloss.Width(hint) >= width {
+		hint = ""
+	}
+	body := paint(strings.Repeat(rule, width-lipgloss.Width(hint)))
+	if hint != "" {
+		// The count stays faint while the rule carries the focus light: which region has the keys is the
+		// rule's job, and a bold number would say it twice and say it wrong.
+		body += styleDim.Render(hint)
+	}
+	return body
 }
 
 // listBlock is the list column on its own: the changeset box, the file tree, and the reviewed counter.
@@ -1452,20 +1466,19 @@ func (m reviewModel) listBlock() string {
 	files, section := m.window()
 
 	lines := m.boxLines(section)
+	above, below := m.filesHidden()
 	// The row that used to separate the box from the tree is the tree's own top spine, and the tree
 	// gets a matching one under its last row: a reviewer on a narrow terminal has rows to spend and
-	// no columns to spare, which is the opposite trade to a frame.
-	lines = append(lines, m.treeSpine())
+	// no columns to spare, which is the opposite trade to a frame. Each carries the count of what the
+	// window hides in its own direction, so nothing here is a row that arrives late.
+	lines = append(lines, m.treeSpine(scrollHint(above, true)))
 	if total == 0 {
 		lines = append(lines, styleDim.Render("(no changed files in this span)"))
 	}
 	for _, r := range files {
 		lines = append(lines, m.line(r))
 	}
-	if m.scroll > 0 {
-		lines = append(lines, styleDim.Render(fmt.Sprintf("  (hidden above: %d)", m.scroll)))
-	}
-	lines = append(lines, m.treeSpine(), m.counterLine(reviewed, total))
+	lines = append(lines, m.treeSpine(scrollHint(below, false)), m.counterLine(reviewed, total))
 	for len(lines) < m.listColumnRows() {
 		lines = append(lines, "")
 	}
@@ -2207,24 +2220,36 @@ func (m *reviewModel) move(delta int) {
 	m.clamp()
 }
 
-// activeTop and activeBottom are what gg and G mean: the two ends of the list column, which is the one
-// list the reviewer is holding the keys in even though it is drawn as two windows. `gg` is the box's
-// first row and `G` the tree's last, from whichever half the keys are in, and each takes the keys to the
-// half it names. Where a half has no rows -- an empty span, a changeset with no box -- the other one is
-// the whole column and gets the jump.
+// activeTop and activeBottom are what gg and G mean: the two ends of the region holding the keys. Each
+// half of the list column is its own window with its own height, so the end that matters is the one in
+// the window the reviewer is looking at -- the same reason a page stays inside the window it started in.
+// `gg` is the first row of that region and `G` its last, and neither takes the keys to the other half:
+// `tab`, `f` and the two jumps into the box do that, and a jump that also changed region would land the
+// reviewer at the end of a list they were not reading. Where the region holding the keys has no rows --
+// an empty span, a changeset with no box -- the other one is the whole column and gets the jump.
 func (m *reviewModel) activeTop() {
-	if m.metaStart < len(m.rows) {
+	switch {
+	case m.metaHasFocus() && m.metaStart < len(m.rows):
+		m.metaCursor = m.metaStart
+	case m.focus == focusFiles && m.metaStart > 0:
+		m.cursor = 0
+	case m.metaStart < len(m.rows):
 		m.focus, m.metaCursor = focusMeta, m.metaStart
-	} else {
+	default:
 		m.focus, m.cursor = focusFiles, 0
 	}
 	m.clamp()
 }
 
 func (m *reviewModel) activeBottom() {
-	if m.metaStart > 0 {
+	switch {
+	case m.metaHasFocus() && m.metaStart < len(m.rows):
+		m.metaCursor = len(m.rows) - 1
+	case m.focus == focusFiles && m.metaStart > 0:
+		m.cursor = m.metaStart - 1
+	case m.metaStart > 0:
 		m.focus, m.cursor = focusFiles, m.metaStart-1
-	} else {
+	default:
 		m.focus, m.metaCursor = focusMeta, len(m.rows)-1
 	}
 	m.clamp()
@@ -2455,6 +2480,46 @@ func visibleRows(start, end, scroll, window int) []int {
 		rows = append(rows, i)
 	}
 	return rows
+}
+
+// filesHidden and metaHidden count the rows each region has off its own screen, above and below. They
+// are read off the same window the rows are drawn from, so the number a reviewer is told and the rows
+// they are not shown cannot disagree.
+func (m reviewModel) filesHidden() (above, below int) {
+	return hiddenAround(0, m.metaStart, m.scroll, m.filesWindow())
+}
+
+func (m reviewModel) metaHidden() (above, below int) {
+	return hiddenAround(m.metaStart, len(m.rows), m.metaScroll, m.metaWindow())
+}
+
+func hiddenAround(start, end, scroll, window int) (above, below int) {
+	if start >= end {
+		return 0, 0
+	}
+	top := max(start, scroll)
+	if top > start {
+		above = top - start
+	}
+	if rest := end - (top + window); rest > 0 {
+		below = rest
+	}
+	return above, below
+}
+
+// scrollHint is the count of what a window hides, for the end of the region's own rule: an up arrow with
+// what is above the window, a down arrow with what is below it. It is padded with whitespace on both
+// sides so it reads as a note pinned to the rule rather than as the last cell of whatever sits beside
+// it, and it is empty when there is nothing that way to count.
+func scrollHint(hidden int, above bool) string {
+	if hidden <= 0 {
+		return ""
+	}
+	arrow := "\u2193" // down: what is below the window
+	if above {
+		arrow = "\u2191" // up: what is above it
+	}
+	return fmt.Sprintf("  %s %d ", arrow, hidden)
 }
 
 // The preview pane is a wide-terminal luxury, so it has an entry condition rather than a squeeze:
@@ -3455,15 +3520,12 @@ func (m reviewModel) line(r renderedRow) string {
 // line, the blank under them, the blank above the counter, the counter, the blank under it,
 // and then the rule over the band and the band itself -- bandRows() tall, whatever the band is
 // showing, which is why neither a message nor the keys moving between regions can reflow the list.
-// The "hidden above" note while scrolled is the one row that can still arrive late. The changeset
+// Nothing a region draws is counted here: both of them keep what they have to say inside their own
+// borders and rules, so no note can arrive late and take a row with it. The changeset
 // section is part of the row list, so it is not here — only the counter that separates the two
 // blocks is.
 func (m reviewModel) chromeRows() int {
-	chrome := 7 + m.bandRows()
-	if m.scroll > 0 {
-		chrome++
-	}
-	return chrome
+	return 7 + m.bandRows()
 }
 
 // setStatus reports what the last keystroke did. A failure waits for the reviewer, since the next
