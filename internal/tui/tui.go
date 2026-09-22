@@ -3255,11 +3255,22 @@ func (m reviewModel) handleSearchKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searching, m.searchInput = false, ""
 		return m, nil
 
+	case key.Type == tea.KeyCtrlU:
+		// The line is killed rather than the pane scrolled, because the pane's keys are paused here and a
+		// term typed wrong is the reason to reach for it.
+		m.searchInput = ""
+		return m, nil
+
 	case key.Type == tea.KeyBackspace, key.Type == tea.KeyCtrlH:
-		runes := []rune(m.searchInput)
-		if len(runes) > 0 {
-			m.searchInput = string(runes[:len(runes)-1])
+		// Nothing left to delete means the reviewer is done with the field -- which is what `esc` means,
+		// and the same two keys do it in a shell's prompt. Stopping at the empty field instead would mean
+		// reaching for a different key once the term is gone than while it is being written.
+		if m.searchInput == "" {
+			m.searching, m.searchInput = false, ""
+			return m, nil
 		}
+		runes := []rune(m.searchInput)
+		m.searchInput = string(runes[:len(runes)-1])
 		return m, nil
 
 	case key.Type == tea.KeySpace:
@@ -3300,8 +3311,13 @@ func (m reviewModel) previewLines() []string {
 	case m.searching:
 		// The field goes on the note's row: it is the pane's own bottom line, the line `less` puts its
 		// prompt on, and the layout has already counted a row there, so the field can arrive and leave
-		// without moving anything above it. The caret is the block the thread prompt uses, for the same
-		// reason it does: a field that looks like prose gets typed into by accident.
+		// without moving anything above it. A file shorter than the pane has to be padded up to that row
+		// first: a prompt that floats under the last line of a short file is a prompt in the middle of the
+		// screen, and the eye looks for it at the bottom. The caret is the block the thread prompt uses,
+		// for the same reason it does: a field that looks like prose gets typed into by accident.
+		for len(out) < body+1 {
+			out = append(out, "")
+		}
 		out = append(out, clip("/ "+m.searchInput+threadPromptCursor, width))
 	case end < len(rows) || offset > 0:
 		// The keys the note may point at. In the pane ctrl-b/ctrl-f page it and enter opens the

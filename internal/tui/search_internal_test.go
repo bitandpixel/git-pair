@@ -342,6 +342,90 @@ func TestTheFieldIsTheOnlyThingThePaneReadsWhileItIsOpen(t *testing.T) {
 
 // --- reading the pane ---------------------------------------------------------------------------
 
+// TestTheFieldSitsAtTheBottomOfThePane. The field belongs on the pane's bottom row, which it keeps even for
+// a file short enough to fit with room to spare: a prompt floating under the last line of a short file is a
+// prompt in the middle of the screen, and the eye looks for it at the bottom.
+func TestTheFieldSitsAtTheBottomOfThePane(t *testing.T) {
+	m := focusPane(t, focusFixture(t, 3)) // three lines of diff: the file does not reach the bottom
+	if rows := m.previewLines(); len(rows) >= m.previewBodyRows()+1 {
+		t.Fatalf("the fixture's file is not short: %d rows in a %d-row body", len(rows)-1, m.previewBodyRows())
+	}
+
+	m = typeSearch(t, m, "line")
+	rows := m.previewLines()
+	if want := m.previewBodyRows() + 2; len(rows) != want {
+		t.Errorf("the pane is %d rows with the field open, want %d: the title, the body, the field's row",
+			len(rows), want)
+	}
+	if last := rows[len(rows)-1]; !strings.Contains(last, "/ line"+threadPromptCursor) {
+		t.Errorf("the field is not the pane's last row: %q", last)
+	}
+}
+
+// TestBackspaceAtAnEmptyFieldClosesIt: once the term is gone, `esc`'s job is the only one the key has left,
+// and a shell's prompt does the same. Reaching for a different key to finish aborting than to start it is
+// the kind of thing a reviewer has to remember.
+func TestBackspaceAtAnEmptyFieldClosesIt(t *testing.T) {
+	m := searchModel(t)
+	m = paneKey(t, m, runeKey('/'))
+	m = paneKey(t, m, keyMsg(tea.KeyBackspace))
+	if m.searching {
+		t.Error("backspace on an empty field left it open")
+	}
+	if !m.previewHasFocus() {
+		t.Error("the field closed and took the pane's keys with it")
+	}
+
+	// With something in the field it deletes a letter, and a committed term is kept.
+	m = typeSearch(t, m, "line 007")
+	m = paneKey(t, m, keyMsg(tea.KeyEnter))
+	m = paneKey(t, m, runeKey('/')) // opens prefilled with the term
+	m = paneKey(t, m, keyMsg(tea.KeyBackspace))
+	if !m.searching || m.searchInput != "line 00" {
+		t.Errorf("backspace left the field %q, searching %v, want one letter deleted", m.searchInput, m.searching)
+	}
+	for m.searchInput != "" {
+		m = paneKey(t, m, keyMsg(tea.KeyBackspace))
+	}
+	if !m.searching {
+		t.Error("deleting the last letter closed the field, which is backspace at an empty one's job")
+	}
+	m = paneKey(t, m, keyMsg(tea.KeyBackspace))
+	if m.searching {
+		t.Error("backspace at an empty field left it open")
+	}
+	if m.previewSearch != "line 007" {
+		t.Errorf("aborting a search dropped the committed term: %q", m.previewSearch)
+	}
+	if m.currentMatch() < 0 {
+		t.Error("aborting a search lost the match the reviewer was standing on")
+	}
+}
+
+// TestCtrlUKillsTheField: ctrl-u is the kill-line key wherever a term is typed, and in the pane it cannot
+// mean the half page up, because the pane's keys are paused while the field is open.
+func TestCtrlUKillsTheField(t *testing.T) {
+	m := searchModel(t)
+	m = typeSearch(t, m, "line 0")
+	m = paneKey(t, m, keyMsg(tea.KeyCtrlU))
+
+	if m.searchInput != "" {
+		t.Errorf("ctrl-u left %q in the field", m.searchInput)
+	}
+	if !m.searching {
+		t.Error("ctrl-u closed the field, which is backspace's and esc's job")
+	}
+	if m.previewOffset != 0 {
+		t.Errorf("ctrl-u scrolled the pane to %d", m.previewOffset)
+	}
+	for _, row := range m.previewLines() {
+		if strings.Contains(row, sgrUnderline) {
+			t.Errorf("a killed term is still marking the file: %q", row)
+			break
+		}
+	}
+}
+
 // TestTheHalfPageKeysKeepTheirContext is what `d` and `u` are for in `less`, and why the pane has them
 // beside the ctrl pairs it already had: consecutive presses keep a line of what was just read on screen.
 func TestTheHalfPageKeysKeepTheirContext(t *testing.T) {

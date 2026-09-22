@@ -1112,7 +1112,9 @@ broke in half is still found — and marked on both halves. The bottom row count
 is scrolled, which is what says whether `n` has anywhere left to go. `Enter` on an empty term clears the
 marks, and `Esc` closes the field and keeps the term that was already committed, because a mistyped
 search should not cost you the match you were reading; the second `Esc` gives the keys back, as it did
-before the field existed. While the field is open it owns the keys — `q` types a `q` rather than quitting,
+before the field existed. `Backspace` at an empty field closes it and `ctrl-u` kills what has been typed,
+as they do in a shell's prompt, and the field stays on the pane's bottom row whatever the length of the
+file — a short one is padded rather than leaving the prompt floating under its last line. While the field is open it owns the keys — `q` types a `q` rather than quitting,
 and the pane's scrolling keys wait — which is the same promise the thread title makes. The term outlives the
 file it was typed in: move to another row and the same term marks that one too, which is how a name you are
 chasing across a changeset gets chased; the row it had landed on does not travel, because it means nothing
