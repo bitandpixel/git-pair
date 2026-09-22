@@ -2147,7 +2147,10 @@ region that had them — tree or box — and leaves the pane where it was; `tab`
 half of the column had them, because a region you can only leave by backing out of is not a stop on a ring. `p` pressed where the diff
 already holds the keys does nothing, rather than meaning the opposite of what it means in the list, and
 `q` quits from the pane as it quits from everywhere else — the pane is one `p` away and the marks are on
-disk, so nothing is at stake in the difference. While the pane holds the keys nothing that changes the review can happen —
+disk, so nothing is at stake in the difference. Over the whole-screen overlay `q` gives the list back the
+way `esc` and `enter` do, because that screen carries nothing but the diff: the list the key would leave is
+not on it, and on the narrow terminal where the overlay is all the diff can be a `q` that quit would end the
+session for a reviewer who wanted the list back. While the pane holds the keys nothing that changes the review can happen —
 marking, editing, threading and
 submitting are keys that do not occur, which is the whole-screen preview's promise extended to a
 column that never hid its list. The two jumps into the box — `a` and `t` — are not among them: they name a
@@ -2264,7 +2267,8 @@ a, t     put the cursor and the keys on ABOUT.md or the Threads heading, leaving
 Enter    open the difftool on the file the pane is showing
 Esc      hand the keys back to the list column, leaving the pane where it is in the file
 Tab, f   move the keys back to the list column, as they do from anywhere in it
-q        quit — from here as from anywhere else
+q        in the pane, quit — from here as from anywhere else; over the whole-screen overlay, give the
+         list back, as esc and enter do
 
 a        put the cursor on ABOUT.md (e on that row opens it in the editor)
 t        put the cursor on the Threads heading (Enter collapses or expands the list)
@@ -2277,7 +2281,8 @@ V        open the span picker: pending base and head, applied together on enter
 r        re-pin a ref endpoint that has moved (offered by the drift banner, which is only on
          screen when there is something to re-pin)
 s        submit review (block / feedback / approve)
-q        quit, from whichever region holds the keys
+q        quit, from whichever region holds the keys — except over the whole-screen preview, where it
+         gives the list back
 ```
 
 Submitting review may either occur within the TUI or through the CLI.

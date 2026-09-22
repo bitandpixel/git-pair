@@ -1238,7 +1238,8 @@ hands the keys back to the region that had them — the tree, or the box if the 
 and leaves the pane where it was, so coming back returns to the same lines. `p` does not do that: pressed
 where the diff already holds the keys it is the no-op its name promises, because a key that meant "the
 diff" in one region and "not the diff" in the one it just moved you to has to be remembered rather than
-read off the screen. `q` quits, as it does from every other part of the screen. `tab`, `shift-tab` and `f`
+read off the screen. `q` quits, as it does from every other part of the screen — the overlay below is
+the one place it does not, and the reason is that the list is still drawn here. `tab`, `shift-tab` and `f`
 leave the pane without quitting: the diff is one of the two stops the keys have, and a stop you can only
 leave by backing out of it is not a stop. What `p` no longer does is hide the pane — in a
 terminal with room for two columns the diff is on screen, and the key that leaves it alone is `Esc`. While the diff holds the keys nothing
@@ -1285,12 +1286,13 @@ the keyboard, and the list takes the keys back. Same git bytes, same numbers, sa
 width, with the file and the span it is measured against on the line above it (the span is named in
 the list otherwise, and the list is gone). It scrolls with `j`/`k`, `d`/`u` or `ctrl-d`/`ctrl-u` for half a page,
 `ctrl-f`/`ctrl-b` for a page, `gg` for the top and `G` for the bottom, and `/` searches it the same way the
-pane does. `Esc` or `Enter` gives the list
+pane does. `Esc`, `Enter` or `q` gives the list
 back, and so do the keys that move the keys — `tab`, `shift-tab` and `f` — since the half of the list one of
 them names is only drawn once the diff stops covering the screen. The diff is a stop on the ring here as much as anywhere, which is what lets `tab` reach it: a narrow
 terminal is the one case where the ring would otherwise have a hole where the pane cannot be. Keys mean
-what this screen's shortcut bar says they mean while it is up — including `q`, which quits here too, and
-`ctrl-d`, which pages rather than quits; nothing else reaches through, because a reviewer who cannot see
+what this screen's shortcut bar says they mean while it is up — including `q`, which gives the list back
+here as `esc` and `enter` do rather than quitting as it does in the pane, and `ctrl-d`, which pages rather
+than quits; nothing else reaches through, because a reviewer who cannot see
 the list must not be able to mark a file in it. Closing keeps the
 place however you close it: `p`, `Esc`, `p` returns to the same lines, and so does `f`, `p`.
 Reading a historical span this way works the same — reading is what a read-only span is for. Under 40

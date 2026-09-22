@@ -1663,20 +1663,20 @@ func (m reviewModel) helpText() string {
 	case modeSpan:
 		return helpSpan(m.pick.list != nil, m.pick.nav)
 	case modePreview:
-		// The overlay's own keys. `p` is not among them: the diff already has the screen and the keys,
-		// and `q` means what it means everywhere else. `esc` (or `enter`) is the way back to the list,
-		// and the keys that move the keys take the screen down on their way to the region they name.
+		// The overlay's own keys. `p` is not among them: the diff already has the screen and the keys.
+		// `esc`, `enter` and `q` are the way back to the list, and the keys that move the keys take the
+		// screen down on their way to the region they name.
 		return m.overlayHelp()
 	}
 	return m.helpTextFor(m.focus)
 }
 
-// overlayHelp is the whole-screen diff's own bar: the keys the pane reads, with the two exits the
-// overlay has -- `esc` and `enter` both give the screen back -- and the keys that move the keys. It is
-// part of the row-area budget wherever the overlay is the only form the diff can take, so that no row of
-// it is ever clipped by a bar counted from the list.
+// overlayHelp is the whole-screen diff's own bar: the keys the pane reads, with the three exits the
+// overlay has -- `esc`, `enter` and `q` all give the screen back -- and the keys that move the keys. It
+// is part of the row-area budget wherever the overlay is the only form the diff can take, so that no row
+// of it is ever clipped by a bar counted from the list.
 func (m reviewModel) overlayHelp() string {
-	return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  esc enter back  f tab list  q quit"
+	return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  esc enter q back  f tab list"
 }
 
 // helpTextFor is the bar of one region. It names every key that region reads and none that it does not,
@@ -2832,8 +2832,9 @@ func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 }
 
 // handleDiffKey is everything the diff reads, in either layout: it scrolls with the vim primitives,
-// `esc` gives the keys back, `tab` and `f` move them to the list column, and `q` quits the session as it
-// does everywhere else. For the overlay, `esc` closes the screen as well as returning the keys.
+// `esc` gives the keys back, `tab` and `f` move them to the list column, and `q` quits the session from
+// the pane as it does everywhere else. Over the overlay the screen has nothing else on it, so there `esc`,
+// `enter` and `q` all close it and hand the list back.
 //
 // Nothing else reaches through. That is what a mode buys over a flag, and a focus buys over a pane that
 // is merely drawn: a reviewer must not be able to mark a file they are not looking at, submit a review
@@ -2854,10 +2855,10 @@ func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 // keys, and a cursor that moves under a diff the reviewer is reading is the invisible action the focus is
 // there to prevent; they belong to the list column, and the bar here does not offer them.
 //
-// Keys do mean different things here than in the list -- q closes rather than quits, enter opens the
-// file being read rather than the one under the cursor, ctrl-d scrolls rather than quits -- and that
-// is the point: the shortcut bar names each of these keys while this screen is up, so no meaning
-// travels with a keystroke alone.
+// Keys do mean different things here than in the list -- q closes the overlay rather than quitting over
+// it, enter opens the file being read rather than the one under the cursor, ctrl-d scrolls rather than
+// quits -- and that is the point: the shortcut bar names each of these keys while this screen is up, so
+// no meaning travels with a keystroke alone.
 // jumpFromPreview is `a` or `t` taken while the diff holds the keys: the keys go to the row the key names,
 // which leaves the diff -- the same way `tab` and `f` leave it -- and the pane follows them on to ABOUT.md or
 // the threads. A jump that landed on a row the reviewer cannot see would be the invisible action the focus
@@ -2963,10 +2964,15 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focusOn(focusFiles)
 		return m, nil
 	case key.Type == tea.KeyRunes && firstRune(key) == 'q':
-		// `q` quits here as it does everywhere else. It used to close the preview, which made the one
-		// key with a settled meaning across the whole program -- leave -- mean something else in the
-		// one column a reviewer is most likely to be looking at. Nothing is lost by it: the pane is
-		// `p` away, the marks are on disk, and the screen that closes the overlay is `esc`.
+		// Over the overlay `q` gives the list back, the way `esc` and `enter` do. The key is read
+		// differently in the two layouts because the two layouts show different things: the overlay is
+		// the only thing on the screen, so a `q` that quits ends the session for a reviewer who pressed
+		// it to get the list back -- on the narrow terminal where the overlay is all the diff can be.
+		// In the pane the list is still drawn, `q` means leave as it means it everywhere else, and the
+		// marks are on disk either way.
+		if overlay {
+			return m.closePreview()
+		}
 		m.quitting = true
 		return m, tea.Quit
 	case key.Type == tea.KeyEnter:
