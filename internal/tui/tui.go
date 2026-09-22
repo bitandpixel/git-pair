@@ -1693,13 +1693,17 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 		// column -- `esc` gives the keys back, `f` names the tree, `tab` walks the ring -- so they are
 		// one group on the bar rather than three claims on it. `/ find` is named with the two keys that
 		// walk what it finds: a search nobody can see the keys for is a feature nobody finds.
+		// The two jumps into the box are named here as they are in both bars of the list column: the box
+		// is on screen beside the diff, and the row they name is the reason to leave it.
+		jumps := "a about  t threads  "
 		open := "enter diff"
 		if m.previewKind != previewDiff {
 			// What is on show is a document, and `enter` opens it in the editor rather than in the
 			// difftool -- the bar says "open" because that is the truth of it.
 			open = "enter open"
 		}
-		return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " + open + "  esc f tab list  q quit"
+		return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " +
+			jumps + open + "  esc f tab list  q quit"
 	}
 	// The jumps name a row of the box from either half of the column and take the keys with them. `T`
 	// writes, so it is absent from every bar of a span that cannot.
@@ -2848,6 +2852,20 @@ func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 // file being read rather than the one under the cursor, ctrl-d scrolls rather than quits -- and that
 // is the point: the shortcut bar names each of these keys while this screen is up, so no meaning
 // travels with a keystroke alone.
+// jumpFromPreview is `a` or `t` taken while the diff holds the keys: the keys go to the row the key names,
+// which leaves the diff -- the same way `tab` and `f` leave it -- and the pane follows them on to ABOUT.md or
+// the threads. A jump that landed on a row the reviewer cannot see would be the invisible action the focus
+// exists to prevent; taking the keys is what makes it visible, and reading the document is usually why the
+// reviewer left the diff in the first place.
+func (m reviewModel) jumpFromPreview(kind rowKind, absent string) (tea.Model, tea.Cmd) {
+	if !m.gotoRow(kind) {
+		m.setRefusal(absent)
+		return m, nil
+	}
+	m.previewG = false
+	return m, nil
+}
+
 // openPreview opens what the pane is showing with the key the list would use on it: a diff opens in the
 // difftool, and a document does whatever its own row does -- the editor, or the difftool when the span
 // changed it, and a refusal over history where only the diff is legitimate. Those rules belong to the row, so
@@ -2894,6 +2912,20 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// otherwise.
 	if m.searching {
 		return m.handleSearchKey(key)
+	}
+	// The two jumps into the box work from the diff as they do from either half of the list column, keys
+	// and all. They used to be keys that did not occur here, on the grounds that a cursor moving under a
+	// diff you are reading is an invisible action -- but the answer to that is not to refuse the jump, it
+	// is to go where the jump points, which is what taking the keys along does. The overlay is the
+	// exception, and the rule is the box: these two work wherever it is drawn, and the overlay is the one
+	// screen where it is not, so a cursor moved there would be one you could not see move.
+	if m.mode != modePreview {
+		switch {
+		case key.Type == tea.KeyRunes && firstRune(key) == 'a':
+			return m.jumpFromPreview(rowAbout, "no ABOUT.md row in this changeset's box")
+		case key.Type == tea.KeyRunes && firstRune(key) == 't':
+			return m.jumpFromPreview(rowThreadsHead, "no thread heading in this changeset's box")
+		}
 	}
 	// `g` waits for its partner, as it does in the list. The guard on previewG is what makes the
 	// pair possible at all: without it the second `g` would be read as another prefix and the jump

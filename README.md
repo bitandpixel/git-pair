@@ -1090,9 +1090,12 @@ leave by backing out of it is not a stop. What `p` no longer does is hide the pa
 terminal with room for two columns the diff is on screen, and the key that leaves it alone is `Esc`. While the diff holds the keys nothing
 that changes the review happens: `Space`, `e`, `T`, `s` and the rest are keys that do not occur, the
 same promise the whole-screen preview makes, with the difference that here the list is still on the
-screen and the row you are not marking is one you can see. The two jumps into the box — `a` and `t` — do not
-occur here either: they move a cursor along with the keys, and a cursor that moves under a diff you are
-reading is the invisible action the focus exists to prevent. The frame says which column has the keys
+screen and the row you are not marking is one you can see. The two jumps into the box — `a` and `t` — work
+here and take the keys with them, the way `tab` and `f` do: the box is drawn beside the diff you are
+reading, so the cursor they move is one you can see move, and the pane follows the jump on to ABOUT.md or the
+threads, which is usually why you left the diff. The overlay is the exception and the rule is the box — the
+overlay is the one screen where the box is not drawn — so under it those two are keys that do not occur, and
+the way to the box is the key that brings the list back. The frame says which column has the keys
 three ways: the divider becomes a double rule (`║` instead of `│`), the pane's file line stops being a
 caption and becomes a title, and the list's cursor loses its reverse video so the screen never carries
 two cursors. The first two are glyphs and text, so they survive a terminal that renders no styling at

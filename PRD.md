@@ -1739,7 +1739,11 @@ already holds the keys does nothing, rather than meaning the opposite of what it
 disk, so nothing is at stake in the difference. While the pane holds the keys nothing that changes the review can happen —
 marking, editing, threading and
 submitting are keys that do not occur, which is the whole-screen preview's promise extended to a
-column that never hid its list. The frame says which column has the keys by changing what is drawn
+column that never hid its list. The two jumps into the box — `a` and `t` — are not among them: they name a
+row, take the keys to it and leave the diff, which is what makes the cursor they move a visible one, and the
+pane follows them on to the document the row points at. Under the whole-screen overlay they are keys that do
+not occur, because the box is not drawn there to receive them; the box is reached there by the keys that
+bring the list back. The frame says which column has the keys by changing what is drawn
 rather than only how it is styled: the divider becomes a double rule, the pane's file line becomes a
 title, and the shortcut bar becomes the pane's own, naming every key it reads and none it does not.
 A terminal resized below the pane's floor takes the column away and gives the keys back to the region
@@ -1843,6 +1847,9 @@ j/k      scroll the diff a row; d/u or ctrl-d/ctrl-u half a page, ctrl-f/ctrl-b 
 /        search the file on show: the term marks its matches as it is typed, enter closes the
          field and jumps to the first match at or below the screen, n and N walk the matches
          (wrapping), and esc closes the field keeping the term already committed
+a, t     put the cursor and the keys on ABOUT.md or the Threads heading, leaving the diff;
+         the pane follows them on to the document (not under the overlay, where the box
+         is not drawn)
 Enter    open the difftool on the file the pane is showing
 Esc      hand the keys back to the list column, leaving the pane where it is in the file
 Tab, f   move the keys back to the list column, as they do from anywhere in it

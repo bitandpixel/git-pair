@@ -173,6 +173,69 @@ func TestTheListDoesNotMoveWhileThePaneHasTheKeys(t *testing.T) {
 	}
 }
 
+// The two jumps into the box work from the diff, keys and all: they name a row, take the keys to it, and the
+// pane follows them on to the document -- which is the way to read ABOUT.md without leaving the screen. A
+// jump is not a reason to stay in the diff, and it is not a reason to move a cursor out of sight either, so
+// it does both things the list column's own keys do.
+func TestTheJumpsIntoTheBoxLeaveThePaneWithTheKeys(t *testing.T) {
+	m := focusPane(t, docModel(t))
+	m = paneKey(t, m, runeKey('a'))
+
+	if m.previewHasFocus() {
+		t.Error("`a` left the keys with the diff, so the cursor it moved is one you cannot see move")
+	}
+	if kind, _ := activeKind(t, m); kind != rowAbout {
+		t.Errorf("`a` landed on a %v row, want ABOUT.md", kind)
+	}
+	if view := ansi.Strip(strings.Join(m.previewLines(), "\n")); !strings.Contains(view, "The lock moves into the store") {
+		t.Errorf("the pane did not follow the jump on to the document:\n%s", view)
+	}
+
+	m = paneKey(t, m, runeKey('t'))
+	if kind, _ := activeKind(t, m); kind != rowThreadsHead {
+		t.Errorf("`t` landed on a %v row, want the Threads heading", kind)
+	}
+	if view := ansi.Strip(strings.Join(m.previewLines(), "\n")); !strings.Contains(view, "── locking.md") {
+		t.Errorf("`t` did not bring the threads into the pane:\n%s", view)
+	}
+}
+
+// Where the row a jump names is not in the box, the pane says so and stays put -- the same answer the list
+// gives, and better than a key that silently does nothing beside a diff the reviewer is reading.
+func TestAJumpFromThePaneToARowThatIsNotThereSaysSo(t *testing.T) {
+	m := focusPane(t, docModel(t))
+	at := indexOf(t, m, rowAbout)
+	m.rows = append(m.rows[:at], m.rows[at+1:]...)
+	m.metaStart--
+	m.clamp()
+
+	m = paneKey(t, m, runeKey('a'))
+	if !strings.Contains(m.View(), "no ABOUT.md row") {
+		t.Errorf("`a` with no ABOUT.md row left the pane with nothing to say:\n%s", m.View())
+	}
+	if !m.previewHasFocus() {
+		t.Error("a refused jump took the keys out of the diff anyway")
+	}
+}
+
+// The overlay is the exception, and the rule is the box: the jumps work wherever the box is drawn, because a
+// cursor moving in a list that is off screen is the invisible action the focus exists to prevent. Under the
+// overlay the way to the box is the key that brings the list back.
+func TestTheJumpsWaitForTheBoxToBeOnScreen(t *testing.T) {
+	m := openOverlay(t, overlayModel(t, 20))
+	before := m.metaCursor
+
+	for _, r := range []rune{'a', 't'} {
+		m = paneKey(t, m, runeKey(r))
+		if m.mode != modePreview {
+			t.Fatalf("`%c` took the overlay down to mode %v", r, m.mode)
+		}
+		if m.metaCursor != before {
+			t.Errorf("`%c` moved the box's cursor under the overlay, where nobody can see it", r)
+		}
+	}
+}
+
 func TestNothingThatChangesTheReviewHappensWhileThePaneHasTheKeys(t *testing.T) {
 	m := focusFixture(t, 40)
 	m = focusPane(t, m)
@@ -181,10 +244,11 @@ func TestNothingThatChangesTheReviewHappensWhileThePaneHasTheKeys(t *testing.T) 
 	// `V` is on the list's bar and opens a screen of its own, so it is the read-shaped key most
 	// likely to be pressed here by mistake. The keys that move the keys are not in this list: tab,
 	// shift-tab and f do leave the pane, on purpose, and TestTabMovesTheKeysOutOfThePane is
-	// where that is pinned. The two jumps into the box are here, because a cursor that moved under a
-	// diff the reviewer is reading is the thing the focus is there to prevent.
-	for _, k := range []tea.KeyMsg{keyMsg(tea.KeySpace), runeKey('s'), runeKey('t'), runeKey('T'),
-		runeKey('e'), runeKey('a'), runeKey('c'), runeKey('V')} {
+	// where that is pinned -- and neither are `a` and `t`, which leave it the same way, keys and all,
+	// because a jump whose cursor you cannot see is the thing the focus exists to prevent.
+	// TestTheJumpsIntoTheBoxLeaveThePaneWithTheKeys is where those two are pinned.
+	for _, k := range []tea.KeyMsg{keyMsg(tea.KeySpace), runeKey('s'), runeKey('T'),
+		runeKey('e'), runeKey('c'), runeKey('V')} {
 		m = paneKey(t, m, k)
 	}
 
