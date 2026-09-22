@@ -652,8 +652,8 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
 
 | ID | Question | Needed before |
 | --- | --- | --- |
-| S1 | Does the first-parent transition rule hold when one merge lands several changesets at once, and when a child is landed before its parent? | M3 |
-| S2 | Does folding integration refs into the existing `List` pass really cost zero git invocations in `queue`? | M4 |
+| Done | Does the first-parent transition rule hold when one merge lands several changesets at once, and when a child is landed before its parent? Yes for the merge — one landing commit adds two directories and each is recorded from its own source (`integration_verify_test.go`); yes for the child, which records against its own base and is told where its parent went when the parent lands after (§21). | M3 |
+| Done | Does folding integration refs into the existing `List` pass really cost zero git invocations in `queue`? Yes — the namespace is read once per run and `TestReviewQueueCostDoesNotGrowWithUnrecordedLandings` pins it. | M4 |
 | Done | Does the transition rule identify the landing commit for `--no-ff` merges and squashes? Yes, measured — `research/2026-09-21-landing-transition.md`. | — |
 
 ## Risks
