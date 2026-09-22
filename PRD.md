@@ -2042,7 +2042,7 @@ Example:
 
 ▾ ◐ src/booking/  2/3
   ▾ ✓ concurrency/
-      ✓ lock_test.ts
+      ✓ lock_test.ts +
   ✓ fixtures.ts
   ○ main.ts
 
@@ -2113,6 +2113,14 @@ way it does for the thread heading — while `c` folds the whole tree and opens 
 a changeset of a hundred files is read for its shape before it is read for its detail. Folding moves
 the cursor onto the directory when it was hiding the row the cursor was on, so no fold can leave the
 cursor somewhere the reviewer did not move it.
+
+A file row carries one character after its name for what the span did to that file. git's own status answers
+it: `+` for a file the span created, `-` for one it deleted, `~` for one it moved. No sign means the span only
+changed the file. That is what a span usually does, so a sign marks the exception a reviewer came to find.
+
+The character is dim, and it sits after the name the way a directory's count sits after its name. It is a fact
+about the file rather than part of its name. The move is git's rename detection, so a repository with
+`diff.renames` off gets `-` and `+` for the pair git called two files.
 
 A directory's mark is its subtree's: `✓` when every file under it is reviewed, `○` when none is, and
 between the two the count of what is left (`◐ 2/3`), because a tick there would be a claim about
@@ -2212,6 +2220,16 @@ with the rules the row itself would apply: the difftool for a diff, the editor f
 own refusal where history makes the editor the wrong tool. Over a historical span the document is still read
 from the working tree — it is the file the editor would open — so the header says `working copy` rather than
 letting a reviewer read history that is not there.
+
+Two file rows read as the file rather than as a patch: one the span created, one it moved unchanged. A new
+file's patch is its own text with a `+` on every line. An unchanged move's patch is two lines about a path.
+Every other file row keeps its patch, because a rename with edits has edits to show. A deletion is the only
+place the removed text still is, so its row keeps the patch too.
+
+The text is the file at the span's head, not the working copy, so a reviewer's own edits cannot read as
+reviewed work. The header says `you edited it` when the reviewer edits that file afterwards. A move names the
+path it came from, which the tree's `~` has no room for. `Enter` in the pane opens it in the difftool, because a
+file read as text is still a file.
 
 A span whose head is a commit rather than the working tree is a look at history, and the screen
 says so where the reviewer is already looking: the counter's slot carries `HISTORICAL · READ ONLY`,

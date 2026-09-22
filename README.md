@@ -1091,7 +1091,7 @@ top, the changed files and their marks below it, and the reviewed counter under 
 ▾ ○ src/
     ▾ ○ ui/
         ○ picker.ts
-    ○ a.ts
+    ○ a.ts +
 ═══════════════════════════════════════
 0 / 2 reviewed
 ────────────────────────────────────────
@@ -1133,9 +1133,10 @@ are going. A half with no rows has no ends of its own, and there the jump goes t
 `ctrl-f` and `ctrl-b` and nothing else; `ctrl-c` and `q` are what quit.) The shortcut bar is the bar of the
 half that holds the keys, which is how a key belonging to the other half is a key that is not offered rather
 than a key that quietly does nothing.
-directory holding nothing but one directory is folded into that row (`src/` above holds `a.ts` and
-`ui/`, so it gets its own row; a chain of single-child directories would be one row and print
-`docs/plans/active/`), and every row prints only the name the rows above it have not already said.
+
+Each file sits under its directory, and a row prints only the name the rows above it have not said.
+A directory that holds nothing but one directory is folded into that row. `src/` above holds `a.ts` and `ui/`,
+so it gets a row of its own. A chain of single-child directories becomes one row printed `docs/plans/active/`.
 Each level is indented four cells, so a child's name starts two cells right of the directory it is under.
 That is what the four cells are for: a directory row spends two on its fold arrow and two on its mark
 gutter before its name, and a file row only the gutter, so an indent of two a level puts every child's
@@ -1145,6 +1146,14 @@ both, the way it does for the thread heading — and `c` folds the whole tree an
 which is how a changeset of a hundred files gets read for shape before it gets read for detail.
 Folding a directory that was hiding the cursor leaves the cursor on the directory, not on whatever
 row its old index now points at.
+
+One character goes after a file's name for what the span did to that file. git's own status answers it: `+`
+for a file the span created, `-` for one it deleted, `~` for one it moved. No sign means the span only changed
+the file. That is what a span usually does, so a sign marks the exception a reviewer came to find.
+
+The character is dim, and it sits after the name the way a directory's count sits after its name. It is a fact
+about the file rather than part of its name. The move is git's rename detection, so a repository with
+`diff.renames` off gets `-` and `+` for the pair git called two files.
 A directory's mark is its subtree's: `✓` when every file under it is reviewed, `○` when none is,
 and between the two the count of what is left (`▸ ◐ src/ 2/7`) — a tick there would be a claim about
 files nobody opened. `Enter` does whatever the row under the cursor is for: the difftool for a
@@ -1240,6 +1249,15 @@ added, which is true and says nothing about what the document says, and the pane
 for reading text. The Threads heading is the whole conversation at once: every thread in the order the box
 lists them, each named above its own text, which is what the threads are when the list is collapsed. The
 header counts what is on show — a diff's `+N −M`, a document's lines, the heading's threads.
+
+Two file rows come into the pane as the file, not as a patch: one the span created, one it moved unchanged.
+A new file's patch is its own text with a `+` on every line. An unchanged move's patch is two lines about a path.
+Every other file row keeps its patch, because a rename with edits has edits to show.
+
+A deletion is the only place the removed text still is, so its row keeps the patch too. The text is the file
+at the span's head, not the working copy, so a reviewer's own edits cannot read as reviewed work. The header
+says `you edited it` when the reviewer edits that file afterwards. A move names the path it came from, which
+the tree's `~` has no room for. `Enter` there still opens the difftool, because the row is still a file.
 
 Over a historical span the text is still the file on disk, because that is the file `e` would open, so the
 header adds `working copy` rather than letting someone read history that is not there; the editor stays

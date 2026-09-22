@@ -726,7 +726,7 @@ func TestTheChangesetBoxRendersAboveTheFiles(t *testing.T) {
 		if r.kind != rowFile {
 			continue
 		}
-		at := lineWithSuffix(lines, r.name)
+		at := lineWithFileSuffix(lines, r.name)
 		if at < 0 {
 			t.Errorf("file %q is not rendered:\n%s", r.name, strings.Join(lines, "\n"))
 			continue
@@ -760,6 +760,18 @@ func lineWithSuffix(lines []string, suffix string) int {
 	for i, l := range lines {
 		if strings.HasSuffix(strings.TrimSpace(l), suffix) {
 			return i
+		}
+	}
+	return -1
+}
+
+// lineWithFileSuffix is lineWithSuffix for a file row, which may end with the one character that says
+// what the span did to the file. The name is what the line ends with only when the span changed the file
+// and nothing else.
+func lineWithFileSuffix(lines []string, name string) int {
+	for _, sign := range []string{"", " +", " -", " ~"} {
+		if at := lineWithSuffix(lines, name+sign); at >= 0 {
+			return at
 		}
 	}
 	return -1

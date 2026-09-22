@@ -28,6 +28,12 @@ func previewModel(t *testing.T) reviewModel {
 	// The reviewer's own edits are empty unless a test says otherwise: that is the ordinary case,
 	// and it keeps every other expectation in this file about what the pane looks like.
 	m.workingFor = func(_ context.Context, _ string) Patch { return Patch{} }
+	// Files the pane reads as text are git's answer as much as a patch is, and a test that has stubbed
+	// git must not have a real repository answering behind its back. The text is nothing any patch this
+	// file asserts about contains, so a test that means to look at a diff cannot mistake this for one.
+	m.contentFor = func(_ context.Context, _ string) Document {
+		return Document{Sections: []DocSection{{Lines: []string{"the file's own text"}}}}
+	}
 	return m
 }
 
@@ -73,7 +79,9 @@ func askPreview(t *testing.T, m reviewModel) reviewModel {
 
 func TestPreviewFollowsTheCursor(t *testing.T) {
 	m := previewModel(t)
-	at := indexOfNameBySuffix(t, m, ".go")
+	// main.go is the one file in this fixture that the span only changed, so its pane is a diff. The
+	// files beside it are new, and their pane is the file's own text.
+	at := indexOfNameBySuffix(t, m, "main.go")
 	m.cursor = at
 	m = askPreview(t, m)
 
@@ -266,7 +274,23 @@ func TestPatchesAreFetchedOncePerFile(t *testing.T) {
 		asks[path]++
 		return Patch{Lines: []string{"+x"}, Added: 1}
 	}
-	for _, idx := range []int{0, 1, 0, 2, 1, 0} {
+
+	// The pane reads some rows as a file and others as a diff, and this is about the diffs. Walk the rows
+	// whose pane is a diff, so the count below is a count of patch fetches and not of rows that asked for
+	// something else entirely.
+	var diffs []int
+	for i := range m.rows {
+		m.cursor = i
+		if kind, _, ok := m.previewRowTarget(); ok && kind == previewDiff {
+			diffs = append(diffs, i)
+		}
+	}
+	if len(diffs) < 2 {
+		t.Fatalf("the fixture offers %d rows whose pane is a diff, want at least 2", len(diffs))
+	}
+	walk := append([]int{}, diffs...)
+	walk = append(walk, diffs...)
+	for _, idx := range walk {
 		m.cursor = idx
 		m = askPreview(t, m)
 	}
@@ -275,15 +299,15 @@ func TestPatchesAreFetchedOncePerFile(t *testing.T) {
 			t.Errorf("%s was fetched %d times, want once", path, n)
 		}
 	}
-	if len(asks) != 3 {
-		t.Errorf("fetched %d paths, want the 3 files visited", len(asks))
+	if len(asks) != len(diffs) {
+		t.Errorf("fetched %d paths, want the %d rows visited", len(asks), len(diffs))
 	}
 
 	// Changing the span invalidates every answer: the patches describe a span that is gone.
 	m.forgetPatches()
-	m.cursor = 0
+	m.cursor = diffs[0]
 	m = askPreview(t, m)
-	if asks[m.rows[0].path] != 2 {
+	if asks[m.rows[diffs[0]].path] != 2 {
 		t.Error("forgetting the patches did not make the next visit ask again")
 	}
 }

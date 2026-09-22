@@ -303,14 +303,16 @@ func visibleTree(m reviewModel) string {
 // The whole list at once, because it is the thing the change is for. The paths are the ones the
 // fixture commits; directories come before the files beside them, a directory that really branches
 // keeps its own row while a chain of single-child directories becomes one, and every name says only
-// what the rows above it have not. The reviewed counter and the blank lines between the blocks are
-// drawn around these rows by listBlock, and asserted where they are drawn.
+// what the rows above it have not. The character after a name is git's answer about what the span did
+// to that file: `+` for one it created, and nothing at all for the seven it only changed. The reviewed
+// counter and the blank lines between the blocks are drawn around these rows by listBlock, and
+// asserted where they are drawn.
 func TestTheListAsItRenders(t *testing.T) {
 	m, _ := treeModel(t)
 	want := strings.Join([]string{
 		"▾ ○ changesets/booking/",
-		"    ○ ABOUT.md",
-		"    ○ CHANGESET.yaml",
+		"    ○ ABOUT.md +",
+		"    ○ CHANGESET.yaml +",
 		"▾ ○ docs/",
 		"    ▾ ○ plans/active/",
 		"        ○ x.md",

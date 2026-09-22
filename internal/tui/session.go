@@ -57,7 +57,49 @@ type File struct {
 	// key changes, the file has moved back to unreviewed (PRD §16).
 	Key      string
 	Reviewed bool
+	// Change is what the span did to this file, which is git's answer and not a guess from the shape
+	// of a diff. The tree wears its Sign, and the pane asks whether the file reads better as text.
+	Change Change
+	// MovedFrom is the path a rename left behind, empty for every other change. The tree says only
+	// `~`; the pane names where the file came from, because "moved" without a where-from is half an
+	// answer.
+	MovedFrom string
 }
+
+// Change is what a review span did to one file, read from git's own `--name-status`.
+type Change int
+
+const (
+	// ChangeChanged is a modification: the common case, and the one the tree leaves unmarked.
+	ChangeChanged Change = iota
+	ChangeAdded
+	ChangeDeleted
+	// ChangeMoved is a rename whose content git also found changed. The patch is still the review, so
+	// the pane keeps showing it.
+	ChangeMoved
+	// ChangeMovedWhole is git's R100: the same bytes under a new path, which is why the pane can read
+	// it as a file instead of as a two-line argument about a path.
+	ChangeMovedWhole
+)
+
+// Sign is the tree's one character for the change: `+`, `-`, `~`, or nothing for a modification.
+func (c Change) Sign() string {
+	switch c {
+	case ChangeAdded:
+		return "+"
+	case ChangeDeleted:
+		return "-"
+	case ChangeMoved, ChangeMovedWhole:
+		return "~"
+	}
+	return ""
+}
+
+// ReadsAsFile says whether the pane opens on the file's text rather than its patch. Two changes make
+// the text the better first view: a file the span created, whose patch is one `+` on every line, and a
+// rename whose bytes git found unchanged. Everything else has a patch worth reading, including a rename
+// with edits — the edits are the reason it is under review.
+func (c Change) ReadsAsFile() bool { return c == ChangeAdded || c == ChangeMovedWhole }
 
 // Session is the review state the TUI renders.
 type Session struct {
@@ -182,6 +224,7 @@ func (s *Session) scan(ctx context.Context, sp span.Span) error {
 	if err != nil {
 		return err
 	}
+	statuses := s.changeStatuses(ctx, sp)
 	keys, err := s.diffKeys(ctx, sp)
 	if err != nil {
 		return err
@@ -206,11 +249,68 @@ func (s *Session) scan(ctx context.Context, sp span.Span) error {
 			// rebase, different span — keys differently and so stays unreviewed.
 			marked, read = true, read+1
 		}
-		files = append(files, File{Path: name, Key: key, Reviewed: marked})
+		files = append(files, File{Path: name, Key: key, Reviewed: marked,
+			Change: statuses[name].Change, MovedFrom: statuses[name].From})
 	}
 	s.files = files
 	s.marksRead = read
 	return nil
+}
+
+// change is git's status for one path: what happened to it, and where a rename came from.
+type change struct {
+	Change Change
+	// From is the old path, filled only for a rename or a copy.
+	From string
+}
+
+// changeStatuses asks git what the span did to each file, keyed by the path the span leaves the file at
+// — for a rename, the new path, which is the one the tree already lists.
+//
+// It passes no `-M`, because `DiffNames` — the call whose list this labels — passes none either. The two
+// have to agree about what a rename is. A repository that turns rename detection off gets a delete and
+// an add from both, and the tree says `-` and `+` about the same pair, which is what git itself printed.
+//
+// It returns no error on purpose. A failure here costs the signs and leaves the patch pane as it was;
+// the list above came from git already, and a failure there is the error the reviewer hears about.
+func (s *Session) changeStatuses(ctx context.Context, sp span.Span) map[string]change {
+	out, err := s.repo.Git(ctx, "diff", "--name-status", sp.From, sp.To)
+	if err != nil {
+		return nil
+	}
+	statuses := map[string]change{}
+	for _, line := range splitLines(out) {
+		fields := strings.Split(line, "\t")
+		if len(fields) < 2 {
+			continue
+		}
+		c := change{Change: changeOf(fields[0])}
+		if len(fields) == 3 {
+			c.From = fields[1]
+		}
+		statuses[fields[len(fields)-1]] = c
+	}
+	return statuses
+}
+
+// changeOf reads git's status letter. An unknown letter is a modification: a sign has to be earned, and
+// a status this code has not read says nothing about what changed.
+func changeOf(status string) Change {
+	if status == "" {
+		return ChangeChanged
+	}
+	switch status[0] {
+	case 'A':
+		return ChangeAdded
+	case 'D':
+		return ChangeDeleted
+	case 'R':
+		if status[1:] == "100" {
+			return ChangeMovedWhole
+		}
+		return ChangeMoved
+	}
+	return ChangeChanged
 }
 
 // Reload re-derives the lifecycle state and rescans. Called after an external
@@ -588,6 +688,37 @@ func (s *Session) document(paths []string, named bool) Document {
 		}
 		doc.Sections = append(doc.Sections, DocSection{Name: name, Lines: splitLines(string(data))})
 	}
+	return doc
+}
+
+// FileContent reads one file's text at the span's head, which is the same revision the patch's new side
+// comes from. The working tree is deliberately not it: the reviewer's own uncommitted edits belong to the
+// "you" section of a patch, and an editor view that folded them in quietly would show the reviewer their
+// own typing back as reviewed content.
+//
+// It returns no error, for the same reason `Patch` does: a pane that cannot be drawn is a line in the
+// pane, not a problem the reviewer has to handle.
+func (s *Session) FileContent(ctx context.Context, path string) Document {
+	var doc Document
+	text, err := s.repo.ShowFile(ctx, s.current.To, path)
+	if err != nil {
+		doc.Err = err.Error()
+		return doc
+	}
+	if strings.IndexByte(text, 0) >= 0 {
+		// git's blob is bytes, not text. The pane has nothing to draw, and the two things worth doing
+		// with a binary both start with a key: `e` and `d`.
+		doc.Err = path + " is not text"
+		return doc
+	}
+	if len(text) > maxPreviewBytes {
+		cut := strings.LastIndex(text[:maxPreviewBytes], "\n")
+		if cut < 0 {
+			cut = maxPreviewBytes
+		}
+		text, doc.Capped = text[:cut], true
+	}
+	doc.Sections = []DocSection{{Lines: splitLines(text)}}
 	return doc
 }
 

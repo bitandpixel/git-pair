@@ -116,6 +116,10 @@ expect "the reviewed counter is on screen" -1 "$T/paint.raw" "reviewed"
 expect "the changeset box names the base over the tree" -1 "$T/paint.raw" "base  main"
 expect "the span is a row of the box, not a caption" -1 "$T/paint.raw" "span  main...current"
 expect "the file tree is below it" -1 "$T/paint.raw" "changesets/booking-transaction/"
+# The character after a name is git's status. The changeset's own two files are new, so both carry `+`.
+# src/service.ts was there before the span, so its row carries nothing.
+expect "a file the span created carries a + after its name" -1 "$T/paint.raw" "ABOUT.md +"
+refuse "a file the span only changed carries no sign" -1 "$T/paint.raw" "service.ts +"
 expect "the shortcut bar offers the span picker" -1 "$T/paint.raw" "V picker"
 expect "the shortcut bar offers quit" -1 "$T/paint.raw" "q quit"
 # The box is closed on all four sides in a real terminal, including the side nearest the diff column.
