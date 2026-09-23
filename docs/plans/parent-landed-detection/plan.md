@@ -51,6 +51,7 @@ and that no command moves a base, writes `CHANGESET.yaml`, rebases, or deletes a
 
 Each of these was considered and rejected; keeping them out is part of the design.
 
+deleting the branch changes the measurement base though too right? so if a parent branch is integrated I dont see a ton of benefit to keeping the measurement pure as the base/parent is going to change anyhow. lets move this to a thread to discuss.
 - **No relink while the branch exists.** Relinking moves the measurement base, which changes the span a
   reviewer reads and changes what `Review-Parent-Head` is compared against. `relinkStacks`
   (`internal/changeset/resolve.go:535-549`) keeps its current trigger: the parent branch is gone.
