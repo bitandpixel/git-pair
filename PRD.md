@@ -1549,9 +1549,14 @@ changeset whose chain nothing holds.
 **Either SHA can be derived, and neither is ever guessed.** A person who has just merged knows they merged
 and should not have to translate that into two object ids, and the repository knows it too: the landing is
 the newest commit on the destination's first-parent line that added `changesets/<id>/`, and the reviewed
-head is the branch still carrying that directory. So `git pair integration record` with no flags works from
-the branch someone merged into, and either flag can be named on its own. CI passes both — a shallow clone
-may hold neither branch — and the derivation is the local convenience rather than the contract.
+head is the branch still carrying that directory — under whichever root the clone has it, because a pipeline
+handed the branch by git holds it only at `refs/remotes/origin/<branch>`, where no local branch exists to
+name it. A branch is one candidate however many paths spell it: the branch in the working tree and the copy
+the last fetch brought are the same branch, the local one is what gets recorded, and a destination is
+excluded from the candidates under both spellings — `main` and a stale fetched `origin/main` alike. So `git
+pair integration record` with no flags works from the branch someone merged into, and either flag can be
+named on its own. CI passes both — a shallow clone may hold neither branch — and the derivation is the local
+convenience rather than the contract.
 
 What the derivation will not do is choose. Two changeset directories missing their records, two branches
 carrying one directory, or no branch carrying it at all (the branch was deleted, and nothing here holds the

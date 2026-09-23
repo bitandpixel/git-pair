@@ -88,8 +88,11 @@ Deliverables
 Tasks
 
 - `internal/reviewref/reviewref.go`: drop the two kinds, `legacyRoot`/`legacyArchiveChild`/
-  `legacyIntegrationChild` and the classification branch. `List` keeps returning everything under the root
-  in a second, unclassified count — or exposes `AnyUnderRoot` — whatever keeps `NamespaceEmpty` honest.
+  `legacyIntegrationChild` and the classification branch. `List` now returns every ref under the root and
+  classifies only what it owns — `Entry.Kind` is empty for a ref that is not a durable ref of ours — which
+  keeps `len(entries) == 0` meaning "nothing at all under `refs/git-pair/`" without a second `for-each-ref`.
+  That is the shape the §13.4 guard needed; the alternative (a separate `NamespacePresent`) costs a git call
+  per read to ask a question the same listing already answered.
 - `internal/cli/landed.go:80`, `internal/cli/published.go:103`: two families only.
 - `internal/cli/landed.go:52,66`: the comments about the layout "not being uniform" describe history;
   rewrite them to describe the code.
@@ -97,14 +100,18 @@ Tasks
   in the fixture so the *other* claim is still pinned: a retired ref is not evidence of a missing fetch.
 - `internal/reviewref/reviewref_test.go`, `internal/cli/id_test.go`, `internal/cli/cost_test.go`: update to
   the two-family reading; keep the "reserves no name" case.
-- PRD §13.4, README:510, README:727, `internal/cli/docs_contract_test.go`.
+- PRD §13.4, README:510, README:727, `internal/cli/docs_contract_test.go`. The whitelist entry for the
+  retired prefix stays — the documents still name the path, in order to say nothing reads it — and its
+  comment now says that instead of claiming the path is a record.
 
-Verification
+Verification (done)
 
-- `mise run check`.
-- A fixture with a retired `integration` ref and no current one: `git pair queue` lists the landing as
-  `LANDED, UNRECORDED` (the retirement), and does **not** print the "never fetched" hint (the §13.4 rule).
-- A fixture with no ref under `refs/git-pair/` at all: still prints the fetch hint.
+- `mise run check` clean.
+- `TestQueueReportsALandingTheRetiredLayoutMissed` holds both halves: a retired `integration` ref now puts
+  the landing in `LANDED, UNRECORDED`, and the report says "none *in this clone*" rather than the
+  "holds no refs/git-pair/* refs at all" hint.
+- `TestListKeepsARetiredOnlyNamespaceNonEmpty` pins the same fact one layer down, and
+  `TestQueueSaysOnceThatTheNamespaceIsAbsent` still passes, so the empty-namespace report is intact.
 
 ### M2 — the derivation names a branch it cannot check out
 
@@ -120,19 +127,24 @@ Deliverables
 
 Tasks
 
-- `internal/cli/integration.go`: a small `branchKey(ref)` for the name normalisation both rules need, then
-  the widened `RefTips` ask (`refs/heads/` and `refs/remotes/`), the skip for `…/HEAD`, and the
-  exclude-by-key for destinations.
+- `internal/cli/integration.go`: a `branchKey(ref)` for the name normalisation both rules need, then the
+  widened `RefTips` ask (`refs/heads/` and `refs/remotes/`, local first), the skip for a remote's symbolic
+  `HEAD`, and the exclude-by-key for destinations.
 - Keep the exclusion of the destination's commit: a destination's tip is already excluded by SHA and stays.
 - New `internal/cli` test: a clone with the changeset branch only as `refs/remotes/origin/<branch>` derives
-  the pair with no flags. Add one where both spellings exist (one candidate, records) and one where a stale
-  `refs/remotes/origin/main` carries the directory (excluded, records).
+  the pair with no flags. Add one where both spellings exist and the fetched copy is *behind* the local one
+  (one candidate, and the local tip recorded — keyed on the commit these would be two carriers and a
+  refusal) and one where a stale `refs/remotes/origin/main` carries the directory after `main` moved on
+  past it (excluded, because no SHA exclusion reaches that commit).
 
-Verification
+Verification (done)
 
 - `mise run check`.
-- The existing derivation tests stay green, including the two-carrier refusal and
-  `TestIntegrationRecordDerivesFromABranchNamedWithASlash` from the parent changeset.
+- Each of the three rules fails alone: removing the `refs/remotes/` ask fails the derivation test, removing
+  the local-before-remote dedupe fails the both-spellings test, and removing the branch-key exclusion fails
+  the stale-destination test. The widened ask is not carried by one assertion.
+- The parent changeset's derivation tests stay green, including the two-carrier refusal and
+  `TestIntegrationRecordDerivesFromABranchNamedWithASlash`.
 
 ## Risks
 
