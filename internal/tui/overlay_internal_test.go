@@ -530,21 +530,55 @@ func TestZTakesThePaneToTheWholeScreenAndBack(t *testing.T) {
 	}
 }
 
-// The whole screen is the narrow terminal's only form of the diff, so `z` there asks for a column the
-// terminal does not have. It says so with the number the window is short by, the way `p` does, rather
-// than closing the diff the reviewer was reading.
-func TestZHasNowhereToGoOnANarrowTerminal(t *testing.T) {
-	m := openOverlay(t, overlayModel(t, 40))
+// Where there is no column there is nothing to refuse over: `z` out in the list, or `p` there, took the
+// whole screen because that is all there was, and `z` again gives the list and the keys back rather than
+// quoting a shortfall at a reviewer who only wanted out. The refusal belongs to the other route -- the one
+// that took a column and has to put it back.
+func TestZGivesTheListBackWhereThereWasNeverAColumn(t *testing.T) {
+	for _, entry := range []rune{'p', 'z'} {
+		m := overlayModel(t, 20)
+		m = pressKey(t, m, runeKey(entry))
+		if m.mode != modePreview {
+			t.Fatalf("`%c` gave mode %v, want the whole screen", entry, m.mode)
+		}
+		if strings.Contains(ansi.Strip(m.View()), "z pane") {
+			t.Errorf("the bar offers a way back to a column this terminal has never had:\n%s", ansi.Strip(m.View()))
+		}
 
-	got := pressOverlay(t, m, runeKey('z'))
+		got := pressKey(t, m, runeKey('z'))
+		if got.mode != modeFiles || got.focus != focusFiles {
+			t.Errorf("`z` after `%c` gave mode %v with %v, want the list drawn and holding the keys",
+				entry, got.mode, got.focus)
+		}
+	}
+}
+
+// The pane's `z` gives back a column, so it can only give back a column that fits. The screen was taken
+// while the terminal was wide enough for one; if it is not by the time the reviewer asks for it back, `z`
+// refuses and says which way the window is short, because the alternative is closing the diff they are
+// reading in order to draw a column too narrow to read in.
+func TestZRefusesToGiveBackAColumnThatNoLongerFits(t *testing.T) {
+	m := focusFixture(t, 60)
+	m = paneKey(t, m, runeKey('p'))
+	if !m.previewHasFocus() || m.mode != modeFiles {
+		t.Fatalf("`p` did not move the keys into the pane (mode %v, focus %v)", m.mode, m.focus)
+	}
+	m = paneKey(t, m, runeKey('z'))
+	if m.mode != modePreview {
+		t.Fatalf("`z` over the pane gave mode %v", m.mode)
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "z pane") {
+		t.Fatalf("the bar does not name the way back:\n%s", ansi.Strip(m.View()))
+	}
+
+	m.width, m.height = 60, 14
+	got := paneKey(t, m, runeKey('z'))
 	if got.mode != modePreview {
-		t.Errorf("`z` closed the overlay on a terminal with no column to open: mode %v", got.mode)
+		t.Errorf("`z` closed the diff rather than refusing: mode %v", got.mode)
 	}
-	if !strings.Contains(got.status, "the preview wants 100 columns") {
-		t.Errorf("`z` said %q, want the excuse and the number", got.status)
-	}
-	if strings.Contains(ansi.Strip(got.View()), "z pane") {
-		t.Errorf("the bar offers a key that refuses here:\n%s", ansi.Strip(got.View()))
+	if !strings.Contains(got.status, "the preview wants 100 columns") ||
+		!strings.Contains(got.status, "this terminal has 60") {
+		t.Errorf("status = %q, want the numbers the pane is short by", got.status)
 	}
 }
 
@@ -572,13 +606,16 @@ func TestZFromTheListOpensTheWholeScreenOfThatRow(t *testing.T) {
 		t.Errorf("the bar does not name the way back:\n%s", ansi.Strip(got.View()))
 	}
 
-	back := paneKey(t, got, keyMsg(tea.KeyEsc))
+	back := paneKey(t, got, runeKey('z'))
 	if back.mode != modeFiles || back.focus != focusFiles {
-		t.Errorf("esc from there left mode %v with %v, want the list drawn and holding the keys",
+		t.Errorf("`z` again left mode %v with %v, want the list drawn and holding the keys",
 			back.mode, back.focus)
 	}
 	if back.paneWidth() == 0 {
-		t.Error("esc gave the list back but not the column the diff had been in")
+		t.Error("`z` gave the list back but not the column the diff had been in")
+	}
+	if !strings.Contains(ansi.Strip(back.View()), "z full") {
+		t.Errorf("the list's bar does not name the key that took the screen:\n%s", ansi.Strip(back.View()))
 	}
 }
 

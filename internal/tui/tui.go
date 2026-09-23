@@ -262,6 +262,13 @@ type reviewModel struct {
 	// took them, so `p` gives them back where they came from rather than always to the files.
 	focus     focusTarget
 	prevFocus focusTarget
+	// zoomReturn is the region the keys were standing in when the diff took the whole screen. `z`
+	// gives both the screen and the keys back to it, so un-zooming returns the reviewer to where they
+	// were when they asked for the bigger view: the preview column if `z` was pressed inside the pane,
+	// the half of the list column if it was pressed out there. prevFocus cannot stand for it, because
+	// the pane route leaves prevFocus on the list half that handed the keys over hours of keystrokes
+	// ago, and that is the right answer for `esc` and the wrong one for `z`.
+	zoomReturn focusTarget
 	// gPrefix is a `g` waiting for its partner in the region that holds the keys: the pair jumps to
 	// that region's top. It is kept apart from the diff's own previewG so the two jumps cannot read
 	// each other's half-press.
@@ -2393,12 +2400,9 @@ func (m *reviewModel) focusOn(to focusTarget) {
 		// The narrow terminal's version of the same move: with no column to focus, the overlay is how the
 		// diff is drawn. Where the keys came from is not drawn while it is up, which is what `esc` -- and
 		// `f` and `tab` -- take back down on the way there.
+		from := m.focus
 		m.rememberLeft()
-		m.previewOn = true
-		m.mode = modePreview
-		m.focus = focusPreview
-		m.previewG = false
-		m.setStatus("", false)
+		m.takeScreen(from)
 		return
 	}
 	if to == focusPreview {
@@ -3043,6 +3047,18 @@ func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// takeScreen gives the diff the whole terminal, and records where the keys stood when it did. Every
+// route into this one shape comes through here, so `z` pressed again always has a region to give back
+// rather than a guess about how the screen was reached.
+func (m *reviewModel) takeScreen(from focusTarget) {
+	m.zoomReturn = from
+	m.previewOn = true
+	m.mode = modePreview
+	m.focus = focusPreview
+	m.previewG = false
+	m.setStatus("", false)
+}
+
 // openFullScreen is `z` taken from the list column rather than from inside the diff: the row the keys
 // are standing on, read over the whole terminal. It decides what is on show the way `p` does — from the
 // row, before the keys move — and then takes the screen the way `z` does from the pane, so the three
@@ -3063,51 +3079,61 @@ func (m reviewModel) openFullScreen() (tea.Model, tea.Cmd) {
 		m.setRefusal("nothing to open: the preview has no file on show")
 		return m, nil
 	}
+	from := m.focus
 	m.previewOn = true
 	// Through focusOn, which is what remembers which half of the list column is handing the keys over,
 	// so `esc` from the screen this opens returns to the row the reviewer was on.
 	m.focusOn(focusPreview)
 	if m.mode == modePreview {
-		// The narrow terminal's route: with no column to focus, focusOn draws the overlay directly.
+		// The narrow terminal's route: with no column to focus, focusOn drew the overlay directly and
+		// recorded `from` as the region to give back.
 		return m, nil
 	}
-	return m.toggleFullScreen()
+	m.takeScreen(from)
+	return m, nil
 }
 
-// toggleFullScreen is `z`: the diff takes the whole screen, or gives the list its column back. It
-// changes the shape of the screen and nothing else -- the keys stay with the diff, so does the file it
-// is showing, and so does the place in it, which is what makes the pair of presses one reading gesture
-// rather than two different ones.
+// toggleFullScreen is `z`: the diff takes the whole screen, or gives it back. It changes the shape of the
+// screen and nothing else -- the keys stay with the diff, so does the file it is showing, and so does the
+// place in it, which is what makes the pair of presses one reading gesture rather than two different ones.
 //
-// The two forms are the same two the terminal picks by itself: a wide terminal puts the diff in a
-// column beside the list, a narrow one has no column to spare and draws it over the whole screen. `z`
-// is how a reviewer asks for the other one without moving the keys, and it is refused rather than
-// guessed at where the shape asked for cannot be drawn -- so on the terminal too narrow for a column,
-// `z` over the overlay does nothing, because there is no column to go back to.
+// The two forms are the same two the terminal picks by itself: a wide terminal puts the diff in a column
+// beside the list, a narrow one has no column to spare and draws it over the whole screen. `z` is how a
+// reviewer asks for the other one without moving the keys, and it is refused rather than guessed at where
+// the shape asked for cannot be drawn -- which leaves one case, giving a column back to a terminal that
+// stopped having room for it while the diff was zoomed.
 func (m reviewModel) toggleFullScreen() (tea.Model, tea.Cmd) {
 	if m.mode == modePreview {
-		if reason := m.previewShortfall(); reason != "" {
-			m.setRefusal(reason)
-			return m, nil
-		}
-		m.mode = modeFiles
-		m.previewOn = true
-		m.focus = focusPreview
-		m.previewG = false
-		m.setStatus("", false)
-		return m, nil
+		return m.unzoom()
 	}
 	if !m.previewHasFocus() {
 		return m, nil
 	}
-	// The overlay is the same region as the pane and takes the keys the same way, so which half of the
-	// list column handed them over is already remembered and `esc` still returns there.
+	// The overlay is the same region as the pane and takes the keys the same way.
 	if reason := m.overlayShortfall(); reason != "" {
 		m.setRefusal(reason)
 		return m, nil
 	}
+	m.takeScreen(focusPreview)
+	return m, nil
+}
+
+// unzoom is `z` over the whole screen: the screen and the keys both go back to the region `z` was
+// pressed in. From the pane that is the pane, so the reviewer keeps reading with the list beside them;
+// from the list column it is the list column, so the diff does not keep a keyboard whose region the
+// screen has stopped drawing. `esc` is unaffected and still returns to whichever half of the list
+// column handed the keys over, whatever shape the diff is in.
+func (m reviewModel) unzoom() (tea.Model, tea.Cmd) {
+	if m.zoomReturn != focusPreview {
+		return m.closePreview()
+	}
+	if reason := m.previewShortfall(); reason != "" {
+		m.setRefusal(reason)
+		return m, nil
+	}
+	m.mode = modeFiles
 	m.previewOn = true
-	m.mode = modePreview
+	m.focus = focusPreview
 	m.previewG = false
 	m.setStatus("", false)
 	return m, nil

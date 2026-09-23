@@ -12,10 +12,10 @@ span flags, so `git pair review --unreviewed` is the command most reviewers mean
 
 **The diff had one shape, chosen by the window.** A wide terminal gets a column beside the list, a narrow
 one gets the same diff over the whole screen, and the reviewer could not ask for the other one. `z` takes
-the diff to the whole screen and back to the column — from inside the diff, and from the list column too,
-where the row under the cursor says which diff. The keys, the file and the place in the file stay put, so
-`z` twice is one reading gesture, and the reviewer who reads every diff at full width never moves into the
-pane first.
+the diff to the whole screen and gives it back to whichever region asked — the preview column if `z` was
+pressed inside the pane, the list if it was pressed there. The keys, the file and the place in the file
+stay put, so `z` twice is one reading gesture that ends where it started, and the reviewer who reads every
+diff at full width never moves into the pane first.
 
 **`Enter` on a file the span added opened the difftool on it.** That comparison has nothing on its left
 side: the tool shows the file with a `+` in front of every line, which is the file again and louder. `Enter`
@@ -36,12 +36,18 @@ a subcommand and splice it into `` `git pair review %s` ``. The bare group would
 "`git pair review review` needs a terminal", so `openSession` now takes the command as the reviewer can type
 it — `git pair review`, `git pair review open`, `git pair review reopen` — and quotes that back.
 
-**`toggleFullScreen` is `z`** (`internal/tui/tui.go`). Over the pane it sets `modePreview`, the same state
-the narrow terminal's `p` reaches, so the overlay is one region reached two ways rather than a second
-screen with its own rules. Over the overlay it returns to the pane — `modeFiles` with the keys still on
-`focusPreview` — where a pane fits, and refuses with the shortfall otherwise. Nothing else moves: the keys
-stay with the diff, `previewPath` and `previewOffset` are untouched, and `prevFocus` was already the half
-of the list column that handed them over, so `esc` still returns there.
+**`toggleFullScreen` is `z`, and `unzoom` is the other half of it** (`internal/tui/tui.go`). Over the pane
+`z` sets `modePreview`, the same state the narrow terminal's `p` reaches, so the overlay is one region
+reached two ways rather than a second screen with its own rules. Over the overlay it gives the screen and
+the keys back to `zoomReturn` — the region that was holding the keys when the screen was taken. Nothing
+else moves: `previewPath` and `previewOffset` are untouched, and `esc` is unaffected, still returning to
+whichever half of the list column handed the keys over.
+
+**`zoomReturn` is recorded as the screen is taken, not when it is given back** (`takeScreen`). Every route
+into the whole-screen diff passes through it, so the answer to "where do I go back to?" is a fact about how
+the reviewer got here rather than a guess made afterwards. `prevFocus` cannot stand for it: the pane route
+leaves `prevFocus` on the list half that handed the keys over however long ago, which is right for `esc`
+and wrong for `z`.
 
 **`openFullScreen` is the same key taken from the list** (`internal/tui/tui.go`). It decides what is on
 show the way `p` does — from `previewRowTarget`, the row the keys are standing on, before the keys move —
@@ -70,11 +76,14 @@ has it. `artifactNote` became `editorNote` and takes a path and a name, since a 
 **Tests** (`internal/tui/*_test.go`). `TestZTakesThePaneToTheWholeScreenAndBack` scrolls a pane, presses `z`,
 and checks the mode, the focus, the scroll position, the row at the top of the diff, that the frame is not
 split, and that the bar says `z pane`; then `z` again and the same checks in the pane's shape.
-`TestZHasNowhereToGoOnANarrowTerminal` pins the refusal and the absence of `z pane` from its bar.
+`TestZRefusesToGiveBackAColumnThatNoLongerFits` takes the screen from the pane, shrinks the terminal, and
+pins the refusal and its two numbers. `TestZGivesTheListBackWhereThereWasNeverAColumn` presses `z` after
+both `p` and `z` on the narrow fixture and checks the list comes back holding the keys, with no bar naming
+a column that terminal never had.
 `TestZFromTheListOpensTheWholeScreenOfThatRow` presses `z` with the keys in the tree and checks the mode,
-the focus, the missing column and the bar, then `esc` back onto the list with its column.
-`TestZFromTheBoxOpensTheWholeScreenOfThatDocument` does the same from the changeset box and checks `esc`
-returns to the box. `TestZFromTheListOnANarrowTerminalTakesTheScreen` is the narrow route, and
+the focus, the missing column and the bar, then `z` again back onto the list with its column and its own
+bar. `TestZFromTheBoxOpensTheWholeScreenOfThatDocument` does the same from the changeset box and checks
+`esc` returns to the box. `TestZFromTheListOnANarrowTerminalTakesTheScreen` is the narrow route, and
 `TestZFromARowWithNothingToReadSaysSo` the refusal. `TestEnterOnAnAddedFileGoesToTheEditor`
 is the table over all five changes plus the handoff on the fixture's added file and the `d` that still opens
 the difftool on it. `TestHistoricalSpanRefusesEnterOnAnAddedFile` pins the gate.
@@ -98,10 +107,15 @@ functions. Reading it as only the diff's key would have made the reviewer press 
 about where the keyboard is, not about how big the diff is. `p` and `z` differ only in the size they ask
 for: `p` takes the diff at whatever size the window has room for, `z` asks for the whole of it.
 
-**The keys travel with the screen.** A whole-screen diff that left the keyboard in a list it had just
-hidden would be reading a keystroke from nothing, which is the failure mode the preview's focus rule
-exists to prevent. `z` from the list therefore moves the keys into the diff, and `esc` — already the key
-that returns them to whichever half handed them over — is the way back.
+**The keys travel with the screen, and come back the way they came.** A whole-screen diff that left the
+keyboard in a list it had just hidden would be reading a keystroke from nothing, which is the failure mode
+the preview's focus rule exists to prevent. `z` from the list therefore moves the keys into the diff, and
+`z` again moves them back onto the row they started on.
+
+**The refusal survives only where there is something to refuse over.** Giving back a column that no longer
+fits is the one case where `z` cannot do what was asked, and it says so with the numbers rather than
+closing the diff to draw a column too narrow to read in. Where the terminal never had a column there is
+nothing to refuse over, and `z` gives the list back.
 
 **Refusal over substitution.** `z` over the overlay on a narrow terminal does not close the diff to "give
 back" a column that does not exist, and `Enter` on an added file over history does not quietly open the
@@ -126,8 +140,8 @@ the screen ever appears.
 
 - `mise run check` — gofmt clean, `go vet ./...` clean, `go test ./...` green.
 - `mise run build`, then the pty walkthrough against the binary this branch installs —
-  `PTY: all checks passed`, including the five `z` scenarios: from the pane, back to the pane, the refusal
-  on a narrow terminal, and the two from the list.
+  `PTY: all checks passed`, including the `z` scenarios: from the pane and back, from the list and back, and
+  the narrow terminal where `z` has only the list to give back.
 - `bash scripts/gates/e2e-29.sh` — green.
 - `git-pair review --help` read by eye: the group's flags, its examples, and `open` still listed.
 

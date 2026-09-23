@@ -300,25 +300,28 @@ refuse "and the pane's bar is gone with the pane" 1 "$T/zfull.raw" "z full"
 expect "z again paints the list's counter again" 2 "$T/zback.raw" "reviewed"
 expect "and the pane's bar is back with the column" 2 "$T/zback.raw" "z full"
 
-# On the terminal too narrow for a column there is nothing for `z` to give back, so it says which way
-# the window is short instead of closing the diff the reviewer was reading.
-step "z on a terminal with no column says which way it is short"
-( COLS=60 ROWS=14; session ztiny p,z,ctrl-c )
-expect "z names the columns the pane wants" 1 "$T/ztiny.raw" "the preview wants 100 columns"
-expect "and the terminal it has" 1 "$T/ztiny.raw" "this terminal has 60"
+# On the terminal too narrow for a column there is no column to give back, so `z` there gives the list and
+# the keys back -- the same way out whether the screen was taken by `p` or by `z` itself. The bar names no
+# way back here, because there is no column for a key to go back to.
+step "z on a terminal with no column gives the list back"
+( COLS=60 ROWS=14; session ztiny z,z,ctrl-c )
+expect "z from the narrow list takes the whole screen" 0 "$T/ztiny.raw" "esc enter q back"
+expect "and z gives the list and the keys back" 1 "$T/ztiny.raw" "reviewed"
+refuse "with no bar offering a column this terminal has never had" 1 "$T/ztiny.raw" "z pane"
 
 # `z` is the same request from the list column, where the row under the cursor says which diff: a
-# reviewer who reads every diff at full width never moves into the pane, and the bar of that screen
-# still names the way back.
-step "z from the file list opens that file over the whole screen"
+# reviewer who reads every diff at full width never moves into the pane. The second `z` is the way back,
+# and it brings the keys back to the row they were pressed on.
+step "z from the file list opens that file over the whole screen, and gives the list back"
 # The same walk down the tree the difftool step makes: four downs is src/service.ts, past the
 # changeset's own directory row and the two documents under it.
 ( COLS=140 ROWS=30; session zlist j,j,j,j,z,ctrl-c )
 expect "z from the list paints the overlay's own bar" 4 "$T/zlist.raw" "z pane"
 expect "and the diff of the row the cursor was on" 4 "$T/zlist.raw" "@@"
 refuse "with the list's counter off screen" 4 "$T/zlist.raw" "reviewed"
-( COLS=140 ROWS=30; session zlistback j,j,j,j,z,esc,q )
-expect "esc gives the list back, counter and all" 5 "$T/zlistback.raw" "reviewed"
+( COLS=140 ROWS=30; session zlistback j,j,j,j,z,z,q )
+expect "z again gives the list back, counter and all" 5 "$T/zlistback.raw" "reviewed"
+expect "with the column the diff had taken" 5 "$T/zlistback.raw" "z full"
 
 # Too small for even that is worth saying out loud, and with the smaller of the two asks -- 12 rows
 # would have been enough, so telling the reviewer about the pane's 16 would send them growing the

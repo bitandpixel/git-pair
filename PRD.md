@@ -2189,9 +2189,11 @@ scroll the file already on show (`d`/`u` being `less`'s spelling of the same hal
 reviewer who reaches for it in a diff is reaching for something they know), `Enter` opens the file on show
 — the difftool, or the editor for a file the span added, which has no other side of it to compare
 against — and `/` searches it. `z` changes the shape of the screen rather than the keys: it gives the diff
-the whole screen, and gives the list its column back, keeping the keys, the file and the place in the file.
-These are the two shapes the terminal chooses by itself, and where it has no column to give back `z`
-reports which way the window is short rather than closing the diff. The search reads a term in the pane's
+the whole screen, and gives the screen back to whichever region asked for it — the preview column, or the
+list column if `z` was pressed there — keeping the keys, the file and the place in the file.
+These are the two shapes the terminal chooses by itself. Where a column was given and no longer fits, `z`
+reports which way the window is short rather than closing the diff; where the terminal never had a column,
+it gives the list back. The search reads a term in the pane's
 bottom row — the row the note about the
 rest of the file uses, so the field costs no rows — marks every match as the term is typed, and marks them
 with SGR rather than colour: the diff's green and red are git's bytes, and a highlight that painted over
@@ -2323,8 +2325,8 @@ e        open the selected row in the editor, whatever the span did
 p        move the keys into the diff preview column (wide terminals); inert where the diff already
          has them. Where the terminal is too narrow for a second column it takes the screen for the
          diff instead, since there is no column to move into, and is inert there too
-z        read the row the keys are on over the whole screen, taking the keys with them; `Esc` gives
-         the list back
+z        read the row the keys are on over the whole screen, taking the keys with them; `z` again, or
+         `Esc`, gives the list back
 ctrl-f   page the preview down
 ctrl-b   page the preview up
 Space    toggle reviewed for a file row, or for every file under a directory row
@@ -2340,8 +2342,9 @@ a, t     put the cursor and the keys on ABOUT.md or the Threads heading, leaving
          is not drawn)
 Enter    open what the pane is showing: the difftool, or the editor for a document and for a file
          the span added — the same choice the row makes when the key is pressed on it
-z        give the diff the whole screen, or give the list its column back, keeping the keys,
-         the file and the place in it; where the terminal has no column to give back, it says so.
+z        give the diff the whole screen, or give the screen back to the region `z` was pressed in —
+         the preview column, or the list column if the keys never left it — keeping the keys,
+         the file and the place in it. Where a column was given and no longer fits, it says so.
          From the list column it is the row under the cursor that goes to the whole screen
 Esc      hand the keys back to the list column, leaving the pane where it is in the file
 Tab, f   move the keys back to the list column, as they do from anywhere in it
@@ -3248,8 +3251,8 @@ d        open the difftool for the selected row, falling back to the editor with
 e        edit the selected file or document
 p        move the keys into the diff preview column; inert where the diff already has them.
          Where there is no second column, it takes the screen for the diff
-z        take the whole screen: from the diff, give it the screen or give the list its column back;
-         from the list, open the row under the cursor over the whole screen
+z        take the whole screen: from the diff, give it the screen or give the screen back to the diff;
+         from the list, open the row under the cursor over the whole screen and give the list back
 ctrl-f   page the preview down
 ctrl-b   page the preview up
 /        search the diff the preview column (or the whole screen) is showing; n/N walk the matches

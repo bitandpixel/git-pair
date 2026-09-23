@@ -1285,17 +1285,21 @@ keys the whole-screen preview uses — `j`/`k` a row, `d`/`u` or `ctrl-d`/`ctrl-
 way is the whole point: the four page keys belong to whichever region holds them, so a diff too long to
 fit is paged by moving into it rather than by borrowing the list's keys from across the screen.
 `Enter` there opens the file on show — the difftool for it, or the editor for a file the span added,
-which is the key the pane's own note points at. `z` changes the shape of the screen rather than the keys:
-it takes the diff to the whole screen, and back to the column again. The keys, the file and the place in
-the file all stay where they were, so the two presses are one reading gesture rather than two different
-ones. They are also the two shapes the terminal picks by itself — a column beside the list where there is
-room, the whole screen where there is not — and where there is no column to go back to, `z` says so with
-the number the window is short by instead of closing the diff you were reading. `z` is a key of the list
-column too: pressed on a row it opens that row's text over the whole screen, so a reviewer who reads every
-diff at full width never moves into the pane first. The keys come with the screen — a whole-screen diff
-that left them in a list it had just hidden would be reading a keystroke from nothing — and `Esc` returns
-them to the row they came from. `Esc`
-hands the keys back to the region that had them — the tree, or the box if the keys came from the box —
+which is the key the pane's own note points at.
+
+`z` changes the shape of the screen and nothing else. Pressed where a diff is on show it takes that diff
+to the whole terminal; pressed again it gives the screen back to the region that asked — the pane if `z`
+was pressed inside the pane, the list if it was pressed there. The keys, the file and the place in the
+file stay where they were, so the two presses are one reading gesture rather than two different ones and
+the reviewer ends where they started. The two shapes are the two the terminal picks by itself: a column
+beside the list where there is room, the whole screen where there is not. `z` is a key of the list column
+too, where the row under the cursor says which diff — so reading every diff at full width never needs the
+pane first, and the keys come with the screen, because a whole-screen diff that left them in a list it had
+just hidden would be reading a keystroke from nothing. Where a column was given and no longer fits, `z`
+says so with the number the window is short by instead of closing the diff you were reading; where there
+was never a column it has nothing to refuse over, and gives the list back.
+
+`Esc` hands the keys back to the region that had them — the tree, or the box if the keys came from the box —
 and leaves the pane where it was, so coming back returns to the same lines. `p` does not do that: pressed
 where the diff already holds the keys it is the no-op its name promises, because a key that meant "the
 diff" in one region and "not the diff" in the one it just moved you to has to be remembered rather than
