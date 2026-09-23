@@ -169,7 +169,7 @@ Verification
   and `Span:` still `fix/for-each-ref-glob...current`.
 - `git pair status --json | jq .parent` on the same branch shows the four new keys and no changed key.
 
-### M2 — The same finding in the two gate surfaces
+### M2 — The same finding in the two gate surfaces, and the half the destination branch never asks
 
 Deliverables
 
@@ -178,6 +178,13 @@ Deliverables
 - `git pair queue` notes a READY child sitting on a landed parent, which is the case `behindParent`
   cannot see.
 - Both surfaces still refuse nothing new.
+- `git pair status` on the destination branch reports the namespace-wide findings even though it fails.
+  Half of that already happens: `landingsOnNoChangeset` (`internal/cli/status.go:237-256`) prints the
+  directories that landed with no record beside the `no changeset for this branch` failure. The
+  published-or-not comparison does not run on that path at all (`status.go:198` is on the success path), so
+  the one branch every changeset eventually lands on is the one branch where a record that never left the
+  clone is invisible. Measured on 2026-09-23: three directories recorded, two of them unpublished, and the
+  output is one line — `no changeset for this branch: changesets/main`.
 
 Tasks
 
@@ -194,6 +201,23 @@ Tasks
 - Tests: a READY child on a landed parent produces the queue note and no row change; the same child
   approved and un drifted produces a passing `check` whose `next_action` names the stale branch; the
   queue's git-invocation count is unchanged by a repository with 300 extra refs (`cost_test.go`).
+- `landingsOnNoChangeset` reuses the `indexDurableRefs` result it already reads and calls
+  `publicationReport` (`internal/cli/published.go:64`) with an empty branch — which `lookupDurableRemote`
+  (`internal/cli/fetch.go:51-62`) already defines as "no particular branch", so origin is the answer — then
+  prints through `printUnpublished`. The cost is one local `for-each-ref` over the mirrors and no network.
+- Exit 2 and the first line stay as they are: the branch really does hold no work in progress, and `queue`
+  and CI read that status. The findings are notes printed beside the answer, never the answer.
+- `--json` on that path emits a document with `unrecorded`, `unpublished` and their notes instead of nothing
+  but the error, with empty lists rather than missing keys — the shape `statusJSON` already commits to for
+  `unpublished` (`status.go:151-157`), for the reason stated there: a missing key reads as "this build does
+  not know how to look".
+- Docs travel with the behaviour, as always. `README.md:242` already says `status` and `queue` print
+  `RECORDED, NOT PUBLISHED` — true standing on a changeset branch, false on the destination branch today. Spell
+  where in that sentence, and let `internal/cli/docs_contract_test.go` check the names the prose uses.
+- Tests: trunk with no work in progress, two changesets recorded locally and one of them mirrored, prints
+  `RECORDED, NOT PUBLISHED` naming both and still exits 2; `--json` on the same repository carries both keys
+  with both ids; a clone with no remote prints the sentence saying the question cannot be asked, not an empty
+  list that reads as "all published".
 
 Verification
 
@@ -201,6 +225,9 @@ Verification
   unstacked changeset and for a stack whose parent is still live.
 - The real repository: `check` on `fix/legacy-refs-and-remote-branches` still exits 1 only for the
   existing reason ("marked ready and has not been reviewed since"), and mentions the parent landing.
+- The real repository, destination branch: `git pair status` on `main` prints the two unpublished ids under
+  `RECORDED, NOT PUBLISHED` where today it prints only the `no changeset for this branch` line, and
+  `git ls-remote origin 'refs/git-pair/*'` is the check that says which half is right.
 
 ### M3 — The step, spelled as a command
 

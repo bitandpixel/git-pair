@@ -81,6 +81,13 @@ hard-coding the default branch there. The same milestone also fixes two other th
 `RecordedPair` was consulted only after deriving a source that is then never used, and `deriveArchiveTip` treated
 every trunk-descended branch as a candidate source because landing puts the directory in trunk.
 
+**The destination branch asks half the question** (milestone 2). `status` there fails with
+`no changeset for this branch`, and one half of the global report already prints beside that failure: the
+directories that landed with no record written. The published-or-not comparison runs only when a changeset
+resolves, so the branch every changeset eventually lands on is the branch where a record that never left the
+clone is invisible. Milestone 2 gives that path the second half — same exit code, same first line, the findings
+as notes beside the answer, and the JSON keys present as empty lists rather than absent.
+
 **Milestone 6 is separable.** It changes what `init` writes into committed content, which reaches every future
 changeset, every fresh clone and every CI job, while milestones 1–5 change only reads. It can be cut without
 touching anything else.
@@ -113,6 +120,15 @@ fix-label-word-timer: recorded acd1fd7 as the integration of 8ffdb3a        (the
 
 The last line is what the flagless command should have printed. The id was already settled by the first pass, and
 the second pass refused anyway, so the fix is plumbing rather than verification.
+
+The same repository's trunk shows the milestone 2 gap. With three directories recorded and `git ls-remote origin
+'refs/git-pair/*'` answering two refs, `git pair status` on `main` printed one line:
+
+```
+git-pair: no changeset for this branch: changesets/main (run `git pair init --base <ref>`)
+```
+
+Two changesets were recorded in that clone and had never been published, and nothing on that branch said so.
 
 ## Known limitations
 
