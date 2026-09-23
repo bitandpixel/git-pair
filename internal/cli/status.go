@@ -80,6 +80,23 @@ type parentJSON struct {
 	Reason    string `json:"reason,omitempty"`
 	Next      string `json:"next,omitempty"`
 	Note      string `json:"note,omitempty"`
+	// Landed says the parent has an integration record in this clone: its work is in a destination, and
+	// the branch named above is what is left of it. The record is the only thing that can say this. A
+	// `--no-ff` merge leaves the parent's branch exactly where the approval recorded it, so every
+	// tip comparison in this file reads "nothing happened" in the one case where the work finished.
+	Landed bool `json:"landed"`
+	// LandedCommit is where the parent's record points, in the same short form as `tip`.
+	LandedCommit string `json:"landed_commit,omitempty"`
+	// LandedInDefaultBranch says the landing commit is in the history of the branch this run called the
+	// integration branch. False is both "it reached a release branch" and "no branch here identifies
+	// itself", which `landed_reach` spells out in prose.
+	LandedInDefaultBranch bool   `json:"landed_in_default_branch"`
+	LandedReach           string `json:"landed_reach,omitempty"`
+	// StaleBranch says this changeset's own head already carries the landing, so the parent's branch is
+	// dead weight: the record holds the chain it was holding, and deleting the branch loses nothing
+	// git-pair can still read. False for a child that has not rebased onto the landing yet, where that
+	// branch is still the base the diff is measured on.
+	StaleBranch bool `json:"stale_branch"`
 }
 
 // stackStep is one changeset the reported one was stacked on. The step reports what the record and the
@@ -383,17 +400,22 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 	// The stack. An approval measures itself against a parent tip as well as a head, and the parent
 	// moves in ways this branch's own history cannot show, so `status` says what the approval
 	// recorded and whether it still stands (PRD §21).
-	if ps, err := a.parentSinceApproval(ctx, s.repo, s.cs, s.trunk, s.summary.Marker); err != nil {
+	if ps, err := a.parentSinceApproval(ctx, s.repo, s.cs, s.trunk, s.summary.Marker, s.head); err != nil {
 		return nil, err
 	} else if ps.Branch != "" {
 		view.json.Parent = &parentJSON{
-			Branch:    ps.Branch,
-			Changeset: ps.Changeset,
-			Tip:       short(ps.Tip),
-			Recorded:  short(ps.Recorded),
-			Reason:    ps.Reason,
-			Next:      ps.Next,
-			Note:      ps.Note,
+			Branch:                ps.Branch,
+			Changeset:             ps.Changeset,
+			Tip:                   short(ps.Tip),
+			Recorded:              short(ps.Recorded),
+			Reason:                ps.Reason,
+			Next:                  ps.Next,
+			Note:                  ps.Note,
+			Landed:                ps.Landed != "",
+			LandedCommit:          ps.Landed,
+			LandedInDefaultBranch: ps.LandedInDefaultBranch,
+			LandedReach:           ps.LandedReach,
+			StaleBranch:           ps.StaleBranch,
 		}
 	}
 	if sha, err := reviewref.ResolveArchive(ctx, s.repo, s.cs.Slug); err == nil {
@@ -523,6 +545,11 @@ func printStatus(a *app, v *statusView) {
 				who = fmt.Sprintf("%s (changeset %s)", p.Branch, p.Changeset)
 			}
 			switch {
+			case p.Landed && p.Tip != "":
+				// Above the tip comparisons, because the tip is the wrong instrument here: a merge into the
+				// destination leaves the parent's branch exactly where the approval recorded it, so "unchanged
+				// since the approval" would be a true sentence about a parent whose work is already integrated.
+				a.printf("  parent: %s at %s — landed as %s%s\n", who, p.Tip, p.LandedCommit, p.LandedReach)
 			case p.Tip == "":
 				a.printf("  parent: %s — the branch is gone\n", who)
 			case p.Recorded == "":

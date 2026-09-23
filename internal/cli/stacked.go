@@ -42,31 +42,71 @@ type parentStatus struct {
 	// Note is a one-line observation that is not a refusal — the parent moved, or there was
 	// nothing to compare — for `status` and `queue` to show.
 	Note string
+	// Landed is the commit the parent's integration record points at, empty when this clone holds no
+	// record for the parent. It is the record's claim and not a merge's: a directory in the destination
+	// with no record behind it is the `no integration record` note, because nothing durable says the work
+	// is finished. Landing outranks every reading of the branch tip, because `--no-ff`, squash and
+	// cherry-pick all leave the parent's branch exactly where the approval recorded it.
+	Landed string
+	// LandedInDefaultBranch says the landing commit is in the history of the branch git-pair calls the
+	// integration branch. False covers "it reached a release branch" and "this clone cannot name the
+	// integration branch", which the prose separates with LandedReach.
+	LandedInDefaultBranch bool
+	// LandedReach is that prose: ", reachable from main", ", not reachable from main", or nothing when
+	// no branch identifies itself as the destination.
+	LandedReach string
+	// StaleBranch says the child's own head already carries the landing, so the parent's branch is dead
+	// weight — the record holds the chain the branch was holding. It is false for a child that has not
+	// rebased yet, where that branch is still the base the child is measured on, and false when the branch
+	// is gone, because stale is a statement about a branch that is here.
+	StaleBranch bool
 }
 
 // parentSinceApproval asks the stack question for one changeset: has the branch it is stacked on
 // moved, landed, or ended since the approval being relied on?
 //
-// It answers for an approval only. A changeset that is READY, or blocked, or waiting on feedback has
+// The refusal is for an approval only. A changeset that is READY, or blocked, or waiting on feedback has
 // no approval for a parent to invalidate, and refusing it would report the parent's activity as this
-// changeset's problem.
+// changeset's problem. The reading is not: `status` is where an author looks before offering anything, and
+// a child stacked on a parent that has already landed wants to know that before it is offered, so the
+// notes are reported for every state and any refusal an unapproved child picks up is demoted to one.
+//
+// `head` is the child's own tip, which is what tells the two landed cases apart: a child already on the
+// landing commit has a stale branch to delete, and a child that has not rebased has a rebase to run.
 func (a *app) parentSinceApproval(ctx context.Context, repo *git.Repo, c changeset.Changeset,
-	db changeset.DefaultBranchRef, approved *lifecycle.Event) (parentStatus, error) {
-	if approved == nil || approved.Kind != lifecycle.KindReview || approved.Outcome != model.OutcomeApprove {
-		return parentStatus{}, nil
-	}
+	db changeset.DefaultBranchRef, approved *lifecycle.Event, head string) (parentStatus, error) {
 	parent, err := changeset.ParentOf(ctx, repo, c, db)
 	if err != nil || parent.Branch == "" {
 		return parentStatus{}, err
 	}
-	st := parentStatus{Branch: parent.Branch, Changeset: c.ParentChangeset,
-		Recorded: approved.ReviewedParentHead, Tip: parent.Tip}
-	if st.Tip == "" {
-		return a.parentGone(ctx, repo, c, db, st)
+	isApproval := approved != nil && approved.Kind == lifecycle.KindReview && approved.Outcome == model.OutcomeApprove
+	st := parentStatus{Branch: parent.Branch, Changeset: c.ParentChangeset, Tip: parent.Tip}
+	if isApproval {
+		st.Recorded = approved.ReviewedParentHead
 	}
+	if st.Tip == "" {
+		st, err = a.parentGone(ctx, repo, c, db, st)
+	} else {
+		st, err = a.parentLive(ctx, repo, c, db, head, approved, st)
+	}
+	if err != nil || isApproval {
+		return st, err
+	}
+	if st.Reason != "" {
+		// The state has no approval for any of these findings to invalidate: the abandoned parent, the
+		// unreconciled stack. Say it, and let `status` print it as an observation.
+		st.Note, st.Reason, st.Next = st.Reason, "", ""
+	}
+	return st, nil
+}
+
+// parentLive reads what the parent's side of the stack says while its branch is still here.
+func (a *app) parentLive(ctx context.Context, repo *git.Repo, c changeset.Changeset,
+	db changeset.DefaultBranchRef, head string, approved *lifecycle.Event, st parentStatus) (parentStatus, error) {
 	// A parent that has been abandoned will never carry the work the child was stacked on, whatever
-	// its tip does next. That outranks "it moved": rebasing onto a dead branch is not a way forward.
-	gone, err := parentAbandoned(ctx, repo, c, db, parent.Branch)
+	// its tip does next. That outranks "it moved" and outranks "it landed": rebasing onto a dead branch
+	// is not a way forward.
+	gone, err := parentAbandoned(ctx, repo, c, db, st.Branch)
 	if err != nil {
 		return st, err
 	}
@@ -76,11 +116,22 @@ func (a *app) parentSinceApproval(ctx context.Context, repo *git.Repo, c changes
 			st.parentName(), st.Branch, st.Next)
 		return st, nil
 	}
+	// The record before the tip comparison, and before the early return below: a parent that landed by
+	// merge has not moved its branch, so `Recorded == Tip` is true and reads as "nothing happened"
+	// exactly when the work left the branch.
+	if st, err = a.parentLanded(ctx, repo, c, db, head, st); err != nil {
+		return st, err
+	}
+	if approved == nil || approved.Kind != lifecycle.KindReview || approved.Outcome != model.OutcomeApprove {
+		return st, nil
+	}
 	if st.Recorded == "" {
 		// The approval predates the trailer, or was written by a hand-edited commit. The absence is
 		// not evidence that the parent moved, and refusing here would refuse every child approved
 		// before parent tracking existed. Say what is missing and let the reviewer decide.
-		st.Note = fmt.Sprintf("parent %s: the approval recorded no parent tip, so git-pair cannot tell whether it has moved", st.Branch)
+		if st.Note == "" {
+			st.Note = fmt.Sprintf("parent %s: the approval recorded no parent tip, so git-pair cannot tell whether it has moved", st.Branch)
+		}
 		return st, nil
 	}
 	if st.Recorded == st.Tip {
@@ -94,6 +145,72 @@ func (a *app) parentSinceApproval(ctx context.Context, repo *git.Repo, c changes
 	st.Reason = fmt.Sprintf("the parent branch %s moved since review %s approved %s: %s — %s",
 		st.Branch, approved.Short, short(st.Recorded), moved, advice)
 	st.Next = advice
+	return st, nil
+}
+
+// parentLanded reads the parent's record and says what it means for the child in front of us.
+//
+// Two git reads and one ref, and only for a stack that names a parent changeset: the record, whether the
+// child's head already carries it, and whether the destination branch does. The order is the cheap one —
+// a parent with no record here costs the ref lookup and nothing else.
+func (a *app) parentLanded(ctx context.Context, repo *git.Repo, c changeset.Changeset,
+	db changeset.DefaultBranchRef, head string, st parentStatus) (parentStatus, error) {
+	if c.ParentChangeset == "" {
+		// The yaml names a branch and no changeset, so there is no record to ask. Silence is the answer:
+		// the branch is here, its tip is reported, and nothing about it is claimed from a name.
+		return st, nil
+	}
+	commit, err := reviewref.ResolveIntegration(ctx, repo, c.ParentChangeset)
+	if errors.Is(err, reviewref.ErrNotIntegrated) {
+		return a.parentInTrunkUnrecorded(ctx, repo, c, db, st)
+	}
+	if err != nil {
+		return st, err
+	}
+	st.Landed = short(commit)
+	if db.Ref != "" {
+		in, err := repo.IsAncestor(ctx, commit, db.Ref)
+		if err != nil {
+			return st, err
+		}
+		st.LandedInDefaultBranch = in
+		st.LandedReach = ", reachable from " + displayRef(db.LocalName())
+		if !in {
+			st.LandedReach = ", not reachable from " + displayRef(db.LocalName())
+		}
+	}
+	if head == "" {
+		return st, nil
+	}
+	on, err := repo.IsAncestor(ctx, commit, head)
+	if err != nil {
+		return st, err
+	}
+	st.StaleBranch = on
+	if on {
+		st.Note = fmt.Sprintf("your head is on %s, so the branch %s is stale — it holds nothing the record does not",
+			st.Landed, st.Branch)
+		return st, nil
+	}
+	st.Note = fmt.Sprintf("rebase onto it: this head is still measured on %s, which the landing replaced", st.Branch)
+	return st, nil
+}
+
+// parentInTrunkUnrecorded is the sibling finding: the parent's branch tip is in the integration branch and
+// no integration ref exists for it, which is §22's gap seen from the child. The child cannot be measured
+// against a durable ref that was never written, so this is reported as a note naming the command rather
+// than as a landing.
+func (a *app) parentInTrunkUnrecorded(ctx context.Context, repo *git.Repo, c changeset.Changeset,
+	db changeset.DefaultBranchRef, st parentStatus) (parentStatus, error) {
+	if db.Ref == "" || st.Tip == "" {
+		return st, nil
+	}
+	in, err := repo.IsAncestor(ctx, st.Tip, db.Ref)
+	if err != nil || !in {
+		return st, err
+	}
+	st.Note = fmt.Sprintf("%s is in %s with no integration record: `git pair integration record --changeset %s`, and %s",
+		st.parentName(), displayRef(db.LocalName()), c.ParentChangeset, unrecordedHedge(false))
 	return st, nil
 }
 
@@ -126,6 +243,12 @@ func (a *app) parentGone(ctx context.Context, repo *git.Repo, c changeset.Change
 		return st, err
 	}
 	l, err := a.describeLanding(ctx, repo, commit)
+	if err != nil {
+		return st, err
+	}
+	st.Landed = short(commit)
+	st.LandedInDefaultBranch = l.InDefaultBranch
+	st.LandedReach = l.reach()
 	if err != nil {
 		return st, err
 	}

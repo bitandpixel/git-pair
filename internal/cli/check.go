@@ -157,7 +157,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool, doFetch bool) err
 	}
 	// The stack question. A child's own history can be untouched and its parent can have landed,
 	// been rewritten, or been abandoned underneath it, and only the parent's side shows that.
-	parent, err := a.parentSinceApproval(ctx, s.repo, s.cs, s.trunk, reviewed.Marker)
+	parent, err := a.parentSinceApproval(ctx, s.repo, s.cs, s.trunk, reviewed.Marker, s.head)
 	if err != nil {
 		return err
 	}
