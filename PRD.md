@@ -930,6 +930,10 @@ line, and the refusal message names it.
 
 Launches the interactive review TUI.
 
+`git pair review` with no subcommand is this command: the group takes the screen itself and carries the
+same span flags, so `git pair review --unreviewed` and `git pair review open --unreviewed` are one
+command spelled two ways. `open` stays because a reader of the command tree looks for a verb.
+
 Responsibilities:
 
 -   identify current changeset,

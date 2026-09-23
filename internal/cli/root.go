@@ -187,10 +187,17 @@ Gates and record:  git pair check, then git pair integration record`,
 func groupUsage(name string) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
-			return &usageError{fmt.Errorf("unknown %s command %q; run `git-pair %s --help`", name, args[0], name)}
+			return unknownGroupCommand(name, args)
 		}
 		return cmd.Help()
 	}
+}
+
+// unknownGroupCommand is what a group says about a word that is not one of its commands. It is apart
+// from groupUsage because `review` is a group with a command of its own, so its RunE answers the real
+// invocation and needs the refusal on its own.
+func unknownGroupCommand(name string, args []string) error {
+	return &usageError{fmt.Errorf("unknown %s command %q; run `git-pair %s --help`", name, args[0], name)}
 }
 
 // --- shared loading ---------------------------------------------------------
