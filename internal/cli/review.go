@@ -284,7 +284,7 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 			"outcome":         string(result.Outcome),
 			"commit":          result.Commit,
 			"short":           short(result.Commit),
-			"files":           result.Files,
+			"files":           orEmpty(result.Files),
 			"empty":           result.Empty(),
 			"previous_review": previous,
 			"next_action":     nextActionFor(result.Outcome, s.cs.Base),

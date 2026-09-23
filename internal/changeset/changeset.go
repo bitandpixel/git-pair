@@ -449,9 +449,26 @@ func RequireCurrentOn(ctx context.Context, repo *git.Repo, db DefaultBranchRef) 
 		return c, err
 	}
 	if !c.Exists {
-		return c, fmt.Errorf("%w: %s (run `git pair init --base <ref>`)", ErrNoChangeset, c.Dir)
+		return c, noChangesetHere(ctx, repo, db, c)
 	}
 	return c, nil
+}
+
+// noChangesetHere says what a reader standing on a branch with no work in progress can actually do, and
+// the answer turns on one fact: whether the integration branch already holds this directory.
+//
+// `init` is the right hint only when nothing happened to this branch's changeset yet. When the
+// destination already carries the directory, the changeset landed and this branch is the copy that has
+// not been tidied away. Telling that reader to run `init` starts a second changeset over work with a
+// record, and `status` on a merged branch is the ordinary way to arrive here: the branch is where you
+// were standing when the merge happened.
+func noChangesetHere(ctx context.Context, repo *git.Repo, db DefaultBranchRef, c Changeset) error {
+	if db.Ref != "" && repo.PathExistsAt(ctx, db.Ref, c.Dir) {
+		id := filepath.Base(c.Dir)
+		return fmt.Errorf("%w: %s is not work in progress, and the integration branch already holds it — that "+
+			"changeset landed. Read it with `git pair status --changeset %s`", ErrNoChangeset, c.Dir, id)
+	}
+	return fmt.Errorf("%w: %s (run `git pair init --base <ref>`)", ErrNoChangeset, c.Dir)
 }
 
 // The two stack keys. `parent:` names the branch this changeset is stacked on and *is* its base:

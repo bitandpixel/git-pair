@@ -194,12 +194,12 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 
 	if a.json {
 		out := map[string]any{
-			"ready_for_review":  entries,
-			"skipped":           skipped,
+			// Every array here is `[]` rather than null, including `landed_unrecorded` and `unpublished`.
+			// An empty list is the answer "asked, and none", and a missing key is "this build did not look".
+			"ready_for_review":  orEmpty(entries),
+			"skipped":           orEmpty(skipped),
 			"landed_unrecorded": unrecorded,
-			// Never null, for the reason `landed_unrecorded` is never null: an empty list is the answer
-			// "nothing is waiting to be published" and a missing key is "this build did not look".
-			"unpublished": rep.Findings,
+			"unpublished":       rep.Findings,
 		}
 		if rep.Note != "" {
 			out["unpublished_note"] = rep.Note

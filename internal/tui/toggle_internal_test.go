@@ -21,6 +21,10 @@ func newFileListModel(t *testing.T) reviewModel {
 	return newFileListModelWith(t, map[string]string{
 		"service.go": "package main\n\nfunc Lock() {}\n",
 		"handler.go": "package main\n\nfunc Serve() {}\n",
+		// main.go already exists, so the span changes it rather than creating it. A fixture where every
+		// file is new would leave the pane reading every row as text, and half of this file's tests are
+		// about the diff.
+		"main.go": "package main\n\nfunc main() { Lock() }\n",
 	})
 }
 

@@ -110,8 +110,8 @@ func TestReviewQueueIsSilentAboutAnAbandonedChangesetDirectoryLeftBehind(t *test
 	if queueListsChangeset(t, queue, slug) {
 		t.Errorf("an abandoned changeset is in the queue:\n%s", queue.stdout)
 	}
-	if skipped := queue.json(t)["skipped"]; skipped != nil {
-		t.Errorf("skipped = %v, want silence: the anchor says this changeset ended", skipped)
+	if skipped := queue.jsonList(t, "skipped"); len(skipped) != 0 {
+		t.Errorf("skipped = %v, want the empty array: the anchor says this changeset ended", skipped)
 	}
 }
 

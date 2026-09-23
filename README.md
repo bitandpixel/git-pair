@@ -590,11 +590,16 @@ the invocation itself was wrong, so retrying unchanged will fail again.
 
 ## JSON contracts
 
-Output is indented two spaces, and empty lists may serialise as `null` rather than `[]`
-(`queue`'s `ready_for_review` and `skipped`, `review submit`'s `files`), so test for both. A key
-that answers a question rather than collecting notes is always an array: `queue`'s
-`landed_unrecorded` says `[]` for "asked, and none", so a consumer never has to tell that apart from a
-build old enough not to have been asked.
+Output is indented two spaces. An array is never null. It says `[]` for "asked, and none". A missing key
+then means the build did not ask.
+
+Two fields answer null on purpose, and neither is a list. `status`'s `latest_review` is an object that
+does not exist before the first review. `uncommitted` is a bool that reports the question belongs to a
+checkout this command does not stand in.
+
+`git pair change feedback` and `git pair diff` have no JSON output. `--json` is a global flag, so both
+accept it. Each now says on stderr that the flag changed nothing, because an empty stdout reads to a
+machine as an empty answer.
 
 `git pair status --json`, waiting for the first review. Once a review exists `latest_review`
 becomes `{"index": 0, "outcome": "block", "commit": "332887c", "reviewed_head": "1a2b3c4"}` —
@@ -660,7 +665,7 @@ further to record instead.
 ```
 
 `git pair queue --json` — `head` and `ready_commit` are full SHAs. `skipped` names changesets
-the queue cannot explain (`null` when empty): a branch whose metadata cannot be read, a branch the
+the queue cannot explain (`[]` when empty): a branch whose metadata cannot be read, a branch the
 resolution rule cannot settle between two changesets, a recorded changeset whose archive is in no base
 and on no branch, or a changeset whose integration ref says it landed — that one names the commit,
 because the branch is usually still here and its disappearance from the queue would otherwise be a
@@ -710,6 +715,10 @@ trunk, so the rules that find work in progress stop seeing it, and the branch ma
 its exit-2 "no changeset for this branch" answer, which stays exit 2 because the branch really does hold
 no work in progress.
 
+When the destination already holds the directory, the answer says the changeset landed. It then names
+`git pair status --changeset <id>` rather than telling you to run `git pair init` over work that has a
+record.
+
 Both reports say "no integration record *in this clone*", and mean it: a record written where the merge
 ran arrives with `git fetch origin 'refs/git-pair/*:refs/git-pair/*'` — or with `--fetch`, which
 `status`, `queue` and `check` all accept and which also brings the mirrors under
@@ -758,7 +767,7 @@ is none)
   "changeset": "feat",
   "commit": "941266b18686624cb624722b4e8c348bf03451a7",
   "empty": true,
-  "files": null,
+  "files": [],
   "next_action": "author: `git pair check`, then merge into main with ordinary git, then `git pair integration record`, then `git pair integration publish`",
   "outcome": "approve",
   "previous_review": "",
@@ -1030,8 +1039,7 @@ missing refs is describing exactly that.
 
 The editor is whatever git would use: git-pair asks git with `git var GIT_EDITOR`, so the
 precedence is git's — `GIT_EDITOR`, then `core.editor`, then `VISUAL`, then `EDITOR`, then
-whatever fallback the git build was configured with. `git config core.editor vim` is therefore
-enough, including when it is set in the repository rather than globally, and a caller that
+whatever fallback the git build was configured with. `git config core.editor vim` is enough, including when it is set in the repository rather than globally, and a caller that
 injects `GIT_EDITOR` (a hook, another tool) is honoured the way every other git consumer
 honours it. Only when git cannot answer does git-pair fall back to `$VISUAL`, then `$EDITOR`, then
 `vi`. Automated harnesses must clear `GIT_EDITOR` along with `VISUAL`/`EDITOR`, and every editor
@@ -1083,7 +1091,7 @@ top, the changed files and their marks below it, and the reviewed counter under 
 ▾ ○ src/
     ▾ ○ ui/
         ○ picker.ts
-    ○ a.ts
+    ○ a.ts +
 ═══════════════════════════════════════
 0 / 2 reviewed
 ────────────────────────────────────────
@@ -1125,9 +1133,10 @@ are going. A half with no rows has no ends of its own, and there the jump goes t
 `ctrl-f` and `ctrl-b` and nothing else; `ctrl-c` and `q` are what quit.) The shortcut bar is the bar of the
 half that holds the keys, which is how a key belonging to the other half is a key that is not offered rather
 than a key that quietly does nothing.
-directory holding nothing but one directory is folded into that row (`src/` above holds `a.ts` and
-`ui/`, so it gets its own row; a chain of single-child directories would be one row and print
-`docs/plans/active/`), and every row prints only the name the rows above it have not already said.
+
+Each file sits under its directory, and a row prints only the name the rows above it have not said.
+A directory that holds nothing but one directory is folded into that row. `src/` above holds `a.ts` and `ui/`,
+so it gets a row of its own. A chain of single-child directories becomes one row printed `docs/plans/active/`.
 Each level is indented four cells, so a child's name starts two cells right of the directory it is under.
 That is what the four cells are for: a directory row spends two on its fold arrow and two on its mark
 gutter before its name, and a file row only the gutter, so an indent of two a level puts every child's
@@ -1137,6 +1146,14 @@ both, the way it does for the thread heading — and `c` folds the whole tree an
 which is how a changeset of a hundred files gets read for shape before it gets read for detail.
 Folding a directory that was hiding the cursor leaves the cursor on the directory, not on whatever
 row its old index now points at.
+
+One character goes after a file's name for what the span did to that file. git's own status answers it: `+`
+for a file the span created, `-` for one it deleted, `~` for one it moved. No sign means the span only changed
+the file. That is what a span usually does, so a sign marks the exception a reviewer came to find.
+
+The character is dim, and it sits after the name the way a directory's count sits after its name. It is a fact
+about the file rather than part of its name. The move is git's rename detection, so a repository with
+`diff.renames` off gets `-` and `+` for the pair git called two files.
 A directory's mark is its subtree's: `✓` when every file under it is reviewed, `○` when none is,
 and between the two the count of what is left (`▸ ◐ src/ 2/7`) — a tick there would be a claim about
 files nobody opened. `Enter` does whatever the row under the cursor is for: the difftool for a
@@ -1232,6 +1249,15 @@ added, which is true and says nothing about what the document says, and the pane
 for reading text. The Threads heading is the whole conversation at once: every thread in the order the box
 lists them, each named above its own text, which is what the threads are when the list is collapsed. The
 header counts what is on show — a diff's `+N −M`, a document's lines, the heading's threads.
+
+Two file rows come into the pane as the file, not as a patch: one the span created, one it moved unchanged.
+A new file's patch is its own text with a `+` on every line. An unchanged move's patch is two lines about a path.
+Every other file row keeps its patch, because a rename with edits has edits to show.
+
+A deletion is the only place the removed text still is, so its row keeps the patch too. The text is the file
+at the span's head, not the working copy, so a reviewer's own edits cannot read as reviewed work. The header
+says `you edited it` when the reviewer edits that file afterwards. A move names the path it came from, which
+the tree's `~` has no room for. `Enter` there still opens the difftool, because the row is still a file.
 
 Over a historical span the text is still the file on disk, because that is the file `e` would open, so the
 header adds `working copy` rather than letting someone read history that is not there; the editor stays
@@ -1411,6 +1437,31 @@ like. Nothing is committed or shared — `git status` cannot see the
 directory and `git add` cannot stage it — and no command reports marks, so derived state is
 unaffected. Deleting that directory forgets the marks; the newest 12 commits per changeset are
 kept.
+
+## Development
+
+`mise run check` is the gate: gofmt, `go vet`, then the Go test suite. Run it before you call a
+change done.
+
+Two scripted replays sit above it. Each one runs the installed binary as a subprocess, so it reaches
+what a Go test cannot:
+
+| Gate | What it proves | Needs |
+| --- | --- | --- |
+| `scripts/gates/e2e-29.sh` | The PRD §29 loop end to end in a scratch repo, through review, approve, `check`, record, publish and `--fetch` | `git` |
+| `scripts/gates/pty-walkthrough.sh` | The review TUI under a real pty: first paint, the file tree, marks, the span walk, the difftool handoff | `git`, `python3` |
+
+`mise run gates` builds the binary, then runs both. Each script also takes a binary path as its first
+argument. A pipeline that installs the build elsewhere passes its own path.
+
+Both scripts resolve the default binary by the rule `mise run build` uses. A branch installs and tests
+its own namespaced name, rather than a build another worktree left behind. See
+`scripts/install-name.sh`.
+
+Work here is planned in `docs/plans/<name>/plan.md`, and a finished plan moves to
+`docs/plans/completed/`. Each change carries its own directory under `changesets/`. The tool reviews
+itself. `git pair change ready` offers the change, and `git pair review open` opens it for a
+reviewer.
 
 ## Troubleshooting
 

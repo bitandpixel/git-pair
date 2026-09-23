@@ -5,7 +5,7 @@
 # start without a terminal, and a ref moved by another process only moves while something is
 # watching.
 #
-# Usage: bash docs/plans/completed/gitpr-mvp/artifacts/pty-walkthrough.sh [/path/to/git-pair]
+# Usage: bash scripts/gates/pty-walkthrough.sh [/path/to/git-pair]
 #        (default: the name `mise run build` installs from this repository — the shared
 #        ~/.local/bin/git-pair on trunk, a branch-namespaced one anywhere else)
 #
@@ -18,7 +18,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # rule `mise run build` uses. This walkthrough paints the TUI and checks what came out, so the
 # binary under test has to be the one built from *this* repository — the shared name would
 # paint whatever another worktree last installed, and the checks would pass or fail on it.
-ROOT=$(cd "$HERE/../../../../.." && pwd)
+ROOT=$(cd "$HERE/../.." && pwd)
 G=${1:-$HOME/.local/bin/$(sh "$ROOT/scripts/install-name.sh" "$ROOT")}
 if [ ! -x "$G" ]; then
   printf 'no binary at %s - run `mise run build` in %s first\n' "$G" "$ROOT" >&2
@@ -27,6 +27,10 @@ fi
 DRIVER="$HERE/pty-tui.py"
 PLAIN="$HERE/pty-plain.py"
 T=$(mktemp -d /tmp/git-pair-pty.XXXXXX)
+# The replayed commands get stdin from /dev/null. `git pair init` reads a pipe as piped `--about` content,
+# so a harness that leaves stdin open would leave a fixture `init` blocked forever. The pty drivers build
+# their own terminal for the program they run, so this does not touch what the TUI reads.
+exec < /dev/null
 trap 'rm -rf "$T"' EXIT
 FAILED=0
 COLS=100
@@ -112,6 +116,10 @@ expect "the reviewed counter is on screen" -1 "$T/paint.raw" "reviewed"
 expect "the changeset box names the base over the tree" -1 "$T/paint.raw" "base  main"
 expect "the span is a row of the box, not a caption" -1 "$T/paint.raw" "span  main...current"
 expect "the file tree is below it" -1 "$T/paint.raw" "changesets/booking-transaction/"
+# The character after a name is git's status. The changeset's own two files are new, so both carry `+`.
+# src/service.ts was there before the span, so its row carries nothing.
+expect "a file the span created carries a + after its name" -1 "$T/paint.raw" "ABOUT.md +"
+refuse "a file the span only changed carries no sign" -1 "$T/paint.raw" "service.ts +"
 expect "the shortcut bar offers the span picker" -1 "$T/paint.raw" "V picker"
 expect "the shortcut bar offers quit" -1 "$T/paint.raw" "q quit"
 # The box is closed on all four sides in a real terminal, including the side nearest the diff column.

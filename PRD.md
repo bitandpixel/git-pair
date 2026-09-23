@@ -478,11 +478,13 @@ git-pair
 │   ├── use
 │   ├── ready
 │   ├── unready
+│   ├── abandon
 │   ├── feedback
 │   └── wait
 │
 ├── review
 │   ├── open
+│   ├── reopen
 │   ├── about
 │   ├── thread
 │   ├── submit
@@ -494,7 +496,8 @@ git-pair
 ├── check
 │
 └── integration
-    └── record
+    ├── record
+    └── publish
 ```
 
 ---
@@ -1177,8 +1180,8 @@ alive: the record may exist in the clone that ran the merge and simply not have 
 `--json` reports the same finding as `landed_unrecorded`, an array of `{"changeset", "command"}` — always
 an array, since it answers a question, and a consumer should not have to tell "none" apart from "this
 build predates the question". `unpublished` (§13) is the third list for the same reason and with the same
-rule — the record exists here and not there — and `ready_for_review` and `skipped` keep their documented
-shapes.
+rule — the record exists here and not there. Every array `--json` prints follows it. An empty list is
+`[]`, never null.
 
 The note is the record talking: `booking-transaction`'s branch may still be checked out and its directory
 still absent from trunk, and it is the integration ref that says the queue has nothing to ask of it
@@ -1208,6 +1211,23 @@ git-pair repo list
 Global repository management is useful but may be deferred if needed.
 
 The queue command should have a stable machine-readable form suitable for automation and notifications.
+
+## 10.7 `git pair review reopen`
+
+Launches the same TUI as §10.1 on the span from the most recent review submission to the working tree.
+
+The name carries the reason it exists. `review open` shows the whole changeset, which is the right first
+read. After the author answers a block or feedback, the work to read is what arrived since the reviewer's
+own submission. `review reopen` names that span without a flag.
+
+```text
+git pair review reopen
+```
+
+It resolves the span `<last review>..current`, the same span `git pair review open --unreviewed` shows.
+An earlier review is `git pair review open --since-review=N`. Needs a terminal, like §10.1. With no
+review submission yet it exits 2 and says to run `review open` instead. The author reads a submission
+with `git pair change feedback` (§9.3). This command is the reviewer's.
 
 ---
 
@@ -2022,7 +2042,7 @@ Example:
 
 ▾ ◐ src/booking/  2/3
   ▾ ✓ concurrency/
-      ✓ lock_test.ts
+      ✓ lock_test.ts +
   ✓ fixtures.ts
   ○ main.ts
 
@@ -2093,6 +2113,14 @@ way it does for the thread heading — while `c` folds the whole tree and opens 
 a changeset of a hundred files is read for its shape before it is read for its detail. Folding moves
 the cursor onto the directory when it was hiding the row the cursor was on, so no fold can leave the
 cursor somewhere the reviewer did not move it.
+
+A file row carries one character after its name for what the span did to that file. git's own status answers
+it: `+` for a file the span created, `-` for one it deleted, `~` for one it moved. No sign means the span only
+changed the file. That is what a span usually does, so a sign marks the exception a reviewer came to find.
+
+The character is dim, and it sits after the name the way a directory's count sits after its name. It is a fact
+about the file rather than part of its name. The move is git's rename detection, so a repository with
+`diff.renames` off gets `-` and `+` for the pair git called two files.
 
 A directory's mark is its subtree's: `✓` when every file under it is reviewed, `○` when none is, and
 between the two the count of what is left (`◐ 2/3`), because a tick there would be a claim about
@@ -2192,6 +2220,16 @@ with the rules the row itself would apply: the difftool for a diff, the editor f
 own refusal where history makes the editor the wrong tool. Over a historical span the document is still read
 from the working tree — it is the file the editor would open — so the header says `working copy` rather than
 letting a reviewer read history that is not there.
+
+Two file rows read as the file rather than as a patch: one the span created, one it moved unchanged. A new
+file's patch is its own text with a `+` on every line. An unchanged move's patch is two lines about a path.
+Every other file row keeps its patch, because a rename with edits has edits to show. A deletion is the only
+place the removed text still is, so its row keeps the patch too.
+
+The text is the file at the span's head, not the working copy, so a reviewer's own edits cannot read as
+reviewed work. The header says `you edited it` when the reviewer edits that file afterwards. A move names the
+path it came from, which the tree's `~` has no room for. `Enter` in the pane opens it in the difftool, because a
+file read as text is still a file.
 
 A span whose head is a commit rather than the working tree is a look at history, and the screen
 says so where the reviewer is already looking: the counter's slot carries `HISTORICAL · READ ONLY`,
@@ -2851,8 +2889,16 @@ git pair change feedback
 git pair check
 ```
 
-`git pair integration record` (§11.4) is the agent's to *read about* and not to run; it belongs to
-whoever performed the landing, which is CI in the intended setup.
+`git pair integration record` (§11.4) is the agent's to *read about* and not to run. It belongs to
+whoever does the landing, which is CI in the intended setup.
+
+`--json` has one contract. Every array it prints is `[]` for "asked, and none", never null. A job then
+branches on a field, not on the presence of a key. Two fields answer null on purpose.
+
+`latest_review` is an object that does not exist before the first review. `uncommitted` reports that the
+question belongs to a checkout this command does not stand in. `git pair change feedback` and
+`git pair diff` have no JSON output at all. They print the report itself, and `--json` says on stderr that
+it changed nothing.
 
 Agent behavior:
 

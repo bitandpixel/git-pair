@@ -253,8 +253,8 @@ func TestReviewQueueReportsReadyChangesetFields(t *testing.T) {
 
 	// A changeset a branch owns is not an orphan, and the directory it left in the
 	// tree must not be classified a second time as one.
-	if skipped := res.json(t)["skipped"]; skipped != nil {
-		t.Errorf("skipped = %v, want nothing said about a changeset the queue just listed", skipped)
+	if skipped := res.jsonList(t, "skipped"); len(skipped) != 0 {
+		t.Errorf("skipped = %v, want the empty array: nothing to say about a changeset the queue just listed", skipped)
 	}
 }
 
@@ -386,8 +386,8 @@ func TestReviewQueueOrdersABranchCarryingTwoChangesetsByItsOwnHistory(t *testing
 
 	f.SwitchTo("main")
 	res := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
-	if skipped := res.json(t)["skipped"]; skipped != nil {
-		t.Errorf("skipped = %v, want both branches listed: bbb-two last worked on its own directory\n%s",
+	if skipped := res.jsonList(t, "skipped"); len(skipped) != 0 {
+		t.Errorf("skipped = %v, want the empty array: both branches are listed, bbb-two last on its own directory\n%s",
 			skipped, res.stdout)
 	}
 	for _, want := range []string{"aaa-one", "bbb-two"} {
@@ -549,8 +549,8 @@ func TestReviewQueueIsSilentAboutChangesetsThatLanded(t *testing.T) {
 	if queueListsChangeset(t, res, slug) {
 		t.Errorf("a landed changeset is still in the queue:\n%s", res.stdout)
 	}
-	if skipped := res.json(t)["skipped"]; skipped != nil {
-		t.Errorf("skipped = %v, want nothing said about a changeset that has landed", skipped)
+	if skipped := res.jsonList(t, "skipped"); len(skipped) != 0 {
+		t.Errorf("skipped = %v, want the empty array: nothing to say about a changeset that has landed", skipped)
 	}
 	human := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
 	if strings.Contains(human.stdout+human.stderr, "skipped") {
@@ -579,8 +579,8 @@ func TestReviewQueueIgnoresDirectoriesThatWereNeverOffered(t *testing.T) {
 	if queueListsChangeset(t, res, slug) {
 		t.Errorf("a changeset with no marker is not ready:\n%s", res.stdout)
 	}
-	if skipped := res.json(t)["skipped"]; skipped != nil {
-		t.Errorf("skipped = %v, want silence about a directory that was never offered", skipped)
+	if skipped := res.jsonList(t, "skipped"); len(skipped) != 0 {
+		t.Errorf("skipped = %v, want the empty array: no word about a directory that was never offered", skipped)
 	}
 }
 
@@ -636,8 +636,8 @@ func TestReviewQueueIsSilentAboutAnUnrecordedOrphan(t *testing.T) {
 	if queueListsChangeset(t, res, slug) {
 		t.Errorf("an orphan with no record is not reviewable:\n%s", res.stdout)
 	}
-	if skipped := res.json(t)["skipped"]; skipped != nil {
-		t.Errorf("skipped = %v, want silence about a directory nothing records", skipped)
+	if skipped := res.jsonList(t, "skipped"); len(skipped) != 0 {
+		t.Errorf("skipped = %v, want the empty array: no word about a directory nothing records", skipped)
 	}
 }
 

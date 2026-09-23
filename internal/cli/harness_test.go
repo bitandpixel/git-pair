@@ -47,7 +47,9 @@ func (r result) json(t *testing.T) map[string]any {
 	return out
 }
 
-// jsonList decodes a named array field, accepting null as "empty".
+// jsonList decodes a named array field. A null fails here rather than reading as empty: the JSON contract
+// says an array is `[]` for "asked, and none" (README), and a helper that quietly accepted null is how
+// two of `queue`'s lists stayed null while the suite read them as empty.
 func (r result) jsonList(t *testing.T, key string) []any {
 	t.Helper()
 	value, ok := r.json(t)[key]
@@ -55,7 +57,7 @@ func (r result) jsonList(t *testing.T, key string) []any {
 		t.Fatalf("JSON output has no %q key: %v", key, r.json(t))
 	}
 	if value == nil {
-		return nil
+		t.Fatalf("JSON %q = null, want an array — `[]` is the answer %q\n%s", key, "asked, and none", r.stdout)
 	}
 	list, ok := value.([]any)
 	if !ok {

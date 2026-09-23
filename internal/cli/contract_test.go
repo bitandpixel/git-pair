@@ -329,10 +329,10 @@ func TestJSONKeySets(t *testing.T) {
 		if empty["empty"] != true {
 			t.Errorf("empty = %v, want true for a clean-tree approval", empty["empty"])
 		}
-		if value, ok := empty["files"]; ok && value != nil {
-			if list, ok := value.([]any); !ok || len(list) != 0 {
-				t.Errorf("files = %v, want an empty list for an empty review", value)
-			}
+		// `files` is an empty array here, not null: the key answers a question, and `[]` is the answer
+		// "the submission changed no files" (README's JSON contracts).
+		if list, ok := empty["files"].([]any); !ok || len(list) != 0 {
+			t.Errorf("files = %v, want [] for an empty review", empty["files"])
 		}
 	})
 

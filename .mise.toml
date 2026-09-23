@@ -13,7 +13,7 @@ go = "1.27.1"
 # it was built from. That is not decoration: this repository is worked in several
 # worktrees at once and ~/.local/bin is one shared directory, so whichever worktree
 # built last would be the binary every other one was pretending to test — and the gate
-# scripts under docs/plans resolve the same name, so a replay cannot quietly run a build
+# scripts under scripts/gates resolve the same name, so a replay cannot quietly run a build
 # left behind by a different branch. Trunk keeps the plain name, and `build:prod` below
 # writes it from anywhere: overwriting the shared binary is sometimes the point, and is
 # never supposed to be a surprise.
@@ -28,7 +28,7 @@ if [ "$name" = git-pair ]; then
 else
   echo "installed ~/.local/bin/$name (from $(git branch --show-current))"
   echo "run it as '$name ...'; 'git pair' is still ~/.local/bin/git-pair, and the gate"
-  echo "scripts under docs/plans default to the name just installed"
+  echo "scripts under scripts/gates default to the name just installed"
 fi
 """
 description = "Compile and install onto ~/.local/bin as git-pair-<branch> (trunk installs the plain name)"
@@ -52,6 +52,20 @@ description = "Install the shared ~/.local/bin/git-pair from any branch"
 [tasks.test]
 run = "go test ./..."
 description = "Run the Go test suite"
+
+# The two scripted replays. `check` covers the unit and integration layers; these drive the real
+# CLI as a subprocess, so they catch what a Go test cannot: a workflow step whose exit code or
+# wording changed, and a TUI that paints the wrong thing. They resolve the binary the same way
+# `build` names it, so `build` first is what makes the replay test this checkout.
+[tasks.gates]
+run = """
+set -eu
+mise run build
+bash scripts/gates/e2e-29.sh
+bash scripts/gates/pty-walkthrough.sh
+"""
+depends = ["check"]
+description = "check, then replay the PRD §29 loop and the pty TUI walkthrough (needs python3)"
 
 # The full gate: formatting, vet, then tests. `check` is what to run before
 # calling a change done; `test` is what to run while iterating.
