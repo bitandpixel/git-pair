@@ -23,8 +23,14 @@ The first round argued with the fourth one. Review `a87ae0b` objected that the r
 *when* the base moves, since deleting the parent branch moves it regardless, and measuring it showed the delay
 costs more than a label: a child rebased onto trunk, read against the parent's branch tip, reports the
 parent's own work and unrelated trunk work as the child's change. That non-goal is withdrawn, the argument is
-in the thread, and the trigger is milestone 4 — which cannot be written without settling how PRD §21 treats a
-landing.
+in the thread, and the trigger is milestone 4.
+
+The second round settled what milestone 4 was waiting on (`f443b7c`): an approval survives the relink when
+`base...head` is identical under both bases, and two clones printing different `Base:` values is accepted
+because they agree deterministically given the same refs. Answering "what breaks when they disagree" produced
+two guards and one fix — `Review-Parent-Head` keeps naming the branch tip while the branch exists, a landing is
+recorded beside it rather than replacing it, and `integration record`'s derived `--target` never offers a base
+under `refs/git-pair/` as a destination.
 
 ## What changed
 
@@ -82,8 +88,6 @@ git for-each-ref | grep for-each-ref-glob             # archive 851df62, integra
 
 - Is the stale-branch note worth printing at all once the child has been rebased onto the landing commit
   and only the branch deletion is left? The plan says yes, at `a.warn` severity, and it is cheap to drop.
-- Milestone 4 needs the reviewer's call on PRD §21: whether a landing invalidates an approval, and whether a
-  base may read differently in a clone that has not fetched `refs/git-pair/*`. Argued in the thread.
 - `fix-legacy-refs-and-remote-branches` is in review and edits `landed.go`, `published.go`, `reviewref.go`
   and `integration.go`. This plan reads through `ResolveIntegration` and `indexDurableRefs` rather than
   `List`, so the two overlap in file names only. Should this branch stack on that one instead of trunk?

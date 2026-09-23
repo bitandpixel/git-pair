@@ -224,20 +224,28 @@ Verification
   the parent branch gone and the base relinked by the existing `relinkStacks` path.
 - `mise run gates` passes, including the pty TUI walkthrough.
 
-### M4 — The relink trigger (blocked on the thread)
+### M4 — The relink trigger (decided in the thread)
 
-Open until the reviewer settles PRD §21: does a landing invalidate an approval, and is a base allowed to read
-differently in a clone that has not fetched the namespace? Tasks are written as tests first so the decision
-can be made against passing expectations rather than prose.
+Decided in review `f443b7c`: a landing keeps an approval when the diff is identical, and two clones printing
+different `Base:` values is acceptable because they agree deterministically given the same refs. The three
+practical issues that disagreement produces, and the two guards it needs, are written up in
+`changesets/feat-parent-landed-detection/measurement-base-when-the-parent-lands.md`. Tasks are still written as
+tests first, so the §21 wording lands against passing expectations rather than prose.
 
 Deliverables
 
 - A child whose parent is recorded measures against `refs/git-pair/integrations/<parent>` while the parent's
   branch is still present, and its `Span:` names only the child's own work — including the rebased-onto-trunk
   case where the parent's branch tip makes the parent's work and trunk's work appear as the child's.
-- A clone that has not fetched the namespace keeps the branch base and says so, instead of refusing with
-  `unknown revision`.
-- PRD §21 states which way a landing moves an approval, in the same words `status` and `check` use.
+- An approval survives the relink when `base...head` is identical under both bases, and does not survive it
+  when the content differs. PRD §21 says so in the same words `status` and `check` use, replacing the reading
+  that treats all parent movement alike.
+- A clone that has not fetched the namespace keeps the branch base and prints the fetch remedy on the line
+  where the base is reported, instead of refusing with `unknown revision` or letting a reviewer read the noisy
+  diff unknowingly.
+- `Review-Parent-Head` keeps naming the parent's branch tip while that branch exists, so two clones submitting
+  the same child record the same value. The landing is a separate recorded fact, not a substitute tip.
+- `integration record`'s derived `--target` never offers a base under `refs/git-pair/` as a destination.
 
 Tasks
 
@@ -246,10 +254,13 @@ Tasks
   child's own files only after the trigger moves.
 - Change the trigger from "the parent branch is gone" to "the parent's record exists and resolves", keeping
   the `RevParse` guard, and keep the deleted-branch path's existing expectations passing unchanged.
-- Compare the two spans (`base...head` under each base) at the point of the decision and record which one the
-  §21 reading depends on, so the invalidation rule and the diff rule cannot drift apart.
-- Decide the §21 wording with the reviewer in the thread before implementing either reading; the plan does not
-  pick for them.
+- Compare `base...head` under the old base and the new one at the point of the decision, and gate the
+  approval's survival on that comparison. Give the two outcomes separate tests, since the whole rule is the
+  difference between them.
+- Keep `changeset.ParentOf`'s reported tip as the branch while the branch exists (`internal/changeset/changeset.go:295-330`)
+  and carry the landing beside it, so a submission never writes a value another clone would not write.
+- Skip a `refs/git-pair/` base in `derivationDestinations` (`internal/cli/integration.go:252-275`) so a
+  durable ref is never named as a landing destination, and update the refusal text's candidate list.
 
 Verification
 
@@ -303,3 +314,4 @@ Manual verification is the copy-paste test in M3: the printed commands must be t
 | Date | Audit | Summary |
 |---|---|---|
 | 2026-09-23 | review `a87ae0b` | The reviewer rejected the "no relink while the branch exists" non-goal: deleting the branch moves the base anyway. The probe showed the delay is what makes a rebased child's diff carry the parent's and trunk's work. Non-goal withdrawn, thread opened, milestone 4 added. |
+| 2026-09-23 | review `f443b7c` | PRD §21 settled in the thread: an approval survives a relink when the diff is identical. The clone disagreement is accepted, with two guards — `Review-Parent-Head` stays the branch tip, and a base under `refs/git-pair/` is never a derived `--target`. Milestone 4 unblocked. |
