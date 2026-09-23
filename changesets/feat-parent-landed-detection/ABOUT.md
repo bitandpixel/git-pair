@@ -68,10 +68,18 @@ names the command, names the worktree blocker when another worktree holds the br
 **A landing shape is a graph fact, not a guess** (milestones 5 and 6). Four derivation layers answer "which
 commits" from the graph — a merge's introduced side is `tip^2`, a fast-forward's chain is the destination's own
 first-parent line — and each keeps at least one tree or graph fact, because `parseTrailers` matches any
-`Review-*:` line and a squash message can carry the marker text while it cannot carry the reviewed head. Two of
-those fixes are not about fast-forwards: the recorder consulted `RecordedPair` only after deriving a source it
-never uses, and `deriveArchiveTip` treated every trunk-descended branch as a candidate because landing puts the
-directory in trunk.
+`Review-*:` line and a squash message can carry the marker text while it cannot carry the reviewed head.
+
+**The recorder asks which changeset twice, and the weaker answer wins** (milestone 5). One pass filters ids that
+already have a record and settles on one; the next re-reads the choice from the source tree, subtracts only the
+directories the default branch carries through a call that honours neither `--target` nor `--default-branch`, and
+returns every directory when that subtraction empties the set. Landing is what puts a directory in trunk, so from
+the second landing onward a branch cut after the first carries two directories and trunk holds both: the flagless
+command stops working for every later changeset, and no amount of publishing or fetching changes that. Three
+small fixes, in the plan: pass the settled id downstream, subtract recorded ids in the second pass too, and stop
+hard-coding the default branch there. The same milestone also fixes two other things the session showed —
+`RecordedPair` was consulted only after deriving a source that is then never used, and `deriveArchiveTip` treated
+every trunk-descended branch as a candidate source because landing puts the directory in trunk.
 
 **Milestone 6 is separable.** It changes what `init` writes into committed content, which reaches every future
 changeset, every fresh clone and every CI job, while milestones 1–5 change only reads. It can be cut without
@@ -88,10 +96,23 @@ git pair status --json | jq '.parent, .base, .span'   # null today
 git for-each-ref | grep for-each-ref-glob             # archive 851df62, integration 4c89685
 ```
 
-Milestone 5's fixture set is reproduced from a copy of `pi-heartthrob` with `refs/remotes/origin/main` set
-back to a commit that predates a landing: the flagless `git pair integration record` then refuses with
-`more than one branch carries changesets/feat-more-labels` while naming a `--source` that, when passed, makes
-the command report `already recorded ... nothing changed`.
+Milestone 5's fixtures are the `pi-heartthrob` landing reproduced in a copy of that repository with its
+`refs/git-pair` namespace fetched. Three verbatim outputs are the evidence:
+
+```
+more than one changeset on origin/main is missing its integration record:   (a copy with no records fetched)
+  feat-more-labels
+  fix-label-word-timer
+  fix-thinking-verb
+more than one changeset directory exists in 8ffdb3a:                        (records fetched, flagless,
+  feat-more-labels                                                             after the push to main)
+  fix-label-word-timer
+  fix-thinking-verb
+fix-label-word-timer: recorded acd1fd7 as the integration of 8ffdb3a        (the same command, one flag)
+```
+
+The last line is what the flagless command should have printed. The id was already settled by the first pass, and
+the second pass refused anyway, so the fix is plumbing rather than verification.
 
 ## Known limitations
 

@@ -296,6 +296,32 @@ message — `parseTrailers` (`internal/lifecycle/lifecycle.go:552-569`) matches 
 `git merge --squash` copies the branch's marker commit bodies — while it cannot carry the reviewed head, which
 is the commit a squash deliberately keeps out of trunk.
 
+The layers fix *which commits*. A second defect in the same command fixes *which changeset*, and it is what made
+the reported session need five invocations. The recorder asks that question twice, with different filters, and
+the weaker answer wins:
+
+```go
+// resolveIntegrationRecord — internal/cli/integration.go:154-183
+in = deriveMissingTips(...)   // pass 1: changesetToDerive (:292-300) drops ids that already have a record
+}                             //   and ids in RecordedPair, settles ONE id, feeds deriveLanding + deriveArchiveTip
+  cands, _ := changesetsAtSource(source, in)              // pass 2 (:644-666) re-reads the changeset from the
+  id, err := chooseChangeset(cands, source, in.changeset) //   SOURCE tree, subtracts only the directories the
+                                                          //   default branch carries — via
+                                                          //   DefaultBranch(ctx, repo, ""), so no --target and
+                                                          //   no --default-branch — and returns EVERY directory
+                                                          //   when that subtraction empties the set
+```
+
+Pass 1 resolved `fix-label-word-timer` in the reported repository, derived both commits from it, and then pass 2
+re-opened the choice and refused. The rule pass 2 implies: one directory at the source works, because
+`len(here) < 2` skips the subtraction; two where the default branch carries one works; two where it carries both
+refuses. Landing is what puts a directory in trunk, so from the second landing onward a branch cut after the
+first carries two directories and trunk holds both — the flagless command stops working for every later
+changeset in the repository, whatever is published or fetched. Publishing fixes none of this: the four records
+were in the local namespace and pass 1 read them. Pass 2's own comment states the assumption that breaks here —
+"over-reporting candidates is safe because `--changeset` decides between them" — which holds for a caller who
+named a `--source` and not for the flagless flow, where nothing tells the caller they are being asked to choose.
+
 Deliverables
 
 - A fast-forward landing records with no flags and says it derived a fast-forward, with `archive ==
@@ -305,6 +331,10 @@ Deliverables
   cherry-pick still need the branch or `--source`, because nothing else holds the chain.
 - Re-running `integration record` on a recorded changeset is a no-op that exits 0, whatever the branch set
   looks like.
+- The flagless command records the one unrecorded changeset when trunk carries every directory: three landed,
+  two recorded, and the third is named and written with no flags at all.
+- A named `--source` and a flagless run answer which-changeset the same way, so the recorded ones are not
+  candidates in either.
 - A branch downstream of the landing is never a source candidate, so a landed directory does not turn every
   trunk-descended branch into a claim.
 - The recorder refuses, with the same wording, an unreviewed head, a superseded verdict, a blocked changeset,
@@ -333,6 +363,15 @@ Tasks
 - `derivationDestinations` (`integration.go:252-275`) asks both spellings of the integration branch —
   `refs/heads/main` and `refs/remotes/origin/main` — deduplicated by commit as it already does, and skips a
   base under `refs/git-pair/`.
+- `deriveMissingTips` returns the id pass 1 settled on, and `resolveIntegrationRecord` passes it as `named` to
+  `chooseChangeset` (`integration.go:671`) instead of only `in.changeset`. A resolved id is not re-opened
+  downstream; this one line of plumbing is what makes the flagless case work.
+- `changesetsAtSource` (`integration.go:644-666`) subtracts recorded ids as well as directories the destination
+  carries, using the same `reviewref.List` read pass 1 uses, and keeps the guard that the subtraction must never
+  empty the set.
+- The same call stops hard-coding `changeset.DefaultBranch(ctx, repo, "")`: it honours `--target` when the
+  caller named one and `--default-branch` when they overrode it, and subtracts across both spellings of the
+  branch.
 - Cost stays bounded: one `rev-list`, one `merge-base` per candidate, and the marker walk the recorder
   already runs. Nothing per-branch enters `queue`.
 
@@ -341,6 +380,11 @@ Verification
 - The reported failure reproduces from fixtures: a destination ref behind local trunk, one recorded directory
   and one unrecorded one, three trunk-descended branches carrying the landed directory. Flagless
   `integration record` records the unrecorded changeset and exits 0.
+- The which-changeset rule is pinned at its three boundaries: one directory at the source, two where trunk
+  carries one, two where trunk carries both. The third is the reported refusal today and a recording after the
+  fix. Measured in `pi-heartthrob` on 2026-09-23, flagless lists `feat-more-labels`, `fix-label-word-timer` and
+  `fix-thinking-verb` from `8ffdb3a`; the same command with `--changeset fix-label-word-timer` writes archive
+  `8ffdb3a` and integration `acd1fd7` and exits 0 — so the fix is the plumbing, not the verification.
 - Each of the five refusals still fires, with its existing wording.
 - `mise run gates` passes, and `e2e-29.sh`'s landing loop is unchanged for a merge landing.
 
