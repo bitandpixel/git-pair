@@ -21,6 +21,7 @@ form.
 Seeing every branch also makes the derivation's existing ambiguity rule reachable for the first time: when
 two branches carry the directory it refuses instead of picking. Before, the nested one was invisible, so it
 recorded a guess quietly.
+^ What happens when the remote ref for a branch and a branch both carry the directory?
 
 ## Tests
 
