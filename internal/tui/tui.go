@@ -134,10 +134,10 @@ type row struct {
 	total, marked int
 	note          string // set on the thread heading when the threads could not be listed
 	count         int    // how many threads the heading is standing in for
-	// sign is the change this file row carries: `+`, `-`, `~`, or "" for a modification. It is read
-	// from git's status rather than inferred, so the tree and the pane cannot disagree about what
-	// happened to the file.
-	sign string
+	// change is what the span did to this file, carried on the row rather than looked up again, so the
+	// tree's sign and the row's own Enter cannot disagree about what happened to the file. Only a file
+	// row has one: every other kind leaves it at the modification, whose sign is nothing at all.
+	change Change
 }
 
 // inFileBlock is which rows belong to the file tree rather than to the changeset box. Directory rows
@@ -161,10 +161,11 @@ const (
 	actionSpan
 )
 
-// activateBy is the Enter table: one row kind, one action. A file opens in the difftool
-// because that is the thing under review. The changeset documents are markdown, so they get
-// openArtifact: what a returning reviewer wants from ABOUT.md or a thread is usually the two
-// or three lines the author rewrote after the last review, and a diff is the only way to see
+// activateBy is the Enter table: one row kind, one action. A file opens in the difftool because that
+// is the thing under review, with one exception spelled out in fileAction: a file the span added is
+// read in the editor, because there is no other side of it to compare against. The changeset documents
+// are markdown, so they get openArtifact: what a returning reviewer wants from ABOUT.md or a thread is
+// usually the two or three lines the author rewrote after the last review, and a diff is the only way to see
 // exactly those — while a document the changeset invented has no comparison worth opening.
 // The heading toggles its own group, and the last row of the group creates another thread. Enter on
 // a directory does the same to its own part of the tree — fold it, unfold it — which is what the key
@@ -172,7 +173,7 @@ const (
 func activateBy(r row) action {
 	switch r.kind {
 	case rowFile:
-		return actionDiff
+		return fileAction(r.change)
 	case rowThread, rowAbout:
 		return actionArtifact
 	case rowDir, rowThreadsHead:
@@ -183,6 +184,21 @@ func activateBy(r row) action {
 		return actionSpan
 	}
 	return actionNone
+}
+
+// fileAction is the file half of the Enter table. A modification, a deletion and a rename all have a
+// comparison worth opening: the span did something to a file that was already there, and the patch is
+// the thing under review. A file the span *added* has nothing on the span's left side, so its patch is
+// the file again with a `+` in front of every line -- which is why the pane already reads it as a file
+// rather than as a patch (see Change.ReadsAsFile). Enter opens it in the editor for the same reason
+// openArtifact opens a document the changeset invented; artifactAction is this rule for the changeset's
+// own files. A rename whose bytes are unchanged keeps the difftool, because the rename is the
+// comparison and it is the reason that file is under review at all.
+func fileAction(c Change) action {
+	if c == ChangeAdded {
+		return actionEdit
+	}
+	return actionDiff
 }
 
 // patchKind is which of the two diffs a patch answers: the author's span, or the reviewer's own
@@ -1106,10 +1122,10 @@ func (m reviewModel) activate() (tea.Model, tea.Cmd) {
 	switch activateBy(r) {
 	case actionSpan:
 		return m.openSpanPicker()
-	case actionDiff:
-		return m.openDiff(r.path)
-	case actionEdit:
-		return m.openPath(r.path)
+	case actionDiff, actionEdit:
+		// One call for both, so the rule and the exception live in one place. Only a file row can ask
+		// for either, and it carries the change the rule needs.
+		return m.openFile(r.path, r.change)
 	case actionArtifact:
 		return m.openArtifact(r)
 	case actionCollapse:
@@ -1183,7 +1199,7 @@ func (m reviewModel) openArtifact(r row) (tea.Model, tea.Cmd) {
 	if artifactAction(m.inSpan[r.path], m.sess.HasVersionAt(m.ctx, m.sess.Span().From, r.path)) == actionDiff {
 		return m.openDiff(r.path)
 	}
-	return m.openPathNoted(r.path, m.artifactNote(r))
+	return m.openPathNoted(r.path, m.editorNote(r.path, r.name))
 }
 
 // documentAction is the artifact decision for a row, apart from acting on it: the
@@ -1203,13 +1219,36 @@ func artifactAction(inSpan, hasPrior bool) action {
 	return actionEdit
 }
 
-// artifactNote says which of two different reasons sent a document to the editor: it is new,
-// or nothing happened to it in this span.
-func (m reviewModel) artifactNote(r row) string {
-	if m.inSpan[r.path] {
-		return r.name + " was added by this changeset, so there is nothing to compare it against — opened in the editor"
+// editorNote says which of two different reasons sent a file to the editor: it is new,
+// or nothing happened to it in this span. Both are worth saying, because both are a row whose `d`
+// would open a comparison with nothing on one side of it.
+func (m reviewModel) editorNote(path, name string) string {
+	if m.inSpan[path] {
+		return name + " was added by this changeset, so there is nothing to compare it against — opened in the editor"
 	}
-	return r.name + " has not changed in this span — opened in the editor"
+	return name + " has not changed in this span — opened in the editor"
+}
+
+// openFile is what Enter and the pane's enter do with a file: the difftool, except for a file the span
+// added, which the editor reads. See fileAction for why that one file is different, and openArtifact
+// for the same reasoning applied to a changeset document -- including the read-only gate, which lives
+// here because Enter is not a mutating key and so never passes through the one in handleKey. Over a
+// historical span the editor is refused the way `e` refuses it, and a file the span added that the
+// working tree no longer has goes to the difftool rather than to an empty buffer, because the patch is
+// the one place git still has the file's other side.
+func (m reviewModel) openFile(path string, c Change) (tea.Model, tea.Cmd) {
+	if c != ChangeAdded {
+		return m.openDiff(path)
+	}
+	name := filepath.Base(path)
+	if why := m.cannot("edit " + name); why != "" {
+		m.setRefusal(why)
+		return m, nil
+	}
+	if _, err := os.Stat(absPath(m.sess.Repo().Dir, path)); err != nil {
+		return m.openDiff(path)
+	}
+	return m.openPathNoted(path, m.editorNote(path, name))
 }
 
 func (m reviewModel) openDiff(path string) (tea.Model, tea.Cmd) {
@@ -1755,10 +1794,11 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 		// is on screen beside the diff, and the row they name is the reason to leave it.
 		jumps := "a about  t threads  "
 		open := "enter diff"
-		if m.previewKind == previewDocument || m.previewKind == previewThreads {
-			// What is on show is a document, and `enter` opens it in the editor rather than in the
-			// difftool -- the bar says "open" because that is the truth of it. A file shown as its own text
-			// is still a file, so its Enter still means the difftool.
+		if m.previewKind == previewDocument || m.previewKind == previewThreads ||
+			fileAction(m.previewFileChange()) == actionEdit {
+			// What is on show is a document, or a file the span added, and `enter` opens it in the editor
+			// rather than in the difftool -- the bar says "open" because that is the truth of it. Any other
+			// file, shown as its patch or as its own text, has a comparison worth opening.
 			open = "enter open"
 		}
 		return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " +
@@ -1991,7 +2031,7 @@ func (m *reviewModel) buildRows() {
 			continue
 		}
 		rows = append(rows, row{kind: rowFile, path: e.path, name: e.name, depth: e.depth, file: e.file,
-			sign: files[e.file].Change.Sign()})
+			change: files[e.file].Change})
 	}
 	// The split between the two regions: from here down are the rows the changeset box draws. One index
 	// into one list rather than two lists, because a thread the reviewer creates has to appear in the
@@ -2066,10 +2106,10 @@ func (m reviewModel) rowText(r row) string {
 			text += m.fileGutter(r)
 		}
 		text += r.name
-		if r.sign != "" {
+		if sign := r.change.Sign(); sign != "" {
 			// After the name, the way a directory's count sits after its name: the sign is a fact about
 			// the file, not part of its name, and dim says so.
-			text += styleDim.Render(" " + r.sign)
+			text += styleDim.Render(" " + sign)
 		}
 		return text
 	case rowAbout:
@@ -3088,13 +3128,27 @@ func (m reviewModel) openPreview() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.previewKind == previewDiff || m.previewKind == previewContent {
-		// A file shown as text is still a file: `enter` is the real comparison, which is the difftool.
-		return m.openDiff(m.previewPath)
+		// The same decision the row makes, so enter in the pane and enter on the list are one rule and
+		// not two that can drift. A file shown as its own text keeps its change: the pane reads an added
+		// file as text, and enter still opens the file rather than the patch it has no other side of.
+		return m.openFile(m.previewPath, m.previewFileChange())
 	}
 	if r, ok := m.previewRow(); ok {
 		return m.openArtifact(r)
 	}
 	return m, nil
+}
+
+// previewFileChange is what the span did to the file the pane is showing, or a modification when the
+// pane is showing something that is not a file in the span. It is what lets the pane's enter ask the
+// row's question rather than guess at it.
+func (m reviewModel) previewFileChange() Change {
+	for _, f := range m.sess.Files() {
+		if f.Path == m.previewPath {
+			return f.Change
+		}
+	}
+	return ChangeChanged
 }
 
 // previewRow is the row the pane is a window onto, or false when it is no longer in the list: the rows are

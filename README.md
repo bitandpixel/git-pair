@@ -1080,8 +1080,8 @@ while the tool is for working on it. Plain `git pair diff` runs `git diff` with
 stderr so stdout stays pipeable.
 
 `git pair review` is an orchestration screen, not an editor (`git pair review open` is the same command
-under a longer name). What the review is made of is at the top, the changed files and their marks below
-it, and the reviewed counter under those:
+under a longer name). What the review is made of is at the top, the changed files and their marks below it,
+and the reviewed counter under those:
 
 ```text
 ╭ tuishow ─────────────────────────────╮
@@ -1259,6 +1259,13 @@ Two file rows come into the pane as the file, not as a patch: one the span creat
 A new file's patch is its own text with a `+` on every line. An unchanged move's patch is two lines about a path.
 Every other file row keeps its patch, because a rename with edits has edits to show.
 
+`Enter` follows the same rule the pane applies: on a file the span created it opens the editor, because
+the comparison the key would otherwise open has nothing on one side of it. That is the choice the screen
+already makes for an `ABOUT.md` or a thread the changeset invented. It is a different choice from `d`,
+which opens the difftool on that same row: a reviewer who wants to see the `+` on every line has a key
+that says so. An unchanged move keeps `Enter` on the difftool, because there the rename is the comparison
+and it is the reason the file is under review at all.
+
 A deletion is the only place the removed text still is, so its row keeps the patch too. The text is the file
 at the span's head, not the working copy, so a reviewer's own edits cannot read as reviewed work. The header
 says `you edited it` when the reviewer edits that file afterwards. A move names the path it came from, which
@@ -1268,22 +1275,22 @@ Over a historical span the text is still the file on disk, because that is the f
 header adds `working copy` rather than letting someone read history that is not there; the editor stays
 refused over history, since reading cannot change anything and writing can. `Enter` opens what the pane is
 showing — the difftool for a diff, the editor for a document — the same choice the row makes when the key is
-pressed there, and the pane's bar says `enter open` over a document and `enter diff` over a diff. The
-search and the paging are the pane's rather than the diff's, so a name is chased through the prose the way it
-is chased through a hunk.
+pressed there, and the pane's bar says `enter open` over a document and over a file the span added, and
+`enter diff` over a diff. The search and the paging are the pane's rather than the diff's, so a name is
+chased through the prose the way it is chased through a hunk.
 
 `p` moves into the pane and does nothing else: the keys go to the diff, and it scrolls with the
 keys the whole-screen preview uses — `j`/`k` a row, `d`/`u` or `ctrl-d`/`ctrl-u` half a page,
 `ctrl-f`/`ctrl-b` a page, `gg` the top and `G` the bottom — over the file the pane was already showing. Paging a diff that
 way is the whole point: the four page keys belong to whichever region holds them, so a diff too long to
 fit is paged by moving into it rather than by borrowing the list's keys from across the screen.
-`Enter` there opens the difftool on that file, which is the key the pane's own note points at. `z`
-changes the shape of the screen rather than the keys: it takes the pane to the whole screen, and back to
-the column again. The keys, the file and the place in the file all stay where they were, so the two
-presses are one reading gesture rather than two different ones. They are also the two shapes the terminal
-picks by itself — a column beside the list where there is room, the whole screen where there is not — and
-where there is no column to go back to, `z` says so with the number the window is short by instead of
-closing the diff you were reading. `Esc`
+`Enter` there opens the file on show — the difftool for it, or the editor for a file the span added,
+which is the key the pane's own note points at. `z` changes the shape of the screen rather than the keys:
+it takes the pane to the whole screen, and back to the column again. The keys, the file and the place in
+the file all stay where they were, so the two presses are one reading gesture rather than two different
+ones. They are also the two shapes the terminal picks by itself — a column beside the list where there is
+room, the whole screen where there is not — and where there is no column to go back to, `z` says so with
+the number the window is short by instead of closing the diff you were reading. `Esc`
 hands the keys back to the region that had them — the tree, or the box if the keys came from the box —
 and leaves the pane where it was, so coming back returns to the same lines. `p` does not do that: pressed
 where the diff already holds the keys it is the no-op its name promises, because a key that meant "the

@@ -2186,9 +2186,10 @@ beside a diff comes back from the editor to that diff rather than to a screen th
 `p` moves the keys into that column and does nothing else, so a diff longer than the column is read
 with the keys a diff is read with: `j`/`k`, `d`/`u` or `ctrl-d`/`ctrl-u`, `ctrl-f`/`ctrl-b`, `gg` and `G`
 scroll the file already on show (`d`/`u` being `less`'s spelling of the same half page, kept because a
-reviewer who reaches for it in a diff is reaching for something they know), `Enter` opens the difftool on
-it, and `/` searches it. `z` changes the shape of the screen rather than the keys: it gives the diff the
-whole screen, and gives the list its column back, keeping the keys, the file and the place in the file.
+reviewer who reaches for it in a diff is reaching for something they know), `Enter` opens the file on show
+— the difftool, or the editor for a file the span added, which has no other side of it to compare
+against — and `/` searches it. `z` changes the shape of the screen rather than the keys: it gives the diff
+the whole screen, and gives the list its column back, keeping the keys, the file and the place in the file.
 These are the two shapes the terminal chooses by itself, and where it has no column to give back `z`
 reports which way the window is short rather than closing the diff. The search reads a term in the pane's
 bottom row — the row the note about the
@@ -2248,8 +2249,10 @@ place the removed text still is, so its row keeps the patch too.
 
 The text is the file at the span's head, not the working copy, so a reviewer's own edits cannot read as
 reviewed work. The header says `you edited it` when the reviewer edits that file afterwards. A move names the
-path it came from, which the tree's `~` has no room for. `Enter` in the pane opens it in the difftool, because a
-file read as text is still a file.
+path it came from, which the tree's `~` has no room for. `Enter` in the pane keeps making the row's own
+choice: the editor for a file the span added, because the comparison has nothing on one side of it, and
+the difftool for an unchanged move, because there the rename is the comparison. `d` is the key that asks
+for the patch of either.
 
 A span whose head is a commit rather than the working tree is a look at history, and the screen
 says so where the reviewer is already looking: the counter's slot carries `HISTORICAL · READ ONLY`,
@@ -2308,7 +2311,8 @@ Tab      toggle the keys between the list column and the diff where there is roo
 h/l      fold and unfold the directory under the cursor (left and right arrows do the same);
          h from a file or a closed directory moves up to the directory holding it
 c        fold the whole tree, and open it again
-Enter    activate the row: difftool for a file, fold/unfold for a directory, the decision
+Enter    activate the row: the editor for a file the span added and for nothing else, difftool
+         for every other file, fold/unfold for a directory, the decision
          below for ABOUT.md or a thread, collapse/expand for the Threads heading,
          new-thread prompt for + new thread…
 d        open the difftool for the selected row: for a file, or for a directory every file
@@ -2332,7 +2336,8 @@ j/k      scroll the diff a row; d/u or ctrl-d/ctrl-u half a page, ctrl-f/ctrl-b 
 a, t     put the cursor and the keys on ABOUT.md or the Threads heading, leaving the diff;
          the pane follows them on to the document (not under the overlay, where the box
          is not drawn)
-Enter    open the difftool on the file the pane is showing
+Enter    open what the pane is showing: the difftool, or the editor for a document and for a file
+         the span added — the same choice the row makes when the key is pressed on it
 z        give the diff the whole screen, or give the list its column back, keeping the keys,
          the file and the place in it; where the terminal has no column to give back, it says so
 Esc      hand the keys back to the list column, leaving the pane where it is in the file
@@ -3233,8 +3238,9 @@ Suggested defaults:
 j/k      move through the region that holds the keys
 Tab      toggle the keys between the list column and the diff (f names the file tree; the changeset box
          is the other half of the list column, reached by walking up out of the tree)
-Enter    activate the selected row: diff a file, diff or read a changeset document
-         (whichever gives a real comparison), collapse the thread list, create a thread
+Enter    activate the selected row: the editor for a file the span added, otherwise the difftool,
+         or read a changeset document (whichever gives a real comparison), collapse the thread list,
+         create a thread
 d        open the difftool for the selected row, falling back to the editor with a note
 e        edit the selected file or document
 p        move the keys into the diff preview column; inert where the diff already has them.

@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
+
 	"gitpair/internal/changeset"
 	"gitpair/internal/git"
 	"gitpair/internal/gittest"
@@ -109,6 +112,71 @@ func cursorOnPath(t *testing.T, m reviewModel, path string) (reviewModel, int) {
 	}
 	t.Fatalf("no row for %s:\n%s", path, rowList(m))
 	return m, -1
+}
+
+// Enter on a file the span added goes to the editor; every other change goes to the difftool. The
+// added file is the one change with nothing on the span's left side, so its patch is the file again
+// with a `+` in front of every line -- the same reason the pane reads it as a file rather than as a
+// patch, and the same reason openArtifact gives a document the changeset invented to the editor.
+func TestEnterOnAnAddedFileGoesToTheEditor(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		change Change
+		want   action
+	}{
+		{"a file the span added", ChangeAdded, actionEdit},
+		{"a modification", ChangeChanged, actionDiff},
+		{"a deletion", ChangeDeleted, actionDiff},
+		{"a move with the bytes unchanged", ChangeMovedWhole, actionDiff},
+		{"a move with edits", ChangeMoved, actionDiff},
+	} {
+		if got := activateBy(row{kind: rowFile, change: c.change}); got != c.want {
+			t.Errorf("Enter on %s = %d, want %d", c.name, got, c.want)
+		}
+	}
+
+	m := changeModel(t)
+	fresh, _ := cursorOnPath(t, m, freshFile)
+	if got := fresh.rows[fresh.cursor].change; got != ChangeAdded {
+		t.Fatalf("the row for %s carries %v, want an added file", freshFile, got)
+	}
+	after, cmd := fresh.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := after.(reviewModel)
+	if cmd == nil {
+		t.Errorf("enter on %s handed the terminal to nothing; status %q", freshFile, got.status)
+	}
+	if got.status != "" {
+		t.Errorf("enter on %s was refused: %q", freshFile, got.status)
+	}
+
+	// `d` is the key for the patch of the same row, added or not: the reviewer who wanted to see the
+	// `+` on every line still has one key that says so.
+	if _, cmd := got.Update(runeKey('d')); cmd == nil {
+		t.Errorf("d on %s handed the terminal to nothing", freshFile)
+	}
+}
+
+// The pane's bar says what enter will do, and over a file the span added that is the editor rather
+// than the difftool -- the same difference the row itself makes, said in the one place a reviewer
+// looks to find out what a key means here.
+func TestThePaneSaysEnterOpensAnAddedFile(t *testing.T) {
+	m := changeModel(t)
+	fresh, _ := cursorOnPath(t, m, freshFile)
+	pane := focusPane(t, fresh)
+	if pane.previewKind != previewContent {
+		t.Fatalf("the pane is showing a %v, want the added file read as a file", pane.previewKind)
+	}
+	if !strings.Contains(pane.View(), "enter open") {
+		t.Errorf("the bar does not say what enter opens over an added file:\n%s", ansi.Strip(pane.View()))
+	}
+	if strings.Contains(pane.View(), "enter diff") {
+		t.Errorf("the bar still promises a diff for a file with nothing on one side of it:\n%s", ansi.Strip(pane.View()))
+	}
+
+	kept, _ := cursorOnPath(t, m, keptFile)
+	if got := focusPane(t, kept); !strings.Contains(got.View(), "enter diff") {
+		t.Errorf("the bar does not say enter opens a diff for a modification:\n%s", ansi.Strip(got.View()))
+	}
 }
 
 // The tree's one character per file is git's answer, not a guess from what a diff looks like: a file the
