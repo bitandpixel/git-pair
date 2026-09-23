@@ -42,26 +42,34 @@ and that no command moves a base, writes `CHANGESET.yaml`, rebases, or deletes a
   there — the case it is silent about today.
 - `--json` is additive: `parent` gains `landed`, `landed_commit`, `landed_in_default_branch` and
   `stale_branch`; no existing key changes meaning; no array is null.
-- The measurement base, the printed `span`, and every existing relink and parent-movement test are
-  unchanged. `Base:` still names `fix/for-each-ref-glob` while that branch exists.
+- Milestones 1–3 change no measurement base, no printed `span`, and no existing relink or parent-movement
+  test. `Base:` still names `fix/for-each-ref-glob` while that branch exists.
+- Milestone 4, if the thread decides it, changes that deliberately: `Base:` names the parent's integration ref
+  once a record exists, and `Span:` names the child's own work rather than the parent's plus trunk's.
 - `mise run check`, `scripts/gates/e2e-29.sh` and `scripts/gates/pty-walkthrough.sh` pass at every
   milestone, and `PRD.md`/`README.md` move in the same commit as the behaviour they describe.
 
 ## Non-goals
 
-Each of these was considered and rejected; keeping them out is part of the design.
+Each of these was considered and rejected; keeping them out is part of the design. One of them was rejected
+over the reviewer's objection and is no longer a non-goal — see the thread
+`changesets/feat-parent-landed-detection/measurement-base-when-the-parent-lands.md`.
 
-deleting the branch changes the measurement base though too right? so if a parent branch is integrated I dont see a ton of benefit to keeping the measurement pure as the base/parent is going to change anyhow. lets move this to a thread to discuss.
-- **No relink while the branch exists.** Relinking moves the measurement base, which changes the span a
-  reviewer reads and changes what `Review-Parent-Head` is compared against. `relinkStacks`
-  (`internal/changeset/resolve.go:535-549`) keeps its current trigger: the parent branch is gone.
+- **The relink trigger is open, not settled.** The reviewer's finding (review `a87ae0b`) is that the branch
+  deletion moves the base anyway, so the current trigger decides only *when*, and the delay is what makes a
+  rebased child's diff show the parent's work and trunk's work as the child's own. Measured in a scratch
+  repository: `c.txt p.txt trunk.txt` for a base of the parent's branch tip against `c.txt` for the
+  integration ref. Milestone 4 carries it; `relinkStacks` (`internal/changeset/resolve.go:535-549`) is
+  untouched until that decision is made.
 - **No new `CHANGESET.yaml` field, and no restack to the integration ref.** `base:` and `parent:` are the
   only two shapes (`internal/changeset/changeset.go:474-482`); a `landed:` key would be a state file, and
   pointing `parent:` at `refs/git-pair/integrations/<id>` would destroy the tellability PRD §21 protects
   ("the branch name stays recorded in the changeset, so the two cases remain tellable apart") and would
   make the child unresolvable in a clone that never fetched the namespace.
-- **No approval invalidation.** PRD §21's conservative rule is about the parent *branch* moving. A landing
-  is not that, and treating it as one would drop approvals whose diff content is identical.
+- **No approval invalidation in milestones 1–3.** PRD §21's conservative rule is about the parent *branch*
+  moving. A landing is not that, and treating it as one would drop approvals whose diff content is identical.
+  Milestone 4 reopens exactly this question, because relinking changes what `Review-Parent-Head` is compared
+  against, and it has to be answered before that trigger moves.
 - **No git operations.** git-pair runs no `rebase`, no `branch -D` and no `push` outside the audited
   `internal/git/push.go`; the advisory prints the command, the human runs it.
 
@@ -216,6 +224,41 @@ Verification
   the parent branch gone and the base relinked by the existing `relinkStacks` path.
 - `mise run gates` passes, including the pty TUI walkthrough.
 
+### M4 — The relink trigger (blocked on the thread)
+
+Open until the reviewer settles PRD §21: does a landing invalidate an approval, and is a base allowed to read
+differently in a clone that has not fetched the namespace? Tasks are written as tests first so the decision
+can be made against passing expectations rather than prose.
+
+Deliverables
+
+- A child whose parent is recorded measures against `refs/git-pair/integrations/<parent>` while the parent's
+  branch is still present, and its `Span:` names only the child's own work — including the rebased-onto-trunk
+  case where the parent's branch tip makes the parent's work and trunk's work appear as the child's.
+- A clone that has not fetched the namespace keeps the branch base and says so, instead of refusing with
+  `unknown revision`.
+- PRD §21 states which way a landing moves an approval, in the same words `status` and `check` use.
+
+Tasks
+
+- Write the two probe rows as fixtures first: child not yet on the landing commit, and child rebased onto
+  trunk with trunk having advanced independently since the parent branched. Expect the second to print the
+  child's own files only after the trigger moves.
+- Change the trigger from "the parent branch is gone" to "the parent's record exists and resolves", keeping
+  the `RevParse` guard, and keep the deleted-branch path's existing expectations passing unchanged.
+- Compare the two spans (`base...head` under each base) at the point of the decision and record which one the
+  §21 reading depends on, so the invalidation rule and the diff rule cannot drift apart.
+- Decide the §21 wording with the reviewer in the thread before implementing either reading; the plan does not
+  pick for them.
+
+Verification
+
+- The real repository: `git pair status` in `fix/legacy-refs-and-remote-branches` prints
+  `Base: refs/git-pair/integrations/fix-for-each-ref-glob` and `Span:` naming `4c89685...current`, with the
+  branch still present.
+- A clone with the namespace emptied by fixture setup, not by deletion, still answers with the branch base.
+- `mise run gates` passes, and the relink tests added by `feat-lineage-in-the-surface` still pass untouched.
+
 ## Spikes / research
 
 None planned. Two questions are answered by reading, and the answers belong in the commit that uses them:
@@ -241,6 +284,11 @@ None planned. Two questions are answered by reading, and the answers belong in t
 - **The note becomes noise** once the child has been rebased and the branch simply has not been deleted
   yet. Mitigation: the stale-branch wording is the low-severity variant, printed by `a.warn`, and the
   two flavours are chosen from ancestry rather than repeated for every state.
+- **Two clones, two bases** — the cost milestone 4 buys. `refs/git-pair/integrations/<id>` is not fetched by
+  default, so a relink keyed on the record prints one `Base:` in a fetched clone and another in a clone that
+  has not fetched, against README's rule that two clones of the same commits cannot disagree. Mitigation:
+  keep `relinkStacks`' existing `RevParse` guard so the unfetched clone keeps the branch base, and print the
+  fetch remedy beside the line rather than pretending the two agree.
 
 ## Verification strategy
 
@@ -254,4 +302,4 @@ Manual verification is the copy-paste test in M3: the printed commands must be t
 
 | Date | Audit | Summary |
 |---|---|---|
-| — | — | Plan written before implementation. |
+| 2026-09-23 | review `a87ae0b` | The reviewer rejected the "no relink while the branch exists" non-goal: deleting the branch moves the base anyway. The probe showed the delay is what makes a rebased child's diff carry the parent's and trunk's work. Non-goal withdrawn, thread opened, milestone 4 added. |

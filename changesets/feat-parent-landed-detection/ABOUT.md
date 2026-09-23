@@ -13,23 +13,36 @@ asked; and for an approved child `st.Recorded == st.Tip` returns clean (`stacked
 touches `refs/git-pair/*`, which a landing never moves. `queue`'s `behindParent` (`queue.go:307-322`) is
 silent for the same shape, because a landed, untouched parent is an ancestor of the head.
 
-This changeset is the plan for the fix: `docs/plans/parent-landed-detection/plan.md`. It changes no
-behaviour. It is offered for review before any code is written, because the rejected options are the part
-worth arguing with — a relink while the branch exists, a `landed:` key in `CHANGESET.yaml`, a restack onto
-the integration ref, and treating a landing as parent movement are each considered and each refused, with
-the reason written down next to the milestone that could have done it.
+This changeset is the plan for the fix: `docs/plans/parent-landed-detection/plan.md`. It still changes no
+behaviour, and it was offered for review before any code was written because the rejected options are the part
+worth arguing with — a `landed:` key in `CHANGESET.yaml`, a restack onto the integration ref, and treating a
+landing as parent movement are each considered and each refused, with the reason written next to the milestone
+that could have done it.
+
+The first round argued with the fourth one. Review `a87ae0b` objected that the relink trigger only decides
+*when* the base moves, since deleting the parent branch moves it regardless, and measuring it showed the delay
+costs more than a label: a child rebased onto trunk, read against the parent's branch tip, reports the
+parent's own work and unrelated trunk work as the child's change. That non-goal is withdrawn, the argument is
+in the thread, and the trigger is milestone 4 — which cannot be written without settling how PRD §21 treats a
+landing.
 
 ## What changed
 
-- `docs/plans/parent-landed-detection/plan.md` — the derivation to add, the three milestones, the state
+- `docs/plans/parent-landed-detection/plan.md` — the derivation to add, the four milestones, the state
   matrix to write as tests first, and the real-repository data (`4c89685`) every milestone is checked
   against.
+- `changesets/feat-parent-landed-detection/measurement-base-when-the-parent-lands.md` — the thread review
+  `a87ae0b` asked for, on whether the relink should wait for the parent branch to be deleted.
 
 ## Design decisions
 
-**Detection, not measurement.** The base keeps pointing at the parent branch while that branch exists.
-`relinkStacks` (`internal/changeset/resolve.go:535-549`) keeps its trigger — the branch is gone — because
-moving the base moves the span a reviewer reads and changes what `Review-Parent-Head` is compared against.
+**Detection first, measurement second, and the second one is now open.** Milestones 1–3 change no base and
+keep `relinkStacks` (`internal/changeset/resolve.go:535-549`) on its current trigger — the branch is gone —
+so the notes, the JSON fields and the advisory land without touching what a reviewer reads. The reviewer
+pointed out that deleting the branch moves the base anyway, and measuring it showed the delay is not neutral:
+a child rebased onto trunk, read against the parent's branch tip, prints
+`c.txt p.txt trunk.txt` where the integration ref prints `c.txt`. The relink trigger is now milestone 4, with
+the PRD §21 question it cannot avoid written into the thread.
 
 **Nothing new is written down.** The landing is already durable in `refs/git-pair/integrations/<parent>`,
 and the two signals already have fixed jobs: the ref answers "landed as what", and the directory in the
@@ -69,6 +82,8 @@ git for-each-ref | grep for-each-ref-glob             # archive 851df62, integra
 
 - Is the stale-branch note worth printing at all once the child has been rebased onto the landing commit
   and only the branch deletion is left? The plan says yes, at `a.warn` severity, and it is cheap to drop.
+- Milestone 4 needs the reviewer's call on PRD §21: whether a landing invalidates an approval, and whether a
+  base may read differently in a clone that has not fetched `refs/git-pair/*`. Argued in the thread.
 - `fix-legacy-refs-and-remote-branches` is in review and edits `landed.go`, `published.go`, `reviewref.go`
   and `integration.go`. This plan reads through `ResolveIntegration` and `indexDurableRefs` rather than
   `List`, so the two overlap in file names only. Should this branch stack on that one instead of trunk?
