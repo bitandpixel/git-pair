@@ -507,8 +507,10 @@ refusal happens before the commit is written, so a refused command leaves nothin
 Both are children of `refs/git-pair` rather than refs in it, because a git ref cannot be both a leaf and a
 namespace — git refuses the leaf once a child exists — and a flat namespace would put changeset ids next to
 whatever git-pair needs later. Nothing reads the layouts earlier versions used (`refs/reviews/*`, then the
-nested `refs/git-pair/changesets/<id>/archive`), so a repository upgraded from one reports no record for
-work recorded under the old path; those commits stay reachable from their branches.
+nested `refs/git-pair/changesets/<id>/{archive,integration}`), so a repository upgraded from one reports the
+landings it recorded under the old path as unrecorded; those commits stay reachable from their branches, and
+`git pair integration record` writes the pair where it is read. What a retired ref still means is that this
+clone fetched the namespace — which is the one question the old path continues to answer.
 
 **Surviving review additions.** Review lines left untouched disappear from a `review..HEAD`
 diff, so `change ready` re-derives them with
@@ -732,9 +734,11 @@ record from it. `--json` reports it as `unpublished`, and `unpublished_note` whe
 compare against. `check` does not refuse on it: a record that has not travelled is a durability risk, not
 a bad verdict. Publishing is ordinary git — `git push origin 'refs/git-pair/*:refs/git-pair/*'`. And an
 empty namespace is stated
-once as one condition rather than once per changeset. A landing recorded under the retired
-`refs/git-pair/changesets/<id>/integration` path counts as recorded — the fact is written down — while an
-archive ref alone does not, because it says a chain exists rather than that a landing happened. The
+once as one condition rather than once per changeset: empty means nothing at all lives under
+`refs/git-pair/`, which is a fact about the fetch rather than about the two families, so a clone holding
+only a ref from the retired layout is not told to go and fetch. A landing recorded only under that retired
+`refs/git-pair/changesets/<id>/integration` path is reported as unrecorded — nothing reads that path as a
+record any more, and the finding names the command that writes the pair where something does. The
 printed list caps at ten and counts the rest; `--json` carries all of them.
 
 `git pair review history --json`

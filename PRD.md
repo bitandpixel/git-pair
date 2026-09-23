@@ -268,12 +268,19 @@ Two properties the wording has to hold:
 
 - **"Not recorded" means not recorded *here*.** A record written in the clone that ran the merge reaches
   this one only through §13.4's fetch, so every report of this finding names both readings and the fetch
-  that settles between them. An empty namespace is one condition about the clone, not one per changeset,
-  and is stated once.
-- **A landing the retired layout recorded is recorded.** `refs/git-pair/changesets/<id>/integration` is a
-  different path spelling the same fact, and a detector that reported every changeset predating the
-  upgrade as lost paper trail would be ignored, including the one time it was right. An archive ref
-  alone is not a record of a landing: it says a chain exists.
+  that settles between them. An empty namespace — nothing at all under `refs/git-pair/`, not merely no ref
+  of the two families — is one condition about the clone, not one per changeset, and is stated once.
+- **Only the two families record anything.** `refs/git-pair/archive/<id>` and
+  `refs/git-pair/integrations/<id>` are what a record is, and the layout the pre-two-ref code wrote —
+  `refs/git-pair/changesets/<id>/{archive,integration}` — is read nowhere. A landing written down only
+  under that retired name is reported as unrecorded, and the finding names the command that writes the
+  pair where it is read. The reading this replaces was a kindness to upgraded repositories: a detector
+  reporting every changeset predating the upgrade as lost paper trail gets ignored, including the one
+  time it is right. It is dropped deliberately, because a namespace with three path spellings that mean
+  something is a namespace nobody can hold in their head, and the repositories still holding the old refs
+  are the ones where one `git pair integration record` per changeset fixes it. What a retired ref still
+  answers is the question above: it is a ref under the namespace, so the clone holding it is a clone that
+  fetched. What it no longer answers is whether anything was recorded.
 
 The finding is capped where it is printed — ten changesets, the rest counted — because the queue is also
 a notification surface, and because a repository with fifty unrecorded landings has a workflow problem

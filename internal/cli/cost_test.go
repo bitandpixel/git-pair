@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"gitpair/internal/gittest"
+	"gitpair/internal/reviewref"
 )
 
 // The queue resolves every branch, so its cost has to follow the branches and not the number
@@ -26,7 +27,7 @@ func TestReviewQueueCostFollowsBranchesNotExistingChangesets(t *testing.T) {
 
 	base := f.Head()
 	for i := 0; i < 300; i++ {
-		f.MustGit("update-ref", fmt.Sprintf("refs/git-pair/changesets/cs-%03d/archive", i), base)
+		f.MustGit("update-ref", reviewref.Archive(fmt.Sprintf("cs-%03d", i)), base)
 	}
 
 	before = count()

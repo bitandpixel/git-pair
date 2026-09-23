@@ -74,8 +74,8 @@ func TestEveryCommandIsNamedInTheDocs(t *testing.T) {
 // document naming a ref family the code never writes teaches a reader to fetch nothing.
 func TestRefPathsInTheDocsAreOnesWeWrite(t *testing.T) {
 	prefixes := []string{"refs/git-pair/archive/", "refs/git-pair/integrations/",
-		// Named in the migration prose, and named truthfully: `List` still reports these retired
-		// paths, and a legacy integration ref still counts as the record it is.
+		// Named in the migration prose, and named truthfully: `List` reports these retired paths so a
+		// clone holding only them is not called unfetched, and nothing reads either one as a record.
 		"refs/git-pair/changesets/"}
 	path := regexp.MustCompile(`refs/git-pair/[A-Za-z0-9_.<>*-]+(?:/[A-Za-z0-9_.<>*-]+)*`)
 	for _, file := range docFiles {
