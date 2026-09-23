@@ -46,12 +46,6 @@ const NamespaceRoot = "refs/git-pair"
 const (
 	integrationsRoot = NamespaceRoot + "/integrations"
 	archiveRoot      = NamespaceRoot + "/archive"
-
-	// The retired layout nested both families under one directory per changeset. Named here so the
-	// reader of a List entry can be told which layout wrote a ref.
-	legacyRoot             = NamespaceRoot + "/changesets"
-	legacyArchiveChild     = "archive"
-	legacyIntegrationChild = "integration"
 )
 
 // Integration returns the changeset's integration ref: the commit the changeset became in the
@@ -243,32 +237,31 @@ const (
 	KindArchive Kind = "archive"
 	// KindIntegration is the record of the commit the changeset became.
 	KindIntegration Kind = "integration"
-	// KindLegacyIntegration and KindLegacyArchive are the two families of the retired layout —
-	// `refs/git-pair/changesets/<id>/{archive,integration}` — which the pre-two-ref code wrote and an
-	// upgrade leaves where it is. They are reported rather than dropped because a landing written down
-	// under the old name *is* written down: a command asking whether the fact is recorded has to answer
-	// that question about history it did not write, and answering "no" to every changeset that predates
-	// the upgrade would report a hundred findings nobody caused and train people to ignore the one they
-	// did. They reserve no names (`Taken` says so), and nothing new is ever written at either path.
-	KindLegacyIntegration Kind = "legacy-integration"
-	KindLegacyArchive     Kind = "legacy-archive"
 )
 
-// Entry is one durable ref.
+// Entry is one ref under the durable namespace.
 type Entry struct {
 	Ref string
 	SHA string
 	// ID is the changeset the ref belongs to.
 	ID string
-	// Kind is which of the two families this ref is in.
+	// Kind is which of the two families this ref is in. It is empty for a ref that lives under the
+	// namespace and belongs to neither family — a stray, a retired-layout path, a family spelled wrongly.
+	// Such an entry is not a record of anything; it is in the listing because "is this namespace empty?"
+	// is a question about what is under the root, and answering it from the classified entries alone
+	// reports a fetched clone as an unfetched one (PRD §13.4).
 	Kind Kind
 }
 
-// List returns every durable ref, archive and integration together.
+// List reads the durable namespace in one pass.
 //
 // One `for-each-ref` over the namespace is the whole cost, which is what lets the resolver answer
 // "which of these landed?" for every changeset in a repository without a question per changeset.
 // Entries are returned in git's ref order; callers that care about an ordering say so themselves.
+//
+// Every ref under the root comes back, including the ones that are not durable refs — see Entry.Kind.
+// What the two families are is git-pair's; what lives under the root at all is a fact about the clone,
+// and only the second of those two is safe to report as an absent fetch.
 func List(ctx context.Context, repo *git.Repo) ([]Entry, error) {
 	refs, err := repo.ForEachRef(ctx, NamespaceRoot)
 	if err != nil {
@@ -278,6 +271,7 @@ func List(ctx context.Context, repo *git.Repo) ([]Entry, error) {
 	for _, r := range refs {
 		id, kind, ok := identify(r.Name)
 		if !ok {
+			out = append(out, Entry{Ref: r.Name, SHA: r.SHA})
 			continue
 		}
 		out = append(out, Entry{Ref: r.Name, SHA: r.SHA, ID: id, Kind: kind})
@@ -288,6 +282,10 @@ func List(ctx context.Context, repo *git.Repo) ([]Entry, error) {
 // identify reads a changeset id and a family out of a durable ref path, and answers no for anything
 // that is not one — a stray ref someone else put under the namespace, or a family directory spelled
 // wrongly. Both families are one level deep, so a path with another slash in it names no changeset.
+//
+// The retired layout (`refs/git-pair/changesets/<id>/{archive,integration}`, written before the two
+// families existed) answers no. It is not a record of either fact, and a clone holding it is not a clone
+// holding a durable ref: see List for what the namespace holding only such refs still proves.
 func identify(ref string) (string, Kind, bool) {
 	for _, family := range []struct {
 		prefix string
@@ -301,20 +299,6 @@ func identify(ref string) (string, Kind, bool) {
 			continue
 		}
 		return id, family.kind, true
-	}
-	rest, ok := strings.CutPrefix(ref, legacyRoot+"/")
-	if !ok {
-		return "", "", false
-	}
-	id, child, ok := strings.Cut(rest, "/")
-	if !ok || id == "" || strings.Contains(child, "/") {
-		return "", "", false
-	}
-	switch child {
-	case legacyArchiveChild:
-		return id, KindLegacyArchive, true
-	case legacyIntegrationChild:
-		return id, KindLegacyIntegration, true
 	}
 	return "", "", false
 }

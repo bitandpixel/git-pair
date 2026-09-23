@@ -368,30 +368,72 @@ func deriveLanding(ctx context.Context, repo *git.Repo, dests []string, id strin
 // When no branch carries it the derivation stops and says so. That is the case the archive ref exists for
 // (§13.1): with the branch deleted, nothing in this clone holds the reviewed head unless the durable refs
 // were fetched, and a guess about which commit was approved is exactly what this command must not make.
+// branchKey is the branch a ref names, without the spelling that reached it. `refs/heads/feat/ux` and
+// `refs/remotes/origin/feat/ux` are one branch — the first is the branch in the working tree, the second is
+// the same branch as of the last fetch — and the derivation asks which branch carries a changeset, not
+// which path spells it. Without this, a pushed branch would be two candidates and every derivation of it
+// would refuse as ambiguous for a reason nobody would believe.
+//
+// It answers "" for a ref naming no branch, which is what a remote's symbolic `HEAD` is: a pointer to a
+// branch, not a branch.
+func branchKey(ref string) string {
+	if !strings.HasPrefix(ref, "refs/remotes/") {
+		return displayRef(ref)
+	}
+	name := displayRef(ref) // "origin/feat/ux"
+	_, rest, ok := strings.Cut(name, "/")
+	if !ok || rest == "" || rest == "HEAD" {
+		return ""
+	}
+	return rest
+}
+
 func deriveArchiveTip(ctx context.Context, repo *git.Repo, dests []string, id string) (string, error) {
 	exclude := map[string]bool{}
+	excludeKey := map[string]bool{}
 	for _, dest := range dests {
 		if sha, err := repo.RevParse(ctx, dest+"^{commit}"); err == nil {
 			exclude[sha] = true
 		}
 		exclude[displayRef(dest)] = true
+		// …and under the other spelling of the same branch. A destination fetched into the clone is
+		// still the destination: `refs/remotes/origin/main` carries the changeset directory once the
+		// merge has been pushed and fetched, and offering it as the reviewed head would record a landing
+		// as its own source from a spelling the caller never named.
+		if k := branchKey(dest); k != "" {
+			excludeKey[k] = true
+		}
 	}
 	// The pattern is a `for-each-ref` pattern, not a shell glob: it matches path-name aware, so `*` does
 	// not cross a `/`. `refs/heads/*` answers the branches whose name is one component long, which in a
 	// repository that names its branches `feat/…` is no branches at all — and the derivation would report
 	// that as no branch carrying the changeset. The trailing slash is the prefix form, which does see them.
-	tips, err := repo.RefTips(ctx, "refs/heads/")
+	//
+	// Both roots are read, and the local one first. A CI runner is handed the branch by git, which puts it
+	// under `refs/remotes/origin/` and nowhere else; asking only the local branches told it that the branch
+	// it was standing on did not exist. Local first is not a preference between two answers — it is the
+	// order that makes `seenKey` below keep the branch in the working tree when both spellings are here.
+	locals, err := repo.RefTips(ctx, "refs/heads/")
+	if err != nil {
+		return "", err
+	}
+	remotes, err := repo.RefTips(ctx, "refs/remotes/")
 	if err != nil {
 		return "", err
 	}
 	path := "changesets/" + id
 	var found []string
-	for _, tip := range tips {
-		name := displayRef(tip.Name)
-		if exclude[name] || exclude[tip.Commit] {
+	seenKey := map[string]bool{}
+	for _, tip := range append(append([]git.RefTip{}, locals...), remotes...) {
+		key := branchKey(tip.Name)
+		if key == "" || seenKey[key] {
+			continue
+		}
+		if excludeKey[key] || exclude[displayRef(tip.Name)] || exclude[tip.Commit] {
 			continue
 		}
 		if repo.PathExistsAt(ctx, tip.Commit, path) {
+			seenKey[key] = true
 			found = append(found, tip.Name)
 		}
 	}

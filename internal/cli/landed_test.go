@@ -77,25 +77,28 @@ func TestQueueAndStatusReportALandingNobodyRecorded(t *testing.T) {
 	}
 }
 
-// A landing the retired layout wrote down is written down. `Taken` refuses to let a nested legacy name
-// reserve a changeset id, but this question is "was the fact recorded?", and answering it "no" for every
-// changeset that predates the upgrade would report a hundred findings nobody caused — and the report
-// would then be ignored, including the one time it was true.
-func TestQueueAcceptsALandingTheRetiredLayoutRecorded(t *testing.T) {
+// The retired layout is retired. A landing written down at `refs/git-pair/changesets/<id>/integration` by
+// the pre-two-ref code is not a record of anything this code reads, so the queue reports the landing as
+// unrecorded and names the command that records it in a family that is read.
+//
+// What the retired ref *does* still answer is the other question — has this clone fetched the namespace at
+// all — and that one must not be answered "no". A report telling the reader to fetch, in a repository that
+// fetched and holds only the old spelling, sends them to a command that cannot change the answer.
+func TestQueueReportsALandingTheRetiredLayoutMissed(t *testing.T) {
 	f, slug, landing := landedFixture(t)
 	f.MustGit("update-ref", "refs/git-pair/changesets/"+slug+"/integration", landing)
 
 	q := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
-	mustNotContain(t, q.stdout, "LANDED, UNRECORDED", "the old record is still a record")
-	mustNotContain(t, q.stdout, slug, "and the changeset is left alone")
-
-	// The other half of the retired layout is not: an archive ref says a chain exists, not that a
-	// landing happened, and the missing fact is the one this report is about.
-	f.MustGit("update-ref", "-d", "refs/git-pair/changesets/"+slug+"/integration")
-	f.MustGit("update-ref", "refs/git-pair/changesets/"+slug+"/archive", landing)
-	q = runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
-	mustContain(t, q.stdout, "LANDED, UNRECORDED", "an archive ref alone records no landing")
+	mustContain(t, q.stdout, "LANDED, UNRECORDED", "a retired path records no landing")
 	mustContain(t, q.stdout, slug, "so the changeset is reported")
+	mustNotContain(t, q.stderr, "holds no refs/git-pair/* refs at all", "and the retired ref says this clone did fetch the namespace")
+	mustContain(t, q.stderr, "means none *in this clone*", "so the hedge offered is the true one, not the fetch hint")
+
+	// The current family is what settles it: the same queue, with the landing recorded where the code reads.
+	f.MustGit("update-ref", reviewref.Integration(slug), landing)
+	q = runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
+	mustNotContain(t, q.stdout, "LANDED, UNRECORDED", "the record is what the report asks for")
+	mustNotContain(t, q.stdout, slug, "and the changeset is left alone once it exists")
 }
 
 // An empty namespace is one condition about the clone, not one condition per changeset: §13.4's guidance

@@ -48,16 +48,20 @@ type refIndex struct {
 	// Archive holds the changesets whose unsquashed chain this clone can read.
 	Archive map[string]string
 	// Integrated holds the changesets whose landing this clone has a record of, and the commit each
-	// record names. It is keyed on the fact rather than the layout: a landing written down under the
-	// retired `refs/git-pair/changesets/<id>/integration` name is written down (see KindLegacyIntegration).
+	// record names. Only the two families are records: a ref under the namespace that is not one of them —
+	// a stray, or the retired `refs/git-pair/changesets/<id>/integration` the pre-two-ref code wrote —
+	// records nothing here, and a landing written down only there is reported as unrecorded.
 	Integrated map[string]string
 	// IntegratedRef is the ref that holds each of those records, keyed the same way. It is in the index
-	// because the layout is not uniform — a retired-layout record lives under a different name than the
-	// one its id would suggest — and a surface that names a ref has to name the one that exists.
+	// because a surface that names a ref has to name the one that exists rather than rebuild a path from
+	// the changeset id, which is the rule the whole namespace lives by.
 	IntegratedRef map[string]string
-	// NamespaceEmpty says this clone holds no durable git-pair ref of any kind. That is a fact about the
-	// fetch, not about any changeset (PRD §13.4), and it belongs in the index because the read that
-	// produced the answers already knows it — a caller that printed a fetch hint per changeset would be
+	// NamespaceEmpty says this clone holds no ref of any kind under `refs/git-pair/`. That is a fact about
+	// the fetch, not about any changeset (PRD §13.4), and it is deliberately not "holds no durable ref of
+	// ours": a namespace holding only a retired-layout ref, or only a stray, has been fetched, and a report
+	// saying it never was points the reader at a fetch that cannot help them. It belongs in the index
+	// because the read that produced the answers already knows it — a caller that printed a fetch hint per
+	// changeset would be
 	// blaming the work for a clone.
 	NamespaceEmpty bool
 }
@@ -77,7 +81,7 @@ func indexDurableRefs(ctx context.Context, repo *git.Repo) (refIndex, error) {
 		switch e.Kind {
 		case reviewref.KindArchive:
 			idx.Archive[e.ID] = e.SHA
-		case reviewref.KindIntegration, reviewref.KindLegacyIntegration:
+		case reviewref.KindIntegration:
 			idx.Integrated[e.ID] = e.SHA
 			idx.IntegratedRef[e.ID] = e.Ref
 		}

@@ -39,14 +39,16 @@ func TestRefNaming(t *testing.T) {
 	}
 }
 
-// List reads every durable family in one pass, and tells them apart, because a caller asking "which of
+// List reads the namespace in one pass and tells the two families apart, because a caller asking "which of
 // these landed?" needs the integration refs and a caller asking "where is the chain?" needs the archive
 // refs, and neither should pay for a second `for-each-ref` to find out.
 //
-// The retired layout is reported too, under kinds of its own. `Taken` refuses to let it reserve a name,
-// but a command asking whether a landing was written down has to answer about history this code did not
-// write, and a legacy record is a record.
-func TestListReportsBothFamiliesAndTheRetiredOnes(t *testing.T) {
+// Everything else under the root comes back unclassified rather than dropped. The retired layout
+// (`refs/git-pair/changesets/<id>/…`) is in that group: it is a record of neither fact, and the code reads
+// neither path — but a clone holding only those refs has fetched something under `refs/git-pair/`, and the
+// report that says "this clone has never fetched the durable refs" is about the root, not about the
+// families. Dropping them here would make that report false.
+func TestListClassifiesTheTwoFamiliesAndReportsTheRest(t *testing.T) {
 	f := gittest.New(t)
 	head := f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
 	ctx := context.Background()
@@ -61,7 +63,7 @@ func TestListReportsBothFamiliesAndTheRetiredOnes(t *testing.T) {
 	f.MustGit("update-ref", "refs/git-pair/changesets/legacy/archive", head)
 	f.MustGit("update-ref", "refs/git-pair/changesets/legacy/integration", head)
 	// And refs under the namespace that belong to no family at all — a stray someone left, a nested
-	// path in a family that has no nesting. Reporting one would attribute a changeset that does not
+	// path in a family that has no nesting. Classifying one would attribute a changeset that does not
 	// exist to someone's work.
 	f.MustGit("update-ref", "refs/git-pair/stray", head)
 	f.MustGit("update-ref", "refs/git-pair/archive/nested/notes", head)
@@ -77,30 +79,55 @@ func TestListReportsBothFamiliesAndTheRetiredOnes(t *testing.T) {
 		got[e.Ref] = e.Kind
 	}
 	for ref, want := range map[string]reviewref.Kind{
-		"refs/git-pair/archive/booking":               reviewref.KindArchive,
-		"refs/git-pair/integrations/booking":          reviewref.KindIntegration,
-		"refs/git-pair/integrations/other":            reviewref.KindIntegration,
-		"refs/git-pair/changesets/legacy/archive":     reviewref.KindLegacyArchive,
-		"refs/git-pair/changesets/legacy/integration": reviewref.KindLegacyIntegration,
+		"refs/git-pair/archive/booking":      reviewref.KindArchive,
+		"refs/git-pair/integrations/booking": reviewref.KindIntegration,
+		"refs/git-pair/integrations/other":   reviewref.KindIntegration,
 	} {
 		if got[ref] != want {
 			t.Errorf("List reported %s as %q, want %q (entries: %+v)", ref, got[ref], want, entries)
 		}
 	}
 	for _, ref := range []string{
+		"refs/git-pair/changesets/legacy/archive",
+		"refs/git-pair/changesets/legacy/integration",
 		"refs/git-pair/changesets/legacy/other",
 		"refs/git-pair/changesets/legacy/nested/deep",
 		"refs/git-pair/stray",
 		"refs/git-pair/archive/nested/notes",
 	} {
-		if _, ok := got[ref]; ok {
-			t.Errorf("List reported %s, which is neither family", ref)
+		if kind, ok := got[ref]; !ok {
+			t.Errorf("List dropped %s: the namespace is not empty, and a listing that hides that fact "+
+				"lets a caller report a fetched clone as an unfetched one", ref)
+		} else if kind != "" {
+			t.Errorf("List classified %s as %q, want no family", ref, kind)
 		}
 	}
 	for _, e := range entries {
+		if e.Kind == "" && e.ID != "" {
+			t.Errorf("%s is unclassified but carries the changeset id %q", e.Ref, e.ID)
+		}
 		if e.SHA != head {
 			t.Errorf("%s = %+v, want it to point at %s", e.Ref, e, head)
 		}
+	}
+}
+
+// A namespace holding nothing but retired-layout refs is the case that decision is for: no record of
+// either fact, and no "this clone has never fetched" either.
+func TestListKeepsARetiredOnlyNamespaceNonEmpty(t *testing.T) {
+	f := gittest.New(t)
+	head := f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	f.MustGit("update-ref", "refs/git-pair/changesets/booking/integration", head)
+
+	entries, err := reviewref.List(context.Background(), repo(f))
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("List returned %+v, want the one retired ref reported", entries)
+	}
+	if entries[0].Kind != "" || entries[0].ID != "" {
+		t.Errorf("the retired ref was classified as family %q, id %q: it records neither fact", entries[0].Kind, entries[0].ID)
 	}
 }
 

@@ -100,9 +100,9 @@ func unpushedPairs(idx refIndex, mirrors []reviewref.Entry) []unpublishedPair {
 	}
 	for _, m := range mirrors {
 		switch m.Kind {
-		case reviewref.KindIntegration, reviewref.KindLegacyIntegration:
+		case reviewref.KindIntegration:
 			at[familyIntegration][m.ID] = m.SHA
-		case reviewref.KindArchive, reviewref.KindLegacyArchive:
+		case reviewref.KindArchive:
 			at[familyArchive][m.ID] = m.SHA
 		}
 	}
