@@ -1102,7 +1102,7 @@ and the reviewed counter under those:
 ────────────────────────────────────────
 j/k move  gg/G ends  ctrl-d/u half page  ctrl-f/b page  h/l fold  c fold all  enter open  d diff
 space reviewed  e edit  a about  t threads  T new thread  v spans  V picker  s submit  p preview
-f files  tab preview  q quit
+z full  f files  tab preview  q quit
 ```
 
 The screen has two regions where the keys can be: the changeset box at the top, and the file tree under
@@ -1286,11 +1286,15 @@ way is the whole point: the four page keys belong to whichever region holds them
 fit is paged by moving into it rather than by borrowing the list's keys from across the screen.
 `Enter` there opens the file on show — the difftool for it, or the editor for a file the span added,
 which is the key the pane's own note points at. `z` changes the shape of the screen rather than the keys:
-it takes the pane to the whole screen, and back to the column again. The keys, the file and the place in
+it takes the diff to the whole screen, and back to the column again. The keys, the file and the place in
 the file all stay where they were, so the two presses are one reading gesture rather than two different
 ones. They are also the two shapes the terminal picks by itself — a column beside the list where there is
 room, the whole screen where there is not — and where there is no column to go back to, `z` says so with
-the number the window is short by instead of closing the diff you were reading. `Esc`
+the number the window is short by instead of closing the diff you were reading. `z` is a key of the list
+column too: pressed on a row it opens that row's text over the whole screen, so a reviewer who reads every
+diff at full width never moves into the pane first. The keys come with the screen — a whole-screen diff
+that left them in a list it had just hidden would be reading a keystroke from nothing — and `Esc` returns
+them to the row they came from. `Esc`
 hands the keys back to the region that had them — the tree, or the box if the keys came from the box —
 and leaves the pane where it was, so coming back returns to the same lines. `p` does not do that: pressed
 where the diff already holds the keys it is the no-op its name promises, because a key that meant "the

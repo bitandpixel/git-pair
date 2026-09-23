@@ -548,17 +548,86 @@ func TestZHasNowhereToGoOnANarrowTerminal(t *testing.T) {
 	}
 }
 
-// `z` belongs to the region that is already reading the diff. From the list it is not a key of this
-// screen, and a reviewer who pressed it there should lose nothing to find out.
-func TestZIsNotAKeyOfTheListColumn(t *testing.T) {
-	m := overlayModel(t, 20)
-	if m.previewHasFocus() {
-		t.Fatal("the fixture has the diff holding the keys, so this proves nothing")
+// `z` is the same request from either side of the screen: this, over the whole terminal. From the list
+// the row the cursor is on says which "this", so a reviewer who reads every diff at full width never
+// moves into the pane first -- and the keys go with the screen, because a whole-screen diff that left
+// them in a list it had just hidden would read a keystroke from nothing.
+func TestZFromTheListOpensTheWholeScreenOfThatRow(t *testing.T) {
+	m := focusFixture(t, 60)
+	if m.previewHasFocus() || m.mode != modeFiles {
+		t.Fatal("the fixture does not start with the keys in the list column")
 	}
-	got := pressKey(t, m, runeKey('z'))
-	if got.mode != modeFiles || got.previewHasFocus() || got.status != "" {
-		t.Errorf("`z` from the list gave mode %v, focus %v, status %q",
-			got.mode, got.focus, got.status)
+
+	got := paneKey(t, m, runeKey('z'))
+	if got.mode != modePreview {
+		t.Fatalf("`z` from the list gave mode %v, want the whole screen", got.mode)
+	}
+	if got.focus != focusPreview {
+		t.Errorf("`z` took the screen and left the keys behind: focus=%v", got.focus)
+	}
+	if got.paneWidth() != 0 {
+		t.Errorf("`z` left the list its column: pane %d wide", got.paneWidth())
+	}
+	if !strings.Contains(ansi.Strip(got.View()), "z pane") {
+		t.Errorf("the bar does not name the way back:\n%s", ansi.Strip(got.View()))
+	}
+
+	back := paneKey(t, got, keyMsg(tea.KeyEsc))
+	if back.mode != modeFiles || back.focus != focusFiles {
+		t.Errorf("esc from there left mode %v with %v, want the list drawn and holding the keys",
+			back.mode, back.focus)
+	}
+	if back.paneWidth() == 0 {
+		t.Error("esc gave the list back but not the column the diff had been in")
+	}
+}
+
+// The box is the other half of the list column, and its rows come into the pane on the same terms the
+// tree's do, so `z` reads them the same way and `esc` returns to the half that asked.
+func TestZFromTheBoxOpensTheWholeScreenOfThatDocument(t *testing.T) {
+	m := focusFixture(t, 60)
+	if !m.gotoRow(rowAbout) {
+		t.Skip("the fixture's changeset box has no ABOUT.md row")
+	}
+
+	got := paneKey(t, m, runeKey('z'))
+	if got.mode != modePreview || got.previewKind != previewDocument {
+		t.Fatalf("`z` from the box gave mode %v showing a %v, want the document over the whole screen",
+			got.mode, got.previewKind)
+	}
+	if back := paneKey(t, got, keyMsg(tea.KeyEsc)); !back.metaHasFocus() {
+		t.Errorf("esc left the keys with %v, want the box they came from", back.focus)
+	}
+}
+
+// On the terminal too narrow for a column there is no pane to move into, so `z` from the list opens the
+// overlay directly -- the same screen `p` gives there, reached by the key that says how big to make it.
+func TestZFromTheListOnANarrowTerminalTakesTheScreen(t *testing.T) {
+	m := overlayModel(t, 40)
+	got := paneKey(t, m, runeKey('z'))
+	if got.mode != modePreview || got.focus != focusPreview {
+		t.Errorf("`z` gave mode %v with %v, want the overlay holding the keys", got.mode, got.focus)
+	}
+	if !strings.Contains(ansi.Strip(got.View()), "+line 1") {
+		t.Errorf("the screen does not show the row's diff:\n%s", ansi.Strip(got.View()))
+	}
+}
+
+// A row with nothing to read -- the span line, "+ new thread…" -- has no "this" for `z` to make big,
+// and the key says so rather than painting a screen with nothing on it.
+func TestZFromARowWithNothingToReadSaysSo(t *testing.T) {
+	m := focusFixture(t, 60)
+	m.previewKind, m.previewPath = previewDiff, ""
+	if !m.gotoRow(rowSpan) {
+		t.Skip("the fixture's changeset box has no span row")
+	}
+
+	got := paneKey(t, m, runeKey('z'))
+	if got.mode != modeFiles {
+		t.Errorf("`z` opened a screen with nothing on show: mode %v", got.mode)
+	}
+	if !strings.Contains(got.status, "no file on show") {
+		t.Errorf("status = %q, want it to say there is nothing to read", got.status)
 	}
 }
 

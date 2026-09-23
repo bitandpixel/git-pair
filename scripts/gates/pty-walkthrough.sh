@@ -307,6 +307,19 @@ step "z on a terminal with no column says which way it is short"
 expect "z names the columns the pane wants" 1 "$T/ztiny.raw" "the preview wants 100 columns"
 expect "and the terminal it has" 1 "$T/ztiny.raw" "this terminal has 60"
 
+# `z` is the same request from the list column, where the row under the cursor says which diff: a
+# reviewer who reads every diff at full width never moves into the pane, and the bar of that screen
+# still names the way back.
+step "z from the file list opens that file over the whole screen"
+# The same walk down the tree the difftool step makes: four downs is src/service.ts, past the
+# changeset's own directory row and the two documents under it.
+( COLS=140 ROWS=30; session zlist j,j,j,j,z,ctrl-c )
+expect "z from the list paints the overlay's own bar" 4 "$T/zlist.raw" "z pane"
+expect "and the diff of the row the cursor was on" 4 "$T/zlist.raw" "@@"
+refuse "with the list's counter off screen" 4 "$T/zlist.raw" "reviewed"
+( COLS=140 ROWS=30; session zlistback j,j,j,j,z,esc,q )
+expect "esc gives the list back, counter and all" 5 "$T/zlistback.raw" "reviewed"
+
 # Too small for even that is worth saying out loud, and with the smaller of the two asks -- 12 rows
 # would have been enough, so telling the reviewer about the pane's 16 would send them growing the
 # wrong window.

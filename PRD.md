@@ -2323,6 +2323,8 @@ e        open the selected row in the editor, whatever the span did
 p        move the keys into the diff preview column (wide terminals); inert where the diff already
          has them. Where the terminal is too narrow for a second column it takes the screen for the
          diff instead, since there is no column to move into, and is inert there too
+z        read the row the keys are on over the whole screen, taking the keys with them; `Esc` gives
+         the list back
 ctrl-f   page the preview down
 ctrl-b   page the preview up
 Space    toggle reviewed for a file row, or for every file under a directory row
@@ -2339,7 +2341,8 @@ a, t     put the cursor and the keys on ABOUT.md or the Threads heading, leaving
 Enter    open what the pane is showing: the difftool, or the editor for a document and for a file
          the span added — the same choice the row makes when the key is pressed on it
 z        give the diff the whole screen, or give the list its column back, keeping the keys,
-         the file and the place in it; where the terminal has no column to give back, it says so
+         the file and the place in it; where the terminal has no column to give back, it says so.
+         From the list column it is the row under the cursor that goes to the whole screen
 Esc      hand the keys back to the list column, leaving the pane where it is in the file
 Tab, f   move the keys back to the list column, as they do from anywhere in it
 q        in the pane, quit — from here as from anywhere else; over the whole-screen overlay, give the
@@ -3245,7 +3248,8 @@ d        open the difftool for the selected row, falling back to the editor with
 e        edit the selected file or document
 p        move the keys into the diff preview column; inert where the diff already has them.
          Where there is no second column, it takes the screen for the diff
-z        in the diff, take the whole screen, or give the list its column back
+z        take the whole screen: from the diff, give it the screen or give the list its column back;
+         from the list, open the row under the cursor over the whole screen
 ctrl-f   page the preview down
 ctrl-b   page the preview up
 /        search the diff the preview column (or the whole screen) is showing; n/N walk the matches

@@ -709,6 +709,12 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.activate()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'p':
 		return m.togglePreview()
+	// `z` is the same request from the list column that it is from inside the diff: this, over the
+	// whole screen. The difference is only that here the row the cursor is on says which "this", so
+	// the keys move into the diff on the way — a reviewer who reads a diff at the size of the terminal
+	// should not have to press the key that moves the keys first.
+	case key.Type == tea.KeyRunes && firstRune(key) == 'z':
+		return m.openFullScreen()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'f':
 		m.focusOn(focusFiles)
 	case key.Type == tea.KeyRunes && firstRune(key) == 'd':
@@ -1784,7 +1790,7 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 	page := "j/k move  gg/G ends  ctrl-d/u half page  ctrl-f/b page"
 	// The keys that leave the column for the diff, and the one that names a half of it. `tab` names the
 	// stop it walks to rather than the ring: with two stops there is only one place it can go.
-	elsewhere := "p preview  f files  tab preview"
+	elsewhere := "p preview  z full  f files  tab preview"
 	if target == focusPreview {
 		// The diff reads nothing that changes the review, and its three ways out all mean the list
 		// column -- `esc` gives the keys back, `f` names the tree, `tab` walks the ring -- so they are
@@ -3037,6 +3043,37 @@ func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// openFullScreen is `z` taken from the list column rather than from inside the diff: the row the keys
+// are standing on, read over the whole terminal. It decides what is on show the way `p` does — from the
+// row, before the keys move — and then takes the screen the way `z` does from the pane, so the three
+// entries into this one shape are the same shape and not three screens that happen to look alike.
+//
+// The keys go with the screen. A whole-screen diff that left them in a list it no longer draws is the
+// one thing this screen cannot offer: the list's keys would be read by nothing, and the reviewer would
+// be typing at a picture.
+func (m reviewModel) openFullScreen() (tea.Model, tea.Cmd) {
+	if reason := m.overlayShortfall(); reason != "" {
+		m.setRefusal(reason)
+		return m, nil
+	}
+	if kind, path, ok := m.previewRowTarget(); ok && (kind != m.previewKind || path != m.previewPath) {
+		m.previewKind, m.previewPath, m.previewOffset, m.previewMatch = kind, path, 0, -1
+	}
+	if m.previewPath == "" {
+		m.setRefusal("nothing to open: the preview has no file on show")
+		return m, nil
+	}
+	m.previewOn = true
+	// Through focusOn, which is what remembers which half of the list column is handing the keys over,
+	// so `esc` from the screen this opens returns to the row the reviewer was on.
+	m.focusOn(focusPreview)
+	if m.mode == modePreview {
+		// The narrow terminal's route: with no column to focus, focusOn draws the overlay directly.
+		return m, nil
+	}
+	return m.toggleFullScreen()
+}
+
 // toggleFullScreen is `z`: the diff takes the whole screen, or gives the list its column back. It
 // changes the shape of the screen and nothing else -- the keys stay with the diff, so does the file it
 // is showing, and so does the place in it, which is what makes the pair of presses one reading gesture
@@ -3224,9 +3261,9 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focusOn(focusFiles)
 		return m, nil
 	// `z` changes the shape of the screen the keys are on and nothing else: the diff keeps them, the
-	// place in the file and the file itself. It is the layout key of the region that is already reading,
-	// which is why it is not a key of the list column -- `p` is how the list column asks for the diff,
-	// and `z` is how the diff asks for more of the screen to read it in.
+	// place in the file and the file itself. It is also a key of the list column — see openFullScreen —
+	// and the two readings end on this same screen, which is why `p` and `z` differ only in the size
+	// they ask the diff for.
 	case key.Type == tea.KeyRunes && firstRune(key) == 'z':
 		return m.toggleFullScreen()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'q':
