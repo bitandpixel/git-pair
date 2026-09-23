@@ -39,6 +39,8 @@ candidates appear only when two *different* branches carry the directory, which 
 a check, with the fetched copy deliberately behind the local one — keyed on the commit those would be two
 carriers and a refusal, which is the failure this question is really asking about.
 
+great thank you. can you move this to a resolved questions section? I'll approve.
+
 ## Tests
 
 - `TestIntegrationRecordDerivesFromABranchNamedWithASlash` puts the changeset on `feat/booked`, merges it
