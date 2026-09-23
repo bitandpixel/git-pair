@@ -86,6 +86,22 @@ func (d DefaultBranchRef) LocalName() string {
 	return strings.TrimPrefix(d.Ref, "refs/heads/")
 }
 
+// BaseName is the integration branch as `base:` should record it: the branch name, without the root this
+// clone happens to keep it under. `refs/remotes/origin/main` is the same branch read through the fetch root,
+// and `DefaultBranch` reaches it first whenever there is no local `main` to find — which is the ordinary
+// state of a clone that has fetched and not branched off trunk. A changeset file is read by other machines
+// and printed in `status`; a base spelled as a fetch ref reads as a different destination there, and says
+// "fetched" about a change that has never been pushed. Read-time resolution is unchanged: a name is tried
+// under `refs/heads/` first and then under `refs/remotes/`, so the two spellings resolve to one branch.
+func (d DefaultBranchRef) BaseName() string {
+	if rest, ok := strings.CutPrefix(d.Ref, "refs/remotes/"); ok {
+		if _, tail, ok := strings.Cut(rest, "/"); ok {
+			return tail
+		}
+	}
+	return d.LocalName()
+}
+
 // DefaultBranch resolves the integration branch.
 //
 // A caller-supplied ref wins outright; it is what CI passes, and it matches how

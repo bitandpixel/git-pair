@@ -226,6 +226,19 @@ and names the flag: guessing here would make every directory on the revision loo
 progress. No git config is read. Two clones of one repository must not disagree about what has
 landed.
 
+`init` records that branch in a changeset's `base:` as its **branch name** — `main`, not
+`refs/remotes/origin/main` — because `git clone` records the remote's default branch in
+`refs/remotes/origin/HEAD` and that is the answer the resolution above prefers, so the ref it returns is
+usually a fetch ref even in a clone with a local trunk. The name is tried under `refs/heads/` first and then
+under `refs/remotes/` every time a base is read, so where it resolves it is the same branch and the better
+thing to write; `base:` is a line other machines read, and a fetch ref written there reads as a different
+destination — and says *fetched* about a change that has never been pushed. Where the name resolves to
+nothing, which is a clone holding the integration branch only under the fetch root, the qualified ref is
+recorded instead: a base that does not resolve fails every command, and `cannot resolve changeset base` is the
+worse outcome. Where the local copy of the base and its remote copy are different commits, `init` notes it
+with the counts, and pushes nothing (§26): the diff measured from this clone is then not the diff the forge
+will show.
+
 The consequence worth knowing: if someone merges your unlanded changeset into their branch and
 lands *that*, your changeset reads as landed on your own branch too, because your directory is
 now in the integration branch's tree. That is the rule working as intended — the work is in

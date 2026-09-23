@@ -563,7 +563,7 @@ landed.
 
 | Command | Flags | Notes |
 | --- | --- | --- |
-| `init` | `--id <id>`, `--base <ref>`, `--set-base`, `--parent <branch>`, `--set-parent`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch; refuses on that branch, where a changeset could never contain anything; `--parent` stacks the changeset instead of naming a base, recording the parent's changeset ID beside it, and `--set-parent` restacks it — never done implicitly, because a parent that moved, landed or died is the author's decision; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |
+| `init` | `--id <id>`, `--base <ref>`, `--set-base`, `--parent <branch>`, `--set-parent`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch, recorded as its branch name where that name resolves and as the fetch ref this clone has to reach it through where it does not; refuses on that branch, where a changeset could never contain anything; `--parent` stacks the changeset instead of naming a base, recording the parent's changeset ID beside it, and `--set-parent` restacks it — never done implicitly, because a parent that moved, landed or died is the author's decision; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` when the changeset is in review, otherwise succeeds and records nothing; refuses a changeset whose work is recorded as integrated |
 | `change use <id>` | none | records which changeset a branch carrying more than one is working on: writes `ignores: <other ids>` into the chosen changeset's `CHANGESET.yaml` and commits that file; refuses an id the branch does not offer and a record that would leave the branch still undecided; idempotent |
@@ -1583,6 +1583,17 @@ because nothing in its verdict depends on one.
 git-pair never guesses a base: edit the file, or `git pair init --base <ref> --set-base`.
 From `init` with no `--base`: `cannot infer a base: no main or master branch exists;
 pass --base <ref>` (exit 2).
+
+`base:` is written as a branch name — `main`, not `refs/remotes/origin/main` — because `git clone` records
+the remote's default branch in `refs/remotes/origin/HEAD` and that is the answer `DefaultBranch` prefers,
+so the ref it reaches is usually a fetch ref even in a clone with a local trunk. The two spellings resolve to
+one branch every time a base is read (local first, then fetched), and the file is read on machines that have
+fetched different things, so the name is what belongs in it. Where the name resolves to nothing — a clone
+holding the integration branch only under the fetch root — the qualified ref is recorded instead, because a
+base that does not resolve fails every command. Where the local copy of that branch and its remote copy are
+different commits, `init` says so and gives the counts, because the diff measured from here is then not the
+diff the forge will show: `note: main is not the same commit here and on origin: 1 here that origin does not
+have, 0 on origin that is not here`. It is a note; pushing trunk is yours.
 
 `cannot tell which branch is the integration branch: ...` (exit 2) — there is nothing to compare
 against, so "has this landed?" has no answer and every changeset directory on the revision would
