@@ -46,6 +46,11 @@ and that no command moves a base, writes `CHANGESET.yaml`, rebases, or deletes a
   test. `Base:` still names `fix/for-each-ref-glob` while that branch exists.
 - Milestone 4, if the thread decides it, changes that deliberately: `Base:` names the parent's integration ref
   once a record exists, and `Span:` names the child's own work rather than the parent's plus trunk's.
+- Milestone 5: a landing of any shape — fast-forward, `--no-ff` merge, squash, cherry-pick, rebase-merge — is
+  recordable correctly, and a re-run of `integration record` on a changeset that already has its pair exits 0
+  saying so without needing `--source`.
+- Milestone 6: a changeset created by `init` on a clone that has fetched records `base: main`, not
+  `base: refs/remotes/origin/main`, and that base still resolves in a clone which has only the remote ref.
 - `mise run check`, `scripts/gates/e2e-29.sh` and `scripts/gates/pty-walkthrough.sh` pass at every
   milestone, and `PRD.md`/`README.md` move in the same commit as the behaviour they describe.
 
@@ -270,6 +275,103 @@ Verification
 - A clone with the namespace emptied by fixture setup, not by deletion, still answers with the branch base.
 - `mise run gates` passes, and the relink tests added by `feat-lineage-in-the-surface` still pass untouched.
 
+### M5 — The destination is a branch: record derivation layers
+
+From the `pi-heartthrob` session on 2026-09-23, where `git pair integration record` refused to record the one
+changeset that needed it while asking for a `--source` that the command never uses. The four landing shapes
+come out of one table, and every layer answers "which commits" from graph facts.
+
+```
+1  tip introduced the directory over its first parent and has two parents   archive = tip^2, integration = tip
+2  introduction on the tip's first-parent line, strictly below the tip,
+   the tip's marker walk permits integration, and that marker's
+   `Review-Head` is an ancestor of the tip                                  archive = integration = tip
+3  neither, and a branch carries the directory                              archive = branch tip
+4  none of the above                                                        --source / --commit
+```
+
+Layer 2 is the fast-forward and the rebase-merge, where trunk holds the chain itself. It is licensed by a
+marker and checked by `Review-Head` ancestry, because a squash can carry the marker *text* into its own
+message — `parseTrailers` (`internal/lifecycle/lifecycle.go:552-569`) matches any `Review-*:` line and
+`git merge --squash` copies the branch's marker commit bodies — while it cannot carry the reviewed head, which
+is the commit a squash deliberately keeps out of trunk.
+
+Deliverables
+
+- A fast-forward landing records with no flags and says it derived a fast-forward, with `archive ==
+  integration` naming the reviewed chain's tip. `reviewref.CreatePair` already permits equal shas.
+- A merge landing records with `archive` at the introduced side's tip (`tip^2`, or `git rev-list tip --not
+  tip^1`) so a landing can be recorded after its branch is deleted — for merge landings only. Squash and
+  cherry-pick still need the branch or `--source`, because nothing else holds the chain.
+- Re-running `integration record` on a recorded changeset is a no-op that exits 0, whatever the branch set
+  looks like.
+- A branch downstream of the landing is never a source candidate, so a landed directory does not turn every
+  trunk-descended branch into a claim.
+- The recorder refuses, with the same wording, an unreviewed head, a superseded verdict, a blocked changeset,
+  an abandoned changeset, and a child recorded at its parent's head.
+- PRD §11.4's four checks state the fast-forward shape and the `Review-Head` requirement; README's "record
+  before tidy" sentence names which shapes still need the branch; §13.1's archive definition is unchanged and
+  says why the archive never names a merge commit.
+
+Tasks
+
+- Tests first, fixtures for each shape: fast-forward (single commit and multi-commit), `--no-ff` merge, merge
+  plus a later trunk commit, squash, squash plus a commit on trunk, rebase-merge, `init --no-commit` chain.
+- Give `verifyIntegrationRecord` (`internal/cli/integration.go:486-492`) the fast-forward carve-out, gated on
+  layer 2 having been established, so the "commit does not add the directory over its first parent" refusal
+  stays for a follow-up commit on the destination.
+- Add to `verifyReviewedSource`: the newest permitting marker's `Review-Head` must be an ancestor of the
+  source. Absence is a decline to layer 3, not a refusal, per §21's treatment of a missing
+  `Review-Parent-Head`.
+- `deriveArchiveTip` (`internal/cli/integration.go:371-403`) drops candidates that are descendants of the
+  derived landing commit — one `merge-base --is-ancestor` each — and keeps the destination exclusion. Measured
+  on the reported repository, that leaves `feat/more-labels` alone from four candidates, and
+  `fix/thinking-verb` alone from three.
+- Reorder `integration record`: consult `reviewref.RecordedPair` (`integration.go:846`) after the landing is
+  derived and before `deriveArchiveTip` (`integration.go:238`), reusing the two existing messages at
+  `:1026` and `:1031`. `changesetToDerive`'s own comment already promises the CI re-run this ordering breaks.
+- `derivationDestinations` (`integration.go:252-275`) asks both spellings of the integration branch —
+  `refs/heads/main` and `refs/remotes/origin/main` — deduplicated by commit as it already does, and skips a
+  base under `refs/git-pair/`.
+- Cost stays bounded: one `rev-list`, one `merge-base` per candidate, and the marker walk the recorder
+  already runs. Nothing per-branch enters `queue`.
+
+Verification
+
+- The reported failure reproduces from fixtures: a destination ref behind local trunk, one recorded directory
+  and one unrecorded one, three trunk-descended branches carrying the landed directory. Flagless
+  `integration record` records the unrecorded changeset and exits 0.
+- Each of the five refusals still fires, with its existing wording.
+- `mise run gates` passes, and `e2e-29.sh`'s landing loop is unchanged for a merge landing.
+
+### M6 — `base:` names a branch, not a ref (separable)
+
+Kept separate because it changes what git-pair *writes* into committed content, which reaches every future
+changeset, every fresh clone and every CI job, while milestone 5 changes only reads.
+
+Deliverables
+
+- `init` with no `--base` records the branch name (`base: main`) rather than the ref that happened to resolve,
+  so a changeset does not pin one clone's remote-tracking ref.
+- A bare name in `base:` resolves through the `DefaultBranch` ladder trying `refs/heads/<name>` then
+  `refs/remotes/origin/<name>`, deterministically and documented; `--base <ref>` stays literal, because a
+  caller who names a ref means that ref.
+- When the local branch and its remote-tracking counterpart differ, `status` and `queue` say so: landings
+  since the last fetch read as work in progress.
+
+Tasks
+
+- `changeset.DefaultBranch` (`internal/changeset/resolve.go:100-146`) keeps its ordering for the read-time
+  integration branch — remote-first is principled, since `landed` means landed upstream — and gains a
+  name-to-ref resolution used when a recorded `base:` is a bare branch name. `git rev-parse main` does not
+  resolve to `refs/remotes/origin/main`, so this is explicit logic rather than `RevParse`.
+- `init`'s default records the short name. Explicit `--base` values are untouched, and values already
+  committed keep resolving.
+- The divergence note is one `rev-list --count` printed to the notes stream. It is the line that would have
+  made the reported confusion self-explanatory.
+- Tests: a clone with only `refs/remotes/origin/main` resolves `base: main`; a clone with only local `main`
+  resolves it; `--default-branch` still overrides both, which is what a single-branch CI checkout needs.
+
 ## Spikes / research
 
 None planned. Two questions are answered by reading, and the answers belong in the commit that uses them:
@@ -300,6 +402,17 @@ None planned. Two questions are answered by reading, and the answers belong in t
   has not fetched, against README's rule that two clones of the same commits cannot disagree. Mitigation:
   keep `relinkStacks`' existing `RevParse` guard so the unfetched clone keeps the branch base, and print the
   fetch remedy beside the line rather than pretending the two agree.
+- **A derivation layer weakening a refusal.** Milestone 5 relaxes the transition check, which is one of the
+  four checks that makes a record worth reading later. Mitigation: the carve-out fires only after layer 2 is
+  established, and the five refusals — unreviewed, superseded, blocked, abandoned, wrong head — are pinned by
+  tests this milestone may not edit.
+- **Prose as evidence.** `parseTrailers` matches any `Review-*:` line, so a squash message can read as a
+  marker. Mitigation: every layer keeps at least one graph or tree fact, and `Review-Head` ancestry is the one
+  a squash cannot fake.
+- **A stale destination ref choosing the changeset.** `changesetToDerive` answers from the directories the
+  destination carries, so a `refs/remotes/origin/main` behind local trunk hides an unrecorded landing and
+  turns the retry heuristic into the wrong answer. Mitigation: milestone 5 asks both spellings, milestone 6
+  notes the divergence, and neither makes a local-only merge count as integrated.
 
 ## Verification strategy
 
@@ -315,3 +428,4 @@ Manual verification is the copy-paste test in M3: the printed commands must be t
 |---|---|---|
 | 2026-09-23 | review `a87ae0b` | The reviewer rejected the "no relink while the branch exists" non-goal: deleting the branch moves the base anyway. The probe showed the delay is what makes a rebased child's diff carry the parent's and trunk's work. Non-goal withdrawn, thread opened, milestone 4 added. |
 | 2026-09-23 | review `f443b7c` | PRD §21 settled in the thread: an approval survives a relink when the diff is identical. The clone disagreement is accepted, with two guards — `Review-Parent-Head` stays the branch tip, and a base under `refs/git-pair/` is never a derived `--target`. Milestone 4 unblocked. |
+| 2026-09-23 | session, `pi-heartthrob` | A fast-forward landing and a stale `refs/remotes/origin/main` produced an `integration record` failure that asked for a `--source` the command never uses. Milestones 5 and 6 added from the findings: four derivation layers, the not-downstream candidate rule, the recorder ordering, and `base:` naming a branch. |

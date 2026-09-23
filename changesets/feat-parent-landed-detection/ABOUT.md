@@ -34,9 +34,9 @@ under `refs/git-pair/` as a destination.
 
 ## What changed
 
-- `docs/plans/parent-landed-detection/plan.md` — the derivation to add, the four milestones, the state
-  matrix to write as tests first, and the real-repository data (`4c89685`) every milestone is checked
-  against.
+- `docs/plans/parent-landed-detection/plan.md` — the derivation to add, the six milestones, the state matrix
+  to write as tests first, and the real repositories every milestone is checked against: this one at
+  `4c89685`, and the `pi-heartthrob` landing that refused to record.
 - `changesets/feat-parent-landed-detection/measurement-base-when-the-parent-lands.md` — the thread review
   `a87ae0b` asked for, on whether the relink should wait for the parent branch to be deleted.
 
@@ -65,6 +65,18 @@ this", and a child whose parent landed with an unchanged diff integrates fine.
 **The advisory prints the command and stops.** git-pair runs no `rebase` and no `branch -D`, so the note
 names the command, names the worktree blocker when another worktree holds the branch, and the human runs it.
 
+**A landing shape is a graph fact, not a guess** (milestones 5 and 6). Four derivation layers answer "which
+commits" from the graph — a merge's introduced side is `tip^2`, a fast-forward's chain is the destination's own
+first-parent line — and each keeps at least one tree or graph fact, because `parseTrailers` matches any
+`Review-*:` line and a squash message can carry the marker text while it cannot carry the reviewed head. Two of
+those fixes are not about fast-forwards: the recorder consulted `RecordedPair` only after deriving a source it
+never uses, and `deriveArchiveTip` treated every trunk-descended branch as a candidate because landing puts the
+directory in trunk.
+
+**Milestone 6 is separable.** It changes what `init` writes into committed content, which reaches every future
+changeset, every fresh clone and every CI job, while milestones 1–5 change only reads. It can be cut without
+touching anything else.
+
 ## Validation
 
 No code changed, so nothing to run beyond `mise run check` for the docs-contract test over the new plan file.
@@ -75,6 +87,11 @@ Reviewers who want to reproduce the gap can run, in `/home/david/dev/worktrees/g
 git pair status --json | jq '.parent, .base, .span'   # null today
 git for-each-ref | grep for-each-ref-glob             # archive 851df62, integration 4c89685
 ```
+
+Milestone 5's fixture set is reproduced from a copy of `pi-heartthrob` with `refs/remotes/origin/main` set
+back to a commit that predates a landing: the flagless `git pair integration record` then refuses with
+`more than one branch carries changesets/feat-more-labels` while naming a `--source` that, when passed, makes
+the command report `already recorded ... nothing changed`.
 
 ## Known limitations
 
@@ -91,3 +108,5 @@ git for-each-ref | grep for-each-ref-glob             # archive 851df62, integra
 - `fix-legacy-refs-and-remote-branches` is in review and edits `landed.go`, `published.go`, `reviewref.go`
   and `integration.go`. This plan reads through `ResolveIntegration` and `indexDurableRefs` rather than
   `List`, so the two overlap in file names only. Should this branch stack on that one instead of trunk?
+- Cut or keep milestone 6? The bug it prevents is real but rarer than the milestone 5 ones, and it is the only
+  milestone that changes committed content rather than reads.
