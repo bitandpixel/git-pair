@@ -97,7 +97,11 @@ comment rules that output out ("it must hear `already recorded` rather than a us
 failed build") and holds only where the destination carries one directory. The re-run that has work to do is the
 half-pair: an archive ref with no integration ref, which is what an interrupted write or a half publish leaves,
 and which `refIndex` already distinguishes and `publish.go:117` already calls "not a record". So the list is
-narrowed to half-pairs and the all-recorded case stops listing anything.
+narrowed to half-pairs and the all-recorded case stops listing anything. Its exit code stays 2: a flagless run that
+could not say which changeset it meant belongs with `no changeset directory on <dests>` as a usage error, and a
+green run that wrote nothing is the failure this command exists to prevent — the landing stays unrecorded, and the
+archive chain survives only until someone deletes the branch. Idempotency stays with the directed retry, which
+exits 0 with `already_recorded: true` (`internal/cli/integration_test.go:117-131`).
 
 **Milestone 6 is separable.** It changes what `init` writes into committed content, which reaches every future
 changeset, every fresh clone and every CI job, while milestones 1–5 change only reads. It can be cut without
@@ -144,7 +148,7 @@ Two changesets were recorded in that clone and had never been published, and not
 The all-recorded refusal reproduces in this repository: `main` carries nine changeset directories that
 `refs/git-pair/` holds complete pairs for, and the flagless `git pair integration record` exits 2 naming all nine.
 Any repository whose trunk holds two recorded changesets reaches that branch — it needs no stale remote and no
-flags, only a second landing.
+flags, only a second landing. The exit code there is correct and stays; the list of nine is what changes.
 
 ## Known limitations
 
@@ -161,8 +165,9 @@ flags, only a second landing.
 - `fix-legacy-refs-and-remote-branches` landed on local `main` at `cf71983` on 2026-09-23 and is not yet pushed
   (`origin/main` is `4c89685`, eight commits behind). It edited `deriveArchiveTip` and the source discovery, so
   milestone 5's file offsets need re-locating before implementation, and this branch bases on that merge.
-- Should the all-recorded flagless run exit 0 or stay 2? The plan says 0, because the named run already returns 0
-  for the same state and a CI re-run of an idempotent command should not go red. That is an exit-code change on a
-  command pipelines call, so it is here rather than assumed.
+- Decided on 2026-09-23: the all-recorded flagless run exits 2 and lists nothing, because the command could not
+  identify a changeset — see the design decision above. What remains open is whether a pipeline ever needs a flag
+  for "record if needed, otherwise succeed". The plan's answer is to wait: `--changeset` is that flag, and the
+  caller always has the id.
 - Cut or keep milestone 6? The bug it prevents is real but rarer than the milestone 5 ones, and it is the only
   milestone that changes committed content rather than reads.
