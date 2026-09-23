@@ -2835,13 +2835,40 @@ author who thinks the gate is being pedantic stops trusting it.
 A submission whose approval recorded no parent tip is not refused: the absence says the trailer
 was not written, which is not evidence that the parent moved. `status` says what is missing.
 
+The rule is about a parent **branch** moving. A parent that *lands* is a different event, and it is
+judged on content rather than on movement — see "When the parent lands" below.
+
 ## When the parent lands
 
-A landed parent may have its branch deleted, which is the ordinary end of a stack rather than an
-accident. The integration ref is the bridge: the child's measurement base becomes
-`refs/git-pair/integrations/<parent>`, the commit the parent's work became, so the child stays
-measurable. `check` then refuses with where the work went and what to do about it — the child is
-rebased onto the destination and reviewed again.
+Landing does not delete anything, so the ordinary state of a child whose parent has landed is a parent
+branch that is still there, still at the tip the approval recorded, holding work that is already in the
+destination. That is the case the tip comparison cannot see: `Recorded == Tip` reads as "nothing happened"
+in the one moment where the work finished. The record is the fact, and the branch is where the record used
+to live, so:
+
+-   the child's measurement base becomes `refs/git-pair/integrations/<parent>` while the branch is still
+    present, not only after it is deleted (`changeset.relinkStacks`). The ref has to resolve in this clone;
+    a clone that has never fetched the namespace keeps the branch base and says which half it is missing,
+    rather than failing with `unknown revision` on a base another clone wrote down.
+-   `status`, `check` and `queue` report the landing for **every** state, including a child that has no
+    approval yet. Without an approval it is a note and never a reason: a changeset that has not been
+    offered has nothing for a parent to invalidate. `status --json` carries `parent.landed`,
+    `parent.landed_commit`, `parent.landed_in_default_branch` and `parent.stale_branch`; `check --json`
+    carries `parent_landed`, `parent_landed_commit` and `parent_stale_branch`.
+-   the step is printed as the command, because "rebase onto it" is a sentence the author has to translate
+    into three arguments and gets wrong: `git rebase --onto <landing> <parent-branch> <child-branch>` while
+    the child's head does not carry the landing, and `git branch -D <parent-branch>` once it does — with the
+    worktree named, and `git worktree remove <path>` as text, when another worktree holds that branch and the
+    delete would stop there. git-pair runs neither (§26).
+
+**An approval follows the base only when the content did not move.** `base...head` is the difference between
+the tree at the merge base and the tree at head, and head is the same commit under both bases, so the two
+diffs carry the same content exactly when the two merge bases carry the same tree — two `merge-base` calls
+and two `rev-parse`s rather than a patch comparison on every read. Identical, and the approval stands:
+nothing the reviewer looked at has changed. Different, and it does not: a squash, a rebase-merge or a
+cherry-pick moved the content the review saw into commits the child never had, and `check` refuses with the
+reason naming that. A comparison the clone cannot make answers "different", which is the direction that asks
+a human to look again rather than the one that lets an unreviewed diff through the gate.
 
 A child landed without rebasing carries an archive chain that includes the parent's unsquashed
 commits. That is expected: the archive is the history of the branch that was merged, and the
@@ -2875,15 +2902,19 @@ note rather than a hang, which is also why the note exists at all. `--json` repo
 `stack` (never null) and `stack_note`.
 
 Reading a changeset by id from its durable record relinks the same way the branch path does
-(`changeset.relinkStacks`): where the yaml's `parent:` branch no longer exists and the parent has an
-integration ref, the base becomes that ref — the commit the parent's work became, which is the same
-boundary the branch was — because a parent's branch is normally tidied away before anyone reads the child.
-The branch name stays recorded in the changeset, so the two cases remain tellable apart.
+(`changeset.relinkStacks`): wherever the parent has an integration ref that resolves here, the base becomes
+that ref — the commit the parent's work became, which is the same boundary the branch was — whether or not
+the branch is still in this clone. The branch name stays recorded in the changeset, so the cases stay
+tellable apart: a parent that landed, a parent whose branch this clone has never seen, and a parent that
+moved are three different sentences.
 
 `queue` lists READY branches,
 which by definition have no approval to invalidate, so it notes instead the rows sitting on a
 parent that has moved ahead — the diff a reviewer is about to read is measured against a parent
-that is no longer current.
+that is no longer current — and the rows sitting on a parent that has **landed**, which is the case
+`behindParent` cannot see: it counts parent commits the branch does not have, and a merge into the
+destination leaves the parent's branch with none. Both print as notes, never as rows or reasons, and
+`--json` carries them as `parent_notes`.
 
 ---
 

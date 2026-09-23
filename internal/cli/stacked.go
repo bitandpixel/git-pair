@@ -64,6 +64,9 @@ type parentStatus struct {
 	// `git branch -D <parent>` would fail. It is read only where the deletion is being advised, and named
 	// as text: removing a worktree is not git-pair's to do (PRD §26).
 	ParentWorktree string
+	// landedFull is the record's commit in full, for the comparisons that hand a revision to git. The
+	// reported fields are shortened; git is not.
+	landedFull string
 }
 
 // parentSinceApproval asks the stack question for one changeset: has the branch it is stacked on
@@ -89,7 +92,7 @@ func (a *app) parentSinceApproval(ctx context.Context, repo *git.Repo, c changes
 		st.Recorded = approved.ReviewedParentHead
 	}
 	if st.Tip == "" {
-		st, err = a.parentGone(ctx, repo, c, db, st)
+		st, err = a.parentGone(ctx, repo, c, db, head, approved, st)
 	} else {
 		st, err = a.parentLive(ctx, repo, c, db, head, approved, st)
 	}
@@ -139,6 +142,25 @@ func (a *app) parentLive(ctx context.Context, repo *git.Repo, c changeset.Change
 		return st, nil
 	}
 	if st.Recorded == st.Tip {
+		if st.Landed == "" {
+			return st, nil
+		}
+		// The parent landed and its branch did not move, so the only thing that changed is what the base
+		// points at: the parent's record instead of its branch. An approval is a claim about content, so
+		// content decides whether it follows the base (PRD §21).
+		same, err := landedBaseIsTheSameWork(ctx, repo, st.Recorded, st.landedFull, head)
+		if err != nil {
+			return st, err
+		}
+		if same {
+			st.Note = fmt.Sprintf("%s; the base moved onto the record and the content under it did not, so the approval still measures this work",
+				st.Note)
+			return st, nil
+		}
+		advice := fmt.Sprintf("%s and have the result reviewed again", landedParentStep(c, st))
+		st.Reason = fmt.Sprintf("the parent %s landed as %s%s and the diff under it differs from what review %s approved: %s",
+			st.parentName(), st.Landed, st.LandedReach, approved.Short, advice)
+		st.Next = advice
 		return st, nil
 	}
 	moved, err := classifyParentMovement(ctx, repo, st.Recorded, st.Tip)
@@ -172,6 +194,7 @@ func (a *app) parentLanded(ctx context.Context, repo *git.Repo, c changeset.Chan
 		return st, err
 	}
 	st.Landed = short(commit)
+	st.landedFull = commit
 	if db.Ref != "" {
 		in, err := repo.IsAncestor(ctx, commit, db.Ref)
 		if err != nil {
@@ -292,7 +315,7 @@ func (st parentStatus) parentName() string {
 // so its absence is read from the durable records: an integration ref says it landed, nothing says it
 // ended, and either way the child needs a decision from its author rather than a new default.
 func (a *app) parentGone(ctx context.Context, repo *git.Repo, c changeset.Changeset,
-	db changeset.DefaultBranchRef, st parentStatus) (parentStatus, error) {
+	db changeset.DefaultBranchRef, head string, approved *lifecycle.Event, st parentStatus) (parentStatus, error) {
 	if st.Changeset == "" {
 		st.Next = "choose a new base with `git pair init --parent <branch> --set-parent`"
 		st.Reason = fmt.Sprintf("parent branch %s is gone and the stack records no parent changeset to look for: the stack is unreconciled — %s", st.Branch, st.Next)
@@ -312,11 +335,9 @@ func (a *app) parentGone(ctx context.Context, repo *git.Repo, c changeset.Change
 		return st, err
 	}
 	st.Landed = short(commit)
+	st.landedFull = commit
 	st.LandedInDefaultBranch = l.InDefaultBranch
 	st.LandedReach = l.reach()
-	if err != nil {
-		return st, err
-	}
 	destination := "the branch that carries it"
 	switch {
 	case l.InDefaultBranch:
@@ -324,10 +345,60 @@ func (a *app) parentGone(ctx context.Context, repo *git.Repo, c changeset.Change
 	case l.BranchKnown:
 		destination = fmt.Sprintf("%s, or the branch that carries it", l.DefaultBranch)
 	}
+	// The same rule `parentLive` applies, for the case that has always relinked: the landing moves the
+	// base, and an approval is a claim about content. A squash, a rebase-merge and a cherry-pick move the
+	// content the review saw into commits the child never had, so the comparison says "different" and the
+	// child is told to have the result reviewed again; a plain merge that brought nothing new answers
+	// "the same", and the approval stands.
+	if approved != nil {
+		same, err := landedBaseIsTheSameWork(ctx, repo, st.Recorded, commit, head)
+		if err != nil {
+			return st, err
+		}
+		if same {
+			st.Note = fmt.Sprintf("parent %s landed as %s%s; the base moved onto the record and the content under it did not, so the approval still measures this work",
+				st.parentName(), st.Landed, st.LandedReach)
+			return st, nil
+		}
+	}
 	st.Reason = fmt.Sprintf("the parent %s landed as %s — parent landed as %s; rebase onto %s and have the result reviewed again",
 		st.Changeset, short(commit), short(commit), destination)
 	st.Next = fmt.Sprintf("parent landed as %s; rebase onto %s", short(commit), destination)
 	return st, nil
+}
+
+// landedBaseIsTheSameWork compares what the child's diff measures under the two bases a landing puts in
+// front of it: the tip the approval recorded on the parent's branch, and the commit the parent's work
+// became.
+//
+// `base...head` is the difference between the tree at the merge base and the tree at head, and head is the
+// same commit under both readings — so the two diffs carry the same content exactly when the two merge
+// bases carry the same tree. That is two `merge-base` calls and two `rev-parse`s, where comparing patches
+// would cost two diffs and a patch id on every read of a stacked child.
+//
+// A comparison that cannot be made answers "different", because that is the direction that asks a human to
+// look again rather than the one that lets an unreviewed diff through the gate.
+func landedBaseIsTheSameWork(ctx context.Context, repo *git.Repo, oldBase, landed, head string) (bool, error) {
+	if oldBase == "" || landed == "" || head == "" {
+		return false, nil
+	}
+	was, err := repo.MergeBase(ctx, oldBase, head)
+	if err != nil {
+		return false, nil
+	}
+	now, err := repo.MergeBase(ctx, landed, head)
+	if err != nil {
+		return false, nil
+	}
+	wasTree, err := repo.RevParse(ctx, was+"^{tree}")
+	if err != nil {
+		return false, nil
+	}
+	nowTree, err := repo.RevParse(ctx, now+"^{tree}")
+	if err != nil {
+		return false, nil
+	}
+	return wasTree == nowTree, nil
 }
 
 // parentAbandoned reports whether the parent changeset has been abandoned on a branch that is still

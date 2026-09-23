@@ -267,7 +267,12 @@ func derivationDestinations(ctx context.Context, repo *git.Repo, in integrationR
 		add(in.target)
 		return out, nil
 	}
-	if cur, err := changeset.Current(ctx, repo, in.defaultBranch); err == nil {
+	// A base under refs/git-pair/ is a measurement base, not a destination. The relink points a child at its
+	// parent's record, and `--target` was never meant to name one: offering git-pair's own ref as "a branch
+	// this landing could have reached" would put a durable ref in the list of places work went to, and the
+	// refusal that names its candidates would read as though a record were a branch.
+	if cur, err := changeset.Current(ctx, repo, in.defaultBranch); err == nil &&
+		!strings.HasPrefix(cur.Base, reviewref.NamespaceRoot+"/") {
 		add(cur.Base)
 	}
 	if db, err := changeset.DefaultBranch(ctx, repo, in.defaultBranch); err == nil {
