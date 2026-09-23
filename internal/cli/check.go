@@ -103,6 +103,13 @@ type checkJSON struct {
 	Integrated       bool    `json:"integrated"`
 	IntegratedCommit string  `json:"integrated_commit,omitempty"`
 	IntegratedAt     landing `json:"-"`
+	// ParentLanded says the branch this changeset is stacked on has an integration record: the base is
+	// finished work. It sits beside the verdict and never inside `reasons`, because a parent that landed
+	// changes nothing this child owns — the diff the reviewer approved is the diff still under test.
+	// Refusing it would ask for a re-review of unchanged content.
+	ParentLanded       bool   `json:"parent_landed"`
+	ParentLandedCommit string `json:"parent_landed_commit,omitempty"`
+	ParentStaleBranch  bool   `json:"parent_stale_branch"`
 	// NextAction is the step a passing verdict licenses — the merge someone else performs, then the
 	// record — spelled the same way `status` spells it. It appears only when the gate passed: when it
 	// did not, `reasons` is the next step, and a consumer should never have to decide which of two
@@ -175,7 +182,17 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool, doFetch bool) err
 	out.Ready = len(out.Reasons) == 0
 	if out.Ready {
 		out.NextAction = landingNextAction(s.cs.Base)
+		if parent.Landed != "" {
+			// Spelled beside the landing contract rather than inside it: `landingNextAction` is one string
+			// shared by `status`, `check`, `change ready` and `review`, it takes only a base, and teaching it
+			// about parents would make the same sentence mean two things in four commands.
+			out.NextAction += fmt.Sprintf("; parent %s landed as %s — %s", parent.parentName(), parent.Landed,
+				landedParentStep(parent.Branch, parent.StaleBranch))
+		}
 	}
+	out.ParentLanded = parent.Landed != ""
+	out.ParentLandedCommit = parent.Landed
+	out.ParentStaleBranch = parent.StaleBranch
 	if out.Reasons == nil {
 		// `reasons` is an array in both verdicts. `null` would make every consumer
 		// handle two shapes for the same fact, and the fact it is checking — whether the
@@ -200,6 +217,12 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool, doFetch bool) err
 	// The commit the gate cleared, named on the passing line as well as in --json: a log that says
 	// "ready" without saying what it looked at cannot be re-read after the branch has moved.
 	a.printf("head:  %s\n", short(s.head))
+	if parent.Landed != "" {
+		// Beside the verdict, not inside it: the gate passed, and the reader still needs to know the base
+		// underneath is finished work with a step attached to it.
+		a.printf("parent: %s landed as %s — %s\n", parent.parentName(), parent.Landed,
+			landedParentStep(parent.Branch, parent.StaleBranch))
+	}
 	a.printf("next:  %s\n", out.NextAction)
 	return nil
 }

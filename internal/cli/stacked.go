@@ -188,12 +188,22 @@ func (a *app) parentLanded(ctx context.Context, repo *git.Repo, c changeset.Chan
 	}
 	st.StaleBranch = on
 	if on {
-		st.Note = fmt.Sprintf("your head is on %s, so the branch %s is stale — it holds nothing the record does not",
-			st.Landed, st.Branch)
+		st.Note = fmt.Sprintf("your head is on %s, so %s", st.Landed, landedParentStep(st.Branch, true))
 		return st, nil
 	}
-	st.Note = fmt.Sprintf("rebase onto it: this head is still measured on %s, which the landing replaced", st.Branch)
+	st.Note = fmt.Sprintf("%s: this head is still measured on %s, which the landing replaced",
+		landedParentStep(st.Branch, false), st.Branch)
 	return st, nil
+}
+
+// landedParentStep is the step a landed parent leaves, spelled once because `status`, `check` and `queue`
+// all print it and a fifth spelling is how a contract drifts. It is the sibling of `landingNextAction` for
+// the same reason: one sentence, several readers.
+func landedParentStep(branch string, headOnLanding bool) string {
+	if headOnLanding {
+		return fmt.Sprintf("the branch %s is stale — it holds nothing the record does not", branch)
+	}
+	return "rebase onto it"
 }
 
 // parentInTrunkUnrecorded is the sibling finding: the parent's branch tip is in the integration branch and

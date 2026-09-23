@@ -690,6 +690,7 @@ carries with no integration ref: that is a merge whose record never ran, and it 
     }
   ],
   "skipped": ["untracked-work (cannot resolve changeset base \"other\": unknown revision: other)"],
+  "parent_notes": ["waitlist-rebooking: parent booking-transaction landed as 4f2b8c1 — the branch booking-transaction is stale — it holds nothing the record does not"],
   "landed_unrecorded": [
     {
       "changeset": "waitlist-rebooking",
@@ -698,6 +699,10 @@ carries with no integration ref: that is a merge whose record never ran, and it 
   ]
 }
 ```
+
+`parent_notes` is what the queue says about a row it is not refusing: the branch underneath a READY child
+has an integration record, so the base a reviewer is about to read against is finished work. It is a note
+and not a row, and never a reason — a READY changeset has no approval for a parent to invalidate.
 
 `landed_unrecorded` is the queue's second job: work that reached the integration branch while nobody
 wrote its record. Each entry carries the invocation that closes the gap, and the human form prints the
@@ -715,7 +720,11 @@ The state is the one the merge leaves behind when the step after it is skipped: 
 trunk, so the rules that find work in progress stop seeing it, and the branch may already be deleted.
 `git pair status` prints the same finding on a branch that carries no changeset of its own — attached to
 its exit-2 "no changeset for this branch" answer, which stays exit 2 because the branch really does hold
-no work in progress.
+no work in progress. On that branch `status` also runs the published-or-not comparison, so the destination
+branch — the branch every changeset eventually lands on, and the one where a record that never left the
+clone was invisible — reports both halves. Its `--json` there is a document rather than only an error:
+`reason`, `landed_unrecorded`, `unpublished` and `unpublished_note`, with the two lists present and empty
+when there is nothing to report.
 
 When the destination already holds the directory, the answer says the changeset landed. It then names
 `git pair status --changeset <id>` rather than telling you to run `git pair init` over work that has a
@@ -729,6 +738,8 @@ fetched record is a record; a mirror is only a comparison, and nothing answers "
 one — and they are two fetches, because the mirror side is pruned and the record side must never be.
 What the mirrors are for is the finding `queue` prints as `RECORDED, NOT PUBLISHED`, beside
 `LANDED, UNRECORDED`: changesets whose record this clone holds and the remote, as last fetched, does not.
+`status` prints it on a changeset branch after its report, and on the destination branch beside the failure
+that says there is nothing there to report.
 Half a pair on the remote is its own, louder case — the remote has a hint and no way to reconstruct the
 record from it. `--json` reports it as `unpublished`, and `unpublished_note` when there was nothing to
 compare against. `check` does not refuse on it: a record that has not travelled is a durability risk, not

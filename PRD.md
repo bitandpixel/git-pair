@@ -1863,7 +1863,10 @@ the fixture that found it recorded a landing, fetched, and reported its own reco
 A record that exists only in one clone is the state where the paper trail is complete and still worthless.
 `queue` prints it under its own `RECORDED, NOT PUBLISHED` heading, beside `LANDED, UNRECORDED` and styled
 like it — the two read alike because they are the two halves of one question, and they differ in exactly
-the word that matters. `status` prints the same finding after its report. `--json` carries it as
+the word that matters. `status` prints the same finding after its report, and on the integration branch it
+prints beside the `no changeset for this branch` failure rather than instead of it: that branch has no work
+in progress to report, which is why it is exit 2, and it is also the branch where a record that never left
+the clone was otherwise invisible (§22). `--json` carries it as
 `unpublished`, an array of `{"changeset", "missing", "diverged"}` and never null, plus `unpublished_note`
 when nothing could be compared.
 

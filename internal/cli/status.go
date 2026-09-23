@@ -199,7 +199,7 @@ type statusJSON struct {
 func runStatus(ctx context.Context, a *app, slug string, doFetch bool) error {
 	s, err := a.loadFor(ctx, slug)
 	if err != nil {
-		return a.landingsOnNoChangeset(ctx, slug, err)
+		return a.landingsOnNoChangeset(ctx, slug, doFetch, err)
 	}
 	if doFetch {
 		a.fetchDurableRefs(ctx, s.repo, s.cs.Branch)
@@ -252,7 +252,14 @@ func runStatus(ctx context.Context, a *app, slug string, doFetch bool) error {
 //
 // Every step of the detection is best-effort: this path already has an answer, and a report about
 // landings is never a reason to fail in a new way.
-func (a *app) landingsOnNoChangeset(ctx context.Context, slug string, err error) error {
+//
+// The published-or-not comparison belongs here too, for the reason the section title states: the
+// destination branch is the branch every changeset eventually lands on, and it was the one branch where a
+// record that never left the clone was invisible. It costs one `for-each-ref` over the mirrors and no
+// network, and `lookupDurableRemote` already defines an empty branch as "no particular branch", so origin
+// is the answer. `--fetch` reaches this path only now: the fetch used to sit behind a successful load, so
+// on the destination branch it never ran at all.
+func (a *app) landingsOnNoChangeset(ctx context.Context, slug string, doFetch bool, err error) error {
 	if slug != "" || !errors.Is(err, changeset.ErrNoChangeset) {
 		return err
 	}
@@ -272,7 +279,27 @@ func (a *app) landingsOnNoChangeset(ctx context.Context, slug string, err error)
 	if derr != nil {
 		return err
 	}
-	return unrecordedInStatus(err, durable.unrecordedLandings(dirs), durable.NamespaceEmpty, displayRef(db.Ref))
+	if doFetch {
+		a.fetchDurableRefs(ctx, repo, "")
+	}
+	rep := a.publicationReport(ctx, repo, "", durable, "`git pair status --fetch` asks for them", doFetch)
+	unrecorded := durable.unrecordedLandings(dirs)
+	if a.json {
+		// A document on stdout and the failure on stderr, because the caller is a machine that has to tell
+		// "asked, and none" from "this build could not look". Both lists are present and empty when there is
+		// nothing to report, which is the shape `statusJSON` commits to on the success path.
+		_ = a.emitJSON(map[string]any{
+			"reason":            messageOf(err),
+			"landed_unrecorded": orEmpty(unrecorded),
+			"unpublished":       orEmpty(rep.Findings),
+			"unpublished_note":  rep.Note,
+		})
+		return unrecordedInStatus(err, unrecorded, durable.NamespaceEmpty, displayRef(db.Ref))
+	}
+	// Printed before the error returns so both halves reach the reader who asked the question: the
+	// findings on stdout, the reason for the exit code on stderr.
+	a.printUnpublished(rep, false)
+	return unrecordedInStatus(err, unrecorded, durable.NamespaceEmpty, displayRef(db.Ref))
 }
 
 type statusView struct {
