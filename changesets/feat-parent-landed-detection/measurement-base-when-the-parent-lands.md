@@ -33,6 +33,7 @@ milestone 1:
    with a `RevParse`, so an unfetched clone keeps the branch base, and the same guard works with the branch
    present. The cost is that two clones of the same commits can print different `Base:` values, which cuts
    against the resolution rule in README's Concepts ("two clones of the same commits cannot disagree").
+i think its okay that they disagree. they agree deterministically given the same refs are present. what are the practical issues if this disagreement materializes?
 2. **PRD §21's movement rule.** If a landed parent's current tip is the integration commit, the recorded
    `Review-Parent-Head` no longer matches it. Reading the probe: invalidation should follow the diff rather
    than the ref. Where the child's content is unchanged the relink is a label; where it changes (row two) the
@@ -41,6 +42,10 @@ milestone 1:
    tell a metadata-only parent commit from an implementation change", so it is yours to accept rather than
    mine to assume.
 
+yep lets keep an approval if the diff is identical
+
 Milestone 4 carries the shape: trigger on the record existing and resolving, compare the two spans, and pick
 one of the two readings of §21. Milestones 1–3 stay as written — the notes, the JSON fields and the advisory
 are needed under either answer.
+
+Ok sounds good.
