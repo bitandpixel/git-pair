@@ -21,25 +21,6 @@ form.
 Seeing every branch also makes the derivation's existing ambiguity rule reachable for the first time: when
 two branches carry the directory it refuses instead of picking. Before, the nested one was invisible, so it
 recorded a guess quietly.
-^ What happens when the remote ref for a branch and a branch both carry the directory?
-
-Nothing on this changeset, and that is worth saying rather than leaving to be inferred: this change still
-lists `refs/heads/` only, so `refs/remotes/origin/feat/ux` never reaches the candidate list. The branch in
-the working tree has nothing to compete with, and a fetched copy of it — even one behind, even one carrying
-the directory — cannot pull the derivation into an ambiguity or move the record off the local tip. Checked
-rather than reasoned: with the changeset on `feat/booked`, the merge on `main` and
-`refs/remotes/origin/feat/booked` pointing at `feat/booked~1`, the no-flag record writes the archive at the
-local tip and says nothing about a second carrier.
-
-That blindness is what the next commit in the stack removes — and the answer there is the same one, for a
-better reason. `fix-legacy-refs-and-remote-branches` keys candidates on the branch a ref *names*, so a local
-branch and the copy the last fetch brought are one candidate and the local tip is what gets recorded; two
-candidates appear only when two *different* branches carry the directory, which is the refusal above. Its
-`TestIntegrationRecordCountsOneBranchUnderBothSpellings` is the case above, kept as a test rather than run as
-a check, with the fetched copy deliberately behind the local one — keyed on the commit those would be two
-carriers and a refusal, which is the failure this question is really asking about.
-
-great thank you. can you move this to a resolved questions section? I'll approve.
 
 ## Tests
 
@@ -66,3 +47,25 @@ candidates". The contract was written; this makes the code keep it.
 confirm they fail. The pty walkthrough is not the gate for this: it records with `--source` and `--commit`,
 and `resolveIntegrationRecord` only calls the derivation when one of those is empty, so that run never
 reaches the changed line.
+
+## Resolved questions
+
+^ What happens when the remote ref for a branch and a branch both carry the directory?
+
+Nothing on this changeset, and that is worth saying rather than leaving to be inferred: this change still
+lists `refs/heads/` only, so `refs/remotes/origin/feat/ux` never reaches the candidate list. The branch in
+the working tree has nothing to compete with, and a fetched copy of it — even one behind, even one carrying
+the directory — cannot pull the derivation into an ambiguity or move the record off the local tip. Checked
+rather than reasoned: with the changeset on `feat/booked`, the merge on `main` and
+`refs/remotes/origin/feat/booked` pointing at `feat/booked~1`, the no-flag record writes the archive at the
+local tip and says nothing about a second carrier.
+
+That blindness is what the next commit in the stack removes — and the answer there is the same one, for a
+better reason. `fix-legacy-refs-and-remote-branches` keys candidates on the branch a ref *names*, so a local
+branch and the copy the last fetch brought are one candidate and the local tip is what gets recorded; two
+candidates appear only when two *different* branches carry the directory, which is the refusal in "The
+change" above. Its `TestIntegrationRecordCountsOneBranchUnderBothSpellings` is the case above, kept as a
+test rather than run as a check, with the fetched copy deliberately behind the local one — keyed on the
+commit those would be two carriers and a refusal, which is the failure this question is really asking about.
+
+great thank you. can you move this to a resolved questions section? I'll approve.
