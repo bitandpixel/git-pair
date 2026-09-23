@@ -130,6 +130,9 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 			return &usageError{err}
 		}
 		a.warn("base: %s (pass --base to choose a different ref)\n", base)
+		if note := baseDivergence(ctx, repo, base); note != "" {
+			a.warn("%s\n", note)
+		}
 	}
 
 	// `init` creates a directory, which is not a resolution question. A stacked branch
@@ -366,5 +369,51 @@ func defaultBase(ctx context.Context, repo *git.Repo, override string) (string, 
 	if err != nil {
 		return "", fmt.Errorf("cannot infer a base: %v; pass --base <ref>", err)
 	}
-	return db.LocalName(), nil
+	// The branch name, not the ref this clone happens to reach it through. `DefaultBranch` prefers
+	// `refs/remotes/origin/HEAD`, which `git clone` records, so the ref it returns is usually a fetch ref even
+	// in a clone with a local trunk — and recording that spelling put `base: refs/remotes/origin/main` into a
+	// file other machines read, and made `status` report the base as a fetched remote ref for a change that
+	// had never been pushed anywhere. The name is tried under `refs/heads/` first and then under
+	// `refs/remotes/`, so where it resolves it is the same branch and the better thing to write.
+	name := db.BaseName()
+	if _, err := repo.RevParse(ctx, name); err == nil {
+		return name, nil
+	}
+	// Where the name does not resolve, this clone holds the integration branch only under the fetch root,
+	// and a base that does not resolve makes every command fail: `cannot resolve changeset base "main"`.
+	// The qualified ref is recorded there rather than a name that reads nicer and works nowhere.
+	return db.Ref, nil
+}
+
+// baseDivergence is the note for a base whose local copy and its remote copy are different commits — the
+// state behind a fresh branch reporting `ahead 1, behind 1` and a `Base:` line that resolves through
+// `refs/remotes/`: the trunk in this clone has commits the remote's does not, so the diff measured from here
+// is not the diff the forge will show. It is a note and not a refusal: a base may legitimately be ahead
+// locally, and pushing it is not git-pair's to do (§26).
+func baseDivergence(ctx context.Context, repo *git.Repo, base string) string {
+	if base == "" {
+		return ""
+	}
+	local, remote := "refs/heads/"+base, "refs/remotes/origin/"+base
+	here, err := repo.RevParse(ctx, local)
+	if err != nil {
+		return ""
+	}
+	there, err := repo.RevParse(ctx, remote)
+	if err != nil || here == there {
+		return ""
+	}
+	return fmt.Sprintf("note: %s is not the same commit here and on origin: %s here that origin does not have, %s on origin that is not here. "+
+		"The diff git-pair measures is against the copy in this clone; the forge compares against the copy it has, and pushing %s is yours.",
+		base, countBetween(ctx, repo, local, remote), countBetween(ctx, repo, remote, local), base)
+}
+
+// countBetween is `git rev-list --count <exclude>..<from>`, and "?" when git will not say — a note that
+// cannot count is still worth printing without a number, and is not worth failing `init` over.
+func countBetween(ctx context.Context, repo *git.Repo, from, exclude string) string {
+	out, err := repo.Git(ctx, "rev-list", "--count", exclude+".."+from)
+	if err != nil {
+		return "?"
+	}
+	return strings.TrimSpace(out)
 }

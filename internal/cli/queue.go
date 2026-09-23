@@ -158,6 +158,12 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 				stale = append(stale, fmt.Sprintf("%s on %s is %s behind parent %s",
 					cs.Slug, br.Branch, plural(behind, "commit", "commits"), entry.Base))
 			}
+			// A landed parent is the case `behindParent` cannot see: it counts parent commits the branch
+			// does not have, and a merge into the destination leaves the parent's branch with none. The
+			// record is what says the base is finished, and it is already in the index this loop reads.
+			if note, err := a.landedParentNote(ctx, repo, cs, durable, entry.Head); err == nil && note != "" {
+				stale = append(stale, note)
+			}
 			entries = append(entries, *entry)
 		}
 	}
@@ -200,6 +206,10 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 			"skipped":           orEmpty(skipped),
 			"landed_unrecorded": unrecorded,
 			"unpublished":       rep.Findings,
+			// The notes the text surface prints to stderr: a row whose parent has landed, or moved.
+			// They were prose-only, which left a machine reading the queue with no way to learn that the
+			// base a row is being reviewed against has already been integrated.
+			"parent_notes": orEmpty(stale),
 		}
 		if rep.Note != "" {
 			out["unpublished_note"] = rep.Note
@@ -324,6 +334,37 @@ func (a *app) behindParent(ctx context.Context, repo *git.Repo, cs changeset.Cha
 		return 0, err
 	}
 	return len(records), nil
+}
+
+// landedParentNote is the queue's reading of the same fact, from the index the command already holds.
+//
+// It does not go through parentSinceApproval because that path costs a marker walk of the parent branch,
+// which the queue cannot pay once per READY row: a queue is a list of branches, and the parent's history is
+// somebody else's cost. The index answers the question that matters here — is the parent recorded as
+// landed — for nothing, and one containment question decides which step to name.
+func (a *app) landedParentNote(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
+	durable refIndex, head string) (string, error) {
+	if cs.ParentChangeset == "" {
+		return "", nil
+	}
+	sha, ok := durable.Integrated[cs.ParentChangeset]
+	if !ok {
+		return "", nil
+	}
+	on, err := repo.IsAncestor(ctx, sha, head)
+	if err != nil {
+		return "", err
+	}
+	branch := cs.ParentBranch
+	if branch == "" {
+		branch = cs.ParentChangeset
+	}
+	// The step is spelled by the same helper `status` and `check` print, with one thing left out: the
+	// worktree lookup. The queue is a reviewer's surface and its cost is per row, so it names the command
+	// and leaves the blocker to the command the author runs before deleting anything.
+	st := parentStatus{Branch: branch, Landed: short(sha), StaleBranch: on}
+	return fmt.Sprintf("%s: parent %s landed as %s — %s",
+		cs.Slug, cs.ParentChangeset, short(sha), landedParentStep(cs, st)), nil
 }
 
 // branchReadyEntry is the queue row for one branch, or nil when that branch is not READY.

@@ -86,6 +86,22 @@ func (d DefaultBranchRef) LocalName() string {
 	return strings.TrimPrefix(d.Ref, "refs/heads/")
 }
 
+// BaseName is the integration branch as `base:` should record it: the branch name, without the root this
+// clone happens to keep it under. `refs/remotes/origin/main` is the same branch read through the fetch root,
+// and `DefaultBranch` reaches it first whenever there is no local `main` to find — which is the ordinary
+// state of a clone that has fetched and not branched off trunk. A changeset file is read by other machines
+// and printed in `status`; a base spelled as a fetch ref reads as a different destination there, and says
+// "fetched" about a change that has never been pushed. Read-time resolution is unchanged: a name is tried
+// under `refs/heads/` first and then under `refs/remotes/`, so the two spellings resolve to one branch.
+func (d DefaultBranchRef) BaseName() string {
+	if rest, ok := strings.CutPrefix(d.Ref, "refs/remotes/"); ok {
+		if _, tail, ok := strings.Cut(rest, "/"); ok {
+			return tail
+		}
+	}
+	return d.LocalName()
+}
+
 // DefaultBranch resolves the integration branch.
 //
 // A caller-supplied ref wins outright; it is what CI passes, and it matches how
@@ -523,8 +539,8 @@ func stackParentID(c Candidate) string {
 	return parentID(c.Changeset.Base)
 }
 
-// relinkStacks points a stacked changeset at its parent's integration ref when the parent branch is
-// gone, which is the ordinary state of a child whose parent has landed and been cleaned up.
+// relinkStacks points a stacked changeset at its parent's integration ref once the parent has been
+// recorded, which is the ordinary state of a child whose parent has landed.
 //
 // Without this the child answers nothing at all: every command measures against the base, the base is
 // a branch that no longer exists, and the answer to "what does this changeset contain?" is an
@@ -532,14 +548,26 @@ func stackParentID(c Candidate) string {
 // requirements §Stacked Changesets describes — and it holds the commit the parent's work became, which
 // is what the child should be measured against now. Nothing is invented: the branch name stays in
 // ParentBranch, so the child can still be told its parent has landed rather than merely moved.
+//
+// The trigger used to be the missing branch, and it was too narrow: landing does not delete anything, so
+// the branch is usually still there. A branch that outlives its work is worse than a missing one, because
+// it does not error — it measures. Diffing a child against a branch the landing never moved reads the
+// landed work as still sitting under the child, and a child rebased onto trunk after a merge landing
+// prints trunk's commits as its own work. The record is the fact; the branch is where the record used to
+// live.
+//
+// Whether an approval survives the move is not decided here. PRD §21 makes that a question about content,
+// and the content comparison belongs where the approval is read (`internal/cli/stacked.go`), which has a
+// head to compare against and this resolver does not.
 func relinkStacks(ctx context.Context, repo *git.Repo, candidates []Candidate) []Candidate {
 	for i, c := range candidates {
 		if c.Changeset.ParentBranch == "" || c.Changeset.ParentChangeset == "" {
 			continue
 		}
-		if _, err := repo.RevParse(ctx, "refs/heads/"+c.Changeset.ParentBranch); err == nil {
-			continue
-		}
+		// The record has to resolve, in both cases. Pointing a base at a ref this clone does not have would
+		// trade a working branch base for an unknown-revision error, which is the failure this function
+		// exists to remove: a clone that has never fetched `refs/git-pair/*` keeps measuring against the
+		// branch, and `status` says which half of the relationship it is missing.
 		ref := reviewref.Integration(c.Changeset.ParentChangeset)
 		if _, err := repo.RevParse(ctx, ref); err != nil {
 			continue

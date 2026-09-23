@@ -213,10 +213,17 @@ opinion and takes no part; it neither runs a merge nor derives one, because squa
 destroy the ancestry that would have said so.
 
 The three steps are the whole contract — `check`, the landing with ordinary git, `integration
-record` — and the order of the last two is not free: **record before tidy**. The record is asked of
-the branch that still carries the reviewed head and the changeset directory, which is why it needs
-no flags when the branch is there and needs two SHAs when it is not. Delete the branch first and
-the same fact has to be supplied by hand, or fetched back, or it is gone.
+record` — and the order of the last two is not free: **record before tidy**. The record asks which
+head was reviewed, and the branch that still carries it is where the answer usually comes from — so
+the order that never costs you a flag is record, then delete.
+
+What the branch is needed *for* decides whether deleting it costs anything. A merge carries the
+reviewed chain inside itself, as the side the merge brought in, so a merge landing is still
+recordable after `git branch -D` and needs no flags; a fast-forward carries it in trunk, and is
+recordable once the approval marker on the chain says the work was reviewed there. A squash, a
+cherry-pick and a rebase-merge keep the chain on no commit that survives, so for those the branch is
+the only source of the answer: delete it first and the same fact has to be supplied by hand with
+`--source` and `--commit`, or fetched back, or it is gone.
 
 One command records where the work went, and it is the only git-pair ref write in the whole handoff:
 
@@ -241,6 +248,23 @@ The order is the contract (§PRD §29). Once the branch is deleted the refs are 
 chain, so a delete that lands before a publish leaves the chain reachable from nothing outside the machine
 that recorded it — which is why `status` and `queue` print `RECORDED, NOT PUBLISHED` rather than trusting
 anyone to remember.
+
+A parent that landed without being recorded is the same hazard one level up, and it is the one an author hits
+first: the child's chain — the commits a reviewer approved, which trunk never held — is the child's history
+until the parent is recorded, and the thing holding it is the parent's branch, which `tidy` is built to
+remove. A merge landing holds that chain itself, in the side the merge brought in, and a fast-forward holds
+it in trunk; a squash or a cherry-pick holds it nowhere else. So the order stays record-then-tidy, and the
+answer to an unrecorded parent is its archive ref, never a rebase of the child: rebase the child and the
+parent's chain is gone from the repository and from the child's own history at the same moment.
+
+A stack says what is left of it at the same moment, and this is the ordinary next thing an author hits after
+landing a parent: `git pair status`, `git pair check` and `git pair queue` name the landing and print the
+command that settles the child. While the child's head is not on the landing it is
+`git rebase --onto <landing> <parent-branch> <child-branch>`; once it is, the parent's branch is stale and the
+command is `git branch -D <parent-branch>` — with the worktree named when another worktree has that branch
+checked out, because the delete fails there and removing a worktree is not git-pair's to do. Nothing in
+git-pair runs either one: the rebase and the delete are ordinary git, performed by whoever owns the branches
+(PRD §26).
 
 Two refs, written once, and never moved: the chain that was reviewed, and the commit it became. The
 changeset is discovered from the directories `--source` carries rather than from a ref someone had to
@@ -539,7 +563,7 @@ landed.
 
 | Command | Flags | Notes |
 | --- | --- | --- |
-| `init` | `--id <id>`, `--base <ref>`, `--set-base`, `--parent <branch>`, `--set-parent`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch; refuses on that branch, where a changeset could never contain anything; `--parent` stacks the changeset instead of naming a base, recording the parent's changeset ID beside it, and `--set-parent` restacks it — never done implicitly, because a parent that moved, landed or died is the author's decision; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |
+| `init` | `--id <id>`, `--base <ref>`, `--set-base`, `--parent <branch>`, `--set-parent`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch, recorded as its branch name where that name resolves and as the fetch ref this clone has to reach it through where it does not; refuses on that branch, where a changeset could never contain anything; `--parent` stacks the changeset instead of naming a base, recording the parent's changeset ID beside it, and `--set-parent` restacks it — never done implicitly, because a parent that moved, landed or died is the author's decision; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` when the changeset is in review, otherwise succeeds and records nothing; refuses a changeset whose work is recorded as integrated |
 | `change use <id>` | none | records which changeset a branch carrying more than one is working on: writes `ignores: <other ids>` into the chosen changeset's `CHANGESET.yaml` and commits that file; refuses an id the branch does not offer and a record that would leave the branch still undecided; idempotent |
@@ -690,6 +714,7 @@ carries with no integration ref: that is a merge whose record never ran, and it 
     }
   ],
   "skipped": ["untracked-work (cannot resolve changeset base \"other\": unknown revision: other)"],
+  "parent_notes": ["waitlist-rebooking: parent booking-transaction landed as 4f2b8c1 — the branch booking-transaction is stale — it holds nothing the record does not"],
   "landed_unrecorded": [
     {
       "changeset": "waitlist-rebooking",
@@ -698,6 +723,10 @@ carries with no integration ref: that is a merge whose record never ran, and it 
   ]
 }
 ```
+
+`parent_notes` is what the queue says about a row it is not refusing: the branch underneath a READY child
+has an integration record, so the base a reviewer is about to read against is finished work. It is a note
+and not a row, and never a reason — a READY changeset has no approval for a parent to invalidate.
 
 `landed_unrecorded` is the queue's second job: work that reached the integration branch while nobody
 wrote its record. Each entry carries the invocation that closes the gap, and the human form prints the
@@ -715,7 +744,11 @@ The state is the one the merge leaves behind when the step after it is skipped: 
 trunk, so the rules that find work in progress stop seeing it, and the branch may already be deleted.
 `git pair status` prints the same finding on a branch that carries no changeset of its own — attached to
 its exit-2 "no changeset for this branch" answer, which stays exit 2 because the branch really does hold
-no work in progress.
+no work in progress. On that branch `status` also runs the published-or-not comparison, so the destination
+branch — the branch every changeset eventually lands on, and the one where a record that never left the
+clone was invisible — reports both halves. Its `--json` there is a document rather than only an error:
+`reason`, `landed_unrecorded`, `unpublished` and `unpublished_note`, with the two lists present and empty
+when there is nothing to report.
 
 When the destination already holds the directory, the answer says the changeset landed. It then names
 `git pair status --changeset <id>` rather than telling you to run `git pair init` over work that has a
@@ -729,6 +762,8 @@ fetched record is a record; a mirror is only a comparison, and nothing answers "
 one — and they are two fetches, because the mirror side is pruned and the record side must never be.
 What the mirrors are for is the finding `queue` prints as `RECORDED, NOT PUBLISHED`, beside
 `LANDED, UNRECORDED`: changesets whose record this clone holds and the remote, as last fetched, does not.
+`status` prints it on a changeset branch after its report, and on the destination branch beside the failure
+that says there is nothing there to report.
 Half a pair on the remote is its own, louder case — the remote has a hint and no way to reconstruct the
 record from it. `--json` reports it as `unpublished`, and `unpublished_note` when there was nothing to
 compare against. `check` does not refuse on it: a record that has not travelled is a durability risk, not
@@ -822,6 +857,9 @@ exact pair: a retry is a success that changed nothing, and the two are worth tel
 retry answers from the record before it runs any checks, so it prints no verification and refuses on no
 check — including when it arrives with fewer flags than the run that wrote the pair. `derived` lists the
 flags git-pair filled in from the repository (`"commit"`, `"source"`) and is absent when you named both.
+`fast_forward` says the two refs name one commit because the destination's own line carries the reviewed
+chain — the fast-forward shape, where there is no side branch to name and the commit the work became is the
+commit that carries the approval.
 
 CI passes both SHAs — a shallow clone may hold neither branch — while the person who merged can name
 neither:
@@ -1504,9 +1542,20 @@ is allowed, only not silent: `--target release/2.x`.
 (exit 2, no flags given) — the command was asked to work out which changeset landed, and two of them are
 waiting for a record. `--changeset <id>` picks one; naming `--source` and `--commit` picks one and says
 which commits. `no branch here carries changesets/booking/, so git-pair cannot see which head was reviewed`
-is the same rule at the other end: the changeset branch has been deleted, so nothing in this clone holds the
-reviewed head unless the durable refs were fetched, and guessing which commit was approved is the one thing
-this command must not do. Both refusals name the flag that settles the question.
+is the same rule at the other end, for a landing that did not carry the chain itself: a squash or a
+cherry-pick keeps the reviewed head on no commit that survives, so with the branch gone nothing in this clone
+holds it unless the durable refs were fetched, and guessing which commit was approved is the one thing this
+command must not do. Both refusals name the flag that settles the question.
+
+`nothing to record: each of the 9 changeset directories on main already has its archive and integration refs
+here` (exit 2, no flags given) — the destination's directories all have their pairs, so there is nothing
+left to write. It is a usage error rather than green because a record is create-only — "record it again" is
+never the finding — and because a pipeline that reads zero as success is a pipeline in which a landing sits
+unrecorded while `tidy` is allowed to delete the branch that still holds the chain. A run that can name one
+changeset gets the other answer: `--changeset <id>`, or a destination that carries exactly one directory,
+reaches the record and exits 0 with `already_recorded`. The remedy the refusal names for a landing on a
+branch git-pair did not search is `--target <ref>`; for a record written in another clone it is fetching the
+namespace.
 
 `4f2b8c1 does not add changesets/booking/ over its first parent d91c21e` (exit 1) — the commit carries the
 directory but did not bring it in, so it is a follow-up on the destination branch rather than the landing.
@@ -1534,6 +1583,17 @@ because nothing in its verdict depends on one.
 git-pair never guesses a base: edit the file, or `git pair init --base <ref> --set-base`.
 From `init` with no `--base`: `cannot infer a base: no main or master branch exists;
 pass --base <ref>` (exit 2).
+
+`base:` is written as a branch name — `main`, not `refs/remotes/origin/main` — because `git clone` records
+the remote's default branch in `refs/remotes/origin/HEAD` and that is the answer `DefaultBranch` prefers,
+so the ref it reaches is usually a fetch ref even in a clone with a local trunk. The two spellings resolve to
+one branch every time a base is read (local first, then fetched), and the file is read on machines that have
+fetched different things, so the name is what belongs in it. Where the name resolves to nothing — a clone
+holding the integration branch only under the fetch root — the qualified ref is recorded instead, because a
+base that does not resolve fails every command. Where the local copy of that branch and its remote copy are
+different commits, `init` says so and gives the counts, because the diff measured from here is then not the
+diff the forge will show: `note: main is not the same commit here and on origin: 1 here that origin does not
+have, 0 on origin that is not here`. It is a note; pushing trunk is yours.
 
 `cannot tell which branch is the integration branch: ...` (exit 2) — there is nothing to compare
 against, so "has this landed?" has no answer and every changeset directory on the revision would

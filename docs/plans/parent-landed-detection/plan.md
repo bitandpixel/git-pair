@@ -548,3 +548,42 @@ Manual verification is the copy-paste test in M3: the printed commands must be t
 | 2026-09-23 | review `a87ae0b` | The reviewer rejected the "no relink while the branch exists" non-goal: deleting the branch moves the base anyway. The probe showed the delay is what makes a rebased child's diff carry the parent's and trunk's work. Non-goal withdrawn, thread opened, milestone 4 added. |
 | 2026-09-23 | review `f443b7c` | PRD §21 settled in the thread: an approval survives a relink when the diff is identical. The clone disagreement is accepted, with two guards — `Review-Parent-Head` stays the branch tip, and a base under `refs/git-pair/` is never a derived `--target`. Milestone 4 unblocked. |
 | 2026-09-23 | session, `pi-heartthrob` | A fast-forward landing and a stale `refs/remotes/origin/main` produced an `integration record` failure that asked for a `--source` the command never uses. Milestones 5 and 6 added from the findings: four derivation layers, the not-downstream candidate rule, the recorder ordering, and `base:` naming a branch. |
+
+## Execution status
+
+Implemented on `feat/parent-landed-impl` in one changeset (`feat-parent-landed-impl`), one commit per
+milestone, 2026-09-24. `mise run check` green at every milestone and at handoff; `mise run gates` at handoff.
+
+| Milestone | Commit | Outcome |
+|---|---|---|
+| M1 — the read, in `status` | `76017e7` | Done. `parentStatus` gained `Landed`, `LandedInDefaultBranch`, `LandedReach`, `StaleBranch`, `ParentWorktree`; the read runs for every state, and the refusal for an unapproved child became a note. |
+| M2 — `check`, `queue`, and the destination branch | `5776851` | Done. Exit codes unchanged; the destination branch now runs the published comparison before its usage error. |
+| M3 — the printed remedy | `56a79c2` | Done. `landedParentStep` names the rebase or the delete, and the worktree when one holds the branch. |
+| M4 — relink on the parent's record | `c679e25` | Done. Approval survival decided by `landedBaseIsTheSameWork`, conservatively. |
+| M5 — record derivation and discovery | `8867a02` | Done, with the deviations below. `ffChainTip` is the fast-forward layer; the flagless all-recorded run exits 2. |
+| M6 — `init` records a branch | `9effa7c` | Done, with the fallback below. |
+
+Deviations from the plan, each stated in its commit message:
+
+- **M1.** The `Span:` label keeps the ref name (`refs/git-pair/integrations/alpha...current`) rather than
+  being rewritten to the landing commit, and the fetch remedy for a clone that lacks the record prints in the
+  `Stack:` section rather than on the `Base:` line. Both are display choices the plan allowed to move; neither
+  changes what is measured.
+- **M2.** The JSON keys are `unpublished` and `landed_unrecorded`, not the plan's `unrecorded`, so each key
+  names the words the human surface prints.
+- **M5.** The plan asked for the `Review-Head` ancestry requirement inside `verifyReviewedSource`, on any
+  `--source` the caller names. It is applied instead in the layer that derives the head (`ffChainTip`), which
+  is where a copied marker can otherwise produce a record nobody approved. A caller who names `--source` names
+  the head, and §11.4's marker walk already runs on it; adding the requirement there would fail hand-supplied
+  sources whose `Review-Head` is a branch-relative name, for a risk the caller owns.
+- **M6.** The plan's `base: main` holds where that name resolves. Where it does not — a clone holding the
+  integration branch only under `refs/remotes/` — the qualified ref is still recorded, because the alternative
+  is `cannot resolve changeset base "main"` on every command. A scratch clone built by deleting the local
+  trunk found this: the first version of the change preferred the readable name over the working one, and the
+  test now asserts `status` runs after `init`.
+
+Verified against the real CLI in scratch clones rather than fixtures alone: a fast-forward landing recorded
+with no flags and no branch present; a merge landing recorded after `git branch -D`; the flagless run over
+three landed changesets, recording the one that needed it and refusing with `nothing to record` when all three
+were finished; `init` recording `base: main` in a clone with `refs/remotes/origin/HEAD` set, and printing the
+divergence note when the local trunk had one commit origin did not.

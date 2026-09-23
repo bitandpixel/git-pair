@@ -4,6 +4,11 @@
 #        (default: the name `mise run build` installs from this repository — the shared
 #        ~/.local/bin/git-pair on trunk, a branch-namespaced one anywhere else)
 set -uo pipefail
+# What this replay does NOT cover, and why: it lands one unstacked changeset, so the "parent landed" notes
+# (PRD §21) never appear here — they need a child stacked on the branch being landed, and §29's workflow is
+# one changeset from ready to published. Those surfaces are covered by
+# internal/cli/status_parent_landed_test.go (the two notes, the exact commands, the worktree blocker) and
+# internal/cli/parent_landed_surfaces_test.go (check's verdict, queue's note, the destination branch).
 # The default comes from this script's own path, not the working directory, and from the
 # same rule `mise run build` uses: this replay cd's into a scratch repo, and the binary
 # under test has to be the one built from *this* repository. Falling back to the shared
