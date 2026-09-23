@@ -1547,32 +1547,63 @@ as not-yet-recorded and the next invocation completes the pair. The reverse orde
 changeset whose chain nothing holds.
 
 **Either SHA can be derived, and neither is ever guessed.** A person who has just merged knows they merged
-and should not have to translate that into two object ids, and the repository knows it too: the landing is
-the newest commit on the destination's first-parent line that added `changesets/<id>/`, and the reviewed
-head is the branch still carrying that directory — under whichever root the clone has it, because a pipeline
-handed the branch by git holds it only at `refs/remotes/origin/<branch>`, where no local branch exists to
-name it. A branch is one candidate however many paths spell it: the branch in the working tree and the copy
-the last fetch brought are the same branch, the local one is what gets recorded, and a destination is
-excluded from the candidates under both spellings — `main` and a stale fetched `origin/main` alike. So `git
-pair integration record` with no flags works from the branch someone merged into, and either flag can be
-named on its own. CI passes both — a shallow clone may hold neither branch — and the derivation is the local
-convenience rather than the contract.
+and should not have to translate that into two object ids, and the repository knows it too — in layers, most
+trustworthy first, because the branch that answers the question is the branch `tidy` is built to delete.
+
+The landing is the newest commit on the destination's first-parent line that added `changesets/<id>/`. That
+commit names both ends when it can: with two parents and no directory in its first parent it is a merge, and
+the side it brought in is the reviewed chain's tip — which is why a merge landing is recordable after
+`git branch -D`, and why recording stopped being a race with tidying for the shape most people use. With one
+parent the destination's own line carried the chain, which is the fast-forward and the rebase-merge, and that
+reading needs a licence the tree cannot give: a commit on that line may carry a permitting marker for the
+changeset **and** that marker's `Review-Head` must be an ancestor of it. The second condition is what keeps a
+squash out, because a squash can copy a marker's text into its own message and cannot copy the reviewed head
+into trunk — and it is what makes a rebase-merge decline rather than record the copy: the marker it replays
+points at a head that is no longer in the history. Otherwise — a squash, a cherry-pick, a declined
+fast-forward — the reviewed head comes from the branch still carrying the directory, as before, under
+whichever root the clone has it, because a pipeline handed the branch by git holds it only at
+`refs/remotes/origin/<branch>`, where no local branch exists to name it. A branch is one candidate however
+many paths spell it: the branch in the working tree and the copy the last fetch brought are the same branch,
+the local one is what gets recorded, and a destination is excluded from the candidates under both spellings —
+`main` and a stale fetched `origin/main` alike. A branch *downstream* of the landing is not a candidate
+either: after a merge the destination carries the directory, so every branch cut from it afterwards inherits
+it, and without that rule a landed changeset turns every trunk-descended branch into a claim about where its
+reviewed head is. Then `--source` and `--commit`, which are the answer after all of this.
+
+So `git pair integration record` with no flags works from the branch someone merged into, and either flag can
+be named on its own. CI passes both — a shallow clone may hold neither branch — and the derivation is the
+local convenience rather than the contract.
 
 What the derivation will not do is choose. Two changeset directories missing their records, two branches
-carrying one directory, or no branch carrying it at all (the branch was deleted, and nothing here holds the
-reviewed head unless §13.4's fetch brought it back) are exit 2 naming the candidates and the flag that
-settles the question. One deliberate exception: when every directory on the destination already has a
-record, the command re-derives the same pair and answers "already recorded", because a CI job that runs the
-command on every build must hear that rather than a usage error it will report as a failed build.
+carrying one directory, or no source available for a landing that did not carry the chain itself (the branch
+was deleted, and nothing here holds the reviewed head unless §13.4's fetch brought it back) are exit 2 naming
+the candidates and the flag that settles the question. "Missing its record" is both halves: an archive ref
+without its integration ref is a half-pair, and a half-pair is what §13.2 calls not-a-record, so it is listed
+here too — completing it is the work.
+
+When every directory the destinations carry has its pair, the flagless command answers exit 2 with
+`nothing to record` and names no candidates. A record is create-only (§13.1), so "record it again" is never
+the finding, and nine names for nine finished records reads as nine gaps. The exit code is 2 rather than 0
+because the command could not say which changeset it meant, and because a landing that sits unrecorded while
+`tidy` is allowed to delete the branch that holds the chain is the state this command exists to prevent — a
+second green run of an idempotent command is not evidence that anything was recorded. A run that *can* name
+one changeset gets the other answer, and it is the one §22 requires: `--changeset <id>`, or a destination that
+carries exactly one directory, reaches the record and exits 0 with `already_recorded`. That is the CI re-run;
+the flagless run in a repository with nothing left to write is a caller who asked for a landing and will be
+told there is none.
 
 The changeset is **discovered from content, not from a ref**. `--source` is resolved through `rev-parse`
 first — an abbreviated SHA pasted from a CI log must resolve before discovery, not match nothing — and
 then the `changesets/<id>/` directories in its tree are the candidates, minus the ones the destination
-branch already carries (a landed directory is in trunk precisely because this command is being asked to
-record it, so the subtraction is skipped when it would leave nothing, and when there is only one candidate
-to begin with). That is §4's rule read at the commit the record names, and it is the only discovery that
-works from a CI checkout: it asks two trees, so it needs no ref to have been written first, no namespace
-to have been fetched, and no branch to be standing around.
+branch already carries and the ones whose record is already written (a landed directory is in trunk precisely
+because this command is being asked to record it, so the subtraction is skipped when it would leave nothing,
+and when there is only one candidate to begin with; the destination is `--target` when it was named and the
+default branch otherwise, read with `--default-branch`, because a CI clone that was told which branch is its
+destination is entitled to be believed). That is §4's rule read at the commit the record names, and it is the
+only discovery that works from a CI checkout: it asks two trees, so it needs no ref to have been written
+first, no namespace to have been fetched, and no branch to be standing around. Both readings are answers to
+one question and have to agree: the destination-side reading and this one are allowed to disagree only about
+which of them knows more, never about what counts as already landed or already recorded.
 
 Resolution comes first, because every check below is about commits the caller named:
 

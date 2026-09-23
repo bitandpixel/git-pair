@@ -213,10 +213,17 @@ opinion and takes no part; it neither runs a merge nor derives one, because squa
 destroy the ancestry that would have said so.
 
 The three steps are the whole contract — `check`, the landing with ordinary git, `integration
-record` — and the order of the last two is not free: **record before tidy**. The record is asked of
-the branch that still carries the reviewed head and the changeset directory, which is why it needs
-no flags when the branch is there and needs two SHAs when it is not. Delete the branch first and
-the same fact has to be supplied by hand, or fetched back, or it is gone.
+record` — and the order of the last two is not free: **record before tidy**. The record asks which
+head was reviewed, and the branch that still carries it is where the answer usually comes from — so
+the order that never costs you a flag is record, then delete.
+
+What the branch is needed *for* decides whether deleting it costs anything. A merge carries the
+reviewed chain inside itself, as the side the merge brought in, so a merge landing is still
+recordable after `git branch -D` and needs no flags; a fast-forward carries it in trunk, and is
+recordable once the approval marker on the chain says the work was reviewed there. A squash, a
+cherry-pick and a rebase-merge keep the chain on no commit that survives, so for those the branch is
+the only source of the answer: delete it first and the same fact has to be supplied by hand with
+`--source` and `--commit`, or fetched back, or it is gone.
 
 One command records where the work went, and it is the only git-pair ref write in the whole handoff:
 
@@ -241,6 +248,14 @@ The order is the contract (§PRD §29). Once the branch is deleted the refs are 
 chain, so a delete that lands before a publish leaves the chain reachable from nothing outside the machine
 that recorded it — which is why `status` and `queue` print `RECORDED, NOT PUBLISHED` rather than trusting
 anyone to remember.
+
+A parent that landed without being recorded is the same hazard one level up, and it is the one an author hits
+first: the child's chain — the commits a reviewer approved, which trunk never held — is the child's history
+until the parent is recorded, and the thing holding it is the parent's branch, which `tidy` is built to
+remove. A merge landing holds that chain itself, in the side the merge brought in, and a fast-forward holds
+it in trunk; a squash or a cherry-pick holds it nowhere else. So the order stays record-then-tidy, and the
+answer to an unrecorded parent is its archive ref, never a rebase of the child: rebase the child and the
+parent's chain is gone from the repository and from the child's own history at the same moment.
 
 A stack says what is left of it at the same moment, and this is the ordinary next thing an author hits after
 landing a parent: `git pair status`, `git pair check` and `git pair queue` name the landing and print the
@@ -842,6 +857,9 @@ exact pair: a retry is a success that changed nothing, and the two are worth tel
 retry answers from the record before it runs any checks, so it prints no verification and refuses on no
 check — including when it arrives with fewer flags than the run that wrote the pair. `derived` lists the
 flags git-pair filled in from the repository (`"commit"`, `"source"`) and is absent when you named both.
+`fast_forward` says the two refs name one commit because the destination's own line carries the reviewed
+chain — the fast-forward shape, where there is no side branch to name and the commit the work became is the
+commit that carries the approval.
 
 CI passes both SHAs — a shallow clone may hold neither branch — while the person who merged can name
 neither:
@@ -1524,9 +1542,20 @@ is allowed, only not silent: `--target release/2.x`.
 (exit 2, no flags given) — the command was asked to work out which changeset landed, and two of them are
 waiting for a record. `--changeset <id>` picks one; naming `--source` and `--commit` picks one and says
 which commits. `no branch here carries changesets/booking/, so git-pair cannot see which head was reviewed`
-is the same rule at the other end: the changeset branch has been deleted, so nothing in this clone holds the
-reviewed head unless the durable refs were fetched, and guessing which commit was approved is the one thing
-this command must not do. Both refusals name the flag that settles the question.
+is the same rule at the other end, for a landing that did not carry the chain itself: a squash or a
+cherry-pick keeps the reviewed head on no commit that survives, so with the branch gone nothing in this clone
+holds it unless the durable refs were fetched, and guessing which commit was approved is the one thing this
+command must not do. Both refusals name the flag that settles the question.
+
+`nothing to record: each of the 9 changeset directories on main already has its archive and integration refs
+here` (exit 2, no flags given) — the destination's directories all have their pairs, so there is nothing
+left to write. It is a usage error rather than green because a record is create-only — "record it again" is
+never the finding — and because a pipeline that reads zero as success is a pipeline in which a landing sits
+unrecorded while `tidy` is allowed to delete the branch that still holds the chain. A run that can name one
+changeset gets the other answer: `--changeset <id>`, or a destination that carries exactly one directory,
+reaches the record and exits 0 with `already_recorded`. The remedy the refusal names for a landing on a
+branch git-pair did not search is `--target <ref>`; for a record written in another clone it is fetching the
+namespace.
 
 `4f2b8c1 does not add changesets/booking/ over its first parent d91c21e` (exit 1) — the commit carries the
 directory but did not bring it in, so it is a follow-up on the destination branch rather than the landing.
