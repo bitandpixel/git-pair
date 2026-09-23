@@ -943,6 +943,10 @@ line, and the refusal message names it.
 
 Launches the interactive review TUI.
 
+`git pair review` with no subcommand is this command: the group takes the screen itself and carries the
+same span flags, so `git pair review --unreviewed` and `git pair review open --unreviewed` are one
+command spelled two ways. `open` stays because a reader of the command tree looks for a verb.
+
 Responsibilities:
 
 -   identify current changeset,
@@ -2229,8 +2233,15 @@ beside a diff comes back from the editor to that diff rather than to a screen th
 `p` moves the keys into that column and does nothing else, so a diff longer than the column is read
 with the keys a diff is read with: `j`/`k`, `d`/`u` or `ctrl-d`/`ctrl-u`, `ctrl-f`/`ctrl-b`, `gg` and `G`
 scroll the file already on show (`d`/`u` being `less`'s spelling of the same half page, kept because a
-reviewer who reaches for it in a diff is reaching for something they know), `Enter` opens the difftool on
-it, and `/` searches it. The search reads a term in the pane's bottom row — the row the note about the
+reviewer who reaches for it in a diff is reaching for something they know), `Enter` opens the file on show
+— the difftool, or the editor for a file the span added, which has no other side of it to compare
+against — and `/` searches it. `z` changes the shape of the screen rather than the keys: it gives the diff
+the whole screen, and gives the screen back to whichever region asked for it — the preview column, or the
+list column if `z` was pressed there — keeping the keys, the file and the place in the file.
+These are the two shapes the terminal chooses by itself. Where a column was given and no longer fits, `z`
+reports which way the window is short rather than closing the diff; where the terminal never had a column,
+it gives the list back. The search reads a term in the pane's
+bottom row — the row the note about the
 rest of the file uses, so the field costs no rows — marks every match as the term is typed, and marks them
 with SGR rather than colour: the diff's green and red are git's bytes, and a highlight that painted over
 them would hide which kind of line a match sits on. `Enter` jumps to the first match at or below the
@@ -2287,8 +2298,10 @@ place the removed text still is, so its row keeps the patch too.
 
 The text is the file at the span's head, not the working copy, so a reviewer's own edits cannot read as
 reviewed work. The header says `you edited it` when the reviewer edits that file afterwards. A move names the
-path it came from, which the tree's `~` has no room for. `Enter` in the pane opens it in the difftool, because a
-file read as text is still a file.
+path it came from, which the tree's `~` has no room for. `Enter` in the pane keeps making the row's own
+choice: the editor for a file the span added, because the comparison has nothing on one side of it, and
+the difftool for an unchanged move, because there the rename is the comparison. `d` is the key that asks
+for the patch of either.
 
 A span whose head is a commit rather than the working tree is a look at history, and the screen
 says so where the reviewer is already looking: the counter's slot carries `HISTORICAL · READ ONLY`,
@@ -2347,7 +2360,8 @@ Tab      toggle the keys between the list column and the diff where there is roo
 h/l      fold and unfold the directory under the cursor (left and right arrows do the same);
          h from a file or a closed directory moves up to the directory holding it
 c        fold the whole tree, and open it again
-Enter    activate the row: difftool for a file, fold/unfold for a directory, the decision
+Enter    activate the row: the editor for a file the span added and for nothing else, difftool
+         for every other file, fold/unfold for a directory, the decision
          below for ABOUT.md or a thread, collapse/expand for the Threads heading,
          new-thread prompt for + new thread…
 d        open the difftool for the selected row: for a file, or for a directory every file
@@ -2358,6 +2372,8 @@ e        open the selected row in the editor, whatever the span did
 p        move the keys into the diff preview column (wide terminals); inert where the diff already
          has them. Where the terminal is too narrow for a second column it takes the screen for the
          diff instead, since there is no column to move into, and is inert there too
+z        read the row the keys are on over the whole screen, taking the keys with them; `z` again, or
+         `Esc`, gives the list back
 ctrl-f   page the preview down
 ctrl-b   page the preview up
 Space    toggle reviewed for a file row, or for every file under a directory row
@@ -2371,7 +2387,12 @@ j/k      scroll the diff a row; d/u or ctrl-d/ctrl-u half a page, ctrl-f/ctrl-b 
 a, t     put the cursor and the keys on ABOUT.md or the Threads heading, leaving the diff;
          the pane follows them on to the document (not under the overlay, where the box
          is not drawn)
-Enter    open the difftool on the file the pane is showing
+Enter    open what the pane is showing: the difftool, or the editor for a document and for a file
+         the span added — the same choice the row makes when the key is pressed on it
+z        give the diff the whole screen, or give the screen back to the region `z` was pressed in —
+         the preview column, or the list column if the keys never left it — keeping the keys,
+         the file and the place in it. Where a column was given and no longer fits, it says so.
+         From the list column it is the row under the cursor that goes to the whole screen
 Esc      hand the keys back to the list column, leaving the pane where it is in the file
 Tab, f   move the keys back to the list column, as they do from anywhere in it
 q        in the pane, quit — from here as from anywhere else; over the whole-screen overlay, give the
@@ -3301,12 +3322,15 @@ Suggested defaults:
 j/k      move through the region that holds the keys
 Tab      toggle the keys between the list column and the diff (f names the file tree; the changeset box
          is the other half of the list column, reached by walking up out of the tree)
-Enter    activate the selected row: diff a file, diff or read a changeset document
-         (whichever gives a real comparison), collapse the thread list, create a thread
+Enter    activate the selected row: the editor for a file the span added, otherwise the difftool,
+         or read a changeset document (whichever gives a real comparison), collapse the thread list,
+         create a thread
 d        open the difftool for the selected row, falling back to the editor with a note
 e        edit the selected file or document
 p        move the keys into the diff preview column; inert where the diff already has them.
          Where there is no second column, it takes the screen for the diff
+z        take the whole screen: from the diff, give it the screen or give the screen back to the diff;
+         from the list, open the row under the cursor over the whole screen and give the list back
 ctrl-f   page the preview down
 ctrl-b   page the preview up
 /        search the diff the preview column (or the whole screen) is showing; n/N walk the matches

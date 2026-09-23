@@ -721,6 +721,44 @@ func TestReviewOpenRefusesWithoutTerminal(t *testing.T) {
 	}
 }
 
+// `git pair review` with no subcommand is `git pair review open`: the same screen, the same flags, and
+// the same refusal spelled the way the reviewer typed it. `open` keeps existing because a reader of
+// `git pair review --help` should find the verb they would have guessed.
+func TestBareReviewIsReviewOpen(t *testing.T) {
+	f, _ := newChangeset(t, "booking", "main")
+
+	bare := runIn(t, f.Dir(), "review")
+	if bare.code != exitUsage {
+		t.Errorf("`git-pair review` exited %d, want %d\nstderr: %s", bare.code, exitUsage, bare.stderr)
+	}
+	mustContain(t, bare.stderr, "`git pair review` needs a terminal",
+		"the refusal quotes the wrong command")
+	mustContain(t, bare.stderr, "git pair diff", "the refusal must name the non-interactive equivalents")
+
+	// The span flags belong to the group as much as to `open`, so the shorthand can still say which span.
+	span := runIn(t, f.Dir(), "review", "--since-review=xyz")
+	if span.code != exitUsage {
+		t.Errorf("`git-pair review --since-review=xyz` exited %d, want %d\nstderr: %s",
+			span.code, exitUsage, span.stderr)
+	}
+	mustContain(t, span.stderr, "--since-review expects an integer index",
+		"the group does not carry the span flags `open` has")
+
+	help := runIn(t, f.Dir(), "review", "--help")
+	if help.code != exitOK {
+		t.Errorf("`git-pair review --help` exited %d, want %d\nstderr: %s", help.code, exitOK, help.stderr)
+	}
+	mustContain(t, help.stdout, "git pair review open", "the group's help must name what it abbreviates")
+	mustContain(t, help.stdout, "--unreviewed", "the group's help must show the flags it accepts")
+
+	// A word that is not one of the group's commands is still a mistake, not an argument to the screen.
+	bogus := runIn(t, f.Dir(), "review", "bogus")
+	if bogus.code != exitUsage {
+		t.Errorf("`git-pair review bogus` exited %d, want %d\nstderr: %s", bogus.code, exitUsage, bogus.stderr)
+	}
+	mustContain(t, bogus.stderr, `unknown review command "bogus"`, "the group stopped naming its mistakes")
+}
+
 // --- helpers ----------------------------------------------------------------
 
 // submitJSON submits a review with --json so the commit SHA can be asserted.

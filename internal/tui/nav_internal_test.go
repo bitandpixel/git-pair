@@ -944,17 +944,17 @@ func TestArtifactActionNeedsTwoSides(t *testing.T) {
 	}
 }
 
-// The two reasons a document opens in the editor instead of a difftool read differently, and
-// the reviewer should get the right one.
-func TestArtifactNoteNamesTheReason(t *testing.T) {
+// TestEditorNoteNamesTheReason covers the two reasons something opens in the editor instead of a
+// difftool: they read differently, and the reviewer should get the right one.
+func TestEditorNoteNamesTheReason(t *testing.T) {
 	inSpan := reviewModel{inSpan: map[string]bool{"changesets/x/locking.md": true}}
-	got := inSpan.artifactNote(row{path: "changesets/x/locking.md", name: "locking.md"})
+	got := inSpan.editorNote("changesets/x/locking.md", "locking.md")
 	if !strings.Contains(got, "added by this changeset") {
 		t.Errorf("note for a new document = %q", got)
 	}
 
 	outside := reviewModel{inSpan: map[string]bool{}}
-	got = outside.artifactNote(row{path: "changesets/x/locking.md", name: "locking.md"})
+	got = outside.editorNote("changesets/x/locking.md", "locking.md")
 	if !strings.Contains(got, "has not changed in this span") {
 		t.Errorf("note for a document the span left alone = %q", got)
 	}

@@ -80,7 +80,7 @@ booking-transaction
   head: 8065dae
 ```
 
-The reviewer runs `git pair review open` for the TUI, or works from the CLI. Here they edited
+The reviewer runs `git pair review` for the TUI, or works from the CLI. Here they edited
 `src/service.ts` directly, added a thread, and blocked:
 
 ```bash
@@ -570,7 +570,7 @@ landed.
 | `change abandon` | none | records the terminal `Review-State: abandoned` and nothing else — no ref, since an abandoned changeset has no landing to record; `change ready`, `change unready` and `review submit` refuse against it afterwards; refuses a changeset whose work is recorded as integrated; idempotent |
 | `change feedback` | `--stat`, `--name-only`, `--changeset <slug>` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
 | `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
-| `review open` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref` | TUI; needs a terminal; full changeset unless a span flag says otherwise; a `--head-*` flag opens a historical span, which is read-only |
+| `review`, `review open` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref` | TUI; needs a terminal; full changeset unless a span flag says otherwise; a `--head-*` flag opens a historical span, which is read-only; with no subcommand `review` is `review open` and takes the same flags |
 | `review reopen` | none | TUI on `<last review>..current`, the work that has landed since you reviewed; needs a terminal; refuses if no review exists |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
@@ -953,8 +953,8 @@ Never prompt: `init`, `change ready`, `change unready`, `change abandon`, `chang
 and exit instead of asking, even with a terminal attached.
 
 Refuse with exit 2 when stdin or stdout is a pipe or a regular file, because launching an
-editor or the TUI against one would hang: `review open`, `review reopen`, `review about`,
-and `review thread`
+editor or the TUI against one would hang: `review` with no subcommand, `review open`, `review reopen`,
+`review about`, and `review thread`
 (which creates the thread file and then refuses to open it). Read and write those files
 directly instead; they are ordinary files in the working tree. `/dev/null` counts as a
 character device, so redirecting to `/dev/null` does not produce this refusal — it makes
@@ -1117,8 +1117,9 @@ while the tool is for working on it. Plain `git pair diff` runs `git diff` with
 `core.quotePath=false` and inherits your pager and colour settings; the span label goes to
 stderr so stdout stays pipeable.
 
-`git pair review open` is an orchestration screen, not an editor. What the review is made of is at the
-top, the changed files and their marks below it, and the reviewed counter under those:
+`git pair review` is an orchestration screen, not an editor (`git pair review open` is the same command
+under a longer name). What the review is made of is at the top, the changed files and their marks below it,
+and the reviewed counter under those:
 
 ```text
 ╭ tuishow ─────────────────────────────╮
@@ -1139,7 +1140,7 @@ top, the changed files and their marks below it, and the reviewed counter under 
 ────────────────────────────────────────
 j/k move  gg/G ends  ctrl-d/u half page  ctrl-f/b page  h/l fold  c fold all  enter open  d diff
 space reviewed  e edit  a about  t threads  T new thread  v spans  V picker  s submit  p preview
-f files  tab preview  q quit
+z full  f files  tab preview  q quit
 ```
 
 The screen has two regions where the keys can be: the changeset box at the top, and the file tree under
@@ -1296,6 +1297,13 @@ Two file rows come into the pane as the file, not as a patch: one the span creat
 A new file's patch is its own text with a `+` on every line. An unchanged move's patch is two lines about a path.
 Every other file row keeps its patch, because a rename with edits has edits to show.
 
+`Enter` follows the same rule the pane applies: on a file the span created it opens the editor, because
+the comparison the key would otherwise open has nothing on one side of it. That is the choice the screen
+already makes for an `ABOUT.md` or a thread the changeset invented. It is a different choice from `d`,
+which opens the difftool on that same row: a reviewer who wants to see the `+` on every line has a key
+that says so. An unchanged move keeps `Enter` on the difftool, because there the rename is the comparison
+and it is the reason the file is under review at all.
+
 A deletion is the only place the removed text still is, so its row keeps the patch too. The text is the file
 at the span's head, not the working copy, so a reviewer's own edits cannot read as reviewed work. The header
 says `you edited it` when the reviewer edits that file afterwards. A move names the path it came from, which
@@ -1305,17 +1313,31 @@ Over a historical span the text is still the file on disk, because that is the f
 header adds `working copy` rather than letting someone read history that is not there; the editor stays
 refused over history, since reading cannot change anything and writing can. `Enter` opens what the pane is
 showing — the difftool for a diff, the editor for a document — the same choice the row makes when the key is
-pressed there, and the pane's bar says `enter open` over a document and `enter diff` over a diff. The
-search and the paging are the pane's rather than the diff's, so a name is chased through the prose the way it
-is chased through a hunk.
+pressed there, and the pane's bar says `enter open` over a document and over a file the span added, and
+`enter diff` over a diff. The search and the paging are the pane's rather than the diff's, so a name is
+chased through the prose the way it is chased through a hunk.
 
 `p` moves into the pane and does nothing else: the keys go to the diff, and it scrolls with the
 keys the whole-screen preview uses — `j`/`k` a row, `d`/`u` or `ctrl-d`/`ctrl-u` half a page,
 `ctrl-f`/`ctrl-b` a page, `gg` the top and `G` the bottom — over the file the pane was already showing. Paging a diff that
 way is the whole point: the four page keys belong to whichever region holds them, so a diff too long to
 fit is paged by moving into it rather than by borrowing the list's keys from across the screen.
-`Enter` there opens the difftool on that file, which is the key the pane's own note points at. `Esc`
-hands the keys back to the region that had them — the tree, or the box if the keys came from the box —
+`Enter` there opens the file on show — the difftool for it, or the editor for a file the span added,
+which is the key the pane's own note points at.
+
+`z` changes the shape of the screen and nothing else. Pressed where a diff is on show it takes that diff
+to the whole terminal; pressed again it gives the screen back to the region that asked — the pane if `z`
+was pressed inside the pane, the list if it was pressed there. The keys, the file and the place in the
+file stay where they were, so the two presses are one reading gesture rather than two different ones and
+the reviewer ends where they started. The two shapes are the two the terminal picks by itself: a column
+beside the list where there is room, the whole screen where there is not. `z` is a key of the list column
+too, where the row under the cursor says which diff — so reading every diff at full width never needs the
+pane first, and the keys come with the screen, because a whole-screen diff that left them in a list it had
+just hidden would be reading a keystroke from nothing. Where a column was given and no longer fits, `z`
+says so with the number the window is short by instead of closing the diff you were reading; where there
+was never a column it has nothing to refuse over, and gives the list back.
+
+`Esc` hands the keys back to the region that had them — the tree, or the box if the keys came from the box —
 and leaves the pane where it was, so coming back returns to the same lines. `p` does not do that: pressed
 where the diff already holds the keys it is the no-op its name promises, because a key that meant "the
 diff" in one region and "not the diff" in the one it just moved you to has to be remembered rather than
@@ -1375,7 +1397,10 @@ what this screen's shortcut bar says they mean while it is up — including `q`,
 here as `esc` and `enter` do rather than quitting as it does in the pane, and `ctrl-d`, which pages rather
 than quits; nothing else reaches through, because a reviewer who cannot see
 the list must not be able to mark a file in it. Closing keeps the
-place however you close it: `p`, `Esc`, `p` returns to the same lines, and so does `f`, `p`.
+place however you close it: `p`, `Esc`, `p` returns to the same lines, and so does `f`, `p`. `z` gives the
+list its column back wherever the terminal has one to give back, and the bar names the key only there: on
+the terminal too narrow for a column the key can only refuse, and a bar that names a refusing key names a
+feature nobody is offered.
 Reading a historical span this way works the same — reading is what a read-only span is for. Under 40
 columns or 13 rows even this is unreadable, and the key says which way the terminal is short, naming
 the smaller of the two asks because that is the one worth growing to. The row floor is its bar's

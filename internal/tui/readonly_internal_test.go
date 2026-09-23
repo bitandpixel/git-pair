@@ -131,6 +131,32 @@ func TestHistoricalSpanRefusesEverythingThatChangesSomething(t *testing.T) {
 	}
 }
 
+// Enter on a file the span added hands the terminal to the editor, so over history it is refused for
+// the same reason `e` is: the file on disk is not the file this span contains. `d` is the key that
+// only reads, and it is the way a reviewer of history gets to the added file's patch.
+func TestHistoricalSpanRefusesEnterOnAnAddedFile(t *testing.T) {
+	m, _ := readonlyModel(t, historySel())
+	at, _ := cursorOnPath(t, m, "handler.go")
+	if got := at.rows[at.cursor].change; got != ChangeAdded {
+		t.Fatalf("the row for handler.go carries %v, want an added file", got)
+	}
+
+	updated, cmd := at.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := updated.(reviewModel)
+	if cmd != nil {
+		t.Error("enter handed the terminal to the editor over a historical span")
+	}
+	for _, want := range []string{"read-only", "V chooses", "handler.go"} {
+		if !strings.Contains(got.status, want) {
+			t.Errorf("status = %q, want it to say %q", got.status, want)
+		}
+	}
+
+	if _, cmd := got.Update(runeKey('d')); cmd == nil {
+		t.Error("d on the same row would not open the difftool, which reading history does allow")
+	}
+}
+
 // The two jumps into the box name rows rather than actions, so they are the keys that came out of the
 // read-only gate: a reviewer reading history still comes to the box to read what the author said, and
 // `e` on the row they land on is the key that stays refused.

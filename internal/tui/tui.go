@@ -134,10 +134,10 @@ type row struct {
 	total, marked int
 	note          string // set on the thread heading when the threads could not be listed
 	count         int    // how many threads the heading is standing in for
-	// sign is the change this file row carries: `+`, `-`, `~`, or "" for a modification. It is read
-	// from git's status rather than inferred, so the tree and the pane cannot disagree about what
-	// happened to the file.
-	sign string
+	// change is what the span did to this file, carried on the row rather than looked up again, so the
+	// tree's sign and the row's own Enter cannot disagree about what happened to the file. Only a file
+	// row has one: every other kind leaves it at the modification, whose sign is nothing at all.
+	change Change
 }
 
 // inFileBlock is which rows belong to the file tree rather than to the changeset box. Directory rows
@@ -161,10 +161,11 @@ const (
 	actionSpan
 )
 
-// activateBy is the Enter table: one row kind, one action. A file opens in the difftool
-// because that is the thing under review. The changeset documents are markdown, so they get
-// openArtifact: what a returning reviewer wants from ABOUT.md or a thread is usually the two
-// or three lines the author rewrote after the last review, and a diff is the only way to see
+// activateBy is the Enter table: one row kind, one action. A file opens in the difftool because that
+// is the thing under review, with one exception spelled out in fileAction: a file the span added is
+// read in the editor, because there is no other side of it to compare against. The changeset documents
+// are markdown, so they get openArtifact: what a returning reviewer wants from ABOUT.md or a thread is
+// usually the two or three lines the author rewrote after the last review, and a diff is the only way to see
 // exactly those — while a document the changeset invented has no comparison worth opening.
 // The heading toggles its own group, and the last row of the group creates another thread. Enter on
 // a directory does the same to its own part of the tree — fold it, unfold it — which is what the key
@@ -172,7 +173,7 @@ const (
 func activateBy(r row) action {
 	switch r.kind {
 	case rowFile:
-		return actionDiff
+		return fileAction(r.change)
 	case rowThread, rowAbout:
 		return actionArtifact
 	case rowDir, rowThreadsHead:
@@ -183,6 +184,21 @@ func activateBy(r row) action {
 		return actionSpan
 	}
 	return actionNone
+}
+
+// fileAction is the file half of the Enter table. A modification, a deletion and a rename all have a
+// comparison worth opening: the span did something to a file that was already there, and the patch is
+// the thing under review. A file the span *added* has nothing on the span's left side, so its patch is
+// the file again with a `+` in front of every line -- which is why the pane already reads it as a file
+// rather than as a patch (see Change.ReadsAsFile). Enter opens it in the editor for the same reason
+// openArtifact opens a document the changeset invented; artifactAction is this rule for the changeset's
+// own files. A rename whose bytes are unchanged keeps the difftool, because the rename is the
+// comparison and it is the reason that file is under review at all.
+func fileAction(c Change) action {
+	if c == ChangeAdded {
+		return actionEdit
+	}
+	return actionDiff
 }
 
 // patchKind is which of the two diffs a patch answers: the author's span, or the reviewer's own
@@ -246,6 +262,13 @@ type reviewModel struct {
 	// took them, so `p` gives them back where they came from rather than always to the files.
 	focus     focusTarget
 	prevFocus focusTarget
+	// zoomReturn is the region the keys were standing in when the diff took the whole screen. `z`
+	// gives both the screen and the keys back to it, so un-zooming returns the reviewer to where they
+	// were when they asked for the bigger view: the preview column if `z` was pressed inside the pane,
+	// the half of the list column if it was pressed out there. prevFocus cannot stand for it, because
+	// the pane route leaves prevFocus on the list half that handed the keys over hours of keystrokes
+	// ago, and that is the right answer for `esc` and the wrong one for `z`.
+	zoomReturn focusTarget
 	// gPrefix is a `g` waiting for its partner in the region that holds the keys: the pair jumps to
 	// that region's top. It is kept apart from the diff's own previewG so the two jumps cannot read
 	// each other's half-press.
@@ -693,6 +716,12 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.activate()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'p':
 		return m.togglePreview()
+	// `z` is the same request from the list column that it is from inside the diff: this, over the
+	// whole screen. The difference is only that here the row the cursor is on says which "this", so
+	// the keys move into the diff on the way — a reviewer who reads a diff at the size of the terminal
+	// should not have to press the key that moves the keys first.
+	case key.Type == tea.KeyRunes && firstRune(key) == 'z':
+		return m.openFullScreen()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'f':
 		m.focusOn(focusFiles)
 	case key.Type == tea.KeyRunes && firstRune(key) == 'd':
@@ -1106,10 +1135,10 @@ func (m reviewModel) activate() (tea.Model, tea.Cmd) {
 	switch activateBy(r) {
 	case actionSpan:
 		return m.openSpanPicker()
-	case actionDiff:
-		return m.openDiff(r.path)
-	case actionEdit:
-		return m.openPath(r.path)
+	case actionDiff, actionEdit:
+		// One call for both, so the rule and the exception live in one place. Only a file row can ask
+		// for either, and it carries the change the rule needs.
+		return m.openFile(r.path, r.change)
 	case actionArtifact:
 		return m.openArtifact(r)
 	case actionCollapse:
@@ -1183,7 +1212,7 @@ func (m reviewModel) openArtifact(r row) (tea.Model, tea.Cmd) {
 	if artifactAction(m.inSpan[r.path], m.sess.HasVersionAt(m.ctx, m.sess.Span().From, r.path)) == actionDiff {
 		return m.openDiff(r.path)
 	}
-	return m.openPathNoted(r.path, m.artifactNote(r))
+	return m.openPathNoted(r.path, m.editorNote(r.path, r.name))
 }
 
 // documentAction is the artifact decision for a row, apart from acting on it: the
@@ -1203,13 +1232,36 @@ func artifactAction(inSpan, hasPrior bool) action {
 	return actionEdit
 }
 
-// artifactNote says which of two different reasons sent a document to the editor: it is new,
-// or nothing happened to it in this span.
-func (m reviewModel) artifactNote(r row) string {
-	if m.inSpan[r.path] {
-		return r.name + " was added by this changeset, so there is nothing to compare it against — opened in the editor"
+// editorNote says which of two different reasons sent a file to the editor: it is new,
+// or nothing happened to it in this span. Both are worth saying, because both are a row whose `d`
+// would open a comparison with nothing on one side of it.
+func (m reviewModel) editorNote(path, name string) string {
+	if m.inSpan[path] {
+		return name + " was added by this changeset, so there is nothing to compare it against — opened in the editor"
 	}
-	return r.name + " has not changed in this span — opened in the editor"
+	return name + " has not changed in this span — opened in the editor"
+}
+
+// openFile is what Enter and the pane's enter do with a file: the difftool, except for a file the span
+// added, which the editor reads. See fileAction for why that one file is different, and openArtifact
+// for the same reasoning applied to a changeset document -- including the read-only gate, which lives
+// here because Enter is not a mutating key and so never passes through the one in handleKey. Over a
+// historical span the editor is refused the way `e` refuses it, and a file the span added that the
+// working tree no longer has goes to the difftool rather than to an empty buffer, because the patch is
+// the one place git still has the file's other side.
+func (m reviewModel) openFile(path string, c Change) (tea.Model, tea.Cmd) {
+	if c != ChangeAdded {
+		return m.openDiff(path)
+	}
+	name := filepath.Base(path)
+	if why := m.cannot("edit " + name); why != "" {
+		m.setRefusal(why)
+		return m, nil
+	}
+	if _, err := os.Stat(absPath(m.sess.Repo().Dir, path)); err != nil {
+		return m.openDiff(path)
+	}
+	return m.openPathNoted(path, m.editorNote(path, name))
 }
 
 func (m reviewModel) openDiff(path string) (tea.Model, tea.Cmd) {
@@ -1718,8 +1770,17 @@ func (m reviewModel) helpText() string {
 // overlay has -- `esc`, `enter` and `q` all give the screen back -- and the keys that move the keys. It
 // is part of the row-area budget wherever the overlay is the only form the diff can take, so that no row
 // of it is ever clipped by a bar counted from the list.
+//
+// `z` is named only where it does something. The overlay is both the wide terminal's full-screen diff
+// and the narrow terminal's only diff, and only the first has a column to go back to; a bar that
+// offered `z` to the second would name a key that refuses, which is the one thing a bar is not for.
 func (m reviewModel) overlayHelp() string {
-	return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  esc enter q back  f tab list"
+	back := "esc enter q back"
+	if m.previewShortfall() == "" {
+		back = "z pane  " + back
+	}
+	return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " + back +
+		"  f tab list"
 }
 
 // helpTextFor is the bar of one region. It names every key that region reads and none that it does not,
@@ -1736,7 +1797,7 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 	page := "j/k move  gg/G ends  ctrl-d/u half page  ctrl-f/b page"
 	// The keys that leave the column for the diff, and the one that names a half of it. `tab` names the
 	// stop it walks to rather than the ring: with two stops there is only one place it can go.
-	elsewhere := "p preview  f files  tab preview"
+	elsewhere := "p preview  z full  f files  tab preview"
 	if target == focusPreview {
 		// The diff reads nothing that changes the review, and its three ways out all mean the list
 		// column -- `esc` gives the keys back, `f` names the tree, `tab` walks the ring -- so they are
@@ -1746,14 +1807,15 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 		// is on screen beside the diff, and the row they name is the reason to leave it.
 		jumps := "a about  t threads  "
 		open := "enter diff"
-		if m.previewKind == previewDocument || m.previewKind == previewThreads {
-			// What is on show is a document, and `enter` opens it in the editor rather than in the
-			// difftool -- the bar says "open" because that is the truth of it. A file shown as its own text
-			// is still a file, so its Enter still means the difftool.
+		if m.previewKind == previewDocument || m.previewKind == previewThreads ||
+			fileAction(m.previewFileChange()) == actionEdit {
+			// What is on show is a document, or a file the span added, and `enter` opens it in the editor
+			// rather than in the difftool -- the bar says "open" because that is the truth of it. Any other
+			// file, shown as its patch or as its own text, has a comparison worth opening.
 			open = "enter open"
 		}
 		return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " +
-			jumps + open + "  esc f tab list  q quit"
+			jumps + open + "  z full  esc f tab list  q quit"
 	}
 	// The jumps name a row of the box from either half of the column and take the keys with them. `T`
 	// writes, so it is absent from every bar of a span that cannot.
@@ -1982,7 +2044,7 @@ func (m *reviewModel) buildRows() {
 			continue
 		}
 		rows = append(rows, row{kind: rowFile, path: e.path, name: e.name, depth: e.depth, file: e.file,
-			sign: files[e.file].Change.Sign()})
+			change: files[e.file].Change})
 	}
 	// The split between the two regions: from here down are the rows the changeset box draws. One index
 	// into one list rather than two lists, because a thread the reviewer creates has to appear in the
@@ -2057,10 +2119,10 @@ func (m reviewModel) rowText(r row) string {
 			text += m.fileGutter(r)
 		}
 		text += r.name
-		if r.sign != "" {
+		if sign := r.change.Sign(); sign != "" {
 			// After the name, the way a directory's count sits after its name: the sign is a fact about
 			// the file, not part of its name, and dim says so.
-			text += styleDim.Render(" " + r.sign)
+			text += styleDim.Render(" " + sign)
 		}
 		return text
 	case rowAbout:
@@ -2338,12 +2400,9 @@ func (m *reviewModel) focusOn(to focusTarget) {
 		// The narrow terminal's version of the same move: with no column to focus, the overlay is how the
 		// diff is drawn. Where the keys came from is not drawn while it is up, which is what `esc` -- and
 		// `f` and `tab` -- take back down on the way there.
+		from := m.focus
 		m.rememberLeft()
-		m.previewOn = true
-		m.mode = modePreview
-		m.focus = focusPreview
-		m.previewG = false
-		m.setStatus("", false)
+		m.takeScreen(from)
 		return
 	}
 	if to == focusPreview {
@@ -2988,6 +3047,98 @@ func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// takeScreen gives the diff the whole terminal, and records where the keys stood when it did. Every
+// route into this one shape comes through here, so `z` pressed again always has a region to give back
+// rather than a guess about how the screen was reached.
+func (m *reviewModel) takeScreen(from focusTarget) {
+	m.zoomReturn = from
+	m.previewOn = true
+	m.mode = modePreview
+	m.focus = focusPreview
+	m.previewG = false
+	m.setStatus("", false)
+}
+
+// openFullScreen is `z` taken from the list column rather than from inside the diff: the row the keys
+// are standing on, read over the whole terminal. It decides what is on show the way `p` does — from the
+// row, before the keys move — and then takes the screen the way `z` does from the pane, so the three
+// entries into this one shape are the same shape and not three screens that happen to look alike.
+//
+// The keys go with the screen. A whole-screen diff that left them in a list it no longer draws is the
+// one thing this screen cannot offer: the list's keys would be read by nothing, and the reviewer would
+// be typing at a picture.
+func (m reviewModel) openFullScreen() (tea.Model, tea.Cmd) {
+	if reason := m.overlayShortfall(); reason != "" {
+		m.setRefusal(reason)
+		return m, nil
+	}
+	if kind, path, ok := m.previewRowTarget(); ok && (kind != m.previewKind || path != m.previewPath) {
+		m.previewKind, m.previewPath, m.previewOffset, m.previewMatch = kind, path, 0, -1
+	}
+	if m.previewPath == "" {
+		m.setRefusal("nothing to open: the preview has no file on show")
+		return m, nil
+	}
+	from := m.focus
+	m.previewOn = true
+	// Through focusOn, which is what remembers which half of the list column is handing the keys over,
+	// so `esc` from the screen this opens returns to the row the reviewer was on.
+	m.focusOn(focusPreview)
+	if m.mode == modePreview {
+		// The narrow terminal's route: with no column to focus, focusOn drew the overlay directly and
+		// recorded `from` as the region to give back.
+		return m, nil
+	}
+	m.takeScreen(from)
+	return m, nil
+}
+
+// toggleFullScreen is `z`: the diff takes the whole screen, or gives it back. It changes the shape of the
+// screen and nothing else -- the keys stay with the diff, so does the file it is showing, and so does the
+// place in it, which is what makes the pair of presses one reading gesture rather than two different ones.
+//
+// The two forms are the same two the terminal picks by itself: a wide terminal puts the diff in a column
+// beside the list, a narrow one has no column to spare and draws it over the whole screen. `z` is how a
+// reviewer asks for the other one without moving the keys, and it is refused rather than guessed at where
+// the shape asked for cannot be drawn -- which leaves one case, giving a column back to a terminal that
+// stopped having room for it while the diff was zoomed.
+func (m reviewModel) toggleFullScreen() (tea.Model, tea.Cmd) {
+	if m.mode == modePreview {
+		return m.unzoom()
+	}
+	if !m.previewHasFocus() {
+		return m, nil
+	}
+	// The overlay is the same region as the pane and takes the keys the same way.
+	if reason := m.overlayShortfall(); reason != "" {
+		m.setRefusal(reason)
+		return m, nil
+	}
+	m.takeScreen(focusPreview)
+	return m, nil
+}
+
+// unzoom is `z` over the whole screen: the screen and the keys both go back to the region `z` was
+// pressed in. From the pane that is the pane, so the reviewer keeps reading with the list beside them;
+// from the list column it is the list column, so the diff does not keep a keyboard whose region the
+// screen has stopped drawing. `esc` is unaffected and still returns to whichever half of the list
+// column handed the keys over, whatever shape the diff is in.
+func (m reviewModel) unzoom() (tea.Model, tea.Cmd) {
+	if m.zoomReturn != focusPreview {
+		return m.closePreview()
+	}
+	if reason := m.previewShortfall(); reason != "" {
+		m.setRefusal(reason)
+		return m, nil
+	}
+	m.mode = modeFiles
+	m.previewOn = true
+	m.focus = focusPreview
+	m.previewG = false
+	m.setStatus("", false)
+	return m, nil
+}
+
 // handleDiffKey is everything the diff reads, in either layout: it scrolls with the vim primitives,
 // `esc` gives the keys back, `tab` and `f` move them to the list column, and `q` quits the session from
 // the pane as it does everywhere else. Over the overlay the screen has nothing else on it, so there `esc`,
@@ -3040,13 +3191,27 @@ func (m reviewModel) openPreview() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.previewKind == previewDiff || m.previewKind == previewContent {
-		// A file shown as text is still a file: `enter` is the real comparison, which is the difftool.
-		return m.openDiff(m.previewPath)
+		// The same decision the row makes, so enter in the pane and enter on the list are one rule and
+		// not two that can drift. A file shown as its own text keeps its change: the pane reads an added
+		// file as text, and enter still opens the file rather than the patch it has no other side of.
+		return m.openFile(m.previewPath, m.previewFileChange())
 	}
 	if r, ok := m.previewRow(); ok {
 		return m.openArtifact(r)
 	}
 	return m, nil
+}
+
+// previewFileChange is what the span did to the file the pane is showing, or a modification when the
+// pane is showing something that is not a file in the span. It is what lets the pane's enter ask the
+// row's question rather than guess at it.
+func (m reviewModel) previewFileChange() Change {
+	for _, f := range m.sess.Files() {
+		if f.Path == m.previewPath {
+			return f.Change
+		}
+	}
+	return ChangeChanged
 }
 
 // previewRow is the row the pane is a window onto, or false when it is no longer in the list: the rows are
@@ -3121,6 +3286,12 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Type == tea.KeyRunes && firstRune(key) == 'f':
 		m.focusOn(focusFiles)
 		return m, nil
+	// `z` changes the shape of the screen the keys are on and nothing else: the diff keeps them, the
+	// place in the file and the file itself. It is also a key of the list column — see openFullScreen —
+	// and the two readings end on this same screen, which is why `p` and `z` differ only in the size
+	// they ask the diff for.
+	case key.Type == tea.KeyRunes && firstRune(key) == 'z':
+		return m.toggleFullScreen()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'q':
 		// Over the overlay `q` gives the list back, the way `esc` and `enter` do. The key is read
 		// differently in the two layouts because the two layouts show different things: the overlay is

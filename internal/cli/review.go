@@ -23,11 +23,30 @@ import (
 )
 
 func newReviewCommand(a *app) *cobra.Command {
+	opts := &spanOptions{}
 	cmd := &cobra.Command{
 		Use:   "review",
-		Short: "Reviewer-side commands",
-		RunE:  groupUsage("review"),
+		Short: "Reviewer-side commands (no subcommand opens the review screen)",
+		Long: `Reviewer-side commands, and the review screen itself.
+
+With no subcommand, ` + "`git pair review`" + ` is ` + "`git pair review open`" + `: it takes the terminal
+and opens the review session for the current changeset. Every flag below belongs to that screen, so
+` + "`git pair review --unreviewed`" + ` and ` + "`git pair review open --unreviewed`" + ` are the same
+command spelled two ways.`,
+		Example: `  git pair review
+  git pair review --unreviewed
+  git pair review --base-ref=main --head-commit=abc1234`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// The group's own job is the screen, so a word that is not one of its commands is a
+			// mistake rather than an argument to it.
+			if len(args) > 0 {
+				return unknownGroupCommand("review", args)
+			}
+			return runReviewOpen(cmd.Context(), a, opts, "git pair review")
+		},
 	}
+	opts.register(cmd)
+	opts.registerHead(cmd)
 	cmd.AddCommand(
 		newReviewOpenCommand(a),
 		newReviewReopenCommand(a),
@@ -47,6 +66,9 @@ func newReviewOpenCommand(a *app) *cobra.Command {
 		Use:   "open",
 		Short: "Open the interactive review session",
 		Long: `Open a small orchestration screen for the current changeset.
+
+This is what ` + "`git pair review`" + ` does with no subcommand, and it takes the same flags; the name
+is here for the readers who look for a verb.
 
 The TUI is not an editor and renders no diff. It lists the files in the chosen
 span, tracks which ones you have looked at, and launches your editor, your
@@ -74,7 +96,7 @@ screen keeps the pinned span and offers r to re-pin it.`,
   git pair review open --base-ref=main --head-commit=abc1234`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runReviewOpen(cmd.Context(), a, opts)
+			return runReviewOpen(cmd.Context(), a, opts, "git pair review open")
 		},
 	}
 	opts.register(cmd)
@@ -82,7 +104,10 @@ screen keeps the pinned span and offers r to re-pin it.`,
 	return cmd
 }
 
-func runReviewOpen(ctx context.Context, a *app, opts *spanOptions) error {
+// runReviewOpen opens the session on the span the flags named. invocation is the command as the
+// reviewer can type it -- "git pair review open", or "git pair review" for the bare group -- so the
+// no-terminal message quotes the one they actually ran.
+func runReviewOpen(ctx context.Context, a *app, opts *spanOptions, invocation string) error {
 	s, err := a.load(ctx)
 	if err != nil {
 		return err
@@ -91,7 +116,7 @@ func runReviewOpen(ctx context.Context, a *app, opts *spanOptions) error {
 	if err != nil {
 		return err
 	}
-	return openSession(ctx, a, s, so, "open", "")
+	return openSession(ctx, a, s, so, invocation, "")
 }
 
 // --- review about -----------------------------------------------------------
@@ -484,17 +509,18 @@ func runReviewReopen(ctx context.Context, a *app) error {
 	} else if len(names) == 0 {
 		note = fmt.Sprintf("nothing has landed since %s", reviewLabel(s.summary.LatestReview))
 	}
-	return openSession(ctx, a, s, sel, "reopen", note)
+	return openSession(ctx, a, s, sel, "git pair review reopen", note)
 }
 
-// openSession runs the TUI on a chosen span. name is the subcommand to
-// blame in the no-terminal message.
+// openSession runs the TUI on a chosen span. invocation is the command as the reviewer can type it,
+// which the no-terminal message quotes back at them: the refusal that names a command they did not
+// run reads like a bug in the tool rather than an answer about the terminal.
 // note, if set, is written to stderr before the session takes the screen.
-func openSession(ctx context.Context, a *app, s *session, sel span.Selector, name, note string) error {
+func openSession(ctx context.Context, a *app, s *session, sel span.Selector, invocation, note string) error {
 	if !console.Interactive() {
 		return &usageError{fmt.Errorf(
-			"`git pair review %s` needs a terminal; use `git pair diff`, `git pair review about`, "+
-				"`git pair review thread`, and `git pair review submit` instead", name)}
+			"`%s` needs a terminal; use `git pair diff`, `git pair review about`, "+
+				"`git pair review thread`, and `git pair review submit` instead", invocation)}
 	}
 	if note != "" {
 		a.warn("%s\n", note)
