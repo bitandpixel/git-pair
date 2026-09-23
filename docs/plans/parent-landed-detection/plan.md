@@ -358,6 +358,10 @@ Deliverables
   cherry-pick still need the branch or `--source`, because nothing else holds the chain.
 - Re-running `integration record` on a recorded changeset is a no-op that exits 0, whatever the branch set
   looks like.
+- The flagless run reaches that no-op too. When every directory on the destinations already has its pair, the
+  command writes nothing, says so with the destinations it searched, and exits 0 — it does not print the
+  directories as candidates. A record is create-only, so "record it again" is never the finding; a half-pair is,
+  and only a half-pair is listed.
 - The flagless command records the one unrecorded changeset when trunk carries every directory: three landed,
   two recorded, and the third is named and written with no flags at all.
 - A named `--source` and a flagless run answer which-changeset the same way, so the recorded ones are not
@@ -387,6 +391,27 @@ Tasks
 - Reorder `integration record`: consult `reviewref.RecordedPair` (`integration.go:846`) after the landing is
   derived and before `deriveArchiveTip` (`integration.go:238`), reusing the two existing messages at
   `:1026` and `:1031`. `changesetToDerive`'s own comment already promises the CI re-run this ordering breaks.
+- Deliver what `changesetToDerive`'s comment already promises and the code does not. The comment says that when
+  every directory has a record "the answer is the same directory again, because this is a CI job running the
+  command a second time: it must hear `already recorded` rather than a usage error it will report as a failed
+  build" (`integration.go:281-287`). The code delivers that only when the destination carries one directory; with
+  two or more it returns the ambiguity usage error the comment rules out. Measured in this repository: nine
+  directories on `main`, nine complete pairs in `refs/git-pair/`, and the flagless command exits 2 listing all
+  nine as if nine records were missing.
+- Split the "nothing is unrecorded" case on the pair's state rather than on the count. A half-pair — an archive
+  ref with no integration ref, which `refIndex` already keys separately (`internal/cli/landed.go:47-70`) — is real
+  work and the only thing worth listing: name those ids, say which ref is missing, and use the words the rest of
+  the CLI already uses ("a half-pair is not a record", `internal/cli/publish.go:117`; `half published:`,
+  `internal/cli/published.go:195`). No half-pair means no work: an early return before an id is needed prints
+  `nothing to record: <n> changesets on <dests> already have their records here`, and the note points at
+  `--target <ref>` for a landing on a branch git-pair did not search.
+- `--json` for that case is a document, not an error: `nothing_to_record` as a list and the destinations
+  searched, so a pipeline can tell "already done" from "this build failed". README's `integration record` row
+  says "anything ambiguous is a usage error naming the candidates" (`README.md:559`); its boundary gets spelled
+  in the same commit, and the string pinned in `integration_verify_test.go` moves with it.
+- Line numbers in this milestone are from `4c89685`. `fix-legacy-refs-and-remote-branches` reached `main` at
+  `cf71983` and changed `deriveArchiveTip` and the source discovery, so re-locate every site here before
+  editing rather than trusting the offsets.
 - `derivationDestinations` (`integration.go:252-275`) asks both spellings of the integration branch —
   `refs/heads/main` and `refs/remotes/origin/main` — deduplicated by commit as it already does, and skips a
   base under `refs/git-pair/`.
@@ -412,6 +437,10 @@ Verification
   fix. Measured in `pi-heartthrob` on 2026-09-23, flagless lists `feat-more-labels`, `fix-label-word-timer` and
   `fix-thinking-verb` from `8ffdb3a`; the same command with `--changeset fix-label-word-timer` writes archive
   `8ffdb3a` and integration `acd1fd7` and exits 0 — so the fix is the plumbing, not the verification.
+- A destination carrying two recorded directories and one half-pair: flagless completes the half-pair and names
+  only it. With both directories complete, flagless exits 0, prints `nothing to record`, and names no changeset.
+- This repository's own `main` is the regression: nine landed directories, nine complete pairs, flagless
+  `integration record` exits 0. Today it exits 2.
 - Each of the five refusals still fires, with its existing wording.
 - `mise run gates` passes, and `e2e-29.sh`'s landing loop is unchanged for a merge landing.
 

@@ -88,6 +88,17 @@ resolves, so the branch every changeset eventually lands on is the branch where 
 clone is invisible. Milestone 2 gives that path the second half — same exit code, same first line, the findings
 as notes beside the answer, and the JSON keys present as empty lists rather than absent.
 
+**A record is create-only, so "record it again" is never a finding** (milestone 5). `integration record` writes
+both refs once and never moves them, and the named case already honours that: a changeset with its pair answers
+`already recorded ... nothing changed` and exits 0 (`integration.go:1068-1076`). The flagless case does not: when
+every directory on the destinations is recorded, `changesetToDerive` falls back to listing all of them, which is
+what happened on this repository's own `main` — nine landed directories, nine complete pairs, exit 2. Its own
+comment rules that output out ("it must hear `already recorded` rather than a usage error it will report as a
+failed build") and holds only where the destination carries one directory. The re-run that has work to do is the
+half-pair: an archive ref with no integration ref, which is what an interrupted write or a half publish leaves,
+and which `refIndex` already distinguishes and `publish.go:117` already calls "not a record". So the list is
+narrowed to half-pairs and the all-recorded case stops listing anything.
+
 **Milestone 6 is separable.** It changes what `init` writes into committed content, which reaches every future
 changeset, every fresh clone and every CI job, while milestones 1–5 change only reads. It can be cut without
 touching anything else.
@@ -130,6 +141,11 @@ git-pair: no changeset for this branch: changesets/main (run `git pair init --ba
 
 Two changesets were recorded in that clone and had never been published, and nothing on that branch said so.
 
+The all-recorded refusal reproduces in this repository: `main` carries nine changeset directories that
+`refs/git-pair/` holds complete pairs for, and the flagless `git pair integration record` exits 2 naming all nine.
+Any repository whose trunk holds two recorded changesets reaches that branch — it needs no stale remote and no
+flags, only a second landing.
+
 ## Known limitations
 
 - The plan assumes `parent-changeset:` is present on the children that matter. A child without it has no
@@ -142,8 +158,11 @@ Two changesets were recorded in that clone and had never been published, and not
 
 - Is the stale-branch note worth printing at all once the child has been rebased onto the landing commit
   and only the branch deletion is left? The plan says yes, at `a.warn` severity, and it is cheap to drop.
-- `fix-legacy-refs-and-remote-branches` is in review and edits `landed.go`, `published.go`, `reviewref.go`
-  and `integration.go`. This plan reads through `ResolveIntegration` and `indexDurableRefs` rather than
-  `List`, so the two overlap in file names only. Should this branch stack on that one instead of trunk?
+- `fix-legacy-refs-and-remote-branches` landed on local `main` at `cf71983` on 2026-09-23 and is not yet pushed
+  (`origin/main` is `4c89685`, eight commits behind). It edited `deriveArchiveTip` and the source discovery, so
+  milestone 5's file offsets need re-locating before implementation, and this branch bases on that merge.
+- Should the all-recorded flagless run exit 0 or stay 2? The plan says 0, because the named run already returns 0
+  for the same state and a CI re-run of an idempotent command should not go red. That is an exit-code change on a
+  command pipelines call, so it is here rather than assumed.
 - Cut or keep milestone 6? The bug it prevents is real but rarer than the milestone 5 ones, and it is the only
   milestone that changes committed content rather than reads.
