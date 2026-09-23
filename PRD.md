@@ -2187,7 +2187,11 @@ beside a diff comes back from the editor to that diff rather than to a screen th
 with the keys a diff is read with: `j`/`k`, `d`/`u` or `ctrl-d`/`ctrl-u`, `ctrl-f`/`ctrl-b`, `gg` and `G`
 scroll the file already on show (`d`/`u` being `less`'s spelling of the same half page, kept because a
 reviewer who reaches for it in a diff is reaching for something they know), `Enter` opens the difftool on
-it, and `/` searches it. The search reads a term in the pane's bottom row — the row the note about the
+it, and `/` searches it. `z` changes the shape of the screen rather than the keys: it gives the diff the
+whole screen, and gives the list its column back, keeping the keys, the file and the place in the file.
+These are the two shapes the terminal chooses by itself, and where it has no column to give back `z`
+reports which way the window is short rather than closing the diff. The search reads a term in the pane's
+bottom row — the row the note about the
 rest of the file uses, so the field costs no rows — marks every match as the term is typed, and marks them
 with SGR rather than colour: the diff's green and red are git's bytes, and a highlight that painted over
 them would hide which kind of line a match sits on. `Enter` jumps to the first match at or below the
@@ -2329,6 +2333,8 @@ a, t     put the cursor and the keys on ABOUT.md or the Threads heading, leaving
          the pane follows them on to the document (not under the overlay, where the box
          is not drawn)
 Enter    open the difftool on the file the pane is showing
+z        give the diff the whole screen, or give the list its column back, keeping the keys,
+         the file and the place in it; where the terminal has no column to give back, it says so
 Esc      hand the keys back to the list column, leaving the pane where it is in the file
 Tab, f   move the keys back to the list column, as they do from anywhere in it
 q        in the pane, quit — from here as from anywhere else; over the whole-screen overlay, give the
@@ -3233,6 +3239,7 @@ d        open the difftool for the selected row, falling back to the editor with
 e        edit the selected file or document
 p        move the keys into the diff preview column; inert where the diff already has them.
          Where there is no second column, it takes the screen for the diff
+z        in the diff, take the whole screen, or give the list its column back
 ctrl-f   page the preview down
 ctrl-b   page the preview up
 /        search the diff the preview column (or the whole screen) is showing; n/N walk the matches

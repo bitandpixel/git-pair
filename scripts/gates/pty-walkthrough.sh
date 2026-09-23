@@ -289,6 +289,24 @@ expectbytes "and the session left only when ctrl-c said so" "$T/qoverlay.raw" $'
 expectbytes "q in the pane gave the terminal back" "$T/qpane.raw" $'\033[?1049l'
 refuse "and the list's bar was never repainted under it" 1 "$T/qpane.raw" "space reviewed"
 
+# `z` is the pane's own layout key: the same diff, the same keys and the same place in the file, over
+# the whole screen. The two shapes are the two the terminal picks by itself, so the pair of presses is
+# one reading gesture rather than two different screens with two different sets of keys.
+step "z takes the pane to the whole screen, and gives the column back"
+( COLS=140 ROWS=30; session zfull p,z,ctrl-c )
+expect "z over the pane paints the overlay's own bar" 1 "$T/zfull.raw" "z pane"
+refuse "and the pane's bar is gone with the pane" 1 "$T/zfull.raw" "z full"
+( COLS=140 ROWS=30; session zback p,z,z,q )
+expect "z again paints the list's counter again" 2 "$T/zback.raw" "reviewed"
+expect "and the pane's bar is back with the column" 2 "$T/zback.raw" "z full"
+
+# On the terminal too narrow for a column there is nothing for `z` to give back, so it says which way
+# the window is short instead of closing the diff the reviewer was reading.
+step "z on a terminal with no column says which way it is short"
+( COLS=60 ROWS=14; session ztiny p,z,ctrl-c )
+expect "z names the columns the pane wants" 1 "$T/ztiny.raw" "the preview wants 100 columns"
+expect "and the terminal it has" 1 "$T/ztiny.raw" "this terminal has 60"
+
 # Too small for even that is worth saying out loud, and with the smaller of the two asks -- 12 rows
 # would have been enough, so telling the reviewer about the pane's 16 would send them growing the
 # wrong window.

@@ -475,6 +475,93 @@ func TestOverlayKeepsItsPlaceWhenReopened(t *testing.T) {
 	}
 }
 
+// `z` is the diff's own layout key: it changes the shape of the screen the diff is on and moves
+// nothing else. The two shapes are the two the terminal picks by itself -- a column beside the list on
+// a wide terminal, the whole screen on a narrow one -- and `z` asks for the other one while the keys,
+// the file and the place in it all stay where they were.
+func TestZTakesThePaneToTheWholeScreenAndBack(t *testing.T) {
+	m := focusPane(t, focusFixture(t, 60))
+	for i := 0; i < 5; i++ {
+		m = paneKey(t, m, runeKey('j'))
+	}
+	before, rows := m.previewOffset, m.previewContent(unmarked)
+	if before >= len(rows) {
+		t.Fatalf("the fixture has scrolled past its own content: offset %d of %d rows", before, len(rows))
+	}
+	top := rows[before].text
+
+	full := paneKey(t, m, runeKey('z'))
+	if full.mode != modePreview {
+		t.Fatalf("`z` over the pane left mode %v, want the whole screen", full.mode)
+	}
+	if full.focus != focusPreview {
+		t.Errorf("`z` took the screen and the keys with it: focus=%v, want the diff to keep them", full.focus)
+	}
+	if full.previewOffset != before {
+		t.Errorf("`z` moved the scroll from %d to %d", before, full.previewOffset)
+	}
+	if got := full.previewContent(unmarked); full.previewOffset >= len(got) || got[full.previewOffset].text != top {
+		t.Errorf("`z` changed the row at the top of the diff from %q", top)
+	}
+	view := ansi.Strip(full.View())
+	if strings.Contains(view, "\u2502") {
+		t.Errorf("`z` left the screen split:\n%s", view)
+	}
+	if !strings.Contains(view, ansi.Strip(top)) {
+		t.Errorf("`z` did not carry the diff to the whole screen:\n%s", view)
+	}
+	if !strings.Contains(view, "z pane") {
+		t.Errorf("the full screen does not name the key that gives the column back:\n%s", view)
+	}
+
+	back := paneKey(t, full, runeKey('z'))
+	if back.mode != modeFiles || !back.previewHasFocus() {
+		t.Errorf("`z` back left mode %v with %v, want the pane drawn and the diff holding the keys",
+			back.mode, back.focus)
+	}
+	if back.paneWidth() == 0 {
+		t.Error("`z` back took the pane off the screen rather than giving the list its column")
+	}
+	if back.previewOffset != before {
+		t.Errorf("`z` back moved the scroll from %d to %d", before, back.previewOffset)
+	}
+	if !strings.Contains(ansi.Strip(back.View()), "z full") {
+		t.Errorf("the pane does not name the key that takes the whole screen:\n%s", ansi.Strip(back.View()))
+	}
+}
+
+// The whole screen is the narrow terminal's only form of the diff, so `z` there asks for a column the
+// terminal does not have. It says so with the number the window is short by, the way `p` does, rather
+// than closing the diff the reviewer was reading.
+func TestZHasNowhereToGoOnANarrowTerminal(t *testing.T) {
+	m := openOverlay(t, overlayModel(t, 40))
+
+	got := pressOverlay(t, m, runeKey('z'))
+	if got.mode != modePreview {
+		t.Errorf("`z` closed the overlay on a terminal with no column to open: mode %v", got.mode)
+	}
+	if !strings.Contains(got.status, "the preview wants 100 columns") {
+		t.Errorf("`z` said %q, want the excuse and the number", got.status)
+	}
+	if strings.Contains(ansi.Strip(got.View()), "z pane") {
+		t.Errorf("the bar offers a key that refuses here:\n%s", ansi.Strip(got.View()))
+	}
+}
+
+// `z` belongs to the region that is already reading the diff. From the list it is not a key of this
+// screen, and a reviewer who pressed it there should lose nothing to find out.
+func TestZIsNotAKeyOfTheListColumn(t *testing.T) {
+	m := overlayModel(t, 20)
+	if m.previewHasFocus() {
+		t.Fatal("the fixture has the diff holding the keys, so this proves nothing")
+	}
+	got := pressKey(t, m, runeKey('z'))
+	if got.mode != modeFiles || got.previewHasFocus() || got.status != "" {
+		t.Errorf("`z` from the list gave mode %v, focus %v, status %q",
+			got.mode, got.focus, got.status)
+	}
+}
+
 // The floor has to be arithmetic rather than a guess. At the smallest size the overlay accepts, the
 // diff still has rows to show, and the frame is still the size of the terminal: a shortcut bar that
 // wrapped past that point would push the frame over the bottom, and a frame taller than the terminal

@@ -1718,8 +1718,17 @@ func (m reviewModel) helpText() string {
 // overlay has -- `esc`, `enter` and `q` all give the screen back -- and the keys that move the keys. It
 // is part of the row-area budget wherever the overlay is the only form the diff can take, so that no row
 // of it is ever clipped by a bar counted from the list.
+//
+// `z` is named only where it does something. The overlay is both the wide terminal's full-screen diff
+// and the narrow terminal's only diff, and only the first has a column to go back to; a bar that
+// offered `z` to the second would name a key that refuses, which is the one thing a bar is not for.
 func (m reviewModel) overlayHelp() string {
-	return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  esc enter q back  f tab list"
+	back := "esc enter q back"
+	if m.previewShortfall() == "" {
+		back = "z pane  " + back
+	}
+	return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " + back +
+		"  f tab list"
 }
 
 // helpTextFor is the bar of one region. It names every key that region reads and none that it does not,
@@ -1753,7 +1762,7 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 			open = "enter open"
 		}
 		return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " +
-			jumps + open + "  esc f tab list  q quit"
+			jumps + open + "  z full  esc f tab list  q quit"
 	}
 	// The jumps name a row of the box from either half of the column and take the keys with them. `T`
 	// writes, so it is absent from every bar of a span that cannot.
@@ -2988,6 +2997,45 @@ func (m reviewModel) leavePreview() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// toggleFullScreen is `z`: the diff takes the whole screen, or gives the list its column back. It
+// changes the shape of the screen and nothing else -- the keys stay with the diff, so does the file it
+// is showing, and so does the place in it, which is what makes the pair of presses one reading gesture
+// rather than two different ones.
+//
+// The two forms are the same two the terminal picks by itself: a wide terminal puts the diff in a
+// column beside the list, a narrow one has no column to spare and draws it over the whole screen. `z`
+// is how a reviewer asks for the other one without moving the keys, and it is refused rather than
+// guessed at where the shape asked for cannot be drawn -- so on the terminal too narrow for a column,
+// `z` over the overlay does nothing, because there is no column to go back to.
+func (m reviewModel) toggleFullScreen() (tea.Model, tea.Cmd) {
+	if m.mode == modePreview {
+		if reason := m.previewShortfall(); reason != "" {
+			m.setRefusal(reason)
+			return m, nil
+		}
+		m.mode = modeFiles
+		m.previewOn = true
+		m.focus = focusPreview
+		m.previewG = false
+		m.setStatus("", false)
+		return m, nil
+	}
+	if !m.previewHasFocus() {
+		return m, nil
+	}
+	// The overlay is the same region as the pane and takes the keys the same way, so which half of the
+	// list column handed them over is already remembered and `esc` still returns there.
+	if reason := m.overlayShortfall(); reason != "" {
+		m.setRefusal(reason)
+		return m, nil
+	}
+	m.previewOn = true
+	m.mode = modePreview
+	m.previewG = false
+	m.setStatus("", false)
+	return m, nil
+}
+
 // handleDiffKey is everything the diff reads, in either layout: it scrolls with the vim primitives,
 // `esc` gives the keys back, `tab` and `f` move them to the list column, and `q` quits the session from
 // the pane as it does everywhere else. Over the overlay the screen has nothing else on it, so there `esc`,
@@ -3121,6 +3169,12 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Type == tea.KeyRunes && firstRune(key) == 'f':
 		m.focusOn(focusFiles)
 		return m, nil
+	// `z` changes the shape of the screen the keys are on and nothing else: the diff keeps them, the
+	// place in the file and the file itself. It is the layout key of the region that is already reading,
+	// which is why it is not a key of the list column -- `p` is how the list column asks for the diff,
+	// and `z` is how the diff asks for more of the screen to read it in.
+	case key.Type == tea.KeyRunes && firstRune(key) == 'z':
+		return m.toggleFullScreen()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'q':
 		// Over the overlay `q` gives the list back, the way `esc` and `enter` do. The key is read
 		// differently in the two layouts because the two layouts show different things: the overlay is

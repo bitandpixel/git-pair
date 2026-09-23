@@ -1277,7 +1277,13 @@ keys the whole-screen preview uses — `j`/`k` a row, `d`/`u` or `ctrl-d`/`ctrl-
 `ctrl-f`/`ctrl-b` a page, `gg` the top and `G` the bottom — over the file the pane was already showing. Paging a diff that
 way is the whole point: the four page keys belong to whichever region holds them, so a diff too long to
 fit is paged by moving into it rather than by borrowing the list's keys from across the screen.
-`Enter` there opens the difftool on that file, which is the key the pane's own note points at. `Esc`
+`Enter` there opens the difftool on that file, which is the key the pane's own note points at. `z`
+changes the shape of the screen rather than the keys: it takes the pane to the whole screen, and back to
+the column again. The keys, the file and the place in the file all stay where they were, so the two
+presses are one reading gesture rather than two different ones. They are also the two shapes the terminal
+picks by itself — a column beside the list where there is room, the whole screen where there is not — and
+where there is no column to go back to, `z` says so with the number the window is short by instead of
+closing the diff you were reading. `Esc`
 hands the keys back to the region that had them — the tree, or the box if the keys came from the box —
 and leaves the pane where it was, so coming back returns to the same lines. `p` does not do that: pressed
 where the diff already holds the keys it is the no-op its name promises, because a key that meant "the
@@ -1338,7 +1344,10 @@ what this screen's shortcut bar says they mean while it is up — including `q`,
 here as `esc` and `enter` do rather than quitting as it does in the pane, and `ctrl-d`, which pages rather
 than quits; nothing else reaches through, because a reviewer who cannot see
 the list must not be able to mark a file in it. Closing keeps the
-place however you close it: `p`, `Esc`, `p` returns to the same lines, and so does `f`, `p`.
+place however you close it: `p`, `Esc`, `p` returns to the same lines, and so does `f`, `p`. `z` gives the
+list its column back wherever the terminal has one to give back, and the bar names the key only there: on
+the terminal too narrow for a column the key can only refuse, and a bar that names a refusing key names a
+feature nobody is offered.
 Reading a historical span this way works the same — reading is what a read-only span is for. Under 40
 columns or 13 rows even this is unreadable, and the key says which way the terminal is short, naming
 the smaller of the two asks because that is the one worth growing to. The row floor is its bar's
