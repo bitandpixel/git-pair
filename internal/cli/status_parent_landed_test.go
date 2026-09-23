@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"path/filepath"
 	"testing"
 
 	"gitpair/internal/gittest"
@@ -66,6 +67,8 @@ func TestStatusCallsALandedParentStaleWhileItsBranchIsPresent(t *testing.T) {
 		"the parent's record is the fact its branch tip cannot give")
 	mustContain(t, res.stdout, "alpha is stale",
 		"and the branch is what is left of a landed parent")
+	mustContain(t, res.stdout, "git branch -D alpha",
+		"printed as the command, because an author translating \"delete it\" into arguments gets the order wrong")
 	mustContain(t, res.stdout, "Base: alpha",
 		"the read does not move the measurement base")
 	mustNotContain(t, res.stdout, "stale:  ",
@@ -102,6 +105,8 @@ func TestStatusNotesALandedParentTheChildHasNotRebasedOnto(t *testing.T) {
 	res.mustSucceed(t, "status")
 	mustContain(t, res.stdout, "landed as "+shortOf(landing), "the parent's record still answers")
 	mustContain(t, res.stdout, "rebase onto it", "and the step is the rebase, not the deletion")
+	mustContain(t, res.stdout, "git rebase --onto "+shortOf(landing)+" alpha beta",
+		"with the landing commit as --onto, the parent branch as the upstream, and the child as the branch")
 	mustNotContain(t, res.stdout, "is stale", "the branch still carries the base this child is measured on")
 
 	p := parentJSONOf(t, f, "beta")
@@ -166,6 +171,27 @@ func TestStatusSaysALandedParentHasNoRecordHere(t *testing.T) {
 	if p["landed"] != false {
 		t.Errorf("parent.landed is %v without a record: landed is a record's claim, not a merge's", p["landed"])
 	}
+}
+
+// The delete the stale note advises fails in the repository layout this project actually uses: the parent
+// branch is checked out in another worktree, and git refuses with "used by worktree at ...". git-pair does
+// not remove worktrees (PRD §26), so the blocker and its remedy are named as text.
+func TestStatusNamesTheWorktreeBlockingAParentDelete(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("alpha")
+	f.CommitChangeset("alpha", "main")
+	f.Commit("alpha work", gittest.WithFile("a.go", "package main\n"))
+	landAndRecord(t, f, "alpha", "main")
+	stackedChangeset(t, f, "beta", "alpha", "alpha", "b.go")
+	wt := filepath.Join(t.TempDir(), "alpha-worktree")
+	f.MustGit("worktree", "add", wt, "alpha")
+
+	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
+	res.mustSucceed(t, "status")
+	mustContain(t, res.stdout, "git branch -D alpha", "the step is still the delete")
+	mustContain(t, res.stdout, "checked out in "+wt, "and the reason it would fail is named")
+	mustContain(t, res.stdout, "git worktree remove "+wt,
+		"with the remedy spelled as text rather than run: removing a worktree is not git-pair's to do")
 }
 
 // The parent's branch being gone is the case `relinkStacks` already measures a child against the parent's

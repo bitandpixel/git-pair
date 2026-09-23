@@ -359,8 +359,12 @@ func (a *app) landedParentNote(ctx context.Context, repo *git.Repo, cs changeset
 	if branch == "" {
 		branch = cs.ParentChangeset
 	}
+	// The step is spelled by the same helper `status` and `check` print, with one thing left out: the
+	// worktree lookup. The queue is a reviewer's surface and its cost is per row, so it names the command
+	// and leaves the blocker to the command the author runs before deleting anything.
+	st := parentStatus{Branch: branch, Landed: short(sha), StaleBranch: on}
 	return fmt.Sprintf("%s: parent %s landed as %s — %s",
-		cs.Slug, cs.ParentChangeset, short(sha), landedParentStep(branch, on)), nil
+		cs.Slug, cs.ParentChangeset, short(sha), landedParentStep(cs, st)), nil
 }
 
 // branchReadyEntry is the queue row for one branch, or nil when that branch is not READY.

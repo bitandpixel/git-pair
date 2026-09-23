@@ -187,7 +187,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool, doFetch bool) err
 			// shared by `status`, `check`, `change ready` and `review`, it takes only a base, and teaching it
 			// about parents would make the same sentence mean two things in four commands.
 			out.NextAction += fmt.Sprintf("; parent %s landed as %s — %s", parent.parentName(), parent.Landed,
-				landedParentStep(parent.Branch, parent.StaleBranch))
+				landedParentStep(s.cs, parent))
 		}
 	}
 	out.ParentLanded = parent.Landed != ""
@@ -221,7 +221,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool, doFetch bool) err
 		// Beside the verdict, not inside it: the gate passed, and the reader still needs to know the base
 		// underneath is finished work with a step attached to it.
 		a.printf("parent: %s landed as %s — %s\n", parent.parentName(), parent.Landed,
-			landedParentStep(parent.Branch, parent.StaleBranch))
+			landedParentStep(s.cs, parent))
 	}
 	a.printf("next:  %s\n", out.NextAction)
 	return nil

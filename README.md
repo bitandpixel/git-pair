@@ -242,6 +242,15 @@ chain, so a delete that lands before a publish leaves the chain reachable from n
 that recorded it — which is why `status` and `queue` print `RECORDED, NOT PUBLISHED` rather than trusting
 anyone to remember.
 
+A stack says what is left of it at the same moment, and this is the ordinary next thing an author hits after
+landing a parent: `git pair status`, `git pair check` and `git pair queue` name the landing and print the
+command that settles the child. While the child's head is not on the landing it is
+`git rebase --onto <landing> <parent-branch> <child-branch>`; once it is, the parent's branch is stale and the
+command is `git branch -D <parent-branch>` — with the worktree named when another worktree has that branch
+checked out, because the delete fails there and removing a worktree is not git-pair's to do. Nothing in
+git-pair runs either one: the rebase and the delete are ordinary git, performed by whoever owns the branches
+(PRD §26).
+
 Two refs, written once, and never moved: the chain that was reviewed, and the commit it became. The
 changeset is discovered from the directories `--source` carries rather than from a ref someone had to
 write first, so a pipeline needs only the two SHAs it already holds.

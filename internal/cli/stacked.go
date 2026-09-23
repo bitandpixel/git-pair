@@ -60,6 +60,10 @@ type parentStatus struct {
 	// rebased yet, where that branch is still the base the child is measured on, and false when the branch
 	// is gone, because stale is a statement about a branch that is here.
 	StaleBranch bool
+	// ParentWorktree is a worktree that has the parent branch checked out, which is the reason
+	// `git branch -D <parent>` would fail. It is read only where the deletion is being advised, and named
+	// as text: removing a worktree is not git-pair's to do (PRD §26).
+	ParentWorktree string
 }
 
 // parentSinceApproval asks the stack question for one changeset: has the branch it is stacked on
@@ -188,22 +192,73 @@ func (a *app) parentLanded(ctx context.Context, repo *git.Repo, c changeset.Chan
 	}
 	st.StaleBranch = on
 	if on {
-		st.Note = fmt.Sprintf("your head is on %s, so %s", st.Landed, landedParentStep(st.Branch, true))
+		// `git branch -D` is the step this leaves, and in a repository where the parent is still checked
+		// out somewhere it fails before it does anything. Read the blocker rather than guess at it: one
+		// `worktree list` for the case that prints the deletion.
+		path, err := worktreeHolding(ctx, repo, st.Branch)
+		if err != nil {
+			return st, err
+		}
+		st.ParentWorktree = path
+	}
+	if on {
+		st.Note = fmt.Sprintf("your head is on %s, so %s", st.Landed, landedParentStep(c, st))
 		return st, nil
 	}
 	st.Note = fmt.Sprintf("%s: this head is still measured on %s, which the landing replaced",
-		landedParentStep(st.Branch, false), st.Branch)
+		landedParentStep(c, st), st.Branch)
 	return st, nil
 }
 
 // landedParentStep is the step a landed parent leaves, spelled once because `status`, `check` and `queue`
 // all print it and a fifth spelling is how a contract drifts. It is the sibling of `landingNextAction` for
 // the same reason: one sentence, several readers.
-func landedParentStep(branch string, headOnLanding bool) string {
-	if headOnLanding {
-		return fmt.Sprintf("the branch %s is stale — it holds nothing the record does not", branch)
+//
+// It prints the command, because "rebase onto it" is a sentence the author has to translate into three
+// arguments, and the translation is the part that goes wrong: the argument people reach for is the parent
+// branch's name where the landing commit belongs, and vice versa.
+func landedParentStep(cs changeset.Changeset, st parentStatus) string {
+	if st.StaleBranch {
+		step := fmt.Sprintf("the branch %s is stale — it holds nothing the record does not: `git branch -D %s`",
+			st.Branch, st.Branch)
+		if st.ParentWorktree != "" {
+			// The deletion will fail there, and the remedy is not git-pair's to run (PRD §26): naming the
+			// worktree is the whole of it.
+			step += fmt.Sprintf(" (checked out in %s — `git worktree remove %s` first)",
+				st.ParentWorktree, st.ParentWorktree)
+		}
+		return step
 	}
-	return "rebase onto it"
+	child := cs.Branch
+	if child == "" {
+		child = cs.Slug
+	}
+	return fmt.Sprintf("rebase onto it: `git rebase --onto %s %s %s`", st.Landed, st.Branch, child)
+}
+
+// worktreeHolding is the path of the worktree that has <branch> checked out, or "" when none does.
+//
+// It exists for one sentence. `git branch -D <parent>` is the step a landed parent leaves, and in a
+// repository that keeps its stacks in worktrees the branch is still checked out somewhere and the delete
+// stops with "used by worktree at ...". A reader who has to discover that by running it is a reader who
+// just learned the hard way that the tool knew.
+func worktreeHolding(ctx context.Context, repo *git.Repo, branch string) (string, error) {
+	out, err := repo.Git(ctx, "worktree", "list", "--porcelain")
+	if err != nil {
+		// The finding is the deletion, and the blocker is a note about it. A failed read must not swallow
+		// the advice, so the caller is told nothing was found rather than nothing being true.
+		return "", nil
+	}
+	path, want := "", "refs/heads/"+branch
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			path = strings.TrimPrefix(line, "worktree ")
+		case line == "branch "+want:
+			return path, nil
+		}
+	}
+	return "", nil
 }
 
 // parentInTrunkUnrecorded is the sibling finding: the parent's branch tip is in the integration branch and
