@@ -1,10 +1,6 @@
 ---
 name: git-pair
-I think this description could be shortened. We probably only need references to `git pair` and `git-pair` not the subcommands, since once this description is triggered the skill body will be looked up in full right? 
-
-And we probably don't need the part  about the commands agent must never run, since any decision to use git pair would lead to loading this full skill body, which would include that more concrete guidance?
-
-description: Use when working in a repository whose changes go through git-pair review — creating a changeset, keeping ABOUT.md current, handing work to a human reviewer with `git pair change ready`, waiting for the review with `git pair change wait`, reading what the reviewer said with `git pair change feedback`, and asserting integration-readiness with `git pair check`. Covers the author-side loop, the exit-code and JSON contracts, and the git-pair commands an agent must never run.
+description: Use when working in a repository whose changes go through git-pair review — creating a changeset, keeping ABOUT.md current, and handing work to a human reviewer with `git pair`. Covers the author-side loop and the exit-code and JSON contracts.
 ---
 
 # git-pair
@@ -15,9 +11,10 @@ pushes nothing except the two durable refs of a recorded landing.
 
 Review state is derived, never stored. `changesets/<id>/` holds `ABOUT.md` and review threads;
 lifecycle transitions are commits carrying `Review-*` trailers; `refs/git-pair/archive/<id>` and
-`refs/git-pair/integrations/<id>` hold the durable pair written when work lands. This is to preserve the 
-review in history even if the author merges via squash or cherry-pick. (Please reformat this suggestion) There is no state
-file and no queue file, so `status` cannot be stale and a deleted branch cannot orphan a queue entry.
+`refs/git-pair/integrations/<id>` hold the durable pair written when work lands, so the review survives a
+merge that does not carry those commits — a squash or a cherry-pick leaves no `Review-*` trailer reachable
+from the destination branch, and the archive ref still names the reviewed tip. There is no state file and no
+queue file, so `status` cannot be stale and a deleted branch cannot orphan a queue entry.
 
 ## Roles
 

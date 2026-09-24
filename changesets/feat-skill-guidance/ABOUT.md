@@ -40,7 +40,10 @@ checked too, because a `SKILL.md` whose description does not parse is not loaded
 pointer into the PRD: an agent activates a skill to be told what to do, and a page that says "see PRD §22"
 sends it somewhere it cannot open. `references/cli.md` is the catalogue (every command, its flags, the exit
 codes, the JSON shapes); `references/integration.md` covers the landing contract for an agent who reads
-about it and does not run it; `references/installing-the-skill.md` covers the harness directories.
+about it and does not run it; `references/installing-the-skill.md` covers the harness directories. The
+opening paragraph states why the durable refs exist — a squash or a cherry-pick leaves the reviewed commits
+unreachable from the destination branch, and the archive ref is what keeps the review reachable — because an
+agent that knows the reason applies it, and an agent that memorised the layout does not.
 
 **`skills/embed.go`** — `//go:embed all:git-pair` and the `AGENTS.md` stanza, plus `Name`, `Files()` and
 `Read()`. The package lives in `skills/` rather than under `internal/` because `go:embed` cannot reach above
@@ -74,6 +77,13 @@ the opposite decision, and the reason it gave — a surface that duplicates the 
 happened, one repository away, where nothing could see it. `docs/plans/review-architecture-v2/reconciliation.md`
 §0.8.1 argued for this repository, with the canonical wording staying in the requirements and the skill held
 to the same names; that is what landed, except that the skill restates the loop instead of pointing at it.
+
+**A description is a trigger, not a summary.** The frontmatter `description` is what a harness matches
+before it reads anything else, and a match loads the whole body. So it names the situation and the tool —
+git-pair review, a changeset, `ABOUT.md`, `git pair` — and stops. Enumerating `change ready`, `change wait`,
+`change feedback` and `check` there would index the body for a reader who already has it, and the same goes
+for the never-run commands: the rule belongs where the agent reads it at the moment it applies, in the Roles
+section, not in the line that decides whether the file is opened at all.
 
 **A self-contained skill, not a pointer into the PRD.** The loop is 40 lines and an agent needs it in front
 of it. The alternative — a page that names the PRD sections — optimises for one copy of the text and
