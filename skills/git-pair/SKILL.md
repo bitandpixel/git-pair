@@ -12,8 +12,8 @@ pushes nothing except the two durable refs of a recorded landing.
 Review state is derived, never stored. `changesets/<id>/` holds `ABOUT.md` and review threads;
 lifecycle transitions are commits carrying `Review-*` trailers; `refs/git-pair/archive/<id>` and
 `refs/git-pair/integrations/<id>` hold the durable pair written when work lands, so the review survives a
-merge that does not carry those commits — a squash or a cherry-pick leaves no `Review-*` trailer reachable
-from the destination branch, and the archive ref still names the reviewed tip. There is no state file and no
+merge that does not carry those commits — a squash or a cherry-pick may leave no `Review-*` trailer reachable
+and review context in intermediate commit diffs is also lost.  The archive ref will persist the reviewed tip. There is no state file and no
 queue file, so `status` cannot be stale and a deleted branch cannot orphan a queue entry.
 
 ## Roles
