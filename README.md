@@ -550,8 +550,8 @@ of the override. See `docs/plans/completed/gitpr-mvp/research/git-plumbing-findi
 ## Command reference
 
 Every command accepts the persistent `--json` flag, but only `status`, `change ready`,
-`change unready`, `change wait`, `review submit`, `review history`, `queue`, `check`, `skill list` and
-`integration record` change output for it; elsewhere it is accepted and ignored.
+`change unready`, `change wait`, `review submit`, `review history`, `queue`, `check`, `skill list`,
+`skill install` and `integration record` change output for it; elsewhere it is accepted and ignored.
 
 Every command also accepts `--default-branch <ref>`, which states the integration branch that
 "has this landed?" is measured against. Without it git-pair reads git's own answer
@@ -584,6 +584,8 @@ landed.
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 | `skill list` | — | the agent skill this binary carries, and every directory a harness would read it from, each marked `current`, `stale`, `absent` or `unavailable`. `current` means the installed bytes equal this binary's, which is the check that keeps an installed skill from describing an older tool. Read-only |
 | `skill show` | `[path]` | prints one compiled-in file of the skill, `SKILL.md` by default, so it can be read or copied without a checkout. No JSON output |
+| `skill install` | `--harness agents\|pi\|claude`, `--scope repo\|user`, `--dest <dir>`, `--dry-run`, `--force` | writes the compiled-in skill into a skills directory as `git-pair/`. Matching files are left alone, differing files are refused without `--force`, and files git-pair did not write are reported and kept. `--dest` cannot be combined with `--harness` or `--scope` |
+| `skill agents-md` | — | prints the pointer stanza for `AGENTS.md` or `CLAUDE.md`, for a harness with no skill discovery. No JSON output |
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
 commits, no blocking surviving additions — the last acknowledged with
@@ -1078,6 +1080,66 @@ Documented rather than configured on anyone's behalf, because publishing review 
 about who gets to read it — the archive holds every commit of the review, including ones the author
 later dropped. Until that line is run, the author's clone holds the only copy, and a CI job reporting
 missing refs is describing exactly that.
+
+## The agent skill
+
+The contract above is also a file an agent reads. `skills/git-pair/` is the skill — the author-side loop,
+the roles, the exit codes and the prohibitions in one page, with the flags, the JSON shapes and the
+landing contract in references beside it — and the same bytes are compiled into the binary.
+
+Every page under `skills/` is held to the command tree by `docs_contract_test.go`, the way this file and
+the README are: a command name or a ref path the prose uses must be one the code answers to, and the
+reference page must name every command. That check exists because the first version of this skill lived
+beside a different repository and documented a `review close` that had been removed and a `refs/reviews/*`
+namespace that never existed. Prose that drifts from the code is read as a promise.
+
+Put it where the agents working on a repository read skills:
+
+```bash
+$ git pair skill list
+git-pair skill "git-pair" — 4 files, from git-pair 0.1.0
+
+  agents  repo   .agents/skills/git-pair              absent
+  agents  user   $HOME/.agents/skills/git-pair        absent
+  pi      repo   .pi/skills/git-pair                  absent
+  pi      user   $HOME/.pi/agent/skills/git-pair      absent
+  claude  repo   .claude/skills/git-pair              absent
+  claude  user   $HOME/.claude/skills/git-pair        absent
+
+current is the same bytes this git-pair ships; stale is an older copy, read as fact.
+
+$ git pair skill install
+installed the git-pair skill into .agents/skills/git-pair
+  wrote      SKILL.md
+  wrote      references/cli.md
+  wrote      references/installing-the-skill.md
+  wrote      references/integration.md
+
+Commit .agents/skills/git-pair so every clone, worktree and CI job gets the same copy.
+A harness that was already running has read its skill directories: restart it if the skill does not appear.
+```
+
+`--harness` chooses whose directories to write, `--scope` chooses the repository or the home directory,
+and `--dest` names a directory outright for a harness git-pair has no row for:
+
+| Harness | Per repository | Per machine |
+| --- | --- | --- |
+| `agents` (default; Codex CLI and pi both read it) | `.agents/skills/` | `~/.agents/skills/` |
+| `pi` | `.pi/skills/` | `~/.pi/agent/skills/` |
+| `claude` | `.claude/skills/` | `~/.claude/skills/` |
+
+Copying is equally supported: copy `skills/git-pair/` — the directory, with its `references/` — into any
+of those. `git pair skill list` still reports `current` or `stale` against it, which is the point of
+compiling the skill in: the check does not depend on how the files got there.
+
+For a harness with no skill discovery, print the pointer stanza instead:
+
+```bash
+git pair skill agents-md >> AGENTS.md
+```
+
+It names where the skill is and the three rules agents most often get wrong. A repository can carry both
+halves — the stanza for every harness, and the installed skill for the ones that read it.
 
 ## Configuration
 

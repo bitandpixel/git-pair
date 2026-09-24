@@ -75,6 +75,7 @@ than guess what has landed.
 
 Full flags, span semantics and the JSON shapes: [references/cli.md](references/cli.md). The landing
 side, which you read about and do not run: [references/integration.md](references/integration.md).
+Putting this skill into a repository or a machine: [references/installing-the-skill.md](references/installing-the-skill.md).
 
 ## ABOUT.md
 

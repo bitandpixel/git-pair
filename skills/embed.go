@@ -23,6 +23,16 @@ import (
 //go:embed all:git-pair
 var skillFS embed.FS
 
+// AgentsMD is the pointer stanza for a harness with no skill discovery — the text an agent reads from
+// AGENTS.md or CLAUDE.md when nothing else will tell it that this repository reviews changes with
+// git-pair. It lives beside the skill rather than in a Go string so it is reviewed as prose.
+//
+//go:embed agents-md.md
+var agentsMD string
+
+// AgentsMDPointer returns that stanza, with its trailing newline.
+func AgentsMDPointer() string { return agentsMD }
+
 // Name is the skill's directory name, and the `name` in its frontmatter. The Agent Skills standard
 // requires the two to agree, and a harness that matches on one and opens the other would otherwise read
 // two different things. internal/cli/docs_contract_test.go checks the frontmatter half.

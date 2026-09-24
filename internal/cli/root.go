@@ -105,6 +105,7 @@ var noJSONCommands = map[string]bool{
 	"change feedback": true,
 	"diff":            true,
 	"skill show":      true,
+	"skill agents-md": true,
 }
 
 // warnUnansweredJSON says out loud that `--json` changed nothing on a viewer. The note stays on stderr, so

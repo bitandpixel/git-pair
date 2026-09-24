@@ -30,13 +30,15 @@ by a test.
 | `integration publish` | `[<changeset>…]`, `--remote <name>` | **not an agent command.** Sends a changeset's two refs to the shared remote, unforced — the only git-pair command that pushes, and the only thing it may push is `refs/git-pair/*`. Idempotent |
 | `skill list` | none | the skill compiled into this binary, and every directory a harness would read it from, marked `current`, `stale`, `absent` or `unavailable`. Read-only |
 | `skill show` | `[path]` | prints the compiled-in `SKILL.md`, or a file inside the skill such as `references/cli.md`. No JSON output |
+| `skill install` | `--harness agents\|pi\|claude`, `--scope repo\|user`, `--dest <dir>`, `--dry-run`, `--force` | writes the compiled-in skill into a skills directory as `git-pair/`. Files that already match are left alone, files that differ are refused without `--force`, and files git-pair did not write are reported and kept. `--dest` names the directory outright and cannot be combined with `--harness` or `--scope`. See [installing-the-skill.md](installing-the-skill.md) |
+| `skill agents-md` | none | prints the pointer stanza for `AGENTS.md` or `CLAUDE.md`, for a harness with no skill discovery. No JSON output |
 
 `review` with no subcommand is `review open` and takes the same flags.
 
 ## Flags every command takes
 
-- `--json` — machine-readable output where supported. `change feedback`, `diff` and `skill show` have
-  none, and say so on stderr rather than printing nothing.
+- `--json` — machine-readable output where supported. `change feedback`, `diff`, `skill show` and
+  `skill agents-md` have none, and say so on stderr rather than printing nothing.
 - `--default-branch <ref>` — the integration branch that "has this landed?" is measured against.
   Without it git-pair reads git's own answer (`refs/remotes/origin/HEAD`, then a sole `origin/main` or
   `origin/master`, then a local `main` or `master`) and refuses if there is nothing to compare against.
@@ -57,8 +59,8 @@ opens a historical span, which is read-only.
 | Code | Meaning | Seen as |
 | --- | --- | --- |
 | 0 | success | — |
-| 1 | a git-pair rule or the repository state refused the operation | surviving additions; dirty working tree; missing `ABOUT.md`; `check` printing `NOT READY:`; `change wait` timing out or finding a `WORKING` changeset; `integration record` verifying nothing |
-| 2 | usage error | unknown flag, command or subcommand; `no changeset for this branch`; detached HEAD; more than one changeset and none named with `--changeset`; `cannot tell which branch is the integration branch`; `--fetch` with no remote configured; a path outside the span; editor or TUI commands without a terminal |
+| 1 | a git-pair rule or the repository state refused the operation | surviving additions; dirty working tree; missing `ABOUT.md`; `check` printing `NOT READY:`; `change wait` timing out or finding a `WORKING` changeset; `integration record` verifying nothing; `skill install` meeting a file that differs, with no `--force` |
+| 2 | usage error | unknown flag, command or subcommand; `no changeset for this branch`; detached HEAD; more than one changeset and none named with `--changeset`; `cannot tell which branch is the integration branch`; `--fetch` with no remote configured; a path outside the span; editor or TUI commands without a terminal; `skill install` with an unknown `--harness` or `--scope`, or with `--dest` alongside either |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess failing for a reason other than an unresolvable revision |
 
 Exit 1 says the invocation was right and the repository said no: fix the state and retry. Exit 2 says the
