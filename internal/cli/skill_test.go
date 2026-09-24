@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,6 +129,40 @@ func TestSkillListReportsWhatHasNoHome(t *testing.T) {
 			}
 		}
 	}
+
+	// The other half of the row's name: with no home to resolve, the user rows report it too, and say so
+	// in the form a person reads.
+	t.Setenv("HOME", "")
+	out := runIn(t, t.TempDir(), "skill", "list").mustSucceed(t, "skill", "list")
+	if !strings.Contains(out.stdout, "(no home directory)") {
+		t.Errorf("with no home, the table does not say which rows that leaves\n%s", out.stdout)
+	}
+	for _, target := range skillTargetsOf(t, runIn(t, t.TempDir(), "skill", "list", "--json").
+		mustSucceed(t, "skill", "list")) {
+		if target.Scope == "user" && target.State != "unavailable" {
+			t.Errorf("%s/user state = %q with no home, want \"unavailable\"", target.Harness, target.State)
+		}
+	}
+}
+
+// The human table is what a person reads, and README shows a transcript of it, so the header's file count
+// and the shortened paths are claims worth pinning.
+func TestSkillListHumanTableNamesTheSkillAndItsPlaces(t *testing.T) {
+	f := newRepo(t)
+	isolatedHome(t)
+
+	res := runIn(t, f.Dir(), "skill", "list").mustSucceed(t, "skill", "list")
+	if want := fmt.Sprintf("%d files, from git-pair", len(skills.Files())); !strings.Contains(res.stdout, want) {
+		t.Errorf("the header does not count the compiled skill's files as %q\n%s", want, res.stdout)
+	}
+	for _, want := range []string{
+		"agents  repo", ".agents/skills/git-pair", ".pi/skills/git-pair", ".claude/skills/git-pair",
+		"$HOME/.agents/skills/git-pair", "absent",
+	} {
+		if !strings.Contains(res.stdout, want) {
+			t.Errorf("the table never shows %q\n%s", want, res.stdout)
+		}
+	}
 }
 
 func TestSkillListComparesAnInstalledSkillWithThisBinary(t *testing.T) {
@@ -170,6 +205,13 @@ func TestSkillListComparesAnInstalledSkillWithThisBinary(t *testing.T) {
 	if len(got.Unmanaged) != 1 || got.Unmanaged[0] != filepath.Join("notes", "team.md") {
 		t.Errorf("unmanaged = %v, want the one file git-pair did not write", got.Unmanaged)
 	}
+
+	// The same fact in the form a person reads: something sits beside the shipped skill that git-pair
+	// did not write, and `list` is where a reviewer would learn it.
+	human := runIn(t, f.Dir(), "skill", "list").mustSucceed(t, "skill", "list")
+	if !strings.Contains(human.stdout, "notes/team.md") || !strings.Contains(human.stdout, "not written by git-pair") {
+		t.Errorf("the table hides the file git-pair did not write\n%s", human.stdout)
+	}
 }
 
 // installSkill writes the skill this binary carries into dir, the way an install would.
@@ -199,7 +241,7 @@ func TestSkillShowPrintsTheCompiledSkill(t *testing.T) {
 	} {
 		file := "SKILL.md"
 		if len(args) == 3 {
-			file = strings.TrimPrefix(strings.TrimPrefix(args[2], "git-pair/"), "./")
+			file = strings.TrimPrefix(args[2], "git-pair/")
 		}
 		want, err := skills.Read(file)
 		if err != nil {

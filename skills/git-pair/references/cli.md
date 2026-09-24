@@ -71,7 +71,9 @@ invocation was wrong: retrying unchanged fails again.
 Output is indented two spaces. An array is `[]` for "asked, and none", never null; a missing key means
 the build did not ask. Two fields answer null on purpose, and neither is a list: `status`'s
 `latest_review` (no object before the first review) and `uncommitted` (the question belongs to a checkout
-this command does not stand in).
+this command does not stand in). The examples below name the keys an agent branches on, not every key the
+command emits — README's JSON contracts is the complete shape, and a field missing here says nothing about
+whether it exists.
 
 `git pair status --json`, before the first review:
 
@@ -145,8 +147,9 @@ up". A timeout exits 1, an answered wait exits 0.
 changesets the queue cannot explain, `parent_notes` for a READY child whose parent has moved or landed,
 and `landed_unrecorded` carrying the `integration record` invocation that closes each gap.
 
-`git pair change ready --json` returns the `status` fields plus `ready_commit`,
-`review_queue_visible`, `acknowledged_survivors` and `surviving_review_artifacts`.
+`git pair change ready --json` prints `changeset`, `branch`, `base`, `state`, `head`, `ready_commit`,
+`review_queue_visible` and `acknowledged_survivors`; `surviving_review_artifacts` appears only when a
+surviving-additions report existed.
 `git pair change unready --json` reports `was` and `state`, with `recorded` false when there was nothing
 to withdraw. `git pair review history --json` lists the submissions with `index`, `outcome`, `sha`,
 `short`, `reviewed_head`, `subject`, `author`, `when`, `age`.

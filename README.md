@@ -551,7 +551,8 @@ of the override. See `docs/plans/completed/gitpr-mvp/research/git-plumbing-findi
 
 Every command accepts the persistent `--json` flag, but only `status`, `change ready`,
 `change unready`, `change wait`, `review submit`, `review history`, `queue`, `check`, `skill list`,
-`skill install` and `integration record` change output for it; elsewhere it is accepted and ignored.
+`skill install`, `integration record` and `integration publish` change output for it; elsewhere it is
+accepted and ignored.
 
 Every command also accepts `--default-branch <ref>`, which states the integration branch that
 "has this landed?" is measured against. Without it git-pair reads git's own answer
@@ -611,7 +612,7 @@ nothing, those reads exit 2. For a span of another branch, name its ends: `git p
 | --- | --- | --- |
 | 0 | success | — |
 | 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:`; `integration record` finding no changeset directory at `--source`, a head that was never reviewed, a landing that is not in the destination branch or did not add the changeset directory, or a record naming a different commit |
-| 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`/`integration`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; `cannot tell which branch is the integration branch`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal; more than one changeset directory in `--source` and none named with `--changeset` |
+| 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`/`integration`/`skill`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; detached HEAD; `cannot tell which branch is the integration branch`; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal; more than one changeset directory in `--source` and none named with `--changeset`; `skill install` with an unknown `--harness` or `--scope`, or with `--dest` alongside either |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
 The split between 1 and 2 is deliberate and load-bearing for agents: exit 1 means the
@@ -627,9 +628,9 @@ Two fields answer null on purpose, and neither is a list. `status`'s `latest_rev
 does not exist before the first review. `uncommitted` is a bool that reports the question belongs to a
 checkout this command does not stand in.
 
-`git pair change feedback`, `git pair diff` and `git pair skill show` have no JSON output. `--json` is a
-global flag, so all three accept it. Each now says on stderr that the flag changed nothing, because an
-empty stdout reads to a machine as an empty answer.
+`git pair change feedback`, `git pair diff`, `git pair skill show` and `git pair skill agents-md` have no
+JSON output. `--json` is a global flag, so all four accept it. Each now says on stderr that the flag changed
+nothing, because an empty stdout reads to a machine as an empty answer.
 
 `git pair status --json`, waiting for the first review. Once a review exists `latest_review`
 becomes `{"index": 0, "outcome": "block", "commit": "332887c", "reviewed_head": "1a2b3c4"}` —
@@ -883,8 +884,9 @@ neither:
 }
 ```
 
-`git pair change ready --json` returns the `status` fields plus `ready_commit` (full SHA),
-`review_queue_visible`, `acknowledged_survivors` and `surviving_review_artifacts`.
+`git pair change ready --json` prints `changeset`, `branch`, `base`, `state`, `head`, `ready_commit` (full
+SHA), `review_queue_visible` and `acknowledged_survivors`. `surviving_review_artifacts` appears only when a
+surviving-additions report existed — which is when `--allow-surviving-review-additions` acknowledged lines.
 
 `git pair change unready --json` — `was` is the state the command found and `state` the state after
 it, which differ only when a marker was written. `recorded` is false when there was nothing to
@@ -1087,11 +1089,13 @@ The contract above is also a file an agent reads. `skills/git-pair/` is the skil
 the roles, the exit codes and the prohibitions in one page, with the flags, the JSON shapes and the
 landing contract in references beside it — and the same bytes are compiled into the binary.
 
-Every page under `skills/` is held to the command tree by `docs_contract_test.go`, the way this file and
-the README are: a command name or a ref path the prose uses must be one the code answers to, and the
+Every page under `skills/` is held to the command tree by `docs_contract_test.go`, the way the spec and
+this file are: a command name or a ref path the prose uses must be one the code answers to, and the
 reference page must name every command. That check exists because the first version of this skill lived
 beside a different repository and documented a `review close` that had been removed and a `refs/reviews/*`
-namespace that never existed. Prose that drifts from the code is read as a promise.
+namespace that never existed. Prose that drifts from the code is read as a promise. What the check does not
+cover is the flags, the JSON field names, and the harness directories below: those are prose, and a reviewer
+reads them.
 
 Put it where the agents working on a repository read skills:
 
@@ -1120,7 +1124,10 @@ A harness that was already running has read its skill directories: restart it if
 ```
 
 `--harness` chooses whose directories to write, `--scope` chooses the repository or the home directory,
-and `--dest` names a directory outright for a harness git-pair has no row for:
+and `--dest` names a directory outright for a harness git-pair has no row for. The paths are each harness's
+documented discovery rules, cited with the date they were read in
+[`skills/git-pair/references/installing-the-skill.md`](skills/git-pair/references/installing-the-skill.md)
+and in the `skillHarness` comment — not a probe of what some version of a harness happens to scan:
 
 | Harness | Per repository | Per machine |
 | --- | --- | --- |

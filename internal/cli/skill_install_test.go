@@ -131,11 +131,22 @@ func TestSkillInstallRefusesToOverwriteADifferentFile(t *testing.T) {
 	}
 
 	forced := installed(t, runIn(t, f.Dir(), "skill", "install", "--force", "--json").
-		mustSucceed(t, "skill", "install"))
+		mustSucceed(t, "skill", "install", "--force"))
 	if have, err := onDisk(t, dir, "SKILL.md"); err != nil {
 		t.Errorf("--force left no SKILL.md: %v", err)
 	} else if want, _ := skills.Read("SKILL.md"); have != string(want) {
 		t.Errorf("--force did not replace SKILL.md")
+	}
+	// "replaced" rather than "wrote": an overwrite of a file somebody else made is the thing a person
+	// scanning this output needs to see, and it is not the same event as writing a new file. The file is
+	// made to differ again because the run above has already brought it back to this binary's bytes.
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("somebody else's\n"), 0o644); err != nil {
+		t.Fatalf("write the conflicting SKILL.md again: %v", err)
+	}
+	human := runIn(t, f.Dir(), "skill", "install", "--force").
+		mustSucceed(t, "skill", "install", "--force")
+	if !strings.Contains(human.stdout, "replaced   SKILL.md") {
+		t.Errorf("--force did not say which files it replaced\n%s", human.stdout)
 	}
 	// The file git-pair did not write survives the install and is named, so the next reader knows it
 	// is there and knows who did not write it.
@@ -144,6 +155,45 @@ func TestSkillInstallRefusesToOverwriteADifferentFile(t *testing.T) {
 	}
 	if len(forced.Unmanaged) != 1 || forced.Unmanaged[0] != "notes.md" {
 		t.Errorf("unmanaged = %v, want notes.md", forced.Unmanaged)
+	}
+}
+
+// A dry run predicts the real run, and the real run refuses. A --dry-run that planned happily past a
+// conflicting file would tell a caller to expect success where the command stops.
+func TestSkillInstallDryRunRefusesTheSameThing(t *testing.T) {
+	f := newRepo(t)
+	isolatedHome(t)
+	dir := filepath.Join(f.Dir(), ".agents", "skills", "git-pair")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create the skill directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("somebody else's\n"), 0o644); err != nil {
+		t.Fatalf("write the conflicting SKILL.md: %v", err)
+	}
+
+	res := runIn(t, f.Dir(), "skill", "install", "--dry-run")
+	if res.code != exitRefusal {
+		t.Fatalf("dry run over a different file exited %d, want %d\nstdout: %s",
+			res.code, exitRefusal, res.stdout)
+	}
+	if !strings.Contains(res.stderr, "--force") {
+		t.Errorf("the dry-run refusal does not name the way out\nstderr: %s", res.stderr)
+	}
+	if have, err := onDisk(t, dir, "SKILL.md"); err != nil || have != "somebody else's\n" {
+		t.Errorf("a refused dry run changed the file: %q, %v", have, err)
+	}
+}
+
+// With no home to resolve, a user-scoped install has nowhere to write. That is the repository saying no
+// to a correct command — exit 1 — and the message carries the way out.
+func TestSkillInstallWithoutAHomeRefuses(t *testing.T) {
+	t.Setenv("HOME", "")
+	res := runIn(t, t.TempDir(), "skill", "install")
+	if res.code != exitRefusal {
+		t.Fatalf("install with no home exited %d, want %d\nstderr: %s", res.code, exitRefusal, res.stderr)
+	}
+	if !strings.Contains(res.stderr, "--dest") {
+		t.Errorf("the refusal never names --dest, the only way to answer it\nstderr: %s", res.stderr)
 	}
 }
 
@@ -255,6 +305,19 @@ func TestSkillInstallToAnArbitraryDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dest, "git-pair", "SKILL.md")); err != nil {
 		t.Errorf("nothing was written under --dest: %v", err)
+	}
+
+	// Neither closing sentence is true of a directory git-pair was handed: it is not in a repository
+	// somebody commits, and it is not the home directory of one account.
+	human := runIn(t, f.Dir(), "skill", "install", "--dest", dest+"/other").
+		mustSucceed(t, "skill", "install", "--dest", dest+"/other")
+	for _, not := range []string{"Every repository this account opens", "Commit ", "not written by git-pair"} {
+		if strings.Contains(human.stdout, not) {
+			t.Errorf("a --dest install said %q, which it has no way to know\n%s", not, human.stdout)
+		}
+	}
+	if !strings.Contains(human.stdout, "restart it") {
+		t.Errorf("a --dest install gave no advice a caller can act on\n%s", human.stdout)
 	}
 }
 

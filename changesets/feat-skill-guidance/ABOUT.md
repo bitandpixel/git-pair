@@ -47,11 +47,14 @@ about it and does not run it; `references/installing-the-skill.md` covers the ha
 its own package directory, and the skill has to stay where a person walking the repository finds it. The
 consequence — one Go file inside a skills directory — is written up in the package comment.
 
-**`internal/cli/skill.go`** — the `skill` group and its four commands. `skillTarget` is the one shape both
-the table and the install report; `inspectSkill` (for `list`) and `planSkillInstall` (for `install`) ask the
-same question of a directory — what matches, what differs, what is not ours — and `unmanagedFiles` is shared
-between them. `skillRepoRoot` deliberately does not carry `loadRepo`'s exit 3 for an absent repository: these
-commands read the filesystem, and no repository is a row in the table rather than a failure.
+**`internal/cli/skill.go`** — the `skill` group and its four commands. `list` reports `skillTarget`s and
+`install` reports a `skillInstallReport`; both take their answer from the same directory comparison,
+because "this copy is current" and "there is nothing to write" are one predicate and will drift the moment
+they are two implementations — `inspectSkill` is `planSkillInstall` read rather than written, and
+`unmanagedFiles` is shared. Each installed file is written through a temporary name and renamed, the way a
+review mark is, so an interrupted install cannot leave a `SKILL.md` that parses as the beginning of one.
+`skillRepoRoot` deliberately does not carry `loadRepo`'s exit 3 for an absent repository: these commands read
+the filesystem, and no repository is a row in the table rather than a failure.
 
 **`internal/cli/docs_contract_test.go`** — `docFiles(t)` now includes every page under `skills/`, found by
 walking the directory so a new reference page is covered without anyone adding it; a walk that finds no
@@ -96,18 +99,33 @@ row for, and `codex` resolves to `agents` because that is the truth for Codex CL
 what it left. Deleting is a different operation, the skill directory may hold a team's own notes, and a
 command whose worst case is "it removed something" will not be run on somebody's setup step.
 
+**The harness table cites its sources.** Six places state where each harness reads skills — the code, its
+`--help`, the README, the PRD and the skill's reference page — and this is the one table where being wrong is
+silent: an install into a directory nothing reads succeeds, `skill list` says `current`, and the agent never
+sees the skill. So the `skillHarness` comment names the document each row came from and the date it was read
+(2026-09-24: pi's `docs/skills.md`, the Codex CLI and Claude Code skills pages), the reference page repeats
+the citations, and the prose says "documented discovery rules" rather than "what the harness does". `--dest`
+remains the answer for any harness with no row.
+
+**Closing advice only for a destination git-pair chose.** `--dest` prints neither "commit this" nor "every
+repository this account opens", because a directory it was handed is in neither of those places. The same
+reasoning is why `--dry-run` refuses a conflict rather than planning past it: a dry run that predicted
+success where the real command stops is not a preflight.
+
 **The refusal is exit 1, not a warning.** An overwritten skill is the failure this feature exists to prevent,
 so overwriting needs to be a decision somebody made with `--force`. Exit 1 also fits the table: the invocation
 was right, the repository said no.
 
 ## Validation
 
-- `go test ./...` green, including 14 tests in `skill_test.go` and `skill_install_test.go`: the `list` table
-  and its four states, byte-for-byte install, idempotence, the refusal, `--force`, unmanaged files kept,
-  harness/scope/`--dest` resolution and each usage error, `show` against the compiled copy, `agents-md`
-  against the compiled stanza.
-- The JSON contract tests gained `skill list --json` in the null-array sweep and both viewers in the
-  "the flag changed nothing" test.
+- `go test ./...` green, including 16 tests in `skill_test.go` and `skill_install_test.go`: the `list` table
+  in both output forms and each of its four states, the unmanaged file visible to a person as well as to a
+  machine, byte-for-byte install, idempotence, the refusal, `--force` saying which files it replaced,
+  unmanaged files kept, a dry run refusing what the real run refuses, no-home and no-repository refusals
+  naming their way out, harness/scope/`--dest` resolution and each usage error, `show` against the compiled
+  copy, and `agents-md` against the compiled stanza.
+- The JSON contract tests gained `skill list --json` and `skill install --json` in the null-array sweep, and
+  both viewers in the "the flag changed nothing" test.
 - `docs_contract_test.go` green with the skill in `docFiles`, and green for the new commands in `completeDocs`.
 - Manual: `skill list` and `skill install` in a scratch repository, the second install reporting nothing to
   write, `--dry-run` writing nothing, the refusal against a hand-edited `SKILL.md` followed by `--force`,
@@ -125,6 +143,12 @@ was right, the repository said no.
 - The skill restates the loop, so a command change can leave the prose accurate about names and wrong about
   behaviour. The test catches renamed and removed commands; semantic drift is still a reviewer's job, exactly
   as it is for the README.
+- The same limit is narrower than it looks: `docs_contract_test.go` checks command names, ref paths and the
+  catalogue, not the flag columns, not the JSON field names, and not the harness table. A renamed flag would
+  pass. The pages are held to that standard by review, and the citations above are what makes the harness
+  table checkable at all.
+- An install is not one transaction. Each file lands atomically, so no single file can be torn, but an
+  interrupted install can leave a half-installed skill — which is what `stale` is there to report.
 - `--dest` is not remembered, so `git pair skill list` cannot report on a custom directory. `--dry-run` on
   the same `--dest` is the check.
 

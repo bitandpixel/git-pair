@@ -103,6 +103,11 @@ func TestNoJSONArrayIsEverNull(t *testing.T) {
 			runs:  [][]string{{"queue", "--json"}, {"skill", "list", "--json"}},
 		},
 		{
+			name:  "an install",
+			setup: func(t *testing.T) string { return newRepo(t).Dir() },
+			runs:  [][]string{{"skill", "install", "--json"}},
+		},
+		{
 			name: "work in flight",
 			setup: func(t *testing.T) string {
 				f, _ := newChangeset(t, "booking", "main")

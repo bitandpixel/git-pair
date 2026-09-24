@@ -51,10 +51,26 @@ const (
 	skillStateUnavailable = "unavailable"
 )
 
-// skillHarness is one family of skill locations. The two paths come from each harness's own documented
-// discovery rules, and `agents` is first because it is the one place that serves more than one harness:
-// Codex CLI and pi both read `.agents/skills/` in the repository and `~/.agents/skills/` in the home
-// directory, so a committed `.agents/skills/git-pair/` needs no second copy for the other one.
+// skillHarness is one family of skill locations, and the two paths are that harness's documented
+// discovery rules — not a probe of what some version of it happens to scan. Each row cites the document
+// it came from and the date it was read, because this table is the one place in git-pair where being
+// wrong is silent: an install into a directory nothing reads succeeds, `skill list` says `current`, and
+// the agent never sees the skill. `--dest` is the answer for a harness with no row here.
+//
+// Verified 2026-09-24 against:
+//
+//   - pi — `docs/skills.md` (pi 0.85.1): global `~/.pi/agent/skills/` and `~/.agents/skills/`; project
+//     `.pi/skills/` and `.agents/skills/` in the working directory and its ancestors up to the repository
+//     root; and a `skills` array in settings for directories beyond those.
+//   - Codex CLI — the Skills page at developers.openai.com/codex/skills: `.agents/skills` in the working
+//     directory, in each directory above it, and at the repository root; `$HOME/.agents/skills` for the
+//     user scope.
+//   - Claude Code — the Skills page at code.claude.com/docs/en/skills: `.claude/skills/<name>/SKILL.md`
+//     in the project, read from the starting directory and every parent up to the repository root, and
+//     `~/.claude/skills/<name>/SKILL.md` for the personal scope.
+//
+// `agents` is first because it is the one place that serves more than one harness: Codex CLI and pi both
+// read `.agents/skills/`, so a committed `.agents/skills/git-pair/` needs no second copy for the other.
 type skillHarness struct {
 	name string
 	repo string
@@ -144,7 +160,7 @@ func runSkillList(ctx context.Context, a *app) error {
 		return err
 	}
 	targets := skillTargets(repoRoot)
-	home, _ := os.UserHomeDir()
+	home := homeDir()
 	if a.json {
 		return a.emitJSON(struct {
 			Skill      string        `json:"skill"`
@@ -164,6 +180,11 @@ func runSkillList(ctx context.Context, a *app) error {
 	}
 	for _, t := range targets {
 		a.printf("  %-7s %-5s  %-*s  %s\n", t.Harness, t.Scope, width, t.display(repoRoot, home), t.State)
+		for _, rel := range t.Unmanaged {
+			// The same line `install` prints: a file beside the shipped skill that git-pair did not
+			// write belongs in the table a person reads, not only in the JSON.
+			a.printf("                             kept       %s (not written by git-pair)\n", rel)
+		}
 	}
 	a.printf("\ncurrent is the same bytes this git-pair ships; stale is an older copy, read as fact.\n")
 	return nil
@@ -200,11 +221,11 @@ func skillRepoRoot(ctx context.Context, a *app) (string, error) {
 	return repo.Dir, nil
 }
 
-// skillTargets builds the table `skill list` prints, in harness order with each harness's repository
-// row before its home row. Nothing about this is a search: a skill directory is a documented location,
-// and guessing at a fourth one would install the skill somewhere no harness reads.
+// skillTargets builds the table `skill list` prints, in harness order with each harness's repository row
+// before its home row. Nothing about this is a search: the locations are the documented ones (see
+// skillHarness), and guessing at a fourth would install the skill somewhere no harness reads.
 func skillTargets(repoRoot string) []skillTarget {
-	home, homeErr := os.UserHomeDir()
+	home := homeDir()
 	var out []skillTarget
 	for _, h := range skillHarnesses {
 		for _, scope := range []string{"repo", "user"} {
@@ -212,7 +233,7 @@ func skillTargets(repoRoot string) []skillTarget {
 			switch {
 			case scope == "repo" && repoRoot == "":
 				target.State = skillStateUnavailable
-			case scope == "user" && homeErr != nil:
+			case scope == "user" && home == "":
 				target.State = skillStateUnavailable
 			case scope == "repo":
 				target.Path = filepath.Join(repoRoot, h.repo, skills.Name)
@@ -229,26 +250,25 @@ func skillTargets(repoRoot string) []skillTarget {
 	return out
 }
 
-// inspectSkill compares one installed skill directory against the skill compiled into this binary.
+// inspectSkill reports what one installed skill directory holds against the skill compiled into this
+// binary. It is `planSkillInstall` read rather than written — the same comparison, bucketed for a table —
+// because `current` in `list` and "nothing to write" in `install` are one predicate and will drift the
+// moment they are two implementations.
 //
-// A directory that cannot be read is stale rather than current: nothing proves it matches, and reporting
-// a match that was not verified is the failure mode this whole command exists to avoid.
+// A directory that cannot be read is stale rather than current: nothing proves it matches, and reporting a
+// match that was not verified is the failure mode this whole command exists to avoid.
 func inspectSkill(root string) skillTarget {
 	if _, err := os.Stat(root); err != nil {
 		return skillTarget{State: skillStateAbsent}
 	}
-	state := skillTarget{State: skillStateCurrent}
-	for _, rel := range skills.Files() {
-		want, err := skills.Read(rel)
-		if err != nil {
-			continue
-		}
-		have, err := os.ReadFile(filepath.Join(root, rel))
-		if err != nil || !bytes.Equal(want, have) {
-			state.State = skillStateStale
-		}
+	plan, err := planSkillInstall(root)
+	if err != nil {
+		return skillTarget{State: skillStateStale}
 	}
-	state.Unmanaged = unmanagedFiles(root)
+	state := skillTarget{State: skillStateCurrent, Unmanaged: plan.unmanaged}
+	if len(plan.wouldWrite) > 0 || len(plan.conflicts) > 0 {
+		state.State = skillStateStale
+	}
 	return state
 }
 
@@ -366,8 +386,10 @@ func runSkillInstall(cmd *cobra.Command, a *app, opts *skillInstallOptions) erro
 	}
 
 	written := append([]string{}, plan.wouldWrite...)
+	replaced := []string(nil)
 	if opts.force {
-		written = append(written, plan.conflicts...)
+		replaced = plan.conflicts
+		written = append(written, replaced...)
 	}
 	if !opts.dryRun {
 		for _, rel := range written {
@@ -379,15 +401,25 @@ func runSkillInstall(cmd *cobra.Command, a *app, opts *skillInstallOptions) erro
 			if err != nil {
 				return err
 			}
-			if err := os.WriteFile(path, data, 0o644); err != nil {
-				return fmt.Errorf("write %s: %w", path, err)
+			// Written through a temporary file, the way a review mark is: an agent reads `SKILL.md` as
+			// frontmatter, so an install interrupted halfway must not leave a file that parses as the
+			// beginning of one. The rename is per file and the skill is not one transaction, which is
+			// what `skill list` reporting `stale` is there to say.
+			tmp := path + ".tmp"
+			if err := os.WriteFile(tmp, data, 0o644); err != nil {
+				return fmt.Errorf("write %s: %w", tmp, err)
+			}
+			if err := os.Rename(tmp, path); err != nil {
+				os.Remove(tmp)
+				return fmt.Errorf("replace %s: %w", path, err)
 			}
 		}
 	}
 	return printSkillInstall(a, skillInstallReport{
 		Harness: harnessName, Scope: scope, Dest: container, Path: dir,
 		Shown:  displayedSkillPath(dir, repoRoot, home),
-		DryRun: opts.dryRun, Written: written, Unchanged: plan.unchanged, Unmanaged: plan.unmanaged,
+		DryRun: opts.dryRun, Written: written, Replaced: replaced,
+		Unchanged: plan.unchanged, Unmanaged: plan.unmanaged,
 	})
 }
 
@@ -400,6 +432,7 @@ type skillInstallReport struct {
 	Shown     string
 	DryRun    bool
 	Written   []string
+	Replaced  []string
 	Unchanged []string
 	Unmanaged []string
 }
@@ -430,7 +463,11 @@ func printSkillInstall(a *app, r skillInstallReport) error {
 	} else {
 		a.printf("%s the %s skill into %s\n", verb, skills.Name, r.Shown)
 		for _, rel := range r.Written {
-			a.printf("  wrote      %s\n", rel)
+			if skillIn(r.Replaced, rel) {
+				a.printf("  replaced   %s\n", rel)
+			} else {
+				a.printf("  wrote      %s\n", rel)
+			}
 		}
 	}
 	for _, rel := range r.Unchanged {
@@ -442,15 +479,27 @@ func printSkillInstall(a *app, r skillInstallReport) error {
 	if r.DryRun {
 		return nil
 	}
-	switch {
-	case r.Dest == "":
-	case r.Scope == "repo":
+	// Which closing sentence is true is a fact about the destination, so it is asked of the scope that
+	// produced it. `--dest` answers neither: nothing here knows who else can read that directory, and
+	// promising "every repository this account opens" about /srv/shared/skills is this command's own
+	// failure mode — a statement about the machine the code did not establish.
+	switch r.Scope {
+	case "repo":
 		a.printf("\nCommit %s so every clone, worktree and CI job gets the same copy.\n", r.Shown)
-	default:
+	case "user":
 		a.printf("\nEvery repository this account opens now has the skill.\n")
 	}
 	a.printf("A harness that was already running has read its skill directories: restart it if the skill does not appear.\n")
 	return nil
+}
+
+func skillIn(list []string, want string) bool {
+	for _, got := range list {
+		if got == want {
+			return true
+		}
+	}
+	return false
 }
 
 // skillHarnessNamed resolves a `--harness` value, alias included.

@@ -36,6 +36,22 @@ Go file that embeds these files into the binary and the `AGENTS.md` stanza it pr
 
 ## Where each harness looks
 
+These are each harness's documented discovery rules, not a probe of what some version of it happens to
+scan. They were read on 2026-09-24 from:
+
+- **Codex CLI** — the Skills page at `developers.openai.com/codex/skills`: `.agents/skills` in the working
+  directory, in every directory above it, and at the repository root; `$HOME/.agents/skills` for the user
+  scope.
+- **pi** — `docs/skills.md` in the pi distribution (read at pi 0.85.1): global `~/.pi/agent/skills/` and
+  `~/.agents/skills/`, project `.pi/skills/`, and `.agents/skills/` in the working directory and its
+  ancestors up to the repository root.
+- **Claude Code** — the Skills page at `code.claude.com/docs/en/skills`: `.claude/skills/<name>/SKILL.md`
+  in the project, read from the starting directory and every parent up to the repository root, and
+  `~/.claude/skills/<name>/SKILL.md` for the personal scope.
+
+If one of those documents changes, the table in `internal/cli/skill.go` changes with it — the same date and
+sources are recorded in that file's `skillHarness` comment.
+
 | Harness | Per repository | Per machine |
 | --- | --- | --- |
 | Codex CLI | `.agents/skills/`, in every directory from the working directory up to the repository root | `~/.agents/skills/` |
@@ -48,8 +64,8 @@ the cheapest thing to commit. `--harness pi` uses pi's own `.pi/skills/` and `~/
 `--harness claude` uses `.claude/skills/` and `~/.claude/skills/`. `--harness codex` is accepted as a
 spelling of `agents`, because Codex reads those same directories.
 
-For a project-level skills directory written by one harness that another harness should also read, pi can
-be pointed at it directly — in `.pi/settings.json`:
+A harness can also be told where to look. pi documents a `skills` array in its settings, and its own example
+points it at another harness's project directory — in `.pi/settings.json`:
 
 ```json
 { "skills": ["../.claude/skills"] }
