@@ -261,7 +261,8 @@ func TestTheTextPaneShowsTheFileRatherThanItsPatch(t *testing.T) {
 	if strings.Contains(view, "+package main") {
 		t.Errorf("the pane shows a patch of the file the span created:\n%s", view)
 	}
-	// The header counts the file, in the place a diff's `+N −M` sits: one slot for "what is this, and how
+	// bonjour
+	// The headerz counts the file, in the place a diff's `+N −M` sits: one slot for "what is this, and how
 	// much of it", whichever kind of thing the pane is showing.
 	if !strings.Contains(view, freshFile+"  3 lines") {
 		t.Errorf("the pane does not count the file's lines beside its name:\n%s", view)

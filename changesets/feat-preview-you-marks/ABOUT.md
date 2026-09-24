@@ -1,6 +1,6 @@
 # feat-preview-you-marks
+hi
 
-The pane that reads a file as a file kept the reviewer's own typing off screen. The header said
 `· you edited it` and the rows stayed the committed file, so the lines the reviewer had just typed — the only
 lines on that screen they had written — were nowhere on it. They are on it now, at the place each one lands,
 marked as the reviewer's.
