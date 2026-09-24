@@ -482,7 +482,8 @@ func TestPreviewNumbersTheLinesItCan(t *testing.T) {
 		"+package main",
 		"+",
 	}}
-	numbers, max := lineNumbers(patch.Lines)
+	numbers, _ := rowPositions(patch.Lines, true)
+	max := largestNumber(numbers)
 	want := []int{0, 0, 0, 0, 0, 10, 11, 11, 12, 0, 0, 0, 0, 0, 0, 1, 2}
 	for i := range want {
 		if numbers[i] != want[i] {
@@ -507,10 +508,10 @@ func TestPreviewNumbersTheLinesItCan(t *testing.T) {
 // Colours are classification-proof: git colours the very + and - characters the numbering looks
 // for, so the decision is made on the stripped line while the display keeps the original.
 func TestNumberingSurvivesGitsColours(t *testing.T) {
-	numbers, _ := lineNumbers([]string{
+	numbers, _ := rowPositions([]string{
 		"\x1b[32m@@ -1 +1,2 @@\x1b[0m",
 		"\x1b[32m+added\x1b[0m",
-	})
+	}, true)
 	if numbers[1] != 1 {
 		t.Errorf("a coloured added line was numbered %d, want 1", numbers[1])
 	}
@@ -519,12 +520,12 @@ func TestNumberingSurvivesGitsColours(t *testing.T) {
 // A patch with no hunk header -- a binary note, a truncated diff -- gets no numbers rather than
 // numbers that would be wrong.
 func TestNothingIsNumberedWithoutAHunkHeader(t *testing.T) {
-	numbers, max := lineNumbers([]string{
+	numbers, _ := rowPositions([]string{
 		"diff --git a/logo.png b/logo.png",
 		"index 1111111..2222222 100644",
 		"Binary files a/logo.png and b/logo.png differ",
-	})
-	if max != 0 || numbers[2] != 0 {
+	}, true)
+	if largestNumber(numbers) != 0 || numbers[2] != 0 {
 		t.Errorf("metadata was numbered: %v", numbers)
 	}
 }
@@ -684,8 +685,8 @@ func TestThePreviewRefillsAfterAToolCloses(t *testing.T) {
 // Your uncommitted edits are a diff too, but git's bytes do not say who wrote them: an added line you typed
 // and one the author typed are the same green. So the pane marks each of your rows, leads the one that undoes
 // the span's own work with `×` where git drew `-`, and drops what git printed about which file this is -- the
-// header has said that twice over. Your rows come first, because the section you came to check is the one that
-// should not need paging.
+// header has said that twice over. Your rows are drawn into the author's patch rather than under it, because
+// both diffs are numbered against the same file and the pane can therefore say a line once.
 func TestPreviewMarksYourRowsAndDropsWhatNamesTheFile(t *testing.T) {
 	m := previewModel(t)
 	// The span adds two lines; you delete the first of them and type one in its place. Both diffs are
@@ -732,10 +733,19 @@ func TestPreviewMarksYourRowsAndDropsWhatNamesTheFile(t *testing.T) {
 	if !strings.Contains(shown, "@@ -1 +1,2 @@") {
 		t.Errorf("the pane dropped the hunk header along with the file headers:\n%s", shown)
 	}
-	// Your rows first, then the author's span: a section at the bottom of a diff longer than the pane is a
-	// section below the fold.
-	if strings.Index(shown, "\u00d7line the span added") > strings.Index(shown, "+added line") {
-		t.Errorf("your edits are not the first thing the pane shows:\n%s", shown)
+	// Your deletion took the author's row of that line rather than landing beside it, so the pane says the line
+	// once, and there is one hunk header rather than two.
+	if strings.Contains(shown, "+line the span added") {
+		t.Errorf("the pane prints the line twice, as yours and as the author's:\n%s", shown)
+	}
+	if strings.Contains(shown, "@@ -1,2 +1,2 @@") || !strings.Contains(shown, "@@ -1 +1,2 @@") {
+		t.Errorf("the pane printed the reviewer's hunk header, or lost the author's:\n%s", shown)
+	}
+	// And your rows are where they belong in the file, not parked above it: the line you typed sits between the
+	// line you deleted and the author's next one.
+	if !(strings.Index(shown, "\u00d7line the span added") < strings.Index(shown, "+line you typed") &&
+		strings.Index(shown, "+line you typed") < strings.Index(shown, "+added line")) {
+		t.Errorf("your rows are not drawn at the place they land:\n%s", shown)
 	}
 	// Two markers, for the two lines you changed. The line you deleted is one the span added, so it leads
 	// with the pane's own sign rather than git's `-`. The colours are not checked here: lipgloss drops colour
@@ -753,6 +763,106 @@ func TestPreviewMarksYourRowsAndDropsWhatNamesTheFile(t *testing.T) {
 	// The author's rows are git's own bytes, sign included: the pane's sign is on your rows only.
 	if strings.Contains(shown, "\u00d7added line") {
 		t.Errorf("the pane put its own sign on the author's row:\n%s", shown)
+	}
+	// The line you added is not a line of the file these numbers count, so it is numbered in none of them --
+	// the same rule the pane that reads a file as text already follows.
+	if strings.Contains(shown, "1 +line you typed") {
+		t.Errorf("your added line carries a number it does not have:\n%s", shown)
+	}
+}
+
+// Two patches of one file say some lines twice, because both are about the same file: the line the author
+// shows as context is the line the reviewer shows as context, and the line the author added is the line the
+// reviewer deleted. The merged pane says each of them once, in the place the file has it.
+func TestTheMergedPaneSaysALineOnce(t *testing.T) {
+	span := Patch{Lines: []string{
+		"@@ -1 +1,3 @@",
+		"+line the span added",
+		" a line of the file",
+		"+another line the span added",
+	}}
+	work := Patch{Lines: []string{
+		"@@ -2 +2,0 @@",
+		"- a line of the file",
+		" a line of the file",
+	}}
+	shown := ansi.Strip(strings.Join(rowTexts(previewRows(span, work, 60, unmarked, paneView{file: true})), "\n"))
+
+	if n := strings.Count(shown, "a line of the file"); n != 1 {
+		t.Errorf("%d rows say \"a line of the file\", want one:\n%s", n, shown)
+	}
+	// The reviewer deleted a line that predates the span, so it keeps git's `-` and the amber colour, and it
+	// sits where the author's context row sat: between the span's two additions, at the number the file has.
+	if !strings.Contains(shown, "2 - a line of the file  \u2190 you") {
+		t.Errorf("the line the reviewer deleted did not take the author's row's place:\n%s", shown)
+	}
+	if !(strings.Index(shown, "+line the span added") < strings.Index(shown, "\u2190 you") &&
+		strings.Index(shown, "\u2190 you") < strings.Index(shown, "+another line the span added")) {
+		t.Errorf("the deletion is not between the lines the file has it between:\n%s", shown)
+	}
+}
+
+// A reviewer edit outside every hunk the author has has no row to sit in. It is drawn where its number puts
+// it, the author's rows above it, and the jump in the gutter is the only thing saying that lines of the file
+// are not on show -- which is why the pane keeps printing the author's `@@` headers rather than folding two
+// patches into a hunk git never printed.
+func TestAReviewerEditOutsideTheAuthorsHunksStandsWhereItsNumberPutsIt(t *testing.T) {
+	span := Patch{Lines: []string{
+		"@@ -1 +1,2 @@",
+		"+line the span added",
+		"+another line the span added",
+	}}
+	work := Patch{Lines: []string{
+		"@@ -9 +9,2 @@",
+		" a line down the file",
+		"+a line you added down here",
+	}}
+	shown := ansi.Strip(strings.Join(rowTexts(previewRows(span, work, 60, unmarked, paneView{file: true})), "\n"))
+
+	// The author's rows, then the reviewer's at their number: the file's order, not "yours" then "theirs".
+	if !(strings.Index(shown, "+another line the span added") < strings.Index(shown, " a line down the file") &&
+		strings.Index(shown, " a line down the file") < strings.Index(shown, "+a line you added down here")) {
+		t.Errorf("the reviewer's edit is not where its number puts it:\n%s", shown)
+	}
+	if !strings.Contains(shown, "  9  a line down the file") {
+		t.Errorf("the reviewer's own context is missing, so nothing says what their line sits in:\n%s", shown)
+	}
+	if !strings.Contains(shown, "  2 +another line the span added") {
+		t.Errorf("the gutter does not jump from 2 to 9, which is what says lines are not on show:\n%s", shown)
+	}
+}
+
+// A directory's pane shows several files at once, so a number on that screen belongs to no one file: the
+// arithmetic that tells a deletion of the span's own work from a deletion of anything else would read one
+// file's numbers against another's. That pane keeps git's rendering whole -- the chrome, the reviewer's own
+// hunk header, the two sections, and git's `-` on every deletion.
+func TestADirectoryPaneKeepsGitsTwoSections(t *testing.T) {
+	span := Patch{Lines: []string{
+		"diff --git a/main.go b/main.go",
+		"@@ -1 +1,2 @@",
+		"+line the span added",
+	}}
+	work := Patch{Lines: []string{
+		"diff --git a/main.go b/main.go",
+		"@@ -1 +1,2 @@",
+		"-line the span added",
+		"+line you typed",
+	}}
+	shown := ansi.Strip(strings.Join(rowTexts(previewRows(span, work, 60, unmarked, paneView{})), "\n"))
+
+	for _, want := range []string{"diff --git a/main.go", "@@ -1 +1,2 @@", "-line the span added  \u2190 you"} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("the directory pane dropped %q:\n%s", want, shown)
+		}
+	}
+	// The reviewer's section, then the author's, with the blank row between them: the layout a directory needs
+	// because git's chrome says which file each half belongs to.
+	if strings.Index(shown, "-line the span added") > strings.Index(shown, "+line the span added") {
+		t.Errorf("the reviewer's rows are not above the author's:\n%s", shown)
+	}
+	// And no `\u00d7`, because the pane cannot tell which file a number on this screen belongs to.
+	if strings.Contains(shown, "\u00d7") {
+		t.Errorf("the directory pane signed a row it cannot tell the file of:\n%s", shown)
 	}
 }
 

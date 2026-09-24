@@ -25,10 +25,12 @@ reads as text.
 **The header's note counts what it admits to**: `you edited it  +3 −1`, git's numbers for the reviewer's own
 section, not the span's.
 
-**The diff pane's reviewer section now leads, its rows carry the same mark, and it has no caption.** Each line
-the reviewer changed there ends in `← you`, and nothing else on the screen does. The section's counts went to
-the header, beside the file's own — `main.go  +2 −0  ·  you edited it  +1 −1` — which is where the pane puts
-counts anyway.
+**The diff pane draws the reviewer's rows into the author's patch.** A line the reviewer deleted is drawn where
+the author's patch shows that line, rather than once as the author's addition and once as the reviewer's
+deletion, and a line the reviewer added follows the line it sits after. Each line the reviewer changed ends in
+`← you`, and nothing else on the screen does. The counts went to the header, beside the file's own —
+`main.go  +2 −0  ·  you edited it  +1 −1` — which is where the pane puts counts anyway, and which is why the
+pane needs no caption and no section of its own.
 
 **The header's counts sit in one slot.** A document and the thread heading used to read `path · 21 lines`;
 they now read `path  21 lines`, the place a diff's `+N −M` sits. One kind of answer, one place.
@@ -40,6 +42,9 @@ Your additions are blue, a line you deleted that the span added is purple and le
 `-`, and a line you deleted that predates the span is amber. A pane over a directory, or the changeset box,
 keeps git's colours and the marker alone — its numbers belong to several files, and the arithmetic that tells
 those two deletions apart needs them not to.
+
+**A directory's pane keeps git's two sections.** There the numbers on the screen belong to no one file, so the
+reviewer's rows stay a run above the author's, with git's chrome and their own `@@` headers untouched.
 
 **A historical span still fetches no working patch at all.**
 
@@ -97,6 +102,20 @@ two caches — is unchanged, and is now pinned the other way round: the file row
 *as an edit* (`-# Changeset` and the marker), and the About row shows the same text as the document, with no
 marker on it because all of it is the reviewer's.
 
+**`mergeRows` is the merge** (`internal/tui/preview.go`). It walks the author's rows and the reviewer's, both
+numbered against the same file — the author's head and the reviewer's base — and drops the author's row where the
+reviewer deleted that line, drops the reviewer's context row where the author already shows the line, and puts
+the reviewer's additions after the lines they follow. The sort that reassembles the body is stable and keyed on
+that number, and within one patch the numbers only ever increase, which is why merging two patches cannot
+reorder either of them.
+
+**`rowPositions` replaced `lineNumbers`** (`internal/tui/preview.go`). The pane already read one number per row
+off git's `@@` headers; a merge needs two — the number git printed for the row, which is what the gutter shows,
+and the line of the head file the row sits at, which differ for a row that is not a line of that file at all.
+The pane that reads a file as text reads its placements off the same walk now, which also corrects a context
+row's number there: it was the working copy's, which drifts ahead of the file's own as soon as the reviewer adds
+a line.
+
 **The documents** (`PRD.md`, `README.md`) — the paragraphs on what the text pane shows said the reviewer's
 edits were not in it. They say what is in it now, and why the kept line comes before the line it replaced.
 
@@ -147,6 +166,15 @@ names the file from exactly the pane that needs it.
 anything to work out what changed. That keeps PRD §3's restriction intact — the pane remains a renderer, and
 `Enter`/`d` remain where interpreting belongs.
 
+**The author's `@@` header stays above rows that are no longer the author's.** Its counts then describe the
+author's rows and not the body under them. That is the cost of a merge, and the alternative is worse: git
+printed no header for the shape the pane draws, and writing one would be the pane claiming a hunk it never saw.
+The reviewer's own headers are dropped on a merged pane for the same reason — two headers over one run of the
+file would read as two hunks.
+
+**An added line is numbered in no file, in either pane.** It is not a line of the file at the span's head, and a
+working copy's number beside it would be a second numbering in one gutter with one of them a lie.
+
 **Where it cannot place, it says nothing rather than guessing.** A capped file holds less than the patch
 describes: a run that replaces a line past the cut is not drawn, and the header note is what still tells the
 reviewer edits exist. A column too narrow for text and marker together falls back to the unmarked file, which
@@ -155,7 +183,10 @@ is the readable half.
 ## Validation
 
 - `go test ./internal/tui/` green, and `mise run check` green — gofmt clean, `go vet ./...` clean, the whole
-  suite.
+  suite. The merge is tested on its own, with no model and no terminal: a deleted line takes the author's row's
+  place and the pane says that line once; an edit outside every hunk of the author's stands where its number
+  puts it, with the gutter's jump as the only signal; a directory's pane keeps the chrome, the two sections and
+  git's `-` on every deletion.
 - `scripts/gates/pty-walkthrough.sh` — `PTY: all checks passed`, against a binary built from this branch, with
   the two scenarios: the text pane drawing the reviewer's edit into the file with the mark on it and the line it
   replaced led by `×`, and the diff pane on the file the span modifies marking the row the reviewer typed while

@@ -272,8 +272,10 @@ Tasks
 
 Verification
 
-- `go test ./internal/tui/`, then `mise run gates`, including the walkthrough's diff-pane scenario, which now
-  expects the merged single-file shape.
+- [x] `go test ./internal/tui/`: a deletion takes the author's row's place and the line is said once; an edit
+      outside every hunk of the author's stands where its number puts it, with the jump in the gutter as the
+      only signal; a directory's pane keeps the chrome, the reviewer's own `@@`, the two sections and git's `-`.
+- [x] `mise run gates` — gofmt, vet, the suite, `e2e-29.sh` and the walkthrough.
 
 ## Risks
 
@@ -303,4 +305,9 @@ untouched, which is what `e2e-29.sh` keeps pinned.
 | —          | —     | Plan written before implementation. |
 | 2026-09-24 | M1–M3 executed; M4 added from review feedback | The merge, the pane and the documents are in. The review pass looked at the diff pane too and asked for the reviewer's section there to lead and to be marked, which is M4; the count's slot moved with it. |
 | 2026-09-24 | M4 executed | `previewEditsBody` marks `head..working` rows only — the author's span, the context lines and git's `---`/`+++` rows carry no mark — and the section paints above the span. `mise run gates` green, including the walkthrough's new diff-pane scenario. |
+| 2026-09-24 | M6 executed | The reviewer's rows are drawn into the author's patch by head-file number: a
+      deletion takes the author's row of that line, an addition follows its anchor, the reviewer's duplicate
+      context rows go, and a hunk outside the author's stands where its number puts it. `rowPositions` replaced
+      `lineNumbers`, because the merge needs git's number and the head-file position — the pane that reads a
+      file as text reads its placements off the same walk now. |
 | 2026-09-24 | M5 executed | Git's per-file rows come off a file's pane, `@@` stays, the caption is gone with its counts moved to the header, and the reviewer's rows take the pane's three colours and the `×` sign. Two plan tasks moved: `singleFilePatch` → `paneView`, because a patch's shape cannot tell a file from a directory holding one file, and `laidOut.you` → `youText`, beside where `patchRows` already decides whose a row is. `mise run gates` green. |

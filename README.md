@@ -1415,36 +1415,40 @@ the smaller of the two asks because that is the one worth growing to. The row fl
 fault: the shortcut bar is what wraps there, and a key the band cannot draw is a key nobody is
 offered, so the floor counts the bar's rows and lets the diff have what is left.
 
-Above the author's diff, the pane shows whatever you have edited without committing. Each line you changed
-there carries `← you`, and only those lines do: the lines around them belong to the file, the author's span
-below is git's patch of the author's own ends, and git's rows about which file the patch is about are nobody's
-work. The counts for your section are on the header beside the file — `main.go  +2 −0  ·  you edited it
-+1 −1` — so the number next to the path cannot be read as a tally that includes your typing. The section leads
-rather than follows because it is the one you came to check, and at the bottom of a diff longer than the pane
-it would be below the fold. None of this is decoration: git's bytes do not say who typed them, and an added
+The pane draws your uncommitted edits into the author's diff, at the line numbers they carry: a line you
+deleted is drawn where the author's patch shows that line rather than twice, once as the author's addition and
+once as your deletion, and a line you added follows the line it sits after. Each line you changed carries
+`← you`, and only those lines do — the lines around them belong to the file, the author's rows below belong to
+the author, and git's rows about which file the patch is about are nobody's work. Your counts are on the header
+beside the file — `main.go  +2 −0  ·  you edited it  +1 −1` — so the number next to the path cannot be read as a
+tally that includes your typing. None of this is decoration: git's bytes do not say who typed them, and an added
 line you wrote is the same green as one the author wrote.
+
+The merge works on line numbers, and it needs the numbers of one file to work: on a directory's pane, or a
+changeset box, several files share the screen and a number on it belongs to no one of them, so there the
+reviewer's section stays a section — its own hunk headers and git's chrome, above the author's rows with a blank
+row between. A file the pane reads as text has no diff to merge into at all, so your edits are drawn into the
+file's own text instead, at the position each one lands in.
 
 On the pane of a single file your rows also take a colour of the pane's own, because the pane has one more fact
 to tell and a line number is how it knows it. An addition you made is blue. A line you deleted that the span
 had added is purple, and leads with `×` where git drew `-`: it is the row that undoes reviewed work, which is
 not what a deletion of a line that predates the span says, and that one is amber. A line number is what tells
-those two apart, so the colours appear only where the numbers all belong to one file — a directory's pane, or
-a changeset box, leaves git's colours alone and puts the mark on alone.
+those two apart, so the colours appear only where the numbers all belong to one file.
 
-Measuring your section from the revision under review rather than from the span's start is what keeps it from
-repeating the author's work. What it means is "not in the revision under review", which is your typing while
+Measuring your edits from the revision under review rather than from the span's start is what keeps them from
+repeating the author's work. What they mean is "not in the revision under review", which is your typing while
 the author's work is committed — the state `change ready` hands you. In a tree where the author is still
 working it carries their unreviewed lines too, and marks them as yours: nothing on this screen can tell who
 typed an uncommitted line. The reviewed counter still counts the span alone, so your typing never changes what
-"reviewed" means — and `d`/`Enter` still open the working tree, which is where those edits live. A file the
-pane reads as text has no section to put them under, so its edits are drawn into the text instead — same
-markers, no section at all.
+"reviewed" means — and `d`/`Enter` still open the working tree, which is where those edits live.
 
 What the pane prints is git's own bytes and git's own colours: no hunk model, no folding, and no colour of its
 own on the author's rows — the line that keeps it a preview rather than a diff renderer, since reading a diff
-properly means opening it and `Enter` is one keypress away. The one thing it rewrites is the sign of a row
-that was the span's work and is yours no longer, and it keeps git's bytes on every row as what that row is a
-line of, so a search finds `-gone` on a row the pane painted with `×`.
+properly means opening it and `Enter` is one keypress away. What it does is place two diffs git printed side by
+side by the numbers in their headers. The one sign it rewrites belongs to a row that was the span's work and is
+yours no longer, and it keeps git's bytes on every row as what that row is a line of, so a search finds `-gone`
+on a row the pane painted with `×`.
 
 A span can start anywhere as well as end anywhere — `diff --base-ref=main`,
 `--base-commit=abc1234`, `--base-review=0` — which is how a script names a starting point without

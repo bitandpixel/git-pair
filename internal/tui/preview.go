@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -66,18 +67,16 @@ type marks struct {
 // unmarked is what counting asks for.
 var unmarked = marks{current: -1}
 
-// previewRows assembles the pane's body: the reviewer's own uncommitted edits first, and the author's span
-// below them. Both sections are git's bytes, and git's bytes do not say who typed them: an added line the
-// reviewer wrote and one the author wrote are the same green, so the `← you` on each of the reviewer's rows is
-// what keeps their edits from reading as the author's. The reviewer's section leads because it is the one they
-// came to find, and on a diff longer than the pane a section at the bottom is a section below the fold. The
-// blank between the two sections carries no line: the search looks for the diff, not for the chrome over it.
-//
-// `view` is what the model knows about the row the pane is on and git's bytes do not say. On a file the header
-// has named the file twice over already, so git's rows about which file this is come out and the reviewer's
-// rows take the pane's own colours; on a directory those rows are the only thing saying where one file's patch
-// ends and the next begins, and one file's line numbers would be read against another's, so git's rendering
-// stands.
+// previewRows assembles the pane's body. On a file the reviewer's own uncommitted rows are drawn into the
+// author's patch at the line numbers they carry, so the pane prints one body of one file: a line the reviewer
+// deleted is drawn where the author's patch shows that line, rather than twice -- once as the author's addition
+// and once as the reviewer's deletion. On a directory that arithmetic is impossible, because the numbers of one
+// file would be read against another, and git's rendering stands: the reviewer's section first, the author's
+// below it, and the rows git printed about which file each belongs to in between. Neither layout is decoration.
+// Git's bytes do not say who typed a line -- an added line the reviewer wrote and one the author wrote are the
+// same green -- so the `← you` on each of the reviewer's rows is what keeps their edits from reading as the
+// author's. The reviewer's work leads where it is not merged because it is the one they came to find, and at
+// the bottom of a diff longer than the pane it would be below the fold.
 func previewRows(span, work Patch, width int, mk marks, view paneView) []previewRow {
 	if view.file {
 		span.Lines, work.Lines = withoutFileChrome(span.Lines), withoutFileChrome(work.Lines)
@@ -85,15 +84,12 @@ func previewRows(span, work Patch, width int, mk marks, view paneView) []preview
 	if len(work.Lines) == 0 {
 		return previewBody(span, width, mk)
 	}
-	of := youOf{}
 	if view.file {
 		added := spanAdditions(span)
-		of = youOf{colour: true, span: func(head int) bool { return added[head] }}
+		of := youOf{colour: true, span: func(head int) bool { return added[head] }}
+		return paintRows(mergeRows(span, work), width, mk, of)
 	}
-	// Your rows lead, so they start at the top of the pane; the author's start below them and the blank
-	// between the two sections. `current` is the row the reviewer is standing on, counted from the top, so
-	// each section is told where its own first row falls.
-	you := previewEditsBody(work, width, marks{term: mk.term, current: mk.current}, of)
+	you := previewEditsBody(work, width, marks{term: mk.term, current: mk.current}, youOf{})
 	author := previewBody(span, width, marks{term: mk.term, current: mk.current - 1 - len(you)})
 
 	rows := make([]previewRow, 0, 1+len(you)+len(author))
@@ -104,9 +100,11 @@ func previewRows(span, work Patch, width int, mk marks, view paneView) []preview
 	return append(rows, author...)
 }
 
-// paneView is what the model knows about the row the pane is showing that git's bytes do not say: whether the
-// pane is on one file rather than a subtree, and whether the span wrote every line of it. Both come from the
-// session's own list of files, which is also what put the row there.
+// paneView is what the model knows about the row the pane is showing that git's bytes do not say: whether it is
+// one file the tree listed, rather than a directory whose patch happens to hold one file, and whether the span
+// wrote every line of it. A file the span created has no line in it the span did not add; a file it moved with
+// its bytes unchanged has nothing but lines that predate it. The session's own list of files is what put the
+// row in the tree, so it is where both answers are.
 type paneView struct {
 	file bool
 	span func(head int) bool
@@ -140,26 +138,179 @@ func gitFileHeader(plain string) bool {
 	return false
 }
 
+// paneRow is one row of the pane's body before it is painted: git's bytes, the number git gave the row, the
+// number the gutter prints, where the row sits in the file at the span's head, and whose row it is. Those
+// numbers are three different things for a row that is not a line of that file -- a line the reviewer added is
+// numbered by git against the working copy and printed in no file at all -- and the third is what lets the pane
+// draw two patches as one body.
+type paneRow struct {
+	line   string
+	number int // git's own number for the row, which is what makes it a line of a file rather than chrome
+	shown  int // what the gutter prints: 0 for a row that is a line of no file
+	at     int // the line of the head file this row is, or the one it follows
+	you    bool
+	header bool // an `@@` line, which the merge keeps from the author and drops from the reviewer
+	group  int  // 0 for a hunk header, 1 for the author's rows, 2 for the reviewer's
+}
+
+// headLine says whether a row of the author's patch is a line of the file at the span's head -- which for their
+// patch is the new side, so an addition and a context row are and a deletion is not. The reviewer's deletions
+// are matched against these.
+func (r paneRow) headLine() bool {
+	return r.group == 1 && r.at > 0 && !strings.HasPrefix(ansi.Strip(r.line), "-")
+}
+
+// mergeRows is the author's patch with the reviewer's rows drawn into it, for the pane of a single file. Both
+// patches are numbered against the same file -- the author's head and the reviewer's base -- so this is
+// arithmetic on git's own numbers rather than a guess about which texts resemble each other.
+//
+// A row the reviewer deleted takes the place of the row the author shows for that line, which is the whole
+// reason to merge: printing the same line as the author's addition and again as the reviewer's deletion says one
+// thing twice and leaves the reader to work out which of them is the file now. An addition follows the line it
+// sits after. A context row of the reviewer's is dropped where the author already shows that line, because it is
+// the same line of the same file, and kept where nobody else shows it, because there it is the only thing saying
+// what the reviewer's edit sits in.
+//
+// The reviewer's own `@@` headers do not survive the merge: the author's header above the rows they were drawn
+// into is the one that stays, and its counts then describe the author's rows rather than the body underneath
+// them. That is the cost of merging, said rather than hidden -- git printed no header for the shape the pane
+// draws, and inventing one would be the pane claiming a hunk it never saw. Where a reviewer edit falls outside
+// every hunk the author has, there is no header for it to sit under at all, and the jump in the gutter is the
+// only signal that lines of the file are not on show.
+func mergeRows(span, work Patch) []paneRow {
+	author, yours := patchRows(span, false, true), patchRows(work, true, false)
+
+	// The head-file lines the author shows, and the ones the reviewer deleted. A deletion of a shown line takes
+	// its place; a deletion of a line nobody shows stands alone, because there is nothing for it to replace.
+	shown, deleted := map[int]bool{}, map[int]bool{}
+	for _, r := range author {
+		if r.headLine() {
+			shown[r.at] = true
+		}
+	}
+	for _, r := range yours {
+		if r.group == 2 && r.at > 0 && strings.HasPrefix(ansi.Strip(r.line), "-") {
+			deleted[r.at] = true
+		}
+	}
+
+	merged := make([]paneRow, 0, len(author)+len(yours))
+	for _, r := range author {
+		if r.headLine() && deleted[r.at] {
+			continue
+		}
+		merged = append(merged, r)
+	}
+	for _, r := range yours {
+		switch {
+		case r.header:
+			// git's header for the reviewer's hunk: the author's header stands above these rows.
+		case !editedLine(ansi.Strip(r.line)) && shown[r.at]:
+			// The author shows this line already, and it is the same line of the same file.
+		default:
+			merged = append(merged, r)
+		}
+	}
+
+	// A hunk header comes before the rows it announces, and the author's row of a line comes before the
+	// reviewer's row of it -- that order is what puts a deletion in the author's row's place. The sort is
+	// stable, so git's own order survives everywhere else: within one patch these positions only ever
+	// increase, which is why merging two patches cannot reorder either of them.
+	sort.SliceStable(merged, func(i, j int) bool {
+		if merged[i].at != merged[j].at {
+			return merged[i].at < merged[j].at
+		}
+		return merged[i].group < merged[j].group
+	})
+	return merged
+}
+
+// patchRows is one patch as rows the pane can lay out or merge. `you` marks the rows the reviewer wrote -- the
+// changes, not the context around them -- and prints an added line with no number, because it is not a line of
+// the file these numbers count. `headIsPost` says which side of git's two counters the file at the span's head
+// is on: the author's patch ends at that file, so their additions and context rows are lines of it; the
+// reviewer's starts from it, so their deletions and context rows are.
+func patchRows(patch Patch, you, headIsPost bool) []paneRow {
+	numbers, positions := rowPositions(patch.Lines, headIsPost)
+	out := make([]paneRow, 0, len(patch.Lines))
+	for i, line := range patch.Lines {
+		plain := ansi.Strip(line)
+		number := numbers[i]
+		shown := number
+		header := strings.HasPrefix(plain, "@@")
+		group := 1
+		if you {
+			group = 2
+		}
+		if header {
+			group = 0
+		}
+		if you && strings.HasPrefix(plain, "+") {
+			shown = 0
+		}
+		out = append(out, paneRow{
+			line:   line,
+			number: number,
+			shown:  shown,
+			at:     positions[i],
+			you:    you && number > 0 && editedLine(plain),
+			header: header,
+			group:  group,
+		})
+	}
+	return out
+}
+
 // previewBody renders a patch as rows of at most width cells: a right-aligned line number, a
 // space, then git's own text, wrapped when it is too long for the column. Every row opens the
 // styles it needs and closes them again, because the renderer skips redrawing a row that has not
 // changed -- a colour left open on a skipped row would tint everything written under it.
 func previewBody(patch Patch, width int, mk marks) []previewRow {
-	return patchRows(patch, width, mk, false, youOf{})
+	return paintRows(patchRows(patch, false, true), width, mk, youOf{})
 }
 
-// previewEditsBody is previewBody for the pane's `head..working` section, where every line the reviewer wrote
-// or removed carries `← you` -- the rows the marker is for, and the only rows it is put on. The marker is on
-// each row rather than once above the section because the section is a run of rows in a pane that scrolls:
-// the row that named them can be off screen while the rows it named are not. Context lines in that section
-// belong to the file rather than to the change and stay unmarked.
+// previewEditsBody is previewBody for a pane that shows `head..working` as its own section, where every line
+// the reviewer wrote or removed carries `← you` -- the rows the marker is for, and the only rows it is put on.
+// The marker is on each row rather than once above the section because the section is a run of rows in a pane
+// that scrolls: the row that named them can be off screen while the rows it named are not. Context lines in
+// that section belong to the file rather than to the change and stay unmarked.
 //
-// `of` decides how much the pane says beside the mark. On a file -- where the header has already named it twice
-// over -- your additions are blue, a deletion of a line the span added is purple and leads with `×`, and a
-// deletion of a line the span did not touch is amber. On a directory's pane, where several files share the
-// screen, `of` says nothing and git's colours stand.
+// `of` decides how much the pane says beside the mark. It is empty on a directory's pane, where several files
+// share the screen and the numbers of one would be read against another's: there git's colours stand and the
+// mark is all the pane adds.
 func previewEditsBody(patch Patch, width int, mk marks, of youOf) []previewRow {
-	return patchRows(patch, width, mk, markedRows, of)
+	return paintRows(patchRows(patch, true, false), width, mk, of)
+}
+
+// paintRows lays out rows the pane has already assembled -- from one patch, or from two merged -- into a
+// column of at most width cells.
+func paintRows(rows []paneRow, width int, mk marks, of youOf) []previewRow {
+	largest := 0
+	for _, r := range rows {
+		if r.shown > largest {
+			largest = r.shown
+		}
+	}
+	l, ok := layout(width, largest)
+	if !ok {
+		return nil
+	}
+	out := make([]previewRow, 0, len(rows))
+	for _, r := range rows {
+		number := ""
+		if r.shown > 0 {
+			number = strconv.Itoa(r.shown)
+		}
+		plain := ansi.Strip(r.line)
+		// git gave this row a line number, so it is a row of the file and its sign is a change. The metadata
+		// rows above the first hunk -- `--- a/path`, `+++ b/path` -- start with a sign too, and are nobody's.
+		if r.you && r.number > 0 && editedLine(plain) {
+			out = append(out, l.marked(youText(plain, of, r.at), r.line, number, len(out), mk)...)
+			continue
+		}
+		out = append(out, l.line(r.line, number, len(out), mk)...)
+	}
+	return out
 }
 
 // youOf is what the pane knows about the reviewer's rows beyond the fact that they are the reviewer's. It is
@@ -171,44 +322,16 @@ type youOf struct {
 	span   func(head int) bool // which of your deleted rows the span added
 }
 
-// markedRows is the one thing patchRows is asked to do beyond laying a patch out: put the marker on the
-// reviewer's own changed rows.
-const markedRows = true
-
-func patchRows(patch Patch, width int, mk marks, mark bool, of youOf) []previewRow {
-	numbers, largest := lineNumbers(patch.Lines)
-	l, ok := layout(width, largest)
-	if !ok {
-		return nil
-	}
-	out := make([]previewRow, 0, len(patch.Lines))
-	for i, line := range patch.Lines {
-		number := ""
-		if numbers[i] > 0 {
-			number = strconv.Itoa(numbers[i])
-		}
-		plain := ansi.Strip(line)
-		// git gave this row a line number, so it is a row of the file and its sign is a change. The metadata
-		// rows above the first hunk -- `--- a/path`, `+++ b/path` -- start with a sign too, and are nobody's.
-		if mark && numbers[i] > 0 && editedLine(plain) {
-			out = append(out, l.marked(youText(plain, of, numbers[i]), line, number, len(out), mk)...)
-			continue
-		}
-		out = append(out, l.line(line, number, len(out), mk)...)
-	}
-	return out
-}
-
 // spanAdditions is the set of head-file line numbers the span put there. The span's `+` rows and the
 // reviewer's `-` rows are both numbered against the head file, so "the reviewer deleted a line the span
 // added" is a lookup in this set -- arithmetic on the numbers git printed, with no comparison of content and
 // no claim about what the two texts have in common.
 func spanAdditions(span Patch) map[int]bool {
-	numbers, _ := lineNumbers(span.Lines)
+	_, positions := rowPositions(span.Lines, true)
 	added := map[int]bool{}
 	for i, line := range span.Lines {
-		if numbers[i] > 0 && strings.HasPrefix(ansi.Strip(line), "+") {
-			added[numbers[i]] = true
+		if positions[i] > 0 && strings.HasPrefix(ansi.Strip(line), "+") {
+			added[positions[i]] = true
 		}
 	}
 	return added
@@ -360,7 +483,8 @@ func editedDocRows(doc Document, work Patch, width int, mk marks, of youOf) []pr
 		return docRows(doc, width, mk)
 	}
 	lines := doc.Sections[0].Lines
-	numbers, largest := lineNumbers(work.Lines)
+	numbers, positions := rowPositions(work.Lines, false)
+	largest := largestNumber(numbers)
 	if largest < len(lines) {
 		largest = len(lines)
 	}
@@ -381,7 +505,9 @@ func editedDocRows(doc Document, work Patch, width int, mk marks, of youOf) []pr
 
 hunks:
 	for i, raw := range work.Lines {
-		n := numbers[i]
+		// The position, not the number: this pane reads the file at the span's head, and a context row's
+		// own number is the working copy's, which drifts ahead of it as soon as the reviewer adds a line.
+		n := positions[i]
 		if n <= 0 {
 			continue // metadata, an @@ header, or a line this cannot place
 		}
@@ -522,19 +648,24 @@ func matchesAt(hay, needle []rune, fold bool) bool {
 	return true
 }
 
-// lineNumbers returns the number each line of the patch carries on the side being reviewed, and
-// the largest of them, which is how wide the gutter has to be. The numbers come from git's own
-// @@ headers and from counting the +, - and context lines beneath them -- the same arithmetic git
-// did -- so a line that no hunk header covers gets nothing rather than a guess.
-func lineNumbers(lines []string) ([]int, int) {
-	numbers := make([]int, len(lines))
+// rowPositions walks a patch and gives every row two things: the number git's hunk headers put it in, exactly
+// as the pane has always printed it, and the line of the file at the span's head that the row sits at. For a
+// line of that file they are the same number. For a row that is not one -- a line this patch deletes, or one it
+// adds -- the second is the line the row follows, which is what lets a patch that starts at the head file and a
+// patch that ends there be drawn as one body.
+//
+// `headIsPost` says which side of git's two counters that file is on: the author's patch ends at it, so their
+// `+` rows and context rows are lines of it, and the reviewer's starts from it, so their `-` rows and context
+// rows are. A hunk header sits at its own first line, which is what keeps it above the rows it announces.
+func rowPositions(lines []string, headIsPost bool) (numbers, at []int) {
+	numbers = make([]int, len(lines))
+	at = make([]int, len(lines))
 	old, new := -1, -1
-	max := 0
 	for i, line := range lines {
 		// git colours the very characters we are looking for, so the classification reads the
 		// line without them while the display keeps them.
 		plain := ansi.Strip(line)
-		var number int
+		var number, position int
 		switch {
 		case strings.HasPrefix(plain, "diff "):
 			// A new file's metadata precedes its first hunk; nothing before that header is
@@ -546,11 +677,23 @@ func lineNumbers(lines []string) ([]int, int) {
 				old, new = -1, -1
 			} else {
 				old, new = o, n
+				if headIsPost {
+					position = new
+				} else {
+					position = old
+				}
 			}
 		case new < 0 || strings.HasPrefix(plain, `\`):
 			// metadata, or git's "\ No newline at end of file"
 		case strings.HasPrefix(plain, "+"):
 			number, new = new, new+1
+			if headIsPost {
+				position = number
+			} else if old > 0 {
+				// The reviewer's own addition: not a line of the head file, and sitting after
+				// the last one this hunk consumed.
+				position = old - 1
+			}
 		case strings.HasPrefix(plain, "-"):
 			if strings.HasPrefix(plain, "--- ") {
 				break
@@ -558,18 +701,39 @@ func lineNumbers(lines []string) ([]int, int) {
 			if old > 0 {
 				number, old = old, old+1
 			}
+			if headIsPost {
+				if new > 0 {
+					// A line the span deleted is not in the head file: it sat before this one.
+					position = new - 1
+				}
+			} else {
+				position = number
+			}
 		default:
 			number, new = new, new+1
+			if headIsPost {
+				position = number
+			} else if old > 0 {
+				position = old
+			}
 			if old > 0 {
 				old++
 			}
 		}
-		numbers[i] = number
-		if number > max {
-			max = number
+		numbers[i], at[i] = number, position
+	}
+	return numbers, at
+}
+
+// largestNumber is the widest gutter a set of rows needs.
+func largestNumber(numbers []int) int {
+	largest := 0
+	for _, n := range numbers {
+		if n > largest {
+			largest = n
 		}
 	}
-	return numbers, max
+	return largest
 }
 
 // parseHunk reads the two ends of an "@@ -1,3 +1,5 @@ title" header. Each side starts at the line

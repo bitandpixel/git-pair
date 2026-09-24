@@ -2273,21 +2273,29 @@ title, and the shortcut bar becomes the pane's own, naming every key it reads an
 A terminal resized below the pane's floor takes the column away and gives the keys back to the region
 that held them before the pane, because a column that is not drawn cannot hold the keyboard.
 
-When the reviewer has edited a file without committing, the pane shows those edits above the author's, each
-line the reviewer changed carrying the marker that says whose it is and nothing else on the screen carrying
-it — not the context lines around them, which belong to the file, not the author's span below, not git's rows
-about which file the patch is about. The counts for the section are on the title beside the file, where the
-pane puts counts anyway, so the number next to the path cannot be read as a tally that includes the
-reviewer's typing. The section leads because it is the one the reviewer came to check, and a section at the
-bottom of a diff longer than the pane is a section below the fold. Git's output does not say who typed a
-line, so the marker is what keeps the reviewer's work from reading as the author's; the section is diffed from
-the revision under review, not the span's start, so it cannot repeat the author's changes. The reviewed
-counter stays the span's: a reviewer's typing does not change what has been reviewed. What the section holds
-is whatever is not in the revision under review. That is the reviewer's typing while the author's work is
-committed — the state a handoff leaves — and in a tree where the author is still working it also carries
-their unreviewed lines, which the marker then claims. Nothing on this screen attributes an uncommitted line:
-the claim rests on git-pair's model that the tree under review is the reviewer's, and a tree holding the
-author's uncommitted work is outside it.
+When the reviewer has edited a file without committing, the pane draws those edits into the author's diff at
+the line numbers they carry: a line the reviewer deleted is drawn where the author's patch shows that line,
+rather than once as the author's addition and once as the reviewer's deletion, and a line the reviewer added
+follows the line it sits after. Each line the reviewer changed carries the marker that says whose it is and
+nothing else on the screen carries it — not the context lines around them, which belong to the file, not the
+author's rows, not git's rows about which file the patch is about. The counts for the reviewer's work are on the
+title beside the file, where the pane puts counts anyway, so the number next to the path cannot be read as a
+tally that includes the reviewer's typing. Git's output does not say who typed a line, so the marker is what
+keeps the reviewer's work from reading as the author's; the reviewer's diff is taken from the revision under
+review, not the span's start, so it cannot repeat the author's changes. The reviewed counter stays the span's: a
+reviewer's typing does not change what has been reviewed. What the reviewer's diff holds is whatever is not in
+the revision under review. That is the reviewer's typing while the author's work is committed — the state a
+handoff leaves — and in a tree where the author is still working it also carries their unreviewed lines, which
+the marker then claims. Nothing on this screen attributes an uncommitted line: the claim rests on git-pair's
+model that the tree under review is the reviewer's, and a tree holding the author's uncommitted work is outside
+it.
+
+The merge is arithmetic on git's own numbers — the author's head and the reviewer's base are the same file — and
+it needs the numbers of one file to be arithmetic at all. On a directory's pane, and on the changeset box, the
+reviewer's rows stay a section of their own above the author's, with git's chrome and their own `@@` headers
+untouched, because a number on that screen belongs to no one of the files shown. A file the pane reads as text
+has no diff to merge into, so the reviewer's edits are drawn into the file's own text at the position each lands
+in.
 
 On the pane of one file the reviewer's rows carry more than the marker, because the pane has one more fact and
 line numbers are how it knows it: an addition the reviewer made is blue, a line the reviewer deleted that the
