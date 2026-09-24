@@ -767,7 +767,11 @@ func (s *Session) diff(ctx context.Context, from, to, path string) Patch {
 	}
 	// The counts come from git rather than by counting these lines, so a capped patch still
 	// reports the file's real size — and so that a directory, whose numstat is one line per file
-	// under it, reports the subtree's size rather than the first file's.
+	// under it, reports the subtree's size rather than the first file's. This call needs no
+	// `--no-textconv` whatever the patch above it needed: git works numstat out from the two sides
+	// it is comparing, not from what a `textconv` filter turns them into, so a filter that hides a
+	// change from the patch cannot move these counts, and the size beside the path stays a
+	// description of the diff beneath it.
 	numstat := append([]string{"diff", "--no-ext-diff", "--numstat"}, revs...)
 	num, err := s.repo.Git(ctx, append(numstat, "--", path)...)
 	if err == nil {
