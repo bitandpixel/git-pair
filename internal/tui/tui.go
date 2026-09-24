@@ -1352,6 +1352,13 @@ var (
 	// one untouched, and this is the part way through, where the row counts what is left instead of
 	// claiming the mark.
 	stylePartial = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	// The reviewer's own rows in the preview, told apart by colour where the pane shows one file and the
+	// header has already named it: blue is a line they added, purple a line the span added that they then
+	// deleted, amber a line the span never touched that they deleted. Three colours git's diff has no word
+	// for, because git's diff does not know who typed anything.
+	styleYouAdd    = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+	styleYouUndo   = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))
+	styleYouDelete = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 	// styleWarn is the drift banner: a warning about the ground moving, not an error about
 	// something the reviewer just did.
 	styleWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
@@ -3387,10 +3394,6 @@ func (m reviewModel) pagePreview(dir int) (tea.Model, tea.Cmd) {
 	return m.scrollPreview(dir, m.previewBodyRows()/2)
 }
 
-// previewLines renders the pane: the file it belongs to, git's own coloured diff, and a note
-// about the part that is not on show. Everything between the first line and the note is git's
-// bytes with nothing added — PRD §3 rules out a diff renderer, and this is the alternative to
-// building one: a window onto what git printed.
 // previewContent renders what the pane is showing as the rows it draws, with the marks it should carry.
 // It sits apart from the pane's chrome so the search, the paging and the note all count the same rows the
 // reviewer is looking at. Nil for a file with nothing cached yet.
@@ -3404,7 +3407,7 @@ func (m reviewModel) previewContent(mk marks) []previewRow {
 			return nil
 		}
 		work, _ := m.patch(patchWorking, m.previewPath)
-		return previewRows(patch, work, m.previewWidth(), mk)
+		return previewRows(patch, work, m.previewWidth(), mk, m.paneView(m.previewPath))
 	}
 	cache := m.docs
 	if m.previewKind == previewContent {
@@ -3422,7 +3425,10 @@ func (m reviewModel) previewContent(mk marks) []previewRow {
 		// The search, the paging, the note and the whole-screen overlay all come through here, so they
 		// count those rows too rather than the file alone.
 		if work, known := m.patch(patchWorking, m.previewPath); known && len(work.Lines) > 0 {
-			return editedDocRows(doc, work, m.previewWidth(), mk)
+			// Every line of a file the span created is one the span added, and none of a file it moved
+			// unchanged is: that is all the pane needs to tell a deletion of the reviewed work from a deletion
+			// of anything else, and it needs no git call to know it.
+			return editedDocRows(doc, work, m.previewWidth(), mk, youOf{colour: true, span: m.paneView(m.previewPath).span})
 		}
 	}
 	return docRows(doc, m.previewWidth(), mk)
@@ -3540,25 +3546,35 @@ func (m reviewModel) previewTitle(width int) string {
 			// The tree has room for one character about a move; here is the rest of the answer.
 			header = fmt.Sprintf("%s  \u00b7  from %s", header, from)
 		}
-		if work, known := m.patch(patchWorking, m.previewPath); known && len(work.Lines) > 0 {
-			// These rows are the file at the span's head with lines the reviewed revision does not have
-			// drawn into them. The counts are git's for that section rather than the span's, so the number
-			// beside the file cannot be read as a tally that includes the working copy's typing.
-			header += "  \u00b7  you edited it"
-			if work.Added >= 0 {
-				header += fmt.Sprintf("  +%d \u2212%d", work.Added, work.Deleted)
-			}
-		}
+		header += m.youEditedNote(m.previewPath)
 	default:
 		if patch, cached := m.patches[m.previewPath]; cached && patch.Added >= 0 {
 			header = fmt.Sprintf("%s  +%d \u2212%d", header, patch.Added, patch.Deleted)
 		}
+		header += m.youEditedNote(m.previewPath)
 	}
 	title := styleDim.Render
 	if m.previewHasFocus() {
 		title = styleActive.Render
 	}
 	return title(clip(header, width))
+}
+
+// youEditedNote is the header's answer about the working copy: what this tree holds that the revision under
+// review does not, with git's counts for it. The pane's body no longer has a caption of its own to say it --
+// the `← you` on each of your rows does that, and the header is where the size of the section goes. The counts
+// are git's for that section rather than the span's, so the number beside the file cannot be read as a tally
+// that includes the working copy's typing. Over a historical span nothing is fetched, and the note is empty.
+func (m reviewModel) youEditedNote(path string) string {
+	work, known := m.patch(patchWorking, path)
+	if !known || len(work.Lines) == 0 {
+		return ""
+	}
+	note := "  \u00b7  you edited it"
+	if work.Added >= 0 {
+		note += fmt.Sprintf("  +%d \u2212%d", work.Added, work.Deleted)
+	}
+	return note
 }
 
 // movedFrom is the path a renamed file came from, for the row the pane is holding. It is empty for a file
@@ -3570,6 +3586,21 @@ func (m reviewModel) movedFrom(path string) string {
 		}
 	}
 	return ""
+}
+
+// paneView is what the model knows about a path the pane is showing that git's bytes do not say: whether it is
+// one file the tree listed, rather than a directory whose patch happens to hold one file, and whether the span
+// wrote every line of it. A file the span created has no line in it the span did not add; a file it moved with
+// its bytes unchanged has nothing but lines that predate it. The session's own list of files is what put the
+// row in the tree, so it is where both answers are.
+func (m reviewModel) paneView(path string) paneView {
+	for _, f := range m.sess.Files() {
+		if f.Path == path {
+			created := f.Change == ChangeAdded
+			return paneView{file: true, span: func(int) bool { return created }}
+		}
+	}
+	return paneView{}
 }
 
 // searchTerm is what the pane is highlighting: what is being typed while the field is open, and the term
@@ -3720,6 +3751,11 @@ func (m reviewModel) handleSearchKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// previewLines renders the pane: the file it belongs to, git's own coloured diff, and a note about the part
+// that is not on show. Everything between the first line and the note is git's bytes with nothing added --
+// PRD §3 rules out a diff renderer, and this is the alternative to building one: a window onto what git
+// printed. The exception is the reviewer's own uncommitted rows, which nothing in git's bytes could tell
+// anyone about; previewRows says what the pane puts on them.
 func (m reviewModel) previewLines() []string {
 	width := m.previewWidth()
 	if width <= 0 || m.previewPath == "" {

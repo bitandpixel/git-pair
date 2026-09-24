@@ -2220,9 +2220,11 @@ On a terminal at least 100 columns and 16 rows, the list shares the screen with 
 the diff the common span made to the selected file. It prints git's
 own output, colour included, and adds only what a fixed-width column cannot decline to do: the line
 number git itself put in the hunk header, a break where a line is too wide, and the spaces a tab
-advances to. It does not fold, group, filter, or renumber hunks, and it does not choose
-colours, which is the shape PRD §3's refusal to build a diff renderer leaves: the pane is
-for glancing, and reading a diff means opening it. The frame fills the terminal — the row
+advances to. It does not fold, group, filter, or renumber hunks, and it puts no colour of its own on
+the author's rows, which is the shape PRD §3's refusal to build a diff renderer leaves: the pane is
+for glancing, and reading a diff means opening it. The one place it does add colour, and rewrite one sign,
+is the reviewer's own uncommitted work on the pane of a single file, which nothing in git's output could
+attribute. The frame fills the terminal — the row
 area holds the window's height and every row is padded to its width — so the shortcut bar
 sits against the bottom edge rather than under a short list.
 
@@ -2271,19 +2273,31 @@ title, and the shortcut bar becomes the pane's own, naming every key it reads an
 A terminal resized below the pane's floor takes the column away and gives the keys back to the region
 that held them before the pane, because a column that is not drawn cannot hold the keyboard.
 
-When the reviewer has edited a file without committing, the pane shows those edits above the author's,
-under a caption naming them, with counts and line numbers of their own, and every line the reviewer changed
-carries the marker. The reviewer's section leads because it is the one they came to check, and a section at
-the bottom of a diff longer than the pane is a section below the fold; the marker is there because the
-caption names the section from one row, and that row scrolls away while the rows it names stay. Git's output
-does not say who typed a line, so the caption and the marker are what keep the reviewer's work from reading
-as the author's; the section is diffed from the revision under review, not the span's start, so it cannot
-repeat the author's changes. The reviewed counter stays the span's: a reviewer's typing does not change what
-has been reviewed. What the section holds is whatever is not in the revision under review. That is the
-reviewer's typing while the author's work is committed — the state a handoff leaves — and in a tree where the
-author is still working it also carries their unreviewed lines, which the caption and the marker then claim.
-Nothing on this screen attributes an uncommitted line: the claim rests on git-pair's model that the tree under
-review is the reviewer's, and a tree holding the author's uncommitted work is outside it.
+When the reviewer has edited a file without committing, the pane shows those edits above the author's, each
+line the reviewer changed carrying the marker that says whose it is and nothing else on the screen carrying
+it — not the context lines around them, which belong to the file, not the author's span below, not git's rows
+about which file the patch is about. The counts for the section are on the title beside the file, where the
+pane puts counts anyway, so the number next to the path cannot be read as a tally that includes the
+reviewer's typing. The section leads because it is the one the reviewer came to check, and a section at the
+bottom of a diff longer than the pane is a section below the fold. Git's output does not say who typed a
+line, so the marker is what keeps the reviewer's work from reading as the author's; the section is diffed from
+the revision under review, not the span's start, so it cannot repeat the author's changes. The reviewed
+counter stays the span's: a reviewer's typing does not change what has been reviewed. What the section holds
+is whatever is not in the revision under review. That is the reviewer's typing while the author's work is
+committed — the state a handoff leaves — and in a tree where the author is still working it also carries
+their unreviewed lines, which the marker then claims. Nothing on this screen attributes an uncommitted line:
+the claim rests on git-pair's model that the tree under review is the reviewer's, and a tree holding the
+author's uncommitted work is outside it.
+
+On the pane of one file the reviewer's rows carry more than the marker, because the pane has one more fact and
+line numbers are how it knows it: an addition the reviewer made is blue, a line the reviewer deleted that the
+span had added is purple and leads with `×` rather than git's `-`, and a line the reviewer deleted that
+predates the span is amber. Git draws the same `-` for both kinds of deletion, and they are not the same
+thing — one undoes reviewed work — and the intersection of the two diffs' line numbers is what tells them
+apart without a claim about what their text has in common. Because that arithmetic needs every number to
+belong to one file, a directory's pane and the changeset box keep git's colours and the marker alone. The
+bytes git printed stay on the row as what it is a line of, so a search matches `-gone` on a row the pane
+painted with `×`.
 
 The list column's other half is documents rather than files, and the pane reads them the same way it reads
 a diff: ABOUT.md and each thread, when the box's cursor is on them, are shown as their own text with the

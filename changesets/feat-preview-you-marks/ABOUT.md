@@ -1,15 +1,14 @@
 # feat-preview-you-marks
-hi
 
-`· you edited it` and the rows stayed the committed file, so the lines the reviewer had just typed — the only
-lines on that screen they had written — were nowhere on it. They are on it now, at the place each one lands,
-marked as the reviewer's.
+The header could say `· you edited it` while the rows stayed the committed file, so the lines the reviewer had
+just typed — the only lines on that screen they had written — were nowhere on it. They are on it now, at the
+place each one lands, marked as the reviewer's.
 
 ```text
 fresh.go  3 lines  ·  you edited it  +3 −1
   1 package main
   2
-  3 -func Fresh() {}                      ← you
+  3 ×func Fresh() {}                      ← you
     +func Fresh() { return nil }          ← you
     +// reviewer: why?                    ← you
 ```
@@ -26,12 +25,21 @@ reads as text.
 **The header's note counts what it admits to**: `you edited it  +3 −1`, git's numbers for the reviewer's own
 section, not the span's.
 
-**The diff pane's reviewer section now leads, and its rows carry the same mark.** `── you · uncommitted` sits
-above the author's span rather than below it, and each line the reviewer changed there ends in `← you`. The
-caption names the section from one row; that row scrolls away and the rows it names stay.
+**The diff pane's reviewer section now leads, its rows carry the same mark, and it has no caption.** Each line
+the reviewer changed there ends in `← you`, and nothing else on the screen does. The section's counts went to
+the header, beside the file's own — `main.go  +2 −0  ·  you edited it  +1 −1` — which is where the pane puts
+counts anyway.
 
 **The header's counts sit in one slot.** A document and the thread heading used to read `path · 21 lines`;
 they now read `path  21 lines`, the place a diff's `+N −M` sits. One kind of answer, one place.
+
+**On a pane of one file, git's rows about which file the patch is about come out, and your rows take the pane's
+colours.** `diff --git`, `index`, `---`/`+++` and the mode and rename lines are gone, because the header has
+named the file twice over; `@@` stays, being the only row that says which lines of the file are not on show.
+Your additions are blue, a line you deleted that the span added is purple and leads with `×` where git drew
+`-`, and a line you deleted that predates the span is amber. A pane over a directory, or the changeset box,
+keeps git's colours and the marker alone — its numbers belong to several files, and the arithmetic that tells
+those two deletions apart needs them not to.
 
 **A historical span still fetches no working patch at all.**
 
@@ -113,12 +121,27 @@ marked line is the reviewer's, which is precisely the fact to state rather than 
 **The reviewer's own section leads the diff pane.** It is the section they came to check, and on a diff longer
 than the pane a section at the bottom is a section below the fold. The order the author's rows and the
 reviewer's rows paint in says nothing about the order they were written in or reviewed in — the two sections
-are measured against two different revisions, which is what the caption is for.
+are measured against two different revisions, which is what the marker and the header's note are for.
 
-**The marker is on the row, not only on the caption.** A caption names rows that are on screen with it, and a
-pane scrolls. This is the same reason the text pane has no caption at all: the fact belongs on the row it is
-about. And it is put on `head..working` rows only — the pane's one `you`-making claim, so it is made where the
-evidence is and nowhere else.
+**The marker is on the row, and there is no caption at all.** A caption names rows that are on screen with it,
+and a pane scrolls: halfway down a diff, the reviewer would have to remember who the unmarked green belonged
+to. The same reason gives the text pane no caption either — the fact belongs on the row it is about — so the
+section's counts went to the header instead, where the pane puts counts anyway. And the mark is put on
+`head..working` rows only: the pane's one `you`-making claim, so it is made where the evidence is and nowhere
+else.
+
+**The colours and the `×` come from arithmetic on two diffs' line numbers.** The span's `+` rows and the
+reviewer's `-` rows are both numbered against the head file, so "the line the reviewer deleted is one the span
+added" is an intersection — no comparison of content, and no claim about what two pieces of text have in
+common. Git draws the same `-` for that and for deleting a line that predates the span, and they are not the
+same thing: one undoes reviewed work. `×` is one cell, so the sign column and the narrow-terminal rule are
+untouched, and git's bytes stay on the row as what it is a line of — a search matches `-gone` on a row the pane
+painted with `×`.
+
+**The pane asks the model what it is looking at, not the patch.** Whether a pane is one file's comes from the
+session's list of files, which is what put the row there. The shape of the patch cannot answer it: a directory
+holding one file has one `diff --git` in its patch, and a rule that counted them would strip the chrome that
+names the file from exactly the pane that needs it.
 
 **Placement is arithmetic on git's own numbers.** The merge moves lines; it never compares the file to
 anything to work out what changed. That keeps PRD §3's restriction intact — the pane remains a renderer, and
@@ -134,9 +157,15 @@ is the readable half.
 - `go test ./internal/tui/` green, and `mise run check` green — gofmt clean, `go vet ./...` clean, the whole
   suite.
 - `scripts/gates/pty-walkthrough.sh` — `PTY: all checks passed`, against a binary built from this branch, with
-  the two new scenarios: the text pane drawing the reviewer's edit into the file with the mark on it, and the
-  diff pane on the file the span modifies leading with `── you · uncommitted`, marking the one row the
-  reviewer typed and not the author's row below it nor git's own `--- a/…`.
+  the two scenarios: the text pane drawing the reviewer's edit into the file with the mark on it and the line it
+  replaced led by `×`, and the diff pane on the file the span modifies marking the row the reviewer typed while
+  a context line stays unmarked, keeping `@@`, and counting the reviewer's typing in the header. What the chrome
+  strip takes away is the Go test's claim rather than the walkthrough's: the window it captures includes the
+  directory pane the cursor walked through, and a directory's patch is allowed to say which file it is about.
+- Colour is checked where a terminal is: the walkthrough compares the colour codes the reviewer's row and the
+  author's row arrive in, and requires them to differ. It does not name a particular escape sequence, because
+  lipgloss drops colour when it decides there is no terminal to write to — which is what a Go test is — and
+  picks 256-colour or 24-bit by what the terminal advertises.
 - `mise run gates` runs gofmt, `go vet`, the suite, `e2e-29.sh` and the walkthrough in one pass over the tree.
 - The pane read by eye at 140 columns on the fixture with the reviewer's edit in the working copy:
   `you edited it  +3 −1` above `-func Fresh() {}` and the two `+` lines, each ending in `← you`, and the
@@ -146,7 +175,7 @@ is the readable half.
   (`TestTheTextPaneMarksNothingOverAHistoricalSpan`).
 - One thing the walkthrough cannot check and the Go test can: which section is on top. The capture holds
   repaints, and the frame that arrives first is the span without the working patch, so `grep` over it says
-  nothing about screen order. `TestPreviewShowsYourEditsUnderTheirOwnCaption` asserts on a reconstructed
+  nothing about screen order. `TestPreviewMarksYourRowsAndDropsWhatNamesTheFile` asserts on a reconstructed
   `View()`, where the order is the pixels the reviewer gets.
 
 ## Known limitations
@@ -157,15 +186,19 @@ is the readable half.
 - A long run of edits carries `← you` on every row of it. Marking only the first row of a run is wrong for a
   scrolling pane, where the row above the window is the one that would have carried it.
 - The reviewer's section is `head..working`, so what it holds is *whatever is not in the revision under
-  review*. The caption and the marker read that as "yours", which is git-pair's model — the tree under review
-  is the reviewer's, and the author's work is committed before the handoff. In a tree where the author is
-  still working, their unreviewed lines arrive in that section marked as the reviewer's, and the whole file
-  can look like the reviewer wrote it. Nothing on the screen attributes an uncommitted line.
+  review*. The marker reads that as "yours", which is git-pair's model — the tree under review is the
+  reviewer's, and the author's work is committed before the handoff. In a tree where the author is still
+  working, their unreviewed lines arrive in that section marked as the reviewer's, and the whole file can look
+  like the reviewer wrote it. Nothing on the screen attributes an uncommitted line.
 - The pane's body and the marker together need `4` columns beyond the gutter; below that the file draws
   unmarked and the header note is all the reviewer gets. At that width the file is barely readable anyway.
-- The merge and the diff pane's `previewRows` are now two renderings of the same working patch. They share
-  `laidOut`, the marker and `patchRows`; what can drift is the placement rule, and the merge's own tests are
-  what notice.
+- The merge and the diff pane's `previewRows` are now two renderings of the same working patch, and the diff
+  pane still prints the reviewer's rows twice: once in their own section, and once as the span's row that the
+  reviewer has since deleted or left behind. They share `laidOut`, the marker and `patchRows`; what can drift
+  is the placement rule, and the merge's own tests are what notice.
+- The colours need a pane of one file, so they are off wherever the numbers are not all of one file: a
+  directory, the changeset box, and any pane whose patch git assembled from more than one path. A reviewer
+  looking at a whole changeset sees the marker and git's colours, which is the old answer.
 
 ## Open questions
 

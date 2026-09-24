@@ -681,64 +681,131 @@ func TestThePreviewRefillsAfterAToolCloses(t *testing.T) {
 	}
 }
 
-// Your uncommitted edits are a diff too, but git's bytes do not say who wrote them -- an added
-// line you typed and one the author typed are the same green -- so the pane prints them under a
-// caption that says whose they are, above the author's span rather than below it: the section you came to
-// check is the one that should not need paging. Each of your lines carries the marker too, because the
-// caption is one row and scrolls away while the rows it names stay.
-func TestPreviewShowsYourEditsUnderTheirOwnCaption(t *testing.T) {
+// Your uncommitted edits are a diff too, but git's bytes do not say who wrote them: an added line you typed
+// and one the author typed are the same green. So the pane marks each of your rows, leads the one that undoes
+// the span's own work with `×` where git drew `-`, and drops what git printed about which file this is -- the
+// header has said that twice over. Your rows come first, because the section you came to check is the one that
+// should not need paging.
+func TestPreviewMarksYourRowsAndDropsWhatNamesTheFile(t *testing.T) {
 	m := previewModel(t)
-	m.workingFor = func(_ context.Context, _ string) Patch {
+	// The span adds two lines; you delete the first of them and type one in its place. Both diffs are
+	// numbered against the head file, which is what lets the pane know that the line you deleted is one the
+	// span put there.
+	m.patchFor = func(_ context.Context, path string) Patch {
 		return Patch{Lines: []string{
-			"diff --git a/main.go b/main.go",
-			"index 1234567..89abcde 100644",
-			"--- a/main.go",
-			"+++ b/main.go",
-			"@@ -1 +1,3 @@",
-			"+a note you typed",
-			" a line of the file you did not touch",
-			"-and one you removed",
+			"diff --git a/" + path + " b/" + path,
+			"index 1111111..2222222 100644",
+			"--- a/" + path,
+			"+++ b/" + path,
+			"@@ -1 +1,2 @@",
+			"+line the span added",
+			"+added line",
+		}, Added: 2, Deleted: 0}
+	}
+	m.workingFor = func(_ context.Context, path string) Patch {
+		return Patch{Lines: []string{
+			"diff --git a/" + path + " b/" + path,
+			"index 2222222..3333333 100644",
+			"--- a/" + path,
+			"+++ b/" + path,
+			"@@ -1,2 +1,2 @@",
+			"-line the span added",
+			"+line you typed",
 		}, Added: 1, Deleted: 1}
 	}
+	m, _ = cursorOnPath(t, m, "main.go")
 	m = askPreview(t, m)
 	shown := ansi.Strip(m.View())
 
-	if !strings.Contains(shown, "you \u00b7 uncommitted  +1 \u22121") {
-		t.Errorf("your edits are on screen without a caption naming them and their size:\n%s", shown)
+	// The header names the file, counts the span, and counts your typing separately: the pane's body has no
+	// caption of its own once each of your rows carries the marker.
+	if !strings.Contains(shown, "main.go  +2 \u22120  \u00b7  you edited it  +1 \u22121") {
+		t.Errorf("the header does not count the span and your typing apart:\n%s", shown)
 	}
-	if !strings.Contains(shown, "+a note you typed") {
-		t.Errorf("your edits are missing:\n%s", shown)
+	// git's rows about which file this is are gone, and the hunk header stays: it is the only row saying which
+	// lines of the file are not on screen.
+	for _, gone := range []string{"diff --git", "index 1111111", "--- a/main.go", "+++ b/main.go"} {
+		if strings.Contains(shown, gone) {
+			t.Errorf("the pane still prints git's %q on a file it has already named:\n%s", gone, shown)
+		}
 	}
-	if !strings.Contains(shown, "+added line") {
-		t.Errorf("the author's span vanished when your edits arrived:\n%s", shown)
+	if !strings.Contains(shown, "@@ -1 +1,2 @@") {
+		t.Errorf("the pane dropped the hunk header along with the file headers:\n%s", shown)
 	}
-	// The caption first, then your lines, then the author's span: a section at the bottom of a diff longer
-	// than the pane is a section below the fold.
-	if strings.Index(shown, "you \u00b7 uncommitted") > strings.Index(shown, "+a note you typed") {
+	// Your rows first, then the author's span: a section at the bottom of a diff longer than the pane is a
+	// section below the fold.
+	if strings.Index(shown, "\u00d7line the span added") > strings.Index(shown, "+added line") {
 		t.Errorf("your edits are not the first thing the pane shows:\n%s", shown)
 	}
-	if strings.Index(shown, "+a note you typed") > strings.Index(shown, "+added line") {
-		t.Errorf("the author's span comes before your edits:\n%s", shown)
-	}
-	// Your lines carry line numbers of their own, from git's headers in your diff.
-	if !strings.Contains(shown, "1 +a note you typed") {
-		t.Errorf("your lines are not numbered:\n%s", shown)
-	}
-	// Your two lines carry the marker. The context line between them belongs to the file, and the author's
-	// span below carries none of it: two markers, not four.
+	// Two markers, for the two lines you changed. The line you deleted is one the span added, so it leads
+	// with the pane's own sign rather than git's `-`. The colours are not checked here: lipgloss drops colour
+	// when it decides there is no terminal to write to, which is exactly what a unit test is. The pty
+	// walkthrough checks they reach a real one.
 	if n := strings.Count(shown, "\u2190 you"); n != 2 {
 		t.Errorf("%d rows carry the marker, want the two lines you changed:\n%s", n, shown)
 	}
-	if !strings.Contains(shown, "-and one you removed  \u2190 you") {
-		t.Errorf("the line you removed is not marked:\n%s", shown)
+	if !strings.Contains(shown, "\u00d7line the span added  \u2190 you") {
+		t.Errorf("the line you deleted is not marked, or not signed as the span's own work:\n%s", shown)
 	}
-	if strings.Contains(shown, "a line of the file you did not touch  \u2190 you") {
-		t.Errorf("a context line is marked as yours:\n%s", shown)
+	if !strings.Contains(shown, "+line you typed  \u2190 you") {
+		t.Errorf("the line you typed is not marked:\n%s", shown)
 	}
-	// The lines above the first hunk carry a git sign without being a line of the file: `--- a/main.go` is
-	// the old path, not a line the reviewer deleted.
-	if strings.Contains(shown, "--- a/main.go  \u2190 you") || strings.Contains(shown, "+++ b/main.go  \u2190 you") {
-		t.Errorf("git's own metadata is marked as the reviewer's work:\n%s", shown)
+	// The author's rows are git's own bytes, sign included: the pane's sign is on your rows only.
+	if strings.Contains(shown, "\u00d7added line") {
+		t.Errorf("the pane put its own sign on the author's row:\n%s", shown)
+	}
+}
+
+// The three states the pane can tell your rows into, and the case where it adds nothing at all. The colours are
+// the pane's claim rather than this test's to check -- lipgloss drops colour when it decides there is no
+// terminal, and a unit test is one of those -- so what is checked is what survives the stripping: the sign the
+// pane leads with, which is the part a colourless terminal still has to have.
+func TestTheThreeStatesOfYourOwnRow(t *testing.T) {
+	always := func(int) bool { return true }
+	never := func(int) bool { return false }
+	add := ansi.Strip(youText("+typed", youOf{colour: true, span: never}, 4))
+	undo := ansi.Strip(youText("-typed", youOf{colour: true, span: always}, 4))
+	del := ansi.Strip(youText("-typed", youOf{colour: true, span: never}, 4))
+
+	if add != "+typed" {
+		t.Errorf("your own addition is drawn as %q, which is not git's `+`", add)
+	}
+	if undo != "\u00d7typed" {
+		t.Errorf("the line that undoes the span's work is drawn as %q, want it to lead with \u00d7", undo)
+	}
+	if del != "-typed" {
+		t.Errorf("a plain deletion of yours is drawn as %q, which is not git's `-`", del)
+	}
+	if undo == del {
+		t.Error("deleting the span's own work is not told apart from deleting anything else")
+	}
+	// On a directory's pane the pane has nothing to say about which file a number belongs to, so it adds the
+	// mark and leaves git's bytes alone.
+	if got := youText("-typed", youOf{span: never}, 4); got != "-typed" {
+		t.Errorf("without colour to give, the pane rewrote git's line as %q", got)
+	}
+}
+
+// The row keeps git's bytes as the line it is a line of, so the search matches a sign the pane may not have
+// drawn: a search for the text finds the row painted with `\u00d7`.
+func TestTheSearchMatchesWhatGitPrintedRatherThanWhatThePaneDraws(t *testing.T) {
+	yours := youOf{colour: true, span: func(int) bool { return true }}
+	rows := previewEditsBody(Patch{Lines: []string{"@@ -1 +1 @@", "-gone line"}}, 40, unmarked, yours)
+
+	var drawn, searched string
+	for _, r := range rows {
+		if r.line == "-gone line" {
+			drawn, searched = r.text, r.line
+		}
+	}
+	if drawn == "" {
+		t.Fatalf("no row kept git's own bytes:\n%q", rows)
+	}
+	if !strings.Contains(ansi.Strip(drawn), "\u00d7gone line") {
+		t.Errorf("the row is drawn as %q, want the pane's own sign", drawn)
+	}
+	if searched != "-gone line" {
+		t.Errorf("the row remembers being %q, want git's bytes", searched)
 	}
 }
 
@@ -824,7 +891,7 @@ func freshEdit() Patch {
 // review and stands in place of that file's row, the added lines follow it with no number, and none of
 // git's patch chrome arrives in a pane that reads the file as a file.
 func TestEditedRowsPutTheReviewersLinesWhereTheyLand(t *testing.T) {
-	rows := editedDocRows(freshDoc(), freshEdit(), 70, unmarked)
+	rows := editedDocRows(freshDoc(), freshEdit(), 70, unmarked, youOf{})
 	shown := strings.Join(rowTexts(rows), "\n")
 	plain := ansi.Strip(shown)
 
@@ -897,7 +964,7 @@ func TestEditedRowsPlaceEveryHunk(t *testing.T) {
 		"+NINE",
 	}, Added: 2, Deleted: 2}
 
-	plain := ansi.Strip(strings.Join(rowTexts(editedDocRows(doc, work, 60, unmarked)), "\n"))
+	plain := ansi.Strip(strings.Join(rowTexts(editedDocRows(doc, work, 60, unmarked, youOf{})), "\n"))
 	// git's order within each hunk: what came out, then what went in.
 	order := []string{"one", "-two", "+TWO", "three", "eight", "-nine", "+NINE", "ten"}
 	at := -1
@@ -917,7 +984,7 @@ func TestEditedRowsPlaceEveryHunk(t *testing.T) {
 // The pane chooses this function only when there are edits, but the function itself is asked about an
 // empty patch too, and then it is exactly what the pane drew before: the file, and nothing beside it.
 func TestEditedRowsWithNoEditsAreTheFileAlone(t *testing.T) {
-	got, want := rowTexts(editedDocRows(freshDoc(), Patch{}, 70, unmarked)), rowTexts(docRows(freshDoc(), 70, unmarked))
+	got, want := rowTexts(editedDocRows(freshDoc(), Patch{}, 70, unmarked, youOf{})), rowTexts(docRows(freshDoc(), 70, unmarked))
 	if len(got) != len(want) {
 		t.Fatalf("an unedited file draws %d rows, want %d:\n%s", len(got), len(want), strings.Join(got, "\n"))
 	}
@@ -943,7 +1010,7 @@ func TestEditedRowsStopWhereThePaneStops(t *testing.T) {
 		"+TWO",
 	}, Added: 1, Deleted: 2}
 
-	plain := ansi.Strip(strings.Join(rowTexts(editedDocRows(capped, work, 60, unmarked)), "\n"))
+	plain := ansi.Strip(strings.Join(rowTexts(editedDocRows(capped, work, 60, unmarked, youOf{})), "\n"))
 	if !strings.Contains(plain, "one") || !strings.Contains(plain, "two") {
 		t.Errorf("the capped file lost its own rows:\n%s", plain)
 	}
@@ -962,7 +1029,7 @@ func TestTheMarkerDoesNotWidenThePane(t *testing.T) {
 		"+func Fresh() { return aVeryLongExpression(after: the, reviewer: typed, all: of, this: line) }",
 	}, Added: 1, Deleted: 1}
 
-	for _, row := range rowTexts(editedDocRows(freshDoc(), long, width, unmarked)) {
+	for _, row := range rowTexts(editedDocRows(freshDoc(), long, width, unmarked, youOf{})) {
 		if w := ansi.StringWidth(row); w > width {
 			t.Errorf("a marked row is %d columns wide in a %d-column pane: %q", w, width, ansi.Strip(row))
 		}
@@ -972,7 +1039,7 @@ func TestTheMarkerDoesNotWidenThePane(t *testing.T) {
 // The marker is the pane's own word, and the search looks for a term in what the reviewer wrote rather
 // than in the word beside it: `/you` finds a file about yourself, not every line the reviewer typed.
 func TestTheMarkerIsNotWhatTheSearchFinds(t *testing.T) {
-	found := rowTexts(editedDocRows(freshDoc(), freshEdit(), 70, marks{term: "you", current: -1}))
+	found := rowTexts(editedDocRows(freshDoc(), freshEdit(), 70, marks{term: "you", current: -1}, youOf{}))
 	for _, row := range found {
 		if strings.Contains(row, sgrUnderline) || strings.Contains(row, sgrReverse) {
 			t.Errorf("/you matched the marker rather than the text:\n%s", ansi.Strip(row))
@@ -980,7 +1047,7 @@ func TestTheMarkerIsNotWhatTheSearchFinds(t *testing.T) {
 	}
 	// And the marker is not decoration the search cannot reach: a term in the reviewer's own line still
 	// lands, on a row that carries it.
-	for _, row := range editedDocRows(freshDoc(), freshEdit(), 70, marks{term: "nil", current: -1}) {
+	for _, row := range editedDocRows(freshDoc(), freshEdit(), 70, marks{term: "nil", current: -1}, youOf{}) {
 		if strings.Contains(ansi.Strip(row.text), "+func Fresh() { return nil }") &&
 			!strings.Contains(row.text, sgrUnderline) {
 			t.Errorf("the search could not find a term inside the reviewer's line: %q", ansi.Strip(row.text))

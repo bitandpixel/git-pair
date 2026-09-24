@@ -16,6 +16,15 @@ import (
 // them, filter them, decide what is worth reading, or choose its own colours, and PRD §3 is the
 // reason for those restrictions -- a pane that interprets diffs is a diff renderer, and the way to
 // read a diff properly remains opening it in the difftool.
+//
+// Those restrictions are about the author's diff, and they hold for it without exception: the colour on
+// screen is git's, from `git diff --color=always`, and the pane puts none of its own on those rows. The
+// reviewer's own uncommitted rows are a different case, because git's bytes do not say who typed them and
+// this pane is the only place the reviewer sees them. On the pane of a single file, and nowhere else, it
+// puts a colour of its own on the rows the reviewer wrote, leads with `\u00d7` the one that was the span's
+// work, and drops the rows git printed about which file the patch is about -- which the header has said
+// twice already. That is the whole of the pane's editing of a diff, and the bytes stay on the row as what
+// it is a line of, so a search matches what git printed rather than what the pane drew.
 
 const (
 	sgrReset        = "\x1b[0m"
@@ -57,25 +66,37 @@ type marks struct {
 // unmarked is what counting asks for.
 var unmarked = marks{current: -1}
 
-// previewRows assembles the pane's body: the reviewer's own uncommitted edits first, under a caption
-// naming who they came from, and the author's span below them. Both sections are git's bytes, and git's
-// bytes do not say who typed them: an added line the reviewer wrote and one the author wrote are the same
-// green, so the caption is what keeps the reviewer's edits from reading as the author's. The reviewer's
-// section leads because it is the one they came to find, and on a diff longer than the pane a section at
-// the bottom is a section below the fold. The caption and the blank under it carry no line: the search
-// looks for the diff, not for the chrome drawn over it.
-func previewRows(span, work Patch, width int, mk marks) []previewRow {
+// previewRows assembles the pane's body: the reviewer's own uncommitted edits first, and the author's span
+// below them. Both sections are git's bytes, and git's bytes do not say who typed them: an added line the
+// reviewer wrote and one the author wrote are the same green, so the `← you` on each of the reviewer's rows is
+// what keeps their edits from reading as the author's. The reviewer's section leads because it is the one they
+// came to find, and on a diff longer than the pane a section at the bottom is a section below the fold. The
+// blank between the two sections carries no line: the search looks for the diff, not for the chrome over it.
+//
+// `view` is what the model knows about the row the pane is on and git's bytes do not say. On a file the header
+// has named the file twice over already, so git's rows about which file this is come out and the reviewer's
+// rows take the pane's own colours; on a directory those rows are the only thing saying where one file's patch
+// ends and the next begins, and one file's line numbers would be read against another's, so git's rendering
+// stands.
+func previewRows(span, work Patch, width int, mk marks, view paneView) []previewRow {
+	if view.file {
+		span.Lines, work.Lines = withoutFileChrome(span.Lines), withoutFileChrome(work.Lines)
+	}
 	if len(work.Lines) == 0 {
 		return previewBody(span, width, mk)
 	}
-	// Your rows start one row down, behind the caption; the author's start below your rows and the blank
-	// between the two sections. `current` is the row the reviewer is standing on, counted from the top of
-	// the pane, so each section is told where its own first row falls.
-	you := previewEditsBody(work, width, marks{term: mk.term, current: mk.current - 1})
-	author := previewBody(span, width, marks{term: mk.term, current: mk.current - 2 - len(you)})
+	of := youOf{}
+	if view.file {
+		added := spanAdditions(span)
+		of = youOf{colour: true, span: func(head int) bool { return added[head] }}
+	}
+	// Your rows lead, so they start at the top of the pane; the author's start below them and the blank
+	// between the two sections. `current` is the row the reviewer is standing on, counted from the top, so
+	// each section is told where its own first row falls.
+	you := previewEditsBody(work, width, marks{term: mk.term, current: mk.current}, of)
+	author := previewBody(span, width, marks{term: mk.term, current: mk.current - 1 - len(you)})
 
-	rows := make([]previewRow, 0, 2+len(you)+len(author))
-	rows = append(rows, previewRow{text: styleDim.Render(clip(yourEditsCaption(work), width))})
+	rows := make([]previewRow, 0, 1+len(you)+len(author))
 	rows = append(rows, you...)
 	if len(author) > 0 {
 		rows = append(rows, previewRow{})
@@ -83,16 +104,40 @@ func previewRows(span, work Patch, width int, mk marks) []previewRow {
 	return append(rows, author...)
 }
 
-// yourEditsCaption labels the pane's `head..working` section, with git's counts for it rather than the
-// span's, so the number beside the file cannot be read as a tally of the author's work. The section holds
-// whatever the tree has that the revision under review does not; calling those lines the reviewer's is
-// git-pair's model of the checkout rather than something git knows, and a tree holding the author's
-// uncommitted work puts that work here too.
-func yourEditsCaption(work Patch) string {
-	if work.Added >= 0 {
-		return fmt.Sprintf("\u2500\u2500 you \u00b7 uncommitted  +%d \u2212%d", work.Added, work.Deleted)
+// paneView is what the model knows about the row the pane is showing that git's bytes do not say: whether the
+// pane is on one file rather than a subtree, and whether the span wrote every line of it. Both come from the
+// session's own list of files, which is also what put the row there.
+type paneView struct {
+	file bool
+	span func(head int) bool
+}
+
+// withoutFileChrome is a patch with git's rows about which file this is taken out: the paths, the blobs, the
+// mode, the rename. `Binary files … differ` stays, because on a binary file it is the whole answer, and a pane
+// that dropped it would show nothing at all.
+func withoutFileChrome(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if gitFileHeader(ansi.Strip(line)) {
+			continue
+		}
+		out = append(out, line)
 	}
-	return "\u2500\u2500 you \u00b7 uncommitted"
+	return out
+}
+
+// gitFileHeader is git's own preamble about a file rather than a line of it: which paths, which blobs, which
+// mode, which rename.
+func gitFileHeader(plain string) bool {
+	for _, prefix := range []string{
+		"diff --git ", "index ", "--- ", "+++ ", "old mode ", "new mode ", "new file mode ",
+		"deleted file mode ", "rename from ", "rename to ", "copy from ", "copy to ", "similarity index ",
+	} {
+		if strings.HasPrefix(plain, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // previewBody renders a patch as rows of at most width cells: a right-aligned line number, a
@@ -100,19 +145,37 @@ func yourEditsCaption(work Patch) string {
 // styles it needs and closes them again, because the renderer skips redrawing a row that has not
 // changed -- a colour left open on a skipped row would tint everything written under it.
 func previewBody(patch Patch, width int, mk marks) []previewRow {
-	return patchRows(patch, width, mk, false)
+	return patchRows(patch, width, mk, false, youOf{})
 }
 
 // previewEditsBody is previewBody for the pane's `head..working` section, where every line the reviewer wrote
-// or removed carries `← you` -- the rows the marker is for, and the only rows it is put on. The caption naming
-// the section is one row, and it scrolls away while the rows it names stay on screen; context lines in that
-// section belong to the file rather than to the change, and git's metadata rows above the first hunk belong
-// to neither, so both stay unmarked.
-func previewEditsBody(patch Patch, width int, mk marks) []previewRow {
-	return patchRows(patch, width, mk, true)
+// or removed carries `← you` -- the rows the marker is for, and the only rows it is put on. The marker is on
+// each row rather than once above the section because the section is a run of rows in a pane that scrolls:
+// the row that named them can be off screen while the rows it named are not. Context lines in that section
+// belong to the file rather than to the change and stay unmarked.
+//
+// `of` decides how much the pane says beside the mark. On a file -- where the header has already named it twice
+// over -- your additions are blue, a deletion of a line the span added is purple and leads with `×`, and a
+// deletion of a line the span did not touch is amber. On a directory's pane, where several files share the
+// screen, `of` says nothing and git's colours stand.
+func previewEditsBody(patch Patch, width int, mk marks, of youOf) []previewRow {
+	return patchRows(patch, width, mk, markedRows, of)
 }
 
-func patchRows(patch Patch, width int, mk marks, mark bool) []previewRow {
+// youOf is what the pane knows about the reviewer's rows beyond the fact that they are the reviewer's. It is
+// passed rather than computed because the two panes that ask for it know different amounts: the diff pane has
+// the span's patch and reads the answer off its line numbers, and the pane that reads a created file as text
+// knows it without asking, because every line in that file is one the span put there.
+type youOf struct {
+	colour bool                // the pane's own colours and signs, rather than git's
+	span   func(head int) bool // which of your deleted rows the span added
+}
+
+// markedRows is the one thing patchRows is asked to do beyond laying a patch out: put the marker on the
+// reviewer's own changed rows.
+const markedRows = true
+
+func patchRows(patch Patch, width int, mk marks, mark bool, of youOf) []previewRow {
 	numbers, largest := lineNumbers(patch.Lines)
 	l, ok := layout(width, largest)
 	if !ok {
@@ -124,15 +187,53 @@ func patchRows(patch Patch, width int, mk marks, mark bool) []previewRow {
 		if numbers[i] > 0 {
 			number = strconv.Itoa(numbers[i])
 		}
-		draw := l.line
+		plain := ansi.Strip(line)
 		// git gave this row a line number, so it is a row of the file and its sign is a change. The metadata
 		// rows above the first hunk -- `--- a/path`, `+++ b/path` -- start with a sign too, and are nobody's.
-		if mark && numbers[i] > 0 && editedLine(ansi.Strip(line)) {
-			draw = l.marked
+		if mark && numbers[i] > 0 && editedLine(plain) {
+			out = append(out, l.marked(youText(plain, of, numbers[i]), line, number, len(out), mk)...)
+			continue
 		}
-		out = append(out, draw(line, number, len(out), mk)...)
+		out = append(out, l.line(line, number, len(out), mk)...)
 	}
 	return out
+}
+
+// spanAdditions is the set of head-file line numbers the span put there. The span's `+` rows and the
+// reviewer's `-` rows are both numbered against the head file, so "the reviewer deleted a line the span
+// added" is a lookup in this set -- arithmetic on the numbers git printed, with no comparison of content and
+// no claim about what the two texts have in common.
+func spanAdditions(span Patch) map[int]bool {
+	numbers, _ := lineNumbers(span.Lines)
+	added := map[int]bool{}
+	for i, line := range span.Lines {
+		if numbers[i] > 0 && strings.HasPrefix(ansi.Strip(line), "+") {
+			added[numbers[i]] = true
+		}
+	}
+	return added
+}
+
+// youSign leads a line the span added and the reviewer deleted: git's `-` says a line is gone, which is true
+// of both kinds of deletion, and the pane has one more fact to tell. One cell, so the sign column and the
+// narrow-terminal rule are untouched.
+const youSign = "\u00d7"
+
+// youText is one of the reviewer's changed lines as the pane draws it: the pane's colour over git's, and a
+// different sign where the state asks for one. Git's bytes stay on the row as what it is a line of, so the
+// search still looks inside what the reviewer wrote and matches a sign the pane may not have drawn.
+func youText(plain string, of youOf, head int) string {
+	if !of.colour {
+		return plain
+	}
+	switch {
+	case strings.HasPrefix(plain, "-") && of.span != nil && of.span(head):
+		return styleYouUndo.Render(youSign + plain[1:])
+	case strings.HasPrefix(plain, "+"):
+		return styleYouAdd.Render(plain)
+	default:
+		return styleYouDelete.Render(plain)
+	}
 }
 
 // editedLine is git's own test for a line the reviewer changed: the sign is git's, and nothing here
@@ -211,15 +312,19 @@ func docRows(doc Document, width int, mk marks) []previewRow {
 // cannot carry the distinction because the green and red are git's bytes on both sides of the pane.
 const youMarker = "  \u2190 you"
 
-// marked is one line the reviewer typed, as the rows it is drawn on: the same column `line` uses, narrowed by
-// the marker so the terminal never wraps the frame for us, with the marker on the line's last row. The row
-// carries git's own text in `line`, so a search looks for a term in what the reviewer wrote rather than in
-// the word beside it.
-func (l laidOut) marked(text, number string, first int, mk marks) []previewRow {
+// marked is one of the reviewer's rows: the same column `line` lays out, narrowed by the marker so the
+// terminal never wraps the frame for us, with `← you` on the line's last row. `text` is what the pane draws --
+// its own colour and, for a line the span added that the reviewer deleted, its own sign -- while `plain` is
+// git's bytes, which is what the row keeps as the line it came from so a search looks inside what was written
+// rather than at the word or the colour beside it.
+func (l laidOut) marked(text, plain, number string, first int, mk marks) []previewRow {
 	narrow := laidOut{gutter: l.gutter, body: l.body - runewidth.StringWidth(youMarker)}
 	rows := narrow.line(text, number, first, mk)
 	if len(rows) == 0 {
 		return nil
+	}
+	for i := range rows {
+		rows[i].line = plain
 	}
 	last := len(rows) - 1
 	rows[last].text += styleDim.Render(youMarker)
@@ -244,7 +349,11 @@ func (l laidOut) marked(text, number string, first int, mk marks) []previewRow {
 // moves git's lines to where they belong without comparing the file to anything. A placed line whose number
 // is past what the pane was given — a capped file — ends the merge, and the note above the rows still says
 // the reviewer edited it.
-func editedDocRows(doc Document, work Patch, width int, mk marks) []previewRow {
+//
+// `of` is what the caller knows about this file rather than what the patch says. A file the span created has
+// no line in it that the span did not add, so a line the reviewer deletes out of it is always a deletion of
+// the span's work; a file the span moved with its bytes unchanged has nothing but lines that predate it.
+func editedDocRows(doc Document, work Patch, width int, mk marks, of youOf) []previewRow {
 	if len(doc.Sections) != 1 {
 		// A file row has one section. Anything else is not this pane's shape, and `docRows` is what
 		// draws it today.
@@ -279,13 +388,13 @@ hunks:
 		switch plain := ansi.Strip(raw); {
 		case strings.HasPrefix(plain, "+"):
 			// The line before it in the working copy is the line before it here, so it lands as it comes.
-			out = append(out, l.marked(raw, "", len(out), mk)...)
+			out = append(out, l.marked(youText(plain, of, 0), raw, "", len(out), mk)...)
 		case strings.HasPrefix(plain, "-"):
 			if n > len(lines) {
 				break hunks // the line it replaces is past what the pane was given
 			}
 			draw(next, n-1)
-			out = append(out, l.marked(raw, strconv.Itoa(n), len(out), mk)...)
+			out = append(out, l.marked(youText(plain, of, n), raw, strconv.Itoa(n), len(out), mk)...)
 			next = n
 		default:
 			if n > len(lines) {

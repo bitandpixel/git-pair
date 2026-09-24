@@ -261,8 +261,7 @@ func TestTheTextPaneShowsTheFileRatherThanItsPatch(t *testing.T) {
 	if strings.Contains(view, "+package main") {
 		t.Errorf("the pane shows a patch of the file the span created:\n%s", view)
 	}
-	// bonjour
-	// The headerz counts the file, in the place a diff's `+N −M` sits: one slot for "what is this, and how
+	// The header counts the file, in the place a diff's `+N −M` sits: one slot for "what is this, and how
 	// much of it", whichever kind of thing the pane is showing.
 	if !strings.Contains(view, freshFile+"  3 lines") {
 		t.Errorf("the pane does not count the file's lines beside its name:\n%s", view)
@@ -316,7 +315,9 @@ func TestTheTextPaneSaysWhenTheReviewerEditedTheFile(t *testing.T) {
 // The reviewer's uncommitted typing is drawn into the file at the position it lands: git's own `-` and `+`
 // lines, each with the marker that says who typed it. This pane has no caption to file them under — it is
 // the pane that reads a file as a file — so the marker is what keeps their line from reading as the
-// author's, and the removed line is what keeps their edit from reading as the whole story.
+// author's, and the removed line is what keeps their edit from reading as the whole story. The file is one the
+// span created, so every line in it is the span's work: the line the reviewer deleted is drawn as a deletion
+// of the reviewed work, which is what `×` is for.
 func TestTheTextPaneDrawsTheReviewersEditsWhereTheyLand(t *testing.T) {
 	f := changeFixture(t)
 	m := modelOver(t, f)
@@ -328,7 +329,7 @@ func TestTheTextPaneDrawsTheReviewersEditsWhereTheyLand(t *testing.T) {
 	m = askPreview(t, m)
 	shown := ansi.Strip(m.View())
 
-	for _, want := range []string{"-func Fresh() {}", "+func Fresh() { return nil }", "+// reviewer: why?"} {
+	for _, want := range []string{"\u00d7func Fresh() {}", "+func Fresh() { return nil }", "+// reviewer: why?"} {
 		if !strings.Contains(shown, want) {
 			t.Errorf("the pane does not draw the reviewer's line %q:\n%s", want, shown)
 		}
@@ -393,7 +394,7 @@ func TestAFileRowAndTheDocumentOfTheSamePathAreDifferentPanes(t *testing.T) {
 	if !strings.Contains(fileView, "written by the reviewer") || !strings.Contains(fileView, "\u2190 you") {
 		t.Errorf("the file row neither shows the reviewer's edit nor marks it:\n%s", fileView)
 	}
-	if !strings.Contains(fileView, "-# Changeset") {
+	if !strings.Contains(fileView, "\u00d7# Changeset") {
 		t.Errorf("the file row no longer shows what the edit replaced:\n%s", fileView)
 	}
 
@@ -414,7 +415,7 @@ func TestAFileRowAndTheDocumentOfTheSamePathAreDifferentPanes(t *testing.T) {
 	// still the span's file with the edit marked into it, and not the document as it now stands.
 	m, _ = cursorOnPath(t, m, aboutFile)
 	m = askPreview(t, m)
-	if view := ansi.Strip(m.View()); !strings.Contains(view, "-# Changeset") ||
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "\u00d7# Changeset") ||
 		!strings.Contains(view, "\u2190 you") {
 		t.Errorf("the document's text replaced the file row's:\n%s", view)
 	}

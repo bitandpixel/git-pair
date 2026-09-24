@@ -196,6 +196,85 @@ Verification
 
 - `go test ./internal/tui/`, then `mise run gates`.
 
+### M5 — git's file chrome off, and the reviewer's lines in their own colour
+
+The review thread `changesets/feat-preview-you-marks/modified-file-diff-preview.md` asks for the pane's
+single-file diff to stop repeating what the header already says, and for the reviewer's lines to be told apart
+by colour rather than only by a mark. The reviewer then took the caption out of the question: with a mark on
+each row, the section no longer needs a row of its own to be named by.
+
+Deliverables
+
+- A single file's patch is drawn without git's per-file rows: `diff --git`, `index`, `--- a/…`, `+++ b/…`, the
+  mode/rename metadata. A directory's patch keeps all of it, because there the reader is looking at several
+  files at once and needs the boundaries.
+- `@@` hunk headers stay: they are the only row saying which lines are *not* on screen.
+- The reviewer's rows take the pane's own colours — blue for a line they added, purple for a line the span
+  added that they then deleted, amber for a pre-existing line they deleted — and purple leads with `×` where
+  git would have drawn `-`.
+- The `── you · uncommitted` caption is gone. Its counts move to the header beside the file's own, which is
+  where the pane puts counts for every other pane.
+
+Tasks
+
+- `paneView` decides whether a pane is one file's, and whether the span wrote every line of it. It comes from
+  the model's session files rather than from the patch: a directory holding one file carries one `diff --git` in
+  its patch, and a rule that counted them would strip the chrome that names the file from the one pane that
+  needs it. The same rule decides the colours, so the directory pane keeps git's rendering by the rule that
+  strips the file's. *(This replaced the plan's `singleFilePatch`: the shape of a patch cannot tell a file from
+  a directory holding one, and the test the plan proposed would have stripped the wrong pane.)*
+- `spanAdditions`: the head-file line numbers the span put there. The span's `+` rows and the reviewer's `-`
+  rows are both numbered against the head file, so "the reviewer deleted a line the span added" is a lookup in
+  that set — arithmetic on the numbers git already printed, no comparison of content.
+- `youText` colours one of the reviewer's rows and swaps the sign where the state asks for it; `laidOut.marked`
+  still puts `← you` beside it, which stays the one place the marker is appended. The row keeps git's bytes in
+  `line`, so a search matches `-` while the drawn sign is `×`. *(The plan's `laidOut.you` would have put the
+  colour where the marker is painted; `patchRows` already decides which rows are the reviewer's, so the colour
+  belongs with that decision.)*
+- `youEditedNote` is the header's `· you edited it +N −M`, asked for by the text pane and the diff pane alike
+  now that no caption carries those counts.
+
+Verification
+
+- [x] `go test ./internal/tui/`: the chrome goes on a file's pane and stays on a directory's; `@@` stays; the
+      three states of a reviewer's row are told apart and only the one that undoes the span's own work is
+      signed `×`; that row's `line` still holds git's `-`, so a search finds what git printed rather than what
+      the pane drew; two markers for two changed rows and none on a context row; the header counts the span and
+      the reviewer apart.
+- [x] `mise run gates` — gofmt, vet, the suite, `e2e-29.sh`, and the walkthrough: the file's pane without
+      `--- a/src/service.ts` and with `@@`, the typed row marked and a context row not, the line the text pane
+      replaced led by `×`, and the reviewer's row reaching the terminal in a colour the author's row does not
+      arrive in. Colour is compared rather than named, because lipgloss drops it when it decides there is no
+      terminal — which is what a Go test is.
+
+### M6 — one merged diff for a single file
+
+Deliverables
+
+- With the chrome gone, the reviewer's rows splice into the author's patch at the numbers they have in the head
+  file, and the pane stops printing one line twice — once as the reviewer's and once as the span's row the
+  reviewer deleted or left behind. A directory row keeps the two sections, and the header's
+  `you edited it  +N −M` carries the counts wherever they are drawn.
+
+Tasks
+
+- Walk both patches by head-file number: your deletion of a line the span shows as an addition *replaces* that
+  row rather than landing beside it; your other deletions replace the context row for that line where the span
+  has one, and stand alone where it has none; your additions go after the row they follow.
+- A reviewer edit outside every hunk the span has has no row to sit in: it is drawn where its number puts it,
+  and the jump in the gutter is what says the file's lines between are not shown.
+- The span's `@@` header then stands above rows that are not the span's, so its counts describe the span's rows
+  and not the merged body. Said in the code comment and the README rather than fixed by inventing a header git
+  did not print.
+- `README.md` and `PRD.md`: the pane no longer prints git's bytes verbatim for a single file. It strips
+  per-file chrome, merges two patches by line number, and adds three colours of its own — the sentences that
+  said it was a renderer with none move with it.
+
+Verification
+
+- `go test ./internal/tui/`, then `mise run gates`, including the walkthrough's diff-pane scenario, which now
+  expects the merged single-file shape.
+
 ## Risks
 
 - A long run of edits puts `← you` on every row of it. Marking only the first row of a run was the
@@ -224,3 +303,4 @@ untouched, which is what `e2e-29.sh` keeps pinned.
 | —          | —     | Plan written before implementation. |
 | 2026-09-24 | M1–M3 executed; M4 added from review feedback | The merge, the pane and the documents are in. The review pass looked at the diff pane too and asked for the reviewer's section there to lead and to be marked, which is M4; the count's slot moved with it. |
 | 2026-09-24 | M4 executed | `previewEditsBody` marks `head..working` rows only — the author's span, the context lines and git's `---`/`+++` rows carry no mark — and the section paints above the span. `mise run gates` green, including the walkthrough's new diff-pane scenario. |
+| 2026-09-24 | M5 executed | Git's per-file rows come off a file's pane, `@@` stays, the caption is gone with its counts moved to the header, and the reviewer's rows take the pane's three colours and the `×` sign. Two plan tasks moved: `singleFilePatch` → `paneView`, because a patch's shape cannot tell a file from a directory holding one file, and `laidOut.you` → `youText`, beside where `patchRows` already decides whose a row is. `mise run gates` green. |

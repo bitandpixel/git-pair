@@ -57,18 +57,6 @@ refuse() {
 expectfile() {
   if [ -e "$2" ]; then ok "$1"; else fail "$1 — $2 was never created"; fi
 }
-# expectbefore <description> <window> <raw file> <earlier> <later> — for a claim about the order two
-# pieces of the same screen paint in, which no single grep can make.
-expectbefore() {
-  if python3 "$PLAIN" --after "$2" "$3" | python3 -c '
-import sys
-text = sys.stdin.read()
-a, b = text.find(sys.argv[1]), text.find(sys.argv[2])
-sys.exit(0 if a != -1 and b != -1 and a < b else 1)' "$4" "$5"; then ok "$1"; else
-    fail "$1 — '$4' does not come before '$5' after key $2"
-    python3 "$PLAIN" --after "$2" "$3" --head 14 | sed 's/^/      | /'
-  fi
-}
 # expectbytes <description> <raw file> <literal bytes> — for escape sequences, which pty-plain
 # removes on purpose. Alt-screen entry and leave are the whole claim of one scenario.
 expectbytes() {
@@ -346,7 +334,7 @@ cp changesets/booking-transaction/ABOUT.md "$T/about-span"
 sed -i 's/^- business-scoped locking$/- business-scoped locking and a reviewer note/' changesets/booking-transaction/ABOUT.md
 session youmarks j,q
 expect "the line they typed is on screen" 0 "$T/youmarks.raw" "+- business-scoped locking and a reviewer note"
-expect "the line it replaced is on screen too" 0 "$T/youmarks.raw" "-- business-scoped locking"
+expect "the line it replaced is on screen too" 0 "$T/youmarks.raw" $'\u00d7- business-scoped locking'
 expect "and each carries the marker that says whose it is" 0 "$T/youmarks.raw" $'\u2190 you'
 expect "with the span's own text still the thing being read" 0 "$T/youmarks.raw" "  1 # booking-transaction"
 refuse "no patch chrome arrived in the pane that reads a file" 0 "$T/youmarks.raw" "diff --git"
@@ -359,34 +347,75 @@ refuse "an untouched file the pane reads as text carries no marker" 1 "$T/youcle
 
 # The same mark on the pane that reads a file as a patch, where the marker belongs on the `head..working`
 # section and nowhere else: the author's span below it is git's patch of the span's own ends, and a row of that
-# is the author's work however green it looks. The section leads, because the caption is one row and a section
-# at the bottom of a diff longer than the pane is a section below the fold. src/service.ts is the file this
-# span modifies, so its pane is git's patch, and the reviewer has typed one line into it without committing.
+# is the author's work however green it looks. The section leads, because the rows the reviewer came to check
+# should not be below the fold. src/service.ts is the file this span modifies, so its pane is git's patch, and
+# the reviewer has typed one line into it without committing.
 # Four `j` walk the rows the tree stops on -- the changeset's directory, its ABOUT.md and CHANGESET.yaml,
 # and src/ -- down to service.ts's row, and `z` paints the pane on its own: the frame the checks below read.
 # The keystroke that lands the cursor does not wait for git's answer, and a pane still fetching is a pane
 # that paints nothing.
-step "diff pane: the reviewer's section leads the author's, and its rows are marked"
+step "diff pane: the reviewer's rows are marked, and what names the file is gone"
 printf '  // a note the reviewer typed\n' >> src/service.ts
 session youdiff j,j,j,j,z,z,q
 # The header, not the tree: the tree names the path too, and the two spaces before the sign are the pane's
 # own line. Without it these checks could be a directory's combined patch painted by a cursor that stopped
 # one row short.
 expect "the pane is on the file's own row" 3 "$T/youdiff.raw" "src/service.ts  +2"
-expect "the reviewer's section is named, with git's counts for it" 3 "$T/youdiff.raw" "you · uncommitted"
+expect "the header counts the reviewer's typing beside the file" 3 "$T/youdiff.raw" "you edited it"
 expect "the line they typed is on screen" 3 "$T/youdiff.raw" "+  // a note the reviewer typed"
 expect "and the row it typed carries the mark" 3 "$T/youdiff.raw" "+  // a note the reviewer typed  "$'\u2190 you'
 # How many times the mark painted is not a check this capture can make -- it holds repaints, so one row on
-# screen is the mark twice in the stream. Absence is: the author's row and git's own metadata both carry a
-# sign, and neither is a line the reviewer wrote.
-refuse "the author's own span carries no mark" 3 "$T/youdiff.raw" "serialised per business now  "$'\u2190 you'
-refuse "nor does git's header about the old path" 3 "$T/youdiff.raw" "--- a/src/service.ts  "$'\u2190 you'
+# screen is the mark twice in the stream. Absence is: a context line of the file carries no mark, because the
+# reviewer did not write it.
+refuse "a context line is marked as theirs" 3 "$T/youdiff.raw" "  serialised per business now  "$'\u2190 you'
 expect "with the author's span still below it" 3 "$T/youdiff.raw" "serialised per business now"
-# Which section is on top is the Go test's to prove: it asserts on a reconstructed screen, while this capture
-# carries repaints, and the frame that arrives first is the span without the working patch. What this window
-# can show is that the caption and the row it names paint together, in that order, over the real keystroke.
-expectbefore "the caption and the row it names paint together, in that order" 3 "$T/youdiff.raw" \
-  "you · uncommitted" "+  // a note the reviewer typed"
+# On a file's pane the rows git printed about which file this is come out, because the header has named it
+# twice. That absence is the Go test's to prove rather than this window's: the frames here include the directory
+# pane the cursor walked through on the way down, and a directory's patch has every right to say which file it
+# is about. What this capture can say is that the hunk header -- the one row naming which lines of the file are
+# off screen -- is there.
+expect "the hunk header is still there" 3 "$T/youdiff.raw" "@@ "
+# Colour is git's here -- `git diff --color=always` -- and the pane puts its own on the reviewer's rows alone.
+# The claim is that a row the reviewer wrote arrives coloured and a line of the file they left alone arrives
+# plain. Which code carries the colour is lipgloss's business: it writes ANSI 12 as `94` on a terminal
+# advertising sixteen colours and `38;5;12` on one advertising more, and it drops colour entirely when it
+# believes there is no terminal -- which is why this is a pty check and not a Go one.
+python3 - "$T/youdiff.raw" <<'PY' \
+  || fail "the reviewer's row does not reach the terminal in a colour the file's own lines do not arrive in"
+import re, sys
+
+raw = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+SGR = re.compile(r"\x1b\[([0-9;]*)m")
+
+
+def foregrounds(needle):
+    """The codes setting a foreground colour just before each occurrence of `needle`.
+
+    The bytes in front of a row, not the line it lands on: the TUI repaints differentially, so one stretch of
+    the capture between two newlines can hold the tail of one screen row and the head of the next, and a code
+    read from that would belong to a row the needle is not in. The code is adjacent because lipgloss and git
+    both write it immediately ahead of the text they style.
+    """
+    found = set()
+    at = raw.find(needle)
+    while at != -1:
+        for code in SGR.findall(raw[max(0, at - 40) : at]):
+            parts = [int(p) for p in code.split(";") if p != ""]
+            if any(30 <= p <= 37 or 90 <= p <= 97 for p in parts) or 38 in parts:
+                found.add(code)
+        at = raw.find(needle, at + 1)
+    return found
+
+
+# Three claims, and one of them is that colour is reaching this terminal at all: git paints the span's added
+# line green, so green has to be on screen. Then the reviewer's row carries a foreground colour, and it is not
+# that green -- which is what makes it the pane's rather than git's. It cannot be phrased as "a line of the
+# file the reviewer left alone arrives plain", because the pane's rows are a stream and the author's `+` row
+# holds the same words as a context row two panes away.
+git_green = {"32", "92"} & foregrounds("")
+yours = foregrounds("+  // a note the reviewer typed")
+sys.exit(0 if git_green and yours and not (yours & git_green) else 1)
+PY
 git checkout -- src/service.ts
 
 # Too small for even that is worth saying out loud, and with the smaller of the two asks -- 12 rows
