@@ -261,8 +261,10 @@ func TestTheTextPaneShowsTheFileRatherThanItsPatch(t *testing.T) {
 	if strings.Contains(view, "+package main") {
 		t.Errorf("the pane shows a patch of the file the span created:\n%s", view)
 	}
-	if !strings.Contains(view, "3 lines") {
-		t.Errorf("the pane does not count the file's lines:\n%s", view)
+	// The header counts the file, in the place a diff's `+N −M` sits: one slot for "what is this, and how
+	// much of it", whichever kind of thing the pane is showing.
+	if !strings.Contains(view, freshFile+"  3 lines") {
+		t.Errorf("the pane does not count the file's lines beside its name:\n%s", view)
 	}
 	// `enter` is still the real comparison. A file the pane reads as text is a file, and the key that
 	// means "show me this in the tool built for it" has to keep meaning that.
@@ -310,9 +312,71 @@ func TestTheTextPaneSaysWhenTheReviewerEditedTheFile(t *testing.T) {
 	}
 }
 
-// A changeset document is on screen two ways at once: as a file the span created, read at the span's
-// head, and as the document the reviewer is editing, read from disk. Two caches keep those apart, and the
-// file row is the one that stays put when the reviewer writes.
+// The reviewer's uncommitted typing is drawn into the file at the position it lands: git's own `-` and `+`
+// lines, each with the marker that says who typed it. This pane has no caption to file them under — it is
+// the pane that reads a file as a file — so the marker is what keeps their line from reading as the
+// author's, and the removed line is what keeps their edit from reading as the whole story. The file is one the
+// span created, so every line in it is the span's work: the line the reviewer deleted is drawn as a deletion
+// of the reviewed work, which is what `×` is for.
+func TestTheTextPaneDrawsTheReviewersEditsWhereTheyLand(t *testing.T) {
+	f := changeFixture(t)
+	m := modelOver(t, f)
+	// The reviewer edits the file the span created and commits nothing: the span's head still holds what
+	// the author wrote, and the working copy holds the typing on top of it.
+	f.Write(freshFile, "package main\n\nfunc Fresh() { return nil }\n\n// reviewer: why?\n")
+
+	m, _ = cursorOnPath(t, m, freshFile)
+	m = askPreview(t, m)
+	shown := ansi.Strip(m.View())
+
+	for _, want := range []string{"\u00d7func Fresh() {}", "+func Fresh() { return nil }", "+// reviewer: why?"} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("the pane does not draw the reviewer's line %q:\n%s", want, shown)
+		}
+	}
+	if n := strings.Count(shown, "\u2190 you"); n != 4 {
+		t.Errorf("%d rows carry the marker, want one per line of the reviewer's edit (+3 \u22121):\n%s", n, shown)
+	}
+	if !strings.Contains(shown, "you edited it  +3 \u22121") {
+		t.Errorf("the header does not count the reviewer's own lines:\n%s", shown)
+	}
+	// The author's file is still what is being read: the edit is drawn into it, not instead of it.
+	if !strings.Contains(shown, "package main") {
+		t.Errorf("the file itself is gone:\n%s", shown)
+	}
+	if strings.Contains(shown, "diff --git") {
+		t.Errorf("the text pane grew patch chrome:\n%s", shown)
+	}
+}
+
+// A historical span has no reviewer edits inside it: the working tree is not one of its endpoints. The pane
+// marks nothing and says nothing about them, the way it refuses every key that would change something.
+func TestTheTextPaneMarksNothingOverAHistoricalSpan(t *testing.T) {
+	m, f := readonlyModel(t, historySel())
+	m.width = 140
+	m.previewOn = true
+	// handler.go is a file this span created, and the working copy now differs from the head it is read at.
+	f.Write("handler.go", "package main\n\nfunc Serve() { ctx() }\n\n// a note typed afterwards\n")
+
+	m, _ = cursorOnPath(t, m, "handler.go")
+	m = askPreview(t, m)
+	shown := ansi.Strip(m.View())
+
+	if strings.Contains(shown, "\u2190 you") || strings.Contains(shown, "you edited it") {
+		t.Errorf("a historical pane spoke of the reviewer's edits:\n%s", shown)
+	}
+	if !strings.Contains(shown, "func Serve()") {
+		t.Errorf("the historical file's own text is missing:\n%s", shown)
+	}
+	if strings.Contains(shown, "a note typed afterwards") {
+		t.Errorf("the working copy leaked into a historical span:\n%s", shown)
+	}
+}
+
+// A changeset document is on screen two ways at once: as a file the span created, read at the span's head
+// with the reviewer's uncommitted typing marked into it, and as the document the reviewer is editing, read
+// from disk as it stands. Two caches keep those apart, and the file row is the one that keeps showing the
+// span's bytes with the edit drawn into them.
 func TestAFileRowAndTheDocumentOfTheSamePathAreDifferentPanes(t *testing.T) {
 	f := changeFixture(t)
 	m := modelOver(t, f)
@@ -324,9 +388,14 @@ func TestAFileRowAndTheDocumentOfTheSamePathAreDifferentPanes(t *testing.T) {
 	if m.previewKind != previewContent {
 		t.Fatalf("the file row of a created ABOUT.md is pane kind %d, want %d", m.previewKind, previewContent)
 	}
-	fileView := m.View()
-	if strings.Contains(fileView, "written by the reviewer") {
-		t.Errorf("the file row shows the reviewer's uncommitted edit instead of the span's bytes:\n%s", fileView)
+	fileView := ansi.Strip(m.View())
+	// The reviewer's typing is on this row, and it is on it as an edit — git's `-` and `+`, each with the
+	// marker — rather than as the file's own text.
+	if !strings.Contains(fileView, "written by the reviewer") || !strings.Contains(fileView, "\u2190 you") {
+		t.Errorf("the file row neither shows the reviewer's edit nor marks it:\n%s", fileView)
+	}
+	if !strings.Contains(fileView, "\u00d7# Changeset") {
+		t.Errorf("the file row no longer shows what the edit replaced:\n%s", fileView)
 	}
 
 	// The About row is in the changeset box, so the keys have to be in the box to be standing on it.
@@ -335,14 +404,19 @@ func TestAFileRowAndTheDocumentOfTheSamePathAreDifferentPanes(t *testing.T) {
 	if m.previewKind != previewDocument {
 		t.Fatalf("the About row is pane kind %d, want %d", m.previewKind, previewDocument)
 	}
-	if view := m.View(); !strings.Contains(view, "written by the reviewer") {
-		t.Errorf("the About row does not read the working copy:\n%s", view)
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "written by the reviewer") ||
+		strings.Contains(view, "\u2190 you") {
+		// The document is the file as it stands, which is what the reviewer is writing: nothing on it is
+		// somebody's edit, because the whole of it is.
+		t.Errorf("the About row is not the working copy read as a document:\n%s", view)
 	}
 
-	// Back to the file row: the document's text must not have taken its place in the cache.
+	// Back to the file row: the document's text must not have taken its place in the cache. The row is
+	// still the span's file with the edit marked into it, and not the document as it now stands.
 	m, _ = cursorOnPath(t, m, aboutFile)
 	m = askPreview(t, m)
-	if view := m.View(); strings.Contains(view, "written by the reviewer") {
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "\u00d7# Changeset") ||
+		!strings.Contains(view, "\u2190 you") {
 		t.Errorf("the document's text replaced the file row's:\n%s", view)
 	}
 }

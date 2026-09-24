@@ -2294,9 +2294,11 @@ On a terminal at least 100 columns and 16 rows, the list shares the screen with 
 the diff the common span made to the selected file. It prints git's
 own output, colour included, and adds only what a fixed-width column cannot decline to do: the line
 number git itself put in the hunk header, a break where a line is too wide, and the spaces a tab
-advances to. It does not fold, group, filter, or renumber hunks, and it does not choose
-colours, which is the shape PRD §3's refusal to build a diff renderer leaves: the pane is
-for glancing, and reading a diff means opening it. The frame fills the terminal — the row
+advances to. It does not fold, group, filter, or renumber hunks, and it puts no colour of its own on
+the author's rows, which is the shape PRD §3's refusal to build a diff renderer leaves: the pane is
+for glancing, and reading a diff means opening it. The one place it does add colour, and rewrite one sign,
+is the reviewer's own uncommitted work on the pane of a single file, which nothing in git's output could
+attribute. The frame fills the terminal — the row
 area holds the window's height and every row is padded to its width — so the shortcut bar
 sits against the bottom edge rather than under a short list.
 
@@ -2345,20 +2347,48 @@ title, and the shortcut bar becomes the pane's own, naming every key it reads an
 A terminal resized below the pane's floor takes the column away and gives the keys back to the region
 that held them before the pane, because a column that is not drawn cannot hold the keyboard.
 
-When the reviewer has edited a file without committing, the pane shows those edits below the author's,
-under a caption naming them, with counts and line numbers of their own. Git's output does not say who
-typed a line, so the caption is what keeps the reviewer's work from reading as the author's; the
-section is diffed from the revision under review, not the span's start, so it cannot repeat the
-author's changes. The reviewed counter stays the span's: a reviewer's typing does not change what has
-been reviewed.
+When the reviewer has edited a file without committing, the pane draws those edits into the author's diff at
+the line numbers they carry: a line the reviewer deleted is drawn where the author's patch shows that line,
+rather than once as the author's addition and once as the reviewer's deletion, and a line the reviewer added
+follows the line it sits after. Each line the reviewer changed carries the marker that says whose it is and
+nothing else on the screen carries it — not the context lines around them, which belong to the file, not the
+author's rows, not git's rows about which file the patch is about. The counts for the reviewer's work are on the
+title beside the file, where the pane puts counts anyway, so the number next to the path cannot be read as a
+tally that includes the reviewer's typing. Git's output does not say who typed a line, so the marker is what
+keeps the reviewer's work from reading as the author's; the reviewer's diff is taken from the revision under
+review, not the span's start, so it cannot repeat the author's changes. The reviewed counter stays the span's: a
+reviewer's typing does not change what has been reviewed. What the reviewer's diff holds is whatever is not in
+the revision under review. That is the reviewer's typing while the author's work is committed — the state a
+handoff leaves — and in a tree where the author is still working it also carries their unreviewed lines, which
+the marker then claims. Nothing on this screen attributes an uncommitted line: the claim rests on git-pair's
+model that the tree under review is the reviewer's, and a tree holding the author's uncommitted work is outside
+it.
+
+The merge is arithmetic on git's own numbers — the author's head and the reviewer's base are the same file — and
+it needs the numbers of one file to be arithmetic at all. On a directory's pane, and on the changeset box, the
+reviewer's rows stay a section of their own above the author's, with git's chrome and their own `@@` headers
+untouched, because a number on that screen belongs to no one of the files shown. A file the pane reads as text
+has no diff to merge into, so the reviewer's edits are drawn into the file's own text at the position each lands
+in.
+
+On the pane of one file the reviewer's rows carry more than the marker, because the pane has one more fact and
+line numbers are how it knows it: an addition the reviewer made is blue, a line the reviewer deleted that the
+span had added is purple and leads with `×` rather than git's `-`, and a line the reviewer deleted that
+predates the span is amber. Git draws the same `-` for both kinds of deletion, and they are not the same
+thing — one undoes reviewed work — and the intersection of the two diffs' line numbers is what tells them
+apart without a claim about what their text has in common. Because that arithmetic needs every number to
+belong to one file, a directory's pane and the changeset box keep git's colours and the marker alone. The
+bytes git printed stay on the row as what it is a line of, so a search matches `-gone` on a row the pane
+painted with `×`.
 
 The list column's other half is documents rather than files, and the pane reads them the same way it reads
 a diff: ABOUT.md and each thread, when the box's cursor is on them, are shown as their own text with the
 file's own line numbers, and the Threads heading is every thread in the order the box lists them, each named
 above its text. The pane is the screen's place for reading text, and a changeset document is the one thing on
 this screen that is pure text to read; a diff of one against nothing would report every line as added, which
-is true and carries no information about what it says. The header counts what is on show — git's `+N −M` for
-a diff, lines for a document, threads for the heading — and the pane follows the box's cursor the way it
+is true and carries no information about what it says. The header counts what is on show in the one place
+counts sit, beside the name — git's `+N −M` for a diff, lines for a document, threads for the heading — and
+the pane follows the box's cursor the way it
 follows the tree's, which is what makes the two halves one column. `Enter` in the pane opens what is on show
 with the rules the row itself would apply: the difftool for a diff, the editor for a document, and the row's
 own refusal where history makes the editor the wrong tool. Over a historical span the document is still read
@@ -2370,9 +2400,15 @@ file's patch is its own text with a `+` on every line. An unchanged move's patch
 Every other file row keeps its patch, because a rename with edits has edits to show. A deletion is the only
 place the removed text still is, so its row keeps the patch too.
 
-The text is the file at the span's head, not the working copy, so a reviewer's own edits cannot read as
-reviewed work. The header says `you edited it` when the reviewer edits that file afterwards. A move names the
-path it came from, which the tree's `~` has no room for. `Enter` in the pane keeps making the row's own
+The text is the file at the span's head, not the working copy. What the reviewer has edited in it without
+committing is drawn into that text where it lands, in the order git wrote it: the `-` line at the number that
+line has in the file under review, then the `+` lines that replaced it, unnumbered — an added line is in no
+file anyone is reviewing. The pane moves those lines to where they belong and reorders nothing, which is what
+keeps it the same patch `d` and `git pair diff` show. Each of those rows carries `← you`, the same mark that
+names the reviewer's rows in the diff's own section, and the pane's word rather than git's colour: in a pane
+that reads a file as a file, every marked line is the reviewer's, and that is the fact the marker states. The
+header says `you edited it` with git's counts for that section. A move names
+the path it came from, which the tree's `~` has no room for. `Enter` in the pane keeps making the row's own
 choice: the editor for a file the span added, because the comparison has nothing on one side of it, and
 the difftool for an unchanged move, because there the rename is the comparison. `d` is the key that asks
 for the patch of either.

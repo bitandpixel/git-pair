@@ -482,7 +482,8 @@ func TestPreviewNumbersTheLinesItCan(t *testing.T) {
 		"+package main",
 		"+",
 	}}
-	numbers, max := lineNumbers(patch.Lines)
+	numbers, _ := rowPositions(patch.Lines, true)
+	max := largestNumber(numbers)
 	want := []int{0, 0, 0, 0, 0, 10, 11, 11, 12, 0, 0, 0, 0, 0, 0, 1, 2}
 	for i := range want {
 		if numbers[i] != want[i] {
@@ -507,10 +508,10 @@ func TestPreviewNumbersTheLinesItCan(t *testing.T) {
 // Colours are classification-proof: git colours the very + and - characters the numbering looks
 // for, so the decision is made on the stripped line while the display keeps the original.
 func TestNumberingSurvivesGitsColours(t *testing.T) {
-	numbers, _ := lineNumbers([]string{
+	numbers, _ := rowPositions([]string{
 		"\x1b[32m@@ -1 +1,2 @@\x1b[0m",
 		"\x1b[32m+added\x1b[0m",
-	})
+	}, true)
 	if numbers[1] != 1 {
 		t.Errorf("a coloured added line was numbered %d, want 1", numbers[1])
 	}
@@ -519,12 +520,12 @@ func TestNumberingSurvivesGitsColours(t *testing.T) {
 // A patch with no hunk header -- a binary note, a truncated diff -- gets no numbers rather than
 // numbers that would be wrong.
 func TestNothingIsNumberedWithoutAHunkHeader(t *testing.T) {
-	numbers, max := lineNumbers([]string{
+	numbers, _ := rowPositions([]string{
 		"diff --git a/logo.png b/logo.png",
 		"index 1111111..2222222 100644",
 		"Binary files a/logo.png and b/logo.png differ",
-	})
-	if max != 0 || numbers[2] != 0 {
+	}, true)
+	if largestNumber(numbers) != 0 || numbers[2] != 0 {
 		t.Errorf("metadata was numbered: %v", numbers)
 	}
 }
@@ -681,32 +682,240 @@ func TestThePreviewRefillsAfterAToolCloses(t *testing.T) {
 	}
 }
 
-// Your uncommitted edits are a diff too, but git's bytes do not say who wrote them -- an added
-// line you typed and one the author typed are the same green -- so the pane prints them below the
-// author's span, under a caption that says whose they are.
-func TestPreviewShowsYourEditsUnderTheirOwnCaption(t *testing.T) {
+// Your uncommitted edits are a diff too, but git's bytes do not say who wrote them: an added line you typed
+// and one the author typed are the same green. So the pane marks each of your rows, leads the one that undoes
+// the span's own work with `×` where git drew `-`, and drops what git printed about which file this is -- the
+// header has said that twice over. Your rows are drawn into the author's patch rather than under it, because
+// both diffs are numbered against the same file and the pane can therefore say a line once.
+func TestPreviewMarksYourRowsAndDropsWhatNamesTheFile(t *testing.T) {
 	m := previewModel(t)
-	m.workingFor = func(_ context.Context, _ string) Patch {
-		return Patch{Lines: []string{"@@ -1 +1,2 @@", "+a note you typed"}, Added: 1, Deleted: 0}
+	// The span adds two lines; you delete the first of them and type one in its place. Both diffs are
+	// numbered against the head file, which is what lets the pane know that the line you deleted is one the
+	// span put there.
+	m.patchFor = func(_ context.Context, path string) Patch {
+		return Patch{Lines: []string{
+			"diff --git a/" + path + " b/" + path,
+			"index 1111111..2222222 100644",
+			"--- a/" + path,
+			"+++ b/" + path,
+			"@@ -1 +1,2 @@",
+			"+line the span added",
+			"+added line",
+		}, Added: 2, Deleted: 0}
 	}
+	m.workingFor = func(_ context.Context, path string) Patch {
+		return Patch{Lines: []string{
+			"diff --git a/" + path + " b/" + path,
+			"index 2222222..3333333 100644",
+			"--- a/" + path,
+			"+++ b/" + path,
+			"@@ -1,2 +1,2 @@",
+			"-line the span added",
+			"+line you typed",
+		}, Added: 1, Deleted: 1}
+	}
+	m, _ = cursorOnPath(t, m, "main.go")
 	m = askPreview(t, m)
 	shown := ansi.Strip(m.View())
 
-	if !strings.Contains(shown, "you \u00b7 uncommitted  +1 \u22120") {
-		t.Errorf("your edits are on screen without a caption naming them and their size:\n%s", shown)
+	// The header names the file, counts the span, and counts your typing separately: the pane's body has no
+	// caption of its own once each of your rows carries the marker.
+	if !strings.Contains(shown, "main.go  +2 \u22120  \u00b7  you edited it  +1 \u22121") {
+		t.Errorf("the header does not count the span and your typing apart:\n%s", shown)
 	}
-	if !strings.Contains(shown, "+a note you typed") {
-		t.Errorf("your edits are missing:\n%s", shown)
+	// git's rows about which file this is are gone, and the hunk header stays: it is the only row saying which
+	// lines of the file are not on screen.
+	for _, gone := range []string{"diff --git", "index 1111111", "--- a/main.go", "+++ b/main.go"} {
+		if strings.Contains(shown, gone) {
+			t.Errorf("the pane still prints git's %q on a file it has already named:\n%s", gone, shown)
+		}
 	}
-	if !strings.Contains(shown, "+added line") {
-		t.Errorf("the author's span vanished when your edits arrived:\n%s", shown)
+	if !strings.Contains(shown, "@@ -1 +1,2 @@") {
+		t.Errorf("the pane dropped the hunk header along with the file headers:\n%s", shown)
 	}
-	if strings.Index(shown, "+added line") > strings.Index(shown, "you \u00b7 uncommitted") {
-		t.Error("your edits come before the author's, which reads as if they were reviewed first")
+	// Your deletion took the author's row of that line rather than landing beside it, so the pane says the line
+	// once, and there is one hunk header rather than two.
+	if strings.Contains(shown, "+line the span added") {
+		t.Errorf("the pane prints the line twice, as yours and as the author's:\n%s", shown)
 	}
-	// Your lines carry line numbers of their own, from git's headers in your diff.
-	if !strings.Contains(shown, "1 +a note you typed") {
-		t.Errorf("your lines are not numbered:\n%s", shown)
+	if strings.Contains(shown, "@@ -1,2 +1,2 @@") || !strings.Contains(shown, "@@ -1 +1,2 @@") {
+		t.Errorf("the pane printed the reviewer's hunk header, or lost the author's:\n%s", shown)
+	}
+	// And your rows are where they belong in the file, not parked above it: the line you typed sits between the
+	// line you deleted and the author's next one.
+	if !(strings.Index(shown, "\u00d7line the span added") < strings.Index(shown, "+line you typed") &&
+		strings.Index(shown, "+line you typed") < strings.Index(shown, "+added line")) {
+		t.Errorf("your rows are not drawn at the place they land:\n%s", shown)
+	}
+	// Two markers, for the two lines you changed. The line you deleted is one the span added, so it leads
+	// with the pane's own sign rather than git's `-`. The colours are not checked here: lipgloss drops colour
+	// when it decides there is no terminal to write to, which is exactly what a unit test is. The pty
+	// walkthrough checks they reach a real one.
+	if n := strings.Count(shown, "\u2190 you"); n != 2 {
+		t.Errorf("%d rows carry the marker, want the two lines you changed:\n%s", n, shown)
+	}
+	if !strings.Contains(shown, "\u00d7line the span added  \u2190 you") {
+		t.Errorf("the line you deleted is not marked, or not signed as the span's own work:\n%s", shown)
+	}
+	if !strings.Contains(shown, "+line you typed  \u2190 you") {
+		t.Errorf("the line you typed is not marked:\n%s", shown)
+	}
+	// The author's rows are git's own bytes, sign included: the pane's sign is on your rows only.
+	if strings.Contains(shown, "\u00d7added line") {
+		t.Errorf("the pane put its own sign on the author's row:\n%s", shown)
+	}
+	// The line you added is not a line of the file these numbers count, so it is numbered in none of them --
+	// the same rule the pane that reads a file as text already follows.
+	if strings.Contains(shown, "1 +line you typed") {
+		t.Errorf("your added line carries a number it does not have:\n%s", shown)
+	}
+}
+
+// Two patches of one file say some lines twice, because both are about the same file: the line the author
+// shows as context is the line the reviewer shows as context, and the line the author added is the line the
+// reviewer deleted. The merged pane says each of them once, in the place the file has it.
+func TestTheMergedPaneSaysALineOnce(t *testing.T) {
+	span := Patch{Lines: []string{
+		"@@ -1 +1,3 @@",
+		"+line the span added",
+		" a line of the file",
+		"+another line the span added",
+	}}
+	work := Patch{Lines: []string{
+		"@@ -2 +2,0 @@",
+		"- a line of the file",
+		" a line of the file",
+	}}
+	shown := ansi.Strip(strings.Join(rowTexts(previewRows(span, work, 60, unmarked, paneView{file: true})), "\n"))
+
+	if n := strings.Count(shown, "a line of the file"); n != 1 {
+		t.Errorf("%d rows say \"a line of the file\", want one:\n%s", n, shown)
+	}
+	// The reviewer deleted a line that predates the span, so it keeps git's `-` and the amber colour, and it
+	// sits where the author's context row sat: between the span's two additions, at the number the file has.
+	if !strings.Contains(shown, "2 - a line of the file  \u2190 you") {
+		t.Errorf("the line the reviewer deleted did not take the author's row's place:\n%s", shown)
+	}
+	if !(strings.Index(shown, "+line the span added") < strings.Index(shown, "\u2190 you") &&
+		strings.Index(shown, "\u2190 you") < strings.Index(shown, "+another line the span added")) {
+		t.Errorf("the deletion is not between the lines the file has it between:\n%s", shown)
+	}
+}
+
+// A reviewer edit outside every hunk the author has has no row to sit in. It is drawn where its number puts
+// it, the author's rows above it, and the jump in the gutter is the only thing saying that lines of the file
+// are not on show -- which is why the pane keeps printing the author's `@@` headers rather than folding two
+// patches into a hunk git never printed.
+func TestAReviewerEditOutsideTheAuthorsHunksStandsWhereItsNumberPutsIt(t *testing.T) {
+	span := Patch{Lines: []string{
+		"@@ -1 +1,2 @@",
+		"+line the span added",
+		"+another line the span added",
+	}}
+	work := Patch{Lines: []string{
+		"@@ -9 +9,2 @@",
+		" a line down the file",
+		"+a line you added down here",
+	}}
+	shown := ansi.Strip(strings.Join(rowTexts(previewRows(span, work, 60, unmarked, paneView{file: true})), "\n"))
+
+	// The author's rows, then the reviewer's at their number: the file's order, not "yours" then "theirs".
+	if !(strings.Index(shown, "+another line the span added") < strings.Index(shown, " a line down the file") &&
+		strings.Index(shown, " a line down the file") < strings.Index(shown, "+a line you added down here")) {
+		t.Errorf("the reviewer's edit is not where its number puts it:\n%s", shown)
+	}
+	if !strings.Contains(shown, "  9  a line down the file") {
+		t.Errorf("the reviewer's own context is missing, so nothing says what their line sits in:\n%s", shown)
+	}
+	if !strings.Contains(shown, "  2 +another line the span added") {
+		t.Errorf("the gutter does not jump from 2 to 9, which is what says lines are not on show:\n%s", shown)
+	}
+}
+
+// A directory's pane shows several files at once, so a number on that screen belongs to no one file: the
+// arithmetic that tells a deletion of the span's own work from a deletion of anything else would read one
+// file's numbers against another's. That pane keeps git's rendering whole -- the chrome, the reviewer's own
+// hunk header, the two sections, and git's `-` on every deletion.
+func TestADirectoryPaneKeepsGitsTwoSections(t *testing.T) {
+	span := Patch{Lines: []string{
+		"diff --git a/main.go b/main.go",
+		"@@ -1 +1,2 @@",
+		"+line the span added",
+	}}
+	work := Patch{Lines: []string{
+		"diff --git a/main.go b/main.go",
+		"@@ -1 +1,2 @@",
+		"-line the span added",
+		"+line you typed",
+	}}
+	shown := ansi.Strip(strings.Join(rowTexts(previewRows(span, work, 60, unmarked, paneView{})), "\n"))
+
+	for _, want := range []string{"diff --git a/main.go", "@@ -1 +1,2 @@", "-line the span added  \u2190 you"} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("the directory pane dropped %q:\n%s", want, shown)
+		}
+	}
+	// The reviewer's section, then the author's, with the blank row between them: the layout a directory needs
+	// because git's chrome says which file each half belongs to.
+	if strings.Index(shown, "-line the span added") > strings.Index(shown, "+line the span added") {
+		t.Errorf("the reviewer's rows are not above the author's:\n%s", shown)
+	}
+	// And no `\u00d7`, because the pane cannot tell which file a number on this screen belongs to.
+	if strings.Contains(shown, "\u00d7") {
+		t.Errorf("the directory pane signed a row it cannot tell the file of:\n%s", shown)
+	}
+}
+
+// The three states the pane can tell your rows into, and the case where it adds nothing at all. The colours are
+// the pane's claim rather than this test's to check -- lipgloss drops colour when it decides there is no
+// terminal, and a unit test is one of those -- so what is checked is what survives the stripping: the sign the
+// pane leads with, which is the part a colourless terminal still has to have.
+func TestTheThreeStatesOfYourOwnRow(t *testing.T) {
+	always := func(int) bool { return true }
+	never := func(int) bool { return false }
+	add := ansi.Strip(youText("+typed", youOf{colour: true, span: never}, 4))
+	undo := ansi.Strip(youText("-typed", youOf{colour: true, span: always}, 4))
+	del := ansi.Strip(youText("-typed", youOf{colour: true, span: never}, 4))
+
+	if add != "+typed" {
+		t.Errorf("your own addition is drawn as %q, which is not git's `+`", add)
+	}
+	if undo != "\u00d7typed" {
+		t.Errorf("the line that undoes the span's work is drawn as %q, want it to lead with \u00d7", undo)
+	}
+	if del != "-typed" {
+		t.Errorf("a plain deletion of yours is drawn as %q, which is not git's `-`", del)
+	}
+	if undo == del {
+		t.Error("deleting the span's own work is not told apart from deleting anything else")
+	}
+	// On a directory's pane the pane has nothing to say about which file a number belongs to, so it adds the
+	// mark and leaves git's bytes alone.
+	if got := youText("-typed", youOf{span: never}, 4); got != "-typed" {
+		t.Errorf("without colour to give, the pane rewrote git's line as %q", got)
+	}
+}
+
+// The row keeps git's bytes as the line it is a line of, so the search matches a sign the pane may not have
+// drawn: a search for the text finds the row painted with `\u00d7`.
+func TestTheSearchMatchesWhatGitPrintedRatherThanWhatThePaneDraws(t *testing.T) {
+	yours := youOf{colour: true, span: func(int) bool { return true }}
+	rows := previewEditsBody(Patch{Lines: []string{"@@ -1 +1 @@", "-gone line"}}, 40, unmarked, yours)
+
+	var drawn, searched string
+	for _, r := range rows {
+		if r.line == "-gone line" {
+			drawn, searched = r.text, r.line
+		}
+	}
+	if drawn == "" {
+		t.Fatalf("no row kept git's own bytes:\n%q", rows)
+	}
+	if !strings.Contains(ansi.Strip(drawn), "\u00d7gone line") {
+		t.Errorf("the row is drawn as %q, want the pane's own sign", drawn)
+	}
+	if searched != "-gone line" {
+		t.Errorf("the row remembers being %q, want git's bytes", searched)
 	}
 }
 
@@ -759,7 +968,205 @@ func TestPreviewWaitsForYourEditsBeforeSayingNothingChanged(t *testing.T) {
 	}
 }
 
-// Paging counts both sections, so the end of your edits is reachable.
+// --- the text pane with the reviewer's edits in it ---------------------------
+
+// freshDoc is the file the span created, as the pane gets it: the text at the span's head, which is what
+// the reviewer is being asked about.
+func freshDoc() Document {
+	return Document{Sections: []DocSection{{Lines: []string{
+		"package main",
+		"",
+		"func Fresh() {}",
+	}}}}
+}
+
+// freshEdit is git's own answer for the same file after the reviewer typed in it and did not commit:
+// metadata, one hunk, one line removed and two put in its place.
+func freshEdit() Patch {
+	return Patch{Lines: []string{
+		"diff --git a/fresh.go b/fresh.go",
+		"index 1111111..2222222 100644",
+		"--- a/fresh.go",
+		"+++ b/fresh.go",
+		"@@ -1,3 +1,4 @@",
+		" package main",
+		" ",
+		"-func Fresh() {}",
+		"+func Fresh() { return nil }",
+		"+// reviewer: why?",
+	}, Added: 2, Deleted: 1}
+}
+
+// The reviewer's lines land where they land: the removed line keeps the number it has in the file under
+// review and stands in place of that file's row, the added lines follow it with no number, and none of
+// git's patch chrome arrives in a pane that reads the file as a file.
+func TestEditedRowsPutTheReviewersLinesWhereTheyLand(t *testing.T) {
+	rows := editedDocRows(freshDoc(), freshEdit(), 70, unmarked, youOf{})
+	shown := strings.Join(rowTexts(rows), "\n")
+	plain := ansi.Strip(shown)
+
+	for _, chrome := range []string{"diff --git", "index 1111", "@@", "--- a/", "+++ b/"} {
+		if strings.Contains(plain, chrome) {
+			t.Errorf("the text pane grew patch chrome (%q):\n%s", chrome, plain)
+		}
+	}
+	if n := strings.Count(plain, "package main"); n != 1 {
+		t.Errorf("%q appears %d times, want the file's own row once:\n%s", "package main", n, plain)
+	}
+	if n := strings.Count(plain, "-func Fresh() {}"); n != 1 {
+		t.Errorf("the removed line appears %d times, want it once:\n%s", n, plain)
+	}
+	// It stands in place of the file's own row rather than beside it: one row carries the number 3.
+	numbered := 0
+	for _, row := range rows {
+		if strings.HasPrefix(strings.TrimLeft(ansi.Strip(row.text), " "), "3 ") {
+			numbered++
+		}
+	}
+	if numbered != 1 {
+		t.Errorf("%d rows are numbered 3, want the removed line alone:\n%s", numbered, plain)
+	}
+
+	for _, want := range []string{"-func Fresh() {}", "+func Fresh() { return nil }", "+// reviewer: why?"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("the reviewer's line %q is missing:\n%s", want, plain)
+		}
+	}
+	// One marker per reviewer's line: the two added lines and the removed one, and no others.
+	if n := strings.Count(plain, "\u2190 you"); n != 3 {
+		t.Errorf("%d rows carry the marker, want the reviewer's three lines:\n%s", n, plain)
+	}
+	// The removed line is a line of the reviewed file, so it carries that file's number.
+	if !strings.Contains(plain, "3 -func Fresh() {}") {
+		t.Errorf("the removed line is not numbered with the file's own number:\n%s", plain)
+	}
+	// The added lines are in no file under review, so they are numbered in none: the gutter beside a
+	// `+` is empty, where the file's own rows and the removed line carry a number.
+	for _, row := range rows {
+		if p := ansi.Strip(row.text); strings.HasPrefix(strings.TrimLeft(p, " "), "+") && !strings.HasPrefix(p, "    ") {
+			t.Errorf("an added line carries a number, which belongs to a file this pane is not showing:\n%s", plain)
+		}
+	}
+	// And they land at the line they belong to, in the order git wrote them: the line removed, then the
+	// lines that replaced it. The pane puts lines where they belong and reorders nothing, which is what
+	// keeps it the same patch `d` and `git pair diff` show.
+	if strings.Index(plain, "package main") > strings.Index(plain, "-func Fresh()") {
+		t.Error("the edit landed above the file's first line")
+	}
+	if strings.Index(plain, "-func Fresh()") > strings.Index(plain, "+// reviewer: why?") {
+		t.Error("the reviewer's lines were reordered away from git's order")
+	}
+}
+
+// Two hunks in one file both land, and the untouched lines between them are the file's own.
+func TestEditedRowsPlaceEveryHunk(t *testing.T) {
+	doc := Document{Sections: []DocSection{{Lines: []string{
+		"one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+	}}}}
+	work := Patch{Lines: []string{
+		"@@ -1,2 +1,2 @@",
+		" one",
+		"-two",
+		"+TWO",
+		"@@ -8,2 +8,2 @@",
+		" eight",
+		"-nine",
+		"+NINE",
+	}, Added: 2, Deleted: 2}
+
+	plain := ansi.Strip(strings.Join(rowTexts(editedDocRows(doc, work, 60, unmarked, youOf{})), "\n"))
+	// git's order within each hunk: what came out, then what went in.
+	order := []string{"one", "-two", "+TWO", "three", "eight", "-nine", "+NINE", "ten"}
+	at := -1
+	for _, want := range order {
+		found := strings.Index(plain, want)
+		if found <= at {
+			t.Errorf("%q is missing or out of place after offset %d:\n%s", want, at, plain)
+			return
+		}
+		at = found
+	}
+	if n := strings.Count(plain, "\u2190 you"); n != 4 {
+		t.Errorf("%d rows carry the marker, want the reviewer's four lines across both hunks:\n%s", n, plain)
+	}
+}
+
+// The pane chooses this function only when there are edits, but the function itself is asked about an
+// empty patch too, and then it is exactly what the pane drew before: the file, and nothing beside it.
+func TestEditedRowsWithNoEditsAreTheFileAlone(t *testing.T) {
+	got, want := rowTexts(editedDocRows(freshDoc(), Patch{}, 70, unmarked, youOf{})), rowTexts(docRows(freshDoc(), 70, unmarked))
+	if len(got) != len(want) {
+		t.Fatalf("an unedited file draws %d rows, want %d:\n%s", len(got), len(want), strings.Join(got, "\n"))
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("row %d = %q, want %q", i, ansi.Strip(got[i]), ansi.Strip(want[i]))
+		}
+	}
+	if strings.Contains(ansi.Strip(strings.Join(got, "\n")), "\u2190 you") {
+		t.Error("an unedited file carries the reviewer's marker")
+	}
+}
+
+// A capped file carries less than the patch describes. The merge stops where the pane stops: the rows the
+// reviewer can read are the file's own, and the note above them is what still says edits exist.
+func TestEditedRowsStopWhereThePaneStops(t *testing.T) {
+	capped := Document{Sections: []DocSection{{Lines: []string{"one", "two"}}}, Capped: true}
+	work := Patch{Lines: []string{
+		"@@ -1,3 +1,3 @@",
+		" one",
+		"-two",
+		"-three",
+		"+TWO",
+	}, Added: 1, Deleted: 2}
+
+	plain := ansi.Strip(strings.Join(rowTexts(editedDocRows(capped, work, 60, unmarked, youOf{})), "\n"))
+	if !strings.Contains(plain, "one") || !strings.Contains(plain, "two") {
+		t.Errorf("the capped file lost its own rows:\n%s", plain)
+	}
+	if strings.Contains(plain, "-three") {
+		t.Errorf("a removed line past what the pane was given was drawn anyway:\n%s", plain)
+	}
+}
+
+// The marker is drawn inside the column, not past it: the pane wraps what it draws, and a frame the
+// terminal wraps for it shifts every row under the break.
+func TestTheMarkerDoesNotWidenThePane(t *testing.T) {
+	const width = 44
+	long := Patch{Lines: []string{
+		"@@ -3 +3 @@",
+		"-func Fresh() {}",
+		"+func Fresh() { return aVeryLongExpression(after: the, reviewer: typed, all: of, this: line) }",
+	}, Added: 1, Deleted: 1}
+
+	for _, row := range rowTexts(editedDocRows(freshDoc(), long, width, unmarked, youOf{})) {
+		if w := ansi.StringWidth(row); w > width {
+			t.Errorf("a marked row is %d columns wide in a %d-column pane: %q", w, width, ansi.Strip(row))
+		}
+	}
+}
+
+// The marker is the pane's own word, and the search looks for a term in what the reviewer wrote rather
+// than in the word beside it: `/you` finds a file about yourself, not every line the reviewer typed.
+func TestTheMarkerIsNotWhatTheSearchFinds(t *testing.T) {
+	found := rowTexts(editedDocRows(freshDoc(), freshEdit(), 70, marks{term: "you", current: -1}, youOf{}))
+	for _, row := range found {
+		if strings.Contains(row, sgrUnderline) || strings.Contains(row, sgrReverse) {
+			t.Errorf("/you matched the marker rather than the text:\n%s", ansi.Strip(row))
+		}
+	}
+	// And the marker is not decoration the search cannot reach: a term in the reviewer's own line still
+	// lands, on a row that carries it.
+	for _, row := range editedDocRows(freshDoc(), freshEdit(), 70, marks{term: "nil", current: -1}, youOf{}) {
+		if strings.Contains(ansi.Strip(row.text), "+func Fresh() { return nil }") &&
+			!strings.Contains(row.text, sgrUnderline) {
+			t.Errorf("the search could not find a term inside the reviewer's line: %q", ansi.Strip(row.text))
+		}
+	}
+}
+
+// Your edits are the first thing on screen, and paging counts both sections, so the author's span is still
+// reachable at the end of a long edit of your own.
 func TestPagingReachesYourEdits(t *testing.T) {
 	m := previewModel(t)
 	m.workingFor = func(_ context.Context, _ string) Patch {
@@ -770,10 +1177,16 @@ func TestPagingReachesYourEdits(t *testing.T) {
 		return Patch{Lines: lines, Added: 40}
 	}
 	m = focusPane(t, askPreview(t, m))
+	if !strings.Contains(ansi.Strip(m.View()), "+yours 00") {
+		t.Errorf("your edits are not on the first screen:\n%s", ansi.Strip(m.View()))
+	}
 	for range 30 {
 		m = paneKey(t, m, keyMsg(tea.KeyCtrlF))
 	}
 	if !strings.Contains(ansi.Strip(m.View()), "+yours 39") {
 		t.Errorf("paging never reached the end of your edits:\n%s", ansi.Strip(m.View()))
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "+added line") {
+		t.Errorf("paging never reached the author's span below them:\n%s", ansi.Strip(m.View()))
 	}
 }

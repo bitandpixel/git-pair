@@ -323,6 +323,99 @@ refuse "with the list's counter off screen" 4 "$T/zlist.raw" "reviewed"
 expect "z again gives the list back, counter and all" 5 "$T/zlistback.raw" "reviewed"
 expect "with the column the diff had taken" 5 "$T/zlistback.raw" "z full"
 
+# The pane that reads a file as a file has to say which lines in it are the reviewer's, and it has no diff of
+# the author's to draw them into the way a file row's pane has. ABOUT.md is a file this span created, so its
+# pane is the file's own text, and the reviewer has changed one line of it without committing. One `j` is the walk from the changeset's own directory row down to ABOUT.md's row -- the walk
+# the difftool step makes, stopping one row short of it. One line, not a rewrite: the whole edit has to fit
+# in the rows the pane has, or the check below proves only that a row exists somewhere off screen.
+step "text pane: the reviewer's uncommitted edit is drawn into the file, and marked"
+cp changesets/booking-transaction/ABOUT.md "$T/about-span"
+sed -i 's/^- business-scoped locking$/- business-scoped locking and a reviewer note/' changesets/booking-transaction/ABOUT.md
+session youmarks j,q
+expect "the line they typed is on screen" 0 "$T/youmarks.raw" "+- business-scoped locking and a reviewer note"
+expect "the line it replaced is on screen too" 0 "$T/youmarks.raw" $'\u00d7- business-scoped locking'
+expect "and each carries the marker that says whose it is" 0 "$T/youmarks.raw" $'\u2190 you'
+expect "with the span's own text still the thing being read" 0 "$T/youmarks.raw" "  1 # booking-transaction"
+refuse "no patch chrome arrived in the pane that reads a file" 0 "$T/youmarks.raw" "diff --git"
+cp "$T/about-span" changesets/booking-transaction/ABOUT.md
+
+# The same pane on a file nobody edited carries no marker. The counted note on the first screen is a Go
+# test's at 140 columns: at the walkthrough's 100 the path ahead of it is long enough to clip the header.
+session youclean j,j,q
+refuse "an untouched file the pane reads as text carries no marker" 1 "$T/youclean.raw" $'\u2190 you'
+
+# The same mark on the pane that reads a file as a patch, where the reviewer's rows are drawn into the author's
+# at the numbers both diffs agree on. The marker goes on the reviewer's rows and nowhere else: a row of the
+# author's is the author's work however green it looks, and the two are on one screen now rather than in two
+# sections. src/service.ts is the file this span modifies, so its pane is git's patch, and the reviewer has
+# typed one line into it without committing.
+# Four `j` walk the rows the tree stops on -- the changeset's directory, its ABOUT.md and CHANGESET.yaml,
+# and src/ -- down to service.ts's row, and `z` paints the pane on its own: the frame the checks below read.
+# The keystroke that lands the cursor does not wait for git's answer, and a pane still fetching is a pane
+# that paints nothing.
+step "diff pane: the reviewer's rows are marked, and what names the file is gone"
+printf '  // a note the reviewer typed\n' >> src/service.ts
+session youdiff j,j,j,j,z,z,q
+# The header, not the tree: the tree names the path too, and the two spaces before the sign are the pane's
+# own line. Without it these checks could be a directory's combined patch painted by a cursor that stopped
+# one row short.
+expect "the pane is on the file's own row" 3 "$T/youdiff.raw" "src/service.ts  +2"
+expect "the header counts the reviewer's typing beside the file" 3 "$T/youdiff.raw" "you edited it"
+expect "the line they typed is on screen" 3 "$T/youdiff.raw" "+  // a note the reviewer typed"
+expect "and the row it typed carries the mark" 3 "$T/youdiff.raw" "+  // a note the reviewer typed  "$'\u2190 you'
+# How many times the mark painted is not a check this capture can make -- it holds repaints, so one row on
+# screen is the mark twice in the stream. Absence is: a context line of the file carries no mark, because the
+# reviewer did not write it.
+refuse "a context line is marked as theirs" 3 "$T/youdiff.raw" "  serialised per business now  "$'\u2190 you'
+# The two diffs are one body now: the author's line and the reviewer's sit at the numbers the file has them,
+# rather than in a section each.
+expect "with the author's line the reviewer's sits in the same body" 3 "$T/youdiff.raw" "serialised per business now"
+# On a file's pane the rows git printed about which file this is come out, because the header has named it
+# twice. That absence is the Go test's to prove rather than this window's: the frames here include the directory
+# pane the cursor walked through on the way down, and a directory's patch has every right to say which file it
+# is about. What this capture can say is that the hunk header -- the one row naming which lines of the file are
+# off screen -- is there.
+expect "the hunk header is still there" 3 "$T/youdiff.raw" "@@ "
+# Colour is git's here -- `git diff --color=always` -- and the pane puts its own on the reviewer's rows alone.
+# The claim is that the reviewer's row reaches this terminal in a colour that is not git's, in a capture where
+# git's own colours do appear. Which codes carry them is lipgloss's and git's business: lipgloss writes ANSI 12
+# as `94` on a terminal advertising sixteen colours and `38;5;12` on one advertising more, and it drops colour
+# entirely when it believes there is no terminal -- which is why this is a pty check and not a Go one.
+python3 - "$T/youdiff.raw" <<'PY' \
+  || fail "the reviewer's row does not reach the terminal in a colour of the pane's own"
+import re, sys
+
+raw = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+SGR = re.compile(r"\x1b\[([0-9;]*)m")
+# git's own diff palette: new, old, and the hunk headers between them.
+GIT = {"32", "92", "31", "91", "36", "96"}
+
+
+def foregrounds(where):
+    """The codes setting a foreground colour in `where`.
+
+    For a row, `where` is the bytes just in front of it rather than the line it lands on: the TUI repaints
+    differentially, so one stretch of the capture between two newlines can hold the tail of one screen row and
+    the head of the next, and a code read from that would belong to a row the needle is not in.
+    """
+    found = set()
+    for code in SGR.findall(where):
+        parts = [int(p) for p in code.split(";") if p != ""]
+        if any(30 <= p <= 37 or 90 <= p <= 97 for p in parts) or 38 in parts:
+            found.add(code)
+    return found
+
+
+yours = set()
+at = raw.find("+  // a note the reviewer typed")
+while at != -1:
+    yours |= foregrounds(raw[max(0, at - 40) : at])
+    at = raw.find("+  // a note the reviewer typed", at + 1)
+git_here = foregrounds(raw) & GIT
+sys.exit(0 if yours and git_here and not (yours & GIT) else 1)
+PY
+git checkout -- src/service.ts
+
 # Too small for even that is worth saying out loud, and with the smaller of the two asks -- 12 rows
 # would have been enough, so telling the reviewer about the pane's 16 would send them growing the
 # wrong window.
