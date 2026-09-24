@@ -170,6 +170,100 @@ func docRows(doc Document, width int, mk marks) []previewRow {
 	return out
 }
 
+// youMarker is what says the reviewer typed the line it stands beside. Colour cannot carry it: the green
+// and red are git's own bytes, and in a pane that reads a file as a file every marked line in it belongs to
+// the reviewer — which is the fact the marker states rather than leaves to be inferred from a palette.
+const youMarker = "  \u2190 you"
+
+// marked is one line the reviewer typed, as the rows it is drawn on: the same column `line` uses, narrowed
+// by the marker so the terminal never wraps the frame for us, with the marker on the line's last row. The
+// row carries git's own text in `line`, so a search looks for a term in what the reviewer wrote rather than
+// in the word beside it.
+func (l laidOut) marked(text, number string, first int, mk marks) []previewRow {
+	narrow := laidOut{gutter: l.gutter, body: l.body - runewidth.StringWidth(youMarker)}
+	rows := narrow.line(text, number, first, mk)
+	if len(rows) == 0 {
+		return nil
+	}
+	last := len(rows) - 1
+	rows[last].text += styleDim.Render(youMarker)
+	return rows
+}
+
+// editedDocRows lays a file out the way docRows does, with the reviewer's own uncommitted lines spliced into
+// it at the positions they land. A removed line takes the number it has in the file under review and stands
+// in place of that file's row; an added line carries no number, because it is in no file anybody is
+// reviewing — the working copy's numbering beside the reviewed file's would be two numberings in one gutter,
+// one of them a lie.
+//
+// The reviewer's lines come in the order git wrote them, `-` before `+`. The pane moves them to where they
+// belong and changes nothing else about them, which is what keeps it the same patch `d` and
+// `git pair diff` show rather than a second account of it.
+//
+// git's metadata stays out: its `diff --git`, its `index`, its `---`/`+++`, its `@@` headers. This is the
+// pane that reads a file as a file, and patch chrome in it is what
+// TestTheTextPaneShowsTheFileRatherThanItsPatch exists against.
+//
+// Placement comes from `lineNumbers`, the same arithmetic that numbers the diff pane's rows, so the merge
+// moves git's lines to where they belong without comparing the file to anything. A placed line whose number
+// is past what the pane was given — a capped file — ends the merge, and the note above the rows still says
+// the reviewer edited it.
+func editedDocRows(doc Document, work Patch, width int, mk marks) []previewRow {
+	if len(doc.Sections) != 1 {
+		// A file row has one section. Anything else is not this pane's shape, and `docRows` is what
+		// draws it today.
+		return docRows(doc, width, mk)
+	}
+	lines := doc.Sections[0].Lines
+	numbers, largest := lineNumbers(work.Lines)
+	if largest < len(lines) {
+		largest = len(lines)
+	}
+	l, ok := layout(width, largest)
+	if !ok || l.body-runewidth.StringWidth(youMarker) < 4 {
+		// Too narrow to hold the text and the marker in one column. The file still reads, and the header
+		// still says the reviewer edited it: an unreadable file with a marker is the worse trade.
+		return docRows(doc, width, mk)
+	}
+
+	out := make([]previewRow, 0, len(lines)+len(work.Lines))
+	next := 0 // the index in `lines` of the first file row not yet drawn
+	draw := func(from, to int) {
+		for i := from; i < to && i < len(lines); i++ {
+			out = append(out, l.line(lines[i], strconv.Itoa(i+1), len(out), mk)...)
+		}
+	}
+
+hunks:
+	for i, raw := range work.Lines {
+		n := numbers[i]
+		if n <= 0 {
+			continue // metadata, an @@ header, or a line this cannot place
+		}
+		switch plain := ansi.Strip(raw); {
+		case strings.HasPrefix(plain, "+"):
+			// The line before it in the working copy is the line before it here, so it lands as it comes.
+			out = append(out, l.marked(raw, "", len(out), mk)...)
+		case strings.HasPrefix(plain, "-"):
+			if n > len(lines) {
+				break hunks // the line it replaces is past what the pane was given
+			}
+			draw(next, n-1)
+			out = append(out, l.marked(raw, strconv.Itoa(n), len(out), mk)...)
+			next = n
+		default:
+			if n > len(lines) {
+				break hunks
+			}
+			// A context line is a line of the file, drawn once, with the file's number, unmarked.
+			draw(next, n)
+			next = n
+		}
+	}
+	draw(next, len(lines))
+	return out
+}
+
 // --- searching the pane ------------------------------------------------------
 
 // foldSearch is the smart-case rule `less` and `vim` use: a term written entirely in lower case is

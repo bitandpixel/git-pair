@@ -3417,6 +3417,14 @@ func (m reviewModel) previewContent(mk marks) []previewRow {
 	if !ok {
 		return nil
 	}
+	if m.previewKind == previewContent {
+		// The file's own rows, with the reviewer's uncommitted typing drawn into them where it lands.
+		// The search, the paging, the note and the whole-screen overlay all come through here, so they
+		// count those rows too rather than the file alone.
+		if work, known := m.patch(patchWorking, m.previewPath); known && len(work.Lines) > 0 {
+			return editedDocRows(doc, work, m.previewWidth(), mk)
+		}
+	}
 	return docRows(doc, m.previewWidth(), mk)
 }
 
@@ -3531,10 +3539,13 @@ func (m reviewModel) previewTitle(width int) string {
 			header = fmt.Sprintf("%s  \u00b7  from %s", header, from)
 		}
 		if work, known := m.patch(patchWorking, m.previewPath); known && len(work.Lines) > 0 {
-			// These rows are the file at the span's head. The reviewer's edits are in the working copy and
-			// not in them, and the alternative to saying so is letting a reviewer read their own typing
-			// back as content somebody has reviewed.
+			// These rows are the file at the span's head, with the reviewer's own lines drawn into them.
+			// The counts are git's for the reviewer's section, not the span's, so the number beside the
+			// file cannot be read as a tally that includes their typing.
 			header += "  \u00b7  you edited it"
+			if work.Added >= 0 {
+				header += fmt.Sprintf("  +%d \u2212%d", work.Added, work.Deleted)
+			}
 		}
 	default:
 		if patch, cached := m.patches[m.previewPath]; cached && patch.Added >= 0 {

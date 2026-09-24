@@ -323,6 +323,28 @@ refuse "with the list's counter off screen" 4 "$T/zlist.raw" "reviewed"
 expect "z again gives the list back, counter and all" 5 "$T/zlistback.raw" "reviewed"
 expect "with the column the diff had taken" 5 "$T/zlistback.raw" "z full"
 
+# The pane that reads a file as a file has to say which lines in it are the reviewer's: it has no caption
+# to file them under, the way the diff's `── you · uncommitted` section has. ABOUT.md is a file this span
+# created, so its pane is the file's own text, and the reviewer has changed one line of it without
+# committing. One `j` is the walk from the changeset's own directory row down to ABOUT.md's row -- the walk
+# the difftool step makes, stopping one row short of it. One line, not a rewrite: the whole edit has to fit
+# in the rows the pane has, or the check below proves only that a row exists somewhere off screen.
+step "text pane: the reviewer's uncommitted edit is drawn into the file, and marked"
+cp changesets/booking-transaction/ABOUT.md "$T/about-span"
+sed -i 's/^- business-scoped locking$/- business-scoped locking and a reviewer note/' changesets/booking-transaction/ABOUT.md
+session youmarks j,q
+expect "the line they typed is on screen" 0 "$T/youmarks.raw" "+- business-scoped locking and a reviewer note"
+expect "the line it replaced is on screen too" 0 "$T/youmarks.raw" "-- business-scoped locking"
+expect "and each carries the marker that says whose it is" 0 "$T/youmarks.raw" $'\u2190 you'
+expect "with the span's own text still the thing being read" 0 "$T/youmarks.raw" "  1 # booking-transaction"
+refuse "no patch chrome arrived in the pane that reads a file" 0 "$T/youmarks.raw" "diff --git"
+cp "$T/about-span" changesets/booking-transaction/ABOUT.md
+
+# The same pane on a file nobody edited carries no marker. The counted note on the first screen is a Go
+# test's at 140 columns: at the walkthrough's 100 the path ahead of it is long enough to clip the header.
+session youclean j,j,q
+refuse "an untouched file the pane reads as text carries no marker" 1 "$T/youclean.raw" $'\u2190 you'
+
 # Too small for even that is worth saying out loud, and with the smaller of the two asks -- 12 rows
 # would have been enough, so telling the reviewer about the pane's 16 would send them growing the
 # wrong window.

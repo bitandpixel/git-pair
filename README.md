@@ -1305,9 +1305,15 @@ that says so. An unchanged move keeps `Enter` on the difftool, because there the
 and it is the reason the file is under review at all.
 
 A deletion is the only place the removed text still is, so its row keeps the patch too. The text is the file
-at the span's head, not the working copy, so a reviewer's own edits cannot read as reviewed work. The header
-says `you edited it` when the reviewer edits that file afterwards. A move names the path it came from, which
-the tree's `~` has no room for. `Enter` there still opens the difftool, because the row is still a file.
+at the span's head, not the working copy. What the reviewer has edited in it without committing is drawn
+into that text where it lands, in the order git wrote it: the `-` line at the number that line has in the
+file under review, then the `+` lines that replaced it, unnumbered — an added line is in no file anyone is
+reviewing. The pane moves those lines to where they belong and reorders nothing, which is what keeps it the
+same patch `d` and `git pair diff` show. Each of those rows ends in `← you`, which is the pane's own word
+rather than git's colour: in a pane that reads a file as a file, every marked line belongs to the reviewer,
+and that is the fact the marker states. The header says `you edited it` with git's counts for that section. A
+move names the path it came from, which the tree's `~` has no room for. `Enter` there still opens the
+difftool, because the row is still a file.
 
 Over a historical span the text is still the file on disk, because that is the file `e` would open, so the
 header adds `working copy` rather than letting someone read history that is not there; the editor stays
@@ -1413,7 +1419,8 @@ bytes do not say who typed them, and an added line you wrote is the same green a
 wrote. Measuring that section from the revision under review rather than from the span's start is
 what keeps it from repeating the author's work. The reviewed counter still counts the span alone, so
 your typing never changes what "reviewed" means — and `d`/`Enter` still open the working tree, which
-is where those edits live.
+is where those edits live. A file the pane reads as text has no section to put them under, so its edits
+are drawn into the text instead, marked with `← you` at the row's end.
 
 What the pane prints is git's own bytes: no hunk model, no folding, no colours of its own — the line
 that keeps it a preview rather than a diff renderer, since reading a diff properly means opening it

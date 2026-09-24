@@ -2296,9 +2296,14 @@ file's patch is its own text with a `+` on every line. An unchanged move's patch
 Every other file row keeps its patch, because a rename with edits has edits to show. A deletion is the only
 place the removed text still is, so its row keeps the patch too.
 
-The text is the file at the span's head, not the working copy, so a reviewer's own edits cannot read as
-reviewed work. The header says `you edited it` when the reviewer edits that file afterwards. A move names the
-path it came from, which the tree's `~` has no room for. `Enter` in the pane keeps making the row's own
+The text is the file at the span's head, not the working copy. What the reviewer has edited in it without
+committing is drawn into that text where it lands, in the order git wrote it: the `-` line at the number that
+line has in the file under review, then the `+` lines that replaced it, unnumbered — an added line is in no
+file anyone is reviewing. The pane moves those lines to where they belong and reorders nothing, which is what
+keeps it the same patch `d` and `git pair diff` show. Each of those rows carries `← you`, the pane's own word
+rather than git's colour: in a pane that reads a file as a file, every marked line is the reviewer's, and that
+is the fact the marker states. The header says `you edited it` with git's counts for that section. A move names
+the path it came from, which the tree's `~` has no room for. `Enter` in the pane keeps making the row's own
 choice: the editor for a file the span added, because the comparison has nothing on one side of it, and
 the difftool for an unchanged move, because there the rename is the comparison. `d` is the key that asks
 for the patch of either.

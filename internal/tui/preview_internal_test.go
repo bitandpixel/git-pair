@@ -759,6 +759,203 @@ func TestPreviewWaitsForYourEditsBeforeSayingNothingChanged(t *testing.T) {
 	}
 }
 
+// --- the text pane with the reviewer's edits in it ---------------------------
+
+// freshDoc is the file the span created, as the pane gets it: the text at the span's head, which is what
+// the reviewer is being asked about.
+func freshDoc() Document {
+	return Document{Sections: []DocSection{{Lines: []string{
+		"package main",
+		"",
+		"func Fresh() {}",
+	}}}}
+}
+
+// freshEdit is git's own answer for the same file after the reviewer typed in it and did not commit:
+// metadata, one hunk, one line removed and two put in its place.
+func freshEdit() Patch {
+	return Patch{Lines: []string{
+		"diff --git a/fresh.go b/fresh.go",
+		"index 1111111..2222222 100644",
+		"--- a/fresh.go",
+		"+++ b/fresh.go",
+		"@@ -1,3 +1,4 @@",
+		" package main",
+		" ",
+		"-func Fresh() {}",
+		"+func Fresh() { return nil }",
+		"+// reviewer: why?",
+	}, Added: 2, Deleted: 1}
+}
+
+// The reviewer's lines land where they land: the removed line keeps the number it has in the file under
+// review and stands in place of that file's row, the added lines follow it with no number, and none of
+// git's patch chrome arrives in a pane that reads the file as a file.
+func TestEditedRowsPutTheReviewersLinesWhereTheyLand(t *testing.T) {
+	rows := editedDocRows(freshDoc(), freshEdit(), 70, unmarked)
+	shown := strings.Join(rowTexts(rows), "\n")
+	plain := ansi.Strip(shown)
+
+	for _, chrome := range []string{"diff --git", "index 1111", "@@", "--- a/", "+++ b/"} {
+		if strings.Contains(plain, chrome) {
+			t.Errorf("the text pane grew patch chrome (%q):\n%s", chrome, plain)
+		}
+	}
+	if n := strings.Count(plain, "package main"); n != 1 {
+		t.Errorf("%q appears %d times, want the file's own row once:\n%s", "package main", n, plain)
+	}
+	if n := strings.Count(plain, "-func Fresh() {}"); n != 1 {
+		t.Errorf("the removed line appears %d times, want it once:\n%s", n, plain)
+	}
+	// It stands in place of the file's own row rather than beside it: one row carries the number 3.
+	numbered := 0
+	for _, row := range rows {
+		if strings.HasPrefix(strings.TrimLeft(ansi.Strip(row.text), " "), "3 ") {
+			numbered++
+		}
+	}
+	if numbered != 1 {
+		t.Errorf("%d rows are numbered 3, want the removed line alone:\n%s", numbered, plain)
+	}
+
+	for _, want := range []string{"-func Fresh() {}", "+func Fresh() { return nil }", "+// reviewer: why?"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("the reviewer's line %q is missing:\n%s", want, plain)
+		}
+	}
+	// One marker per reviewer's line: the two added lines and the removed one, and no others.
+	if n := strings.Count(plain, "\u2190 you"); n != 3 {
+		t.Errorf("%d rows carry the marker, want the reviewer's three lines:\n%s", n, plain)
+	}
+	// The removed line is a line of the reviewed file, so it carries that file's number.
+	if !strings.Contains(plain, "3 -func Fresh() {}") {
+		t.Errorf("the removed line is not numbered with the file's own number:\n%s", plain)
+	}
+	// The added lines are in no file under review, so they are numbered in none: the gutter beside a
+	// `+` is empty, where the file's own rows and the removed line carry a number.
+	for _, row := range rows {
+		if p := ansi.Strip(row.text); strings.HasPrefix(strings.TrimLeft(p, " "), "+") && !strings.HasPrefix(p, "    ") {
+			t.Errorf("an added line carries a number, which belongs to a file this pane is not showing:\n%s", plain)
+		}
+	}
+	// And they land at the line they belong to, in the order git wrote them: the line removed, then the
+	// lines that replaced it. The pane puts lines where they belong and reorders nothing, which is what
+	// keeps it the same patch `d` and `git pair diff` show.
+	if strings.Index(plain, "package main") > strings.Index(plain, "-func Fresh()") {
+		t.Error("the edit landed above the file's first line")
+	}
+	if strings.Index(plain, "-func Fresh()") > strings.Index(plain, "+// reviewer: why?") {
+		t.Error("the reviewer's lines were reordered away from git's order")
+	}
+}
+
+// Two hunks in one file both land, and the untouched lines between them are the file's own.
+func TestEditedRowsPlaceEveryHunk(t *testing.T) {
+	doc := Document{Sections: []DocSection{{Lines: []string{
+		"one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+	}}}}
+	work := Patch{Lines: []string{
+		"@@ -1,2 +1,2 @@",
+		" one",
+		"-two",
+		"+TWO",
+		"@@ -8,2 +8,2 @@",
+		" eight",
+		"-nine",
+		"+NINE",
+	}, Added: 2, Deleted: 2}
+
+	plain := ansi.Strip(strings.Join(rowTexts(editedDocRows(doc, work, 60, unmarked)), "\n"))
+	// git's order within each hunk: what came out, then what went in.
+	order := []string{"one", "-two", "+TWO", "three", "eight", "-nine", "+NINE", "ten"}
+	at := -1
+	for _, want := range order {
+		found := strings.Index(plain, want)
+		if found <= at {
+			t.Errorf("%q is missing or out of place after offset %d:\n%s", want, at, plain)
+			return
+		}
+		at = found
+	}
+	if n := strings.Count(plain, "\u2190 you"); n != 4 {
+		t.Errorf("%d rows carry the marker, want the reviewer's four lines across both hunks:\n%s", n, plain)
+	}
+}
+
+// The pane chooses this function only when there are edits, but the function itself is asked about an
+// empty patch too, and then it is exactly what the pane drew before: the file, and nothing beside it.
+func TestEditedRowsWithNoEditsAreTheFileAlone(t *testing.T) {
+	got, want := rowTexts(editedDocRows(freshDoc(), Patch{}, 70, unmarked)), rowTexts(docRows(freshDoc(), 70, unmarked))
+	if len(got) != len(want) {
+		t.Fatalf("an unedited file draws %d rows, want %d:\n%s", len(got), len(want), strings.Join(got, "\n"))
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("row %d = %q, want %q", i, ansi.Strip(got[i]), ansi.Strip(want[i]))
+		}
+	}
+	if strings.Contains(ansi.Strip(strings.Join(got, "\n")), "\u2190 you") {
+		t.Error("an unedited file carries the reviewer's marker")
+	}
+}
+
+// A capped file carries less than the patch describes. The merge stops where the pane stops: the rows the
+// reviewer can read are the file's own, and the note above them is what still says edits exist.
+func TestEditedRowsStopWhereThePaneStops(t *testing.T) {
+	capped := Document{Sections: []DocSection{{Lines: []string{"one", "two"}}}, Capped: true}
+	work := Patch{Lines: []string{
+		"@@ -1,3 +1,3 @@",
+		" one",
+		"-two",
+		"-three",
+		"+TWO",
+	}, Added: 1, Deleted: 2}
+
+	plain := ansi.Strip(strings.Join(rowTexts(editedDocRows(capped, work, 60, unmarked)), "\n"))
+	if !strings.Contains(plain, "one") || !strings.Contains(plain, "two") {
+		t.Errorf("the capped file lost its own rows:\n%s", plain)
+	}
+	if strings.Contains(plain, "-three") {
+		t.Errorf("a removed line past what the pane was given was drawn anyway:\n%s", plain)
+	}
+}
+
+// The marker is drawn inside the column, not past it: the pane wraps what it draws, and a frame the
+// terminal wraps for it shifts every row under the break.
+func TestTheMarkerDoesNotWidenThePane(t *testing.T) {
+	const width = 44
+	long := Patch{Lines: []string{
+		"@@ -3 +3 @@",
+		"-func Fresh() {}",
+		"+func Fresh() { return aVeryLongExpression(after: the, reviewer: typed, all: of, this: line) }",
+	}, Added: 1, Deleted: 1}
+
+	for _, row := range rowTexts(editedDocRows(freshDoc(), long, width, unmarked)) {
+		if w := ansi.StringWidth(row); w > width {
+			t.Errorf("a marked row is %d columns wide in a %d-column pane: %q", w, width, ansi.Strip(row))
+		}
+	}
+}
+
+// The marker is the pane's own word, and the search looks for a term in what the reviewer wrote rather
+// than in the word beside it: `/you` finds a file about yourself, not every line the reviewer typed.
+func TestTheMarkerIsNotWhatTheSearchFinds(t *testing.T) {
+	found := rowTexts(editedDocRows(freshDoc(), freshEdit(), 70, marks{term: "you", current: -1}))
+	for _, row := range found {
+		if strings.Contains(row, sgrUnderline) || strings.Contains(row, sgrReverse) {
+			t.Errorf("/you matched the marker rather than the text:\n%s", ansi.Strip(row))
+		}
+	}
+	// And the marker is not decoration the search cannot reach: a term in the reviewer's own line still
+	// lands, on a row that carries it.
+	for _, row := range editedDocRows(freshDoc(), freshEdit(), 70, marks{term: "nil", current: -1}) {
+		if strings.Contains(ansi.Strip(row.text), "+func Fresh() { return nil }") &&
+			!strings.Contains(row.text, sgrUnderline) {
+			t.Errorf("the search could not find a term inside the reviewer's line: %q", ansi.Strip(row.text))
+		}
+	}
+}
+
 // Paging counts both sections, so the end of your edits is reachable.
 func TestPagingReachesYourEdits(t *testing.T) {
 	m := previewModel(t)
