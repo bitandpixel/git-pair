@@ -100,7 +100,7 @@ func TestNoJSONArrayIsEverNull(t *testing.T) {
 		{
 			name:  "an empty repository",
 			setup: func(t *testing.T) string { return newRepo(t).Dir() },
-			runs:  [][]string{{"queue", "--json"}},
+			runs:  [][]string{{"queue", "--json"}, {"skill", "list", "--json"}},
 		},
 		{
 			name: "work in flight",
@@ -192,7 +192,7 @@ func TestJSONOnAViewerSaysTheFlagChangedNothing(t *testing.T) {
 	ready(t, f)
 	submit(t, f, "block")
 
-	for _, args := range [][]string{{"change", "feedback", "--json"}, {"diff", "--json"}} {
+	for _, args := range [][]string{{"change", "feedback", "--json"}, {"diff", "--json"}, {"skill", "show", "--json"}} {
 		res := runIn(t, f.Dir(), args...).mustSucceed(t, args...)
 		if !strings.Contains(res.stderr, "has no --json output") {
 			t.Errorf("git-pair %v said nothing about a flag it cannot honour\nstderr: %s", args, res.stderr)

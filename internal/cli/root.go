@@ -97,12 +97,14 @@ func Execute(args []string) int {
 }
 
 // noJSONCommands are the commands that take the global `--json` and have no machine-readable form to
-// offer. Both are viewers: the whole answer is a patch or a report a person reads. `--json` is global
-// (PRD §8), so these commands accept the flag, and the defect was the silence after it — a machine that
-// asks for JSON and reads an empty stdout learns "nothing", not "this command has no JSON".
+// offer. Each is a viewer: the whole answer is a patch, a report, or a document a person reads. `--json`
+// is global (PRD §8), so these commands accept the flag, and the defect was the silence after it — a
+// machine that asks for JSON and reads an empty stdout learns "nothing", not "this command has no
+// JSON".
 var noJSONCommands = map[string]bool{
 	"change feedback": true,
 	"diff":            true,
+	"skill show":      true,
 }
 
 // warnUnansweredJSON says out loud that `--json` changed nothing on a viewer. The note stays on stderr, so
@@ -178,6 +180,7 @@ Gates and record:  git pair check, then git pair integration record`,
 		newDiffCommand(a),
 		newCheckCommand(a),
 		newIntegrationCommand(a),
+		newSkillCommand(a),
 	)
 	return root
 }

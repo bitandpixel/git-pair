@@ -1751,6 +1751,42 @@ When the clone holds no `refs/git-pair/*` refs at all, the command prints a warn
 namespace being empty changes nothing about what it writes — but it changes what a reader elsewhere
 believes, and a clone that has never fetched is one where `never recorded` is a claim about the clone.
 
+## 11.5 The agent skill
+
+The agent contract (§22) is a product surface, and it ships inside the tool. `skills/git-pair/` holds it
+in this repository, and the same bytes are compiled into the binary. Both halves matter: the directory is
+what a person or an agent finds by walking the repository, and what a project commits into its own skills
+directory; the compiled copy is what makes an installed skill checkable, because a binary installed with
+`go install` has no source tree beside it. A skill that drifted from the commands it documents is worse
+than no skill, because it is read as a promise — which is what happened to the first one, written beside
+a different repository.
+
+`git pair skill list` prints the skill this binary carries and every directory a harness would read it
+from, each marked with one state:
+
+| State | Means |
+| --- | --- |
+| `current` | the installed bytes equal this binary's |
+| `stale` | a skill of the same name is installed there and its bytes differ |
+| `absent` | nothing is installed there |
+| `unavailable` | the location has no home here — a repository-scoped row run outside any repository, or a user-scoped row with no home directory to resolve |
+
+`current` is defined by bytes rather than by a version string, because the version string is written by a
+person who is editing the skill and does not have to write it. `--json` prints `skill`, `version`,
+`files`, `repository` and `targets`, each target carrying `harness`, `scope`, `path` (the skill's own
+`git-pair` directory, inside the skills directory a harness scans), `state` and — only when non-empty —
+`unmanaged`, the files in an installed skill that git-pair did not write.
+
+`git pair skill show [path]` prints one compiled-in file of the skill, `SKILL.md` by default, so it can be
+read or copied without a checkout. The answer is the document, so there is no `--json` form and the flag
+says so on stderr.
+
+Both are read-only: they stat, read and print, and write nothing.
+
+Every page under `skills/` is held to the command tree by the same check as this file and the README: a
+command name or ref path the prose uses must be one the code answers to, and the command reference page
+must name every command the code has.
+
 ---
 
 # 12. Review Lifecycle

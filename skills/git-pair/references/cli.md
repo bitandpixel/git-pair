@@ -28,13 +28,15 @@ by a test.
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | **the reviewer's command; never run it as the author.** Stages the whole tree by default, commits (empty commits allowed), writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history |
 | `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>`, `--allow-feedback`, `--configure-fetch` | **not an agent command.** The only command in git-pair that writes a ref: the create-only pair `refs/git-pair/archive/<id>` and `refs/git-pair/integrations/<id>`, after verifying the verdict and the landing. Re-running it with the same pair succeeds and changes nothing |
 | `integration publish` | `[<changeset>…]`, `--remote <name>` | **not an agent command.** Sends a changeset's two refs to the shared remote, unforced — the only git-pair command that pushes, and the only thing it may push is `refs/git-pair/*`. Idempotent |
+| `skill list` | none | the skill compiled into this binary, and every directory a harness would read it from, marked `current`, `stale`, `absent` or `unavailable`. Read-only |
+| `skill show` | `[path]` | prints the compiled-in `SKILL.md`, or a file inside the skill such as `references/cli.md`. No JSON output |
 
 `review` with no subcommand is `review open` and takes the same flags.
 
 ## Flags every command takes
 
-- `--json` — machine-readable output where supported. `change feedback` and `diff` have none, and say so
-  on stderr rather than printing nothing.
+- `--json` — machine-readable output where supported. `change feedback`, `diff` and `skill show` have
+  none, and say so on stderr rather than printing nothing.
 - `--default-branch <ref>` — the integration branch that "has this landed?" is measured against.
   Without it git-pair reads git's own answer (`refs/remotes/origin/HEAD`, then a sole `origin/main` or
   `origin/master`, then a local `main` or `master`) and refuses if there is nothing to compare against.
