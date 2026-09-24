@@ -363,6 +363,10 @@ Only commits carrying a valid Review-Outcome trailer count; ordinary commits do
 not appear. Indexes are chronological, so 0 is the first review and -1 is the
 most recent, matching ` + "`git pair diff --since-review`" + `.
 
+REVIEWER is who made the submission — the author of the review commit, which is
+the reviewer rather than the author of the change. ` + "`--json`" + ` reports the
+same value as ` + "`reviewer`" + `.
+
 --changeset reads another changeset by slug, from whichever branch carries it.`,
 		Example: `  git pair review history
   git pair review history --json
@@ -393,20 +397,24 @@ most recent, matching ` + "`git pair diff --since-review`" + `.
 						"reviewed_head": r.ReviewedHead,
 						"outcome":       string(r.Outcome),
 						"subject":       r.Subject,
-						"author":        r.Author,
-						"when":          r.When.UTC().Format(time.RFC3339),
-						"age":           lifecycle.Age(r.When, now()),
+						// The reviewer, named for the role rather than for the git field: on a
+						// review submission the commit author *is* the reviewer, and "author"
+						// means the person who wrote the change everywhere else in git-pair.
+						"reviewer": r.Author,
+						"when":     r.When.UTC().Format(time.RFC3339),
+						"age":      lifecycle.Age(r.When, now()),
 					})
 				}
 				return a.emitJSON(map[string]any{"changeset": s.cs.Slug, "reviews": out})
 			}
 			w := tabwriter.NewWriter(a.stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "INDEX\tSHA\tREVIEWED\tOUTCOME\tAGE\tSUBJECT")
+			fmt.Fprintln(w, "INDEX\tSHA\tREVIEWED\tOUTCOME\tREVIEWER\tAGE\tSUBJECT")
 			for i, r := range s.summary.Reviews {
 				// REVIEWED is the commit the submission spoke about — its `Review-Head`, which is
-				// where this commit sits in the line rather than what it changed.
-				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
-					i, r.Short, short(r.ReviewedHead), r.Outcome, lifecycle.Age(r.When, now()), r.Subject)
+				// where this commit sits in the line rather than what it changed. REVIEWER is the
+				// commit's author, so a changeset reviewed by two people says who said what.
+				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					i, r.Short, short(r.ReviewedHead), r.Outcome, r.Author, lifecycle.Age(r.When, now()), r.Subject)
 			}
 			return w.Flush()
 		},

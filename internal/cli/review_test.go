@@ -202,6 +202,46 @@ func TestReviewHistoryWithNoReviews(t *testing.T) {
 	}
 }
 
+// A changeset can be read by more than one person, and the only durable record of who
+// submitted which verdict is the author of the review commit. `review history` prints it as
+// REVIEWER and reports it in `--json` as `reviewer`: on a submission the commit author is the
+// reviewer, while "author" means the person who wrote the change everywhere else in git-pair.
+func TestReviewHistoryNamesTheReviewer(t *testing.T) {
+	f, _ := newChangeset(t, "booking-transaction", "main")
+	ready(t, f)
+
+	submitAs(t, f, "Rae", "block")
+	submitAs(t, f, "Nils", "approve")
+
+	res := runIn(t, f.Dir(), "review", "history", "--json").mustSucceed(t, "review", "history", "--json")
+	rows := res.jsonList(t, "reviews")
+	if len(rows) != 2 {
+		t.Fatalf("reviews = %v, want the two submissions", rows)
+	}
+	want := []string{"Rae", "Nils"}
+	for i, entry := range rows {
+		row, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatalf("review %d = %T, want an object", i, entry)
+		}
+		if row["reviewer"] != want[i] {
+			t.Errorf("reviews[%d].reviewer = %v, want %s", i, row["reviewer"], want[i])
+		}
+		if _, ok := row["author"]; ok {
+			t.Errorf("reviews[%d] still carries the retired `author` key: %v", i, row)
+		}
+	}
+
+	text := runIn(t, f.Dir(), "review", "history").mustSucceed(t, "review", "history").stdout
+	mustContain(t, text, "REVIEWER", "the column header")
+	for _, name := range want {
+		mustContain(t, text, name, "the reviewer who made that submission")
+	}
+	// The fixture's own identity is the changeset author's, and none of their commits is a
+	// review: the column that appears here is the reviewer's, not a fallback to the branch.
+	mustNotContain(t, text, gittest.AuthorName, "the history table")
+}
+
 // --- queue (PRD §10.6) ------------------------------------------------
 
 // A ready marker is what puts a changeset in the queue, and the entry must carry the
@@ -766,6 +806,26 @@ func submitJSON(t *testing.T, f *gittest.Fixture, outcome string) map[string]any
 	t.Helper()
 	args := []string{"review", "submit", "--" + outcome, "--json"}
 	return runIn(t, f.Dir(), args...).mustSucceed(t, args...).json(t)
+}
+
+// submitAs records a review submission as a named reviewer, which is how a test tells two
+// reviewers apart. `review submit` commits through ordinary git with the process environment,
+// so GIT_AUTHOR_* is the identity the commit gets. The author is read back from the commit
+// because a test of a printed name is worth nothing if the fixture never changed it.
+func submitAs(t *testing.T, f *gittest.Fixture, name, outcome string) string {
+	t.Helper()
+	t.Setenv("GIT_AUTHOR_NAME", name)
+	t.Setenv("GIT_AUTHOR_EMAIL", strings.ToLower(name)+"@example.invalid")
+	args := []string{"review", "submit", "--" + outcome, "--json"}
+	out := runIn(t, f.Dir(), args...).mustSucceed(t, args...).json(t)
+	sha, _ := out["commit"].(string)
+	if sha == "" {
+		t.Fatalf("submit --json returned no commit: %v", out)
+	}
+	if got := strings.TrimSpace(f.MustGit("show", "-s", "--format=%an", sha)); got != name {
+		t.Fatalf("%s is authored by %q, want %q", sha, got, name)
+	}
+	return sha
 }
 
 // readyAt marks the current changeset ready with a back-dated marker commit, so queue

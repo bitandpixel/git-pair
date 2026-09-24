@@ -1103,14 +1103,19 @@ Displays all review submissions for the current changeset.
 Example:
 
 ```text
-INDEX   SHA      OUTCOME    AGE
-0       a18cf91  block      2d
-1       39b71aa  block      1d
-2       f7c92e0  feedback   4h
-3       c81ea22  approve    20m
+INDEX   SHA      REVIEWED  OUTCOME    REVIEWER  AGE
+0       a18cf91  9f2c1de   block      Rae       2d
+1       39b71aa  4d7e0b2   block      Rae       1d
+2       f7c92e0  c07a9f4   feedback   Nils      4h
+3       c81ea22  15b83d7   approve    Nils      20m
 ```
 
 The index is chronological.
+
+`REVIEWED` is the commit the submission spoke about, from its `Review-Head` trailer (§10.4), and
+`REVIEWER` is who made it. Both are the commit's own facts: a review submission is authored by the
+reviewer, so `REVIEWER` is that person rather than the author of the change, and `--json` reports
+the same value as `reviewer`.
 
 Indexing semantics:
 
