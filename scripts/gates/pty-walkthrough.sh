@@ -57,6 +57,18 @@ refuse() {
 expectfile() {
   if [ -e "$2" ]; then ok "$1"; else fail "$1 — $2 was never created"; fi
 }
+# expectbefore <description> <window> <raw file> <earlier> <later> — for a claim about the order two
+# pieces of the same screen paint in, which no single grep can make.
+expectbefore() {
+  if python3 "$PLAIN" --after "$2" "$3" | python3 -c '
+import sys
+text = sys.stdin.read()
+a, b = text.find(sys.argv[1]), text.find(sys.argv[2])
+sys.exit(0 if a != -1 and b != -1 and a < b else 1)' "$4" "$5"; then ok "$1"; else
+    fail "$1 — '$4' does not come before '$5' after key $2"
+    python3 "$PLAIN" --after "$2" "$3" --head 14 | sed 's/^/      | /'
+  fi
+}
 # expectbytes <description> <raw file> <literal bytes> — for escape sequences, which pty-plain
 # removes on purpose. Alt-screen entry and leave are the whole claim of one scenario.
 expectbytes() {
@@ -323,9 +335,9 @@ refuse "with the list's counter off screen" 4 "$T/zlist.raw" "reviewed"
 expect "z again gives the list back, counter and all" 5 "$T/zlistback.raw" "reviewed"
 expect "with the column the diff had taken" 5 "$T/zlistback.raw" "z full"
 
-# The pane that reads a file as a file has to say which lines in it are the reviewer's: it has no caption
-# to file them under, the way the diff's `── you · uncommitted` section has. ABOUT.md is a file this span
-# created, so its pane is the file's own text, and the reviewer has changed one line of it without
+# The pane that reads a file as a file has to say which lines in it are the reviewer's, and it has no section
+# of its own to file them under the way the diff's `── you · uncommitted` section has. ABOUT.md is a file
+# this span created, so its pane is the file's own text, and the reviewer has changed one line of it without
 # committing. One `j` is the walk from the changeset's own directory row down to ABOUT.md's row -- the walk
 # the difftool step makes, stopping one row short of it. One line, not a rewrite: the whole edit has to fit
 # in the rows the pane has, or the check below proves only that a row exists somewhere off screen.
@@ -344,6 +356,38 @@ cp "$T/about-span" changesets/booking-transaction/ABOUT.md
 # test's at 140 columns: at the walkthrough's 100 the path ahead of it is long enough to clip the header.
 session youclean j,j,q
 refuse "an untouched file the pane reads as text carries no marker" 1 "$T/youclean.raw" $'\u2190 you'
+
+# The same mark on the pane that reads a file as a patch, where the marker belongs on the `head..working`
+# section and nowhere else: the author's span below it is git's patch of the span's own ends, and a row of that
+# is the author's work however green it looks. The section leads, because the caption is one row and a section
+# at the bottom of a diff longer than the pane is a section below the fold. src/service.ts is the file this
+# span modifies, so its pane is git's patch, and the reviewer has typed one line into it without committing.
+# Four `j` walk the rows the tree stops on -- the changeset's directory, its ABOUT.md and CHANGESET.yaml,
+# and src/ -- down to service.ts's row, and `z` paints the pane on its own: the frame the checks below read.
+# The keystroke that lands the cursor does not wait for git's answer, and a pane still fetching is a pane
+# that paints nothing.
+step "diff pane: the reviewer's section leads the author's, and its rows are marked"
+printf '  // a note the reviewer typed\n' >> src/service.ts
+session youdiff j,j,j,j,z,z,q
+# The header, not the tree: the tree names the path too, and the two spaces before the sign are the pane's
+# own line. Without it these checks could be a directory's combined patch painted by a cursor that stopped
+# one row short.
+expect "the pane is on the file's own row" 3 "$T/youdiff.raw" "src/service.ts  +2"
+expect "the reviewer's section is named, with git's counts for it" 3 "$T/youdiff.raw" "you · uncommitted"
+expect "the line they typed is on screen" 3 "$T/youdiff.raw" "+  // a note the reviewer typed"
+expect "and the row it typed carries the mark" 3 "$T/youdiff.raw" "+  // a note the reviewer typed  "$'\u2190 you'
+# How many times the mark painted is not a check this capture can make -- it holds repaints, so one row on
+# screen is the mark twice in the stream. Absence is: the author's row and git's own metadata both carry a
+# sign, and neither is a line the reviewer wrote.
+refuse "the author's own span carries no mark" 3 "$T/youdiff.raw" "serialised per business now  "$'\u2190 you'
+refuse "nor does git's header about the old path" 3 "$T/youdiff.raw" "--- a/src/service.ts  "$'\u2190 you'
+expect "with the author's span still below it" 3 "$T/youdiff.raw" "serialised per business now"
+# Which section is on top is the Go test's to prove: it asserts on a reconstructed screen, while this capture
+# carries repaints, and the frame that arrives first is the span without the working patch. What this window
+# can show is that the caption and the row it names paint together, in that order, over the real keystroke.
+expectbefore "the caption and the row it names paint together, in that order" 3 "$T/youdiff.raw" \
+  "you · uncommitted" "+  // a note the reviewer typed"
+git checkout -- src/service.ts
 
 # Too small for even that is worth saying out loud, and with the smaller of the two asks -- 12 rows
 # would have been enough, so telling the reviewer about the pane's 16 would send them growing the

@@ -682,17 +682,28 @@ func TestThePreviewRefillsAfterAToolCloses(t *testing.T) {
 }
 
 // Your uncommitted edits are a diff too, but git's bytes do not say who wrote them -- an added
-// line you typed and one the author typed are the same green -- so the pane prints them below the
-// author's span, under a caption that says whose they are.
+// line you typed and one the author typed are the same green -- so the pane prints them under a
+// caption that says whose they are, above the author's span rather than below it: the section you came to
+// check is the one that should not need paging. Each of your lines carries the marker too, because the
+// caption is one row and scrolls away while the rows it names stay.
 func TestPreviewShowsYourEditsUnderTheirOwnCaption(t *testing.T) {
 	m := previewModel(t)
 	m.workingFor = func(_ context.Context, _ string) Patch {
-		return Patch{Lines: []string{"@@ -1 +1,2 @@", "+a note you typed"}, Added: 1, Deleted: 0}
+		return Patch{Lines: []string{
+			"diff --git a/main.go b/main.go",
+			"index 1234567..89abcde 100644",
+			"--- a/main.go",
+			"+++ b/main.go",
+			"@@ -1 +1,3 @@",
+			"+a note you typed",
+			" a line of the file you did not touch",
+			"-and one you removed",
+		}, Added: 1, Deleted: 1}
 	}
 	m = askPreview(t, m)
 	shown := ansi.Strip(m.View())
 
-	if !strings.Contains(shown, "you \u00b7 uncommitted  +1 \u22120") {
+	if !strings.Contains(shown, "you \u00b7 uncommitted  +1 \u22121") {
 		t.Errorf("your edits are on screen without a caption naming them and their size:\n%s", shown)
 	}
 	if !strings.Contains(shown, "+a note you typed") {
@@ -701,12 +712,33 @@ func TestPreviewShowsYourEditsUnderTheirOwnCaption(t *testing.T) {
 	if !strings.Contains(shown, "+added line") {
 		t.Errorf("the author's span vanished when your edits arrived:\n%s", shown)
 	}
-	if strings.Index(shown, "+added line") > strings.Index(shown, "you \u00b7 uncommitted") {
-		t.Error("your edits come before the author's, which reads as if they were reviewed first")
+	// The caption first, then your lines, then the author's span: a section at the bottom of a diff longer
+	// than the pane is a section below the fold.
+	if strings.Index(shown, "you \u00b7 uncommitted") > strings.Index(shown, "+a note you typed") {
+		t.Errorf("your edits are not the first thing the pane shows:\n%s", shown)
+	}
+	if strings.Index(shown, "+a note you typed") > strings.Index(shown, "+added line") {
+		t.Errorf("the author's span comes before your edits:\n%s", shown)
 	}
 	// Your lines carry line numbers of their own, from git's headers in your diff.
 	if !strings.Contains(shown, "1 +a note you typed") {
 		t.Errorf("your lines are not numbered:\n%s", shown)
+	}
+	// Your two lines carry the marker. The context line between them belongs to the file, and the author's
+	// span below carries none of it: two markers, not four.
+	if n := strings.Count(shown, "\u2190 you"); n != 2 {
+		t.Errorf("%d rows carry the marker, want the two lines you changed:\n%s", n, shown)
+	}
+	if !strings.Contains(shown, "-and one you removed  \u2190 you") {
+		t.Errorf("the line you removed is not marked:\n%s", shown)
+	}
+	if strings.Contains(shown, "a line of the file you did not touch  \u2190 you") {
+		t.Errorf("a context line is marked as yours:\n%s", shown)
+	}
+	// The lines above the first hunk carry a git sign without being a line of the file: `--- a/main.go` is
+	// the old path, not a line the reviewer deleted.
+	if strings.Contains(shown, "--- a/main.go  \u2190 you") || strings.Contains(shown, "+++ b/main.go  \u2190 you") {
+		t.Errorf("git's own metadata is marked as the reviewer's work:\n%s", shown)
 	}
 }
 
@@ -956,7 +988,8 @@ func TestTheMarkerIsNotWhatTheSearchFinds(t *testing.T) {
 	}
 }
 
-// Paging counts both sections, so the end of your edits is reachable.
+// Your edits are the first thing on screen, and paging counts both sections, so the author's span is still
+// reachable at the end of a long edit of your own.
 func TestPagingReachesYourEdits(t *testing.T) {
 	m := previewModel(t)
 	m.workingFor = func(_ context.Context, _ string) Patch {
@@ -967,10 +1000,16 @@ func TestPagingReachesYourEdits(t *testing.T) {
 		return Patch{Lines: lines, Added: 40}
 	}
 	m = focusPane(t, askPreview(t, m))
+	if !strings.Contains(ansi.Strip(m.View()), "+yours 00") {
+		t.Errorf("your edits are not on the first screen:\n%s", ansi.Strip(m.View()))
+	}
 	for range 30 {
 		m = paneKey(t, m, keyMsg(tea.KeyCtrlF))
 	}
 	if !strings.Contains(ansi.Strip(m.View()), "+yours 39") {
 		t.Errorf("paging never reached the end of your edits:\n%s", ansi.Strip(m.View()))
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "+added line") {
+		t.Errorf("paging never reached the author's span below them:\n%s", ansi.Strip(m.View()))
 	}
 }

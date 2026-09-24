@@ -169,6 +169,33 @@ Verification
 
 - `mise run gates` — check, `e2e-29.sh`, and `pty-walkthrough.sh` including the new scenario.
 
+### M4 — the reviewer's own section, moved and marked (review feedback)
+
+The first hand pass looked at the diff pane as well, and asked for the same treatment there: the reviewer's
+uncommitted lines were named by a caption at the bottom of a patch they can lose by scrolling.
+
+Deliverables
+
+- `── you · uncommitted` leads the author's span in the diff pane, and each line the reviewer changed there
+  carries `← you`.
+- The header's count of a document or the thread heading sits in the slot a diff's `+N −M` sits in.
+
+Tasks
+
+- `previewRows`: the reviewer's section first, the author's below, with each half told which pane row its own
+  first row is. `patchRows` takes the marking as an argument, so `previewEditsBody` marks `+`/`-` rows and
+  leaves context rows — which belong to the file, not to the reviewer — alone.
+- `previewTitle`: `path  21 lines` rather than `path  ·  21 lines`.
+- Tests: the section paints above the span, two changed lines give two markers and the context line between
+  them none, the first screen already holds your lines, paging still reaches the span below, and the count is
+  pinned beside the name rather than anywhere in the line.
+- `pty-walkthrough.sh`: the same walkthrough onto the file the span *modifies*, expecting the caption, the
+  typed line, one marker, the author's span below, and the reviewer's line before it.
+
+Verification
+
+- `go test ./internal/tui/`, then `mise run gates`.
+
 ## Risks
 
 - A long run of edits puts `← you` on every row of it. Marking only the first row of a run was the
@@ -179,7 +206,7 @@ Verification
   beyond the cut are not drawn, and the note remains, which is the honest half-answer: the reviewer is
   told edits exist and sees the ones that fall inside what the pane can carry.
 - `previewRows` for the diff pane and this merge are now two renderings of the reviewer's patch. They share
-  `previewBody`/`laidOut` and the marker, so what can drift is the placement rule; the M1 tests are the
+  `patchRows`/`laidOut` and the marker, so what can drift is the placement rule; the M1 tests are the
   ones that notice.
 
 ## Verification strategy
@@ -195,3 +222,5 @@ untouched, which is what `e2e-29.sh` keeps pinned.
 | Date       | Audit | Summary |
 | ---------- | ----- | ------- |
 | —          | —     | Plan written before implementation. |
+| 2026-09-24 | M1–M3 executed; M4 added from review feedback | The merge, the pane and the documents are in. The review pass looked at the diff pane too and asked for the reviewer's section there to lead and to be marked, which is M4; the count's slot moved with it. |
+| 2026-09-24 | M4 executed | `previewEditsBody` marks `head..working` rows only — the author's span, the context lines and git's `---`/`+++` rows carry no mark — and the section paints above the span. `mise run gates` green, including the walkthrough's new diff-pane scenario. |

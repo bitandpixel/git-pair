@@ -3500,9 +3500,11 @@ func (m reviewModel) previewTooLong() string {
 	return ""
 }
 
-// previewTitle is the pane's own line: what is on show, and how much of it. The counts are git's for a diff;
-// a document has no additions and deletions to report, only lines, so the header counts what the thing on
-// screen actually has rather than leaving the space for a count that would mean nothing.
+// previewTitle is the pane's own line: what is on show, and how much of it. The count sits beside the name
+// in every case, in the place a diff's `+N −M` sits, because it is the same kind of answer about the thing
+// on screen. The counts are git's for a diff; a document has no additions and deletions to report, only
+// lines, so the header counts what the thing on screen actually has rather than leaving the space for a
+// count that would mean nothing.
 func (m reviewModel) previewTitle(width int) string {
 	header := m.previewPath
 	if m.mode == modePreview {
@@ -3516,9 +3518,9 @@ func (m reviewModel) previewTitle(width int) string {
 	case previewDocument, previewThreads:
 		if doc, cached := m.docs[m.previewPath]; cached {
 			if m.previewKind == previewThreads {
-				header = fmt.Sprintf("%s  \u00b7  %d threads", header, len(doc.Sections))
+				header = fmt.Sprintf("%s  %d threads", header, len(doc.Sections))
 			} else if lines := docLines(doc); lines > 0 {
-				header = fmt.Sprintf("%s  \u00b7  %d lines", header, lines)
+				header = fmt.Sprintf("%s  %d lines", header, lines)
 			}
 			if m.sess.Span().Historical() {
 				// The text is the file on disk, and a historical span does not contain that file -- it
@@ -3531,7 +3533,7 @@ func (m reviewModel) previewTitle(width int) string {
 	case previewContent:
 		if doc, cached := m.contents[m.previewPath]; cached {
 			if lines := docLines(doc); lines > 0 {
-				header = fmt.Sprintf("%s  \u00b7  %d lines", header, lines)
+				header = fmt.Sprintf("%s  %d lines", header, lines)
 			}
 		}
 		if from := m.movedFrom(m.previewPath); from != "" {
@@ -3539,9 +3541,9 @@ func (m reviewModel) previewTitle(width int) string {
 			header = fmt.Sprintf("%s  \u00b7  from %s", header, from)
 		}
 		if work, known := m.patch(patchWorking, m.previewPath); known && len(work.Lines) > 0 {
-			// These rows are the file at the span's head, with the reviewer's own lines drawn into them.
-			// The counts are git's for the reviewer's section, not the span's, so the number beside the
-			// file cannot be read as a tally that includes their typing.
+			// These rows are the file at the span's head with lines the reviewed revision does not have
+			// drawn into them. The counts are git's for that section rather than the span's, so the number
+			// beside the file cannot be read as a tally that includes the working copy's typing.
 			header += "  \u00b7  you edited it"
 			if work.Added >= 0 {
 				header += fmt.Sprintf("  +%d \u2212%d", work.Added, work.Deleted)

@@ -2271,20 +2271,28 @@ title, and the shortcut bar becomes the pane's own, naming every key it reads an
 A terminal resized below the pane's floor takes the column away and gives the keys back to the region
 that held them before the pane, because a column that is not drawn cannot hold the keyboard.
 
-When the reviewer has edited a file without committing, the pane shows those edits below the author's,
-under a caption naming them, with counts and line numbers of their own. Git's output does not say who
-typed a line, so the caption is what keeps the reviewer's work from reading as the author's; the
-section is diffed from the revision under review, not the span's start, so it cannot repeat the
-author's changes. The reviewed counter stays the span's: a reviewer's typing does not change what has
-been reviewed.
+When the reviewer has edited a file without committing, the pane shows those edits above the author's,
+under a caption naming them, with counts and line numbers of their own, and every line the reviewer changed
+carries the marker. The reviewer's section leads because it is the one they came to check, and a section at
+the bottom of a diff longer than the pane is a section below the fold; the marker is there because the
+caption names the section from one row, and that row scrolls away while the rows it names stay. Git's output
+does not say who typed a line, so the caption and the marker are what keep the reviewer's work from reading
+as the author's; the section is diffed from the revision under review, not the span's start, so it cannot
+repeat the author's changes. The reviewed counter stays the span's: a reviewer's typing does not change what
+has been reviewed. What the section holds is whatever is not in the revision under review. That is the
+reviewer's typing while the author's work is committed — the state a handoff leaves — and in a tree where the
+author is still working it also carries their unreviewed lines, which the caption and the marker then claim.
+Nothing on this screen attributes an uncommitted line: the claim rests on git-pair's model that the tree under
+review is the reviewer's, and a tree holding the author's uncommitted work is outside it.
 
 The list column's other half is documents rather than files, and the pane reads them the same way it reads
 a diff: ABOUT.md and each thread, when the box's cursor is on them, are shown as their own text with the
 file's own line numbers, and the Threads heading is every thread in the order the box lists them, each named
 above its text. The pane is the screen's place for reading text, and a changeset document is the one thing on
 this screen that is pure text to read; a diff of one against nothing would report every line as added, which
-is true and carries no information about what it says. The header counts what is on show — git's `+N −M` for
-a diff, lines for a document, threads for the heading — and the pane follows the box's cursor the way it
+is true and carries no information about what it says. The header counts what is on show in the one place
+counts sit, beside the name — git's `+N −M` for a diff, lines for a document, threads for the heading — and
+the pane follows the box's cursor the way it
 follows the tree's, which is what makes the two halves one column. `Enter` in the pane opens what is on show
 with the rules the row itself would apply: the difftool for a diff, the editor for a document, and the row's
 own refusal where history makes the editor the wrong tool. Over a historical span the document is still read
@@ -2300,9 +2308,10 @@ The text is the file at the span's head, not the working copy. What the reviewer
 committing is drawn into that text where it lands, in the order git wrote it: the `-` line at the number that
 line has in the file under review, then the `+` lines that replaced it, unnumbered — an added line is in no
 file anyone is reviewing. The pane moves those lines to where they belong and reorders nothing, which is what
-keeps it the same patch `d` and `git pair diff` show. Each of those rows carries `← you`, the pane's own word
-rather than git's colour: in a pane that reads a file as a file, every marked line is the reviewer's, and that
-is the fact the marker states. The header says `you edited it` with git's counts for that section. A move names
+keeps it the same patch `d` and `git pair diff` show. Each of those rows carries `← you`, the same mark that
+names the reviewer's rows in the diff's own section, and the pane's word rather than git's colour: in a pane
+that reads a file as a file, every marked line is the reviewer's, and that is the fact the marker states. The
+header says `you edited it` with git's counts for that section. A move names
 the path it came from, which the tree's `~` has no room for. `Enter` in the pane keeps making the row's own
 choice: the editor for a file the span added, because the comparison has nothing on one side of it, and
 the difftool for an unchanged move, because there the rename is the comparison. `d` is the key that asks
