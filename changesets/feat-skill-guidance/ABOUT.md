@@ -41,9 +41,10 @@ pointer into the PRD: an agent activates a skill to be told what to do, and a pa
 sends it somewhere it cannot open. `references/cli.md` is the catalogue (every command, its flags, the exit
 codes, the JSON shapes); `references/integration.md` covers the landing contract for an agent who reads
 about it and does not run it; `references/installing-the-skill.md` covers the harness directories. The
-opening paragraph states why the durable refs exist — a squash or a cherry-pick leaves the reviewed commits
-unreachable from the destination branch, and the archive ref is what keeps the review reachable — because an
-agent that knows the reason applies it, and an agent that memorised the layout does not.
+opening paragraph states why the durable refs exist — a squash or a cherry-pick may leave no `Review-*`
+trailer reachable and drops the intermediate review diffs from the merged history, and the archive ref is
+what keeps the whole chain reachable — because an agent that knows the reason applies it, and an agent that
+memorised the layout does not.
 
 **`skills/embed.go`** — `//go:embed all:git-pair` and the `AGENTS.md` stanza, plus `Name`, `Files()` and
 `Read()`. The package lives in `skills/` rather than under `internal/` because `go:embed` cannot reach above
