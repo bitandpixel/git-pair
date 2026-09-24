@@ -1751,6 +1751,80 @@ When the clone holds no `refs/git-pair/*` refs at all, the command prints a warn
 namespace being empty changes nothing about what it writes — but it changes what a reader elsewhere
 believes, and a clone that has never fetched is one where `never recorded` is a claim about the clone.
 
+## 11.5 The agent skill
+
+The agent contract (§22) is a product surface, and it ships inside the tool. `skills/git-pair/` holds it
+in this repository, and the same bytes are compiled into the binary. Both halves matter: the directory is
+what a person or an agent finds by walking the repository, and what a project commits into its own skills
+directory; the compiled copy is what makes an installed skill checkable, because a binary installed with
+`go install` has no source tree beside it. A skill that drifted from the commands it documents is worse
+than no skill, because it is read as a promise — which is what happened to the first one, written beside
+a different repository.
+
+`git pair skill list` prints the skill this binary carries and every directory a harness would read it
+from, each marked with one state:
+
+| State | Means |
+| --- | --- |
+| `current` | the installed bytes equal this binary's |
+| `stale` | a skill of the same name is installed there and its bytes differ |
+| `absent` | the `git-pair` directory is not there |
+| `unavailable` | the location has no home here — a repository-scoped row run outside any repository, or a user-scoped row with no home directory to resolve |
+
+An existing directory holding anything other than this byte-for-byte set is `stale`, including a directory
+that is empty: `absent` is about the directory, and everything else is about the bytes.
+
+`current` is defined by bytes rather than by a version string, because the version string is written by a
+person who is editing the skill and does not have to write it. `--json` prints `skill`, `version`,
+`files`, `repository` and `targets`, each target carrying `harness`, `scope`, `path` (the skill's own
+`git-pair` directory, inside the skills directory a harness scans), `state` and — only when non-empty —
+`unmanaged`, the files in an installed skill that git-pair did not write.
+
+`git pair skill show [path]` prints one compiled-in file of the skill, `SKILL.md` by default, so it can be
+read or copied without a checkout. The answer is the document, so there is no `--json` form and the flag
+says so on stderr.
+
+`git pair skill install` writes the compiled-in skill into a skills directory as `git-pair/`, with its
+`references/` beside `SKILL.md`. A skills directory is the container a harness scans, and the argument is
+always that container:
+
+| Flag | Default | Rule |
+| --- | --- | --- |
+| `--harness` | `agents` | one of `agents`, `pi`, `claude`; `codex` is accepted as a spelling of `agents`, because Codex CLI reads the `.agents/skills` locations. Anything else is a usage error naming what git-pair knows and pointing at `--dest`. The two directories per harness are those harnesses' documented discovery rules — the documents and the date they were read are recorded with `skillHarness` in `internal/cli/skill.go` and cited in the skill's install reference |
+| `--scope` | `repo` inside a git repository, `user` outside one | `repo` writes under the repository root, `user` under the home directory. `--scope repo` with no repository is a usage error with both ways out in the message |
+| `--dest` | none | the container to write into, for a harness git-pair has no row for. It names the destination outright, so combining it with `--harness` or `--scope` is a usage error rather than a precedence rule |
+| `--dry-run` | off | resolve the destination and report what would be written, writing nothing. It makes the same refusal a real install would make, which is what makes it a preflight rather than a different command |
+| `--force` | off | replace installed files that differ |
+
+An install never deletes. Files that match this binary are left alone and reported unchanged; files that
+differ are refused — exit 1, naming each one — until `--force` says otherwise; files git-pair did not
+write are reported as unmanaged and kept, because a team's own notes beside the shipped contract are not
+git-pair's to remove. A second run writes nothing and succeeds. Each file is written through a temporary
+name and renamed into place, so an interrupted install cannot leave a `SKILL.md` that parses as the
+beginning of one; the whole skill is not one transaction, and `skill list` reporting `stale` is what says so.
+
+The closing advice is a fact about the destination, so it is printed only for a destination whose scope was
+asked for: commit the directory for a repository scope, and nothing for `--dest`, because git-pair cannot
+say who else can read a directory it was handed.
+
+`--json` prints `skill`, `version`, `harness`, `scope`, `dest`, `path`, `dry_run`, `written`, `unchanged`
+and `unmanaged`. `written` names the files the call wrote, or under `--dry-run` the files it would have
+written. The two identity fields are empty when `--dest` was used, because neither was consulted.
+
+`git pair skill agents-md` prints the pointer stanza for a harness with no skill discovery — the text an
+agent reads from `AGENTS.md` or `CLAUDE.md` when nothing else would tell it this repository reviews changes
+with git-pair. It is a short pointer, not a second contract: it says where the skill is and names the rules
+an agent most often gets wrong. The stanza is prose in this repository (`skills/agents-md.md`) rather than
+a Go string, so it is reviewed as documentation.
+
+`list`, `show` and `agents-md` are read-only: they stat, read and print, and write nothing. `install` is
+the only command in the family that touches the filesystem, and it touches nothing outside the directory it
+names.
+
+Every page under `skills/` is held to the command tree by the same check as this file and the README: a
+command name or ref path the prose uses must be one the code answers to, and the command reference page
+must name every command the code has.
+
 ---
 
 # 12. Review Lifecycle

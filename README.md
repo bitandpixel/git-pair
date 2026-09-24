@@ -550,8 +550,9 @@ of the override. See `docs/plans/completed/gitpr-mvp/research/git-plumbing-findi
 ## Command reference
 
 Every command accepts the persistent `--json` flag, but only `status`, `change ready`,
-`change unready`, `change wait`, `review submit`, `review history`, `queue`, `check` and
-`integration record` change output for it; elsewhere it is accepted and ignored.
+`change unready`, `change wait`, `review submit`, `review history`, `queue`, `check`, `skill list`,
+`skill install`, `integration record` and `integration publish` change output for it; elsewhere it is
+accepted and ignored.
 
 Every command also accepts `--default-branch <ref>`, which states the integration branch that
 "has this landed?" is measured against. Without it git-pair reads git's own answer
@@ -582,6 +583,10 @@ landed.
 | `integration publish` | `[<changeset>…]`, `--remote <name>` | sends a changeset's two durable refs to the shared remote, unforced, in one push — the only git-pair command that pushes, and the only thing git-pair may push is `refs/git-pair/*` (§26). No arguments publishes every pair this clone holds; named ids publish just those, and a name with no record here is a refusal rather than a silent no-op. No `+` and no options: a remote that holds a different value rejects the push, and the refusal names both values, because two people recording one landing is a decision rather than a race to win. It then re-reads the remote's copies and reports what is actually there, so one ref arriving while the other is refused is reported as the half-state it is rather than as a single failure. Idempotent — a pair the remote already holds is "already published" and nothing is written, which is what lets CI run it every build |
 | `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>`, `--allow-feedback`, `--configure-fetch` (all optional) | writes both durable refs for one changeset, create-only: the archive at `--source` and the integration at `--commit`. The changeset is discovered from the `changesets/<id>/` directories `--source` carries and the integration branch does not, so a pipeline needs the two SHAs it already holds and not the changeset name; `--changeset` disambiguates a stacked child. Before it writes: the source's history must name this changeset and its newest verdict must permit integration (`approve`, or `feedback` with `--allow-feedback`); `--commit` must be in the destination branch's history (the `--target` you name, else the changeset's `base:`, else the default branch) and must be the commit that added `changesets/<id>/` there. Name neither SHA and the repository is asked — the landing is the first-parent commit on the destination that added the directory, the reviewed head is the branch still carrying it, wherever this clone holds that branch (a fetched `refs/remotes/origin/<branch>` counts, since that is where git puts a branch a pipeline was handed), and one branch is one candidate however many paths spell it — and anything ambiguous is a usage error naming the candidates. Needs no checkout and writes no commit; re-running it with the same pair succeeds and changes nothing. `--configure-fetch` is consent for the one thing git-pair ever writes outside a ref: it appends the mirror refspec to `remote.<name>.fetch` — idempotently, printing the key and the value, and reporting "already there" when it was — so an ordinary `git fetch` keeps this clone able to tell published from unpublished. It is a flag rather than a question because this CLI is the agent surface (§PRD §22): a prompt would make one command line mean two things, and an unanswered prompt in CI reads exactly like a declined one. The records themselves stay behind `--fetch`: a record is a claim, and a clone should acquire claims by asking |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
+| `skill list` | — | the agent skill this binary carries, and every directory a harness would read it from, each marked `current`, `stale`, `absent` or `unavailable`. `current` means the installed bytes equal this binary's, which is the check that keeps an installed skill from describing an older tool. Read-only |
+| `skill show` | `[path]` | prints one compiled-in file of the skill, `SKILL.md` by default, so it can be read or copied without a checkout. No JSON output |
+| `skill install` | `--harness agents\|pi\|claude`, `--scope repo\|user`, `--dest <dir>`, `--dry-run`, `--force` | writes the compiled-in skill into a skills directory as `git-pair/`. Matching files are left alone, differing files are refused without `--force`, and files git-pair did not write are reported and kept. `--dest` cannot be combined with `--harness` or `--scope` |
+| `skill agents-md` | — | prints the pointer stanza for `AGENTS.md` or `CLAUDE.md`, for a harness with no skill discovery. No JSON output |
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
 commits, no blocking surviving additions — the last acknowledged with
@@ -607,7 +612,7 @@ nothing, those reads exit 2. For a span of another branch, name its ends: `git p
 | --- | --- | --- |
 | 0 | success | — |
 | 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:`; `integration record` finding no changeset directory at `--source`, a head that was never reviewed, a landing that is not in the destination branch or did not add the changeset directory, or a record naming a different commit |
-| 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`/`integration`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; `cannot tell which branch is the integration branch`; detached HEAD; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal; more than one changeset directory in `--source` and none named with `--changeset` |
+| 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`/`integration`/`skill`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; detached HEAD; `cannot tell which branch is the integration branch`; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal; more than one changeset directory in `--source` and none named with `--changeset`; `skill install` with an unknown `--harness` or `--scope`, or with `--dest` alongside either |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
 The split between 1 and 2 is deliberate and load-bearing for agents: exit 1 means the
@@ -623,9 +628,9 @@ Two fields answer null on purpose, and neither is a list. `status`'s `latest_rev
 does not exist before the first review. `uncommitted` is a bool that reports the question belongs to a
 checkout this command does not stand in.
 
-`git pair change feedback` and `git pair diff` have no JSON output. `--json` is a global flag, so both
-accept it. Each now says on stderr that the flag changed nothing, because an empty stdout reads to a
-machine as an empty answer.
+`git pair change feedback`, `git pair diff`, `git pair skill show` and `git pair skill agents-md` have no
+JSON output. `--json` is a global flag, so all four accept it. Each now says on stderr that the flag changed
+nothing, because an empty stdout reads to a machine as an empty answer.
 
 `git pair status --json`, waiting for the first review. Once a review exists `latest_review`
 becomes `{"index": 0, "outcome": "block", "commit": "332887c", "reviewed_head": "1a2b3c4"}` —
@@ -879,8 +884,9 @@ neither:
 }
 ```
 
-`git pair change ready --json` returns the `status` fields plus `ready_commit` (full SHA),
-`review_queue_visible`, `acknowledged_survivors` and `surviving_review_artifacts`.
+`git pair change ready --json` prints `changeset`, `branch`, `base`, `state`, `head`, `ready_commit` (full
+SHA), `review_queue_visible` and `acknowledged_survivors`. `surviving_review_artifacts` appears only when a
+surviving-additions report existed — which is when `--allow-surviving-review-additions` acknowledged lines.
 
 `git pair change unready --json` — `was` is the state the command found and `state` the state after
 it, which differ only when a marker was written. `recorded` is false when there was nothing to
@@ -1076,6 +1082,71 @@ Documented rather than configured on anyone's behalf, because publishing review 
 about who gets to read it — the archive holds every commit of the review, including ones the author
 later dropped. Until that line is run, the author's clone holds the only copy, and a CI job reporting
 missing refs is describing exactly that.
+
+## The agent skill
+
+The contract above is also a file an agent reads. `skills/git-pair/` is the skill — the author-side loop,
+the roles, the exit codes and the prohibitions in one page, with the flags, the JSON shapes and the
+landing contract in references beside it — and the same bytes are compiled into the binary.
+
+Every page under `skills/` is held to the command tree by `docs_contract_test.go`, the way the spec and
+this file are: a command name or a ref path the prose uses must be one the code answers to, and the
+reference page must name every command. That check exists because the first version of this skill lived
+beside a different repository and documented a `review close` that had been removed and a `refs/reviews/*`
+namespace that never existed. Prose that drifts from the code is read as a promise. What the check does not
+cover is the flags, the JSON field names, and the harness directories below: those are prose, and a reviewer
+reads them.
+
+Put it where the agents working on a repository read skills:
+
+```bash
+$ git pair skill list
+git-pair skill "git-pair" — 4 files, from git-pair 0.1.0
+
+  agents  repo   .agents/skills/git-pair              absent
+  agents  user   $HOME/.agents/skills/git-pair        absent
+  pi      repo   .pi/skills/git-pair                  absent
+  pi      user   $HOME/.pi/agent/skills/git-pair      absent
+  claude  repo   .claude/skills/git-pair              absent
+  claude  user   $HOME/.claude/skills/git-pair        absent
+
+current is the same bytes this git-pair ships; stale is an older copy, read as fact.
+
+$ git pair skill install
+installed the git-pair skill into .agents/skills/git-pair
+  wrote      SKILL.md
+  wrote      references/cli.md
+  wrote      references/installing-the-skill.md
+  wrote      references/integration.md
+
+Commit .agents/skills/git-pair so every clone, worktree and CI job gets the same copy.
+A harness that was already running has read its skill directories: restart it if the skill does not appear.
+```
+
+`--harness` chooses whose directories to write, `--scope` chooses the repository or the home directory,
+and `--dest` names a directory outright for a harness git-pair has no row for. The paths are each harness's
+documented discovery rules, cited with the date they were read in
+[`skills/git-pair/references/installing-the-skill.md`](skills/git-pair/references/installing-the-skill.md)
+and in the `skillHarness` comment — not a probe of what some version of a harness happens to scan:
+
+| Harness | Per repository | Per machine |
+| --- | --- | --- |
+| `agents` (default; Codex CLI and pi both read it) | `.agents/skills/` | `~/.agents/skills/` |
+| `pi` | `.pi/skills/` | `~/.pi/agent/skills/` |
+| `claude` | `.claude/skills/` | `~/.claude/skills/` |
+
+Copying is equally supported: copy `skills/git-pair/` — the directory, with its `references/` — into any
+of those. `git pair skill list` still reports `current` or `stale` against it, which is the point of
+compiling the skill in: the check does not depend on how the files got there.
+
+For a harness with no skill discovery, print the pointer stanza instead:
+
+```bash
+git pair skill agents-md >> AGENTS.md
+```
+
+It names where the skill is and the three rules agents most often get wrong. A repository can carry both
+halves — the stanza for every harness, and the installed skill for the ones that read it.
 
 ## Configuration
 
