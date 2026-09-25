@@ -283,16 +283,7 @@ func suffixReason(reason string) string {
 // question than "no such remote".
 func (a *app) publishRemote(ctx context.Context, repo *git.Repo, remoteFlag string) (string, error) {
 	if remoteFlag != "" {
-		remotes, err := repo.Remotes(ctx)
-		if err != nil {
-			return "", err
-		}
-		for _, r := range remotes {
-			if r == remoteFlag {
-				return remoteFlag, nil
-			}
-		}
-		return "", fmt.Errorf("git-pair: no remote %q; this repository has %s", remoteFlag, orNone(remotes))
+		return namedRemote(ctx, repo, remoteFlag)
 	}
 	remote, err := a.remoteForDurableRefs(ctx, repo, "")
 	if err != nil {

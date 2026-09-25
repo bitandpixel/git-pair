@@ -10,11 +10,15 @@ import (
 	"gitpair/internal/reviewref"
 )
 
-// `--configure-fetch` is the only place git-pair writes configuration, and the flag *is* the consent: PRD
-// §22 makes this CLI the agent surface, so the alternative — asking at the terminal — would make one
-// command line mean two things depending on where it ran, and an unanswered prompt in CI reads exactly like
-// a declined one. These tests are the consequences of that choice: nothing blocks, nothing asks, the
-// default writes no config, and the flag writes exactly one additive line, once.
+// `git pair integration configure` is the only place git-pair writes configuration, and the command *is*
+// the consent: PRD §22 makes this CLI the agent surface, so the alternative — asking at the terminal —
+// would make one command line mean two things depending on where it ran, and an unanswered prompt in CI
+// reads exactly like a declined one. These tests are the consequences of that choice: nothing blocks,
+// nothing asks, no other command writes config, and this one writes exactly two additive lines, once.
+//
+// It is a command rather than a flag on `record` because the clone that wants the configuration is not
+// always a clone that is recording: `record` needs the two SHAs a landing produced, and a clone that
+// arrived after the fact has neither.
 
 // configOf reads the clone's own config file, because the assertions that matter are about the file: a
 // message saying "already configured" is worth nothing unless the file did not change.
@@ -28,127 +32,218 @@ func configOf(t *testing.T, f *gittest.Fixture) string {
 	return string(src)
 }
 
-func fetchValues(t *testing.T, f *gittest.Fixture) []string {
+// configValues reads one multi-valued key straight from git, so the assertions are about the repository
+// rather than about anything git-pair printed. An unset key is git's exit 1, which is an answer and not a
+// failure: the empty list is what "no line written" looks like in the file.
+func configValues(t *testing.T, f *gittest.Fixture, key string) []string {
 	t.Helper()
-	out := strings.TrimSpace(f.MustGit("config", "--local", "--get-all", "remote.origin.fetch"))
-	if out == "" {
+	out, err := f.Git("config", "--local", "--get-all", key)
+	if err != nil || strings.TrimSpace(out) == "" {
 		return nil
 	}
-	return strings.Split(out, "\n")
+	return strings.Split(strings.TrimSpace(out), "\n")
 }
 
-// The default: refs written, config untouched, and one line naming the flag that would have configured it.
-func TestRecordWithoutConfigureFetchWritesNoConfig(t *testing.T) {
-	f, _, source, landing := recordFixture(t)
-	f.SwitchTo("main")
+// remoteWith points the fixture at a fresh bare remote under origin, which is the state the command needs
+// and the state the record fixtures deliberately do not have.
+func remoteWith(t *testing.T, f *gittest.Fixture) string {
+	t.Helper()
 	remote := filepath.Join(t.TempDir(), "remote.git")
 	f.MustGit("init", "--bare", "-b", "main", remote)
 	f.MustGit("remote", "add", "origin", remote)
-	before := fetchValues(t, f)
+	return remote
+}
+
+// A record writes refs and nothing else: the clone's config is untouched, and the answer names the command
+// that would have changed it.
+func TestRecordWritesNoConfigAndNamesTheCommand(t *testing.T) {
+	f, _, source, landing := recordFixture(t)
+	f.SwitchTo("main")
+	remoteWith(t, f)
+	before := configValues(t, f, "remote.origin.fetch")
 
 	res := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing,
 		"--target", "release/2.x").mustSucceed(t, "integration", "record")
-	mustContain(t, res.stdout, "--configure-fetch", "the run names the option it did not take")
+	mustContain(t, res.stdout, "git pair integration configure", "the run names the command it did not run")
 	mustContain(t, res.stdout, "remote.origin.fetch", "and the key it would have written")
-	if got := fetchValues(t, f); len(got) != len(before) {
-		t.Errorf("`--configure-fetch` was not passed, yet remote.origin.fetch went from %v to %v", before, got)
+	mustContain(t, res.stdout, "remote.origin.push", "and the other one")
+	if got := configValues(t, f, "remote.origin.fetch"); len(got) != len(before) {
+		t.Errorf("record changed remote.origin.fetch from %v to %v: configuration is not record's to write", before, got)
+	}
+	if got := configValues(t, f, "remote.origin.push"); len(got) != 0 {
+		t.Errorf("record wrote remote.origin.push = %v, want the key untouched", got)
 	}
 	if durableRefs(t, f) == nil {
 		t.Error("the record was not written: configuration is the optional half, not the gate")
 	}
 
-	// In JSON the absence is the answer: a pipeline that did not ask must be able to tell "not asked" from
-	// "asked and nothing needed writing", which is what `fetch_config` being absent versus present means.
+	// In JSON the absence is the answer: a pipeline that never asked about configuration must be able to
+	// see that this run's answer has nothing to do with configuration.
 	json := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing,
 		"--target", "release/2.x", "--json").json(t)
 	if json["fetch_config"] != nil {
-		t.Errorf("fetch_config = %v on a run that did not ask, want absent", json["fetch_config"])
+		t.Errorf("fetch_config = %v on a record run, want the key gone with the flag it reported", json["fetch_config"])
 	}
 }
 
-// With the flag: one line, the mirror refspec only, and the answer names the key and the value.
-func TestConfigureFetchWritesTheMirrorRefspec(t *testing.T) {
-	f, _, source, landing := recordFixture(t)
+// The default: both lines, each the mirror or the record refspec only, and the answer names the key and
+// the value for both.
+func TestConfigureWritesBothRefspecs(t *testing.T) {
+	f, _, _, _ := recordFixture(t)
 	f.SwitchTo("main")
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	f.MustGit("init", "--bare", "-b", "main", remote)
-	f.MustGit("remote", "add", "origin", remote)
-	before := fetchValues(t, f)
+	remoteWith(t, f)
+	before := configValues(t, f, "remote.origin.fetch")
 
-	res := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing,
-		"--target", "release/2.x", "--configure-fetch").mustSucceed(t, "integration", "record")
-	spec := reviewref.MirrorRefspec("origin")
-	mustContain(t, res.stdout, spec, "the answer prints the value it wrote")
-	mustContain(t, res.stdout, "remote.origin.fetch", "and the key it wrote it to")
-	mustContain(t, res.stdout, "added "+spec, "and says it wrote rather than confirmed")
+	res := runIn(t, f.Dir(), "integration", "configure").mustSucceed(t, "integration", "configure")
+	fetch, push := reviewref.MirrorRefspec("origin"), reviewref.PushRefspec
+	mustContain(t, res.stdout, fetch, "the answer prints the fetch value it wrote")
+	mustContain(t, res.stdout, push, "and the push value")
+	mustContain(t, res.stdout, "added "+fetch+" to remote.origin.fetch", "naming the key and saying it wrote")
+	mustContain(t, res.stdout, "added "+push+" to remote.origin.push", "for both halves")
 
-	got := fetchValues(t, f)
-	if len(got) != len(before)+1 {
+	got := configValues(t, f, "remote.origin.fetch")
+	if len(got) != len(before)+1 || got[len(got)-1] != fetch {
 		t.Fatalf("remote.origin.fetch = %v, want the clone's own refspec plus exactly the mirror refspec", got)
 	}
-	if got[len(got)-1] != spec {
-		t.Errorf("appended %q, want %q", got[len(got)-1], spec)
-	}
-	// The clone's original fetch refspec survives. This is why the write is `--add`: a record command that
-	// replaced `remote.origin.fetch` would leave the clone unable to fetch branches, from a command whose
-	// name says nothing about fetching.
+	// The clone's original fetch refspec survives. This is why the write is `--add`: a command that replaced
+	// `remote.origin.fetch` would leave the clone unable to fetch its own branches, from an invocation
+	// whose name says nothing about fetching.
 	if strings.Join(got[:len(got)-1], "\n") != strings.Join(before, "\n") {
 		t.Errorf("the clone's own fetch refspecs changed: %v, want %v untouched", got, before)
+	}
+	if pushed := configValues(t, f, "remote.origin.push"); len(pushed) != 1 || pushed[0] != push {
+		t.Errorf("remote.origin.push = %v, want exactly %q", pushed, push)
 	}
 }
 
 // The same write reported through `--json`, on its own fixture so the answer is the first run's: a
 // pipeline needs to tell "written now" from "was already there", and `already_configured` is the only place
 // that distinction survives the move away from a terminal.
-func TestConfigureFetchReportsWhatItDid(t *testing.T) {
-	f, _, source, landing := recordFixture(t)
+func TestConfigureReportsWhatItDid(t *testing.T) {
+	f, _, _, _ := recordFixture(t)
 	f.SwitchTo("main")
-	f.MustGit("init", "--bare", "-b", "main", filepath.Join(t.TempDir(), "remote.git"))
-	f.MustGit("remote", "add", "origin", filepath.Join(t.TempDir(), "remote.git"))
+	remoteWith(t, f)
 
-	fc := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing,
-		"--target", "release/2.x", "--configure-fetch", "--json").json(t)["fetch_config"]
-	entry, ok := fc.(map[string]any)
-	if !ok {
-		t.Fatalf("fetch_config = %v, want the key, value and outcome", fc)
+	json := runIn(t, f.Dir(), "integration", "configure", "--json").json(t)
+	if json["remote"] != "origin" {
+		t.Errorf("remote = %v, want the remote the lines were written to", json["remote"])
 	}
-	if entry["key"] != "remote.origin.fetch" || entry["refspec"] != reviewref.MirrorRefspec("origin") ||
-		entry["already_configured"] != false {
-		t.Errorf("fetch_config = %v, want key, refspec and already_configured false", entry)
+	for _, half := range []struct {
+		key     string
+		refspec string
+	}{{"fetch", reviewref.MirrorRefspec("origin")}, {"push", reviewref.PushRefspec}} {
+		entry, ok := json[half.key].(map[string]any)
+		if !ok {
+			t.Fatalf("%s = %v, want the key, value and outcome", half.key, json[half.key])
+		}
+		if entry["key"] != "remote.origin."+half.key || entry["refspec"] != half.refspec ||
+			entry["already_configured"] != false {
+			t.Errorf("%s = %v, want key, refspec and already_configured false", half.key, entry)
+		}
 	}
 }
 
-// Twice is the case the flag has to survive living in a pipeline: the second run says it wrote nothing, and
-// the config file — not the message — proves it.
-func TestConfigureFetchTwiceWritesNothing(t *testing.T) {
-	f, _, source, landing := recordFixture(t)
+// Twice is the case the command has to survive living in a pipeline: the second run says it wrote nothing,
+// and the config file — not the message — proves it.
+func TestConfigureTwiceWritesNothing(t *testing.T) {
+	f, _, _, _ := recordFixture(t)
 	f.SwitchTo("main")
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	f.MustGit("init", "--bare", "-b", "main", remote)
-	f.MustGit("remote", "add", "origin", remote)
+	remoteWith(t, f)
 
-	record := []string{"integration", "record", "--source", source, "--commit", landing,
-		"--target", "release/2.x", "--configure-fetch", "--json"}
-	first := runIn(t, f.Dir(), record...).mustSucceed(t, record...).json(t)
-	if fc := first["fetch_config"].(map[string]any); fc["already_configured"] != false {
-		t.Fatalf("first run reports already_configured = %v, want false", fc["already_configured"])
+	first := runIn(t, f.Dir(), "integration", "configure", "--json").json(t)
+	for _, key := range []string{"fetch", "push"} {
+		if entry := first[key].(map[string]any); entry["already_configured"] != false {
+			t.Fatalf("first run reports %s.already_configured = %v, want false", key, entry["already_configured"])
+		}
 	}
 	before := configOf(t, f)
 
-	// The retry arrives with the same SHAs, which is also the already-recorded path: a pipeline that
-	// re-runs its record step must still be able to configure a clone it did not configure the first time.
-	second := runIn(t, f.Dir(), record...).mustSucceed(t, record...).json(t)
-	if fc := second["fetch_config"].(map[string]any); fc["already_configured"] != true {
-		t.Errorf("second run: fetch_config = %v, want already_configured true", fc)
+	second := runIn(t, f.Dir(), "integration", "configure", "--json").mustSucceed(t, "integration", "configure").json(t)
+	for _, key := range []string{"fetch", "push"} {
+		if entry := second[key].(map[string]any); entry["already_configured"] != true {
+			t.Errorf("second run: %s = %v, want already_configured true", key, entry)
+		}
 	}
 	if got := configOf(t, f); got != before {
 		t.Errorf("the config file changed on a run that reported writing nothing:\n--- before ---\n%s\n--- after ---\n%s", before, got)
 	}
 	// And the human form of the same run says it plainly, because a log full of "configured" lines that
 	// configured nothing is how people stop reading logs.
-	human := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing,
-		"--target", "release/2.x", "--configure-fetch").mustSucceed(t, "integration", "record")
-	mustContain(t, human.stdout, "already fetches the durable mirrors", "the human output says nothing was written")
+	human := runIn(t, f.Dir(), "integration", "configure").mustSucceed(t, "integration", "configure")
+	mustContain(t, human.stdout, "already configured", "the human output says nothing was written")
+	mustContain(t, human.stdout, "remote.origin.push already pushes", "and says which half it checked")
+}
+
+// One half, because a clone that should be able to *compare* a record against the remote need not be the
+// clone that decides the record is public.
+func TestConfigureFetchOnlyWritesOneKey(t *testing.T) {
+	f, _, _, _ := recordFixture(t)
+	f.SwitchTo("main")
+	remoteWith(t, f)
+
+	res := runIn(t, f.Dir(), "integration", "configure", "--fetch-only").mustSucceed(t, "integration", "configure")
+	mustContain(t, res.stdout, "added "+reviewref.MirrorRefspec("origin"), "the fetch half is written")
+	mustNotContain(t, res.stdout, "remote.origin.push", "and the push half is not even mentioned")
+	if got := configValues(t, f, "remote.origin.push"); len(got) != 0 {
+		t.Errorf("--fetch-only wrote remote.origin.push = %v, want the key untouched", got)
+	}
+	if got := configValues(t, f, "remote.origin.fetch"); len(got) == 0 {
+		t.Error("--fetch-only wrote no fetch refspec either")
+	}
+
+	// In JSON the half that was not offered is absent rather than false: "not asked" and "asked and already
+	// there" are two answers, and a pipeline has to tell them apart.
+	json := runIn(t, f.Dir(), "integration", "configure", "--fetch-only", "--json").json(t)
+	if json["push"] != nil {
+		t.Errorf("push = %v on a --fetch-only run, want the key absent", json["push"])
+	}
+	if entry, ok := json["fetch"].(map[string]any); !ok || entry["already_configured"] != true {
+		t.Errorf("fetch = %v, want the half that was asked for and already present", json["fetch"])
+	}
+}
+
+// A repository with more than one remote gets the line on the remote that was named, not on whichever
+// sorted first — and a name that is not a remote is a refusal, not a fallback.
+func TestConfigureNamesTheRemoteItWrites(t *testing.T) {
+	f, _, _, _ := recordFixture(t)
+	f.SwitchTo("main")
+	remoteWith(t, f)
+	up := filepath.Join(t.TempDir(), "upstream.git")
+	f.MustGit("init", "--bare", "-b", "main", up)
+	f.MustGit("remote", "add", "upstream", up)
+
+	runIn(t, f.Dir(), "integration", "configure", "--remote", "upstream").mustSucceed(t, "integration", "configure")
+	if got := configValues(t, f, "remote.upstream.push"); len(got) != 1 || got[0] != reviewref.PushRefspec {
+		t.Errorf("remote.upstream.push = %v, want the durable push refspec", got)
+	}
+	if got := configValues(t, f, "remote.origin.push"); len(got) != 0 {
+		t.Errorf("the remote that was not named still got a line: %v", got)
+	}
+
+	res := runIn(t, f.Dir(), "integration", "configure", "--remote", "nope")
+	if res.code == 0 {
+		t.Fatal("--remote nope succeeded")
+	}
+	mustContain(t, res.stdout+res.stderr, "no remote \"nope\"", "and the refusal says which name it could not find")
+}
+
+// Configuration in a repository with nowhere to fetch from or push to is refused rather than half-written.
+func TestConfigureWithoutARemoteRefuses(t *testing.T) {
+	f, _, _, _ := recordFixture(t)
+	f.SwitchTo("main")
+
+	res := runIn(t, f.Dir(), "integration", "configure")
+	if res.code == 0 {
+		t.Fatal("integration configure succeeded with no remote to configure")
+	}
+	combined := res.stdout + res.stderr
+	mustContain(t, combined, "this repository has none", "and says what was missing")
+	mustContain(t, combined, "git remote add", "naming the fix rather than the failure")
+	for _, key := range []string{"remote.origin.fetch", "remote.origin.push"} {
+		if got := configValues(t, f, key); len(got) != 0 {
+			t.Errorf("the refusal still wrote %s: %v", key, got)
+		}
+	}
 }
 
 // What the configuration buys, and what it deliberately does not: after an ordinary `git fetch` the clone
@@ -164,7 +259,7 @@ func TestConfiguredCloneComparesWithoutTheFetchFlag(t *testing.T) {
 	before := runIn(t, f.Dir(), "status").mustSucceed(t, "status")
 	mustContain(t, before.stdout, "never fetched", "before configuring, a plain fetch brings nothing to compare")
 
-	f.MustGit("config", "--local", "--add", "remote.origin.fetch", reviewref.MirrorRefspec("origin"))
+	runIn(t, f.Dir(), "integration", "configure", "--fetch-only").mustSucceed(t, "integration", "configure")
 	f.MustGit("fetch", "--quiet", "--prune", "origin")
 	after := runIn(t, f.Dir(), "status").mustSucceed(t, "status")
 	mustNotContain(t, after.stdout, "never fetched", "configured, the same plain fetch leaves the clone able to compare")
@@ -187,22 +282,36 @@ func TestConfiguredCloneComparesWithoutTheFetchFlag(t *testing.T) {
 	}
 }
 
-// A flag that asks for configuration in a repository with nowhere to fetch from is refused, and the refusal
-// leaves no half-written record behind: configuration is checked before the refs, because it is the half
-// that can be undone.
-func TestConfigureFetchWithoutARemoteRefuses(t *testing.T) {
-	f, _, source, landing := recordFixture(t)
+// What the push half buys, and the one thing it must never buy: an ordinary `git push` carries the pair to
+// the remote, and a remote that holds a different value rejects it instead of being overwritten. The second
+// assertion is the reason the refspec carries no `+` — a repository can opt into publishing on every push,
+// and even then no push can move a record somebody else wrote.
+func TestConfiguredPushSendsTheRecordsAndNeverMovesOne(t *testing.T) {
+	f, slug, _ := publishedFixture(t)
 	f.SwitchTo("main")
+	runIn(t, f.Dir(), "integration", "configure").mustSucceed(t, "integration", "configure")
 
-	res := runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing,
-		"--target", "release/2.x", "--configure-fetch")
-	if res.code == 0 {
-		t.Fatal("--configure-fetch succeeded with no remote to configure")
+	// A plain `git push`, with no refspec on the command line: the configured one is the whole point.
+	f.MustGit("push", "origin")
+	remote := remoteOf(t, f)
+	for _, ref := range []string{reviewref.Archive(slug), reviewref.Integration(slug)} {
+		if got := remoteRef(t, remote, ref); got == "" {
+			t.Errorf("%s never reached the remote through an ordinary push", ref)
+		}
 	}
-	combined := res.stdout + res.stderr
-	mustContain(t, combined, "no remote", "and says what was missing")
-	mustContain(t, combined, "git remote add", "naming the fix rather than the failure")
-	if got := durableRefs(t, f); len(got) != 0 {
-		t.Errorf("the refusal still wrote durable refs: %v", got)
+	if got := remoteRef(t, remote, reviewref.Archive(slug)); got != f.RefSHA(reviewref.Archive(slug)) {
+		t.Errorf("the remote holds %s for the archive, want %s", got, f.RefSHA(reviewref.Archive(slug)))
+	}
+
+	// Now a disagreement. `--force` is not on the table: git refuses a non-fast-forward update to an
+	// existing ref unless the refspec forces it, and this refspec does not.
+	before := remoteRef(t, remote, reviewref.Archive(slug))
+	moved := unrelatedCommit(t, f)
+	f.MustGit("update-ref", reviewref.Archive(slug), moved)
+	if out, err := f.Git("push", "origin"); err == nil {
+		t.Errorf("the ordinary push accepted a record that disagrees with the remote's:\n%s", out)
+	}
+	if got := remoteRef(t, remote, reviewref.Archive(slug)); got != before {
+		t.Errorf("the refused push still moved the remote's record to %s, want %s", got, before)
 	}
 }
