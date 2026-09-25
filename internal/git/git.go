@@ -648,6 +648,37 @@ type RefEntry struct {
 	SHA  string
 }
 
+// ListRefs maps every ref under prefixes to the ref it points at symbolically, and to ""
+// when it is an ordinary ref.
+//
+// It answers several existence questions in one git subprocess. `rev-parse --verify` is one
+// subprocess per ref, so a command that asks about a handful of refs on every run pays the
+// spawn for each of them.
+//
+// git leaves a symbolic ref whose target does not resolve out of the listing altogether, so
+// an entry here is a ref that resolves. That is the same fact a `rev-parse --verify` of the
+// target proved, which is why callers no longer need to follow the pointer and check it.
+func (r *Repo) ListRefs(ctx context.Context, prefixes ...string) (map[string]string, error) {
+	if len(prefixes) == 0 {
+		// Without a pattern git lists every ref in the repository, which is never what a
+		// caller that named none meant.
+		return nil, errors.New("git: ListRefs needs at least one ref prefix")
+	}
+	out, err := r.Git(ctx, append([]string{"for-each-ref", "--format=%(refname)%09%(symref)"}, prefixes...)...)
+	if err != nil {
+		return nil, err
+	}
+	refs := make(map[string]string)
+	for _, line := range splitLines(out) {
+		name, symref, ok := strings.Cut(line, "\t")
+		if !ok || name == "" {
+			continue
+		}
+		refs[name] = strings.TrimSpace(symref)
+	}
+	return refs, nil
+}
+
 // ForEachRef lists refs matching pattern, ordered by refname.
 func (r *Repo) ForEachRef(ctx context.Context, pattern string) ([]RefEntry, error) {
 	out, err := r.Git(ctx, "for-each-ref", "--sort=-committerdate", "--format=%(refname)%09%(objectname)", pattern)

@@ -121,12 +121,24 @@ func DefaultBranch(ctx context.Context, repo *git.Repo, override string) (Defaul
 		return DefaultBranchRef{Ref: override, Source: DefaultBranchFlag}, nil
 	}
 
-	if full, err := repo.Git(ctx, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"); err == nil {
-		if ref := strings.TrimSpace(full); ref != "" {
-			if _, err := repo.RevParse(ctx, ref); err == nil {
-				return DefaultBranchRef{Ref: ref, Source: DefaultBranchRemoteHead}, nil
-			}
-		}
+	// One listing answers every question below: what `refs/remotes/origin/HEAD` points at, and
+	// which of main and master exist under `refs/remotes/origin` and under `refs/heads`. Asking
+	// them one at a time cost up to seven git subprocesses on every command that resolves a
+	// base, and each of them is a process that does not answer anything else.
+	//
+	// git drops an unresolvable symbolic ref from the listing, which is the same answer the
+	// `rev-parse` this replaces reached when it followed a pointer to a branch that had since
+	// been deleted: a default branch that does not resolve is no default, and the search goes on.
+	refs, err := repo.ListRefs(ctx, "refs/remotes/origin", "refs/heads")
+	if err != nil {
+		// The probes this replaced each swallowed their own failure, so a repository git would
+		// not talk to answered "no integration branch" rather than the git error. It still does:
+		// callers branch on ErrNoDefaultBranch, and they would not recognise this one.
+		refs = nil
+	}
+
+	if target := refs["refs/remotes/origin/HEAD"]; target != "" {
+		return DefaultBranchRef{Ref: target, Source: DefaultBranchRemoteHead}, nil
 	}
 
 	// A remote carrying both main and master is a genuine coin flip, so it is refused rather
@@ -136,7 +148,7 @@ func DefaultBranch(ctx context.Context, repo *git.Repo, override string) (Defaul
 	// which command asked.
 	var remote []string
 	for _, ref := range []string{"refs/remotes/origin/main", "refs/remotes/origin/master"} {
-		if _, err := repo.RevParse(ctx, ref); err == nil {
+		if _, ok := refs[ref]; ok {
 			remote = append(remote, ref)
 		}
 	}
@@ -150,7 +162,7 @@ func DefaultBranch(ctx context.Context, repo *git.Repo, override string) (Defaul
 	}
 
 	for _, ref := range []string{"refs/heads/main", "refs/heads/master"} {
-		if _, err := repo.RevParse(ctx, ref); err == nil {
+		if _, ok := refs[ref]; ok {
 			return DefaultBranchRef{Ref: ref, Source: DefaultBranchSoleCandidate}, nil
 		}
 	}
