@@ -244,6 +244,8 @@ Then publish, and only then tidy:
 ```bash
 $ git pair integration publish
 booking-transaction: published to origin (archive + integration)
+  configure:   git pair integration configure adds refs/git-pair/*:refs/git-pair/* to remote.origin.push,
+               so an ordinary push carries these refs from now on
 ```
 
 Publishing every build is a repository's decision, and one command makes it git's own:
@@ -261,6 +263,12 @@ After that an ordinary `git fetch` keeps the clone able to tell published from u
 now and verifies it arrived; `configure` decides what the repository's own git does from here on, and pushes
 nothing itself. It is the only configuration git-pair writes, it is written once per clone, and no other
 command writes it — `--fetch-only` takes the read half and declines the write half.
+
+Nothing configures a clone on its own behalf, and three surfaces name the option instead, each about the
+half its own run is doing, and each quiet in a clone that already has the line: `integration record` prints
+the line it did not run, `integration publish` names the push key just after the clone sent that pair by
+hand, and the note `status` and `queue` print when they cannot compare a record to the remote names the
+fetch key beside the `--fetch` that would have asked once.
 
 The order is the contract (§PRD §29). Once the branch is deleted the refs are the only copy of the archive
 chain, so a delete that lands before a publish leaves the chain reachable from nothing outside the machine

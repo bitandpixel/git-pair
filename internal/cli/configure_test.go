@@ -315,3 +315,62 @@ func TestConfiguredPushSendsTheRecordsAndNeverMovesOne(t *testing.T) {
 		t.Errorf("the refused push still moved the remote's record to %s, want %s", got, before)
 	}
 }
+
+// Where the command gets named without being run. A configuration a caller has never heard of is a
+// configuration nobody has: the surfaces that meet the absence of it — writing a record, publishing one,
+// and reading a clone that cannot compare — each say the remedy exists, and none of them writes it.
+func TestTheSurfacesNudgeTowardConfiguring(t *testing.T) {
+	f, slug, _ := publishedFixture(t)
+
+	// The read path. Before the mirrors exist the finding is that nothing can be compared, and the
+	// sentence that says so names both remedies: the flag that asks once, and the command that stops the
+	// asking. It is the same string in the human report and in `--json`, because a pipeline reading the
+	// note deserves the same remedy a person is shown.
+	out := runIn(t, f.Dir(), "status", "--changeset", slug).mustSucceed(t, "status", "--changeset", slug)
+	mustContain(t, out.stdout, "never fetched", "the finding is still the finding")
+	mustContain(t, out.stdout, "git pair integration configure", "and it names the durable remedy")
+	note := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").json(t)["unpublished_note"]
+	if s, ok := note.(string); !ok || !strings.Contains(s, "git pair integration configure") {
+		t.Errorf("unpublished_note = %v, want the same remedy --json readers are shown", note)
+	}
+	q := runIn(t, f.Dir(), "queue").mustSucceed(t, "queue")
+	mustContain(t, q.stdout, "git pair integration configure", "and the queue says it too, since it cannot compare either")
+
+	// The publish path: a clone that sent a pair by hand is a clone an ordinary push could have served.
+	// The nudge names the push key only — the fetch half is not what this run just did by hand.
+	pub := runIn(t, f.Dir(), "integration", "publish").mustSucceed(t, "integration", "publish")
+	mustContain(t, pub.stdout, slug+": published to origin", "the publish happened")
+	mustContain(t, pub.stdout, "git pair integration configure", "and the run names the line that would end the handwork")
+	mustContain(t, pub.stdout, "remote.origin.push", "naming the key it would write")
+	mustNotContain(t, pub.stdout, "remote.origin.fetch", "and not offering the half this command does not need")
+
+	// Same command, already configured: the line is gone rather than reworded. A reminder of a thing the
+	// clone already did is how a hint becomes noise, and this is the run a pipeline repeats.
+	f.MustGit("config", "--local", "--add", "remote.origin.push", reviewref.PushRefspec)
+	again := runIn(t, f.Dir(), "integration", "publish").mustSucceed(t, "integration", "publish")
+	mustContain(t, again.stdout, slug+": already published to origin", "the publish still answers")
+	mustNotContain(t, again.stdout, "git pair integration configure", "and says nothing about configuring")
+
+	// The machine's answer carries findings, not prose: a pipeline that asked for JSON gets the same
+	// verdict with no nudge to parse.
+	js := runIn(t, f.Dir(), "integration", "publish", "--json").json(t)
+	for _, key := range []string{"published", "already_published", "failed"} {
+		if _, ok := js[key].([]any); !ok {
+			t.Errorf("%s = %v, want the array this command always answers with", key, js[key])
+		}
+	}
+}
+
+// A run that publishes nothing has no refs to advertise about, so it prints no nudge: the line is about the
+// pair that just travelled, and here there is none.
+func TestPublishWithoutAnythingToSendDoesNotNudge(t *testing.T) {
+	f, _, _ := publishedFixture(t)
+
+	// A fresh clone of the remote holds no records at all — a clone maps `refs/heads/*` and nothing else —
+	// so this is the invocation that finds nothing to send.
+	clone := filepath.Join(t.TempDir(), "empty")
+	f.MustGit("clone", "--quiet", remoteOf(t, f), clone)
+	out := runIn(t, clone, "integration", "publish").mustSucceed(t, "integration", "publish")
+	mustContain(t, out.stdout, "nothing to publish", "the clone holds no record, and says so")
+	mustNotContain(t, out.stdout, "git pair integration configure", "and does not advertise publishing to it")
+}

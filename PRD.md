@@ -2008,7 +2008,9 @@ Three rules shape it:
   from a line that is missing.
 - **When nothing can be compared, one sentence says so.** No remote, or a mirror namespace this clone has
   never fetched and did not just fetch, is one condition about the clone — never a per-changeset
-  accusation. An empty list means nothing is waiting to be published; a note means nobody could know.
+  accusation. An empty list means nothing is waiting to be published; a note means nobody could know. The
+  note names both remedies it knows: the flag that asks once, and `git pair integration configure` (§13.4),
+  which is what stops the clone having to ask again.
 
 `git pair check` deliberately does not refuse on it. A record that has not travelled is a durability risk,
 and blocking the work because of it would hold the present hostage to the archive. Publishing the
@@ -2027,6 +2029,12 @@ agent surface — a prompt makes one command line mean two things, and an unansw
 indistinguishable from a declined one. It is a command rather than a flag on `integration record` because
 configuration is a property of the clone and not of a landing: a clone that arrived after the fact has
 neither SHA a record needs, and had nothing to run.
+
+Nothing configures a clone as a side effect, and three surfaces say the option exists — each naming the half
+its own run is about, and each silent in the clone that already has it: `integration record` prints the line
+it did not run, `integration publish` names the push key a moment after the clone pushed that pair by hand,
+and the read path's "nothing can be compared" note (§13) names the fetch key beside the `--fetch` that would
+have asked once. A configuration nobody has heard of is a configuration nobody has.
 
 **Neither ref exists while work is in flight.** No git-pair command writes a ref before landing:
 `change ready`, `change unready`, `change feedback`, `change wait`, `review submit` and `change abandon`

@@ -227,18 +227,30 @@ func describeRefspec(c *configuredRefspec, done string) string {
 	return fmt.Sprintf("added %s to %s", c.Refspec, c.Key)
 }
 
-// configuredAlready reports whether the mirror refspec is already in the remote's fetch list, so the
-// hint can stay quiet in a clone that asked for nothing because it has already been given.
+// configuredAlready reports whether the mirror refspec is already in the remote's fetch list, so a hint can
+// stay quiet in the clone that asked for nothing because it has already been given.
 func configuredAlready(ctx context.Context, repo *git.Repo, remote string) bool {
-	if remote == "" {
-		return false
-	}
-	have, err := repo.ConfigValues(ctx, fetchConfigKey(remote))
-	if err != nil {
-		return false
-	}
-	return slices.Contains(have, reviewref.MirrorRefspec(remote))
+	return remote != "" && configHas(ctx, repo, fetchConfigKey(remote), reviewref.MirrorRefspec(remote))
 }
+
+// pushConfigured reports the same thing about the push half, which a repository can decline while keeping
+// the fetch half — `--fetch-only` is exactly that state.
+func pushConfigured(ctx context.Context, repo *git.Repo, remote string) bool {
+	return remote != "" && configHas(ctx, repo, pushConfigKey(remote), reviewref.PushRefspec)
+}
+
+// configHas reads one list key and asks whether it already holds one value. A read that fails is "no": a
+// hint is not worth an error path of its own, and the write that would follow reports anything real.
+func configHas(ctx context.Context, repo *git.Repo, key, want string) bool {
+	have, err := repo.ConfigValues(ctx, key)
+	return err == nil && slices.Contains(have, want)
+}
+
+// configureFetchNudge is the durable half of the read path's remedy, and it travels with the finding that
+// nothing could be compared: `--fetch` asks once, and the configuration is what stops a clone paying for
+// the asking every time. It belongs inside that sentence rather than in a hint of its own because the
+// finding is the moment the absence costs something.
+const configureFetchNudge = "`git pair integration configure` keeps an ordinary fetch bringing them"
 
 // configureHint is the one short line for the run that left the clone unconfigured: the remedy exists, it
 // is one command away, and it is named rather than performed. Silent configuration and silent absence are
@@ -254,4 +266,16 @@ func configureHint(remote string) string {
 		"               and %s, so an ordinary fetch keeps this clone able to tell published from\n"+
 		"               unpublished, and an ordinary push keeps what it records published\n",
 		fetchConfigKey(remote), pushConfigKey(remote))
+}
+
+// publishHint is `integration publish`'s half of the same nudge, and it names the push line alone: a clone
+// that has just sent a pair by hand is the clone for which an ordinary push could have carried it. Silent
+// where the line is already written, and the caller stays silent too when the run sent nothing, because
+// then there are no refs for the line to be about.
+func publishHint(ctx context.Context, repo *git.Repo, remote string) string {
+	if pushConfigured(ctx, repo, remote) {
+		return ""
+	}
+	return fmt.Sprintf("  configure:   git pair integration configure adds %s to %s, so an ordinary\n"+
+		"               push carries these refs from now on\n", reviewref.PushRefspec, pushConfigKey(remote))
 }

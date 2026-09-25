@@ -50,6 +50,21 @@ commands now share. The refusals keep their own wording; only the lookup moved.
 **Docs** — PRD §13.4 and §27's automatic-pushing bullet, README's handoff sample, command table, JSON
 contracts, and the publishing section, and `skills/git-pair/references/cli.md`'s record and publish rows.
 
+**Three surfaces name the command** (`internal/cli/configure.go`, `publish.go`, `published.go`) — the answer
+to the review's question, which was whether anything nudges a user toward setting this up. `record` did
+already; `publish` and the read path did not, and now do:
+
+| Surface | What it says |
+| --- | --- |
+| `integration record` | the `configure:` line naming both keys — the two refspecs it did not write |
+| `integration publish` | the `configure:` line naming `remote.<name>.push` alone, printed after a run that sent or confirmed a pair |
+| `status`, `queue` | the "nothing here can say whether a record reached `<remote>`" note ends with the `--fetch` that asks once *and* `git pair integration configure`, which stops the asking |
+
+Each is silent where the line is already written, which is what keeps a repeated pipeline run readable.
+`publish` prints nothing on a run that sent nothing and nothing on the failure path, where the report is
+already a refusal. The two hints are human-surface only, as `record`'s has always been; the read-path
+remedy is in `unpublished_note` because that note is the answer to the question, not an add-on to it.
+
 ## Design decisions
 
 **Both halves by default, `--fetch-only` to decline one.** Narrowing is the caller's job and declining is the
@@ -95,9 +110,17 @@ finishes it; a swallowed error would leave a clone half-configured with a log li
   Run: `mise run gates`.
 - `--help` for `integration record`, `integration configure` and `change wait` inspected by eye: the flag
   column is one column now.
+- New after the review: `TestTheSurfacesNudgeTowardConfiguring` — `status` and its `unpublished_note`,
+  `queue`, `publish` before and after the push line exists, and that `publish --json` carries findings and
+  no prose; `TestPublishWithoutAnythingToSendDoesNotNudge` — a clone with no record publishes nothing and
+  advertises nothing.
 
 ## Known limitations
 
+- The nudges are one line each and appear on the surfaces where the absence of the configuration is already
+  the story. A clone that never records, never publishes and never asks about publication hears nothing
+  about `integration configure`, which is the intended silence: a command that mentions its own option in
+  every report trains people to skim the rest.
 - The configuration is per-clone and per-remote, and there is no command that reports which clones of a
   repository are configured. `status` can only ever speak for the clone it ran in, and it already does.
 - `git push` honours `remote.<name>.push` only when the command line gives no refspec, which is git's rule
