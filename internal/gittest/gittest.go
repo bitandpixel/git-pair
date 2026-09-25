@@ -82,18 +82,38 @@ func New(t *testing.T) *Fixture {
 	if out, errB, err := f.run(dir, nil, "init", "--quiet", "--initial-branch=main", "."); err != nil {
 		t.Fatalf("gittest: git init: %v\n%s\n%s", err, out, errB)
 	}
-	for _, kv := range [][2]string{
-		{"user.name", AuthorName},
-		{"user.email", AuthorEmail},
-		{"commit.gpgsign", "false"},
-		{"tag.gpgsign", "false"},
-		{"core.autocrlf", "false"},
-		{"core.fsmonitor", "false"},
-		{"gc.auto", "0"},
-	} {
-		f.Config(kv[0], kv[1])
-	}
+	f.writeLocalConfig()
 	return f
+}
+
+// fixtureLocalConfig is the repository config every fixture needs. It is one file
+// write rather than seven `git config --local` calls, which is seven git subprocesses
+// per fixture: the suite builds hundreds, and the same keys are written every time.
+// `Config` remains for the tests that change one key; this is the fixed starting point.
+//
+// Every value here is a constant this package owns, so the text needs no escaping.
+const fixtureLocalConfig = "[user]\n" +
+	"\tname = \"" + AuthorName + "\"\n" +
+	"\temail = \"" + AuthorEmail + "\"\n" +
+	"[commit]\n\tgpgsign = false\n" +
+	"[tag]\n\tgpgsign = false\n" +
+	"[core]\n\tautocrlf = false\n\tfsmonitor = false\n" +
+	"[gc]\n\tauto = 0\n"
+
+// writeLocalConfig appends fixtureLocalConfig to the config `git init` just wrote.
+// git reads a config file top to bottom and a later value of a non-multi key wins,
+// so appending is how these keys override anything `init` put there.
+func (f *Fixture) writeLocalConfig() {
+	f.t.Helper()
+	path := filepath.Join(f.dir, ".git", "config")
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		f.t.Fatalf("gittest: open %s: %v", path, err)
+	}
+	defer file.Close()
+	if _, err := file.WriteString("\n" + fixtureLocalConfig); err != nil {
+		f.t.Fatalf("gittest: write %s: %v", path, err)
+	}
 }
 
 // Dir is the repository's absolute path (its git toplevel).

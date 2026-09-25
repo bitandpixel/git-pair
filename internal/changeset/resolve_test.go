@@ -557,6 +557,25 @@ func TestDefaultBranchReadsWhatGitRecords(t *testing.T) {
 	}
 }
 
+// TestDefaultBranchIgnoresADanglingRemoteHead pins the case that makes the listing non-trivial.
+// `git remote set-head` records a symbolic ref, and deleting the branch it points at leaves the
+// pointer behind. Returning it would name an integration branch that resolves to no commit, so
+// the search has to fall through to what does resolve.
+func TestDefaultBranchIgnoresADanglingRemoteHead(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.MustGit("update-ref", "refs/remotes/origin/main", f.Head())
+	f.MustGit("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+
+	got, err := changeset.DefaultBranch(context.Background(), repo(f), "")
+	if err != nil {
+		t.Fatalf("DefaultBranch: %v", err)
+	}
+	if got.Ref != "refs/remotes/origin/main" || got.Source != changeset.DefaultBranchSoleCandidate {
+		t.Errorf("got %+v, want refs/remotes/origin/main", got)
+	}
+}
+
 func TestDefaultBranchFallsBackAndRefuses(t *testing.T) {
 	t.Run("sole origin branch", func(t *testing.T) {
 		f := gittest.New(t)

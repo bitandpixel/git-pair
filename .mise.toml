@@ -48,10 +48,26 @@ echo "installed ~/.local/bin/git-pair from $branch - this replaces the binary 'g
 """
 description = "Install the shared ~/.local/bin/git-pair from any branch"
 
-# Just the test suite, for a fast focused loop.
+# The test suite, sharded across processes.
+#
+# The suite is subprocess-bound: a test's span is mostly a git subprocess, and one `go test`
+# process cannot overlap those, because `internal/cli` and `internal/tui` drive the product through
+# the process working directory and the process standard streams and therefore serialise their own
+# tests. scripts/test-sharded.sh splits a package's tests over several `go test` processes by name,
+# which keeps each process single-threaded exactly as it is today and lets the git work overlap.
+# See the header of that script for what it does and why it is safe.
+#
+# It takes `-n SHARDS` and `-P WORKERS`; `GIT_PAIR_TEST_SHARDS=1` is the old behaviour.
 [tasks.test]
+run = "bash scripts/test-sharded.sh"
+description = "Run the Go test suite in parallel processes (test:serial for one process)"
+
+# One `go test` process over everything: the same tests, in package order, with the output
+# `go test ./...` gives. Use it when a shard's failure output is harder to read than the plain run,
+# or when you want the run pinned to a single process on purpose.
+[tasks."test:serial"]
 run = "go test ./..."
-description = "Run the Go test suite"
+description = "Run the Go test suite in one process"
 
 # The two scripted replays. `check` covers the unit and integration layers; these drive the real
 # CLI as a subprocess, so they catch what a Go test cannot: a workflow step whose exit code or
@@ -79,6 +95,6 @@ if [ -n "$unformatted" ]; then
   exit 1
 fi
 go vet ./...
-go test ./...
+bash scripts/test-sharded.sh
 """
-description = "gofmt + vet + tests"
+description = "gofmt + vet + tests (sharded; test:serial runs them in one process)"
