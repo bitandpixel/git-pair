@@ -1611,6 +1611,13 @@ kept.
 `mise run check` is the gate: gofmt, `go vet`, then the Go test suite. Run it before you call a
 change done.
 
+The suite runs in several `go test` processes (`scripts/test-sharded.sh`) rather than one. Most of a
+test's span is a git subprocess, and one process cannot overlap them: `internal/cli` and
+`internal/tui` drive the product in-process through the process working directory and the process
+standard streams, so their tests take turns. Splitting a package's tests across processes by name
+keeps each process single-threaded exactly as it is today, and reclaims the overlap. `mise run
+test:serial` is the same suite in one process, with the output `go test ./...` gives.
+
 Two scripted replays sit above it. Each one runs the installed binary as a subprocess, so it reaches
 what a Go test cannot:
 
