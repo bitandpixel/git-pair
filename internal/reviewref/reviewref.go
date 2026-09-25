@@ -69,6 +69,17 @@ const FetchRefspec = NamespaceRoot + "/*:" + NamespaceRoot + "/*"
 // a failure and the guidance in the README cannot drift.
 const FetchCommand = "git fetch origin '" + FetchRefspec + "'"
 
+// PushRefspec sends this clone's durable refs to a remote. It is the same spelling as FetchRefspec —
+// each ref maps to the path it already has — and is named separately because the two go into different
+// config keys, and a reader of `remote.origin.push` should read a push constant, not infer the value
+// from a fetch one.
+//
+// Like the fetch refspec it carries no `+`. Both families are create-only, so a remote that holds a
+// different value rejects the push instead of being overwritten by it, which is `integration publish`'s
+// conflict policy expressed in configuration: a repository can make an ordinary `git push` publish the
+// namespace, and even then it cannot move a record somebody else wrote.
+const PushRefspec = NamespaceRoot + "/*:" + NamespaceRoot + "/*"
+
 // MirrorRoot is where a clone keeps its copies of *another* repository's durable refs. It sits under
 // the remote-tracking namespace on purpose: like `refs/remotes/origin/feature/x`, a mirror is somebody
 // else's state seen from here, and git's own conventions already say what happens to it on a prune.

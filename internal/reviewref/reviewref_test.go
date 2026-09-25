@@ -368,6 +368,22 @@ func TestFetchRefspecNamesTheNamespace(t *testing.T) {
 	}
 }
 
+// The push half of `integration configure` is the fetch shape with the same absence of `+`, and the
+// equality with FetchRefspec is deliberate rather than a copy: a durable ref lives at the same path on
+// both sides, so the two refspecs are the same string serving two keys. It is asserted so that a change
+// to one has to be a decision about the other.
+func TestPushRefspecSendsTheNamespace(t *testing.T) {
+	if !strings.Contains(reviewref.PushRefspec, ":"+reviewref.NamespaceRoot+"/*") {
+		t.Errorf("PushRefspec = %q, want it to send the namespace to its own paths", reviewref.PushRefspec)
+	}
+	if strings.HasPrefix(reviewref.PushRefspec, "+") {
+		t.Errorf("PushRefspec = %q; a forced push would let `git push` move a create-only ref, which no git-pair command can do", reviewref.PushRefspec)
+	}
+	if reviewref.PushRefspec != reviewref.FetchRefspec {
+		t.Errorf("PushRefspec = %q, FetchRefspec = %q; the two are the same spelling by design", reviewref.PushRefspec, reviewref.FetchRefspec)
+	}
+}
+
 // The recorder reads the record before it verifies anything, and both halves of that read matter: a pair
 // that already says exactly this is a no-op, and a pair that says something else is refused with what is
 // on the record — which is the refusal the reader needs, not the incidental complaint a later check would
