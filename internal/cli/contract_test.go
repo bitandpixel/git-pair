@@ -350,7 +350,7 @@ func TestJSONKeySets(t *testing.T) {
 			t.Fatalf("reviews = %v, want one entry", reviews)
 		}
 		row := reviews[0].(map[string]any)
-		assertKeys(t, row, "index", "sha", "short", "reviewed_head", "outcome", "subject", "age")
+		assertKeys(t, row, "index", "sha", "short", "reviewed_head", "outcome", "subject", "reviewer", "age")
 		if row["index"] != float64(0) || row["outcome"] != "block" {
 			t.Errorf("review row = %v, want index 0 outcome block", row)
 		}
