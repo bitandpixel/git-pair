@@ -79,6 +79,12 @@ prints it on a branch that carries no changeset of its own.
 has not run, or has not reached here. `--fetch` is how a record written where the merge ran becomes
 visible here; a record is a claim, and a clone acquires claims by asking.
 
+A clone can stop asking every time, and that is a person's or a pipeline's decision rather than yours:
+`git pair integration configure` appends the mirror refspec to `remote.<name>.fetch`, so an ordinary fetch
+keeps this comparison possible, and `refs/git-pair/*:refs/git-pair/*` to `remote.<name>.push`, so an
+ordinary push publishes what that clone records. It is the only configuration git-pair writes, and no
+command writes it on anyone's behalf.
+
 Half a pair on the remote is the louder case: the remote has a hint and no way to reconstruct the record
 from it. `status --json` reports that as `unpublished`, with `unpublished_note` when there was nothing to
 compare against.

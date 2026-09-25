@@ -2019,12 +2019,14 @@ Without `--fetch` these commands do not touch the network, and they say so: an e
 reported as a fact about the clone, never as a verdict about the work.
 
 A repository that wants the *comparison* without asking every time configures it once, with consent:
-`git pair integration record --configure-fetch` appends the mirror refspec to `remote.<remote>.fetch`,
-idempotently, and prints the key and the value it wrote. The records stay behind `--fetch`: a record is a
-claim that a landing happened, and a clone should acquire claims by asking rather than because a
-configuration line written weeks earlier keeps delivering them. Consent is a flag rather than a question
-because §22 makes this CLI the agent surface — a prompt makes one command line mean two things, and an
-unanswered prompt in CI is indistinguishable from a declined one.
+`git pair integration configure` appends the mirror refspec to `remote.<remote>.fetch`, idempotently, and
+prints the key and the value it wrote. The records stay behind `--fetch`: a record is a claim that a landing
+happened, and a clone should acquire claims by asking rather than because a configuration line written weeks
+earlier keeps delivering them. Consent is a command rather than a question because §22 makes this CLI the
+agent surface — a prompt makes one command line mean two things, and an unanswered prompt in CI is
+indistinguishable from a declined one. It is a command rather than a flag on `integration record` because
+configuration is a property of the clone and not of a landing: a clone that arrived after the fact has
+neither SHA a record needs, and had nothing to run.
 
 **Neither ref exists while work is in flight.** No git-pair command writes a ref before landing:
 `change ready`, `change unready`, `change feedback`, `change wait`, `review submit` and `change abandon`
@@ -2147,15 +2149,16 @@ than a flag on `record` because the two acts have different permissions and some
 pipeline may record in a job that can read the repository and publish in one that can write it, and
 `record` stays network-free either way.
 
-A repository can also make publishing automatic with git's own configuration:
-
-```bash
-git config --add remote.origin.push '+refs/git-pair/*:refs/git-pair/*'
-```
+A repository can also make publishing automatic, with the same consent spelled as a command:
+`git pair integration configure` appends `refs/git-pair/*:refs/git-pair/*` to `remote.origin.push`, so an
+ordinary `git push` carries the namespace with the branches. It is written on request and never as a side
+effect of `record` or `publish`, and `--fetch-only` declines it while keeping the comparison.
 
 Which is configuration rather than behaviour, and stays the repository's decision: publishing review
-history is a statement about who gets to read it. Before either happens the landing machine's clone holds
-the only copy, and `RECORDED, NOT PUBLISHED` (§13) reports the truth rather than failing.
+history is a statement about who gets to read it. The refspec carries no `+`, so a remote holding a
+different value rejects the push instead of being overwritten — the same policy §13.3 gives the refs, applied
+to a clone that publishes on every push. Before either happens the landing machine's clone holds the only
+copy, and `RECORDED, NOT PUBLISHED` (§13) reports the truth rather than failing.
 
 The same section of the README covers the fetch a CI job needs for the *default branch* as well: the tree
 rule (§4) compares the revision against trunk's tree, so a one-branch checkout has nothing to compare
@@ -3411,7 +3414,8 @@ would make git-pair responsible for a forge or a server rather than for a reposi
 -   pre-push hooks,
 -   server-side validation,
 -   **automatic** pushing of `refs/git-pair/*` — publishing is a command somebody runs, or a line in the
-    repository's own git configuration (§13), never a side effect of an unrelated command,
+    repository's own git configuration written by `git pair integration configure` (§13), never a side
+    effect of an unrelated command,
 -   forge-level protection of the namespace, and any variant of it that depends on a forge honouring
     protection rules outside `refs/heads/*` and `refs/tags/*`,
 -   protection against destructive rewrites of a changeset whose record has been written: the client
