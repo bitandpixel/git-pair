@@ -12,6 +12,7 @@ stream, and the checks look for the strings and the escape sequences that must a
 Geometry the screen model would check is already asserted by Go tests (internal/tui).
 
 usage: pty-tui.py [--raw FILE] [--settle S] [--gap S] [--tail S] [--timeout S]
+                  [--quiet S] [--term TERM]
                   COLS ROWS CWD KEYS PROGRAM [ARGS...]
 
 KEYS is a comma-separated list. Each entry is written to the terminal as its own write, because a
@@ -21,10 +22,24 @@ the cursor once. Entries:
   !<shell command>   run on the host instead of typing it — how a walkthrough moves a ref, or
                      creates a file, while the session is open
   ~<seconds>         wait without typing, reading whatever the program paints: how a walkthrough
-                     waits for a timer it does not own, such as the drift check's tick
+                     waits for a timer it does not own, such as the drift check's tick. Always the
+                     full length — see --quiet, and the note on window lengths below.
   enter esc space tab backspace up down left right
   ctrl-c ctrl-d ctrl-f ctrl-b ctrl-r ctrl-s ctrl-q
   anything else      sent literally, one entry per keystroke ("j,j,j", never "jjj")
+
+Three waits are fixed wall clock, and the reason is the same each time. `pty-plain --after N` returns
+everything from keystroke N to the end of the capture, so a window is what a `refuse` check asks
+about — "did this *not* paint from here on" — and a window shortened on silence can only ever make
+such a check pass more easily. The three are the explicit ~<seconds> waits, which wait for a timer
+the harness cannot observe; the tail, which closes the last window; and the --gap after each
+keystroke, which is what bounds the window a keystroke opens.
+
+Only the startup --settle shortens early, at --quiet seconds of silence, and it is the one window a
+check reads where that is defensible: what it can lose is a repaint arriving after a screen already
+fully painted, which is a late second frame rather than the first one the checks there are about. It
+is still a trade, so the threshold is generous, and --settle stays as the ceiling: a program that
+paints continuously, or never paints at all, is waited for exactly as long as before.
 """
 
 import os
@@ -70,10 +85,11 @@ QUERIES = (
 
 
 def parse(argv):
-    opts = {"settle": 0.8, "gap": 0.06, "tail": 0.8, "timeout": 25.0, "raw": None, "term": "xterm-256color"}
+    opts = {"settle": 0.8, "gap": 0.06, "tail": 0.8, "timeout": 25.0, "raw": None,
+            "term": "xterm-256color", "quiet": 0.4}
     while argv and argv[0].startswith("--"):
         name = argv[0][2:]
-        if name not in ("settle", "gap", "tail", "timeout", "raw", "term"):
+        if name not in ("settle", "gap", "tail", "timeout", "raw", "term", "quiet"):
             sys.exit(f"pty-tui.py: unknown option --{name}")
         opts[name] = argv[1]
         argv = argv[2:]
@@ -83,6 +99,7 @@ def parse(argv):
     opts["gap"] = float(opts["gap"])
     opts["tail"] = float(opts["tail"])
     opts["timeout"] = float(opts["timeout"])
+    opts["quiet"] = float(opts["quiet"])
     return opts, int(argv[0]), int(argv[1]), argv[2], argv[3].split(","), argv[4:]
 
 
@@ -124,11 +141,18 @@ def main():
             answered.add(key)
             os.write(master, reply)
 
-    def pump(until):
-        """Read whatever the program paints until `until`, or until it exits."""
+    def pump(until, quiet=0.0):
+        """Read whatever the program paints until `until`, or until it exits.
+
+        With `quiet` set, also stop once something has painted and nothing has arrived for that
+        many seconds: `until` becomes a ceiling rather than a promise. A program that has painted
+        nothing is waited for in full, so a slow start cannot be mistaken for a finished one.
+        """
         nonlocal running
+        painted = False
+        last = time.time()
         while time.time() < until and running:
-            readable, _, _ = select.select([master], [], [], 0.05)
+            readable, _, _ = select.select([master], [], [], 0.02)
             if master in readable:
                 try:
                     chunk = os.read(master, 65536)
@@ -140,13 +164,17 @@ def main():
                     break
                 captured.extend(chunk)
                 answer_queries()
+                painted = True
+                last = time.time()
             else:
                 done, sigstatus = os.waitpid(pid, os.WNOHANG)
                 if done:
                     status = sigstatus
                     running = False
+                elif quiet and painted and time.time() - last >= quiet:
+                    break
 
-    pump(time.time() + opts["settle"])
+    pump(time.time() + opts["settle"], opts["quiet"])
     for index, key in enumerate(keys):
         if not running:
             break
@@ -156,7 +184,7 @@ def main():
         captured.extend(b"\n\x1b[0m<<<KEY %d:%s>>>\n" % (index, key.encode("utf-8", "replace")))
         if key.startswith("!"):
             subprocess.run(["/bin/sh", "-c", key[1:]], cwd=cwd, check=False)
-            pump(time.time() + opts["settle"])
+            pump(time.time() + opts["settle"], opts["quiet"])
             continue
         if key.startswith("~"):
             # Pump without typing: how a walkthrough waits for a timer it does not own, such as
