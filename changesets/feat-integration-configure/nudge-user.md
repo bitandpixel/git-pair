@@ -14,7 +14,7 @@ line:
 | --- | --- |
 | `integration record` | the `configure:` line naming both keys — the two refspecs it did not write (already there in the first version) |
 | `integration publish` | the `configure:` line naming `remote.<name>.push` only. A clone that just sent a pair by hand is the clone an ordinary push could have served, and the fetch half is not what this run did by hand |
-| `status`, `queue` | the "nothing here can say whether a record reached `<remote>`… never fetched" note now ends `… — `git pair status --fetch` asks for them, and `git pair integration configure` keeps an ordinary fetch bringing them` |
+| `status`, `queue` | the "nothing here can say whether a record reached `<remote>`… never fetched" note now ends with the `--fetch` that asks once *and* `git pair integration configure`, which stops the asking |
 
 Three details worth your read:
 
