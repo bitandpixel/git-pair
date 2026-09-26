@@ -373,6 +373,17 @@ func ReadyMessage(slug string) string {
 	return "git-pair: ready " + slug + "\n\nReview-State: ready\nReview-Changeset: " + slug + "\n"
 }
 
+// IntegrateMessage is a `git pair change integrate` declaration (PRD §9.9): the state marker that
+// hands an approved changeset to whoever owns the destination branch. head is the commit the
+// declaration covers — pass "" for one that names none, which is the shape `check` refuses.
+func IntegrateMessage(slug, head string) string {
+	message := "git-pair: integrate " + slug + "\n\nReview-State: integrating\nReview-Changeset: " + slug
+	if head != "" {
+		message += "\nReview-Head: " + head
+	}
+	return message + "\n"
+}
+
 // ReviewMessage is a review submission commit message (PRD §10.4). outcome is
 // "block", "feedback" or "approve". head is the commit the review speaks about — pass ""
 // for a marker that names none, which is the shape a submission written before `Review-Head`
@@ -410,6 +421,21 @@ func (f *Fixture) CommitReviewMarker(slug, outcome string, opts ...CommitOpt) st
 func (f *Fixture) CommitReviewMarkerOnParent(slug, outcome, parentHead string, opts ...CommitOpt) string {
 	f.t.Helper()
 	return f.CommitMessage(ReviewMessage(slug, outcome, f.reviewedHead(), parentHead), append([]CommitOpt{WithEmpty()}, opts...)...)
+}
+
+// CommitIntegrateMarker commits a declaration for slug naming the current head, as `change
+// integrate` does.
+func (f *Fixture) CommitIntegrateMarker(slug string, opts ...CommitOpt) string {
+	f.t.Helper()
+	return f.CommitMessage(IntegrateMessage(slug, f.reviewedHead()), append([]CommitOpt{WithEmpty()}, opts...)...)
+}
+
+// CommitIntegrateMarkerOn commits a declaration naming `head` explicitly, for the cases the
+// command itself cannot produce: a marker naming a commit this history no longer carries, or one
+// naming nothing.
+func (f *Fixture) CommitIntegrateMarkerOn(slug, head string, opts ...CommitOpt) string {
+	f.t.Helper()
+	return f.CommitMessage(IntegrateMessage(slug, head), append([]CommitOpt{WithEmpty()}, opts...)...)
 }
 
 // reviewedHead is HEAD, or "" where the repository has no commits yet.

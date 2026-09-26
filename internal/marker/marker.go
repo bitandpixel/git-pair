@@ -69,6 +69,34 @@ func ReadyMessage(slug string) Message {
 	}
 }
 
+// IntegrateMessage is the declaration `git pair change integrate` writes: the approval is
+// standing and the work is handed to whoever owns the destination branch.
+//
+// head is the commit the declaration covers, written for the reason `ReviewMessage` writes
+// `Review-Head` for: a rebase rewrites the marker and keeps its message, so the marker still
+// names the commit that has gone out of this line — and a declaration about history the branch
+// no longer carries must not read as a licence to merge what replaced it.
+//
+// It names no destination. Where the work goes is derived from the changeset and its parent's
+// record when the merge happens, and a trailer written here would be a second, unfalsifiable
+// claim about the same fact (PRD §9.9).
+func IntegrateMessage(slug, head string) Message {
+	trailers := []string{
+		"Review-State=" + model.StateValueIntegrating,
+		"Review-Changeset=" + slug,
+	}
+	// The same rule as a review's head: no head is recorded as no trailer, because
+	// `Review-Head:` with nothing after it is a malformed trailer block to every other reader,
+	// while a missing trailer reads as "this declaration names no commit" — which is a refusal.
+	if head != "" {
+		trailers = append(trailers, "Review-Head="+head)
+	}
+	return Message{
+		Subject:  fmt.Sprintf("git-pair: integrate %s", slug),
+		Trailers: trailers,
+	}
+}
+
 // UnreadyMessage describes a retraction of a ready marker for slug.
 // AbandonedMessage is the terminal marker written by `change abandon` (PRD §9.7).
 func AbandonedMessage(slug string) Message {
