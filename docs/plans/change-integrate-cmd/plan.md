@@ -33,8 +33,9 @@ Observable outcomes:
   approval stands, the approved commit is no longer in this history, content outside `changesets/<id>/`
   moved since the approval, the stacked parent moved/landed/ended in a way that invalidates the approval,
   **the parent branch has not landed**, the changeset was abandoned, or it already has an integration record.
-- `git pair status --json` reports `state: "INTEGRATING"` beside `integrate_commit` and `integrate_head`,
-  and `next_action` names the push and the destination rather than the manual merge.
+- `git pair status --json` reports `state: "INTEGRATING"` beside `integrating` and `integrate_commit` —
+  the same two fields `check --json` answers with — and `next_action` names the push and the destination
+  rather than the manual merge.
 - `git pair check --json` reports `integrating` and `integrate_commit` beside `ready`. For CI the whole
   gate is `.ready and .integrating`, and it is still true after the marker is written: the approval
   underneath licenses the merge.
@@ -45,9 +46,11 @@ Observable outcomes:
 - A stacked child can be declared only once its parent has a record. Its destination resolves to where
   the parent landed — `main` in the ordinary case, the release branch when the parent landed there — and
   `integration record` derives the same destination with no flags.
-- A scripted replay shows a CI clone taking the marker, gating on `check --json`, landing ff / merge /
-  squash, and finishing with `integration record` + `integration publish` and a published pair in all
-  three shapes.
+- A scripted replay shows a CI clone taking the marker, gating on `check --json`, landing with ordinary
+  git, and finishing with `integration record` + `integration publish` and a published pair. The three
+  landing shapes (ff, merge, squash) are covered by Go tests rather than by the replay: the replay proves
+  the part only a second clone can prove — that the request travels as a commit and the recorder needs no
+  flags — and one bash job staging three merges of one changeset would prove nothing the fixtures do not.
 - `mise run check` and `mise run gates` pass; PRD, README and the skill name the command, and
   `TestEveryCommandIsNamedInTheDocs` is what enforces it.
 
@@ -113,18 +116,18 @@ What exists when this plan starts (`feat/change-integrate-cmd`, on top of `feat/
 
 **Tasks**
 
-- [ ] `model`: `StateIntegrating = "INTEGRATING"`, `StateValueIntegrating = "integrating"`. The package
+- [x] `model`: `StateIntegrating = "INTEGRATING"`, `StateValueIntegrating = "integrating"`. The package
       doc's "five states" prose and the `State` doc comment (which currently says nothing about a
       changeset waiting to be merged) move with it.
-- [ ] `lifecycle`: `KindIntegrate`, `String()`, `parseEvent` recognising `integrating`, `Event.State()`
+- [x] `lifecycle`: `KindIntegrate`, `String()`, `parseEvent` recognising `integrating`, `Event.State()`
       → `INTEGRATING`, `markerLabel`/`markerReason` wording.
-- [ ] `lifecycle.Summary.Integrating *Event` — the newest declaration, beside `Abandoned`, so surfaces
+- [x] `lifecycle.Summary.Integrating *Event` — the newest declaration, beside `Abandoned`, so surfaces
       get the commit sha without switching on `Kind`. Newest wins, same rule as `Abandoned`.
-- [ ] `marker.IntegrateMessage(slug, head)`: subject `git-pair: integrate <slug>`, trailers
+- [x] `marker.IntegrateMessage(slug, head)`: subject `git-pair: integrate <slug>`, trailers
       `Review-State=integrating`, `Review-Changeset=<slug>`, `Review-Head=<head>`. `Review-Head` is the
       commit the declaration covers, written for the same reason `ReviewMessage` writes it: a rebase
       rewrites the marker and keeps the message, and the stale name is the evidence.
-- [ ] Unit tests in `internal/lifecycle`: parse, newest-wins, `Trailing`/`Stale` around the declaration
+- [x] Unit tests in `internal/lifecycle`: parse, newest-wins, `Trailing`/`Stale` around the declaration
       (it is empty, so the marker underneath it stays the newest *verdict*), and a marker naming no head.
 
 **Verification**
@@ -144,22 +147,28 @@ What exists when this plan starts (`feat/change-integrate-cmd`, on top of `feat/
 
 **Tasks**
 
-- [ ] `internal/cli/integrate.go`: `newChangeIntegrateCommand`, registered in `newChangeCommand`.
-- [ ] Run the gate as `check` runs it — `SummarizeAgainstTreeHEAD`, `terminalRecord`,
+- [x] `internal/cli/integrate.go`: `newChangeIntegrateCommand`, registered in `newChangeCommand`.
+- [x] Run the gate as `check` runs it — `SummarizeAgainstTreeHEAD`, `terminalRecord`,
       `ResolveIntegration`, `lineageReason`, `parentSinceApproval`, `integrationReasons` — so one
       implementation answers both commands and the two cannot disagree about what drift is. Add the
       parent-not-landed condition to the list in `integrationReasons`, shared by both commands: it is a
       condition on the automatic merge, and `check` refusing it too is the conservative direction.
-- [ ] `integrationVerdict(s)`: the event whose outcome licenses integration — the newest marker, or,
+      *Done as `a.integrationGate`, shared by both commands. The parent-not-landed rule did **not** go into
+      `integrationReasons`: it lives in `unlandedParentReason`, called only by `change integrate`. `check`
+      answers "may this merge" for a person who can merge a child onto an unlanded parent and record that
+      (`recordCarried`), and a gate that refused the merge would remove a landing shape the recorder exists
+      to support. The two questions differ, so the condition belongs to the request. See the Decisions
+      table.*
+- [x] `integrationVerdict(s)`: the event whose outcome licenses integration — the newest marker, or,
       when the newest marker is the declaration, the newest review underneath it. `integrationReasons`
       and `lineageReason` both ask it, so the outcome test and the lineage test move together and a
       rebase after the declaration cannot slip past the ancestry check.
-- [ ] Refusals: dirty tree, `base` is this branch, abandoned (`refuseIfAbandoned`), recorded
+- [x] Refusals: dirty tree, `base` is this branch, abandoned (`refuseIfAbandoned`), recorded
       (`marker.RefuseIntegrated`), plus the gate's reasons. Every reason printed in one run.
-- [ ] Idempotency: newest marker is a declaration naming `HEAD` → record nothing, exit 0,
+- [x] Idempotency: newest marker is a declaration naming `HEAD` → record nothing, exit 0,
       `recorded: false`. Naming a different head → a fresh declaration for that head.
-- [ ] `--allow-feedback`, `--json`; human output names the destination and the push.
-- [ ] Tests: one refusal per condition with its exit code; the JSON contract; the rewrite-after-declare
+- [x] `--allow-feedback`, `--json`; human output names the destination and the push.
+- [x] Tests: one refusal per condition with its exit code; the JSON contract; the rewrite-after-declare
       case; drift after the declaration; `change ready`/`review submit`/`change abandon` after it.
 
 **Verification**
@@ -176,13 +185,19 @@ What exists when this plan starts (`feat/change-integrate-cmd`, on top of `feat/
 
 **Tasks**
 
-- [ ] `internal/changeset`: `Destination(ctx, repo, cs, trunk)` — the base when it is a real branch;
+- [x] `internal/changeset`: `Destination(ctx, repo, cs, trunk)` — the base when it is a real branch;
       when the base is a durable ref, the parent's own base read at the commit that ref names
       (`BaseAt` reads `CHANGESET.yaml` from a tree — the parent's directory landed with it), walked
       upward and bounded; otherwise the default branch. Never returns a `refs/git-pair/*` ref.
-- [ ] `integration.go`: use it for the derived destination beside `base` and `default`, keeping the
+      *Done as `DestinationFor` in `internal/changeset/destination.go` — the name `Destination` is taken by
+      the return type — reading the parent's whole stack with `StackAt` rather than only its base, because
+      whether the walk continues depends on whether the parent was itself stacked on something landed. It
+      applies the resolver's relink rule at each hop, so a three-deep stack ends on the branch under all of
+      it, and reports `Why` (`base` / `parent` / `default`), `Via` and `Unreachable` so a caller can say
+      which rule produced the answer.*
+- [x] `integration.go`: use it for the derived destination beside `base` and `default`, keeping the
       existing guard and the "which destination was tried" wording in the refusal.
-- [ ] Tests: parent landed on trunk → `main`; parent landed on a release branch → that branch; a
+- [x] Tests: parent landed on trunk → `main`; parent landed on a release branch → that branch; a
       three-deep stack; a clone that has not fetched the namespace (base stays a branch, and M2's rule
       refuses rather than guessing).
 
@@ -202,18 +217,21 @@ What exists when this plan starts (`feat/change-integrate-cmd`, on top of `feat/
 
 **Tasks**
 
-- [ ] `status --json`: `integrate_commit`, `integrate_head`; `nextAction` for `INTEGRATING` — the push
+- [x] `status --json`: `integrate_commit`, `integrate_head`; `nextAction` for `INTEGRATING` — the push
       and the destination, not the manual merge; the human report names the declaration beside `State:`.
-- [ ] `check --json`: `integrating`, `integrate_commit`. Document `.ready and .integrating` as the CI gate.
-- [ ] `queue`: `awaiting_integration` (never null) with the changeset, branch, destination and the age of
+      *Done as `integrating` + `integrate_commit`, mirroring `check --json` rather than inventing
+      `integrate_head`: the same question gets the same two field names in both commands, and the head is
+      already `head`.*
+- [x] `check --json`: `integrating`, `integrate_commit`. Document `.ready and .integrating` as the CI gate.
+- [x] `queue`: `awaiting_integration` (never null) with the changeset, branch, destination and the age of
       the declaration; the review rows stay READY-only, because a reviewer owes nothing to a change whose
       reviewer has already spoken.
-- [ ] `change unready`: extends to withdrawing a declaration — `inReview` becomes a predicate that
+- [x] `change unready`: extends to withdrawing a declaration — `inReview` becomes a predicate that
       answers "is there an offer or a declaration to withdraw", the marker and message say the
       declaration is withdrawn, and the case is tested both ways (it must clear `integrating` in `check`).
-- [ ] Confirm nothing in `internal/tui` branches on the state set (it does not today — it prints the
+- [x] Confirm nothing in `internal/tui` branches on the state set (it does not today — it prints the
       derived state), and say so in the plan rather than silently assuming it.
-- [ ] Tests: `status --json` for a declared changeset; queue's new array; unready clearing the gate.
+- [x] Tests: `status --json` for a declared changeset; queue's new array; unready clearing the gate.
 
 **Verification**
 
@@ -229,18 +247,22 @@ What exists when this plan starts (`feat/change-integrate-cmd`, on top of `feat/
 
 **Tasks**
 
-- [ ] PRD: §9.9 `git pair change integrate`; §11.1 and §11.3 for the new JSON; §12's state list gains
+- [x] PRD: §9.9 `git pair change integrate`; §11.1 and §11.3 for the new JSON; §12's state list gains
       `INTEGRATING`; §21's "When the parent lands" gains the parent rule and the destination rule; §29's
       landing contract gains the declaration as the step that hands the merge to CI; §26 re-read for the
       no-merge claim, which stays true.
-- [ ] README: command table, quickstart, the CI section spelled as
+- [x] README: command table, quickstart, the CI section spelled as
       `git pair check --json | jq -e '.ready and .integrating'`.
-- [ ] `skills/git-pair/references/cli.md` (must name every leaf), `SKILL.md`, and
+- [x] `skills/git-pair/references/cli.md` (must name every leaf), `SKILL.md`, and
       `references/integration.md` — whose "there is no `git pair merge` … and none is coming" stays, next
       to a sentence saying the new command requests a merge that somebody else performs.
-- [ ] `scripts/gates/e2e-29.sh`: the declaration, the push, and a clone that gates on `check --json` and
+- [x] `scripts/gates/e2e-29.sh`: the declaration, the push, and a clone that gates on `check --json` and
       lands all three shapes; extend the "what this replay does not cover" header instead of leaving the
       gap implicit.
+      *Done, with the landing narrowed to one ordinary merge from the second clone and the three-shape
+      matrix left to the Go tests — the reason is in the Success criteria and in the script's own comment.
+      The replay also fetches the published pair back into the author's clone and asserts the request stops
+      being listed once the record is visible there.*
 
 **Verification**
 
@@ -258,6 +280,9 @@ What exists when this plan starts (`feat/change-integrate-cmd`, on top of `feat/
 | 2026-09-26 | Marker stays minimal (id + head) | The destination is derivable, and `Review-Target` would be a second claim about where work goes, unfalsifiable once written. |
 | 2026-09-26 | Measurement base stays `refs/git-pair/integrations/<parent>`; the *destination* resolves to the parent's base | Measured on a scratch repo: for merge and squash landings the two candidate bases give the same range and the same `base...head` span, so retargeting the base buys nothing; it loses the record's authority about where the parent actually went and collapses `landedBaseIsTheSameWork`. Naming the destination separately gets what the change was for. |
 | 2026-09-26 | A child cannot be declared while its parent branch is unlanded | The automatic merge would land work on a branch a reviewer can still rewrite, and a create-only ref naming a commit on that branch can end up unreachable. The human path — merge into the parent with ordinary git, then `integration record` — stays open, which is what `recordCarried` already exists for. |
+| 2026-09-26 | That refusal lives in `change integrate`, not in `integrationReasons` | The plan had it in the shared gate. Implementation showed the two commands ask different questions: `check` answers "may this merge" for a human who can merge onto an unlanded parent and record it, and refusing that in the gate deletes a supported landing shape. A declaration asks for a merge nobody will be asked again about, which is the narrower permission. |
+| 2026-09-26 | `check`'s `integrating` reads the newest **marker**, not the newest declaration in the range | `Summary.Integrating` keeps the newest declaration even after a re-offer, a re-review or a retraction supersedes it, because "was one ever made, and where" is a question whose answer survives. CI's gate is not that question: a pipeline merging on a superseded request performs the merge the author just took back. `integrationGate.Declared()` is the reading, and `status` uses it too so one branch cannot answer "did the author ask" two ways. |
+| 2026-09-26 | The replay lands one shape; ff / merge / squash stay in Go tests | The replay's value is the second clone — a request that travels as a commit, and a recorder that needs no flags. Three merges of one changeset in bash prove a matrix the fixtures already prove, with more ways to be accidentally wrong. |
 
 ## Risks
 
@@ -282,4 +307,6 @@ branch and nothing else. `mise run gates` runs the replay; `mise run check` runs
 
 ## Audit history
 
-_None yet._
+| Date | Milestone | Outcome |
+| ---- | --------- | ------- |
+| 2026-09-26 | M1–M5 | Implemented and committed as six commits: the marker and state, the destination resolver, `record`'s destination wiring, the command and the shared gate, the surfaces, the docs, then the replay. Three deliberate departures from the plan are recorded above: the unlanded-parent refusal lives in the command rather than the gate, `status --json` mirrors `check`'s field names, and the scripted replay lands one shape with the three-shape matrix left to Go tests. Verification surface: `go test ./...`, `mise run check`, `scripts/gates/e2e-29.sh` (118 assertions), and the docs-contract test. |
