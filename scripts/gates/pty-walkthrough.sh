@@ -424,11 +424,11 @@ step "too small for even the overlay: it names the width it needs"
 expect "the refusal names the columns the overlay needs" 0 "$T/tiny.raw" "the preview wants 40 columns"
 expect "and the terminal it has" 0 "$T/tiny.raw" "this terminal has 30"
 
-# `--configure-fetch` is consent as an argument, and the property worth painting is that it stays one:
+# `integration configure` is consent as a command, and the property worth painting is that it stays one:
 # PRD §22 makes the CLI the agent surface, so a command that writes configuration must not become a
 # conversation because it found a terminal. Sent no keystrokes, with a timeout, the run has to finish on
-# its own and paint its answer. Its own repository, because the record needs a verdict the TUI fixture
-# above has no reason to have left in place.
+# its own and paint its answer. Its own repository, because it writes config and the fixture above has no
+# business having any.
 step "a command that writes config asks for nothing at a terminal"
 CR="$T/configrepo"
 git init -q -b main "$CR"
@@ -437,25 +437,15 @@ git -C "$CR" config user.name Painter
 git -C "$CR" config commit.gpgsign false
 printf 'one\n' > "$CR/file.txt"
 git -C "$CR" add -A && git -C "$CR" commit -qm "start"
-git -C "$CR" switch -qc cfg-branch
-(cd "$CR" && "$G" init --base main >/dev/null) && ok "the record fixture has a changeset" || fail "fixture: init"
-printf 'two\n' > "$CR/file.txt"
-git -C "$CR" add -A && git -C "$CR" commit -qm "implement"
-(cd "$CR" && "$G" change ready >/dev/null) && ok "and is offered" || fail "fixture: change ready"
-(cd "$CR" && "$G" review submit --approve >/dev/null) && ok "and approved" || fail "fixture: review submit --approve"
-(cd "$CR" && git switch -q main && git merge -q --no-ff --no-edit cfg-branch)
-SRC=$(git -C "$CR" rev-parse cfg-branch)
-LAND=$(git -C "$CR" rev-parse HEAD)
 git init -q --bare -b main "$T/config-remote.git"
 (cd "$CR" && git remote add origin "$T/config-remote.git" && git push -q origin --all)
 
 python3 "$DRIVER" --raw "$T/configure.raw" --settle 1 --timeout 20 --term "${PTY_TERM:-xterm-256color}" \
-  "$COLS" "$ROWS" "$CR" "" "$G" integration record --source "$SRC" --commit "$LAND" \
-  --target main --configure-fetch >"$T/configure.exit" 2>"$T/configure.err"
+  "$COLS" "$ROWS" "$CR" "" "$G" integration configure >"$T/configure.exit" 2>"$T/configure.err"
 case $? in
-  0) ok "the record finished with nobody typing" ;;
-  124) fail "the record is waiting at a prompt; no command in git-pair asks" ;;
-  *) fail "the record exited $?" ;;
+  0) ok "the configuration finished with nobody typing" ;;
+  124) fail "the configuration is waiting at a prompt; no command in git-pair asks" ;;
+  *) fail "the configuration exited $?" ;;
 esac
 [ -s "$T/configure.err" ] && sed 's/^/      ! /' "$T/configure.err"
 # Nothing was typed, so there is no keystroke marker to window on: this is the whole session's output.
@@ -465,6 +455,7 @@ expectall() { # expectall <description> <raw file> <literal string>
   fi
 }
 expectall "it names the key it wrote" "$T/configure.raw" "remote.origin.fetch"
+expectall "and the other one" "$T/configure.raw" "remote.origin.push"
 expectall "and the refspec, not a paraphrase of it" "$T/configure.raw" "+refs/git-pair/*"
 expectall "and says what comes next" "$T/configure.raw" "git pair integration publish"
 if git -C "$CR" config --local --get-all remote.origin.fetch | grep -qF -- \
@@ -474,15 +465,18 @@ else
   fail "it painted a config line it did not write"
 fi
 # The same invocation through a pipe, on the state the pty run left: it must reach the same conclusion
-# without a terminal under it, and write the line once rather than again. Same command, two worlds, one
+# without a terminal under it, and write each line once rather than again. Same command, two worlds, one
 # answer — which is what "consent is an argument" has to mean for a pipeline.
-out=$(cd "$CR" && "$G" integration record --source "$SRC" --commit "$LAND" --target main --configure-fetch 2>&1)
+out=$(cd "$CR" && "$G" integration configure 2>&1)
 printf '%s' "$out" | grep -qF -- "already fetches the durable mirrors" \
   && ok "through a pipe it reports that it wrote nothing" \
   || { fail "the piped run did not report idempotence: $out"; }
 count=$(git -C "$CR" config --local --get-all remote.origin.fetch | grep -cF -- '+refs/git-pair/*')
 [ "$count" = 1 ] && ok "and the refspec is in the config exactly once" \
   || fail "the refspec appears $count times; the write is meant to be idempotent"
+count=$(git -C "$CR" config --local --get-all remote.origin.push | grep -cF -- 'refs/git-pair/*:refs/git-pair/*')
+[ "$count" = 1 ] && ok "and so is the push one" \
+  || fail "the push refspec appears $count times; the write is meant to be idempotent"
 
 # --- verdict ---------------------------------------------------------------
 printf '\n'

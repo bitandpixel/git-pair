@@ -233,7 +233,9 @@ booking-transaction: recorded 4f2b8c1 as the integration of 0eaad3b
   archive:     refs/git-pair/archive/booking-transaction -> 0eaad3b
   integration: refs/git-pair/integrations/booking-transaction -> 4f2b8c1
   verified reachable from main
-  configure:   --configure-fetch adds +refs/git-pair/*:refs/remotes/origin/refs/git-pair/* to remote.origin.fetch, so an ordinary fetch keeps this clone able to tell published from unpublished
+  configure:   git pair integration configure adds the durable refspecs to remote.origin.fetch
+               and remote.origin.push, so an ordinary fetch keeps this clone able to tell published from
+               unpublished, and an ordinary push keeps what it records published
   next:        git pair integration publish booking-transaction, then the branch can go
 ```
 
@@ -242,7 +244,31 @@ Then publish, and only then tidy:
 ```bash
 $ git pair integration publish
 booking-transaction: published to origin (archive + integration)
+  configure:   git pair integration configure adds refs/git-pair/*:refs/git-pair/* to remote.origin.push,
+               so an ordinary push carries these refs from now on
 ```
+
+Publishing every build is a repository's decision, and one command makes it git's own:
+
+```bash
+$ git pair integration configure
+origin: configured for the durable refs
+  fetch: added +refs/git-pair/*:refs/remotes/origin/refs/git-pair/* to remote.origin.fetch
+  push:  added refs/git-pair/*:refs/git-pair/* to remote.origin.push
+  next:  git pair integration publish, to send what this clone already holds
+```
+
+After that an ordinary `git fetch` keeps the clone able to tell published from unpublished, and an ordinary
+`git push` carries `refs/git-pair/*` with the branches. `publish` remains the command that sends one pair
+now and verifies it arrived; `configure` decides what the repository's own git does from here on, and pushes
+nothing itself. It is the only configuration git-pair writes, it is written once per clone, and no other
+command writes it — `--fetch-only` takes the read half and declines the write half.
+
+Nothing configures a clone on its own behalf, and three surfaces name the option instead, each about the
+half its own run is doing, and each quiet in a clone that already has the line: `integration record` prints
+the line it did not run, `integration publish` names the push key just after the clone sent that pair by
+hand, and the note `status` and `queue` print when they cannot compare a record to the remote names the
+fetch key beside the `--fetch` that would have asked once.
 
 The order is the contract (§PRD §29). Once the branch is deleted the refs are the only copy of the archive
 chain, so a delete that lands before a publish leaves the chain reachable from nothing outside the machine
@@ -551,8 +577,8 @@ of the override. See `docs/plans/completed/gitpr-mvp/research/git-plumbing-findi
 
 Every command accepts the persistent `--json` flag, but only `status`, `change ready`,
 `change unready`, `change wait`, `review submit`, `review history`, `queue`, `check`, `skill list`,
-`skill install`, `integration record` and `integration publish` change output for it; elsewhere it is
-accepted and ignored.
+`skill install`, `integration record`, `integration publish` and `integration configure` change output for
+it; elsewhere it is accepted and ignored.
 
 Every command also accepts `--default-branch <ref>`, which states the integration branch that
 "has this landed?" is measured against. Without it git-pair reads git's own answer
@@ -581,7 +607,8 @@ landed.
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug |
 | `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition — the review's outcome, whether the commit it approved is still in this history, and whether the content still matches; no `--changeset`, because it is the gate a forge runs *on* a revision |
 | `integration publish` | `[<changeset>…]`, `--remote <name>` | sends a changeset's two durable refs to the shared remote, unforced, in one push — the only git-pair command that pushes, and the only thing git-pair may push is `refs/git-pair/*` (§26). No arguments publishes every pair this clone holds; named ids publish just those, and a name with no record here is a refusal rather than a silent no-op. No `+` and no options: a remote that holds a different value rejects the push, and the refusal names both values, because two people recording one landing is a decision rather than a race to win. It then re-reads the remote's copies and reports what is actually there, so one ref arriving while the other is refused is reported as the half-state it is rather than as a single failure. Idempotent — a pair the remote already holds is "already published" and nothing is written, which is what lets CI run it every build |
-| `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>`, `--allow-feedback`, `--configure-fetch` (all optional) | writes both durable refs for one changeset, create-only: the archive at `--source` and the integration at `--commit`. The changeset is discovered from the `changesets/<id>/` directories `--source` carries and the integration branch does not, so a pipeline needs the two SHAs it already holds and not the changeset name; `--changeset` disambiguates a stacked child. Before it writes: the source's history must name this changeset and its newest verdict must permit integration (`approve`, or `feedback` with `--allow-feedback`); `--commit` must be in the destination branch's history (the `--target` you name, else the changeset's `base:`, else the default branch) and must be the commit that added `changesets/<id>/` there. Name neither SHA and the repository is asked — the landing is the first-parent commit on the destination that added the directory, the reviewed head is the branch still carrying it, wherever this clone holds that branch (a fetched `refs/remotes/origin/<branch>` counts, since that is where git puts a branch a pipeline was handed), and one branch is one candidate however many paths spell it — and anything ambiguous is a usage error naming the candidates. Needs no checkout and writes no commit; re-running it with the same pair succeeds and changes nothing. `--configure-fetch` is consent for the one thing git-pair ever writes outside a ref: it appends the mirror refspec to `remote.<name>.fetch` — idempotently, printing the key and the value, and reporting "already there" when it was — so an ordinary `git fetch` keeps this clone able to tell published from unpublished. It is a flag rather than a question because this CLI is the agent surface (§PRD §22): a prompt would make one command line mean two things, and an unanswered prompt in CI reads exactly like a declined one. The records themselves stay behind `--fetch`: a record is a claim, and a clone should acquire claims by asking |
+| `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>`, `--allow-feedback` (all optional) | writes both durable refs for one changeset, create-only: the archive at `--source` and the integration at `--commit`. The changeset is discovered from the `changesets/<id>/` directories `--source` carries and the integration branch does not, so a pipeline needs the two SHAs it already holds and not the changeset name; `--changeset` disambiguates a stacked child. Before it writes: the source's history must name this changeset and its newest verdict must permit integration (`approve`, or `feedback` with `--allow-feedback`); `--commit` must be in the destination branch's history (the `--target` you name, else the changeset's `base:`, else the default branch) and must be the commit that added `changesets/<id>/` there. Name neither SHA and the repository is asked — the landing is the first-parent commit on the destination that added the directory, the reviewed head is the branch still carrying it, wherever this clone holds that branch (a fetched `refs/remotes/origin/<branch>` counts, since that is where git puts a branch a pipeline was handed), and one branch is one candidate however many paths spell it — and anything ambiguous is a usage error naming the candidates. Needs no checkout and writes no commit; re-running it with the same pair succeeds and changes nothing. It writes refs and nothing else: the clone's configuration is `integration configure`'s to write, and `record` prints the one line naming that command when the clone has none. The records themselves stay behind `--fetch`: a record is a claim, and a clone should acquire claims by asking |
+| `integration configure` | `--remote <name>`, `--fetch-only` | the only configuration git-pair ever writes, and the command *is* the consent for it: appends the mirror refspec `+refs/git-pair/*:refs/remotes/<name>/refs/git-pair/*` to `remote.<name>.fetch`, so an ordinary `git fetch` keeps this clone able to tell published from unpublished, and appends `refs/git-pair/*:refs/git-pair/*` to `remote.<name>.push`, so an ordinary `git push` publishes what this clone records. Both are `--add` writes, idempotent, each reported with its key, its value and whether it was already there — so it is safe in a pipeline and safe in a repository with its own refspecs. `--fetch-only` writes the read half alone, for a clone that should compare a record against the remote without being the thing that makes it public. The push refspec carries no `+`, so a remote holding a different value rejects the push instead of being overwritten: publishing automatically is a repository's decision, and moving somebody else's record is nobody's. It is a command rather than a flag on `record` because configuration is a property of the clone, and a clone that arrived after a landing has no SHAs to record and had nothing to run. A prompt would make one command line mean two things, and an unanswered prompt in CI reads exactly like a declined one (§PRD §22) |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 | `skill list` | — | the agent skill this binary carries, and every directory a harness would read it from, each marked `current`, `stale`, `absent` or `unavailable`. `current` means the installed bytes equal this binary's, which is the check that keeps an installed skill from describing an older tool. Read-only |
 | `skill show` | `[path]` | prints one compiled-in file of the skill, `SKILL.md` by default, so it can be read or copied without a checkout. No JSON output |
@@ -611,7 +638,7 @@ nothing, those reads exit 2. For a span of another branch, name its ends: `git p
 | Exit code | Meaning | Seen as |
 | --- | --- | --- |
 | 0 | success | — |
-| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:`; `integration record` finding no changeset directory at `--source`, a head that was never reviewed, a landing that is not in the destination branch or did not add the changeset directory, or a record naming a different commit |
+| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:`; `integration record` finding no changeset directory at `--source`, a head that was never reviewed, a landing that is not in the destination branch or did not add the changeset directory, or a record naming a different commit; `integration configure` in a repository with no remote to write |
 | 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`/`integration`/`skill`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; detached HEAD; `cannot tell which branch is the integration branch`; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal; more than one changeset directory in `--source` and none named with `--changeset`; `skill install` with an unknown `--harness` or `--scope`, or with `--dest` alongside either |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
@@ -627,6 +654,12 @@ then means the build did not ask.
 Two fields answer null on purpose, and neither is a list. `status`'s `latest_review` is an object that
 does not exist before the first review. `uncommitted` is a bool that reports the question belongs to a
 checkout this command does not stand in.
+
+`git pair integration configure --json` reports the `remote` it wrote, then `fetch` and `push`, each
+`{"key", "refspec", "already_configured"}`. A half is absent when it was not offered — `--fetch-only` leaves
+`push` out — so a pipeline can tell "not asked" from "asked, and the line was already there". Every other
+command's answer about configuration is silence: `git pair integration record --json` has no configuration
+key at all, because writing configuration is not that command's to do.
 
 `git pair change feedback`, `git pair diff`, `git pair skill show` and `git pair skill agents-md` have no
 JSON output. `--json` is a global flag, so all four accept it. Each now says on stderr that the flag changed
@@ -1071,17 +1104,17 @@ on compares its tree against trunk's, so a checkout holding one branch refuses t
 states it directly instead of fetching. A `--single-branch` clone records no `origin/HEAD`, which is
 why the second line above names the branch.
 
-Publishing is the other half, and git-pair does not do it: nothing in the tool runs `push`, so the
-refs stay in the author's clone until the repository is configured to share them.
+Publishing is the other half. `git pair integration publish` sends one pair when somebody runs it, and a
+repository can make publishing automatic with `git pair integration configure`, which appends
+`refs/git-pair/*:refs/git-pair/*` to `remote.origin.push` so an ordinary `git push` carries the namespace
+with the branches. That line is written on request and never as a side effect of another command, because
+publishing review history is a decision about who gets to read it — the archive holds every commit of the
+review, including ones the author later dropped. Until it is run, the author's clone holds the only copy,
+and a CI job reporting missing refs is describing exactly that.
 
-```bash
-git config --add remote.origin.push '+refs/git-pair/*:refs/git-pair/*'
-```
-
-Documented rather than configured on anyone's behalf, because publishing review history is a decision
-about who gets to read it — the archive holds every commit of the review, including ones the author
-later dropped. Until that line is run, the author's clone holds the only copy, and a CI job reporting
-missing refs is describing exactly that.
+The configured push refspec carries no `+`, for the same reason the fetch one does: a remote holding a
+different value rejects the push instead of being overwritten by it. A repository can publish on every push
+and still have no push that moves somebody else's record.
 
 ## The agent skill
 

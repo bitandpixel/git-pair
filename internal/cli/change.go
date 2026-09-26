@@ -694,7 +694,7 @@ asked for: it reports at once and exits 0. Without --timeout it waits indefinite
 			return runChangeWait(cmd.Context(), a, opts)
 		},
 	}
-	cmd.Flags().BoolVar(&opts.fetch, "fetch", false, "run `git fetch` before each check")
+	cmd.Flags().BoolVar(&opts.fetch, "fetch", false, "run git fetch before each check")
 	cmd.Flags().StringVar(&opts.interval, "interval", "10s", "pause between checks (go duration: 30s, 1m)")
 	cmd.Flags().StringVar(&opts.timeout, "timeout", "", "give up after this long (default: wait forever)")
 	return cmd

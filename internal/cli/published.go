@@ -76,8 +76,8 @@ func (a *app) publicationReport(ctx context.Context, repo *git.Repo, branch stri
 		return rep
 	}
 	if !present && !asked {
-		rep.Note = fmt.Sprintf("nothing here can say whether a record reached %s: this clone has never fetched %s — %s",
-			remote, reviewref.MirrorRoot(remote), remedy)
+		rep.Note = fmt.Sprintf("nothing here can say whether a record reached %s: this clone has never fetched %s — %s, and %s",
+			remote, reviewref.MirrorRoot(remote), remedy, configureFetchNudge)
 		return rep
 	}
 	mirrors, err := reviewref.RemoteList(ctx, repo, remote)

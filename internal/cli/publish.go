@@ -117,7 +117,7 @@ func (a *app) runIntegrationPublish(ctx context.Context, names []string, remoteF
 				Reason: "this clone holds only one half of the pair, and a half-pair is not a record",
 			})
 		}
-		return a.finishPublish(view, len(incomplete) > 0)
+		return a.finishPublish(view, "")
 	}
 
 	// The mirrors *before* the push are what distinguishes "we published that" from "it was already
@@ -231,12 +231,16 @@ func (a *app) runIntegrationPublish(ctx context.Context, names []string, remoteF
 	sortPublished(view.Already)
 	sort.Slice(view.Failed, func(i, j int) bool { return view.Failed[i].Changeset < view.Failed[j].Changeset })
 
-	return a.finishPublish(view, len(view.Failed) > 0)
+	// The nudge is asked for before the report, where the repository is still in scope: it is a fact about
+	// this clone's configuration, and a run that published nothing prints neither the one nor the other.
+	return a.finishPublish(view, publishHint(ctx, repo, remote))
 }
 
 // finishPublish prints the answer and chooses the exit code: publishing that left a pair split across
-// two values is a refusal, not a warning, because the remote is now in a state nobody chose.
-func (a *app) finishPublish(view publishJSON, failed bool) error {
+// two values is a refusal, not a warning, because the remote is now in a state nobody chose. `nudge` is the
+// line naming the configuration that would make the next run of this command unnecessary, empty when the
+// clone already has it.
+func (a *app) finishPublish(view publishJSON, nudge string) error {
 	if a.json {
 		return a.emitJSON(view)
 	}
@@ -259,6 +263,10 @@ func (a *app) finishPublish(view publishJSON, failed bool) error {
 	if len(view.Published) == 0 && len(view.Already) == 0 {
 		a.printf("nothing to publish: this clone holds no integration record for the %s asked for\n",
 			"changesets")
+		return nil
+	}
+	if nudge != "" {
+		a.printf("%s", nudge)
 	}
 	return nil
 }
@@ -283,16 +291,7 @@ func suffixReason(reason string) string {
 // question than "no such remote".
 func (a *app) publishRemote(ctx context.Context, repo *git.Repo, remoteFlag string) (string, error) {
 	if remoteFlag != "" {
-		remotes, err := repo.Remotes(ctx)
-		if err != nil {
-			return "", err
-		}
-		for _, r := range remotes {
-			if r == remoteFlag {
-				return remoteFlag, nil
-			}
-		}
-		return "", fmt.Errorf("git-pair: no remote %q; this repository has %s", remoteFlag, orNone(remotes))
+		return namedRemote(ctx, repo, remoteFlag)
 	}
 	remote, err := a.remoteForDurableRefs(ctx, repo, "")
 	if err != nil {
