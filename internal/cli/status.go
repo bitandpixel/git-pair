@@ -156,6 +156,13 @@ type statusJSON struct {
 	Uncommitted     *bool  `json:"uncommitted"`
 	Abandoned       bool   `json:"abandoned"`
 	AbandonedCommit string `json:"abandoned_commit,omitempty"`
+	// Integrating reports the author's declaration — `git pair change integrate` — and IntegrateCommit is
+	// the commit that wrote it. It sits beside `state` for the reason `integrated` does: the state name
+	// already says INTEGRATING while the declaration is the newest marker, and what the field adds is the
+	// address of the thing that says so. The same rule `check --json` uses, so one read of the branch
+	// cannot answer "did the author ask" two ways.
+	Integrating     bool   `json:"integrating"`
+	IntegrateCommit string `json:"integrate_commit,omitempty"`
 	// Integrated reports the presence of an integration ref, which is the only record that a
 	// changeset landed: squash, rebase and cherry-pick destroy the ancestry that would otherwise
 	// answer it. Like `abandoned`, it sits beside `state` rather than inside it — the lifecycle
@@ -415,6 +422,12 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 		view.json.Abandoned = true
 		view.json.AbandonedCommit = at.SHA
 	}
+	// The declaration, read the way `check` reads it: the newest marker, and nothing that a later
+	// re-offer or review has superseded.
+	if m := s.summary.Marker; m != nil && m.Kind == lifecycle.KindIntegrate {
+		view.json.Integrating = true
+		view.json.IntegrateCommit = short(m.SHA)
+	}
 	if r := s.summary.LatestReview; r != nil {
 		view.json.LatestReview = &latestReviewJSON{
 			Index:        len(s.summary.Reviews) - 1,
@@ -531,6 +544,11 @@ func printStatus(a *app, v *statusView) {
 	}
 	if j.Abandoned {
 		a.printf("\nTerminal:\n  abandoned by %s (`git pair change abandon`)\n", short(j.AbandonedCommit))
+	}
+	if j.Integrating {
+		// Beside the state rather than inside it, in the block where the branch's other standing facts are:
+		// the state says what the newest marker is, and this names the commit that made it so.
+		a.printf("\nDeclared:\n  ready to integrate at %s (`git pair change integrate`)\n", j.IntegrateCommit)
 	}
 	if j.Integrated {
 		// Nothing here tells the reader to run `git pair integration record`: this block prints because that
@@ -678,6 +696,15 @@ func nextAction(s lifecycle.Summary, base string) string {
 			return "the head moved since the review: `git pair change ready` to offer it for review again"
 		}
 		return landingNextAction(base)
+	case model.StateIntegrating:
+		// The author's step is over; the merge belongs to whoever owns the destination branch, and git-pair
+		// performs none of it (PRD §26). The push is named first because until the branch is on the remote
+		// nobody else can see the request at all.
+		if s.Stale {
+			// A declaration is about a commit, and a commit has landed on top of the one it named.
+			return "the head moved since the declaration: `git pair change integrate` to declare this head"
+		}
+		return "push the branch so whoever merges can see the request; then " + landingNextAction(base)
 	}
 	return ""
 }

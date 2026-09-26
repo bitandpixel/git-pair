@@ -31,16 +31,42 @@ type queueEntry struct {
 	ReadyAge    string `json:"ready_age"`
 }
 
+// integrationEntry is a changeset whose author has asked for the merge and whose landing nobody has
+// recorded. It is a second list rather than a second state inside `ready_for_review` because the two rows
+// answer two different people: the review queue is "what is waiting for a reviewer", and this is "what a
+// reviewer has already approved and the author has handed over". A dashboard that reads only the first
+// would keep showing approved work as if it still needed somebody to look at it.
+type integrationEntry struct {
+	Changeset string `json:"changeset"`
+	Branch    string `json:"branch"`
+	Base      string `json:"base"`
+	State     string `json:"state"`
+	Head      string `json:"head"`
+	// IntegrateCommit is the declaration — the commit that says the author is done with this head.
+	IntegrateCommit string `json:"integrate_commit"`
+	DeclaredAge     string `json:"declared_age"`
+	// Destination is the branch the work is asking to land on, which for the child of a landed parent is
+	// not the branch its own `base:` names. It is reported because the row exists to be acted on, and an
+	// actor who merges into the wrong branch finds out from the record refusing, not from here.
+	Destination string `json:"destination"`
+}
+
 func newQueueCommand(a *app) *cobra.Command {
 	var doFetch bool
 	cmd := &cobra.Command{
 		Use:   "queue",
 		Short: "List changesets ready for human review",
-		Long: `List every changeset in this repository whose branch is READY.
+		Long: `List every changeset in this repository whose branch is READY, and every
+changeset whose author has asked for the merge with ` + "`git pair change integrate`" + `.
 
 Readiness comes from commit history, not a queue file: a changeset is listed
 while its branch carries a ready marker that no review submission has answered.
 Entries are ordered longest-waiting first.
+
+The second list is the author's half of an automatic merge: approved work with a declaration on its tip,
+waiting for whoever owns the destination branch to perform it. git-pair performs nothing itself and writes
+nothing durable while work is in flight (PRD §26) — ` + "`git pair integration record`" + ` after the merge
+is what turns a row here into a record.
 
 Branches are read from the repository, not from the checked-out directory, so the
 queue says the same thing on main as it does on the changeset's own branch. A
@@ -89,6 +115,9 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 	seen := map[string]bool{}
 	noted := map[string]bool{}
 	var entries []queueEntry
+	// Declarations the author has made and nobody has landed yet. A second list beside the review queue,
+	// because the two answer different questions — see integrationEntry.
+	var integrations []integrationEntry
 	var skipped []string
 	// Stacks whose parent has moved on. A note, not a row: see behindParent.
 	var stale []string
@@ -143,10 +172,16 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 		// to one row and picking the branch with the newest ready marker made a changeset under review on
 		// one branch invisible on the other, which is the reviewer's question the queue exists to answer
 		// (requirements, invariant 5).
-		entry, err := branchReadyEntry(ctx, repo, cs, br.Branch)
+		// One read of the branch's history answers both queue questions: is this offered for review, and
+		// has the author asked for the merge. They are mutually exclusive by construction — a declaration
+		// is a marker, so a branch carrying one is not in the state the review row asks for.
+		entry, declared, err := branchQueueEntries(ctx, repo, cs, br.Branch, db)
 		if err != nil {
 			skipped = append(skipped, br.Branch+" ("+err.Error()+")")
 			continue
+		}
+		if declared != nil {
+			integrations = append(integrations, *declared)
 		}
 		if entry != nil {
 			// A stacked child whose parent has moved is a review someone is about to read against a
@@ -197,15 +232,20 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 	sort.SliceStable(entries, func(i, j int) bool {
 		return ageLess(entries[i].ReadyAge, entries[j].ReadyAge)
 	})
+	// Same rule as the review rows: the request that has been waiting longest is asked about first.
+	sort.SliceStable(integrations, func(i, j int) bool {
+		return ageLess(integrations[i].DeclaredAge, integrations[j].DeclaredAge)
+	})
 
 	if a.json {
 		out := map[string]any{
 			// Every array here is `[]` rather than null, including `landed_unrecorded` and `unpublished`.
 			// An empty list is the answer "asked, and none", and a missing key is "this build did not look".
-			"ready_for_review":  orEmpty(entries),
-			"skipped":           orEmpty(skipped),
-			"landed_unrecorded": unrecorded,
-			"unpublished":       rep.Findings,
+			"ready_for_review":     orEmpty(entries),
+			"awaiting_integration": orEmpty(integrations),
+			"skipped":              orEmpty(skipped),
+			"landed_unrecorded":    unrecorded,
+			"unpublished":          rep.Findings,
 			// The notes the text surface prints to stderr: a row whose parent has landed, or moved.
 			// They were prose-only, which left a machine reading the queue with no way to learn that the
 			// base a row is being reviewed against has already been integrated.
@@ -222,6 +262,7 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 		a.printUnpublished(rep, true)
 		printSkipped(a, skipped)
 		printBehindParent(a, stale)
+		printAwaitingIntegration(a, integrations)
 		return nil
 	}
 	a.printf("READY FOR REVIEW\n\n")
@@ -239,7 +280,29 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 	a.printUnpublished(rep, false)
 	printSkipped(a, skipped)
 	printBehindParent(a, stale)
+	printAwaitingIntegration(a, integrations)
 	return nil
+}
+
+// printAwaitingIntegration lists the work its author has handed over for the merge. It is a section and not
+// a note under the review rows because it is not a qualification of a review row: nothing here is waiting
+// for a reviewer, and a list of approved work printed under "READY FOR REVIEW" would tell a reader to look
+// at something that has already been looked at.
+func printAwaitingIntegration(a *app, entries []integrationEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	a.printf("AWAITING INTEGRATION\n\n")
+	for _, e := range entries {
+		a.printf("%s\n", e.Changeset)
+		a.printf("  branch: %s\n", e.Branch)
+		// The destination rather than the base, because this is the list somebody acts on: `base` is where
+		// the diff starts, and for a child of a landed parent the two are different answers.
+		a.printf("  merge into: %s\n", e.Destination)
+		a.printf("  declared: %s ago by %s\n", e.DeclaredAge, short(e.IntegrateCommit))
+		a.printf("  head: %s\n", short(e.Head))
+		a.printf("\n")
+	}
 }
 
 // printBehindParent says which ready rows sit on a parent that has moved. It goes to the notes stream
@@ -367,30 +430,54 @@ func (a *app) landedParentNote(ctx context.Context, repo *git.Repo, cs changeset
 		cs.Slug, cs.ParentChangeset, short(sha), landedParentStep(cs, st)), nil
 }
 
-// branchReadyEntry is the queue row for one branch, or nil when that branch is not READY.
+// branchQueueEntries is what one branch contributes to the two queue lists, from one read of its history.
+// Either half can be nil: a branch is offered for review, or handed over for the merge, or is neither.
 //
-// It asks about one branch because that is the unit the queue reports: review commits are appended to a
-// branch, so the branch is what is ready, and two branches carrying one changeset have two answers.
-func branchReadyEntry(ctx context.Context, repo *git.Repo, cs changeset.Changeset, branch string) (*queueEntry, error) {
+// Both ask about one branch because that is the unit the queue reports: markers are appended to a branch,
+// so the branch is what is ready or what is declared, and two branches carrying one changeset have two
+// answers.
+func branchQueueEntries(ctx context.Context, repo *git.Repo, cs changeset.Changeset, branch string,
+	db changeset.DefaultBranchRef) (*queueEntry, *integrationEntry, error) {
 	summary, err := lifecycle.Summarize(ctx, repo, cs.Slug, cs.Base, branch)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if summary.State != model.StateReady || summary.Marker == nil {
-		return nil, nil
+	if summary.Marker == nil {
+		return nil, nil, nil
 	}
 	head, err := repo.RevParse(ctx, branch)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &queueEntry{
-		Changeset:   cs.Slug,
-		Branch:      branch,
-		Base:        cs.Base,
-		State:       string(summary.State),
-		Head:        head,
-		ReadyCommit: summary.Marker.SHA,
-		ReadyAge:    lifecycle.Age(summary.Marker.When, now()),
+	if summary.State == model.StateReady {
+		return &queueEntry{
+			Changeset:   cs.Slug,
+			Branch:      branch,
+			Base:        cs.Base,
+			State:       string(summary.State),
+			Head:        head,
+			ReadyCommit: summary.Marker.SHA,
+			ReadyAge:    lifecycle.Age(summary.Marker.When, now()),
+		}, nil, nil
+	}
+	if summary.State != model.StateIntegrating {
+		return nil, nil, nil
+	}
+	// The destination is the one fact a row in this list cannot be acted on without, and it costs a walk
+	// only for the branches that got here: an unstacked changeset answers from its own base.
+	dest, err := changeset.DestinationFor(ctx, repo, cs, db)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, &integrationEntry{
+		Changeset:       cs.Slug,
+		Branch:          branch,
+		Base:            cs.Base,
+		State:           string(summary.State),
+		Head:            head,
+		IntegrateCommit: summary.Marker.SHA,
+		DeclaredAge:     lifecycle.Age(summary.Marker.When, now()),
+		Destination:     displayRef(dest.Ref),
 	}, nil
 }
 

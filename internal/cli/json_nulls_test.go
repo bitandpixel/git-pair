@@ -54,7 +54,8 @@ func nullKeys(t *testing.T, out string) []string {
 func TestEmptyListsAreEmptyArrays(t *testing.T) {
 	t.Run("queue with nothing ready", func(t *testing.T) {
 		f := newRepo(t)
-		for _, key := range []string{"ready_for_review", "skipped", "landed_unrecorded", "unpublished"} {
+		for _, key := range []string{"ready_for_review", "awaiting_integration", "skipped",
+			"landed_unrecorded", "unpublished"} {
 			out := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 			if got := out.json(t)[key]; got == nil {
 				t.Errorf("%s = null, want [] — an empty list is the answer %q\n%s", key, "asked, and none", out.stdout)
