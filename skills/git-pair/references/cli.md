@@ -12,14 +12,15 @@ by a test.
 | `init` | `--id <id>`, `--base <ref>`, `--set-base`, `--parent <branch>`, `--set-parent`, `--about <text>`, `--set-about`, `--no-commit` | creates `changesets/<id>/`, `CHANGESET.yaml`, `ABOUT.md`, commits them. Never overwrites existing content. Commits only the changeset directory, so a staged index stays staged. `--about` reads a pipe. Default base is the integration branch, recorded as its branch name where that name resolves. Refuses on the base itself, where a changeset could never hold anything. `--id` is chosen, never normalised: an id that would need rewriting is refused, and a collision refuses rather than suffixing |
 | `change use` | `<id>` | records which changeset a branch carrying more than one is working on, by writing `ignores:` into that changeset's `CHANGESET.yaml`. Idempotent; refuses an id the branch does not offer |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive. Checks in order: clean working tree, `ABOUT.md` exists, the repository has commits, no blocking surviving review additions |
-| `change unready` | none | withdraws the offer. Records `Review-State: working` when the changeset is in review, otherwise succeeds and records nothing. Checks only for a clean tree, since the marker it writes is empty. Refuses a changeset already recorded as integrated |
+| `change integrate` | `--allow-feedback` | declares this approved head ready to be merged: one empty `Review-State: integrating` marker naming the head with `Review-Head`, and nothing else — no ref, no push, no merge. Runs `check`'s gate first and names every failed condition, so it cannot be made for work the gate would refuse. Refuses a stacked child whose parent has no integration record. Idempotent at the head it declared; a commit after it is declared next time. **Not a verdict:** the approval underneath is what permits the merge |
+| `change unready` | none | withdraws the offer. Records `Review-State: working` when the changeset is in review — `READY`, `APPROVED`, `FEEDBACK`, or `INTEGRATING`, which is how a merge request is taken back — otherwise succeeds and records nothing. Checks only for a clean tree, since the marker it writes is empty. Refuses a changeset already recorded as integrated |
 | `change abandon` | none | terminal `Review-State: abandoned`, and nothing else — no ref, since an abandoned changeset has no landing to record. `change ready`, `change unready` and `review submit` refuse against it afterwards. Idempotent |
 | `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks while the changeset is `READY`, exits the moment it becomes `BLOCKED`, `FEEDBACK` or `APPROVED`. Read-only. `--fetch` runs `git fetch` before each round and also evaluates the branch's remote-tracking ref, so a review pushed from another clone ends the wait. Without `--timeout` it waits indefinitely. Exit 1 on timeout, and 1 (not a wait) on a `WORKING` changeset |
 | `change feedback` | `--stat`, `--name-only`, `--changeset <slug>` | the most recent submission as a diff (`review^..review`). No JSON output |
 | `status` | `--changeset <slug>`, `--fetch` | derived state, reason, `next_action`. Reads any changeset by slug, from whichever branch carries it, falling back to the durable refs |
-| `queue` | `--fetch` | one row per branch whose changeset is `READY`, longest wait first, plus `LANDED, UNRECORDED` and `RECORDED, NOT PUBLISHED` findings. Read from the repository, not the checkout |
+| `queue` | `--fetch` | one row per branch whose changeset is `READY`, longest wait first, plus `LANDED, UNRECORDED` and `RECORDED, NOT PUBLISHED` findings, plus `AWAITING INTEGRATION` / `awaiting_integration` for approved work whose author asked for the merge. Read from the repository, not the checkout |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | no JSON output. Paths are checked against the span first, so a typo is an error rather than an empty diff |
-| `check` | `--allow-feedback`, `--fetch` | the integration gate. `--allow-feedback` is where a repository states that a non-blocking review is enough; there is no config key for it, because the command that runs the gate is the only place the policy is known |
+| `check` | `--allow-feedback`, `--fetch` | the integration gate. `--allow-feedback` is where a repository states that a non-blocking review is enough; there is no config key for it, because the command that runs the gate is the only place the policy is known. Reports `integrating` beside the verdict, so an automatic merge gates on one command: `jq -e '.ready and .integrating'` |
 | `review history` | `--changeset <slug>` | review submissions only, indexed from `0`, each naming the commit it reviewed under `REVIEWED` |
 | `review open` | the span flags above | the review screen. Needs a terminal; refuses with exit 2 under an agent |
 | `review reopen` | none | the screen on `<last review>..current`. Needs a terminal; refuses if no review exists |
@@ -60,7 +61,7 @@ opens a historical span, which is read-only.
 | Code | Meaning | Seen as |
 | --- | --- | --- |
 | 0 | success | — |
-| 1 | a git-pair rule or the repository state refused the operation | surviving additions; dirty working tree; missing `ABOUT.md`; `check` printing `NOT READY:`; `change wait` timing out or finding a `WORKING` changeset; `integration record` verifying nothing; `skill install` meeting a file that differs, with no `--force` |
+| 1 | a git-pair rule or the repository state refused the operation | surviving additions; dirty working tree; missing `ABOUT.md`; `check` printing `NOT READY:`; `change integrate` refusing work the gate would refuse, or a child whose parent has not landed; `change wait` timing out or finding a `WORKING` changeset; `integration record` verifying nothing; `skill install` meeting a file that differs, with no `--force` |
 | 2 | usage error | unknown flag, command or subcommand; `no changeset for this branch`; detached HEAD; more than one changeset and none named with `--changeset`; `cannot tell which branch is the integration branch`; `--fetch` with no remote configured; a path outside the span; editor or TUI commands without a terminal; `skill install` with an unknown `--harness` or `--scope`, or with `--dest` alongside either |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess failing for a reason other than an unresolvable revision |
 
@@ -105,11 +106,14 @@ whether it exists.
 Once a review exists, `latest_review` is `{"index": 0, "outcome": "block", "commit": "332887c",
 "reviewed_head": "1a2b3c4"}`. `abandoned`, `integrated`, `archive_ref`, `archive_commit`,
 `integrated_commit` and `integration_ref` are facts beside the state, not extra state values: the state
-stays `WORKING` after `change abandon`, and untouched by a record.
+stays `WORKING` after `change abandon`, and untouched by a record. `integrating` and `integrate_commit` are
+the exception that is a state: `INTEGRATING` while a declaration is the newest marker.
 
 `git pair check --json` carries the verdict in `ready` and exits 0 either way, so a gate asks `jq`
 rather than `$?`. `reasons` names every failed condition, empty when it passed; `policy` is
-`approve-only` or `approve-or-feedback`; `next_action` appears only when `ready` is true.
+`approve-only` or `approve-or-feedback`; `next_action` appears only when `ready` is true. `integrating`
+is the separate question of whether the author asked for this merge — true only while the declaration is
+the newest marker, so a re-offer or a re-review stops an automatic merge without a rebase.
 
 ```json
 {
@@ -144,13 +148,18 @@ up". A timeout exits 1, an answered wait exits 0.
 }
 ```
 
-`git pair queue --json` — `ready_for_review` (full SHAs in `head` and `ready_commit`), `skipped` for
+`git pair queue --json` — `ready_for_review` (full SHAs in `head` and `ready_commit`),
+`awaiting_integration` (approved work handed over for the merge, with `integrate_commit`, `declared_age`
+and the `destination` somebody would merge into), `skipped` for
 changesets the queue cannot explain, `parent_notes` for a READY child whose parent has moved or landed,
 and `landed_unrecorded` carrying the `integration record` invocation that closes each gap.
 
 `git pair change ready --json` prints `changeset`, `branch`, `base`, `state`, `head`, `ready_commit`,
 `review_queue_visible` and `acknowledged_survivors`; `surviving_review_artifacts` appears only when a
 surviving-additions report existed.
+`git pair change integrate --json` prints the same identity fields plus `recorded` (false when this head
+was already declared), `integrate_commit`, `destination` with `destination_source` (`base`, `parent`,
+`default`), `destination_via`, `destination_unreachable`, `reasons` and `next_action`.
 `git pair change unready --json` reports `was` and `state`, with `recorded` false when there was nothing
 to withdraw. `git pair review history --json` lists the submissions with `index`, `outcome`, `sha`,
 `short`, `reviewed_head`, `subject`, `author`, `when`, `age`.

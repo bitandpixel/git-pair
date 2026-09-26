@@ -937,6 +937,88 @@ line, and the refusal message names it.
 
 ---
 
+## 9.9 `git pair change integrate`
+
+Declares that the current changeset is approved and should be merged, by committing the declaration to
+its branch.
+
+An approved changeset had an author standing between the approval and the merge button: the gate, the
+merge, and the record were three steps one person ran in sequence, and a pipeline that wanted the merge
+had to take the decision out of the author's hands to get it. The declaration moves the waiting rather
+than the decision. The author says once, in a commit on the branch where every reader sees it, that the
+work is approved and should land. Whoever owns the destination branch performs the merge, with ordinary
+git.
+
+```bash
+git pair change integrate
+```
+
+Requirements:
+
+-   the changeset must exist and its working tree be clean — the declaration is a commit, so a dirty tree
+    is the blocker `change ready` treats it as (§9.2): repository state, not bad arguments,
+-   run the gate of `git pair check` (§11.3) first, as the same code rather than an imitation of it, and
+    name every failed condition in one run,
+-   refuse a changeset that has an integration record (§11.4): the work has landed, and a declaration on
+    top of it would ask for a second merge,
+-   refuse a stacked child whose parent has no integration record — see the rule below,
+-   write the marker commit and nothing else: no ref, no config, no network (§26),
+-   succeed and record nothing when this head is already declared, so a script can declare
+    unconditionally,
+-   keep `git pair check` as the gate a merge runs. This command requests a merge; it never performs one,
+    and it never certifies one.
+
+Suggested commit:
+
+```text
+git-pair: integrate booking-transaction
+```
+
+Include machine-readable Git trailers, e.g.:
+
+```text
+Review-State: integrating
+Review-Changeset: booking-transaction
+Review-Head: 4f9c1d2e7b6a5389c0d4e1f2a3b4c5d6e7f8091a
+```
+
+Two things about a declaration are worth holding onto.
+
+It is about a commit. `Review-Head` names the head that was declared, for the reason a review names one
+(§10.4): a rebase rewrites the marker and keeps the message, and the stale name is what makes the gate
+refuse the rewrite rather than bless it. A commit after the declaration moves the head it names, so the
+next run declares that one instead and the branch keeps a record of every head that was offered for the
+merge. Re-running at the head already declared records nothing and succeeds.
+
+It is not a verdict. The approval underneath it stays the thing that permits the merge, which is why
+`check` keeps passing after a declaration and keeps refusing after anything that would have made it
+refuse before: the content that moved since the approval, the history that was rewritten, the parent that
+moved. A declaration is superseded rather than erased — `change unready` (§9.6), a fresh `change ready`,
+or a reviewer's submission (§10.4) each becomes the newest marker, and `integrating` (§11.3) goes back to
+false. Withdrawing a request therefore needs no rebase and no force-push: it needs one more marker.
+
+A stacked child is refused until its parent has an integration record. The automatic merge would land the
+child on a branch that review can still rewrite, and a create-only ref naming a commit on such a branch can
+end up pointing at history that stopped existing (§13.3). The rule belongs to the request and not to the
+gate: `check` answers "may this merge" for a person who can merge a child onto its unlanded parent and
+record that (§11.4), while this command asks for a merge nobody will be asked again about. Merging a child
+onto its parent by hand stays open; git-pair declines to queue it, not to record it. A parent branch that
+records no `parent-changeset:` is refused the same way, because there is no record to look for and
+"cannot tell" goes the direction that asks a person to look again.
+
+The answer names the branch the work is asking to land on. For the child of a landed parent that is not the
+branch its own `base:` names — the measurement moved to the parent's integration ref when the parent landed
+(§21), and a durable ref is a commit, not a destination — so the destination is read from the parent's
+record (§11.4) and the answer says which rule produced it.
+
+The machine-readable answer carries the changeset, the branch, the base, the state before and after, the
+head, whether this run wrote the marker, the declaration's commit, the destination with its source and the
+chain walked to reach it, `reasons` as an array in both outcomes, and the next step.
+
+Exit codes: `0` declared or already declared, `1` refused, `2` usage, `3` git failed (§22).
+
+---
+
 # 10. Reviewer Commands
 
 ## 10.1 `git pair review open`
@@ -1216,6 +1298,35 @@ The note is the record talking: `booking-transaction`'s branch may still be chec
 still absent from trunk, and it is the integration ref that says the queue has nothing to ask of it
 (§13.2).
 
+Approved work the author has handed over for the merge is a second list, not more rows in the first:
+
+```json
+{
+    "ready_for_review": [],
+    "awaiting_integration": [
+        {
+            "changeset": "booking-transaction",
+            "branch": "booking-transaction",
+            "base": "refs/git-pair/integrations/checkout-refactor",
+            "state": "INTEGRATING",
+            "head": "4f9c1d2e",
+            "integrate_commit": "9b7e2c1",
+            "declared_age": "2h",
+            "destination": "main"
+        }
+    ]
+}
+```
+
+The two lists answer two different people. `ready_for_review` is "what is waiting for a reviewer"; this one
+is "what a reviewer has already approved and the author has handed over", and printing it under the first
+heading would tell a reviewer to look at work somebody already looked at. A declared changeset is never in
+both: a declaration is a marker, so a branch carrying one is not in the state the review row asks for. Rows
+come from the same read of each branch's history that the review rows do, are ordered longest-waiting
+first, and carry `destination` — the branch somebody would merge into, which for the child of a landed
+parent is not the `base` the row also prints (§21). The human surface prints them under
+`AWAITING INTEGRATION` and omits the section when there is none; the array is `[]` either way.
+
 Future/global support should allow:
 
 ```bash
@@ -1367,6 +1478,14 @@ they are reported the way they are so a consumer sees one shape either way, and 
 statement that the work landed. `integration_ref` and `integrated_commit` name the landing itself and
 appear only with it (§13).
 
+`integrating` and `integrate_commit` are the author's declaration (§9.9) and its commit, read by the same
+rule `check --json` uses (§11.3): the newest marker, and nothing a later re-offer or review has superseded.
+The state already says `INTEGRATING` while that is true; the commit is what `status` adds, because the
+author looking at their own branch wants the address of the thing they did, not only the state it produced.
+`next_action` for that state names the push that makes the request visible to whoever can act on it, with
+the landing contract (§29) still attached — and names `git pair change integrate` again when a commit has
+landed on top of the head the declaration covered, because a declaration is about a commit.
+
 `latest_review.reviewed_head` is the commit that submission spoke about, from its `Review-Head`
 trailer (§10.4) — the other end of the comparison `git pair check` makes when it refuses a rewritten
 branch (§11.3). It is omitted when the marker names no head, which is itself the answer the gate
@@ -1421,7 +1540,8 @@ The conditions, all of them reported rather than the first:
 
 1. the changeset has not ended (§9.7),
 2. the newest lifecycle marker is a review whose outcome permits integration — `approve`, or
-   `feedback` under `--allow-feedback`. A changeset that is merely marked ready, or withdrawn by
+   `feedback` under `--allow-feedback` — or a declaration (§9.9) standing on such a review, in which case
+   the review underneath it is the verdict. A changeset that is merely marked ready, or withdrawn by
    `change unready`, is not reviewed,
 3. no marker after it carries `Review-*` trailers this build cannot read,
 4. the commit that review spoke about is still in this line of history: `Review-Head` (§10.4) is an
@@ -1502,12 +1622,33 @@ flag is on the command that runs the gate, which is the one place the policy is 
 
 `--json` prints `changeset`, `ready`, `state`, `head`, `reasons`, `policy` (`approve-only` or
 `approve-or-feedback`, so a verdict in a log carries the policy that produced it), `reviewed_head`,
-`integrated`, `integrated_commit` and `next_action`. `head` and `reviewed_head` are full SHAs rather than the short
+`integrated`, `integrated_commit`, `integrating`, `integrate_commit` and `next_action`. `head` and `reviewed_head` are full SHAs rather than the short
 forms the human output prints, because the consumer compares them against the revision it built —
-`integrated_commit` is short, matching `status`. `reviewed_head` is the commit the newest permitting
+`integrated_commit` and `integrate_commit` are short in `status` and full here, matching the other
+commit fields of this command. `reviewed_head` is the commit the newest permitting
 review named (§10.4), reported whether or not the verdict is ready, and omitted where the marker names
 no head. `reasons` is an array in both verdicts, so a consumer branches on `ready` instead of handling
 two shapes for one fact.
+
+`ready` and `integrating` are two answers to two questions, and the gate a pipeline runs is the
+conjunction:
+
+```bash
+git pair check --json | jq -e '.ready and .integrating'
+```
+
+`ready` is "may this merge" — the verdict, the lineage, the tree, the parent. `integrating` is "did the
+author ask for one": the newest marker is a `git pair change integrate` declaration (§9.9) covering this
+head. Neither implies the other, and neither belongs inside the other. A gate that merged on `ready` alone
+would merge every approved changeset the moment it was approved, which takes the decision out of the
+author's hands; a gate that merged on `integrating` alone would merge a request whose approval had been
+rewritten, withdrawn, or answered since. Both come from one run because they are computed from one read of
+the branch, and two commands would be two answers waiting to disagree.
+
+`integrating` reads the newest marker, not the newest declaration in the history: a re-offer, a re-review
+or a retraction supersedes a declaration without erasing it, and a merge performed on a superseded request
+is the merge the author has just taken back. The human form prints the declaration beside the verdict as
+`declared: <sha>`, because a log that says "ready" about a branch somebody handed over should say that too.
 
 `next_action` is the handoff the passing verdict licenses (§9.5) — the gate, then the merge, then the
 record — and it is present only when `ready` is true. When the gate failed its next step is its
@@ -1851,6 +1992,8 @@ ready
     ↓
 review feedback / approve
     ↓
+integrating (an author's request, not a verdict — `git pair change integrate`, §9.9)
+    ↓
 landed (a pair of refs written once by `git pair integration record` — not a state)
 ```
 
@@ -1860,11 +2003,14 @@ commands that move state refuse against the changeset afterwards.
 The author's side of that loop is `git pair change ready`, then `git pair change wait` to learn that a
 reviewer has acted, then `git pair change feedback` to read the submission before addressing it, then
 `git pair check` and the landing itself (§9.5). Every step is a command an agent runs; the merge in the
-middle is the one step git-pair leaves to git.
+middle is the one step git-pair leaves to git. `git pair change integrate` (§9.9) sits on that last step:
+it does not perform the merge, it records that the author is handing the approved head over for one, so
+whoever owns the destination branch — or the pipeline standing in for them — knows to act without asking.
 
 Readiness also ends on purpose. `git pair change unready` (§9.6) writes a `working` marker and takes
 the changeset back out of the queue, which is how an author says "not finished after all" instead of
-leaving the offer standing while they keep implementing.
+leaving the offer standing while they keep implementing. It withdraws a declaration the same way, which is
+what makes stopping an automatic merge need no rebase.
 
 State comes from the commits on the branch. There is one fallback, and it is not a second source: where
 a changeset has no branch — deleted after the work landed — the archive ref at
@@ -1882,17 +2028,26 @@ READY
 BLOCKED
 FEEDBACK
 APPROVED
+INTEGRATING
 ```
 
-Five states, six markers: `working` is written by `change unready` (§9.6) and is the same state a
+Six states, seven markers: `working` is written by `change unready` (§9.6) and is the same state a
 changeset with no marker derives; `abandoned` (§9.7) is the seventh and names no state — an abandoned
 changeset reports `WORKING`, and the ending is reported beside it as `abandoned_commit`.
+
+`INTEGRATING` is a state because it is a marker, and the safety property below admits no other kind of
+state: it moves when `git pair change integrate` records a declaration, and at no other time. It is not a
+second verdict — the approval underneath it is what permits a merge, which is why `check` (§11.3) reports
+`ready` and `integrating` as two answers to two questions rather than folding one into the other. A changeset
+that has been declared is also still whatever its approval says it is, and a superseded declaration leaves
+the state to whatever superseded it.
 
 There is no state for a landed changeset. Landing is not a marker: git-pair does not perform the merge
 and does not derive it either, because squash, rebase and cherry-pick each destroy the ancestry that
 would have answered the question. `git pair integration record` (§11.4) is the merge's record, written
 once by whoever did the landing, and `git pair status` reports it beside the state rather than as another
-value of it.
+value of it. The distinction between `INTEGRATING` and that report is the whole difference between a
+request and a fact: one is a commit the author made, the other is a ref the recorder wrote.
 
 Avoid maintaining a fragile mutable state variable where possible.
 
@@ -3065,6 +3220,37 @@ A child landed without rebasing carries an archive chain that includes the paren
 commits. That is expected: the archive is the history of the branch that was merged, and the
 parent's own record is a separate pair of refs.
 
+### Where a child lands is not what it is measured against
+
+Relinking answers "what is this diff measured against", and the answer for a stacked child is a commit:
+`refs/git-pair/integrations/<parent>`. That answer is right for the diff and wrong for a destination — a
+durable ref names no branch anything can merge into, which is why `integration record` (§11.4) refuses one
+as `--target`.
+
+So the destination is read from the record instead. The commit an integration ref names carries the parent's
+own `CHANGESET.yaml`, and the base written there is the branch the parent's work was measured against — the
+branch the parent *said* it was going to. The same rule is applied at each level, so a three-deep stack ends
+on the branch under all of it; the walk is bounded and cycle-guarded, because that yaml is committed content.
+It appears as `destination` in `git pair change integrate` (§9.9) and `queue --json` (§10.6), and as the
+candidate `integration record` verifies a landing against, where the note beside the answer says the
+destination came from the branch its landed parent was based on.
+
+Two limits belong with the rule. "Said it was going to" is a limit: a parent landed somewhere other than its
+own base makes this answer wrong, and it is wrong in the direction `integration record` catches — the record
+refuses a landing commit that is not reachable from the destination it derived — and `--target` is the named
+way to say so. And nothing is invented: a walk that cannot resolve an answer falls back to the default
+branch and says so in `destination_source` and `destination_unreachable`, rather than reporting a guess as a
+fact about the work.
+
+**A child is not declared until its parent has landed.** `git pair change integrate` (§9.9) refuses a child
+whose parent branch has no integration record, and refuses a parent branch that records no
+`parent-changeset:` because there is no record to look for. That rule belongs to the request and not to the
+gate: `check` answers "may this merge" for a person who can merge a child onto an unlanded parent and record
+that (§11.4, *carried*), while a declaration asks for a merge nobody will be asked again about, onto a
+branch review can still rebase, amend or block an hour from now — and a create-only ref (§13.3) naming a
+commit on such a branch can end up naming history that stopped existing. Refusing the request is the whole
+mitigation; the human path stays open, so nothing is lost but the automation.
+
 ## When the parent is abandoned
 
 A parent that was abandoned rather than integrated leaves the child **unreconciled**. git-pair does
@@ -3124,6 +3310,7 @@ git pair change unready
 git pair change wait --json
 git pair change feedback
 git pair check
+git pair change integrate
 ```
 
 `git pair integration record` (§11.4) is the agent's to *read about* and not to run. It belongs to
@@ -3154,7 +3341,11 @@ Agent behavior:
 13. run `git pair check` to assert integration-readiness. Its exit code is the answer, and an agent
     asked to confirm that a changeset may land should call it rather than read `status` output,
     because `status` is observing and `check` is deciding (§11.3),
-14. stop there. Landing is not the agent's step: the merge is ordinary git run by whoever owns the
+14. where the repository's flow asks for it, run `git pair change integrate` (§9.9) to hand the approved
+    head over for merging. It is a request written as a commit: it performs no merge, writes no ref, and
+    pushes nothing, and it refuses anything `check` would refuse — so an agent may run it unconditionally
+    after a passing gate and read the refusal if there is one.
+15. stop there. Landing is not the agent's step: the merge is ordinary git run by whoever owns the
     destination branch, and `git pair integration record` then `git pair integration publish` (§11.4, §13)
     follow it — in that order, and before the branch is deleted (§29).
 
@@ -3168,7 +3359,8 @@ did not receive. Where the history has to be tidied, tidy it before the handoff.
 
 When the author needs to keep implementing after handing off, `git pair change unready` (§9.6) withdraws
 the offer before that work starts. It succeeds when there is nothing to withdraw, so an agent may run
-it unconditionally rather than branching on state.
+it unconditionally rather than branching on state. It withdraws a declaration too, which is the way to
+stop a pipeline from merging work that has just gone back in review.
 
 An agent must **not approve its own work**.
 
@@ -3342,6 +3534,13 @@ command that discharges it. The carve-out grants a namespace, not a verb:
   and the hygiene test enforces the carve-out as a *location*: `internal/git/push.go` is the only shipped
   file that may invoke `push`, `internal/cli/publish.go` is the only file that may call it, and a planted
   call site anywhere else fails the build.
+
+`git pair change integrate` (§9.9) is inside this list, not an exception to it. It declares that a merge is
+wanted; it performs none, pushes nothing, and writes no ref while work is in flight. The distinction is what
+makes the feature compatible with the rule at all: git-pair has never merged anything, and the command that
+asks for a merge is the reason that stays true — the merge is still ordinary git, performed by whoever owns
+the destination branch, and `git pair check` (§11.3) is still the gate they run. A future command that
+performed the merge would need a second carve-out of the kind above, and this list has one.
 
 ---
 
@@ -3597,14 +3796,23 @@ git pair integration publish
 
 ## The landing contract
 
-Landing is four steps, in this order, and nothing else:
+Landing is five steps, in this order, and nothing else:
 
 1.  `git pair check` — the gate, run by the author and by CI alike.
-2.  The landing itself, with **ordinary git**: merge, squash-merge, or whatever forge button the
+2.  `git pair change integrate` — the author declares this head ready to be merged (§9.9), on the branch,
+    in a commit. A repository that keeps a person in the loop can skip it and nothing else changes; a merge
+    performed without it is a merge nobody asked for, which is why CI's gate is `jq -e '.ready and
+    .integrating'` rather than `ready` alone.
+3.  The landing itself, with **ordinary git**: merge, squash-merge, or whatever forge button the
     repository uses. git-pair writes no merge, and no ref at all while work is in flight.
-3.  `git pair integration record` — the one command that writes the two durable refs, and the only
+4.  `git pair integration record` — the one command that writes the two durable refs, and the only
     place in git-pair that writes a ref at all (§13.4).
-4.  `git pair integration publish` — the refs sent to the shared remote (§13), unforced.
+5.  `git pair integration publish` — the refs sent to the shared remote (§13), unforced.
+
+The declaration changes who waits, not who decides. Step 2 is a commit the author makes; step 3 is still
+performed by whoever owns the destination branch, and steps 4 and 5 are unchanged — a landing the author
+asked for still needs its own record, because the record is the fact that it happened and not the fact that
+somebody wanted it.
 
 **Record and publish before tidy.** The record is written before the branch is deleted or the working copy
 is cleaned up. It is asked of the branch that still carries the reviewed head and the changeset directory,
