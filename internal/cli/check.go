@@ -103,6 +103,14 @@ type checkJSON struct {
 	Integrated       bool    `json:"integrated"`
 	IntegratedCommit string  `json:"integrated_commit,omitempty"`
 	IntegratedAt     landing `json:"-"`
+	// Integrating says the newest declaration from `git pair change integrate` is on this branch, and
+	// IntegrateCommit names the commit that wrote it. They sit beside `ready` for the same reason
+	// `integrated` does: "may this merge" and "did the author ask for one" are two questions, and CI's
+	// gate is the conjunction of the two answers — `jq -e '.ready and .integrating'`. Note that this is
+	// the marker, not the tree: an implementation commit placed after the declaration turns `state` back
+	// into WORKING and `ready` off, and the declaration is still the newest marker on the branch.
+	Integrating     bool   `json:"integrating"`
+	IntegrateCommit string `json:"integrate_commit,omitempty"`
 	// ParentLanded says the branch this changeset is stacked on has an integration record: the base is
 	// finished work. It sits beside the verdict and never inside `reasons`, because a parent that landed
 	// changes nothing this child owns — the diff the reviewer approved is the diff still under test.
@@ -126,73 +134,46 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool, doFetch bool) err
 	if doFetch {
 		a.fetchDurableRefs(ctx, s.repo, s.cs.Branch)
 	}
-	// The tree question — is the reviewed content still what HEAD carries? — is the one
-	// `status` asks observationally and this command has to answer as a verdict. Asking it
-	// through the same derivation is what keeps the two from disagreeing about what drift is.
-	reviewed, err := lifecycle.SummarizeAgainstTreeHEAD(ctx, s.repo, s.cs.Slug, s.cs.Base)
+	g, err := a.integrationGate(ctx, s, allowFeedback)
 	if err != nil {
 		return err
-	}
-	terminal, err := terminalRecord(ctx, s.repo, s.cs.Slug, s.cs.Base, reviewed)
-	if err != nil {
-		return err
-	}
-	// Reported beside the verdict rather than folded into it: "already integrated" is not the same
-	// fact as "not ready", and a pipeline re-running this gate after its own landing needs to tell
-	// the two apart without matching on the wording of a reason.
-	landed, err := reviewref.ResolveIntegration(ctx, s.repo, s.cs.Slug)
-	if err != nil && !errors.Is(err, reviewref.ErrNotIntegrated) {
-		return err
-	}
-	var where landing
-	if landed != "" {
-		if where, err = a.describeLanding(ctx, s.repo, landed); err != nil {
-			return err
-		}
 	}
 
 	policy := policyApproveOnly
 	if allowFeedback {
 		policy = policyApproveOrFeedback
 	}
-	// The lineage question, asked of the same derivation so the two conditions cannot disagree
-	// about which marker is newest or what it approved. It is the check the tree cannot do: a
-	// rebase that changes no file passes the drift test and fails this one.
-	lineage, reviewedHead, err := lineageReason(ctx, s.repo, reviewed, s.head, allowFeedback)
-	if err != nil {
-		return err
-	}
-	// The stack question. A child's own history can be untouched and its parent can have landed,
-	// been rewritten, or been abandoned underneath it, and only the parent's side shows that.
-	parent, err := a.parentSinceApproval(ctx, s.repo, s.cs, s.trunk, reviewed.Marker, s.head)
-	if err != nil {
-		return err
-	}
 	out := checkJSON{
 		Changeset:        s.cs.Slug,
-		State:            string(reviewed.State),
+		State:            string(g.Summary.State),
 		Head:             s.head,
 		Policy:           policy,
-		ReviewedHead:     reviewedHead,
-		Integrated:       landed != "",
-		IntegratedCommit: short(landed),
-		IntegratedAt:     where,
-		Reasons:          integrationReasons(s.cs.Slug, terminal, reviewed, s.head, allowFeedback, where, lineage, parent.Reason),
+		ReviewedHead:     g.ReviewedHead,
+		Integrated:       g.Recorded != "",
+		IntegratedCommit: short(g.Recorded),
+		IntegratedAt:     g.Where,
+		Reasons:          g.Reasons,
+		// The CI half of the gate. `ready` answers "may this merge"; `integrating` answers "did the
+		// author ask for one", and a pipeline that merges on the first alone takes the decision out of
+		// the author's hands. Both in one command is the point: a CI job should not have to run a second
+		// command and join two verdicts that were computed from two different reads of the repository.
+		Integrating:     g.Declared() != nil,
+		IntegrateCommit: eventSHA(g.Declared()),
 	}
 	out.Ready = len(out.Reasons) == 0
 	if out.Ready {
 		out.NextAction = landingNextAction(s.cs.Base)
-		if parent.Landed != "" {
+		if g.Parent.Landed != "" {
 			// Spelled beside the landing contract rather than inside it: `landingNextAction` is one string
 			// shared by `status`, `check`, `change ready` and `review`, it takes only a base, and teaching it
 			// about parents would make the same sentence mean two things in four commands.
-			out.NextAction += fmt.Sprintf("; parent %s landed as %s — %s", parent.parentName(), parent.Landed,
-				landedParentStep(s.cs, parent))
+			out.NextAction += fmt.Sprintf("; parent %s landed as %s — %s", g.Parent.parentName(), g.Parent.Landed,
+				landedParentStep(s.cs, g.Parent))
 		}
 	}
-	out.ParentLanded = parent.Landed != ""
-	out.ParentLandedCommit = parent.Landed
-	out.ParentStaleBranch = parent.StaleBranch
+	out.ParentLanded = g.Parent.Landed != ""
+	out.ParentLandedCommit = g.Parent.Landed
+	out.ParentStaleBranch = g.Parent.StaleBranch
 	if out.Reasons == nil {
 		// `reasons` is an array in both verdicts. `null` would make every consumer
 		// handle two shapes for the same fact, and the fact it is checking — whether the
@@ -217,14 +198,137 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool, doFetch bool) err
 	// The commit the gate cleared, named on the passing line as well as in --json: a log that says
 	// "ready" without saying what it looked at cannot be re-read after the branch has moved.
 	a.printf("head:  %s\n", short(s.head))
-	if parent.Landed != "" {
+	if d := g.Declared(); d != nil {
+		// Beside the verdict, because it is a different question: the gate says the merge may happen, the
+		// declaration says somebody asked for it.
+		a.printf("declared: %s (`git pair change integrate`)\n", short(d.SHA))
+	}
+	if g.Parent.Landed != "" {
 		// Beside the verdict, not inside it: the gate passed, and the reader still needs to know the base
 		// underneath is finished work with a step attached to it.
-		a.printf("parent: %s landed as %s — %s\n", parent.parentName(), parent.Landed,
-			landedParentStep(s.cs, parent))
+		a.printf("parent: %s landed as %s — %s\n", g.Parent.parentName(), g.Parent.Landed,
+			landedParentStep(s.cs, g.Parent))
 	}
 	a.printf("next:  %s\n", out.NextAction)
 	return nil
+}
+
+// integrationGate asks everything the integration policy asks, in one read of the repository, and
+// lists every failed condition instead of the first.
+//
+// It is shared by the two commands that need the answer: `git pair check`, which prints the verdict as
+// its whole output, and `git pair change integrate`, which refuses to declare a changeset that the gate
+// would refuse. Two implementations of "is the reviewed content still here" would be two answers waiting
+// to disagree about what drift is, which is why the second command asks this one rather than reading the
+// marker it is about to write.
+type integrationGate struct {
+	// Summary is the derivation with the tree question asked — the marker verdict, then whether the
+	// content it spoke about is still what HEAD carries.
+	Summary lifecycle.Summary
+	// Verdict is the marker whose outcome licenses the merge: the newest marker, or the newest review
+	// under it when the newest marker is a declaration.
+	Verdict *lifecycle.Event
+	// Terminal is the abandon marker, if this changeset has one.
+	Terminal *lifecycle.Event
+	// Recorded is the commit the integration ref names, empty when there is no record. Where is what
+	// git-pair can honestly say about that commit.
+	Recorded string
+	Where    landing
+	// ReviewedHead is the commit the verdict spoke about, resolved to a full SHA where this clone can.
+	ReviewedHead string
+	// Parent is the stack reading: whether the branch this changeset is stacked on moved, landed, or
+	// ended since the verdict.
+	Parent parentStatus
+	// Reasons is every failed condition, in the order a reader can act on them. Empty means ready.
+	Reasons []string
+}
+
+// Declared is the declaration while it is the newest marker on the branch — the author's last statement is
+// "merge this" — and nil once anything has been said since.
+//
+// It is not `Summary.Integrating`, which keeps the newest declaration in the range even when a re-offer, a
+// re-review or a retraction has superseded it, because "was a declaration ever made, and where" is a
+// question with an answer that survives. The CI gate is not that question. A pipeline that merged on a
+// superseded declaration would perform the merge the author had just taken back, and `ready` alone would
+// not save it: work put back in review can come back to approved a commit later, with the older
+// declaration still sitting in the history naming one of them.
+func (g integrationGate) Declared() *lifecycle.Event {
+	if m := g.Summary.Marker; m != nil && m.Kind == lifecycle.KindIntegrate {
+		return m
+	}
+	return nil
+}
+
+func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback bool) (*integrationGate, error) {
+	// The tree question — is the reviewed content still what HEAD carries? — is the one `status` asks
+	// observationally and the gate has to answer as a verdict. Asking it through the same derivation is
+	// what keeps the two from disagreeing about what drift is.
+	reviewed, err := lifecycle.SummarizeAgainstTreeHEAD(ctx, s.repo, s.cs.Slug, s.cs.Base)
+	if err != nil {
+		return nil, err
+	}
+	g := &integrationGate{Summary: reviewed, Verdict: integrationVerdict(reviewed)}
+	if g.Terminal, err = terminalRecord(ctx, s.repo, s.cs.Slug, s.cs.Base, reviewed); err != nil {
+		return nil, err
+	}
+	// Reported beside the verdict rather than folded into it: "already integrated" is not the same
+	// fact as "not ready", and a pipeline re-running this gate after its own landing needs to tell
+	// the two apart without matching on the wording of a reason.
+	landed, err := reviewref.ResolveIntegration(ctx, s.repo, s.cs.Slug)
+	if err != nil && !errors.Is(err, reviewref.ErrNotIntegrated) {
+		return nil, err
+	}
+	g.Recorded = landed
+	if landed != "" {
+		if g.Where, err = a.describeLanding(ctx, s.repo, landed); err != nil {
+			return nil, err
+		}
+	}
+	// The lineage question, asked of the same derivation so the two conditions cannot disagree about
+	// which marker is newest or what it approved. It is the check the tree cannot do: a rebase that
+	// changes no file passes the drift test and fails this one.
+	lineage, head, err := lineageReason(ctx, s.repo, reviewed, s.head, allowFeedback)
+	if err != nil {
+		return nil, err
+	}
+	g.ReviewedHead = head
+	// The stack question. A child's own history can be untouched and its parent can have landed, been
+	// rewritten, or been abandoned underneath it, and only the parent's side shows that. Asked of the
+	// verdict rather than of the newest marker: a declaration is not an approval, and a parent that moved
+	// under a declared child invalidates the approval the declaration is resting on.
+	if g.Parent, err = a.parentSinceApproval(ctx, s.repo, s.cs, s.trunk, g.Verdict, s.head); err != nil {
+		return nil, err
+	}
+	g.Reasons = integrationReasons(s.cs.Slug, g.Terminal, reviewed, s.head, allowFeedback, g.Where, lineage, g.Parent.Reason)
+	return g, nil
+}
+
+// integrationVerdict is the marker whose review outcome licenses a merge.
+//
+// It is the newest marker, except when the newest marker is `git pair change integrate`'s declaration:
+// then it is the newest review under it. A declaration is the author adding "and merge this" to a verdict
+// that already permits the merge, so it cannot be read as a verdict — it carries no outcome, and the gate
+// would refuse the act it was asked to license. Nor can it be treated as absent: the lineage test reads
+// the verdict's `Review-Head`, and skipping the declaration without reading under it would let a rewrite
+// of the branch pass the gate that a rewrite is precisely what the gate exists to refuse.
+//
+// Nil means no verdict at all — which for a declaration is the hand-written or half-written history the
+// reason line names rather than guesses about.
+func integrationVerdict(s lifecycle.Summary) *lifecycle.Event {
+	if s.Marker != nil && s.Marker.Kind == lifecycle.KindIntegrate {
+		return s.LatestReview
+	}
+	return s.Marker
+}
+
+// eventSHA is an event's full SHA where the event exists, for a JSON field that is empty when it does
+// not. Tests and surfaces both print the marker's SHA, and nil-checking at every call site is how one
+// of them forgets.
+func eventSHA(e *lifecycle.Event) string {
+	if e == nil {
+		return ""
+	}
+	return e.SHA
 }
 
 // integrationReasons lists every reason this changeset is not integration-ready, in the order a
@@ -262,23 +366,32 @@ func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summ
 
 	var reasons []string
 
-	m := s.Marker
+	// The verdict, not simply the newest marker: a declaration to integrate sits above the approval it
+	// rests on and speaks for neither (see integrationVerdict).
+	m, verdict := s.Marker, integrationVerdict(s)
 	switch {
-	case m == nil:
-		reasons = append(reasons, "the changeset has no lifecycle marker yet: run `git pair change ready`")
-	case m.Kind == lifecycle.KindUnready:
+	case verdict == nil:
+		if m != nil && m.Kind == lifecycle.KindIntegrate {
+			// The author declared a changeset no review has ever judged — a hand-written marker, or one
+			// whose verdict was rewritten away. Naming the declaration is what makes it findable.
+			reasons = append(reasons, fmt.Sprintf(
+				"the newest marker is the author's declaration to integrate (%s) and no review under it records a verdict: `git pair review submit --approve`", m.Short))
+		} else {
+			reasons = append(reasons, "the changeset has no lifecycle marker yet: run `git pair change ready`")
+		}
+	case verdict.Kind == lifecycle.KindUnready:
 		reasons = append(reasons, fmt.Sprintf(
-			"the author took the changeset out of review (%s): run `git pair change ready` when it is offered again", m.Short))
-	case m.Kind == lifecycle.KindReady:
-		reasons = append(reasons, fmt.Sprintf("the changeset is marked ready and has not been reviewed since (%s)", m.Short))
-	case m.Kind == lifecycle.KindReview:
-		switch m.Outcome {
+			"the author took the changeset out of review (%s): run `git pair change ready` when it is offered again", verdict.Short))
+	case verdict.Kind == lifecycle.KindReady:
+		reasons = append(reasons, fmt.Sprintf("the changeset is marked ready and has not been reviewed since (%s)", verdict.Short))
+	case verdict.Kind == lifecycle.KindReview:
+		switch verdict.Outcome {
 		case model.OutcomeApprove:
 			// Integration is permitted at this head.
 		case model.OutcomeFeedback:
 			if !allowFeedback {
 				reasons = append(reasons, fmt.Sprintf(
-					"the newest review is feedback, which is non-blocking and is not sufficient without --allow-feedback (%s)", m.Short))
+					"the newest review is feedback, which is non-blocking and is not sufficient without --allow-feedback (%s)", verdict.Short))
 			}
 		default:
 			// `block`, and anything git-pair could not read as an outcome: the gate fails
@@ -286,7 +399,7 @@ func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summ
 			reasons = append(reasons, "latest review outcome is blocking")
 		}
 	default:
-		reasons = append(reasons, fmt.Sprintf("the newest lifecycle marker (%s) is not one git-pair can classify", m.Short))
+		reasons = append(reasons, fmt.Sprintf("the newest lifecycle marker (%s) is not one git-pair can classify", verdict.Short))
 	}
 
 	if s.TrailingUnrecognised > 0 {
@@ -319,12 +432,16 @@ func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summ
 // lineageReason asks the question the tree cannot: is the commit the approving review spoke about
 // still in this line of history?
 //
-// It is asked only where the newest marker is a review that permits integration — with no approval
+// It is asked only where the verdict is a review that permits integration — with no approval
 // standing there is nothing for a rewrite to invalidate, and a `READY` changeset rebased before
 // anyone read it owes no explanation. Where it applies it answers three ways: the named commit is
 // an ancestor of HEAD (pass, and its full SHA is returned for `--json`), it is not (the branch was
 // rewritten since the review), or this clone cannot tell (the commit is not here at all, which in CI
 // is a fetch gap and must not read as a verdict about the work).
+//
+// "The verdict" is read through a declaration to the review under it, so a branch rewritten after
+// `change integrate` still fails here: the declaration inherits the approval's commitment to a commit
+// rather than replacing it.
 //
 // An approval whose marker names no head is refused rather than waved through. The review commit's
 // own first parent is the same value as the trailer before a rewrite and a *rewritten* parent after
@@ -332,7 +449,7 @@ func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summ
 // no `Review-Head` is a marker whose approval covers an unknown commit (PRD §12).
 func lineageReason(ctx context.Context, repo *git.Repo, s lifecycle.Summary,
 	head string, allowFeedback bool) (reason, reviewedHead string, err error) {
-	m := s.Marker
+	m := integrationVerdict(s)
 	if m == nil || m.Kind != lifecycle.KindReview {
 		return "", "", nil
 	}

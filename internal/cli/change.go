@@ -31,7 +31,8 @@ func newChangeCommand(a *app) *cobra.Command {
 		RunE: groupUsage("change"),
 	}
 	cmd.AddCommand(newChangeUseCommand(a), newChangeReadyCommand(a), newChangeUnreadyCommand(a),
-		newChangeAbandonCommand(a), newChangeFeedbackCommand(a), newChangeWaitCommand(a))
+		newChangeAbandonCommand(a), newChangeFeedbackCommand(a), newChangeWaitCommand(a),
+		newChangeIntegrateCommand(a))
 	return cmd
 }
 

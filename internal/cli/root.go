@@ -152,7 +152,7 @@ Review state lives in the repository: a changeset directory holds ABOUT.md and
 review threads, lifecycle markers are commits carrying Review-* trailers, and
 refs/git-pair/* holds the two durable refs written when a changeset lands.
 
-Author commands:   git pair init, then git pair change use | ready | unready | abandon
+Author commands:   git pair init, then git pair change use | ready | integrate | unready | abandon
 Reviewer commands: git pair review open | about | thread | submit | history
 Reading state:     git pair queue | status | diff
 Gates and record:  git pair check, then git pair integration record`,
