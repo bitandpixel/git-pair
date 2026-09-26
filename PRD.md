@@ -1017,6 +1017,12 @@ chain walked to reach it, `reasons` as an array in both outcomes, and the next s
 
 Exit codes: `0` declared or already declared, `1` refused, `2` usage, `3` git failed (§22).
 
+Nothing here performs the merge, and the product is not where a merge lives (§26). A repository that wants a
+pipeline to perform it can copy one: `.github/workflows/git-pair-integrate.yml` for the trigger and the
+permissions, `scripts/ci/git-pair-integrate.sh` for the sequence, and `scripts/gates/ci-integrate.sh` to
+replay that job against scratch remotes. Its shape is an example; what a job gates on is §11.3's two fields,
+and what makes the landing a fact is §11.4's record.
+
 ---
 
 # 10. Reviewer Commands
@@ -3831,6 +3837,14 @@ for that" becomes a claim nobody can check. `git pair status` and `git pair queu
 From then on the durable pair holds the story: the complete unsquashed history is reachable from
 `refs/git-pair/archive/<id>`, the landing is `refs/git-pair/integrations/<id>`, and the branch can be
 deleted without losing the detailed review history (§13).
+
+**A pipeline can run steps 3 to 5.** This repository carries one shape of that: a workflow file whose only
+job is the trigger, the permissions and the build, and a shell script that holds the sequence — the gate of
+step 1, an ordinary `git merge --no-ff` into the destination the queue names, the push, then steps 4 and 5.
+`scripts/gates/ci-integrate.sh` replays that job against scratch remotes, which is what keeps the example
+true without a runner. It is an example and not a contract: the merge is ordinary git, no part of it is a
+git-pair subcommand (§26), and a repository that lands with a forge button instead needs only the same two
+fields (§11.3) and the same record.
 
 ---
 

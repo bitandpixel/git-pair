@@ -270,6 +270,47 @@ What exists when this plan starts (`feat/change-integrate-cmd`, on top of `feat/
 
 ---
 
+## M6 — The merge a declaration asks for, as an example
+
+Added after the milestone list was closed, from the question the feature leaves open: `change integrate`
+asks, so who answers? A repository has to have something to copy, and a claim about CI that no test runs is
+a claim that rots.
+
+**Deliverables**
+
+- `scripts/ci/git-pair-integrate.sh`: the gate, the `--no-ff` merge, the push, the record, the publish — in
+  shell, in the order §29 gives them, runnable by hand and by a job.
+- `.github/workflows/git-pair-integrate.yml`: one thin workflow. Push to a feature branch, a poll of the
+  queue, and a manual run all call the same script.
+- `scripts/gates/ci-integrate.sh`: the replay, against scratch bare remotes, wired into `mise run gates`.
+- README's "Landing a declared change from CI", and pointers from PRD §9.9 and §29.
+
+**Tasks**
+
+- [x] The script: `check --json` as the only gate, the destination read from `queue --json` rather than
+      `base:`, the head cross-checked between the two reads so a branch that moved mid-run is not merged,
+      `--no-ff` then push then record then publish, `merge --abort` on a conflict, no record for a refused
+      push, `--dry-run`, and no call to `change integrate` (a pipeline that writes the declaration asks for
+      its own merge).
+- [x] The workflow: `contents: write`, `fetch-depth: 0`, one concurrency group per ref, build from the
+      checkout, one call into the script. The logic is deliberately not in the YAML — the replay runs the
+      script, and YAML a runner never reached is not covered by anything.
+- [x] The replay: merge-and-publish, a re-run that does nothing twice, an approved-but-undeclared branch
+      left alone, a drifted declaration refused, the queue-driven poll finding a declaration with no event
+      behind it, a dry run that writes nothing, a conflicted merge aborted and reported red, and usage
+      errors. 43 assertions.
+- [x] What the replay caught: a changeset based on trunk read as stacked on a branch called `main` whenever
+      the clone knows trunk only as `refs/remotes/origin/main`. `changeset.DefaultBranchRef.IsBranch` now
+      compares every spelling of the branch, and the refusal that bug produced would have broken the
+      command in ordinary clones. Tests: `TestParentOfTreatsEverySpellingOfTrunkAsTrunk`, and
+      `change integrate` run in a clone, in `integrate_test.go`.
+
+**Verification**
+
+- `bash scripts/gates/ci-integrate.sh` (43 assertions), `mise run check`, `mise run gates`.
+
+---
+
 ## Decisions
 
 | Date | Decision | Why |
@@ -283,6 +324,9 @@ What exists when this plan starts (`feat/change-integrate-cmd`, on top of `feat/
 | 2026-09-26 | That refusal lives in `change integrate`, not in `integrationReasons` | The plan had it in the shared gate. Implementation showed the two commands ask different questions: `check` answers "may this merge" for a human who can merge onto an unlanded parent and record it, and refusing that in the gate deletes a supported landing shape. A declaration asks for a merge nobody will be asked again about, which is the narrower permission. |
 | 2026-09-26 | `check`'s `integrating` reads the newest **marker**, not the newest declaration in the range | `Summary.Integrating` keeps the newest declaration even after a re-offer, a re-review or a retraction supersedes it, because "was one ever made, and where" is a question whose answer survives. CI's gate is not that question: a pipeline merging on a superseded request performs the merge the author just took back. `integrationGate.Declared()` is the reading, and `status` uses it too so one branch cannot answer "did the author ask" two ways. |
 | 2026-09-26 | The replay lands one shape; ff / merge / squash stay in Go tests | The replay's value is the second clone — a request that travels as a commit, and a recorder that needs no flags. Three merges of one changeset in bash prove a matrix the fixtures already prove, with more ways to be accidentally wrong. |
+| 2026-09-27 | The CI example keeps its logic in `scripts/ci/`, with one thin workflow file | A script is replayable by `scripts/gates/`, callable by hand, and reusable by a poll and a push trigger. The same steps in YAML are covered by nothing until a runner executes them, and the hygiene rule (§26) stays honest because the merge is visibly an example rather than a subcommand. |
+| 2026-09-27 | The example records after the push, not before | A record is the durable claim that a landing happened. Written before the push, it survives a refused push, and "integrated at <sha>" then names a commit no destination branch holds. The recorder's own check (`--commit` added `changesets/<id>/` to `--target`) reads the remote-tracking ref the push just updated, so the order buys the verification as well as the honesty. |
+| 2026-09-27 | A gate that will not answer is a skip when the queue has no row for the branch | `check` on a branch whose changeset has landed answers "no changeset for this branch", which is true of the branch and not a fault in the work. Exiting red for it would make every post-landing event red. The queue answers whether anybody asked for the merge, which is the distinction, and it is a read rather than a message to parse. |
 
 ## Risks
 
@@ -310,3 +354,4 @@ branch and nothing else. `mise run gates` runs the replay; `mise run check` runs
 | Date | Milestone | Outcome |
 | ---- | --------- | ------- |
 | 2026-09-26 | M1–M5 | Implemented and committed as six commits: the marker and state, the destination resolver, `record`'s destination wiring, the command and the shared gate, the surfaces, the docs, then the replay. Three deliberate departures from the plan are recorded above: the unlanded-parent refusal lives in the command rather than the gate, `status --json` mirrors `check`'s field names, and the scripted replay lands one shape with the three-shape matrix left to Go tests. Verification surface: `go test ./...`, `mise run check`, `scripts/gates/e2e-29.sh` (118 assertions), and the docs-contract test. |
+| 2026-09-27 | M6 | Implemented: the CI script, one thin workflow, the scripted replay in `mise run gates`, README's CI section, and pointers from PRD §9.9 and §29. The replay earned its place on its first run — a changeset based on trunk was read as stacked on a branch called `main` in any clone that knows trunk only as a fetch ref, and `change integrate` refused to declare in exactly the clones a pipeline builds. Fixed with `DefaultBranchRef.IsBranch`, which compares every spelling of the integration branch, with a Go test at the comparison (`internal/changeset`) and one at the command in a real clone (`internal/cli`). Verification: `scripts/gates/ci-integrate.sh` (43 assertions), `mise run check`. |

@@ -1284,6 +1284,75 @@ git pair skill agents-md >> AGENTS.md
 It names where the skill is and the three rules agents most often get wrong. A repository can carry both
 halves — the stanza for every harness, and the installed skill for the ones that read it.
 
+## Landing a declared change from CI
+
+`git pair change integrate` asks for a merge. Somebody still performs it, and a repository can decide that
+its pipeline performs it on the destination branch's behalf. This repository carries one shape of that, as
+an example — no git-pair command merges anything, and none of this is one:
+
+| file | role |
+| --- | --- |
+| `.github/workflows/git-pair-integrate.yml` | the trigger, the permissions, the build — nothing else |
+| `scripts/ci/git-pair-integrate.sh` | the sequence, in shell, so it can be replayed without a runner |
+| `scripts/gates/ci-integrate.sh` | the replay: that job against scratch bare remotes, part of `mise run gates` |
+
+Run it by hand from any clone, on one branch or on everything the queue reports:
+
+```bash
+scripts/ci/git-pair-integrate.sh feat/my-branch
+scripts/ci/git-pair-integrate.sh --dry-run feat/my-branch   # says what it would do, writes nothing
+scripts/ci/git-pair-integrate.sh                            # every changeset awaiting integration
+```
+
+The sequence is §29's landing contract, and the order is the point:
+
+1.  `git pair check --json` — merge only when `.ready and .integrating`. `ready` alone merges work the moment
+    a reviewer approves it; `integrating` alone merges a request whose approval has since been rewritten,
+    withdrawn, or answered.
+2.  `git merge --no-ff <declared head>` into the destination the **queue** names.
+3.  `git push` the destination — the landing exists when the branch says it does.
+4.  `git pair integration record --changeset <id> --source <declared head> --commit <merge commit> --target origin/<destination>`
+5.  `git pair integration publish <id> --remote origin`, unforced, before anything is tidied.
+
+Three details a first attempt usually gets the wrong way round, each one something the recorder refuses:
+
+-   **`--commit` is the merge commit**, the commit that added `changesets/<id>/` to the destination — which is
+    the destination's *new* tip, not the tip it had before the merge. The old tip adds nothing, so the record
+    refuses it.
+-   **`--source` is the head that was declared**, which `check --json` prints as `.head`: the declaration
+    commit itself, whose history carries the approval underneath it.
+-   **The destination comes from `queue --json`'s `awaiting_integration[].destination`,** not from `base:`.
+    For the child of a landed parent, `base:` is the parent's integration ref, and a ref is a commit rather
+    than a branch anything can merge into.
+
+What the job will not do: merge a change the gate refuses (it says so and exits 0, because a push-triggered
+job usually runs before anybody has declared anything, and a red build for "not yet" teaches nobody
+anything); record a merge whose push was refused; leave a conflicted merge in the tree (`git merge --abort`,
+exit 1); call `change integrate` itself, since a pipeline that writes the declaration is asking for its own
+merge; or force anything, including the publish.
+
+From one run of the replay:
+
+```text
+### flow/merge
+flow-merge: declared by ae51ffb for merge into main
+Merge made by the 'ort' strategy.
+  merged as 346a18a
+flow-merge: recorded 346a18a as the integration of ae51ffb
+  archive:     refs/git-pair/archive/flow-merge -> ae51ffb
+  integration: refs/git-pair/integrations/flow-merge -> 346a18a
+  verified reachable from origin/main
+flow-merge: published to origin (archive + integration)
+  flow-merge: merged, recorded, published
+```
+
+What the runner has to provide: `contents: write`, `fetch-depth: 0` (the gate reads the approval out of
+history, and the record verifies a landing in it), and the integration branch named — `GIT_PAIR_DEFAULT_BRANCH`
+or `--default-branch` on each call, because a checkout that fetched one branch has nothing to compare
+against. `git pair integration configure` is worth running once so ordinary fetches and pushes carry
+`refs/git-pair/*`; the script also fetches them itself, because the destination of a stack is read through
+its parent's record.
+
 ## Configuration
 
 The editor is whatever git would use: git-pair asks git with `git var GIT_EDITOR`, so the

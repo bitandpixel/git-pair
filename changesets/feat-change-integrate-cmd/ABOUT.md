@@ -112,6 +112,34 @@ gate. git-pair still writes no merge, pushes nothing, and writes no ref while wo
   fields, merging with ordinary git, recording with **no flags**, publishing, and the author's clone
   fetching the record back and stopping the listing.
 
+## What changed (M6 — the merge somebody has to perform)
+
+Added after M5, from the question the feature leaves open: the command asks, so who answers? Nothing here is
+a git-pair subcommand, and §26 stays true — this is the example a repository can copy, plus the replay that
+keeps it honest.
+
+- `scripts/ci/git-pair-integrate.sh`: gate → `git merge --no-ff` → push the destination → `integration
+  record` → `integration publish`, with the destination read from `queue --json` rather than `base:`, the
+  head cross-checked between the two reads so a branch that moved mid-run is not merged, `merge --abort` on
+  a conflict, no record for a refused push, `--dry-run`, and `--require` for a hand-run where a refusal
+  should be red. It never calls `change integrate`: a pipeline that writes the declaration would be asking
+  for its own merge.
+- `.github/workflows/git-pair-integrate.yml`: one thin workflow — push to a feature branch, a 15-minute poll
+  of the queue, and `workflow_dispatch`, all calling that script. `contents: write`, `fetch-depth: 0`, one
+  concurrency group per ref, built from the checkout.
+- `scripts/gates/ci-integrate.sh`: the job replayed against scratch bare remotes, in `mise run gates`.
+  Merges what is declared and ready; leaves an approved-but-undeclared branch and a drifted declaration
+  alone; a re-run does nothing twice; the poll finds a declaration with no event behind it; a dry run writes
+  nothing; a conflicted merge is aborted, unrecorded and red.
+- README's "Landing a declared change from CI", including the two derivations that are easy to get wrong:
+  `--commit` is the merge commit rather than the destination's tip before the merge, and the destination
+  comes from the queue rather than from `base:`.
+- One fix the replay caught on its first run. A clone that knows trunk only as `refs/remotes/origin/main`
+  compared that ref against `base: main`, concluded the changeset was stacked on a branch called `main`, and
+  — because an unlanded parent is a refusal — `change integrate` refused to declare in the ordinary clone.
+  `changeset.DefaultBranchRef.IsBranch` now answers for every spelling, used by `ParentOf`, `parentOfBranch`
+  and `init`'s two trunk checks. `status` also stops printing a bogus `Stack: parent: main` there.
+
 ## Design decisions
 
 - **A state, not a fact beside it.** The author's distinction is the CI trigger and `status --json` is
@@ -130,6 +158,16 @@ gate. git-pair still writes no merge, pushes nothing, and writes no ref while wo
   so retargeting the base buys nothing; naming the destination separately gets what the change was for.
 - **The replay lands one shape.** ff / merge / squash stay in Go tests, where a landing can be staged
   without pretending one CI job performed three merges of one changeset.
+- **The CI example keeps its logic in `scripts/ci/`.** One thin workflow file, one script. The script is
+  replayable by `scripts/gates/`, runnable by hand, and shared by the push trigger and the poll; the same
+  steps written in YAML are covered by nothing until a runner reaches them. It also keeps §26 honest at a
+  glance: the merge is visibly a repository's own script, not a subcommand with a merge in it.
+- **The example records after the push.** A record written before a refused push is a durable claim about a
+  landing no destination branch holds. The order also buys the verification, because `integration record`
+  checks `--commit` against `--target`, and the push is what makes `origin/<destination>` hold it.
+- **A gate that will not answer is a skip, decided by the queue.** `check` on a branch whose changeset
+  already landed says "no changeset for this branch", which is about the branch and not the work. The queue
+  answers the real question — did anybody ask for this merge — without the script parsing message text.
 
 ## Validation
 
@@ -144,6 +182,11 @@ gate. git-pair still writes no merge, pushes nothing, and writes no ref while wo
   machine (M3); `internal/cli/integrating_surfaces_test.go` — status, unready, queue (M4);
   `json_nulls_test.go` now asserts `awaiting_integration` is `[]` and not null.
 - `scripts/gates/e2e-29.sh`: 118 assertions, `E2E: all checks passed`, including the second clone.
+- `scripts/gates/ci-integrate.sh`: 43 assertions, `CI-INTEGRATE: all checks passed` — the job run as a job
+  runs it, in a clone of a bare remote, with the merge, the refs, the skips and the aborted conflict
+  checked on the remote rather than on what the script printed (M6).
+- `TestParentOfTreatsEverySpellingOfTrunkAsTrunk`, and `change integrate` in a real clone where trunk is
+  only a fetch ref: the pair that covers the bug the CI replay found (M6).
 - `TestEveryCommandIsNamedInTheDocs` passes, which is what makes PRD, README and `cli.md` name the
   command rather than merely mention it.
 
