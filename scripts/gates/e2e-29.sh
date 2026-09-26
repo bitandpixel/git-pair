@@ -317,6 +317,115 @@ else
   echo "  ok: the archive stops at the head the record names"
 fi
 
+step "declaration: the author asks for the merge, and a pipeline reads that"
+# `git pair change integrate` (PRD §9.9) is the author's half of an automatic merge: a marker commit, and
+# no ref, no push, no merge. This step walks the request from the branch to a second clone, because a
+# request is only useful to somebody who can see it, and it asserts that the gate's two answers move apart
+# — which is the whole reason there are two of them.
+# What this replay does not cover: the three landing shapes and what each leaves the record to name. That
+# matrix is internal/cli/integration_test.go and internal/cli/integration_destination_test.go, where a
+# landing can be staged without pretending one CI job performed three merges of one changeset.
+git switch -qc awaiting-merge main
+mkdir -p changesets/awaiting-merge
+printf 'base: main\n' > changesets/awaiting-merge/CHANGESET.yaml
+printf 'Summary: work whose author hands it over for merging.\n' > changesets/awaiting-merge/ABOUT.md
+printf 'offered\n' > awaiting.md && git add -A && git commit -qm "awaiting-merge: the work"
+$G change ready >/dev/null 2>&1; check "the changeset to be declared is offered" 0 $?
+$G review submit --approve >/dev/null 2>&1; check "and approved" 0 $?
+out=$($G check --json 2>&1)
+printf '%s' "$out" | grep -q '"integrating": false' \
+  && echo "  ok: an approved head nobody declared is not integrating" \
+  || { echo "  FAIL: an undeclared head reported integrating: $out"; FAILED=1; }
+$G change integrate >/dev/null; check "change integrate" 0 $?
+[ "$(git log -1 --format=%s)" = "git-pair: integrate awaiting-merge" ] \
+  && echo "  ok: the declaration is a commit on the branch" \
+  || { echo "  FAIL: the newest commit is not the declaration"; FAILED=1; }
+[ -z "$(git diff HEAD~1 HEAD --name-only)" ] && echo "  ok: and it changes no file" \
+  || { echo "  FAIL: the declaration touched the tree"; FAILED=1; }
+git log -1 --format=%B | grep -q '^Review-State: integrating$' \
+  && echo "  ok: it carries the state" \
+  || { echo "  FAIL: the declaration carries no state trailer"; FAILED=1; }
+git log -1 --format=%B | grep -q "^Review-Head: $(git rev-parse HEAD~1)$" \
+  && echo "  ok: and the head it declares, which is what makes a rewrite refuse instead of bless" \
+  || { echo "  FAIL: the declaration names no head, or the wrong one"; FAILED=1; }
+# Scoped to this changeset: the replay wrote booking-transaction's pair earlier, and "git-pair writes no
+# ref" is a claim about the command that ran, not about the repository's whole namespace.
+[ -z "$(git for-each-ref refs/git-pair/archive/awaiting-merge refs/git-pair/integrations/awaiting-merge)" ] \
+  && echo "  ok: a declaration writes no durable ref (PRD §26)" \
+  || { echo "  FAIL: a declaration wrote a ref"; FAILED=1; }
+$G check >/dev/null 2>&1; check "the gate still passes under the declaration" 0 $?
+out=$($G check --json 2>&1)
+printf '%s' "$out" | grep -q '"ready": true' && printf '%s' "$out" | grep -q '"integrating": true' \
+  && echo "  ok: CI's gate is both answers of this one command" \
+  || { echo "  FAIL: ready and integrating were not both true: $out"; FAILED=1; }
+out=$($G queue 2>&1)
+printf '%s' "$out" | grep -q "AWAITING INTEGRATION" && printf '%s' "$out" | grep -q "merge into: main" \
+  && echo "  ok: the queue lists it as awaiting integration, with its destination" \
+  || { echo "  FAIL: the queue did not report the request: $out"; FAILED=1; }
+printf '%s' "$out" | sed -n '/READY FOR REVIEW/,/AWAITING INTEGRATION/p' | grep -q awaiting-merge \
+  && { echo "  FAIL: declared work was listed for review too"; FAILED=1; }
+out=$($G change integrate 2>&1)
+printf '%s' "$out" | grep -q "already declared" \
+  && echo "  ok: re-running at the same head records nothing and succeeds" \
+  || { echo "  FAIL: a second declaration explained nothing: $out"; FAILED=1; }
+# The declaration is not a verdict. Content that moved since the approval takes `ready` away and leaves the
+# request standing, and the command that would have made a new one refuses.
+printf 'answered\n' >> awaiting.md && git add -A && git commit -qm "awaiting-merge: an answer the reviewer never saw"
+out=$($G check --json 2>&1)
+printf '%s' "$out" | grep -q '"ready": false' && printf '%s' "$out" | grep -q '"integrating": true' \
+  && echo "  ok: the pair reads asked, and not yet permitted" \
+  || { echo "  FAIL: the two answers did not move apart: $out"; FAILED=1; }
+$G change integrate >/dev/null 2>&1; check "and the drift refuses a new declaration" 1 $?
+$G change unready >/dev/null 2>&1; check "change unready withdraws the declaration" 0 $?
+out=$($G check --json 2>&1)
+printf '%s' "$out" | grep -q '"integrating": false' \
+  && echo "  ok: a superseded request stops the pipeline, with no rebase and no force-push" \
+  || { echo "  FAIL: a withdrawn declaration still read as a request: $out"; FAILED=1; }
+$G change ready >/dev/null 2>&1; $G review submit --approve >/dev/null 2>&1
+$G change integrate >/dev/null 2>&1; check "and the request can be made again" 0 $?
+# The clone is the shape a merge job gets: it sees the branch because it was pushed, and the request
+# because a request is a commit. Nothing but the branch carried it here.
+DECL=$(mktemp -d); DECLREMOTE="$DECL/remote.git"; DECLCLONE="$DECL/ci"
+git init -q --bare -b main "$DECLREMOTE"
+git push -q "$DECLREMOTE" --all
+git clone -q "$DECLREMOTE" "$DECLCLONE"
+git -C "$DECLCLONE" switch -q awaiting-merge
+out=$(cd "$DECLCLONE" && $G check --json 2>&1)
+printf '%s' "$out" | grep -q '"ready": true' && printf '%s' "$out" | grep -q '"integrating": true' \
+  && echo "  ok: a clone that never met the author gates on the same two fields" \
+  || { echo "  FAIL: the clone could not see the request: $out"; FAILED=1; }
+# The merge is ordinary git, performed by whoever owns the destination — and the record follows it with no
+# flags, which is the CI shape: two SHAs a pipeline already holds are not needed when the branch is here.
+git -C "$DECLCLONE" switch -q main
+git -C "$DECLCLONE" merge -q --no-ff -m "awaiting-merge: land the reviewed work" awaiting-merge
+out=$(cd "$DECLCLONE" && $G integration record 2>&1); code=$?
+check "the recorder needs no flags in the clone that merged" 0 $code
+printf '%s' "$out" | grep -q "verified reachable from main" \
+  && echo "  ok: and it verified the landing against the destination it derived" \
+  || { echo "  FAIL: the record did not verify a destination: $out"; FAILED=1; }
+out=$(cd "$DECLCLONE" && $G integration publish --remote origin 2>&1); code=$?
+check "and publishes the pair from there" 0 $code
+for family in integrations archive; do
+  if git --git-dir="$DECLREMOTE" for-each-ref --format='%(refname)' \
+       "refs/git-pair/$family/awaiting-merge" | grep -q .; then
+    echo "  ok: refs/git-pair/$family/awaiting-merge reached the remote"
+  else
+    echo "  FAIL: the declared landing's record never left the clone"; FAILED=1
+  fi
+done
+# The clone published the pair, and this clone reading it back is the last claim the declaration has to
+# survive: the request was made here, the merge happened elsewhere, and the paper trail that says so has to
+# reach the author's machine or the author is looking at a changeset that appears to still be waiting.
+git fetch -q "$DECLREMOTE" 'refs/git-pair/*:refs/git-pair/*'
+if $G queue 2>&1 | grep -q "awaiting-merge (integrated at"; then
+  echo "  ok: with the record fetched, this clone stops listing the request"
+else
+  echo "  FAIL: the author's clone still lists a changeset the other clone landed and recorded"
+  $G queue 2>&1 | sed 's/^/    /'
+  FAILED=1
+fi
+rm -rf "$DECL"
+
 step "a landing nobody recorded is reported rather than hidden"
 # The merge is git's, and so is the step after it. When that step is skipped the changeset is in the
 # worst place the design has: its directory is in trunk, so the rules that find work in progress stop
