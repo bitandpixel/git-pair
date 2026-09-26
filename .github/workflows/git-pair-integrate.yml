@@ -4,22 +4,36 @@
 # integrated", and pushes it. What performs the merge is whatever the destination branch's owner decides to
 # run, and this is one shape of that — ordinary git, run by a job that is allowed to touch the branch, with
 # the record written afterwards by the command that verifies it. Nothing here is a git-pair subcommand; the
-# logic lives in scripts/ci/git-pair-integrate.sh so it can be replayed without a runner (§scripts/gates/
-# ci-integrate.sh).
+# logic lives in scripts/ci/git-pair-integrate.sh so it can be replayed without a runner
+# (`scripts/gates/ci-integrate.sh`).
 #
-# Two triggers, because the declaration and the merge are not the same event:
+# Three triggers, because the declaration, the tests, and the merge are three different events:
 #
-#   push to a feature branch   the cheap path — the branch just moved, so ask the gate about it now
-#   schedule                   the poll path — the queue is already the list of things somebody asked for,
-#                              so this needs no event at all: a declaration pushed from a laptop, an
-#                              approval written an hour later, both get picked up
+#   workflow_run    the one that usually acts: the repository's own test workflow finished with a commit, so
+#                   the merge job can be told *which* commit was tested instead of guessing at a branch tip
+#   schedule        the poll: the queue is already the list of things somebody asked for, so a declaration
+#                   that went green before this job existed still gets merged
+#   dispatch        a person naming one branch
 #
-# The gate refuses anything that is not both ready and declared, so a red-free run usually means "nothing to
-# do yet", which is the point: a job that is red until somebody declares something teaches nobody anything.
+# There is no `push` trigger, and that is not an oversight. A job that runs on the feature branch puts its
+# own check run on the very commit it must certify green, and would then wait for itself. `workflow_run` is
+# the event that means "the tests for that head are over", and it carries the sha.
+#
+# The gate refuses anything that is not reviewed, declared, *and* green, so a green run here usually means
+# "nothing to do yet" — which is the point: a job that is red until somebody declares something teaches
+# nobody anything.
 name: git-pair integrate
 
 on:
-  push:
+  workflow_run:
+    # Replace this with the `name:` of the workflow that runs the repository's tests. A repository with no
+    # test workflow should drop `--require-ci` below rather than watch this one wait for checks that never
+    # run — the merge job refuses to merge a head it cannot prove green, which is the safe direction and a
+    # permanent no-op.
+    workflows:
+      - 'CI'
+    types:
+      - completed
     branches:
       - 'feat/**'
       - 'feature/**'
@@ -48,6 +62,10 @@ concurrency:
 jobs:
   integrate:
     runs-on: ubuntu-latest
+    # A test workflow that ended red, was cancelled, or is still queued is not an event worth merging on. The
+    # merge job would decline the head anyway — the probe reads the same conclusions — but running a job to
+    # be told no wastes a runner and puts a green-looking row in the list.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     steps:
       # The full history, not the tip. `integration record` verifies that `--commit` really added
       # changesets/<id>/ to the destination, and the gate reads the approval out of the source's history:
@@ -74,6 +92,13 @@ jobs:
           EVENT: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
           CHOSEN: ${{ inputs.branch }}
+          # Empty unless a test workflow just finished, in which case it is the commit its checks ran
+          # against. The job merges nothing that is not this commit, so a branch that moved while the job
+          # was starting is skipped rather than merged on an old run's reputation.
+          TESTED: ${{ github.event.workflow_run.head_sha }}
+          TESTED_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          # The probe asks about this repository's checks; it reads the token the runner already has.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
           # The merge commit is authored by this job. Saying so in the identity is honest: the approval
@@ -81,10 +106,13 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-          set --
+          branch=$REF_NAME
+          [ "$EVENT" = workflow_run ] && branch=$TESTED_BRANCH
+          set -- --require-ci
+          [ -n "$TESTED" ] && set -- "$@" --expect-head "$TESTED"
           case "$EVENT" in
-            push) set -- "$REF_NAME" ;;
-            workflow_dispatch) [ -n "$CHOSEN" ] && set -- "$CHOSEN" ;;
+            workflow_dispatch) [ -n "$CHOSEN" ] && set -- "$@" "$CHOSEN" ;;
+            *) [ -n "$branch" ] && [ "$branch" != "$GIT_PAIR_DEFAULT_BRANCH" ] && set -- "$@" "$branch" ;;
           esac
           scripts/ci/git-pair-integrate.sh "$@"
 

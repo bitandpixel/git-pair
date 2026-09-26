@@ -3839,8 +3839,10 @@ From then on the durable pair holds the story: the complete unsquashed history i
 deleted without losing the detailed review history (§13).
 
 **A pipeline can run steps 3 to 5.** This repository carries one shape of that: a workflow file whose only
-job is the trigger, the permissions and the build, and a shell script that holds the sequence — the gate of
-step 1, an ordinary `git merge --no-ff` into the destination the queue names, the push, then steps 4 and 5.
+job is the triggers, the permissions and the build, and a shell script that holds the sequence — the gate of
+step 1, the head's own checks proven green where the repository has them (the forge's answer, not git-pair's,
+and asked about the commit the declaration names), an ordinary `git merge --no-ff` into the destination the
+queue names, the push, then steps 4 and 5.
 `scripts/gates/ci-integrate.sh` replays that job against scratch remotes, which is what keeps the example
 true without a runner. It is an example and not a contract: the merge is ordinary git, no part of it is a
 git-pair subcommand (§26), and a repository that lands with a forge button instead needs only the same two

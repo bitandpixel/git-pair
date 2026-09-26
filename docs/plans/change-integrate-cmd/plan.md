@@ -280,8 +280,10 @@ a claim that rots.
 
 - `scripts/ci/git-pair-integrate.sh`: the gate, the `--no-ff` merge, the push, the record, the publish — in
   shell, in the order §29 gives them, runnable by hand and by a job.
-- `.github/workflows/git-pair-integrate.yml`: one thin workflow. Push to a feature branch, a poll of the
+- `.github/workflows/git-pair-integrate.yml`: one thin workflow. The test workflow finishing, a poll of the
   queue, and a manual run all call the same script.
+- `scripts/ci/gh-head-green.sh`: the probe that answers whether a commit is green on GitHub, as a command
+  with a three-way exit code rather than as a step inside the job.
 - `scripts/gates/ci-integrate.sh`: the replay, against scratch bare remotes, wired into `mise run gates`.
 - README's "Landing a declared change from CI", and pointers from PRD §9.9 and §29.
 
@@ -298,7 +300,10 @@ a claim that rots.
 - [x] The replay: merge-and-publish, a re-run that does nothing twice, an approved-but-undeclared branch
       left alone, a drifted declaration refused, the queue-driven poll finding a declaration with no event
       behind it, a dry run that writes nothing, a conflicted merge aborted and reported red, and usage
-      errors. 43 assertions.
+      errors. 56 assertions.
+- [x] Green before merged: `--require-ci` consults a probe (any command with a three-way exit code) about
+      the declared commit; `--expect-head` makes the trigger name the commit its CI finished with. The replay
+      drives all three answers with a stub probe and asserts the sha the probe was handed.
 - [x] What the replay caught: a changeset based on trunk read as stacked on a branch called `main` whenever
       the clone knows trunk only as `refs/remotes/origin/main`. `changeset.DefaultBranchRef.IsBranch` now
       compares every spelling of the branch, and the refusal that bug produced would have broken the
@@ -307,7 +312,7 @@ a claim that rots.
 
 **Verification**
 
-- `bash scripts/gates/ci-integrate.sh` (43 assertions), `mise run check`, `mise run gates`.
+- `bash scripts/gates/ci-integrate.sh` (56 assertions), `mise run check`, `mise run gates`.
 
 ---
 
@@ -327,6 +332,9 @@ a claim that rots.
 | 2026-09-27 | The CI example keeps its logic in `scripts/ci/`, with one thin workflow file | A script is replayable by `scripts/gates/`, callable by hand, and reusable by a poll and a push trigger. The same steps in YAML are covered by nothing until a runner executes them, and the hygiene rule (§26) stays honest because the merge is visibly an example rather than a subcommand. |
 | 2026-09-27 | The example records after the push, not before | A record is the durable claim that a landing happened. Written before the push, it survives a refused push, and "integrated at <sha>" then names a commit no destination branch holds. The recorder's own check (`--commit` added `changesets/<id>/` to `--target`) reads the remote-tracking ref the push just updated, so the order buys the verification as well as the honesty. |
 | 2026-09-27 | A gate that will not answer is a skip when the queue has no row for the branch | `check` on a branch whose changeset has landed answers "no changeset for this branch", which is true of the branch and not a fault in the work. Exiting red for it would make every post-landing event red. The queue answers whether anybody asked for the merge, which is the distinction, and it is a read rather than a message to parse. |
+| 2026-09-27 | The CI-green check is a probe command with a three-way exit code, not a step in the job | The job has to be replayable without a forge, and "green" is the forge's answer rather than git-pair's. `0` green / `1` not green / `2` cannot tell keeps "nobody tested this" out of the pass column, which is the mistake that turns a CI gate into a rubber stamp. |
+| 2026-09-27 | The merge job triggers on `workflow_run`, not on `push` | A job running on the feature branch puts its own check run on the commit it must certify green, so it waits for itself. `workflow_run` also arrives with the sha CI tested, which is what `--expect-head` needs; the poll stays for declarations that went green before the job existed. |
+| 2026-09-27 | The probe reads every check, not branch protection's required list | One rule that is written down beats two that can disagree, and the stricter direction is the one that cannot merge untested work. A repository with a narrower required set passes its own probe. |
 
 ## Risks
 
@@ -355,3 +363,4 @@ branch and nothing else. `mise run gates` runs the replay; `mise run check` runs
 | ---- | --------- | ------- |
 | 2026-09-26 | M1–M5 | Implemented and committed as six commits: the marker and state, the destination resolver, `record`'s destination wiring, the command and the shared gate, the surfaces, the docs, then the replay. Three deliberate departures from the plan are recorded above: the unlanded-parent refusal lives in the command rather than the gate, `status --json` mirrors `check`'s field names, and the scripted replay lands one shape with the three-shape matrix left to Go tests. Verification surface: `go test ./...`, `mise run check`, `scripts/gates/e2e-29.sh` (118 assertions), and the docs-contract test. |
 | 2026-09-27 | M6 | Implemented: the CI script, one thin workflow, the scripted replay in `mise run gates`, README's CI section, and pointers from PRD §9.9 and §29. The replay earned its place on its first run — a changeset based on trunk was read as stacked on a branch called `main` in any clone that knows trunk only as a fetch ref, and `change integrate` refused to declare in exactly the clones a pipeline builds. Fixed with `DefaultBranchRef.IsBranch`, which compares every spelling of the integration branch, with a Go test at the comparison (`internal/changeset`) and one at the command in a real clone (`internal/cli`). Verification: `scripts/gates/ci-integrate.sh` (43 assertions), `mise run check`. |
+| 2026-09-27 | M6 (green gate) | Added on request: the merge now waits for the head to be proven green. `--require-ci` asks a probe command (three-way exit code, `scripts/ci/gh-head-green.sh` for GitHub) about the declared commit; `--expect-head` ties the merge to the commit the trigger's CI actually finished with; the workflow's `push` trigger became `workflow_run`, because a merge job running on the branch would certify its own in-progress check run forever. The replay stubs the probe and covers green, not green, cannot tell, `--require`, the expect-head mismatch, and the sha handed to the probe: 56 assertions. |

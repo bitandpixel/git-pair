@@ -1292,7 +1292,7 @@ an example — no git-pair command merges anything, and none of this is one:
 
 | file | role |
 | --- | --- |
-| `.github/workflows/git-pair-integrate.yml` | the trigger, the permissions, the build — nothing else |
+| `.github/workflows/git-pair-integrate.yml` | the triggers, the permissions, the build — nothing else |
 | `scripts/ci/git-pair-integrate.sh` | the sequence, in shell, so it can be replayed without a runner |
 | `scripts/gates/ci-integrate.sh` | the replay: that job against scratch bare remotes, part of `mise run gates` |
 
@@ -1309,10 +1309,11 @@ The sequence is §29's landing contract, and the order is the point:
 1.  `git pair check --json` — merge only when `.ready and .integrating`. `ready` alone merges work the moment
     a reviewer approves it; `integrating` alone merges a request whose approval has since been rewritten,
     withdrawn, or answered.
-2.  `git merge --no-ff <declared head>` into the destination the **queue** names.
-3.  `git push` the destination — the landing exists when the branch says it does.
-4.  `git pair integration record --changeset <id> --source <declared head> --commit <merge commit> --target origin/<destination>`
-5.  `git pair integration publish <id> --remote origin`, unforced, before anything is tidied.
+2.  With `--require-ci`: prove the head green (below).
+3.  `git merge --no-ff <declared head>` into the destination the **queue** names.
+4.  `git push` the destination — the landing exists when the branch says it does.
+5.  `git pair integration record --changeset <id> --source <declared head> --commit <merge commit> --target origin/<destination>`
+6.  `git pair integration publish <id> --remote origin`, unforced, before anything is tidied.
 
 Three details a first attempt usually gets the wrong way round, each one something the recorder refuses:
 
@@ -1325,11 +1326,40 @@ Three details a first attempt usually gets the wrong way round, each one somethi
     For the child of a landed parent, `base:` is the parent's integration ref, and a ref is a commit rather
     than a branch anything can merge into.
 
-What the job will not do: merge a change the gate refuses (it says so and exits 0, because a push-triggered
-job usually runs before anybody has declared anything, and a red build for "not yet" teaches nobody
-anything); record a merge whose push was refused; leave a conflicted merge in the tree (`git merge --abort`,
-exit 1); call `change integrate` itself, since a pipeline that writes the declaration is asking for its own
-merge; or force anything, including the publish.
+What the job will not do: merge a change the gate refuses (it says so and exits 0, because a job triggered by
+an event usually runs before anybody has declared anything, and a red build for "not yet" teaches nobody
+anything); merge a head it cannot prove green; record a merge whose push was refused; leave a conflicted
+merge in the tree (`git merge --abort`, exit 1); call `change integrate` itself, since a pipeline that writes
+the declaration is asking for its own merge; or force anything, including the publish.
+
+### Green before the merge
+
+Reviewed and handed over is git-pair's answer. Whether the branch's own tests pass is a second question, and
+it belongs to the forge, so it is asked there:
+
+```bash
+scripts/ci/git-pair-integrate.sh --require-ci --expect-head "$TESTED_SHA" feat/my-branch
+```
+
+-   `--require-ci` consults a probe before merging, and merges on a yes only. A probe is any command: it is
+    handed the sha, prints one line of reason, and exits `0` green, `1` not green, `2` cannot tell. The
+    default is `scripts/ci/gh-head-green.sh`, which reads every check run and commit status GitHub reports
+    for that commit — not branch protection's list of *required* checks, because "everything GitHub can see
+    is green" is one rule instead of two, and a repository whose required set is narrower passes its own
+    `--ci-probe`.
+-   `2` is not `0`. A head with nothing running for it has not been tested, so it is not merged; the poll
+    asks again after the next run. The replay covers all three answers.
+-   `--expect-head <sha>` names the commit the trigger was told CI finished with, so a branch that moved
+    while the job was starting is skipped rather than merged on the strength of a run that tested other
+    work. It also fixes *which* commit the probe is asked about: the declared head, never whatever the branch
+    tip became in the meantime.
+-   The workflow triggers on `workflow_run` — the test workflow completing — and on the schedule, not on
+    `push`. A merge job that ran on the feature branch would put its own check run on the very commit it has
+    to certify, and then wait for itself.
+
+The guarantee is about the head, not about the merge. `main` runs its own CI after the push; a repository
+that wants the *merge result* proven before it lands wants a merge queue, which is a different mechanism and
+outside this example.
 
 From one run of the replay:
 

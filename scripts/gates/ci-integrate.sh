@@ -6,8 +6,9 @@
 #
 # What it proves, in order: a declared and ready changeset is merged as a merge commit, recorded, and
 # published; a re-run does nothing twice; an undeclared changeset and a drifted declaration are left alone;
-# the queue-driven poll finds a declaration with no event behind it; a dry run writes nothing; and a merge
-# that conflicts is aborted, unrecorded, and reported red.
+# the queue-driven poll finds a declaration with no event behind it; a head that is not proven green is not
+# merged, whether the probe says "no" or "I cannot tell", and the probe is asked about the declared commit;
+# a dry run writes nothing; and a merge that conflicts is aborted, unrecorded, and reported red.
 #
 # What it does not: it is not a GitHub Actions test. The workflow file is thin on purpose — build, then this
 # script — so the behaviour worth proving lives here, and the file's own claims (permissions, triggers,
@@ -173,6 +174,60 @@ contains "$out" "merged, recorded, published" "and finished the handoff"
 if [ "$(git -C "$T/origin.git" rev-parse main)" != "$TIP" ]; then ok "the destination moved for the poll"; else fail "the poll merged nothing"; fi
 check "two changesets are now recorded" 2 "$(git -C "$T/origin.git" for-each-ref --format='%(refname)' 'refs/git-pair/integrations/*' | wc -l | tr -d ' ')"
 
+step "the head has to be proven green"
+
+# The probe is a stub, so what is under test is the job's three-way decision rather than any forge. The stub
+# records the sha it was asked about, which is the claim worth asserting: the job asks about the commit the
+# declaration named, not about whatever the branch tip happens to be when the answer comes back.
+ci_probe_run() { # ci_probe_run <rc> <says> <dir> [job args...]
+  local rc=$1 says=$2 dir=$3; shift 3
+  ( cd "$dir" && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
+      PROBE_RC="$rc" PROBE_SAYS="$says" PROBE_CALLS="$T/probe-calls" \
+      bash "$CI" --require-ci --ci-probe "bash $T/probe" "$@" 2>&1 )
+}
+cat > "$T/probe" <<'EOS'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "$PROBE_CALLS"
+printf '%s\n' "${PROBE_SAYS:-stub: no opinion}"
+exit "${PROBE_RC:-2}"
+EOS
+chmod +x "$T/probe"
+
+declare_changeset flow/ci src/h.ts 'export const h = 8' || { echo "fixture: flow/ci" >&2; exit 1; }
+git -C "$T/work" checkout -q flow/ci && wing change integrate >/dev/null || { echo "fixture: declare flow/ci" >&2; exit 1; }
+git -C "$T/work" push -q origin flow/ci >/dev/null 2>&1
+DECL_CI=$(git -C "$T/origin.git" rev-parse refs/heads/flow/ci)
+MAIN_BEFORE_CI=$(git -C "$T/origin.git" rev-parse main)
+CI5=$(clone ci5) || { echo "cannot clone for ci5" >&2; exit 1; }
+
+out=$(ci_probe_run 1 'not green: the test job failed' "$CI5" flow/ci); code=$?
+show "$out"
+check "a head whose tests failed is not merged (exit 0)" 0 $code
+contains "$out" "not green: the test job failed" "the probe's own reason reaches the log"
+contains "$out" "not merging — the head is not green" "and the job says what it declined"
+if [ "$(git -C "$T/origin.git" rev-parse main)" = "$MAIN_BEFORE_CI" ]; then ok "the destination did not move"; else fail "a red head was merged"; fi
+
+out=$(ci_probe_run 2 'cannot tell: nothing has run for this commit' "$CI5" flow/ci); code=$?
+show "$out"
+check "a head nobody has tested is not merged either (exit 0)" 0 $code
+contains "$out" "nothing proves the head green" "and the answer is not treated as a pass"
+
+out=$(ci_probe_run 1 'not green' "$CI5" --require flow/ci); code=$?
+check "--require turns the decline into a red run" 1 $code
+
+out=$(ci_probe_run 0 'green: everything passed' "$CI5" --expect-head "$MAIN_BEFORE_CI" flow/ci); code=$?
+show "$out"
+check "the green answer does not license a different commit" 0 $code
+contains "$out" "nothing tested to merge" "the job says which two commits disagree"
+if [ "$(git -C "$T/origin.git" rev-parse main)" = "$MAIN_BEFORE_CI" ]; then ok "and nothing moved"; else fail "a head CI never tested was merged"; fi
+
+: > "$T/probe-calls"
+out=$(ci_probe_run 0 'green: 12 checks, all finished' "$CI5" --expect-head "$DECL_CI" flow/ci); code=$?
+show "$out"
+check "green, and this is the commit CI finished with: merged" 0 $code
+contains "$out" "merged, recorded, published" "the handoff finishes"
+check "the probe was asked about the declared head" "$DECL_CI" "$(tail -1 "$T/probe-calls")"
+
 step "the dry run"
 
 declare_changeset flow/dry src/d.ts 'export const d = 5' || { echo "fixture: flow/dry" >&2; exit 1; }
@@ -215,6 +270,7 @@ git -C "$T/work" checkout -q flow/clash &&
   { echo "fixture: declare flow/clash" >&2; exit 1; }
 git -C "$T/work" push -q origin flow/clash >/dev/null 2>&1
 BEFORE=$(git -C "$T/origin.git" rev-parse main)
+REFS0=$(git -C "$T/origin.git" for-each-ref --format='%(refname)' 'refs/git-pair/integrations/*' | wc -l | tr -d ' ')
 CI4=$(clone ci4) || { echo "cannot clone for ci4" >&2; exit 1; }
 out=$(cigr "$CI4" flow/clash); code=$?
 show "$out"
@@ -222,7 +278,11 @@ check "a conflicting merge is a red run" 1 $code
 contains "$out" "the merge conflicted" "it says so"
 contains "$out" "nothing merged, nothing recorded" "and says what it did not do"
 if [ "$(git -C "$T/origin.git" rev-parse main)" = "$BEFORE" ]; then ok "the destination is untouched"; else fail "a conflicted merge reached the destination"; fi
-check "no record was written for a merge that did not happen" 2 "$(git -C "$T/origin.git" for-each-ref --format='%(refname)' 'refs/git-pair/integrations/*' | wc -l | tr -d ' ')"
+if [ "$(git -C "$T/origin.git" for-each-ref --format='%(refname)' 'refs/git-pair/integrations/*' | wc -l | tr -d ' ')" = "$REFS0" ]; then
+  ok "no record was written for a merge that did not happen"
+else
+  fail "a record was written for a merge that did not happen"
+fi
 if [ -z "$(git -C "$CI4" status --porcelain)" ]; then ok "the clone was left clean"; else fail "the clone was left dirty"; fi
 if [ -f "$CI4/.git/MERGE_HEAD" ]; then fail "a merge was left half-done"; else ok "and no merge was left half-done"; fi
 

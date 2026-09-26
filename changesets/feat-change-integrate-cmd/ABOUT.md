@@ -124,9 +124,16 @@ keeps it honest.
   a conflict, no record for a refused push, `--dry-run`, and `--require` for a hand-run where a refusal
   should be red. It never calls `change integrate`: a pipeline that writes the declaration would be asking
   for its own merge.
-- `.github/workflows/git-pair-integrate.yml`: one thin workflow — push to a feature branch, a 15-minute poll
-  of the queue, and `workflow_dispatch`, all calling that script. `contents: write`, `fetch-depth: 0`, one
-  concurrency group per ref, built from the checkout.
+- `.github/workflows/git-pair-integrate.yml`: one thin workflow — the repository's test workflow finishing
+  (`workflow_run`), a 15-minute poll of the queue, and `workflow_dispatch`, all calling that script.
+  `contents: write`, `fetch-depth: 0`, one concurrency group per ref, built from the checkout. No `push`
+  trigger: a merge job running on the feature branch would have to certify its own in-progress check run.
+- The green gate, on request: `--require-ci` consults a probe before merging anything, and merges on a yes
+  only. A probe is any command handed the sha — exit `0` green, `1` not green, `2` cannot tell — and
+  `scripts/ci/gh-head-green.sh` answers it from GitHub's check runs and commit statuses for that one commit.
+  `2` is not `0`, so "nothing has run for this" is not a pass. `--expect-head <sha>` ties the merge to the
+  commit the trigger's CI finished with, so a branch that moved mid-job is skipped rather than merged on an
+  older run's reputation.
 - `scripts/gates/ci-integrate.sh`: the job replayed against scratch bare remotes, in `mise run gates`.
   Merges what is declared and ready; leaves an approved-but-undeclared branch and a drifted declaration
   alone; a re-run does nothing twice; the poll finds a declaration with no event behind it; a dry run writes
@@ -168,6 +175,11 @@ keeps it honest.
 - **A gate that will not answer is a skip, decided by the queue.** `check` on a branch whose changeset
   already landed says "no changeset for this branch", which is about the branch and not the work. The queue
   answers the real question — did anybody ask for this merge — without the script parsing message text.
+- **"Green" is a probe command, not a step in the job.** The job must be replayable with no forge present,
+  and whether tests pass is the forge's answer rather than git-pair's. Three exit codes rather than two
+  exist because "nothing has run for this commit" must not read as a pass — that one mistake is what turns a
+  CI gate into a rubber stamp — and the strict rule (every check GitHub can see, not the protection list)
+  was chosen over two rules that can disagree.
 
 ## Validation
 
@@ -182,9 +194,10 @@ keeps it honest.
   machine (M3); `internal/cli/integrating_surfaces_test.go` — status, unready, queue (M4);
   `json_nulls_test.go` now asserts `awaiting_integration` is `[]` and not null.
 - `scripts/gates/e2e-29.sh`: 118 assertions, `E2E: all checks passed`, including the second clone.
-- `scripts/gates/ci-integrate.sh`: 43 assertions, `CI-INTEGRATE: all checks passed` — the job run as a job
+- `scripts/gates/ci-integrate.sh`: 56 assertions, `CI-INTEGRATE: all checks passed` — the job run as a job
   runs it, in a clone of a bare remote, with the merge, the refs, the skips and the aborted conflict
-  checked on the remote rather than on what the script printed (M6).
+  checked on the remote rather than on what the script printed; and the probe stubbed so all three of its
+  answers, `--require`, the `--expect-head` mismatch, and the sha the probe is handed are all asserted (M6).
 - `TestParentOfTreatsEverySpellingOfTrunkAsTrunk`, and `change integrate` in a real clone where trunk is
   only a fetch ref: the pair that covers the bug the CI replay found (M6).
 - `TestEveryCommandIsNamedInTheDocs` passes, which is what makes PRD, README and `cli.md` name the
