@@ -1215,7 +1215,8 @@ Ordinary Git commits do not.
 
 ## 10.6 `git pair queue`
 
-Shows changesets currently ready for human review.
+Shows changesets currently ready for human review, and the approved changesets whose author has asked for the
+merge (§9.9) — two lists, because they answer two different people.
 
 Default scope: current repository.
 

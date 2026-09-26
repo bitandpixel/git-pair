@@ -17,6 +17,8 @@ The MVP deliberately does not:
 - implement a source-code editor, a full diff renderer, or anything that competes with
   Vim/Neovim, `git difftool`, git, or GitHub/GitLab
 - create or manage pull requests, merge branches, squash branches, or push
+  (`git pair change integrate` asks for a merge, in a commit, for somebody else to perform — it merges
+  nothing, pushes nothing, and writes no ref while work is in flight)
 - run coding agents or CI/CD
 - keep inline-comment databases or GitHub-style comment anchoring
 - treat per-file review checkmarks as review state — they persist locally under the git directory

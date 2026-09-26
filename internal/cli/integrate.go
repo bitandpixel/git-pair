@@ -258,7 +258,7 @@ func reportIntegrate(a *app, s *session, dest changeset.Destination, res integra
 	if !res.Written {
 		a.printf("%s is already declared ready to integrate at %s (head %s): nothing recorded\n",
 			s.cs.Slug, short(res.Commit), short(s.head))
-		a.printf("  merge into: %s\n", displayRef(dest.Ref))
+		a.printf("  merge into: %s%s\n", displayRef(dest.Ref), destinationNote(dest))
 		return nil
 	}
 	a.printf("Integrating: %s\n", s.cs.Slug)

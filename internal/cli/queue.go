@@ -55,7 +55,7 @@ func newQueueCommand(a *app) *cobra.Command {
 	var doFetch bool
 	cmd := &cobra.Command{
 		Use:   "queue",
-		Short: "List changesets ready for human review",
+		Short: "List changesets awaiting review, and those handed over for merging",
 		Long: `List every changeset in this repository whose branch is READY, and every
 changeset whose author has asked for the merge with ` + "`git pair change integrate`" + `.
 
