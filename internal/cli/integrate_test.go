@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -469,4 +470,57 @@ func TestChangeIntegrateUsageErrors(t *testing.T) {
 	// `--help` is a subcommand nobody uses.
 	help := runIn(t, f.Dir(), "change", "--help").mustSucceed(t, "change", "--help").stdout
 	mustContain(t, help, "integrate", "`git pair change --help` lists the declaration")
+}
+
+// A clone that has fetched and not branched off trunk knows the integration branch only as
+// `refs/remotes/origin/main`, while its changeset file spells the same branch `main`. Comparing one
+// spelling to the other says "stacked on a branch called main", and for this command that reading is not
+// cosmetic: an unlanded parent is a refusal, so the command that asks for a merge refused to ask in the
+// ordinary state of the clone that most needs it — the one a pipeline makes. The scripted CI replay in
+// scripts/gates/ci-integrate.sh is what caught it, because a replay starts from a clone.
+func TestChangeIntegrateAsksForTheMergeInACloneWhereTrunkIsOnlyAFetchRef(t *testing.T) {
+	f, _, _, _ := approvedChangeset(t)
+	remote := remoteWith(t, f)
+	f.MustGit("push", "--quiet", "origin", "main", "booking-transaction")
+	clone := filepath.Join(t.TempDir(), "clone")
+	f.MustGit("clone", "--quiet", remote, clone)
+
+	// The fixture has to be the case under test, and that is worth checking rather than assuming: a clone
+	// that somehow held a local trunk would pass for the wrong reason.
+	if got := gitIn(t, clone, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/main"); got == "" {
+		t.Fatal("the clone does not hold trunk as a fetch ref, so it proves nothing")
+	}
+	gitIn(t, clone, "checkout", "--quiet", "booking-transaction")
+	// The clone is a fresh working copy with the fixture's isolated configuration, so it has no identity of
+	// its own until one is given: the marker commit this command makes needs an author.
+	gitIn(t, clone, "config", "user.email", "ci@example.com")
+	gitIn(t, clone, "config", "user.name", "CI")
+	// The guard that matters: this run has to be reading trunk through the fetch root. A clone whose
+	// `main` was checked out locally would answer the question the wrong way round and pass for nothing.
+	spelling := runIn(t, clone, "status", "--json").mustSucceed(t, "status", "--json").json(t)
+	if spelling["default_branch"] != "origin/main" {
+		t.Fatalf("default_branch = %v, want origin/main: the run must be reading trunk through refs/remotes", spelling["default_branch"])
+	}
+
+	res := runIn(t, clone, "change", "integrate", "--json").mustSucceed(t, "change", "integrate")
+	j := res.json(t)
+	if j["state"] != "INTEGRATING" {
+		t.Errorf("state = %v, want INTEGRATING", j["state"])
+	}
+	if j["destination"] != "main" {
+		t.Errorf("destination = %v, want main", j["destination"])
+	}
+	mustNotContain(t, res.stdout, "records no parent changeset", "trunk is not reported as a parent that has not landed")
+
+	// The same reading in `status`: a changeset measured against the integration branch is not stacked on
+	// it, and a Stack section naming trunk as a parent sends an author to `init --parent` for a stack that
+	// does not exist.
+	st := runIn(t, clone, "status").mustSucceed(t, "status")
+	mustNotContain(t, st.stdout, "parent: main", "status does not call trunk a parent")
+
+	// And the gate agrees with the command, in the same clone, on the same head.
+	chk := runIn(t, clone, "check", "--json").mustSucceed(t, "check", "--json").json(t)
+	if chk["ready"] != true || chk["integrating"] != true {
+		t.Errorf("check said ready=%v integrating=%v for the head just declared, want both true", chk["ready"], chk["integrating"])
+	}
 }

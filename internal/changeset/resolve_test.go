@@ -576,6 +576,68 @@ func TestDefaultBranchIgnoresADanglingRemoteHead(t *testing.T) {
 	}
 }
 
+// TestParentOfTreatsEverySpellingOfTrunkAsTrunk is the comparison behind a refusal. `base:` is written as a
+// name and `DefaultBranch` answers with a ref, and in a clone that has fetched and not branched off trunk
+// the two spellings of one branch differ: `main`, and `refs/remotes/origin/main`. Read as two branches,
+// every changeset in such a clone is stacked on a branch called main — which `status` prints as a parent
+// line, and which `change integrate` refuses over, because an unlanded parent is a refusal and trunk never
+// has an integration record. A real stack has to stay a stack, or the refusal loses its meaning.
+func TestParentOfTreatsEverySpellingOfTrunkAsTrunk(t *testing.T) {
+	ctx := context.Background()
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("feature/booking")
+	f.MustGit("update-ref", "refs/remotes/origin/main", f.Head())
+	f.MustGit("branch", "-D", "main")
+
+	repo := repo(f)
+	db, err := changeset.DefaultBranch(ctx, repo, "")
+	if err != nil {
+		t.Fatalf("DefaultBranch: %v", err)
+	}
+	if db.Ref != "refs/remotes/origin/main" {
+		t.Fatalf("db.Ref = %q, want the fetch root: the case under test is a trunk with no local branch", db.Ref)
+	}
+	for _, name := range []string{"main", "refs/heads/main", "refs/remotes/origin/main"} {
+		if !db.IsBranch(name) {
+			t.Errorf("IsBranch(%q) = false, want true: the same branch read through another root", name)
+		}
+	}
+	if db.IsBranch("feature/booking") {
+		t.Error("IsBranch reported a feature branch as the integration branch")
+	}
+
+	for _, base := range []string{"main", "refs/heads/main", "refs/remotes/origin/main"} {
+		p, err := changeset.ParentOf(ctx, repo,
+			changeset.Changeset{Slug: "booking", Branch: "feature/booking", Base: base}, db)
+		if err != nil {
+			t.Fatalf("ParentOf(base %q): %v", base, err)
+		}
+		if p.Branch != "" {
+			t.Errorf("base %q read as stacked on %q, want unstacked", base, p.Branch)
+		}
+		// The `parent:` key spells the same branch the same way, and answering "stacked on trunk" there is
+		// what makes `init --parent main` look like a stack.
+		p, err = changeset.ParentOf(ctx, repo,
+			changeset.Changeset{Slug: "booking", Branch: "feature/booking", Base: base, ParentBranch: "main"}, db)
+		if err != nil {
+			t.Fatalf("ParentOf(parent %q): %v", base, err)
+		}
+		if p.Branch != "" {
+			t.Errorf("parent %q read as a stack on %q, want no parent", base, p.Branch)
+		}
+	}
+
+	p, err := changeset.ParentOf(ctx, repo,
+		changeset.Changeset{Slug: "child", Branch: "feature/child", Base: "feature/booking"}, db)
+	if err != nil {
+		t.Fatalf("ParentOf(a real parent): %v", err)
+	}
+	if p.Branch != "feature/booking" || p.Tip == "" {
+		t.Errorf("a stack on a feature branch read as %+v, want the branch and its tip", p)
+	}
+}
+
 func TestDefaultBranchFallsBackAndRefuses(t *testing.T) {
 	t.Run("sole origin branch", func(t *testing.T) {
 		f := gittest.New(t)

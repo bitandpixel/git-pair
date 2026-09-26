@@ -112,7 +112,7 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	// a changeset is measured against that branch, so one started on it is inert — every
 	// directory it carries is already landed. Saying so where the mistake is made beats a
 	// status line that never shows the changeset.
-	if db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch); err == nil && branch == db.LocalName() {
+	if db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch); err == nil && db.IsBranch(branch) {
 		return &usageError{fmt.Errorf("%s is the integration branch, so a changeset started on it can never contain anything: `git switch -c <branch>` first", branch)}
 	}
 	if opts.parent != "" && opts.base != "" {
@@ -179,7 +179,7 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	// read after the parent is gone.
 	parentChangeset := ""
 	if opts.parent != "" {
-		if db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch); err == nil && opts.parent == db.LocalName() {
+		if db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch); err == nil && db.IsBranch(opts.parent) {
 			return &usageError{fmt.Errorf("--parent %s is the integration branch, which is not a stack: a changeset measured against it is not stacked. --base %s is the flag for that", opts.parent, opts.parent)}
 		}
 		pcs, why := parentChangesetOn(ctx, repo, opts.parent, a.defaultBranch)
