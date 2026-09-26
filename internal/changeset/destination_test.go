@@ -1,0 +1,248 @@
+package changeset_test
+
+import (
+	"context"
+	"testing"
+
+	"gitpair/internal/changeset"
+	"gitpair/internal/gittest"
+	"gitpair/internal/reviewref"
+)
+
+// The rule under test: where a changeset's work lands is not always the base it is measured against. For
+// a stack whose parent has landed, the base is the parent's integration ref — a commit, which nothing can
+// merge into — and the destination has to be read further up the stack instead. These fixtures are the
+// shapes where the two answers differ, plus the ones where the walk has nothing to walk and has to say so
+// rather than invent a branch.
+
+func destinationOf(t *testing.T, f *gittest.Fixture, slug string) changeset.Destination {
+	t.Helper()
+	ctx := context.Background()
+	r := repo(f)
+	db, err := changeset.DefaultBranch(ctx, r, "")
+	if err != nil {
+		t.Fatalf("DefaultBranch: %v", err)
+	}
+	// The changeset comes from the resolver rather than being typed by hand, because the relink that
+	// makes this question interesting happens there: `DestinationFor` is asked about the base the rest of
+	// the product measures against, not the string a yaml file happens to carry.
+	res := resolveAt(t, f, "HEAD")
+	if res.Selected == nil || res.Selected.Changeset.Slug != slug {
+		t.Fatalf("resolved %q, want %q (candidates %v)", selectedID(res), slug, candidateIDs(res))
+	}
+	got, err := changeset.DestinationFor(ctx, r, res.Selected.Changeset, db)
+	if err != nil {
+		t.Fatalf("DestinationFor: %v", err)
+	}
+	return got
+}
+
+// recordLanding writes the pair `integration record` would have written for slug at commit, which is what
+// a destination walk has to read. The archive half is the branch's own tip, so the fixture says what the
+// recorder would have said instead of the test inventing a ref path.
+// stageStacked writes a changeset directory stacked on a parent branch. `parent:` is the base, and the
+// parent's changeset is recorded beside it — the pair that still names the relationship once the parent
+// has landed and its branch has been tidied away.
+func stageStacked(t *testing.T, f *gittest.Fixture, slug, parentBranch, parentSlug string) {
+	t.Helper()
+	f.StageChangeset(slug, parentBranch)
+	f.Write(f.ChangesetPath(slug, "CHANGESET.yaml"),
+		"id: "+slug+"\nparent: "+parentBranch+"\nparent-changeset: "+parentSlug+"\n")
+}
+
+func recordLanding(t *testing.T, f *gittest.Fixture, slug, commit, source string) {
+	t.Helper()
+	if _, err := reviewref.CreatePair(context.Background(), repo(f),
+		reviewref.Pair{ID: slug, Archive: source, Integration: commit}); err != nil {
+		t.Fatalf("record %s: %v", slug, err)
+	}
+}
+
+// A changeset measured against a branch has the simplest answer, and it is worth pinning because every
+// other rule here is an exception to it: the destination is the base, and the walk never runs.
+func TestDestinationIsTheBaseForUnstackedWork(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking", "main")
+	f.Commit("work", gittest.WithFile("booking.txt", "1\n"))
+
+	got := destinationOf(t, f, "booking")
+	if got.Ref != "main" || got.Why != "base" || len(got.Via) != 0 {
+		t.Errorf("destination = %s via %v, want main (base)", got, got.Via)
+	}
+}
+
+// A child stacked on a parent that has not landed still has the branch as its base, and the branch as its
+// destination: this is the stacked landing that stays a human decision (git-pair records a child landed on
+// its parent branch — see `integration record`'s carried answer — it only declines to queue one).
+func TestDestinationIsTheParentBranchWhileTheParentIsUnlanded(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking", "main")
+	f.Commit("booking work", gittest.WithFile("booking.txt", "1\n"))
+	f.CreateBranch("booking-tests")
+	stageStacked(t, f, "booking-tests", "booking", "booking")
+	f.Commit("test work", gittest.WithFile("booking_test.txt", "1\n"))
+
+	got := destinationOf(t, f, "booking-tests")
+	if got.Ref != "booking" || got.Why != "base" {
+		t.Errorf("destination = %s, want booking (base): the parent has no record, so nothing has moved", got)
+	}
+}
+
+// The case the rule exists for. The parent landed on trunk, the child's base became the parent's
+// integration ref, and a destination of `refs/git-pair/integrations/booking` would name a commit and no
+// branch — `integration record` refuses one as `--target` for exactly that reason. The answer comes from
+// the parent's own record, which landed with the parent's directory.
+func TestDestinationFollowsALandedParentToItsBase(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking", "main")
+	parentTip := f.Commit("booking work", gittest.WithFile("booking.txt", "1\n"))
+	f.CreateBranch("booking-tests")
+	stageStacked(t, f, "booking-tests", "booking", "booking")
+	f.Commit("test work", gittest.WithFile("booking_test.txt", "1\n"))
+
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land booking", "booking")
+	recordLanding(t, f, "booking", f.Head(), parentTip)
+
+	f.SwitchTo("booking-tests")
+	got := destinationOf(t, f, "booking-tests")
+	if got.Ref != "main" || got.Why != "parent" {
+		t.Errorf("destination = %s, want main (parent)", got)
+	}
+	if len(got.Via) != 1 || got.Via[0] != "booking" {
+		t.Errorf("via = %v, want [booking]: the report has to name the chain it crossed", got.Via)
+	}
+	if got.Unreachable != "" {
+		t.Errorf("unreachable = %q, want empty", got.Unreachable)
+	}
+}
+
+// A stack three deep, where both ancestors landed: the walk crosses two records and lands on the branch
+// under all of it. This is where a rule that gave up after one hop would return a durable ref.
+func TestDestinationWalksAParentChain(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("alpha")
+	f.CommitChangeset("alpha", "main")
+	alphaTip := f.Commit("alpha work", gittest.WithFile("alpha.txt", "1\n"))
+	f.CreateBranch("beta")
+	stageStacked(t, f, "beta", "alpha", "alpha")
+	betaTip := f.Commit("beta work", gittest.WithFile("beta.txt", "1\n"))
+	f.CreateBranch("gamma")
+	stageStacked(t, f, "gamma", "beta", "beta")
+	f.Commit("gamma work", gittest.WithFile("gamma.txt", "1\n"))
+
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land beta", "beta")
+	recordLanding(t, f, "beta", f.Head(), betaTip)
+	f.SwitchTo("alpha")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land alpha", "alpha")
+	recordLanding(t, f, "alpha", f.Head(), alphaTip)
+
+	f.SwitchTo("gamma")
+	got := destinationOf(t, f, "gamma")
+	if got.Ref != "main" || got.Why != "parent" {
+		t.Errorf("destination = %s, want main (parent)", got)
+	}
+	if len(got.Via) != 2 || got.Via[0] != "beta" || got.Via[1] != "alpha" {
+		t.Errorf("via = %v, want [beta alpha] nearest first", got.Via)
+	}
+}
+
+// The walk ends where the chain has no answer, and says which answer it fell back to: the branch a
+// parent's own record named is gone from this clone, so the only branch left to name is the destination
+// branch. `Unreachable` is what keeps that fallback from reading as a fact about the work.
+func TestDestinationFallsBackWhenTheParentBaseIsGone(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("release/2.x")
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking", "release/2.x")
+	tip := f.Commit("booking work", gittest.WithFile("booking.txt", "1\n"))
+	f.CreateBranch("booking-tests")
+	stageStacked(t, f, "booking-tests", "booking", "booking")
+	f.Commit("test work", gittest.WithFile("booking_test.txt", "1\n"))
+
+	f.SwitchTo("release/2.x")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land booking", "booking")
+	recordLanding(t, f, "booking", f.Head(), tip)
+	// The branch the parent said it was going to is gone, and its work is only in the record now.
+	f.SwitchTo("main")
+	f.ForceDeleteBranch("release/2.x")
+
+	f.SwitchTo("booking-tests")
+	got := destinationOf(t, f, "booking-tests")
+	if got.Ref == "" || got.Why != "default" {
+		t.Errorf("destination = %s, want the default branch, resolved by the fallback", got)
+	}
+	if got.Unreachable != "release/2.x" {
+		t.Errorf("unreachable = %q, want release/2.x: the reader learns the fallback ran", got.Unreachable)
+	}
+}
+
+// A base under `refs/git-pair/` that is not an integration ref — an archive ref, a stray, a retired
+// layout — has no parent to walk to. Falling back is the whole answer; guessing whose archive ref it is
+// and reading a base out of it would be inventing a relationship.
+func TestDestinationStopsAtADurableRefThatIsNotARecord(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking", "main")
+	tip := f.Commit("work", gittest.WithFile("booking.txt", "1\n"))
+	if _, err := reviewref.CreateOnly(context.Background(), repo(f),
+		reviewref.Archive("booking"), tip); err != nil {
+		t.Fatalf("write an archive ref: %v", err)
+	}
+	// Hand-pointed at the archive ref: the resolver would never do this, and a hand-edited or
+	// half-migrated changeset can.
+	cs := changeset.Changeset{Slug: "booking", Base: reviewref.Archive("booking"), Exists: true}
+	db, err := changeset.DefaultBranch(context.Background(), repo(f), "")
+	if err != nil {
+		t.Fatalf("DefaultBranch: %v", err)
+	}
+	got, err := changeset.DestinationFor(context.Background(), repo(f), cs, db)
+	if err != nil {
+		t.Fatalf("DestinationFor: %v", err)
+	}
+	if got.Why != "default" || got.Ref == "" {
+		t.Errorf("destination = %s, want the default branch: an archive ref names no destination", got)
+	}
+	if len(got.Via) != 0 {
+		t.Errorf("via = %v, want nothing walked: an archive ref is not a parent's record", got.Via)
+	}
+}
+
+// `parent-changeset:` is committed content. A file edited into a loop has to stop the walk with the
+// fallback rather than hang the command, which is also why the walk is bounded in the first place.
+func TestDestinationStopsOnAParentLoop(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("alpha")
+	f.StageChangeset("alpha", "main")
+	f.WriteChangesetFile("alpha", "CHANGESET.yaml", "id: alpha\nparent: alpha\nparent-changeset: alpha\n")
+	f.Commit("alpha work", gittest.WithFile("alpha.txt", "1\n"))
+	recordLanding(t, f, "alpha", f.Head(), f.Head())
+
+	cs := changeset.Changeset{Slug: "alpha", Base: reviewref.Integration("alpha"),
+		ParentBranch: "alpha", ParentChangeset: "alpha", Exists: true}
+	db, err := changeset.DefaultBranch(context.Background(), repo(f), "")
+	if err != nil {
+		t.Fatalf("DefaultBranch: %v", err)
+	}
+	got, err := changeset.DestinationFor(context.Background(), repo(f), cs, db)
+	if err != nil {
+		t.Fatalf("DestinationFor: %v", err)
+	}
+	if got.Why != "default" || got.Ref == "" {
+		t.Errorf("destination = %s, want the default branch: a loop has no answer above it", got)
+	}
+	if len(got.Via) > 2 {
+		t.Errorf("via = %v, want the walk to stop the second time it sees the same changeset", got.Via)
+	}
+}
