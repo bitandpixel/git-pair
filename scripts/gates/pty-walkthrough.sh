@@ -381,6 +381,11 @@ expect "the hunk header is still there" 3 "$T/youdiff.raw" "@@ "
 # git's own colours do appear. Which codes carry them is lipgloss's and git's business: lipgloss writes ANSI 12
 # as `94` on a terminal advertising sixteen colours and `38;5;12` on one advertising more, and it drops colour
 # entirely when it believes there is no terminal -- which is why this is a pty check and not a Go one.
+#
+# It is also why the harness pins the environment and not only the window size: `pty-tui.py` removes `CI` and
+# `NO_COLOR` for the program it launches, because termenv treats any non-empty `CI` as not-a-terminal before
+# it looks at the descriptor, and then there is no colour to compare. That removal is part of the condition
+# this assertion needs, so a future failure is worth reading against the driver before this check is relaxed.
 python3 - "$T/youdiff.raw" <<'PY' \
   || fail "the reviewer's row does not reach the terminal in a colour of the pane's own"
 import re, sys
@@ -412,7 +417,14 @@ while at != -1:
     yours |= foregrounds(raw[max(0, at - 40) : at])
     at = raw.find("+  // a note the reviewer typed", at + 1)
 git_here = foregrounds(raw) & GIT
-sys.exit(0 if yours and git_here and not (yours & GIT) else 1)
+ok = bool(yours) and bool(git_here) and not (yours & GIT)
+if not ok:
+    # Which of the three conditions failed is the question, and answering it by hand cost a CI round
+    # trip and a local bisect: an empty pane set is a profile with no colour in it, an empty git set is
+    # git's palette absent from the capture, and an overlap is the 40-byte window reading a neighbouring
+    # row's code rather than this one's.
+    print("    colour check: pane=%s git=%s overlap=%s" % (sorted(yours), sorted(git_here), sorted(yours & GIT)))
+sys.exit(0 if ok else 1)
 PY
 git checkout -- src/service.ts
 
