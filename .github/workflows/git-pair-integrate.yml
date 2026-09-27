@@ -51,6 +51,7 @@ on:
       # `--expect-head` fed a main-side sha would decline every merge. It stays unreachable because the
       # parent rule in the plan's Decisions table refuses a child's declaration until the parent lands, so no
       # child sits in this queue waiting for main to move. Keep this note for the day that rule changes.
+      # Please remove this inline comment and you can add it to open questions in ABOUT or a unique comment thread
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:

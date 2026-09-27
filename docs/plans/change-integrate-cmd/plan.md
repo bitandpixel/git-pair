@@ -42,6 +42,7 @@ Observable outcomes:
 > declaration, not deferred") and in `ABOUT.md`. Short form: the record cannot be issued early, because it is
 > the create-only claim that a merge already happened; and a declaration held open until the parent lands
 > would name a head the parent's landing has just made untested.
+please move these both to a separate comment thread or the ABOUT file
 
 - `git pair status --json` reports `state: "INTEGRATING"` beside `integrating` and `integrate_commit` —
   the same two fields `check --json` answers with — and `next_action` names the push and the destination
