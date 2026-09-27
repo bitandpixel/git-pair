@@ -23,12 +23,23 @@ import (
 // EditorCommand builds the command opening path in the user's editor.
 //
 // The editor is whatever git would use, so git-pair asks git instead of searching on its own:
-// GIT_EDITOR, then core.editor, then VISUAL, then EDITOR, then vi. Two things come from that
-// beyond getting the order right — an EDITOR override does not outrank core.editor in git, and
-// used to here — repo-local core.editor becomes available, which an environment lookup can
-// never see, and a wrapper that injects GIT_EDITOR (a hook, another tool) is honoured the way
-// every other git consumer honours it. The value is a command line, so the launch keeps git's
-// shape: `myeditor --wait` is a program plus flags, not a program named "myeditor --wait".
+// GIT_EDITOR, then core.editor, then VISUAL, then EDITOR, then whatever that git build falls
+// back to. Two things come from that beyond getting the order right — an EDITOR override does not
+// outrank core.editor in git, and used to here — repo-local core.editor becomes available, which
+// an environment lookup can never see, and a wrapper that injects GIT_EDITOR (a hook, another
+// tool) is honoured the way every other git consumer honours it. The value is a command line, so
+// the launch keeps git's shape: `myeditor --wait` is a program plus flags, not a program named
+// "myeditor --wait".
+//
+// The third rung is conditional, and the man page does not say so: git reads VISUAL only when it
+// believes the terminal can show an editor, counting TERM unset or "dumb" as not able to
+// (editor.c `is_terminal_dumb()`). On such a terminal git passes over VISUAL and takes EDITOR, so
+// headless callers — CI, an agent, `ssh host git commit` — should set EDITOR or core.editor.
+// With neither set on a dumb terminal git answers nothing and exits 1, refusing to name a
+// full-screen editor it could not draw. That is where the fallback below runs, and it does not
+// copy the refusal: someone who configured only VISUAL meant it, and an error opens no file. The
+// difference is deliberate and asserted in console_test.go, because it is invisible until
+// somebody reads git's source.
 func EditorCommand(ctx context.Context, repo *git.Repo, path string) (*exec.Cmd, error) {
 	value, err := repo.Git(ctx, "var", "GIT_EDITOR")
 	value = strings.TrimSpace(value)
