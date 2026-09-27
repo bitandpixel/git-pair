@@ -213,6 +213,10 @@ keeps it honest.
   answers, `--require`, the `--expect-head` mismatch, and the sha the probe is handed are all asserted (M6).
 - `TestParentOfTreatsEverySpellingOfTrunkAsTrunk`, and `change integrate` in a real clone where trunk is
   only a fetch ref: the pair that covers the bug the CI replay found (M6).
+- `scripts/gates/pty-walkthrough.sh` under the runner's surroundings — `CI=true NO_COLOR=1
+  GITHUB_ACTIONS=true` exported for the whole replay — and under a clean environment: `PTY: all checks
+  passed` both ways. Before the driver removed those switches, the same replay with `CI=true` failed the
+  pane's one colour assertion, which is what makes the passing pair evidence rather than a weakened check.
 - `main` merged in (`5a3a7a3`) for the terminal fix in `feat-editor-term-gate`. The first CI run of this
   repository failed on `TestEditorPrecedenceMatchesGit/VISUAL_beats_EDITOR` — neither this changeset's
   code nor a git-pair defect: `git var GIT_EDITOR` reads `VISUAL` only when `TERM` names a usable
@@ -242,6 +246,11 @@ keeps it honest.
 
 ## Open questions
 
+- Should the review TUI honour the terminal it has over an exported `CI`? `review open` refuses to start
+  without one, so by the time the TUI is drawing, the terminal question is settled — yet termenv returns
+  `false` from `isTTY()` for any non-empty `CI`, and lipgloss renders the whole review without colour. The
+  gate is pinned around it (see Validation); the product question is open, and answering it means choosing
+  between honouring the flag and honouring the descriptor.
 - Should `queue`'s `awaiting_integration` row carry the parent chain (`destination_via`) too, or is
   `destination` plus `status`'s `Stack:` enough for the actor who merges? Left as-is: one field, one
   question.
