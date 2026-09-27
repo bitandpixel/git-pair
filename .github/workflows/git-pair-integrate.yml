@@ -41,17 +41,6 @@ on:
     branches:
       - 'feat/**'
       - 'feature/**'
-      # if we also allow stacked child changesets to be INTEGRATING before their parents have landed, we'll want to consider running these on `main` changing as well, in case the child feature branch is stable and passing (no new commits or workflows) but becomes eligible for integration because of a `main`-side change. Or maybe the backstop could be good enough?
-      #
-      # Answered 2026-09-27 (review 906332c): the backstop is good enough, and the case is unreachable today.
-      # The poll re-reads `queue --json` and re-derives each destination on every pass, so a changeset that
-      # became eligible without a commit of its own is picked up within one interval — 15 minutes here — with
-      # the same probe and the same refusal to merge a head it cannot prove green. A trigger on `main` would
-      # buy latency and nothing else: the probe is asked about the declared head, never about main's sha, and
-      # `--expect-head` fed a main-side sha would decline every merge. It stays unreachable because the
-      # parent rule in the plan's Decisions table refuses a child's declaration until the parent lands, so no
-      # child sits in this queue waiting for main to move. Keep this note for the day that rule changes.
-      # Please remove this inline comment and you can add it to open questions in ABOUT or a unique comment thread
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:

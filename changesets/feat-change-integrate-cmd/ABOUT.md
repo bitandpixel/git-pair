@@ -226,34 +226,19 @@ keeps it honest.
 - `TestEveryCommandIsNamedInTheDocs` passes, which is what makes PRD, README and `cli.md` name the
   command rather than merely mention it.
 
-## Responses (review `906332c`)
+## Responses (reviews `906332c`, `17df992`)
 
-Two questions were asked, both left in place where they were asked rather than moved here.
+Both questions from `906332c` — refuse a child whose parent has not landed, or write the record early and let
+the child become integratable later; and whether the merge job should wake when `main` finishes CI or whether
+the scheduled poll is enough — are answered in
+`changesets/feat-change-integrate-cmd/child-declarations-and-the-main-side-trigger.md`, with each question
+quoted as it was written. `17df992` asked for the inline copies to leave the plan and the workflow file, so
+both are gone from those files: the rule itself stays in the plan's Decisions table, the standing question
+about a main-side trigger is in Open questions below, and the discussion lives in the thread.
 
-- **"Does it make sense to enforce 'the parent branch has not landed' at integration-ready time, or write the
-  record and let the child become integratable later?"** Refused now, not deferred. The record is the wrong
-  instrument for an intention: it is create-only, it states that a merge already happened, and `integration
-  record` verifies that statement against the destination's tree — a record for an unmerged child is a false
-  claim that can never be corrected. Deferring the declaration instead would leave a request that goes stale
-  on the event unblocking it: the parent's landing changes what the child's merge is against, while the gate
-  (`--expect-head`, and the probe) speaks about the head the author declared, which no run has tested since.
-  The destination is also not knowable before the parent lands, since `DestinationFor` reads the parent's
-  integration ref. The human path is unaffected — `check` still answers yes, `recordCarried` still lands a
-  carried directory — so the refusal costs one more `change integrate`, against a head CI has run. Reasoning
-  in the plan's Decisions table, and the question is answered there beside the reviewer's text.
-- **"Should the merge workflow also trigger when `main` changes, in case a stable child becomes eligible for
-  a main-side reason — or is the backstop good enough?"** The backstop is good enough: the scheduled poll
-  re-reads the queue and re-derives each destination on every pass, so such a changeset is picked up within
-  one interval with the same probes and the same refusals. A trigger on `main` would reduce latency only, and
-  would arrive with main's sha while `--expect-head` must name the declared head. The case is also
-  unreachable today, because of the answer above. Kept as a comment where the reviewer wrote it, for the day
-  that rule changes.
-
-Retained on purpose, and therefore reported by `change ready` as surviving review additions: the reviewer's
-comment in `.github/workflows/git-pair-integrate.yml`, the question in the plan's success criteria, and the
-markdown pass over `plan.md` (emphasis markers and table alignment). The answers are written beside each
-rather than replacing them. New table rows keep this file's original compact spacing, so the tables are now
-mixed width — cosmetic, and a formatter pass over the file would settle it either way.
+The reviewer's markdown pass over `plan.md` (emphasis markers, table alignment) is retained as submitted; new
+table rows keep this file's original compact spacing, so the tables are mixed width. Cosmetic, and one
+formatter pass would settle it either way.
 
 ## Known limitations
 
@@ -279,6 +264,10 @@ mixed width — cosmetic, and a formatter pass over the file would settle it eit
 
 ## Open questions
 
+- Should the merge workflow also wake when `main` finishes CI, so a child that became eligible without a
+  commit of its own merges sooner than the poll's next interval? Unreachable while a child cannot be declared
+  before its parent lands, and the poll covers it at fifteen minutes' latency; the reasoning and the shape of
+  the trigger are in the thread `child-declarations-and-the-main-side-trigger.md`.
 - Should the review TUI honour the terminal it has over an exported `CI`? `review open` refuses to start
   without one, so by the time the TUI is drawing, the terminal question is settled — yet termenv returns
   `false` from `isTTY()` for any non-empty `CI`, and lipgloss renders the whole review without colour. The
