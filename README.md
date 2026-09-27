@@ -1398,6 +1398,14 @@ honours it. Only when git cannot answer does git-pair fall back to `$VISUAL`, th
 probe should be wrapped in `timeout`, because an editor that takes the terminal and is never
 driven will block forever.
 
+One rung of that ladder carries a condition git does not document: `VISUAL` is read only when
+`TERM` names a terminal git believes it can draw on, so with `TERM` unset or `dumb` — a CI step, an
+agent, `ssh host git commit` — git passes over `VISUAL` and takes `EDITOR`, and with neither set it
+answers nothing and exits 1 rather than name a full-screen editor. So `EDITOR` is the dependable
+variable for a headless environment and `core.editor` the dependable one everywhere; `VISUAL` alone
+can be invisible to git. It is not invisible to git-pair, which falls back to `VISUAL` in exactly
+the case where git refused to answer — a deliberate difference, asserted in `console_test.go`.
+
 The resolved value is a command line, expanded by `/bin/sh` with word splitting exactly as git
 expands it, so `core.editor="code --wait"` works: `code` is the program and `--wait` its flag. A
 program path containing a literal space needs quoting inside the value

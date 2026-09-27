@@ -31,7 +31,7 @@ The Git commit boundary provides the primary semantics. A commit identified as a
 It should use:
 
 -   Git for versioning, commits, branches, diffs, and refs.
--   Git's configured editor (`GIT_EDITOR`, `core.editor`, `$VISUAL`, `$EDITOR`) for text editing.
+-   Git's configured editor (git's own resolution: `$GIT_EDITOR`, `core.editor`, `$VISUAL`, `$EDITOR`) for text editing.
 -   configured Git difftools for code review.
 -   GitHub, GitLab, Forgejo, etc. only as optional remote/CI/merge systems.
 
@@ -1062,13 +1062,20 @@ Editor resolution should follow git's, which means asking git rather than guessi
 
 1. `$GIT_EDITOR`
 2. `core.editor` (repository-local first, then global)
-3. `$VISUAL`
+3. `$VISUAL` — only when `TERM` names a terminal git can draw on; git skips it when `TERM` is unset or `dumb`
 4. `$EDITOR`
 5. the fallback the git build itself would use
 
 `git var GIT_EDITOR` answers all five, so git-pair asks for it and consults 3–5 only when git
 cannot answer. The value is a command line, so `code --wait` is a program plus its flags, as git
 treats it.
+
+The condition on the third rung is not in git's documentation and is worth stating, because it is
+what makes a machine depend on `EDITOR` rather than `VISUAL`: with `TERM` unset or `dumb` — a CI
+step, an agent, `ssh host git commit` — git passes over `$VISUAL` and takes `$EDITOR`, and with
+neither set it answers nothing and exits 1 rather than name a full-screen editor it could not show.
+git-pair's fallback does not copy that refusal: it resolves `$VISUAL`, so a person who configured
+only `VISUAL` still gets an editor. The divergence is asserted in the console tests.
 
 Example:
 
