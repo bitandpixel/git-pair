@@ -8,7 +8,8 @@
 # published; a re-run does nothing twice; an undeclared changeset and a drifted declaration are left alone;
 # the queue-driven poll finds a declaration with no event behind it; a head that is not proven green is not
 # merged, whether the probe says "no" or "I cannot tell", and the probe is asked about the declared commit;
-# a dry run writes nothing; and a merge that conflicts is aborted, unrecorded, and reported red.
+# a dry run writes nothing; a merge that conflicts is aborted, unrecorded, and reported red; and the two
+# workflow files still name each other, so a rename fails a build instead of stalling a merge.
 #
 # What it does not: it is not a GitHub Actions test. The workflow file is thin on purpose — build, then this
 # script — so the behaviour worth proving lives here, and the file's own claims (permissions, triggers,
@@ -285,6 +286,17 @@ else
 fi
 if [ -z "$(git -C "$CI4" status --porcelain)" ]; then ok "the clone was left clean"; else fail "the clone was left dirty"; fi
 if [ -f "$CI4/.git/MERGE_HEAD" ]; then fail "a merge was left half-done"; else ok "and no merge was left half-done"; fi
+
+step "the two workflow files still name each other"
+
+# Renaming either workflow is invisible until a merge fails to happen: `workflow_run` matches the other
+# file's `name:` string, and nothing but a push runs the pair. These are text checks of two conventions
+# rather than a YAML parse — there is no YAML parser to depend on in a gate — but they fail the build here
+# instead of leaving a merge job that quietly never fires.
+check "the test workflow declares the name the merge job triggers on" 1 "$(grep -c '^name: CI$' "$ROOT/.github/workflows/ci.yml")"
+check "and the merge job names it back" 1 "$(grep -c "^[[:space:]]*- 'CI'\$" "$ROOT/.github/workflows/git-pair-integrate.yml")"
+check "CI runs on branch pushes, whose checks are the ones on the head the probe reads" 1 "$(grep -c '^    branches:$' "$ROOT/.github/workflows/ci.yml")"
+check "and the merge job has no push trigger that would make it certify its own check run" 0 "$(grep -c '^  push:$' "$ROOT/.github/workflows/git-pair-integrate.yml")"
 
 step "usage"
 

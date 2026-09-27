@@ -26,10 +26,14 @@ name: git-pair integrate
 
 on:
   workflow_run:
-    # Replace this with the `name:` of the workflow that runs the repository's tests. A repository with no
-    # test workflow should drop `--require-ci` below rather than watch this one wait for checks that never
-    # run — the merge job refuses to merge a head it cannot prove green, which is the safe direction and a
-    # permanent no-op.
+    # `ci.yml` in this repository — its `name:`, which is the whole link between the two files. Rename the
+    # test workflow and this trigger stops firing, and stops quietly: the merge job keeps declining every
+    # head with "nothing proves the head green", which is the safe direction and a permanent no-op. Same
+    # advice for a repository with no test workflow at all — drop `--require-ci` there.
+    #
+    # Only runs whose checks land on the branch head count. `ci.yml` therefore triggers on `push` as well as
+    # on `pull_request`: a pull-request run reports its checks against the PR's merge ref, and the head the
+    # declaration names would look untested to the probe.
     workflows:
       - 'CI'
     types:

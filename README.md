@@ -1857,20 +1857,25 @@ standard streams, so their tests take turns. Splitting a package's tests across 
 keeps each process single-threaded exactly as it is today, and reclaims the overlap. `mise run
 test:serial` is the same suite in one process, with the output `go test ./...` gives.
 
-Two scripted replays sit above it. Each one runs the installed binary as a subprocess, so it reaches
+Three scripted replays sit above it. Each one runs the installed binary as a subprocess, so it reaches
 what a Go test cannot:
 
 | Gate | What it proves | Needs |
 | --- | --- | --- |
 | `scripts/gates/e2e-29.sh` | The PRD §29 loop end to end in a scratch repo, through review, approve, `check`, record, publish and `--fetch` | `git` |
 | `scripts/gates/pty-walkthrough.sh` | The review TUI under a real pty: first paint, the file tree, marks, the span walk, the difftool handoff | `git`, `python3` |
+| `scripts/gates/ci-integrate.sh` | The CI merge job against scratch bare remotes: the gate, the merge, the record, the publish, and every refusal in between | `git`, `jq` |
 
-`mise run gates` builds the binary, then runs both. Each script also takes a binary path as its first
+`mise run gates` builds the binary, then runs all three. Each script also takes a binary path as its first
 argument. A pipeline that installs the build elsewhere passes its own path.
 
 Both scripts resolve the default binary by the rule `mise run build` uses. A branch installs and tests
 its own namespaced name, rather than a build another worktree left behind. See
 `scripts/install-name.sh`.
+
+`.github/workflows/ci.yml` runs `mise run gates` on every push and pull request — one line, because the
+task is the definition. `.github/workflows/git-pair-integrate.yml` then triggers on that workflow finishing
+and performs the landing of a declared changeset (§Landing a declared change from CI).
 
 Work here is planned in `docs/plans/<name>/plan.md`, and a finished plan moves to
 `docs/plans/completed/`. Each change carries its own directory under `changesets/`. The tool reviews

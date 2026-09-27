@@ -138,6 +138,16 @@ keeps it honest.
   Merges what is declared and ready; leaves an approved-but-undeclared branch and a drifted declaration
   alone; a re-run does nothing twice; the poll finds a declaration with no event behind it; a dry run writes
   nothing; a conflicted merge is aborted, unrecorded and red.
+- `.github/workflows/ci.yml`: the repository's own CI — `name: CI`, `mise run gates` on every push and on
+  pull requests, through mise so the pinned Go and the task list stay in `.mise.toml`. It is here for two
+  reasons. It is the workflow `git-pair-integrate.yml`'s `workflow_run` names, which until now pointed at a
+  placeholder. And it triggers on `push` to every branch, because the merge job reads the checks on a
+  *branch head* while a pull-request run reports them against the PR's merge ref — a PR-only CI would leave
+  every declared head looking untested, correctly and silently.
+- One host dependency, caught before the new CI ran once: `e2e-29.sh` commits a merge in a clone it creates,
+  and a clone has no committer of its own — every pass it had returned here came from the machine's global
+  git config. Each clone the replay creates now sets an identity, and both replays were re-run with
+  `GIT_CONFIG_GLOBAL=/dev/null`.
 - README's "Landing a declared change from CI", including the two derivations that are easy to get wrong:
   `--commit` is the merge commit rather than the destination's tip before the merge, and the destination
   comes from the queue rather than from `base:`.
@@ -194,7 +204,10 @@ keeps it honest.
   machine (M3); `internal/cli/integrating_surfaces_test.go` — status, unready, queue (M4);
   `json_nulls_test.go` now asserts `awaiting_integration` is `[]` and not null.
 - `scripts/gates/e2e-29.sh`: 118 assertions, `E2E: all checks passed`, including the second clone.
-- `scripts/gates/ci-integrate.sh`: 56 assertions, `CI-INTEGRATE: all checks passed` — the job run as a job
+- Both scripted replays re-run with `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null`, which is the
+  condition a runner starts in: `E2E: all checks passed`, `PTY: all checks passed`. The e2e replay was not
+  green in that condition until the identity fix above — it had been borrowing this machine's `~/.gitconfig`.
+- `scripts/gates/ci-integrate.sh`: 60 assertions, `CI-INTEGRATE: all checks passed` — the job run as a job
   runs it, in a clone of a bare remote, with the merge, the refs, the skips and the aborted conflict
   checked on the remote rather than on what the script printed; and the probe stubbed so all three of its
   answers, `--require`, the `--expect-head` mismatch, and the sha the probe is handed are all asserted (M6).
