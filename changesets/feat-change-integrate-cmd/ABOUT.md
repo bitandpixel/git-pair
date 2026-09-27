@@ -226,8 +226,41 @@ keeps it honest.
 - `TestEveryCommandIsNamedInTheDocs` passes, which is what makes PRD, README and `cli.md` name the
   command rather than merely mention it.
 
+## Responses (review `906332c`)
+
+Two questions were asked, both left in place where they were asked rather than moved here.
+
+- **"Does it make sense to enforce 'the parent branch has not landed' at integration-ready time, or write the
+  record and let the child become integratable later?"** Refused now, not deferred. The record is the wrong
+  instrument for an intention: it is create-only, it states that a merge already happened, and `integration
+  record` verifies that statement against the destination's tree — a record for an unmerged child is a false
+  claim that can never be corrected. Deferring the declaration instead would leave a request that goes stale
+  on the event unblocking it: the parent's landing changes what the child's merge is against, while the gate
+  (`--expect-head`, and the probe) speaks about the head the author declared, which no run has tested since.
+  The destination is also not knowable before the parent lands, since `DestinationFor` reads the parent's
+  integration ref. The human path is unaffected — `check` still answers yes, `recordCarried` still lands a
+  carried directory — so the refusal costs one more `change integrate`, against a head CI has run. Reasoning
+  in the plan's Decisions table, and the question is answered there beside the reviewer's text.
+- **"Should the merge workflow also trigger when `main` changes, in case a stable child becomes eligible for
+  a main-side reason — or is the backstop good enough?"** The backstop is good enough: the scheduled poll
+  re-reads the queue and re-derives each destination on every pass, so such a changeset is picked up within
+  one interval with the same probes and the same refusals. A trigger on `main` would reduce latency only, and
+  would arrive with main's sha while `--expect-head` must name the declared head. The case is also
+  unreachable today, because of the answer above. Kept as a comment where the reviewer wrote it, for the day
+  that rule changes.
+
+Retained on purpose, and therefore reported by `change ready` as surviving review additions: the reviewer's
+comment in `.github/workflows/git-pair-integrate.yml`, the question in the plan's success criteria, and the
+markdown pass over `plan.md` (emphasis markers and table alignment). The answers are written beside each
+rather than replacing them. New table rows keep this file's original compact spacing, so the tables are now
+mixed width — cosmetic, and a formatter pass over the file would settle it either way.
+
 ## Known limitations
 
+- The job proves the *declared head* green, not the merge result green; `main` runs its own CI after the
+  push, and proving the result before it lands is a merge queue, which this example deliberately is not
+  (README, "Green before the merge"). This is the same fact that makes a deferred child declaration worth
+  refusing: a green from before the parent landed is a green about different work.
 - The destination is the branch a parent's record *says* it was based on. A parent landed somewhere other
   than its own base makes that answer wrong, and it is wrong in the direction `integration record`
   catches: the record refuses a landing not reachable from the destination it derived, and `--target` is
