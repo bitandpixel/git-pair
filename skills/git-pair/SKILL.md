@@ -117,6 +117,26 @@ Open every `path:line` it reports and address, respond to, remove, or consciousl
 then run `git pair change ready --allow-surviving-review-additions`. The override states that you
 verified the surviving lines; it is not a way past a check you have not read.
 
+### Reviewer text in an implementation file
+
+A comment a reviewer left in a file outside `changesets/<id>/` is a request written into your source. It is
+not an annotation to keep. Once you have done the work it asks for, delete the reviewer's line in the same
+commit. A line you deleted no longer survives, so the check stops reporting it — that is the resolution the
+check aims at, not a way around it. Do not answer in place: a `// done` reply leaves reviewer text in the
+file and is a worse answer than the one in `ABOUT.md` or the thread.
+
+Do not transcribe the comment before deleting it. The review commit introduced the line and your fix commit
+removes it, so git history already records that the feedback existed and what became of it. Record the
+substance only when it needs further discussion, elaboration, or another person:
+
+- settled and nothing to add → delete it and move on;
+- needs discussion, elaboration or collaboration → append an `Addressed feedback` section to `ABOUT.md`, or
+  open a thread under `changesets/<id>/`. Use the thread when the point is a conversation, and `ABOUT.md`
+  when it is a fact about the change. `git pair init` does not scaffold that section; add the heading when
+  you first need it;
+- the reviewer's line is code you are keeping → leave it in place and acknowledge it with
+  `--allow-surviving-review-additions`.
+
 ## Exit codes
 
 | Code | Meaning | What to do |
@@ -200,5 +220,6 @@ invocation that closes the gap. Report them; do not run them.
 - Treating `git pair status` output as permission to merge. `status` observes; `check` decides.
 - Running `git pair change integrate` instead of `git pair check`, or before it. The declaration refuses
   what the gate refuses, and it licenses nothing on its own.
+- Leaving an answered reviewer comment in a source file. Delete it once the work is done; history keeps it.
 - Leaving a changeset `READY` when the work is not finished: run `git pair change unready` first.
 - Assuming `git pair check --json` failing looks like a non-zero exit. It exits 0 and says `false`.

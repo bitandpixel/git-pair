@@ -700,6 +700,9 @@ git pair change ready --allow-surviving-review-additions
 
 This is intended for cases where review-added code or comments are deliberately retained.
 
+A surviving addition the author resolves by doing the work is removed from the file, not left in place; §19.5
+states that policy and where the record of it belongs.
+
 The check applies only to additions from the **most recent review submission**, not all historical review additions.
 
 ## 9.3 `git pair change feedback`
@@ -3110,6 +3113,27 @@ The invariant is:
 
 > Before advancing past the latest review boundary, every addition introduced by that review must either have changed/disappeared or be explicitly acknowledged as intentionally surviving.
 
+## 19.5 Resolving a surviving addition
+
+§19.2 forces inspection. What an author should then do with a reviewer comment inside an implementation file
+— a path outside `changesets/<id>/`, which is the boundary §19 uses for blocking versus non-blocking — is
+policy, and the policy is:
+
+-   The author applies the feedback and then removes the reviewer's inline text, in the same commit. A
+    comment that outlives the work it asked for is feedback the repository has not finished consuming.
+-   The author does not copy the comment before deleting it. Git history already holds the exchange: the
+    review commit introduced the line (§19.1) and a later commit removed it.
+-   The author records the substance when it needs further discussion, elaboration, or collaboration, and not
+    otherwise. There are two homes: an `Addressed feedback` section of `ABOUT.md` (§6), and a new thread
+    (§7). The choice follows the content — a thread is a conversation, `ABOUT.md` describes the change — and
+    neither is a requirement to fill in. `init` does not scaffold the section.
+-   An addition the author keeps is not resolved by deletion. It survives, and §19.2's override acknowledges
+    it. That is the normal outcome for a direct code edit (§20) the author accepts.
+
+Nothing enforces the removal. Deleting an addressed comment makes the addition disappear from `HEAD`, so the
+diagnostic stops reporting it, and an author can delete a comment without doing the work it asked for. The
+diagnostic guarantees inspection; §19.4 states the invariant and this section states what inspection is for.
+
 ---
 
 # 20. Direct Human Code Edits
@@ -3130,6 +3154,10 @@ The agent must consciously decide whether to:
 -   otherwise resolve it.
 
 Do not attempt to distinguish review comments from reviewer-authored implementation code in MVP.
+
+The absence of a distinction does not make the two answers equal. §19.5 states the expected one for a comment
+the reviewer left in an implementation file: apply it, then delete it. An edit that is now the code the author
+wants is the case for the override.
 
 ---
 

@@ -54,7 +54,13 @@ func printSurvivalReport(w io.Writer, r survival.Report, header, hint string) {
 		}
 		fmt.Fprintln(w)
 	}
-	fmt.Fprintf(w, "\nReview these additions before continuing.\n")
+	// The line is the author's first reading of the rule, because this is the moment they hit it. A
+	// sentence that only says "review these" leaves the resolution policy — apply it, then delete the
+	// reviewer's comment, and record it only when it needs discussion — to a document they are not
+	// looking at. PRD §19.5.
+	fmt.Fprintf(w, "\nReview these additions before continuing: apply each one, then remove the comment it came\n"+
+		"from. The review commit keeps its history. Record anything that needs further discussion in\n"+
+		"ABOUT.md or in a new thread.\n")
 	if hint != "" {
 		fmt.Fprintf(w, "\nTo intentionally preserve them:\n  %s\n", hint)
 	}

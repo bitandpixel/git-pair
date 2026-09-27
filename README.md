@@ -136,9 +136,13 @@ still reporting where things stand). `change feedback` is the author's "what did
 just tell me?". It is not the reviewer's command: right after a submission the
 reviewer's own span, `diff --unreviewed`, is empty because the submission is the newest commit.
 
-The author addresses the feedback in code, `ABOUT.md` and the thread. What the reviewer sees
-next is the review-relative span, where review lines are deleted — that is how a reviewer sees
-feedback being consumed:
+The author addresses the feedback in code, `ABOUT.md` and the thread, and deletes the reviewer's
+comment from the source once the work it asked for is done. History already holds the exchange: the
+review commit introduced the line and a later commit removed it, so the comment needs no
+transcription. Record it only when it still needs discussion, elaboration or another person, and
+then in an `Addressed feedback` section of `ABOUT.md` or in a new thread (PRD §19.5). What the
+reviewer sees next is the review-relative span, where review lines are deleted — that is how a
+reviewer sees feedback being consumed:
 
 ```bash
 $ git pair diff --unreviewed -- src/service.ts
@@ -171,7 +175,9 @@ src/service.ts:11
     // What happens if these execute concurrently?
 
 
-Review these additions before continuing.
+Review these additions before continuing: apply each one, then remove the comment it came
+from. The review commit keeps its history. Record anything that needs further discussion in
+ABOUT.md or in a new thread.
 
 To intentionally preserve them:
   git pair change ready --allow-surviving-review-additions
@@ -2034,7 +2040,9 @@ git pair change ready --allow-surviving-review-additions
 ```
 
 Only the most recent review counts, and only additions outside `changesets/<changeset>/`
-block; surviving `ABOUT.md` and thread text is listed as non-blocking. It is the only hatch left:
+block; surviving `ABOUT.md` and thread text is listed as non-blocking. Resolving a blocking
+addition means applying it and then removing the reviewer's inline comment; an edit the author keeps
+is what the flag is for (PRD §19.5). It is the only hatch left:
 `git pair check` has no override flag, because its answer is what a merge acts on, and the recorder runs
 no diagnostic at all — refusing to write down a landing that has already happened would be an argument
 about a decision the author can no longer un-take (PRD §19.3).
