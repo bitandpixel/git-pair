@@ -102,6 +102,27 @@ func (d DefaultBranchRef) BaseName() string {
 	return d.LocalName()
 }
 
+// IsBranch reports whether a name means the integration branch, whichever root this clone happens to
+// hold it under.
+//
+// It exists because `base:` is written as a name and `DefaultBranch` answers with a ref, and the two
+// meet in the question "is this changeset measured against trunk, or stacked on a branch?". In a clone
+// that has fetched and not branched off trunk — the ordinary state — the integration branch is only
+// `refs/remotes/origin/main`, so a comparison of `main` to that ref says "stacked on a branch called
+// main", which `status` prints as a parent line and `change integrate` refuses over: an unlanded parent
+// is a refusal, and trunk never has an integration record. So every spelling of the same branch counts:
+// the ref as found, the name with its root removed, and that name under `refs/heads/`.
+//
+// A branch really named `origin/main` would answer true here and be mistaken for trunk. That is the
+// trade, and it is the one `BaseName` already makes for `base:` and for `status`.
+func (d DefaultBranchRef) IsBranch(name string) bool {
+	if d.Ref == "" || name == "" {
+		return false
+	}
+	base := d.BaseName()
+	return name == d.Ref || name == base || name == "refs/heads/"+base
+}
+
 // DefaultBranch resolves the integration branch.
 //
 // A caller-supplied ref wins outright; it is what CI passes, and it matches how

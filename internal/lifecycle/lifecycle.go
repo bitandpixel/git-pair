@@ -31,6 +31,14 @@ const (
 	// holds the newest-marker rule the same way the others do, but it names no state —
 	// see Summary.Abandoned for why.
 	KindAbandoned
+	// KindIntegrate is `change integrate`: the author's declaration that the approval is
+	// standing and the work is handed to whoever owns the destination branch. It is a marker
+	// and it does establish a state (INTEGRATING), which is what separates it from KindAbandoned:
+	// "has the author handed this over" is a question a merge gate branches on.
+	//
+	// It is not a verdict. The outcome that licenses a merge stays the review underneath it, and
+	// `check` reads through this marker to find it (PRD §9.9, §11.3).
+	KindIntegrate
 )
 
 func (k Kind) String() string {
@@ -43,6 +51,8 @@ func (k Kind) String() string {
 		return "unready"
 	case KindAbandoned:
 		return "abandoned"
+	case KindIntegrate:
+		return "integrate"
 	}
 	return "implementation"
 }
@@ -97,7 +107,13 @@ type Summary struct {
 	// reports WORKING, and anything that advises a next step or decides whether an
 	// operation may record a marker has to look here (PRD §9.7).
 	Abandoned *Event
-	State     model.State
+	// Integrating is the newest `change integrate` declaration in the range, or nil. The state
+	// already says INTEGRATING when the newest marker is one, so this exists for the two questions
+	// the state cannot answer on its own: which commit made the declaration, and whether a
+	// changeset in some other state ever made one — a re-review or a retraction supersedes a
+	// declaration without erasing it.
+	Integrating *Event
+	State       model.State
 	// Reason explains State in one line, for humans and `status --json`.
 	Reason string
 	// Stale is true when commits other than the newest marker follow it. Most callers
@@ -323,6 +339,12 @@ func parseEvent(slug string, rec []string) Event {
 			e.Kind = KindUnready
 		case state == model.StateValueAbandoned:
 			e.Kind = KindAbandoned
+		case state == model.StateValueIntegrating:
+			e.Kind = KindIntegrate
+			// The commit the declaration covers, read the way a review's head is read: a rebase
+			// rewrites the marker and keeps its message, so the name left behind is the evidence that
+			// the declaration speaks about history this branch no longer has.
+			e.ReviewedHead = reviewedHead(trailers[model.TrailerHead])
 		default:
 			// `Review-State: closed` was read here until ending a changeset became a
 			// ref move instead of a commit. It now falls through to the
@@ -358,8 +380,14 @@ func derive(events []Event) Summary {
 		}
 		if e.Kind == KindAbandoned {
 			// The terminal record, newest wins. It is reported beside the state rather
-			// than as one, so `state` keeps its five values.
+			// than as one, so an abandoned changeset keeps the state its remaining markers
+			// derive.
 			s.Abandoned = &s.Events[i]
+		}
+		if e.Kind == KindIntegrate {
+			// Newest wins, the way the newest verdict does: a declaration someone superseded is
+			// not the one in force, and the commit to name is the one most recently handed over.
+			s.Integrating = &s.Events[i]
 		}
 		if e.UnrecognisedMarker {
 			s.Unrecognised = append(s.Unrecognised, e)
@@ -429,6 +457,8 @@ func markerLabel(m Event) string {
 		return "unready " + m.Short
 	case KindAbandoned:
 		return "abandoned " + m.Short
+	case KindIntegrate:
+		return "integrate " + m.Short
 	}
 	return m.Short
 }
@@ -444,6 +474,8 @@ func markerReason(m Event) string {
 		return "marked unready by " + m.Short
 	case KindAbandoned:
 		return "abandoned by " + m.Short
+	case KindIntegrate:
+		return "declared ready to integrate by " + m.Short
 	}
 	return m.Subject
 }
@@ -538,6 +570,12 @@ func (e Event) State() model.State {
 		// on it. What makes it recognisable is Summary.Abandoned, which every surface
 		// that advises a next step has to consult (PRD §9.7).
 		return model.StateWorking
+	case KindIntegrate:
+		// The one marker that is not a verdict and is still a state. The approval underneath it
+		// neither moves nor has to: INTEGRATING is the author adding "and merge this" to a verdict
+		// that already permits the merge, and the gate reads the verdict for the outcome and for the
+		// commit it approved (PRD §9.9, §11.3).
+		return model.StateIntegrating
 	}
 	return model.StateWorking
 }

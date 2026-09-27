@@ -17,6 +17,8 @@ The MVP deliberately does not:
 - implement a source-code editor, a full diff renderer, or anything that competes with
   Vim/Neovim, `git difftool`, git, or GitHub/GitLab
 - create or manage pull requests, merge branches, squash branches, or push
+  (`git pair change integrate` asks for a merge, in a commit, for somebody else to perform — it merges
+  nothing, pushes nothing, and writes no ref while work is in flight)
 - run coding agents or CI/CD
 - keep inline-comment databases or GitHub-style comment anchoring
 - treat per-file review checkmarks as review state — they persist locally under the git directory
@@ -208,14 +210,35 @@ head:  0eaad3b
 next:  `git pair check`, then merge into main with ordinary git, then `git pair integration record`, then `git pair integration publish`
 ```
 
+When the merge is somebody else's job — a pipeline, or the person who owns the destination branch — the
+author says so once, in a commit on the branch:
+
+```bash
+$ git pair change integrate
+Integrating: booking-transaction
+  head:        0eaad3b
+  declared by: 91bf204
+  merge into:  main
+  next:        `git push origin booking-transaction` — main merges what `git pair check --json` reports ready and integrating
+```
+
+That is the whole command: one empty marker, no ref, no push, no merge. It runs the gate above before it
+writes, so nothing `check` would refuse can be declared, and `git pair change unready` takes the request
+back. What moved is who waits for whom — the merge is still ordinary git run by whoever owns the branch, and
+CI's gate is both answers of that one command:
+
+```bash
+git pair check --json | jq -e '.ready and .integrating'
+```
+
 Then the owner lands it, with ordinary git. Squash, rebase-merge, plain merge — git-pair has no
 opinion and takes no part; it neither runs a merge nor derives one, because squash and cherry-pick
 destroy the ancestry that would have said so.
 
-The three steps are the whole contract — `check`, the landing with ordinary git, `integration
-record` — and the order of the last two is not free: **record before tidy**. The record asks which
-head was reviewed, and the branch that still carries it is where the answer usually comes from — so
-the order that never costs you a flag is record, then delete.
+The steps are the whole contract — `check`, the declaration when the merge is not the author's, the landing
+with ordinary git, `integration record` — and the order of the last two is not free: **record before tidy**.
+The record asks which head was reviewed, and the branch that still carries it is where the answer usually
+comes from — so the order that never costs you a flag is record, then delete.
 
 What the branch is needed *for* decides whether deleting it costs anything. A merge carries the
 reviewed chain inside itself, as the side the merge brought in, so a merge landing is still
@@ -388,7 +411,7 @@ withdrawing it is a command too: an author who wants to keep implementing after 
 instead of leaving a reviewer to guess whether a changeset in the queue is finished work or work in
 progress. `working` is not a sixth state — it is `WORKING` chosen on purpose, and a changeset with no
 marker derives the same answer. The marker is written only when the changeset is in review (`READY`,
-`APPROVED` or `FEEDBACK`); on a `WORKING` or `BLOCKED` changeset there is nothing to withdraw, so the
+`APPROVED`, `FEEDBACK` or `INTEGRATING`); on a `WORKING` or `BLOCKED` changeset there is nothing to withdraw, so the
 command succeeds and records nothing. Withdrawing an approval does not delete it: the approval stays
 in `git pair review history`, and `git pair check` refuses until a reviewer approves again. The
 withdrawal is the marker commit and nothing else — no ref moves, because no ref exists yet.
@@ -448,10 +471,12 @@ approval is about a commit, and git-pair does not read an approval of one commit
 rewritten version of it. Merging the base in rewrites nothing and passes. A marker naming no head is
 refused too, because there is nothing to compare and no honest way to guess.
 States:
-`WORKING`, `READY`, `BLOCKED`, `FEEDBACK`, `APPROVED`. `git pair status` prints the
+`WORKING`, `READY`, `BLOCKED`, `FEEDBACK`, `APPROVED`, `INTEGRATING`. `git pair status` prints the
 state plus a one-line `Reason`. There is no state file, and no state for a completed
 changeset: completion is a pair of refs (below), and the merge that finishes a changeset is not
-something state derivation can see. (The TUI caches the reviewer's
+something state derivation can see. `INTEGRATING` is the sixth because it is a marker — the author's
+request that this head be merged (§9.9) — and it is not a verdict: the approval underneath it is what
+permits the merge, which is why `check` answers `ready` and `integrating` separately. (The TUI caches the reviewer's
 per-file marks under the git directory; those are reading progress, not state, and no
 command reports them.)
 
@@ -592,7 +617,8 @@ landed.
 | --- | --- | --- |
 | `init` | `--id <id>`, `--base <ref>`, `--set-base`, `--parent <branch>`, `--set-parent`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch, recorded as its branch name where that name resolves and as the fetch ref this clone has to reach it through where it does not; refuses on that branch, where a changeset could never contain anything; `--parent` stacks the changeset instead of naming a base, recording the parent's changeset ID beside it, and `--set-parent` restacks it — never done implicitly, because a parent that moved, landed or died is the author's decision; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
-| `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` when the changeset is in review, otherwise succeeds and records nothing; refuses a changeset whose work is recorded as integrated |
+| `change integrate` | `--allow-feedback` | declares the approved head ready to be merged, as one empty marker commit (`Review-State: integrating`, `Review-Head`): no ref, no push, no merge (§9.9). Runs `git pair check`'s gate first, as the same code, and names every failed condition — so a declaration cannot be made for work the gate would refuse. Refuses a stacked child whose parent has no integration record: the automatic merge would land it on a branch review can still rewrite. Idempotent at the head it declared; a commit after that head is declared next time |
+| `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` when the changeset is in review (including a changeset whose declaration is being taken back), otherwise succeeds and records nothing; refuses a changeset whose work is recorded as integrated |
 | `change use <id>` | none | records which changeset a branch carrying more than one is working on: writes `ignores: <other ids>` into the chosen changeset's `CHANGESET.yaml` and commits that file; refuses an id the branch does not offer and a record that would leave the branch still undecided; idempotent |
 | `change abandon` | none | records the terminal `Review-State: abandoned` and nothing else — no ref, since an abandoned changeset has no landing to record; `change ready`, `change unready` and `review submit` refuse against it afterwards; refuses a changeset whose work is recorded as integrated; idempotent |
 | `change feedback` | `--stat`, `--name-only`, `--changeset <slug>` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
@@ -603,9 +629,9 @@ landed.
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history |
 | `review history` | `--changeset <slug>` | only review marker commits, indexed from `0`, each naming the commit it reviewed under `REVIEWED` and the reviewer who submitted it under `REVIEWER` |
-| `queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus any landing in the integration branch that no integration record accounts for; read from the repository, not the checkout |
+| `queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus any landing in the integration branch that no integration record accounts for; read from the repository, not the checkout. A second list, `AWAITING INTEGRATION` / `awaiting_integration`, holds approved work whose author has asked for the merge (§9.9) with the branch it is asking to land on — never in both lists, because a declaration is a marker and a branch carrying one is not `READY` |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug |
-| `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition — the review's outcome, whether the commit it approved is still in this history, and whether the content still matches; no `--changeset`, because it is the gate a forge runs *on* a revision |
+| `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition — the review's outcome, whether the commit it approved is still in this history, and whether the content still matches; reports `integrating` beside the verdict, so CI's gate is one command and two fields (`jq -e '.ready and .integrating'`); no `--changeset`, because it is the gate a forge runs *on* a revision |
 | `integration publish` | `[<changeset>…]`, `--remote <name>` | sends a changeset's two durable refs to the shared remote, unforced, in one push — the only git-pair command that pushes, and the only thing git-pair may push is `refs/git-pair/*` (§26). No arguments publishes every pair this clone holds; named ids publish just those, and a name with no record here is a refusal rather than a silent no-op. No `+` and no options: a remote that holds a different value rejects the push, and the refusal names both values, because two people recording one landing is a decision rather than a race to win. It then re-reads the remote's copies and reports what is actually there, so one ref arriving while the other is refused is reported as the half-state it is rather than as a single failure. Idempotent — a pair the remote already holds is "already published" and nothing is written, which is what lets CI run it every build |
 | `integration record` | `--source <sha>`, `--commit <sha>`, `--target <ref>`, `--changeset <id>`, `--allow-feedback` (all optional) | writes both durable refs for one changeset, create-only: the archive at `--source` and the integration at `--commit`. The changeset is discovered from the `changesets/<id>/` directories `--source` carries and the integration branch does not, so a pipeline needs the two SHAs it already holds and not the changeset name; `--changeset` disambiguates a stacked child. Before it writes: the source's history must name this changeset and its newest verdict must permit integration (`approve`, or `feedback` with `--allow-feedback`); `--commit` must be in the destination branch's history (the `--target` you name, else the changeset's `base:`, else the default branch) and must be the commit that added `changesets/<id>/` there. Name neither SHA and the repository is asked — the landing is the first-parent commit on the destination that added the directory, the reviewed head is the branch still carrying it, wherever this clone holds that branch (a fetched `refs/remotes/origin/<branch>` counts, since that is where git puts a branch a pipeline was handed), and one branch is one candidate however many paths spell it — and anything ambiguous is a usage error naming the candidates. Needs no checkout and writes no commit; re-running it with the same pair succeeds and changes nothing. It writes refs and nothing else: the clone's configuration is `integration configure`'s to write, and `record` prints the one line naming that command when the clone has none. The records themselves stay behind `--fetch`: a record is a claim, and a clone should acquire claims by asking |
 | `integration configure` | `--remote <name>`, `--fetch-only` | the only configuration git-pair ever writes, and the command *is* the consent for it: appends the mirror refspec `+refs/git-pair/*:refs/remotes/<name>/refs/git-pair/*` to `remote.<name>.fetch`, so an ordinary `git fetch` keeps this clone able to tell published from unpublished, and appends `refs/git-pair/*:refs/git-pair/*` to `remote.<name>.push`, so an ordinary `git push` publishes what this clone records. Both are `--add` writes, idempotent, each reported with its key, its value and whether it was already there — so it is safe in a pipeline and safe in a repository with its own refspecs. `--fetch-only` writes the read half alone, for a clone that should compare a record against the remote without being the thing that makes it public. The push refspec carries no `+`, so a remote holding a different value rejects the push instead of being overwritten: publishing automatically is a repository's decision, and moving somebody else's record is nobody's. It is a command rather than a flag on `record` because configuration is a property of the clone, and a clone that arrived after a landing has no SHAs to record and had nothing to run. A prompt would make one command line mean two things, and an unanswered prompt in CI reads exactly like a declined one (§PRD §22) |
@@ -638,7 +664,7 @@ nothing, those reads exit 2. For a span of another branch, name its ends: `git p
 | Exit code | Meaning | Seen as |
 | --- | --- | --- |
 | 0 | success | — |
-| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:`; `integration record` finding no changeset directory at `--source`, a head that was never reviewed, a landing that is not in the destination branch or did not add the changeset directory, or a record naming a different commit; `integration configure` in a repository with no remote to write |
+| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:`; `git pair change integrate` refusing work the gate would refuse — no approval standing, content that moved since it, a rewritten history, a parent that moved, a dirty tree — or refusing a stacked child whose parent has no integration record; `integration record` finding no changeset directory at `--source`, a head that was never reviewed, a landing that is not in the destination branch or did not add the changeset directory, or a record naming a different commit; `integration configure` in a repository with no remote to write |
 | 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`/`integration`/`skill`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; detached HEAD; `cannot tell which branch is the integration branch`; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `--fetch` with no remote configured; `"<path>" does not appear in <span>`; editor/TUI commands without a terminal; more than one changeset directory in `--source` and none named with `--changeset`; `skill install` with an unknown `--harness` or `--scope`, or with `--dest` alongside either |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
@@ -674,13 +700,16 @@ and two fields report that they cannot answer — `uncommitted` is `null` and `s
 both describe the checkout rather than the commit, and `next_action` names the branch to switch to.
 `abandoned` is true once `change abandon` has ended the changeset, with `abandoned_commit` naming the
 terminal marker; `state` stays `WORKING`, because the ending is a fact beside the state rather than a
-sixth state value. `archive_ref` and `archive_commit` describe the
+state value of its own. `archive_ref` and `archive_commit` describe the
 durable pair and stay `""` while work is in flight, because nothing writes a ref before landing —
 their name is derivable from the changeset, so their existence is the only fact worth reporting.
 `integrated` is true once `git pair integration record` has recorded where
 the work landed, with `integrated_commit` naming that commit and `integration_ref` the ref that holds
 it, and `state` is untouched by it: landing
-is a fact beside the state, not a sixth state value. The human surface prints no "run
+is a fact beside the state, not a state value of its own. `integrating` and `integrate_commit` are the
+other pair beside it, and the only one that is also a state: `INTEGRATING` while a `git pair change
+integrate` declaration (§9.9) is the newest marker, the commit named so the author can see what they did
+and not only what it produced. The human surface prints no "run
 `git pair integration record`" beside a ref that already exists — the finding for a landing with no record
 is `LANDED, UNRECORDED`, which names the command with the changeset in it. Reading a landed changeset by id
 (`status --changeset <id>`, no branch carrying it) keeps that split: `state` stays what the span says while
@@ -752,6 +781,18 @@ carries with no integration ref: that is a merge whose record never ran, and it 
     }
   ],
   "skipped": ["untracked-work (cannot resolve changeset base \"other\": unknown revision: other)"],
+  "awaiting_integration": [
+    {
+      "changeset": "waitlist-rebooking",
+      "branch": "waitlist-rebooking",
+      "base": "main",
+      "state": "INTEGRATING",
+      "head": "7c31b0a0d9cee930b85324aedfbc0aa4b33c1409",
+      "integrate_commit": "2ce9f4a1d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a1",
+      "declared_age": "2h",
+      "destination": "main"
+    }
+  ],
   "parent_notes": ["waitlist-rebooking: parent booking-transaction landed as 4f2b8c1 — the branch booking-transaction is stale — it holds nothing the record does not"],
   "landed_unrecorded": [
     {
@@ -765,6 +806,12 @@ carries with no integration ref: that is a merge whose record never ran, and it 
 `parent_notes` is what the queue says about a row it is not refusing: the branch underneath a READY child
 has an integration record, so the base a reviewer is about to read against is finished work. It is a note
 and not a row, and never a reason — a READY changeset has no approval for a parent to invalidate.
+
+`awaiting_integration` is the second list, and it answers a different person. `ready_for_review` is "what is
+waiting for a reviewer"; this is "what a reviewer approved and the author has handed over for merging"
+(§9.9), oldest request first, each row carrying the branch somebody would merge into. A changeset is never
+in both: a declaration is a marker, so a branch carrying one is not `READY`. The human form prints them
+under `AWAITING INTEGRATION`, and prints nothing when there are none — the array is `[]` either way.
 
 `landed_unrecorded` is the queue's second job: work that reached the integration branch while nobody
 wrote its record. Each entry carries the invocation that closes the gap, and the human form prints the
@@ -871,6 +918,16 @@ naming the merge and then `git pair integration record` — so an agent that gat
 comes next without parsing the human output. It is present only when `ready` is true, because on a
 failing gate the next step is `reasons`.
 
+`integrating` answers the other half of a merge gate, and the two are reported apart because they are two
+questions: `ready` is "may this merge", `integrating` is "did the author ask for one" (§9.9).
+`integrate_commit` is the declaration, full like `head`, and absent when the newest marker is not one. A
+superseded declaration — put back in review, re-offered, or answered by a reviewer — reads false, so a
+pipeline cannot perform a merge the author has just taken back. CI's gate is one command and both fields:
+
+```bash
+git pair check --json | jq -e '.ready and .integrating'
+```
+
 ```json
 {
   "changeset": "feat",
@@ -882,7 +939,8 @@ failing gate the next step is `reasons`.
     "content outside changesets/feat/ changed since 1a2b3c4: src/service.ts"
   ],
   "policy": "approve-only",
-  "integrated": false
+  "integrated": false,
+  "integrating": false
 }
 ```
 
@@ -921,9 +979,38 @@ neither:
 SHA), `review_queue_visible` and `acknowledged_survivors`. `surviving_review_artifacts` appears only when a
 surviving-additions report existed — which is when `--allow-surviving-review-additions` acknowledged lines.
 
+`git pair change integrate --json` — the declaration, and the destination it is asking for. `was` is the
+state the branch was in and `state` the state after, which differ only when a marker was written;
+`recorded` is false when this head was already declared, which is a success rather than a refusal, and
+`integrate_commit` then names the declaration that was already there. `destination` is the branch somebody
+would merge into — `destination_source` says which rule produced it (`base`, `parent` for the branch a
+landed parent landed on, `default`), `destination_via` names the parents walked to get there, and
+`destination_unreachable` names the base that no longer resolves here when the answer fell back. `reasons`
+is an array in both outcomes, so a caller that read a refusal and a caller that read a success handle one
+shape.
+
+```json
+{
+  "changeset": "booking-transaction",
+  "branch": "booking-transaction",
+  "base": "main",
+  "state": "INTEGRATING",
+  "was": "APPROVED",
+  "head": "0eaad3b18686624cb624722b4e8c348bf03451a7",
+  "recorded": true,
+  "integrate_commit": "91bf204d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  "destination": "main",
+  "destination_source": "base",
+  "reasons": [],
+  "next_action": "`git push origin booking-transaction` — main merges what `git pair check --json` reports ready and integrating"
+}
+```
+
 `git pair change unready --json` — `was` is the state the command found and `state` the state after
 it, which differ only when a marker was written. `recorded` is false when there was nothing to
-withdraw, which is a success rather than a refusal, and `unready_commit` is empty then.
+withdraw, which is a success rather than a refusal, and `unready_commit` is empty then. Withdrawing a
+declaration (`was: "INTEGRATING"`) is how an author stops a pipeline from merging work that has gone back
+into review.
 
 ```json
 {
@@ -977,16 +1064,21 @@ git pair change feedback            # read that submission: threads, ABOUT.md, c
 git pair review history --json      # enumerate review commits
 git pair change ready               # again
 git pair check                      # assert integration-readiness; $? is the answer
+# the merge is somebody else's job? git pair change integrate — a request, in a commit
+git pair change integrate           # declares this head ready to be merged; merges nothing
 ```
 
 Rebasing after an approval invalidates it, and `check` says so in as many words. Re-offer the work with
 `change ready` and wait for a reviewer; do not edit the marker's `Review-Head` to make the comparison
 line up — that trailer is the reviewer's statement about what they looked at, not the author's to amend.
 
-`check` is the last step an agent runs. Landing is not the agent's: the merge is ordinary git run by
-whoever owns the destination branch, and `git pair integration record` follows it (§13).
+`check` is the last step an agent runs. `change integrate` is the one step after it that an agent may run:
+it is a request written as a marker commit, it refuses anything `check` refuses, and it merges nothing —
+so it can be run unconditionally after a passing gate. Landing is still not the agent's: the merge is
+ordinary git run by whoever owns the destination branch, and `git pair integration record` follows it
+(§13).
 
-Never prompt: `init`, `change ready`, `change unready`, `change abandon`, `change feedback`,
+Never prompt: `init`, `change ready`, `change integrate`, `change unready`, `change abandon`, `change feedback`,
 `change wait`, `status`, `check`, `diff`, `review submit`, `review history`,
 `queue`. They report
 and exit instead of asking, even with a terminal attached.
@@ -1026,6 +1118,17 @@ which is why a JSON gate asks `jq` rather than `$?`:
 
 ```bash
 git pair check --json | jq -e '.ready'
+```
+
+A merge nobody asked for is a different failure, so the gate has a second field. `integrating` is true while
+the newest marker on the branch is a `git pair change integrate` declaration (§9.9) covering this head, and
+false again as soon as the work is put back in review, re-offered, or answered: a request is superseded,
+not erased. A pipeline that gates on `ready` alone merges every approved changeset the moment it is
+approved, which takes the decision out of the author's hands — so the gate for an automatic merge is the
+conjunction, from the one command that computed both halves from one read of the branch:
+
+```bash
+git pair check --json | jq -e '.ready and .integrating'
 ```
 
 One thing a gate needs to know: `check` accepts `feedback` only with `--allow-feedback`. Whether a
@@ -1180,6 +1283,109 @@ git pair skill agents-md >> AGENTS.md
 
 It names where the skill is and the three rules agents most often get wrong. A repository can carry both
 halves — the stanza for every harness, and the installed skill for the ones that read it.
+
+## Landing a declared change from CI
+
+`git pair change integrate` asks for a merge. Somebody still performs it, and a repository can decide that
+its pipeline performs it on the destination branch's behalf. This repository carries one shape of that, as
+an example — no git-pair command merges anything, and none of this is one:
+
+| file | role |
+| --- | --- |
+| `.github/workflows/git-pair-integrate.yml` | the triggers, the permissions, the build — nothing else |
+| `scripts/ci/git-pair-integrate.sh` | the sequence, in shell, so it can be replayed without a runner |
+| `scripts/gates/ci-integrate.sh` | the replay: that job against scratch bare remotes, part of `mise run gates` |
+
+Run it by hand from any clone, on one branch or on everything the queue reports:
+
+```bash
+scripts/ci/git-pair-integrate.sh feat/my-branch
+scripts/ci/git-pair-integrate.sh --dry-run feat/my-branch   # says what it would do, writes nothing
+scripts/ci/git-pair-integrate.sh                            # every changeset awaiting integration
+```
+
+The sequence is §29's landing contract, and the order is the point:
+
+1.  `git pair check --json` — merge only when `.ready and .integrating`. `ready` alone merges work the moment
+    a reviewer approves it; `integrating` alone merges a request whose approval has since been rewritten,
+    withdrawn, or answered.
+2.  With `--require-ci`: prove the head green (below).
+3.  `git merge --no-ff <declared head>` into the destination the **queue** names.
+4.  `git push` the destination — the landing exists when the branch says it does.
+5.  `git pair integration record --changeset <id> --source <declared head> --commit <merge commit> --target origin/<destination>`
+6.  `git pair integration publish <id> --remote origin`, unforced, before anything is tidied.
+
+Three details a first attempt usually gets the wrong way round, each one something the recorder refuses:
+
+-   **`--commit` is the merge commit**, the commit that added `changesets/<id>/` to the destination — which is
+    the destination's *new* tip, not the tip it had before the merge. The old tip adds nothing, so the record
+    refuses it.
+-   **`--source` is the head that was declared**, which `check --json` prints as `.head`: the declaration
+    commit itself, whose history carries the approval underneath it.
+-   **The destination comes from `queue --json`'s `awaiting_integration[].destination`,** not from `base:`.
+    For the child of a landed parent, `base:` is the parent's integration ref, and a ref is a commit rather
+    than a branch anything can merge into.
+
+What the job will not do: merge a change the gate refuses (it says so and exits 0, because a job triggered by
+an event usually runs before anybody has declared anything, and a red build for "not yet" teaches nobody
+anything); merge a head it cannot prove green; record a merge whose push was refused; leave a conflicted
+merge in the tree (`git merge --abort`, exit 1); call `change integrate` itself, since a pipeline that writes
+the declaration is asking for its own merge; or force anything, including the publish.
+
+### Green before the merge
+
+Reviewed and handed over is git-pair's answer. Whether the branch's own tests pass is a second question, and
+it belongs to the forge, so it is asked there:
+
+```bash
+scripts/ci/git-pair-integrate.sh --require-ci --expect-head "$TESTED_SHA" feat/my-branch
+```
+
+-   `--require-ci` consults a probe before merging, and merges on a yes only. A probe is any command: it is
+    handed the sha, prints one line of reason, and exits `0` green, `1` not green, `2` cannot tell. The
+    default is `scripts/ci/gh-head-green.sh`, which reads every check run and commit status GitHub reports
+    for that commit — not branch protection's list of *required* checks, because "everything GitHub can see
+    is green" is one rule instead of two, and a repository whose required set is narrower passes its own
+    `--ci-probe`.
+-   `2` is not `0`. A head with nothing running for it has not been tested, so it is not merged; the poll
+    asks again after the next run. The replay covers all three answers.
+-   `--expect-head <sha>` names the commit the trigger was told CI finished with, so a branch that moved
+    while the job was starting is skipped rather than merged on the strength of a run that tested other
+    work. It also fixes *which* commit the probe is asked about: the declared head, never whatever the branch
+    tip became in the meantime.
+-   The workflow triggers on `workflow_run` — the test workflow completing — and on the schedule, not on
+    `push`. A merge job that ran on the feature branch would put its own check run on the very commit it has
+    to certify, and then wait for itself.
+
+The guarantee is about the head, not about the merge. `main` runs its own CI after the push; a repository
+that wants the *merge result* proven before it lands wants a merge queue, which is a different mechanism and
+outside this example.
+
+From one run of the replay:
+
+```text
+### flow/merge
+flow-merge: declared by ae51ffb for merge into main
+Merge made by the 'ort' strategy.
+  merged as 346a18a
+flow-merge: recorded 346a18a as the integration of ae51ffb
+  archive:     refs/git-pair/archive/flow-merge -> ae51ffb
+  integration: refs/git-pair/integrations/flow-merge -> 346a18a
+  verified reachable from origin/main
+flow-merge: published to origin (archive + integration)
+  flow-merge: merged, recorded, published
+```
+
+What the runner has to provide: `contents: write` for the merge commit and the ref pair, `checks: read` and
+`statuses: read` for the probe (a token that cannot read them answers "cannot tell", and the job merges
+nothing on that answer, so a missing scope stalls it rather than failing it), `fetch-depth: 0` (the gate
+reads the approval out of history, and the record verifies a landing in it), and the integration branch
+named — `GIT_PAIR_DEFAULT_BRANCH` or `--default-branch` on each call, because a checkout that fetched one
+branch has nothing to compare against. And the destination branch has to accept the push: `GITHUB_TOKEN`
+cannot be a branch-protection bypass actor, so an unprotected trunk works as-is and a protected one needs a
+Ruleset bypass actor of its own (a GitHub App or a deploy key) with its token on the push remote. `git pair
+integration configure` is worth running once so ordinary fetches and pushes carry `refs/git-pair/*`; the
+script also fetches them itself, because the destination of a stack is read through its parent's record.
 
 ## Configuration
 
@@ -1659,20 +1865,25 @@ standard streams, so their tests take turns. Splitting a package's tests across 
 keeps each process single-threaded exactly as it is today, and reclaims the overlap. `mise run
 test:serial` is the same suite in one process, with the output `go test ./...` gives.
 
-Two scripted replays sit above it. Each one runs the installed binary as a subprocess, so it reaches
+Three scripted replays sit above it. Each one runs the installed binary as a subprocess, so it reaches
 what a Go test cannot:
 
 | Gate | What it proves | Needs |
 | --- | --- | --- |
 | `scripts/gates/e2e-29.sh` | The PRD §29 loop end to end in a scratch repo, through review, approve, `check`, record, publish and `--fetch` | `git` |
 | `scripts/gates/pty-walkthrough.sh` | The review TUI under a real pty: first paint, the file tree, marks, the span walk, the difftool handoff | `git`, `python3` |
+| `scripts/gates/ci-integrate.sh` | The CI merge job against scratch bare remotes: the gate, the merge, the record, the publish, and every refusal in between | `git`, `jq` |
 
-`mise run gates` builds the binary, then runs both. Each script also takes a binary path as its first
+`mise run gates` builds the binary, then runs all three. Each script also takes a binary path as its first
 argument. A pipeline that installs the build elsewhere passes its own path.
 
 Both scripts resolve the default binary by the rule `mise run build` uses. A branch installs and tests
 its own namespaced name, rather than a build another worktree left behind. See
 `scripts/install-name.sh`.
+
+`.github/workflows/ci.yml` runs `mise run gates` on every push and pull request — one line, because the
+task is the definition. `.github/workflows/git-pair-integrate.yml` then triggers on that workflow finishing
+and performs the landing of a declared changeset (§Landing a declared change from CI).
 
 Work here is planned in `docs/plans/<name>/plan.md`, and a finished plan moves to
 `docs/plans/completed/`. Each change carries its own directory under `changesets/`. The tool reviews

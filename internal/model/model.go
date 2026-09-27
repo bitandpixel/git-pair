@@ -8,6 +8,10 @@ package model
 // derives state from a changeset's own markers, so it does not derive the merge: the record
 // written by `git pair integration record` is reported by `status`, beside the state rather than
 // as another value of it. Markers are the only thing that moves state.
+//
+// INTEGRATING is the one state that is about the merge without pretending to be it. It is the
+// author's statement that the approval is standing and the work is handed to whoever owns the
+// destination branch — a request for a merge, never the merge, which stays ordinary git (PRD §26).
 type State string
 
 const (
@@ -16,6 +20,13 @@ const (
 	StateBlocked  State = "BLOCKED"
 	StateFeedback State = "FEEDBACK"
 	StateApproved State = "APPROVED"
+	// StateIntegrating is established by `git pair change integrate` and nothing else: the newest
+	// marker is the author's declaration that this changeset may be merged. It sits above APPROVED in
+	// the lifecycle rather than beside it, because the distinction is one an agent branches on —
+	// "a reviewer owes this nothing, and the merge is licensed" — and a field beside `state` would
+	// leave every consumer to remember to read it. A rewrite, a drift, or a moved parent still makes
+	// `git pair check` refuse: the state says the author handed the work over, not that the gate passed.
+	StateIntegrating State = "INTEGRATING"
 )
 
 // Outcome is the verdict recorded by a review submission.
@@ -98,4 +109,10 @@ const (
 	// can never move again has to be recognisable without learning a new state name,
 	// and every consumer that switches on `state` would have to learn one.
 	StateValueAbandoned = "abandoned"
+	// StateValueIntegrating is written by `change integrate`, and unlike `working` and
+	// `abandoned` it *is* a state: INTEGRATING is the answer to "has the author handed this
+	// over?", which is the question a merge gate asks. The value is a declaration about the
+	// next merge, not a claim that one happened — the record of a landing stays the pair of
+	// durable refs (`git pair integration record`).
+	StateValueIntegrating = "integrating"
 )

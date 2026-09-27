@@ -132,9 +132,10 @@ type integrationRecord struct {
 	Commit string
 	// Target is the ref the landing was verified against, empty when nothing identified one.
 	Target string
-	// TargetDerived names where Target came from when the caller did not name one: "base" for the
-	// changeset's own `base:` field, "default" for the default branch. Empty means the caller named it,
-	// which is the only case where the reachability check was promised to them.
+	// TargetDerived names where Target came from when the caller did not name one: "parent" for the
+	// branch a landed parent was based on, "base" for the changeset's own `base:` field, "default" for the
+	// default branch. Empty means the caller named it, which is the only case where the reachability
+	// check was promised to them.
 	TargetDerived string
 	// Derived lists the flags git-pair filled in itself ("source", "commit"), so the answer can say
 	// which parts of the record the caller named and which the repository supplied.
@@ -401,13 +402,18 @@ func derivationDestinations(ctx context.Context, repo *git.Repo, in integrationR
 		add(in.target)
 		return out, nil
 	}
-	// A base under refs/git-pair/ is a measurement base, not a destination. The relink points a child at its
-	// parent's record, and `--target` was never meant to name one: offering git-pair's own ref as "a branch
-	// this landing could have reached" would put a durable ref in the list of places work went to, and the
-	// refusal that names its candidates would read as though a record were a branch.
-	if cur, err := changeset.Current(ctx, repo, in.defaultBranch); err == nil &&
-		!strings.HasPrefix(cur.Base, reviewref.NamespaceRoot+"/") {
-		add(cur.Base)
+	// The destination is not simply the base. For a child whose parent has landed, the base is the
+	// parent's integration ref — a durable ref names a commit and no branch, and putting one in the list
+	// of "places this landing could have reached" would make a record look like a destination and print a
+	// ref in a refusal about branches. `DestinationFor` is what turns that base back into the branch the
+	// parent's work was measured against, so the child of a landed parent gets a destination it can be
+	// verified against instead of only the default branch.
+	if cur, err := changeset.Current(ctx, repo, in.defaultBranch); err == nil {
+		if db, err := changeset.DefaultBranch(ctx, repo, in.defaultBranch); err == nil {
+			if dest, err := changeset.DestinationFor(ctx, repo, cur, db); err == nil {
+				add(dest.Ref)
+			}
+		}
 	}
 	if db, err := changeset.DefaultBranch(ctx, repo, in.defaultBranch); err == nil {
 		add(db.Ref)
@@ -717,7 +723,21 @@ func verifyReviewedSource(ctx context.Context, repo *git.Repo, rec *integrationR
 	}
 	// Newest first, which is the only order that answers "what does this head have on the record": a
 	// superseded approval is not the verdict, and the reviewer corrected it by submitting again (§10.6).
+	//
+	// A `change integrate` declaration is skipped, for the reason `check` skips it: it is the author
+	// adding "and merge this" to a verdict, not a verdict of its own, and this command's question is
+	// whether a human approved the head. The skip is not a courtesy — the merge CI performs is of the
+	// branch that carries the declaration at its tip, so reading the newest marker literally would refuse
+	// to record every landing the declaration exists to trigger. When every marker for this changeset is a
+	// declaration there is nothing to read under it, and the refusal below says so.
 	newest := mine[0]
+	for _, m := range mine {
+		if m.Trailers[model.TrailerState] == model.StateValueIntegrating {
+			continue
+		}
+		newest = m
+		break
+	}
 	outcome, hasOutcome := newest.Trailers[model.TrailerOutcome]
 	state, hasState := newest.Trailers[model.TrailerState]
 	if hasOutcome {
@@ -787,8 +807,8 @@ func verifyLandingReachable(ctx context.Context, repo *git.Repo, rec *integratio
 	var tried []destination
 	seen := map[string]bool{}
 	// Deduplicated by commit rather than by spelling: a changeset whose `base:` is the default branch is
-	// one destination, not two, and a refusal that says "not reachable from main or main" reads like a
-	// bug in the sentence rather than a fact about the work.
+	// one destination, not two, and a refusal that says "not reachable from main or main" reads like
+	// a bug in the sentence rather than a fact about the work.
 	add := func(ref, why string) {
 		if ref == "" {
 			return
@@ -800,11 +820,26 @@ func verifyLandingReachable(ctx context.Context, repo *git.Repo, rec *integratio
 		seen[sha] = true
 		tried = append(tried, destination{ref: ref, why: why})
 	}
-	if base, err := changeset.BaseAt(ctx, repo, rec.Source, rec.ID); err == nil {
-		add(base, "base")
-	}
-	if db, err := changeset.DefaultBranch(ctx, repo, in.defaultBranch); err == nil {
-		add(db.Ref, "default")
+	// The stack's own destination first, because it is the most specific claim available: for a child
+	// whose parent has landed, `base:` in the source tree still names the parent branch — which the
+	// landing left behind — while the destination is the branch the parent's work was measured against.
+	// The recorded base and the default branch stay in the list behind it, in that order, so a changeset
+	// landed anywhere else is still refused rather than matched to a branch nobody chose.
+	if stack, err := changeset.StackAt(ctx, repo, rec.Source, rec.ID); err == nil {
+		cs := changeset.Changeset{Slug: rec.ID, Base: stack.Base,
+			ParentBranch: stack.Parent, ParentChangeset: stack.ParentChangeset}
+		db, dbErr := changeset.DefaultBranch(ctx, repo, in.defaultBranch)
+		if dbErr == nil {
+			if dest, err := changeset.DestinationFor(ctx, repo, cs, db); err == nil {
+				add(dest.Ref, dest.Why)
+			}
+		}
+		if !strings.HasPrefix(stack.Base, reviewref.NamespaceRoot+"/") {
+			add(stack.Base, "base")
+		}
+		if dbErr == nil {
+			add(db.Ref, "default")
+		}
 	}
 	for _, d := range tried {
 		holds, err := repo.IsAncestor(ctx, rec.Commit, d.ref)
@@ -834,6 +869,8 @@ func unaskedDestination(tried []destination) string {
 		switch d.why {
 		case "base":
 			phrases = append(phrases, "taken from the changeset's own `base:` ("+displayRef(d.ref)+")")
+		case "parent":
+			phrases = append(phrases, "taken from the branch its landed parent was based on ("+displayRef(d.ref)+")")
 		case "default":
 			phrases = append(phrases, "taken from the default branch ("+displayRef(d.ref)+")")
 		}
@@ -848,6 +885,8 @@ func derivedNote(rec *integrationRecord) string {
 	switch rec.TargetDerived {
 	case "base":
 		return " (the changeset's base branch)"
+	case "parent":
+		return " (the branch its landed parent was based on)"
 	case "default":
 		return " (the default branch)"
 	}

@@ -314,6 +314,19 @@ func identify(ref string) (string, Kind, bool) {
 	return "", "", false
 }
 
+// IntegrationID returns the changeset an integration ref names, and answers false for anything that is
+// not one — an archive ref, a mirror, a stray, or a retired-layout path.
+//
+// It exists for the caller holding a ref and needing to know whose it is: a child's measurement base is
+// its parent's integration ref once the parent has landed, and reading where the parent's work went means
+// turning that ref back into an id. `identify` does the matching; this says which of the two families the
+// caller meant to ask about, because an archive ref holds the chain and not the landing, and guessing
+// from the last path segment would read it as a landing too.
+func IntegrationID(ref string) (string, bool) {
+	id, kind, ok := identify(ref)
+	return id, ok && kind == KindIntegration
+}
+
 // ErrRefConflict is returned by CreateOnly when the ref exists at a different commit than the one
 // requested. It is the loud half of create-only: the record is written once, and an attempt to
 // write a different one is the case where somebody is about to lose paper trail.

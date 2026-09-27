@@ -111,6 +111,17 @@ def main():
         os.environ["TERM"] = opts["term"]
         os.environ["COLUMNS"] = str(cols)
         os.environ["LINES"] = str(rows)
+        # The terminal handed to the child is real, so the switches that claim otherwise belong to
+        # whoever started the gate, not to the program under test. `CI` is the one that bites on a
+        # runner: termenv's isTTY() returns false for any non-empty CI before it looks at the
+        # descriptor (termenv@v0.16.0/termenv.go:32), so lipgloss falls to the Ascii profile and
+        # every colour assertion in the walkthrough fails — on GitHub Actions, where CI=true is
+        # exported for every step, and nowhere else. NO_COLOR takes the same exit through
+        # envNoColor(). They are removed rather than countered: FORCE_COLOR=1 and CLICOLOR_FORCE
+        # were measured not to rescue the profile, because the profile is already Ascii by the time
+        # either would be consulted.
+        for _switch in ("CI", "NO_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "FORCE_COLOR"):
+            os.environ.pop(_switch, None)
         try:
             os.execvp(program[0], program)
         except OSError as exc:  # pragma: no cover - exec failure shows up as a harness error

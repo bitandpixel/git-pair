@@ -1,18 +1,23 @@
 # The landing contract, for an agent who does not run it
 
-Landing is four steps, in this order, and nothing else. You take part in the first one and report on the
+Landing is five steps, in this order, and nothing else. You take part in the first two and report on the
 rest; the merge and the record belong to the person who owns the destination branch and to CI.
 
 ```bash
 git pair check                       # 1. the gate — yours
-# 2. the landing, with ordinary git: merge, squash-merge, or the forge button this repository uses
-git pair integration record          # 3. the only command in git-pair that writes a ref
-git pair integration publish         # 4. those refs sent to the shared remote, unforced
+git pair change integrate            # 2. the request that this head be merged — yours, when the merge is
+                                     #    somebody else's job; skip it when a person merges by hand
+# 3. the landing, with ordinary git: merge, squash-merge, or the forge button this repository uses
+git pair integration record          # 4. the only command in git-pair that writes a ref
+git pair integration publish         # 5. those refs sent to the shared remote, unforced
 ```
 
 git-pair writes no merge and no ref at all while work is in flight. There is no `git pair merge`, no
 `git pair land`, no `git pair push`, and none is coming: integration stays ordinary git, decided by the
-human.
+human. `git pair change integrate` is not an exception to that sentence — it is a marker commit that asks
+for the merge, and the merge is still performed by somebody else. What it changes is who waits: instead of
+an author standing between an approval and the merge button, the request sits on the branch and whoever
+owns the destination acts on it.
 
 ## 1. The gate you run
 
@@ -22,13 +27,21 @@ git pair check --json | jq -e '.ready'      # verdict in `ready`, exit 0 either 
 git pair check --allow-feedback             # when this repository's policy says feedback is enough
 ```
 
-`check` asks what a merge would act on: the newest marker is a review whose outcome permits integration,
-nothing unreadable came after it, the changeset has not ended, it has not already been recorded as
+`check` asks what a merge would act on: the newest marker is a review whose outcome permits integration
+(or a `change integrate` declaration standing on such a review, in which case the review underneath is the
+verdict), nothing unreadable came after it, the changeset has not ended, it has not already been recorded as
 integrated, and the tree still matches what the review looked at — ignoring `changesets/<id>/`. It reads
 no other ref, and every failed condition is reported in one run.
 
-It is the last step an agent runs. An agent asked "may this land?" runs `git pair check`, reports
-`reasons`, and stops.
+It reports `integrating` beside the verdict, which is why the gate for an automatic merge is one command
+and two fields: `jq -e '.ready and .integrating'`. `ready` is "may this merge"; `integrating` is "did the
+author ask for one", and it goes back to false the moment the work is re-offered, answered by a reviewer,
+or withdrawn with `change unready` — a request is superseded, not erased, and a pipeline must not merge the
+one the author just took back.
+
+It is the last step an agent runs, unless the repository's flow asks for a declaration, which an agent may
+run after a passing gate because the declaration refuses everything the gate refuses and merges nothing. An
+agent asked "may this land?" runs `git pair check`, reports `reasons`, and stops.
 
 `check` accepts a `feedback` outcome only with `--allow-feedback`. Whether a non-blocking review is
 enough to land is a policy of the repository, and that flag is the place it is stated — there is no

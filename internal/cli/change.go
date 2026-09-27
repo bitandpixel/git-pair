@@ -31,7 +31,8 @@ func newChangeCommand(a *app) *cobra.Command {
 		RunE: groupUsage("change"),
 	}
 	cmd.AddCommand(newChangeUseCommand(a), newChangeReadyCommand(a), newChangeUnreadyCommand(a),
-		newChangeAbandonCommand(a), newChangeFeedbackCommand(a), newChangeWaitCommand(a))
+		newChangeAbandonCommand(a), newChangeFeedbackCommand(a), newChangeWaitCommand(a),
+		newChangeIntegrateCommand(a))
 	return cmd
 }
 
@@ -316,20 +317,24 @@ func isNothingToCommit(err error) bool {
 func newChangeUnreadyCommand(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "unready",
-		Short: "Take the current changeset out of the review queue",
+		Short: "Withdraw this changeset from review, and from the merge request",
 		Long: `Record that this changeset is no longer offered for review, and take it out of the queue.
 
 Use it when you want to keep implementing after ` + "`change ready`" + `. The marker says so on
 purpose rather than leaving a reviewer to work it out from the diff, which is the difference between
 an offer you withdrew and an offer you forgot to withdraw.
 
+It also withdraws a declaration made with ` + "`git pair change integrate`" + `. That request is what a
+pipeline merges on, so the way to stop one has to be a commit on the branch as well: the moment the
+unready marker lands, ` + "`git pair check --json`" + ` reports ` + "`integrating`" + ` false again.
+
 The changeset returns to WORKING, and a later ` + "`git pair change ready`" + ` puts it back in the
 queue under the same gate as the first time: review additions that still survive unchanged have to be
 resolved or acknowledged.
 
-The marker is written only when the changeset is actually in review — READY, APPROVED or FEEDBACK. On
-a changeset that is WORKING or BLOCKED there is nothing to withdraw, so the command succeeds without
-recording anything and a script can unready unconditionally.
+The marker is written only when the changeset is actually in review — READY, APPROVED, FEEDBACK, or
+INTEGRATING. On a changeset that is WORKING or BLOCKED there is nothing to withdraw, so the command
+succeeds without recording anything and a script can unready unconditionally.
 
 It records a marker and nothing else. There is no ref to move: the retraction lives on the branch
 beside the offer it withdraws, and ` + "`git pair integration record`" + ` is what makes a changeset's
@@ -376,9 +381,15 @@ func runChangeUnready(ctx context.Context, a *app) error {
 // has a readiness that `change unready` can withdraw. BLOCKED is excluded because the
 // author is already expected to act, and the block marker stays the newest marker until
 // they ready the changeset again.
+//
+// INTEGRATING belongs here for the reason the state exists: a declaration is the author's own statement,
+// made on the branch, and the way to take it back has to be a commit on that branch too. `check` stops
+// reporting the request as soon as the unready marker lands, so the withdrawal is real from the moment it
+// is written — and an author who has just approved their own work should not have to rebase a marker away
+// to stop a pipeline from merging it.
 func inReview(state model.State) bool {
 	switch state {
-	case model.StateReady, model.StateApproved, model.StateFeedback:
+	case model.StateReady, model.StateApproved, model.StateFeedback, model.StateIntegrating:
 		return true
 	}
 	return false
@@ -414,6 +425,11 @@ func printUnready(a *app, s *session, sha string) error {
 	a.printf("  head:    %s\n", short(sha))
 	a.printf("  was:     %s\n", s.summary.State)
 	a.printf("  queue:   `git pair queue` no longer lists this changeset\n")
+	if s.summary.State == model.StateIntegrating {
+		// The withdrawal is bigger than the review queue for this one: the request a pipeline merges on is
+		// gone, and the reader who ran `change integrate` should see that named rather than infer it.
+		a.printf("  merge:   the declaration is withdrawn — `git pair check --json` no longer reports it integrating\n")
+	}
 	a.printf("  next:    `git pair change ready` puts it back once the work is done\n")
 	return nil
 }

@@ -455,3 +455,69 @@ func TestScanLineageKeepsEveryChangesetsMarkers(t *testing.T) {
 		t.Errorf("SHA = %s, want %s", newest.SHA, feedback)
 	}
 }
+
+// TestSummarizeDeclarationOverRealCommits is the trailer round trip: a declaration written as an
+// ordinary commit message has to survive `git log`'s trailer block and come back as INTEGRATING with
+// both commits addressable — the one that made the declaration, and the approval underneath it that
+// licenses the merge.
+//
+// The last two steps are the reason `check` asks the tree as well as the marker. A declaration is a
+// claim about the commit it names, so an implementation commit placed after it must not read as a
+// still-declared head, while a commit inside changesets/<slug>/ must not destroy the declaration the
+// author just wrote.
+func TestSummarizeDeclarationOverRealCommits(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking", "main")
+	f.Commit("implement locking", gittest.WithFile("service.go", "package main\n\nfunc Lock() {}\n"))
+	f.CommitReadyMarker("booking")
+	approval := f.CommitReviewMarker("booking", "approve")
+
+	head := f.Head()
+	declared := f.CommitIntegrateMarker("booking")
+
+	got := summarize(t, f, "booking", "main", "HEAD")
+	if got.State != model.StateIntegrating {
+		t.Fatalf("state = %s, want INTEGRATING (%s)", got.State, got.Reason)
+	}
+	if got.Marker == nil || got.Marker.Kind != lifecycle.KindIntegrate || got.Marker.SHA != declared {
+		t.Errorf("marker = %+v, want the declaration %s", got.Marker, f.Short(declared))
+	}
+	if got.Integrating == nil || got.Integrating.SHA != declared {
+		t.Fatalf("Integrating = %+v, want %s", got.Integrating, f.Short(declared))
+	}
+	if got.Integrating.ReviewedHead != head {
+		t.Errorf("declaration names %q, want the head it was written on %s", got.Integrating.ReviewedHead, f.Short(head))
+	}
+	if got.LatestReview == nil || got.LatestReview.SHA != approval {
+		t.Errorf("latest review = %+v, want the approval %s to still be the verdict", got.LatestReview, f.Short(approval))
+	}
+	if got.Trailing != 0 || got.Stale {
+		t.Errorf("trailing=%d stale=%v, want a clean head at the declaration", got.Trailing, got.Stale)
+	}
+
+	// A commit inside the changeset directory is not content the reviewer looked at, so the
+	// declaration still describes HEAD and `check`'s verdict stays where the author left it.
+	f.Commit("note the follow-up", gittest.WithFile(f.ChangesetPath("booking", "notes.md"), "follow-up\n"))
+	got = summarizeAgainstTree(t, f, "booking", "main", "HEAD")
+	if got.State != model.StateIntegrating || got.Stale || len(got.Drifted) != 0 {
+		t.Errorf("after a changeset-only commit: state=%s stale=%v drifted=%v, want the declaration standing",
+			got.State, got.Stale, got.Drifted)
+	}
+
+	// An implementation commit is. The declaration's own tree is what was declared, so the changed
+	// file is drift against it and the state falls back to WORKING for the gate to refuse.
+	f.Commit("one more change", gittest.WithFile("service.go", "package main\n\nfunc Lock() { ctx() }\n"))
+	got = summarizeAgainstTree(t, f, "booking", "main", "HEAD")
+	if got.State != model.StateWorking {
+		t.Errorf("after an implementation commit: state = %s, want WORKING (%s)", got.State, got.Reason)
+	}
+	if len(got.Drifted) != 1 || got.Drifted[0] != "service.go" {
+		t.Errorf("drifted = %v, want service.go", got.Drifted)
+	}
+	// The declaration is still the newest marker; the tree is what changed the answer.
+	if got.Integrating == nil {
+		t.Error("Integrating was dropped when the tree moved: the marker is still on the branch")
+	}
+}

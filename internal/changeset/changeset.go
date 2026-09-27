@@ -309,7 +309,7 @@ func ParentOf(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranch
 	if c.ParentBranch != "" {
 		return parentOfBranch(ctx, repo, c.ParentBranch, c.Branch, db)
 	}
-	if db.Ref != "" && (c.Base == db.LocalName() || c.Base == db.Ref) {
+	if db.IsBranch(c.Base) {
 		return Parent{}, nil
 	}
 	name := c.Base
@@ -330,7 +330,7 @@ func ParentOf(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranch
 }
 
 func parentOfBranch(ctx context.Context, repo *git.Repo, branch, own string, db DefaultBranchRef) (Parent, error) {
-	if db.Ref != "" && (branch == db.LocalName() || branch == db.Ref) {
+	if db.IsBranch(branch) {
 		return Parent{}, nil
 	}
 	if own != "" && branch == own {
