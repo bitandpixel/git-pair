@@ -41,6 +41,7 @@ on:
     branches:
       - 'feat/**'
       - 'feature/**'
+      # if we also allow stacked child changesets to be INTEGRATING before their parents have landed, we'll want to consider running these on `main` changing as well, in case the child feature branch is stable and passing (no new commits or workflows) but becomes eligible for integration because of a `main`-side change. Or maybe the backstop could be good enough?
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
