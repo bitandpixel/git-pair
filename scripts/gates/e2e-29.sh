@@ -235,6 +235,11 @@ git push -q "$REMOTE" --all
 git push -q "$REMOTE" 'refs/git-pair/*:refs/git-pair/*'
 git clone -q "$REMOTE" "$CLONE"
 git -C "$CLONE" switch -q booking-transaction
+# A clone carries no identity of its own. Whoever runs this gate may or may not have a global git config —
+# a CI runner has none — and the fixtures below commit in these clones, which needs an author. Set where the
+# work happens rather than depending on whose laptop the gate runs on.
+git -C "$CLONE" config user.email ci@example.com
+git -C "$CLONE" config user.name CI
 # The clone's own status has to say what it compared against: "nothing has landed" from a CI job is
 # either a stale fetch or the wrong trunk, and a log that names neither cannot be triaged.
 status=$(cd "$CLONE" && $G status --json)
@@ -390,6 +395,8 @@ git init -q --bare -b main "$DECLREMOTE"
 git push -q "$DECLREMOTE" --all
 git clone -q "$DECLREMOTE" "$DECLCLONE"
 git -C "$DECLCLONE" switch -q awaiting-merge
+git -C "$DECLCLONE" config user.email ci@example.com
+git -C "$DECLCLONE" config user.name CI
 out=$(cd "$DECLCLONE" && $G check --json 2>&1)
 printf '%s' "$out" | grep -q '"ready": true' && printf '%s' "$out" | grep -q '"integrating": true' \
   && echo "  ok: a clone that never met the author gates on the same two fields" \
