@@ -213,6 +213,12 @@ keeps it honest.
   answers, `--require`, the `--expect-head` mismatch, and the sha the probe is handed are all asserted (M6).
 - `TestParentOfTreatsEverySpellingOfTrunkAsTrunk`, and `change integrate` in a real clone where trunk is
   only a fetch ref: the pair that covers the bug the CI replay found (M6).
+- `main` merged in (`5a3a7a3`) for the terminal fix in `feat-editor-term-gate`. The first CI run of this
+  repository failed on `TestEditorPrecedenceMatchesGit/VISUAL_beats_EDITOR` — neither this changeset's
+  code nor a git-pair defect: `git var GIT_EDITOR` reads `VISUAL` only when `TERM` names a usable
+  terminal, and that fixture inherited `TERM` from the developer's shell. After the merge `mise run gates`
+  is green end to end (`E2E`, `PTY`, `CI-INTEGRATE`), and `env -u TERM go test ./internal/console
+  -run TestEditorPrecedence` passes, which is the condition that run failed in.
 - `TestEveryCommandIsNamedInTheDocs` passes, which is what makes PRD, README and `cli.md` name the
   command rather than merely mention it.
 
