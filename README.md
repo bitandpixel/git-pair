@@ -1376,12 +1376,16 @@ flow-merge: published to origin (archive + integration)
   flow-merge: merged, recorded, published
 ```
 
-What the runner has to provide: `contents: write`, `fetch-depth: 0` (the gate reads the approval out of
-history, and the record verifies a landing in it), and the integration branch named — `GIT_PAIR_DEFAULT_BRANCH`
-or `--default-branch` on each call, because a checkout that fetched one branch has nothing to compare
-against. `git pair integration configure` is worth running once so ordinary fetches and pushes carry
-`refs/git-pair/*`; the script also fetches them itself, because the destination of a stack is read through
-its parent's record.
+What the runner has to provide: `contents: write` for the merge commit and the ref pair, `checks: read` and
+`statuses: read` for the probe (a token that cannot read them answers "cannot tell", and the job merges
+nothing on that answer, so a missing scope stalls it rather than failing it), `fetch-depth: 0` (the gate
+reads the approval out of history, and the record verifies a landing in it), and the integration branch
+named — `GIT_PAIR_DEFAULT_BRANCH` or `--default-branch` on each call, because a checkout that fetched one
+branch has nothing to compare against. And the destination branch has to accept the push: `GITHUB_TOKEN`
+cannot be a branch-protection bypass actor, so an unprotected trunk works as-is and a protected one needs a
+Ruleset bypass actor of its own (a GitHub App or a deploy key) with its token on the push remote. `git pair
+integration configure` is worth running once so ordinary fetches and pushes carry `refs/git-pair/*`; the
+script also fetches them itself, because the destination of a stack is read through its parent's record.
 
 ## Configuration
 

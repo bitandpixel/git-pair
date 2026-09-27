@@ -46,11 +46,28 @@ on:
         required: false
         type: string
 
+# What this job needs, and the one thing it cannot get from the runner:
+#
+#   permissions          three categories, below. `contents: write` alone is not enough: the probe's API
+#                        calls live in `checks` and `statuses`, and a token that can write the merge but
+#                        cannot read the checks answers "cannot tell" — which the job treats as "do not
+#                        merge", so a missing scope stalls the merge quietly rather than failing loudly.
+#   branch protection    a protected trunk is the real setup cost. `GITHUB_TOKEN` cannot be added to a
+#                        bypass list, so on a repository that restricts pushes to `main` this job needs a
+#                        Ruleset bypass actor of its own (a GitHub App, or a deploy key with a role) and that
+#                        token in the push remote — `git remote set-url` with it, not the checkout's default.
+#                        An unprotected trunk, which is what this repository has, needs nothing: `contents:
+#                        write` pushes the merge commit as an ordinary commit.
+#   a test workflow      `workflow_run` names one by `name:`. No such workflow, no trigger — and dropping
+#                        `--require-ci` is the honest response, not a probe that always says green.
+#
 # The merge commit is a commit on the destination branch, and the record is a ref write. `contents: write`
 # covers both: the merge is pushed as an ordinary commit and the pair under refs/git-pair/ is pushed by
 # `integration publish`, unforced.
 permissions:
   contents: write
+  checks: read
+  statuses: read
 
 # One merge at a time per ref. Two jobs that both see the same declaration would make two merge attempts,
 # and the second one's push would be refused after its merge commit already existed locally — a confusing
