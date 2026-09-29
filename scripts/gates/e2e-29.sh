@@ -634,12 +634,20 @@ if printf '%s' "$out" | grep -q '"slug": *"tidied-landing"'; then
 else
   echo "  ok: the queue does not list it as work"
 fi
-out=$($G check --changeset tidied-landing 2>&1); code=$?
-if [ "$code" = 1 ]; then
-  echo "  ok: check refuses it the way it refuses any landing"
+out=$($G status --changeset tidied-landing --json 2>&1); code=$?
+if [ "$code" = 0 ] && printf '%s' "$out" | grep -q '"landed": *true'; then
+  echo "  ok: the machine surface still says landed, from the directory's new home"
 else
-  echo "  FAIL: check exited $code: $out"; FAILED=1
+  echo "  FAIL: status --json after the tidy exited $code: $out"; FAILED=1
 fi
+git switch -q tidied-landing
+out=$($G check 2>&1); code=$?
+if [ "$code" = 1 ] && printf '%s' "$out" | grep -qi "landed"; then
+  echo "  ok: the branch the work was done on refuses it as landed too"
+else
+  echo "  FAIL: check on the source branch exited $code: $out"; FAILED=1
+fi
+git switch -q tidy-up
 git switch -q main
 git branch -q -D tidy-up tidied-landing
 
