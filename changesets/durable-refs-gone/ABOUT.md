@@ -2,77 +2,86 @@
 
 ## Summary
 
-Milestone M5 of `docs/plans/simplify-architecture/plan.md`: delete the durable-ref subsystem. Not started.
-This file is the map for whoever starts it, written from the state of the stack at the time M4 landed.
+Milestone M5 of `docs/plans/simplify-architecture/plan.md`: delete the durable-ref subsystem. git-pair
+writes no ref at any point in a lifecycle, and `refs/git-pair/` becomes a namespace the code neither reads
+nor writes. 99 files, -9914/+4701 across the branch; the deletion proper is `5e987db`, and what follows it
+is the rest of the system being told.
+
+## What is gone
+
+`internal/reviewref`, `internal/cli/{integration,publish,configure,published,fetch}.go`,
+`internal/git/push.go`, and their tests — the recorder that verified a claim, the publisher, the consent
+command for refspecs, the mirror namespace, the published/unpublished views, and the audited push call site.
+Commands: `integration`, `integration record`, `integration publish`, `integration configure`. Flags:
+`--fetch` on `status`, `queue` and `check`; `git pair change wait --fetch` stays, because it fetches commits,
+not a namespace.
+
+`internal/cli/landing.go` is the read that replaces them: one batch of destination reads — does the
+destination carry `changesets/<id>/` or `changesets/.landed/<id>/`, which branch, is it the integration
+branch, what chain does that history carry.
+
+## What a reader sees instead
+
+- `LANDED, UNRECORDED` is now `LANDED UNREVIEWED`, and it is a different finding: work reached the
+  destination with no permitting verdict in the chain the destination carries. Nothing closes it with a
+  command, so there is no closing command to print; the fix printed is `git pair status --changeset <id>`.
+  The findings ride `status`'s exit-2 error on stderr, and `queue --json` carries `landed_unreviewed`.
+- `next_action` for a ready head is one sentence — `` `git pair check`, then merge into main with ordinary
+  git `` — because there is no step after the merge. `contract_test.go` pins that string, and
+  `TestNoActionNamesADeletedCommand` pins the general rule.
+- `status`'s `Stack:` block reads each ancestor's landing from the destination and prints `landed:` rather
+  than `record:`; `stack[].integration` in `--json` is `stack[].landed_commit`. `parent.landed_in_default_branch`
+  is deleted: it was true whenever `parent.landed` was, and the index it came from is gone.
+- `change integrate` refuses a stacked child whose parent is not landed, and the reason names what to do
+  (`git pair check`, then merge with ordinary git) instead of a record to write.
+
+## The rule that keeps it gone
+
+`internal/hygiene/hygiene_test.go` loses the audited-push exception and the single-`update-ref` rule and
+gains `TestShippedCodeNeverWritesARef`: no shipped file passes `update-ref`, `symbolic-ref` or `git tag` to
+git. `symbolic-ref` has exactly one exception — `CurrentBranch` reading the checked-out branch in
+`internal/git/git.go` — allowed by file and checked by flag, so the read cannot become a write. The fixture
+self-test gained a second fixture scanned with that rule set, which is what proves the rule catches an
+injected write and ignores `for-each-ref`.
+
+## Gates, which are contracts
+
+`scripts/gates/e2e-29.sh` loses its record and publish steps and gains what the tree model promises: a
+merge into `release/2.x` leaves the source branch live, and naming that branch as the destination
+(`--default-branch release/2.x`) makes the same history report the changeset landed, reviewed, with the
+chain the merge carried — after the branch is deleted as well as before. A clone given only branches reads
+the landing without being told to fetch. `scripts/gates/ci-integrate.sh` now asserts the shared remote holds
+branches and nothing else, and that the directory entered the destination exactly once.
+`scripts/gates/pty-walkthrough.sh` moves its "a command that writes asks for nothing at a terminal" subject
+from `integration configure` to `change tidy`. 110 `ok:` steps in e2e-29 where there were 72.
+
+## Known limitations, stated where the refs used to promise otherwise
+
+- A squash, cherry-pick or rebase-merge landing that carries no markers keeps nothing: `chain_base`,
+  `chain_head` empty and `reviewed: false`. PRD §13.3 says so, and `change tidy` is the mitigation for the
+  clutter it leaves. A `--no-ff` merge keeps the whole chain, which is the shape the gates replay.
+- A landing on a branch that is not the changeset's destination is not landed. That is D1, not a bug: the
+  answers come from the destination, and `--default-branch` names the destination for a read.
+- An abandoned changeset's history lives on its branch. Deleting the branch deletes the finding, which is
+  what `terminalRecord` now reads from the derived chain.
+
+## Two things this changeset deliberately does not do
+
+`changesets/*/ABOUT.md` on trunk still describes the design this deletes, including
+`changesets/feat-publish-the-records/`. Those directories are the tree's record of landings that happened;
+the tool's answer to their clutter is `git pair change tidy`, in its own changeset, not a deletion here.
+Deleting a landed changeset's directory would delete the statement the destination carries, which is the
+thing this plan exists to protect.
 
 ## State of the stack
 
-- M1 `.landed/` in the tree model — merged, `81f01e2`.
-- M2 landing is a tree fact — handed off, `feat/landing-is-a-tree-fact`.
-- M3 derived bases — handed off, `feat/derived-bases`, gates green.
-- M4 `git pair change tidy` — `feat/change-tidy`, this branch's parent.
-- This branch is stacked on `feat/change-tidy`. Before `git pair change ready`, rebase onto the new
-  `origin/main` (`git fetch origin && git merge-base --is-ancestor origin/main HEAD`).
+M1 `81f01e2` (trunk), M2 `feat/landing-is-a-tree-fact`, M3 `feat/derived-bases`, M4 `feat/change-tidy`;
+this branch is stacked on M4 and moves onto the new `origin/main` before `change ready`.
 
-## What M5 deletes
+## Validation
 
-`internal/reviewref` (467 lines), `internal/cli/integration.go` (1366), `internal/cli/publish.go` (415),
-`internal/cli/configure.go` (281), `internal/cli/published.go` (210), `internal/git/push.go` (204),
-`internal/cli/fetch.go` (113), and their tests (~3.0k lines). The ref half of `internal/cli/landed.go`
-(`refIndex`, `indexDurableRefs`) and the two reads that still use it: `internal/changeset/destination.go:60-125`
-(parent `CHANGESET.yaml` from the landing commit's tree — make it read the tree of the destination instead,
-which also fixes the landing-with-no-directory case) and `internal/cli/status.go`'s `Stack:` block, whose
-per-ancestor `record:` line becomes a `landed:` line and whose `--json` key `stack[].integration` becomes
-`stack[].landed_commit`.
-
-Commands that go: `integration`, `integration record`, `integration publish`, `integration configure`, and
-`--fetch` on `status`, `queue` and `check`. `git pair change integrate` stays, and `change wait --fetch`
-stays.
-
-## Order that keeps the tree compiling
-
-1. `internal/cli/status.go`'s `Stack:` block and `internal/changeset/destination.go` — both stop reading the
-   ref index. Commit with their contract tests.
-2. `internal/cli/queue.go` and `internal/cli/landed.go` — drop `indexDurableRefs`, `publicationReport` and the
-   `--fetch` paths. Commit.
-3. The command files and the package, in one commit with the registrations in `internal/cli/root.go` and the
-   ~3.0k lines of tests. `internal/hygiene/hygiene_test.go`'s single-`update-ref` rule (`:647-736`) and the
-   audited-push fence (`:89-110`) become the ban: no shipped file may pass `update-ref`, `symbolic-ref` or
-   `git tag` to git, and no string literal under `refs/git-pair/` may be built outside test fixtures.
-4. `.github/workflows/git-pair-integrate.yml` — drop the record and publish steps and `fetch-depth: 0`.
-5. `scripts/gates/e2e-29.sh` and `scripts/gates/ci-integrate.sh` — both walk the record and publish path
-   today. They are contracts: rewrite them with the behaviour, do not loosen them. e2e-29 has ~121 `ok:`
-   assertions and ci-integrate 60 checks; the durable-layer greps in them were rewritten once already, in M2.
-
-## Known limitations carried into this milestone
-
-A squash, cherry-pick or rebase-merge landing whose commit carries no directory leaves the changeset live and
-its chain read has no markers to report. PRD §13 has to state that limit in the commit that removes the refs,
-because the refs were the thing that made such a landing knowable.
-
-## Two tests that die with `integration record`, not with `DestinationFor`
-
-`integration_destination_test.go:60` and `:78` fail on this draft. They do not come from the destination
-helper: `integration record` derives its own target from the parent's integration ref inside
-`internal/cli/integration.go`. Verified by experiment — changing `DestinationFor`'s fallback to
-`db.LocalName()` left both failures identical, so the edit was reverted rather than kept as a contract change
-nobody asked for. Resolve them by deleting the command and its tests in step 3 of the order below.
-
-## Open questions (M5 design, unresolved)
-
-**Resolved in `a304707`.** 1. A parent merged only into a release branch is not landed (D1), so its child measures against the parent
-   branch. Without the record, nothing says where that child is meant to land: `DestinationFor` can either
-   answer the live parent branch (`booking (base)`) or fall back to the integration branch and say the
-   parent's own base (`release/2.x`) is unreachable. `TestDestinationFallsBackWhenTheParentBaseIsGone`
-   encodes the second, written when the record could tell us the parent's destination. Decide, then rewrite
-   the test and PRD §11.4/§21's destination rule together — `change integrate` refuses a stacked child whose
-   parent has no record today, and that refusal is deleted in this milestone.
-2. Walking past a parent whose recorded base is itself a landed branch needs the id for that branch. The tree
-   answer is `LandedIDs(db.Ref)` containing the base name (branch names are derived from ids by default) and
-   then `StackAt(db.Ref, base)`; the ref answer was `IntegrationID(base)`. Implement that rule and the chain
-   tests pass with their current expectations, or state a different rule and change both tests.
-
-## Open questions
-
-Whether `parent.landed_in_default_branch` stays in `status --json` now that it is true whenever
-`parent.landed` is. The index it was computed from is deleted here, so the decision belongs to this milestone.
+- `mise run gates` green: the sharded suite, e2e-29 (110 steps), pty-walkthrough, ci-integrate (60 checks).
+- `go test ./internal/cli/ -run 'TestCommandsNamedInTheDocsExist|TestEveryCommandIsNamedInTheDocs|TestNoDocNamesADurableRef'`
+  green, so no document names a path under the retired namespace and no help text names a deleted command.
+- `git grep -n 'refs/git-pair' -- '*.go'` is empty outside the test fixtures that plant inert refs to prove
+  they are ignored.
