@@ -250,34 +250,42 @@ Two things measured while building those fixtures, because they change later mil
 
 #### Tasks
 
-- [ ] `internal/cli/landed.go`: replace the ref index (`:71-88`) and `unrecordedLandings` (`:99-110`) with
+- [x] `internal/cli/landed.go`: replace the ref index (`:71-88`) and `unrecordedLandings` (`:99-110`) with
   the unreviewed detector — a landed id whose chain carries no approval marker. Keep the file's own
   reasoning for the heading (`:16-22`): a finding worth a heading is one the reader must act on, and "the
   author stopped one command early" is no longer a finding anybody can act on.
-- [ ] Chain range for a landed changeset: the contiguous run on trunk's first-parent line carrying this
+- [x] Chain range for a landed changeset: the contiguous run on trunk's first-parent line carrying this
   changeset's directory, both pathspecs from M1. Range end is the newest commit in the run, range start the
   commit that introduced the directory. Feed it to the existing
   `lifecycle.Summarize(ctx, repo, slug, base, head)` (`internal/lifecycle/lifecycle.go:98`) so the state,
   verdict, and staleness reads are the same functions the live path uses.
-- [ ] `internal/cli/root.go:294-302`: the archive-ref fallback becomes the trunk walk above. Keep the
+- [x] `internal/cli/root.go:294-302`: the archive-ref fallback becomes the trunk walk above. Keep the
   distinction the current comment draws (`:296-300`) — a changeset that never landed has nothing to read,
   and the usage error should still say so rather than inventing a chain.
-- [ ] `internal/cli/status.go:461-480`: drop `archive_ref`, `archive_commit`, `integrated`,
-  `integrated_commit`, `integrated_ref`; add `landed`, `landed_commit`, `landed_in_default_branch`,
-  `chain_base`, `chain_head`, `reviewed`. Update `internal/cli/contract_test.go` and the README JSON table
-  in the same commit.
-- [ ] `internal/cli/check.go:277-284`: `g.Recorded` and `g.Where` become the tree landing and its reach.
+- [x] `internal/cli/status.go:461-480`: drop `archive_ref`, `archive_commit`, `integrated`,
+  `integrated_commit`, `integrated_ref`; add `landed`, `landed_commit`, `chain_base`, `chain_head`,
+  `reviewed`. Update `internal/cli/contract_test.go` and the README JSON table in the same commit.
+  Shipped as `landed`, `landed_commit`, `landed_branch`, `chain_base`, `chain_head`, `reviewed`: the plan's
+  `landed_in_default_branch` is tautological once landing *is* the integration branch holding the directory,
+  so the field names the branch the read was taken from instead — the answer a consumer can branch on, and
+  the one `integrated_default_branch` used to give. All six are present on every document, empty rather than
+  absent.
+- [x] `internal/cli/check.go:277-284`: `g.Recorded` and `g.Where` become the tree landing and its reach.
   Add the unreviewed reason to `integrationReasons` in the documented order — history, then content, then
   the tree, then landing hygiene (`internal/cli/check.go:334-347`) — so the reader is told what the
   reviewers decided before being told the paperwork is tidy.
-- [ ] `internal/marker/marker.go:192-217`: `RefuseIntegrated` asks the tree. The comment's two reasons
+- [x] `internal/marker/marker.go:192-217`: `RefuseIntegrated` asks the tree. The comment's two reasons
   (an author who forgot the branch was merged; a reviewer working from an old clone) both survive a tree
   read, and the exit code stays 1.
-- [ ] `internal/cli/queue.go`: `:132` becomes the unreviewed detector, `:162` the tree landing,
+- [x] `internal/cli/queue.go`: `:132` becomes the unreviewed detector, `:162` the tree landing,
   `:324-350` the orphan classification loses its ref lookups, `:242-248` and `:261-280` lose `unpublished`
   and rename `landed_unrecorded` to `landed_unreviewed`.
-- [ ] Rewrite `scripts/gates/e2e-29.sh`'s 43 durable-layer assertions to assert the tree facts instead, and
-  add a case where the branch is deleted before `status --changeset` is asked about it.
+- [x] Rewrite `scripts/gates/e2e-29.sh`'s 43 durable-layer assertions to assert the tree facts instead, and
+  add a case where the branch is deleted before `status --changeset` is asked about it. What shipped: the
+  release-line step now asserts the work is still offerable and that `check` has no landing refusal for it;
+  the recording step asserts both `LANDED UNREVIEWED` sentences (no verdict, and one-commit landing), the
+  `--json` key, the exit-2 `status` carry, and that writing the record changes nothing — the finding is
+  about the chain, not the paper trail; and the queue's landed/unreviewed path is read with the branch gone.
 - [ ] Decided during execution, and it is the design rather than a loss: **landed means the integration
   branch, and a merge into some other branch leaves the changeset live.** The durable record refused here —
   once `integration record --target release/2.x` had run, `change ready`, `change unready`, `review submit`,

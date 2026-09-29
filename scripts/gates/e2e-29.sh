@@ -295,18 +295,29 @@ printf '%s' "$out" | grep -q "never moves" \
 [ "$(git rev-parse "$INTEGRATION")" = "$LANDING" ] && echo "  ok: the record did not move" \
   || { echo "  FAIL: a refused recording moved the record"; FAILED=1; }
 
-$G check >/dev/null 2>&1; check "check: an integrated changeset is not integration-ready again" 1 $?
+# A landing on a branch that is not the integration branch leaves the work live. The record used to refuse
+# every in-flight command the moment it existed, whatever branch it named; the tree says what it says, and
+# the release line can still revert the merge or leave the changeset to reach main on its own. This is the
+# half of the design that a ref could not express, because a ref stored an object id and no question.
 git switch -q booking-transaction
-for cmd in "change ready" "change unready" "review submit --approve" "change abandon"; do
-  $G $cmd >/dev/null 2>&1; check "a recorded changeset refuses $cmd" 1 $?
-done
-[ "$(git rev-parse "$ARCHIVE")" = "$SOURCE" ] && [ "$(git rev-parse "$INTEGRATION")" = "$LANDING" ] \
-  && echo "  ok: nothing moved either ref, and no command can" \
-  || { echo "  FAIL: a durable ref moved after the record"; FAILED=1; }
+$G change unready >/dev/null 2>&1; check "a changeset merged only into release/2.x can still be withdrawn" 0 $?
+$G change ready >/dev/null 2>&1; check "and offered again" 0 $?
+out=$($G check 2>&1); code=$?
+if printf '%s' "$out" | grep -q "already landed"; then
+  echo "  FAIL: check refused work the integration branch never took: $out"; FAILED=1
+else
+  echo "  ok: check has no landing refusal for a release-line merge"
+fi
+printf '%s' "$out" | grep -qE "READY|NOT READY" \
+  && echo "  ok: and it still answers the question it was asked (exit $code)" \
+  || { echo "  FAIL: check printed no verdict: $out"; FAILED=1; }
 git switch -q main
-$G queue 2>&1 | grep -q "booking-transaction (integrated at" \
-  && echo "  ok: the queue says the changeset landed instead of listing it" \
-  || { echo "  FAIL: the queue did not account for the landed changeset"; FAILED=1; }
+$G queue 2>&1 | grep -q "booking-transaction" \
+  && echo "  ok: the queue still accounts for the changeset, branch and all" \
+  || { echo "  FAIL: the queue lost a changeset whose branch is live"; FAILED=1; }
+[ "$(git rev-parse "$ARCHIVE")" = "$SOURCE" ] && [ "$(git rev-parse "$INTEGRATION")" = "$LANDING" ] \
+  && echo "  ok: the record the release landing wrote is untouched by any of that" \
+  || { echo "  FAIL: a durable ref moved after the record"; FAILED=1; }
 BEFORE=$(git rev-list --count "$ARCHIVE")
 git branch -D booking-transaction >/dev/null
 AFTER=$(git rev-list --count "$ARCHIVE")
@@ -433,42 +444,72 @@ else
 fi
 rm -rf "$DECL"
 
-step "a landing nobody recorded is reported rather than hidden"
-# The merge is git's, and so is the step after it. When that step is skipped the changeset is in the
-# worst place the design has: its directory is in trunk, so the rules that find work in progress stop
-# seeing it, and the paper trail is the merge commit alone. The detector is what makes the integration
-# contract (PRD §22) enforceable, so the script that walks the contract walks the miss too.
+step "work that reached trunk with no approving verdict is reported rather than hidden"
+# The merge is git's, and so is the review that may or may not have happened before it. When a changeset's
+# directory is in trunk, the rules that find work in progress stop seeing it, and the only account of it is
+# the history behind the directory. The detector reads that history, which is why the integration contract
+# (PRD §22) is enforceable with no refs to consult.
+#
+# Two shapes reach the heading and the report separates them: a chain that carries no verdict, and a landing
+# that carried the directory in one commit so no markers came with it.
 git switch -q main
+git checkout -qb unreviewed-merge
+mkdir -p changesets/unreviewed-merge
+printf 'base: main\n' > changesets/unreviewed-merge/CHANGESET.yaml
+printf 'Summary: work that reached trunk with nobody approving it.\n' > changesets/unreviewed-merge/ABOUT.md
+printf 'merged\n' > unreviewed.md && git add -A && git commit -qm "unreviewed-merge: the work"
+git switch -q main
+git merge -q --no-ff -m "unreviewed-merge: merge it without a review" unreviewed-merge
+git branch -q -D unreviewed-merge
+# The squash shape, from a changeset that *was* reviewed: the review happened and the landing shape kept
+# none of it. Same heading, different sentence.
 git checkout -qb unrecorded-landing
 mkdir -p changesets/unrecorded-landing
 printf 'base: main\n' > changesets/unrecorded-landing/CHANGESET.yaml
 printf 'Summary: work that lands without its record.\n' > changesets/unrecorded-landing/ABOUT.md
 printf 'landed\n' > unrecorded.md && git add -A && git commit -qm "unrecorded-landing: the work"
-$G change ready >/dev/null 2>&1; check "the second changeset is offered" 0 $?
+$G change ready >/dev/null 2>&1; check "the reviewed changeset is offered" 0 $?
 $G review submit --approve >/dev/null 2>&1; check "and approved" 0 $?
 git switch -q main
 git checkout unrecorded-landing -- changesets/unrecorded-landing
 git commit -qm "unrecorded-landing: land it, write no record"
 out=$($G queue 2>&1)
-printf '%s' "$out" | grep -q "LANDED, UNRECORDED" \
-  && echo "  ok: the queue reports the landing as its own heading" \
-  || { echo "  FAIL: an unrecorded landing left no trace in the queue: $out"; FAILED=1; }
-printf '%s' "$out" | grep -q "git pair integration record --changeset unrecorded-landing" \
-  && echo "  ok: and prints the invocation that closes the gap" \
-  || { echo "  FAIL: the report did not say what to run: $out"; FAILED=1; }
+printf '%s' "$out" | grep -q "LANDED UNREVIEWED" \
+  && echo "  ok: the queue reports the landings as its own heading" \
+  || { echo "  FAIL: work in trunk with no verdict left no trace in the queue: $out"; FAILED=1; }
+printf '%s' "$out" | grep -q "unreviewed-merge" \
+  && printf '%s' "$out" | grep -q "no review verdict" \
+  && echo "  ok: naming the changeset whose chain carries no verdict" \
+  || { echo "  FAIL: the chain-with-no-verdict case is missing: $out"; FAILED=1; }
+printf '%s' "$out" | grep -q "unrecorded-landing" \
+  && printf '%s' "$out" | grep -q "one commit" \
+  && echo "  ok: and the landing that carried no history says so rather than blaming the reviewers" \
+  || { echo "  FAIL: the squash case is missing or blamed the wrong thing: $out"; FAILED=1; }
+printf '%s' "$out" | grep -q "status --changeset" \
+  && echo "  ok: and prints the read that goes and looks, not a command that writes" \
+  || { echo "  FAIL: the heading offered a command instead of a read: $out"; FAILED=1; }
+$G queue --json | grep -q '"landed_unreviewed"' \
+  && echo "  ok: the machine surface carries the same finding" \
+  || { echo "  FAIL: queue --json has no landed_unreviewed"; FAILED=1; }
 out=$($G status 2>&1); code=$?
 [ "$code" = 2 ] && echo "  ok: status on the destination branch still exits 2" \
   || { echo "  FAIL: status on the destination branch exited $code"; FAILED=1; }
 printf '%s' "$out" | grep -q "no changeset for this branch" \
-  && printf '%s' "$out" | grep -q "no integration record" \
+  && printf '%s' "$out" | grep -q "LANDED UNREVIEWED" \
   && echo "  ok: and its answer carries the finding" \
   || { echo "  FAIL: status said only that the branch has no changeset: $out"; FAILED=1; }
+$G status --changeset unreviewed-merge --json | grep -q '"landed": true' \
+  && echo "  ok: and a landed changeset read by name says landed, from the tree" \
+  || { echo "  FAIL: status --changeset did not report the landing"; FAILED=1; }
+# Nothing closes the heading with a command. Writing the record -- the invocation this step used to print as
+# the fix -- changes the finding not at all, which is the difference between this heading and the one it
+# replaced. The record is still written, because the publish step below needs a pair to send.
 $G integration record --changeset unrecorded-landing >/dev/null 2>&1
 check "recording the landing is a success" 0 $?
-if $G queue 2>&1 | grep -q "LANDED, UNRECORDED"; then
-  echo "  FAIL: the report outlived the record"; FAILED=1
+if ! $G queue 2>&1 | grep -q "LANDED UNREVIEWED"; then
+  echo "  FAIL: the report went quiet when a record was written, so it was never about the work"; FAILED=1
 else
-  echo "  ok: and the report goes quiet once the record exists"
+  echo "  ok: and the report is still there, because the finding is about the chain, not the paper trail"
 fi
 
 step "publish: the refs leave the clone that wrote them"

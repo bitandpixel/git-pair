@@ -157,3 +157,36 @@ func TestUnreviewedLandingsSurviveEveryBranchBeingGone(t *testing.T) {
 		t.Error("the finding is gone with the refs")
 	}
 }
+
+// The durable refs are still in the repository until milestone M5 deletes them, and this is the test that
+// says they are inert already: point both families at commits that tell a different story, and every answer
+// above stays the one the destination's tree gives. A later change that reads a ref again fails here, in a
+// repository where the refs disagree, rather than in a clone where they happen to agree.
+func TestDurableRefsDisagreeWithTheTreeAndChangeNothing(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	landMergeReviewing(t, f, slug, true)
+	f.ForceDeleteBranch(slug)
+
+	clean := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").json(t)
+	want := len(runIn(t, f.Dir(), "queue", "--json").json(t)["landed_unreviewed"].([]any))
+
+	// Two refs, both lying: an integration ref naming a commit that carries nothing, and an archive ref
+	// naming the destination's own tip.
+	bogus := f.Commit("an unrelated commit the refs will name", gittest.WithFile("elsewhere.go", "package main\n"))
+	f.MustGit("update-ref", "refs/git-pair/integrations/"+slug, bogus)
+	f.MustGit("update-ref", "refs/git-pair/archive/"+slug, "main")
+
+	if len(durableRefs(t, f)) != 2 {
+		t.Fatal("the lying refs were not written, so the assertions below prove nothing")
+	}
+	after := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").json(t)
+	for _, key := range []string{"landed", "landed_commit", "landed_branch", "chain_base", "chain_head",
+		"reviewed", "state"} {
+		if after[key] != clean[key] {
+			t.Errorf("%s = %v with the refs lying, want %v: that answer came from a ref", key, after[key], clean[key])
+		}
+	}
+	if got := len(runIn(t, f.Dir(), "queue", "--json").json(t)["landed_unreviewed"].([]any)); got != want {
+		t.Errorf("landed_unreviewed has %d findings where it had %d: a ref is on the queue's path", got, want)
+	}
+}

@@ -215,7 +215,7 @@ func RefuseIntegrated(ctx context.Context, repo *git.Repo, id string, db changes
 	if moved {
 		path = changeset.LandedDirPath(id)
 	}
-	return fmt.Errorf("changeset %s is on %s at %s, so git-pair records nothing further for it",
+	return fmt.Errorf("changeset %s is landed on %s at %s, so git-pair records nothing further for it",
 		id, displayBranch(db), path)
 }
 
