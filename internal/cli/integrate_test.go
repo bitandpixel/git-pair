@@ -241,29 +241,6 @@ func TestChangeIntegrateRefusesAChangesetThatHasLanded(t *testing.T) {
 	}
 }
 
-// The other half of the same rule, where the load cannot see it: a landing recorded against a branch other
-// than the integration branch leaves the changeset's own directory off trunk, so the branch still reads as
-// work in progress. The recorder's refusal is what stops a declaration from asking for a second merge.
-func TestChangeIntegrateRefusesAChangesetRecordedAgainstAnotherBranch(t *testing.T) {
-	// The fixture stops before the record on purpose, so the record is written here: the landing is on
-	// release/2.x, which trunk does not hold, so the changeset's own branch still reads as work in progress.
-	f, slug, source, interim := recordFixture(t)
-	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", interim,
-		"--target", "release/2.x").mustSucceed(t, "integration", "record")
-	f.SwitchTo(slug)
-	before := f.Head()
-
-	res := runIn(t, f.Dir(), "change", "integrate")
-	if res.code != exitRefusal {
-		t.Fatalf("integrate on a recorded changeset exited %d, want %d\nstdout: %s\nstderr: %s",
-			res.code, exitRefusal, res.stdout, res.stderr)
-	}
-	mustContain(t, res.stdout+res.stderr, "recorded", "the answer names the record that already covers it")
-	if f.Head() != before {
-		t.Error("a refused declaration still wrote a commit")
-	}
-}
-
 // Re-running at the head already declared records nothing and succeeds, which is what lets a script or a
 // job re-run the declaration unconditionally. It is not a silent no-op: the answer says it found one, and
 // `recorded` is false so a log can tell the two successes apart.

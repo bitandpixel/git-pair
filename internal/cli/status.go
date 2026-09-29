@@ -12,7 +12,6 @@ import (
 	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
-	"gitpair/internal/reviewref"
 	"gitpair/internal/span"
 )
 
@@ -86,7 +85,7 @@ type parentJSON struct {
 	// tip comparison in this file reads "nothing happened" in the one case where the work finished.
 	Landed bool `json:"landed"`
 	// LandedCommit is where the parent's record points, in the same short form as `tip`.
-	LandedCommit string `json:"landed_commit,omitempty"`
+	LandedCommit string `json:"landed_commit"`
 	// LandedInDefaultBranch says the landing commit is in the history of the branch this run called the
 	// integration branch. False is both "it reached a release branch" and "no branch here identifies
 	// itself", which `landed_reach` spells out in prose.
@@ -146,32 +145,31 @@ type statusJSON struct {
 	LatestReview        *latestReviewJSON `json:"latest_review"`
 	// Parent is the stack, and is nil for a changeset measured against the integration branch.
 	Parent *parentJSON `json:"parent,omitempty"`
-	// ArchiveRef and ArchiveCommit report the changeset's archived chain: the unsquashed
-	// implementation-and-review tip the record was made from. They are non-empty only once the
-	// changeset has been recorded, because that is the only moment git-pair writes the ref. An
-	// in-flight changeset has no archive to report — the branch holds the chain, and reporting a
-	// ref that does not exist would be reporting a fact about the tool rather than the work.
-	ArchiveRef      string `json:"archive_ref"`
-	ArchiveCommit   string `json:"archive_commit"`
+	// Landed says the integration branch's tree carries this changeset's directory, and LandedCommit is
+	// the commit that put it there. LandedBranch names the branch the read was taken from, the way
+	// `default_branch` names it elsewhere in this document: the pair is the answer, and a bare "true" would
+	// not say which branch decided. Landing is not a marker, so it sits beside `state` for the reason
+	// `abandoned` does — the lifecycle states are what markers move.
+	Landed       bool   `json:"landed"`
+	LandedCommit string `json:"landed_commit"`
+	LandedBranch string `json:"landed_branch"`
+	// ChainBase and ChainHead bound the run of work the destination carries behind the directory: the span
+	// a reviewer read, and where the markers they left sit. Both are empty when the landing carried no
+	// chain — a squash or a cherry-pick brings the tree and leaves the history behind — and `reviewed` is
+	// false in that case whatever happened on the branch, because nothing in the destination kept it.
+	ChainBase       string `json:"chain_base"`
+	ChainHead       string `json:"chain_head"`
+	Reviewed        bool   `json:"reviewed"`
 	Uncommitted     *bool  `json:"uncommitted"`
 	Abandoned       bool   `json:"abandoned"`
 	AbandonedCommit string `json:"abandoned_commit,omitempty"`
 	// Integrating reports the author's declaration — `git pair change integrate` — and IntegrateCommit is
-	// the commit that wrote it. It sits beside `state` for the reason `integrated` does: the state name
-	// already says INTEGRATING while the declaration is the newest marker, and what the field adds is the
-	// address of the thing that says so. The same rule `check --json` uses, so one read of the branch
-	// cannot answer "did the author ask" two ways.
+	// the commit that wrote it. It sits beside `state` for the reason `landed` does: the state name already
+	// says INTEGRATING while the declaration is the newest marker, and what the field adds is the address of
+	// the thing that says so. The same rule `check --json` uses, so one read of the branch cannot answer
+	// "did the author ask" two ways.
 	Integrating     bool   `json:"integrating"`
 	IntegrateCommit string `json:"integrate_commit,omitempty"`
-	// Integrated reports the presence of an integration ref, which is the only record that a
-	// changeset landed: squash, rebase and cherry-pick destroy the ancestry that would otherwise
-	// answer it. Like `abandoned`, it sits beside `state` rather than inside it — the lifecycle
-	// states are what markers move, and landing is not a marker.
-	Integrated bool `json:"integrated"`
-	// IntegratedCommit is where the record points, and IntegratedRef is the ref that holds it — the
-	// address to fetch, diff, or hand to another person.
-	IntegratedCommit string `json:"integrated_commit,omitempty"`
-	IntegratedRef    string `json:"integration_ref,omitempty"`
 	// Unpublished lists changesets whose record this clone holds and whose remote — as this clone last
 	// fetched it — does not, or does not identically (§11.1). Never null: an empty list answers "nothing
 	// is waiting to be published" and a missing key would answer "this build does not know how to look".
@@ -179,14 +177,6 @@ type statusJSON struct {
 	// UnpublishedNote is the one sentence for why the list is empty when the question could not be asked
 	// at all — no remote, or a mirror namespace this clone has never fetched.
 	UnpublishedNote string `json:"unpublished_note,omitempty"`
-	// IntegratedInDefaultBranch says the recorded landing commit is in the history of the branch
-	// git-pair calls the integration branch, and IntegratedDefaultBranch names that branch. Both
-	// are derived at read time, and the pair rather than a single `integrated_target`: a ref stores
-	// an object id and no branch name, so the branch a landing reached is not something git-pair
-	// keeps. Work that retired into a release branch and never reached the default branch must not
-	// read like a default-branch landing, and a lone "main" that was never recorded would be worse.
-	IntegratedInDefaultBranch bool   `json:"integrated_in_default_branch"`
-	IntegratedDefaultBranch   string `json:"integrated_default_branch,omitempty"`
 	// Stack is the chain of changesets this one was stacked on, nearest first, read from
 	// `parent-changeset` and each ancestor's own record. Never null: an empty list answers "this
 	// changeset sat on the integration branch", and a missing key answers "this build cannot look".
@@ -230,7 +220,7 @@ func runStatus(ctx context.Context, a *app, slug string, doFetch bool) error {
 	// "where does this sit" is the branch under the reader's feet, which the `parent:` line above the
 	// fold already says. Once the changeset is recorded its history is two refs and a yaml file, and the
 	// question "did any of it reach trunk" stops being answerable from the checkout.
-	if view.json.Integrated {
+	if view.json.Landed {
 		view.json.Stack, view.json.StackNote = a.stackChain(ctx, s, idx)
 	}
 	if a.json {
@@ -290,32 +280,29 @@ func (a *app) landingsOnNoChangeset(ctx context.Context, slug string, doFetch bo
 		a.fetchDurableRefs(ctx, repo, "")
 	}
 	rep := a.publicationReport(ctx, repo, "", durable, "`git pair status --fetch` asks for them", doFetch)
-	unrecorded := durable.unrecordedLandings(dirs)
+	unreviewed := a.unreviewedLandings(ctx, repo, db, dirs)
 	if a.json {
 		// A document on stdout and the failure on stderr, because the caller is a machine that has to tell
 		// "asked, and none" from "this build could not look". Both lists are present and empty when there is
 		// nothing to report, which is the shape `statusJSON` commits to on the success path.
 		_ = a.emitJSON(map[string]any{
 			"reason":            messageOf(err),
-			"landed_unrecorded": orEmpty(unrecorded),
+			"landed_unreviewed": orEmpty(unreviewed),
 			"unpublished":       orEmpty(rep.Findings),
 			"unpublished_note":  rep.Note,
 		})
-		return unrecordedInStatus(err, unrecorded, durable.NamespaceEmpty, displayRef(db.Ref))
+		return unreviewedInStatus(err, unreviewed, displayRef(db.Ref))
 	}
 	// Printed before the error returns so both halves reach the reader who asked the question: the
 	// findings on stdout, the reason for the exit code on stderr.
 	a.printUnpublished(rep, false)
-	return unrecordedInStatus(err, unrecorded, durable.NamespaceEmpty, displayRef(db.Ref))
+	return unreviewedInStatus(err, unreviewed, displayRef(db.Ref))
 }
 
 type statusView struct {
 	json      statusJSON
 	span      span.Span
 	latestAge string
-	// integratedReach phrases where the landing commit sits, for the text surface: the JSON
-	// surface reports the same facts as fields a consumer can branch on.
-	integratedReach string
 }
 
 // stackChain walks the changesets this one was stacked on, nearest first. Each step is read from the
@@ -458,29 +445,19 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 			StaleBranch:           ps.StaleBranch,
 		}
 	}
-	if sha, err := reviewref.ResolveArchive(ctx, s.repo, s.cs.Slug); err == nil {
-		// The name of the ref is derivable from the slug, so it is only worth
-		// reporting once the ref exists: its absence is the answer to "has this ever been
-		// recorded", which a slug-derived string could never give.
-		view.json.ArchiveRef = reviewref.Archive(s.cs.Slug)
-		view.json.ArchiveCommit = short(sha)
-	} else if !errors.Is(err, reviewref.ErrNoArchiveRef) {
+	// Landed-ness and the chain behind it are read from the destination, which is what makes them facts
+	// about the work rather than about this clone: no git-pair command writes either one, and a clone that
+	// has fetched nothing but the integration branch gives the same answer as the one that did the merge.
+	lv, err := a.landingView(ctx, s.repo, s.trunk, displayRef(s.trunk.Ref), s.cs.Slug)
+	if err != nil {
 		return nil, err
 	}
-	if integrated, err := reviewref.ResolveIntegration(ctx, s.repo, s.cs.Slug); err == nil {
-		view.json.Integrated = true
-		view.json.IntegratedCommit = short(integrated)
-		view.json.IntegratedRef = reviewref.Integration(s.cs.Slug)
-		l, err := a.describeLanding(ctx, s.repo, integrated)
-		if err != nil {
-			return nil, err
-		}
-		view.json.IntegratedInDefaultBranch = l.InDefaultBranch
-		view.json.IntegratedDefaultBranch = l.DefaultBranch
-		view.integratedReach = l.reach()
-	} else if !errors.Is(err, reviewref.ErrNotIntegrated) {
-		return nil, err
-	}
+	view.json.Landed = lv.Landed
+	view.json.LandedCommit = lv.Commit
+	view.json.LandedBranch = lv.Branch
+	view.json.ChainBase = lv.ChainBase
+	view.json.ChainHead = lv.ChainHead
+	view.json.Reviewed = lv.Reviewed
 	// The span names the working span of this checkout — `base...current` — so it
 	// means nothing for a changeset read from another branch. Saying nothing beats
 	// printing a span that points somewhere else.
@@ -503,11 +480,12 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 		// only reading is to stand on it.
 		view.json.NextAction = fmt.Sprintf("`git switch %s` to act on it: git-pair records markers on the branch you have checked out", s.cs.Branch)
 	}
-	if view.json.Integrated {
-		// Last, because it supersedes both answers above. Once the record exists, handing the work
-		// on has happened: the two refs are written, nothing in git-pair moves them, and no
-		// git-pair command is the next step. What is left of the branch's life is ordinary git.
-		view.json.NextAction = fmt.Sprintf("integrated at %s: nothing further is recorded for a changeset that has landed", view.json.IntegratedCommit)
+	if view.json.Landed {
+		// Last, because it supersedes both answers above. The destination holds the directory, so the work
+		// has been handed on: nothing in git-pair moves the tree, and no git-pair command is the next step.
+		// What is left of the branch's life is ordinary git.
+		view.json.NextAction = fmt.Sprintf("landed at %s in %s: nothing further is recorded for a changeset that has landed",
+			view.json.LandedCommit, view.json.LandedBranch)
 	}
 	return view, nil
 }
@@ -531,7 +509,7 @@ func printStatus(a *app, v *statusView) {
 	} else {
 		// A changeset read from its durable record has no branch to name; saying "Branch:" with
 		// nothing after it would read as a bug rather than as an absence.
-		a.printf("Branch: none (read from the durable record)\n")
+		a.printf("Branch: none (read from the landed chain)\n")
 	}
 	a.printf("Base: %s\n", j.Base)
 	a.printf("State: %s\n", j.State)
@@ -550,14 +528,22 @@ func printStatus(a *app, v *statusView) {
 		// the state says what the newest marker is, and this names the commit that made it so.
 		a.printf("\nDeclared:\n  ready to integrate at %s (`git pair change integrate`)\n", j.IntegrateCommit)
 	}
-	if j.Integrated {
-		// Nothing here tells the reader to run `git pair integration record`: this block prints because that
-		// command already wrote the ref, and the `--json` answer on the same facts is "nothing further is
-		// recorded for a changeset that has landed". A landing with no record anywhere is a different
-		// finding — the LANDED, UNRECORDED section, which names the command with the changeset in it.
-		a.printf("\nIntegrated:\n  %s%s\n", j.IntegratedCommit, v.integratedReach)
-		if j.IntegratedRef != "" {
-			a.printf("  %s\n", j.IntegratedRef)
+	if j.Landed {
+		// Nothing here tells the reader to run `git pair integration record`: this block prints because the
+		// destination already holds the directory, and the `--json` answer on the same facts is "nothing
+		// further is recorded for a changeset that has landed". Work that reached the destination with no
+		// approving verdict is a different finding — LANDED UNREVIEWED, which `queue` prints and `status`
+		// attaches to the exit-2 answer on the destination branch.
+		a.printf("\nLanded:\n  %s in %s\n", j.LandedCommit, j.LandedBranch)
+		if j.ChainHead != "" {
+			a.printf("  chain:  %s..%s\n", j.ChainBase, j.ChainHead)
+			if j.Reviewed {
+				a.printf("  review: the chain carries an approval\n")
+			} else {
+				a.printf("  review: the chain carries no approval\n")
+			}
+		} else {
+			a.printf("  chain:  none — the landing carried the directory in one commit\n")
 		}
 	}
 	if j.LatestReview != nil {
@@ -636,14 +622,6 @@ func printStatus(a *app, v *statusView) {
 		}
 		if j.StackNote != "" {
 			a.printf("  note:   %s\n", j.StackNote)
-		}
-	}
-	if j.ArchiveRef != "" {
-		// Both families belong to the record, so they read together: the commit the work became, and
-		// the chain of what it went through to get there.
-		a.printf("\nReview archive:\n  %s\n", j.ArchiveRef)
-		if j.ArchiveCommit != "" {
-			a.printf("    points at: %s\n", j.ArchiveCommit)
 		}
 	}
 	if len(j.Unrecognised) > 0 {

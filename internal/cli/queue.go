@@ -129,7 +129,7 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 	if err != nil {
 		return err
 	}
-	unrecorded := durable.unrecordedLandings(scan.TrunkIDs)
+	unreviewed := a.unreviewedLandings(ctx, repo, db, scan.TrunkIDs)
 	// The same one read of the namespace answers both halves of "did the paper trail survive": is there a
 	// record, and did the record get anywhere. The branch is empty here because the queue spans branches,
 	// so no branch's upstream is the right answer and the repository's origin is.
@@ -196,7 +196,7 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 			// A landed parent is the case `behindParent` cannot see: it counts parent commits the branch
 			// does not have, and a merge into the destination leaves the parent's branch with none. The
 			// record is what says the base is finished, and it is already in the index this loop reads.
-			if note, err := a.landedParentNote(ctx, repo, cs, durable, entry.Head); err == nil && note != "" {
+			if note, err := a.landedParentNote(ctx, repo, cs, db, entry.Head); err == nil && note != "" {
 				stale = append(stale, note)
 			}
 			entries = append(entries, *entry)
@@ -217,7 +217,7 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 		if seen[slug] {
 			continue
 		}
-		note, err := classifyOrphan(ctx, repo, head, slug, durable)
+		note, err := classifyOrphan(ctx, repo, db, head, slug)
 		if err != nil {
 			skipped = append(skipped, slug+" ("+err.Error()+")")
 			continue
@@ -239,12 +239,12 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 
 	if a.json {
 		out := map[string]any{
-			// Every array here is `[]` rather than null, including `landed_unrecorded` and `unpublished`.
+			// Every array here is `[]` rather than null, including `landed_unreviewed` and `unpublished`.
 			// An empty list is the answer "asked, and none", and a missing key is "this build did not look".
 			"ready_for_review":     orEmpty(entries),
 			"awaiting_integration": orEmpty(integrations),
 			"skipped":              orEmpty(skipped),
-			"landed_unrecorded":    unrecorded,
+			"landed_unreviewed":    unreviewed,
 			"unpublished":          rep.Findings,
 			// The notes the text surface prints to stderr: a row whose parent has landed, or moved.
 			// They were prose-only, which left a machine reading the queue with no way to learn that the
@@ -258,7 +258,7 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 	}
 	if len(entries) == 0 {
 		a.printf("READY FOR REVIEW\n\n  nothing is ready\n")
-		a.printUnrecorded(unrecorded, durable.NamespaceEmpty, displayRef(db.Ref), true)
+		a.printUnreviewed(unreviewed, displayRef(db.Ref), true)
 		a.printUnpublished(rep, true)
 		printSkipped(a, skipped)
 		printBehindParent(a, stale)
@@ -276,7 +276,7 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 		a.printf("  head: %s\n", short(e.Head))
 		a.printf("\n")
 	}
-	a.printUnrecorded(unrecorded, durable.NamespaceEmpty, displayRef(db.Ref), false)
+	a.printUnreviewed(unreviewed, displayRef(db.Ref), false)
 	a.printUnpublished(rep, false)
 	printSkipped(a, skipped)
 	printBehindParent(a, stale)
@@ -321,18 +321,18 @@ func printBehindParent(a *app, stale []string) {
 // which gave the same warning to two opposite situations: work that was reviewed,
 // merged, and had its branch deleted — nothing left for a reviewer to do — and work
 // whose branch really did go missing.
-func classifyOrphan(ctx context.Context, repo *git.Repo, head, slug string, durable refIndex) (string, error) {
-	// The chain an orphan might have is read from the same index the rest of this command reads, so an
-	// orphan with no refs costs nothing: no `rev-parse`, no per-slug question about the namespace.
-	archive, ok := durable.Archive[slug]
-	if !ok {
-		// With no archive ref there is no record of this changeset, and a directory with no
-		// branch behind it is either a leftover or work whose branch was deleted before anyone
-		// recorded it — git-pair cannot tell which, so it says nothing rather than guessing about
-		// deleted work. The one shape of it it *can* tell is a directory the destination carries:
-		// that is a landing rather than a disappearance, and `landedIn` reports it under its own
-		// heading instead (see `unrecordedLandings`).
-		return "", nil
+//
+// The two are told apart without any durable ref. The destination carrying the directory is the first
+// answer (a landing, not a disappearance, and the landing report names it under its own heading); the
+// directory's own history on this branch is the second (a marker that ended the changeset on purpose is a
+// complete answer, and the diff would only repeat it); what is left is content in this branch's directory
+// that its base does not hold and no branch carries, which is the disappearance worth reporting.
+func classifyOrphan(ctx context.Context, repo *git.Repo, db changeset.DefaultBranchRef,
+	head, slug string) (string, error) {
+	if db.Ref != "" {
+		if present, _ := changeset.CarriesDir(ctx, repo, db.Ref, slug); present {
+			return "", nil
+		}
 	}
 	base, err := changeset.BaseAt(ctx, repo, head, slug)
 	if err != nil {
@@ -344,31 +344,22 @@ func classifyOrphan(ctx context.Context, repo *git.Repo, head, slug string, dura
 	if base == "" {
 		return "", nil
 	}
-	// An integrated changeset landed, and the branch that carried it is gone. That is the case
-	// the record was written for: nothing is pending, and the diff would only say the work is not
-	// in its base — which the record already says better.
-	if _, ok := durable.Integrated[slug]; ok {
+	// An abandoned changeset ended on purpose, and the marker that says so is on this branch. That is the
+	// whole answer: nothing is pending (PRD §9.7).
+	if summary, err := lifecycle.Summarize(ctx, repo, slug, base, head); err == nil && summary.Abandoned != nil {
 		return "", nil
 	}
-	// An abandoned changeset ended on purpose, and the archive carries the ending. That is the
-	// whole answer: nothing is pending, and the diff would only report that the work is not in its
-	// base, which is what abandoning means (PRD §9.7).
-	if summary, err := lifecycle.Summarize(ctx, repo, slug, base, archive); err == nil && summary.Abandoned != nil {
-		return "", nil
-	}
-	// The archive ref names a commit that survives the branch, so it can be compared with the
-	// base without touching the working tree: identical changeset content on both sides is what a
-	// merge leaves behind.
+	// Identical changeset content on both sides is what a merge leaves behind, so the comparison decides
+	// whether anything is actually missing.
 	dir := filepath.Join(changeset.Root, slug)
-	changed, err := repo.PathsChanged(ctx, base, archive, dir)
+	changed, err := repo.PathsChanged(ctx, base, head, dir)
 	if err != nil {
 		return "", err
 	}
 	if len(changed) == 0 {
 		return "", nil
 	}
-	return fmt.Sprintf("%s (archived at %s, whose %s is not in %s and no branch carries it)",
-		slug, short(archive), dir, base), nil
+	return fmt.Sprintf("%s (%s is not in %s and no branch carries it)", slug, dir, base), nil
 }
 
 func printSkipped(a *app, skipped []string) {
@@ -399,21 +390,26 @@ func (a *app) behindParent(ctx context.Context, repo *git.Repo, cs changeset.Cha
 	return len(records), nil
 }
 
-// landedParentNote is the queue's reading of the same fact, from the index the command already holds.
+// landedParentNote is the queue's reading of the same fact.
 //
 // It does not go through parentSinceApproval because that path costs a marker walk of the parent branch,
 // which the queue cannot pay once per READY row: a queue is a list of branches, and the parent's history is
-// somebody else's cost. The index answers the question that matters here — is the parent recorded as
-// landed — for nothing, and one containment question decides which step to name.
+// somebody else's cost. What it pays instead is one chain derivation of the parent, and only for a row that
+// is stacked on a changeset at all — the destination's first-parent line, bounded by the times the parent's
+// directory changed, not by the length of the branch. One containment question then decides which step to
+// name.
 func (a *app) landedParentNote(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
-	durable refIndex, head string) (string, error) {
-	if cs.ParentChangeset == "" {
+	db changeset.DefaultBranchRef, head string) (string, error) {
+	if cs.ParentChangeset == "" || db.Ref == "" {
 		return "", nil
 	}
-	sha, ok := durable.Integrated[cs.ParentChangeset]
-	if !ok {
+	chain, err := changeset.LandedChain(ctx, repo, db.Ref, cs.ParentChangeset)
+	if err != nil {
+		// No chain means the destination does not carry the parent, which is the same answer as the old
+		// "no record" — and one read of the destination's history is what replaces the index.
 		return "", nil
 	}
+	sha := chain.Landing
 	on, err := repo.IsAncestor(ctx, sha, head)
 	if err != nil {
 		return "", err

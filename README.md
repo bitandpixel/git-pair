@@ -430,8 +430,8 @@ never moved, and neither exists while work is in flight — the branch is the re
 The merge itself is ordinary git, which git-pair neither runs nor derives: squash, rebase-merge and
 cherry-pick each destroy the ancestry that would have answered "did this land", so the link is recorded
 rather than inferred. A recorded changeset still reports `APPROVED` (or `FEEDBACK`) — landing is not a
-marker, and `state` stays the field markers move — with `integrated`, `integrated_commit` and
-`integration_ref` beside it. Ownership follows the same split: the reviewer approves the code, the owner
+marker, and `state` stays the field markers move — with `landed`, `landed_commit` and
+`landed_branch` beside it, read from the integration branch's tree rather than from a ref. Ownership follows the same split: the reviewer approves the code, the owner
 decides what gets taken forward and where. Because both refs are create-only, nothing can quietly rewrite
 the pair that a release note, a bisect, or an agent asking "where did this review go" reads as fact.
 
@@ -624,9 +624,9 @@ landed.
 | `init` | `--id <id>`, `--base <ref>`, `--set-base`, `--parent <branch>`, `--set-parent`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch, recorded as its branch name where that name resolves and as the fetch ref this clone has to reach it through where it does not; refuses on that branch, where a changeset could never contain anything; `--parent` stacks the changeset instead of naming a base, recording the parent's changeset ID beside it, and `--set-parent` restacks it — never done implicitly, because a parent that moved, landed or died is the author's decision; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change integrate` | `--allow-feedback` | declares the approved head ready to be merged, as one empty marker commit (`Review-State: integrating`, `Review-Head`): no ref, no push, no merge (§9.9). Runs `git pair check`'s gate first, as the same code, and names every failed condition — so a declaration cannot be made for work the gate would refuse. Refuses a stacked child whose parent has no integration record: the automatic merge would land it on a branch review can still rewrite. Idempotent at the head it declared; a commit after that head is declared next time |
-| `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` when the changeset is in review (including a changeset whose declaration is being taken back), otherwise succeeds and records nothing; refuses a changeset whose work is recorded as integrated |
+| `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` when the changeset is in review (including a changeset whose declaration is being taken back), otherwise succeeds and records nothing; refuses a changeset the integration branch already holds |
 | `change use <id>` | none | records which changeset a branch carrying more than one is working on: writes `ignores: <other ids>` into the chosen changeset's `CHANGESET.yaml` and commits that file; refuses an id the branch does not offer and a record that would leave the branch still undecided; idempotent |
-| `change abandon` | none | records the terminal `Review-State: abandoned` and nothing else — no ref, since an abandoned changeset has no landing to record; `change ready`, `change unready` and `review submit` refuse against it afterwards; refuses a changeset whose work is recorded as integrated; idempotent |
+| `change abandon` | none | records the terminal `Review-State: abandoned` and nothing else — no ref, since an abandoned changeset has no landing to record; `change ready`, `change unready` and `review submit` refuse against it afterwards; refuses a changeset the integration branch already holds; idempotent |
 | `change feedback` | `--stat`, `--name-only`, `--changeset <slug>` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
 | `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
 | `review`, `review open` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref` | TUI; needs a terminal; full changeset unless a span flag says otherwise; a `--head-*` flag opens a historical span, which is read-only; with no subcommand `review` is `review open` and takes the same flags |
@@ -651,7 +651,7 @@ landed.
 commits, no blocking surviving additions — the last acknowledged with
 `--allow-surviving-review-additions`. `check` asks what the merge would act on: the newest marker is a
 review whose outcome permits integration (`approve`, or `feedback` under `--allow-feedback`), nothing
-unreadable came after it, the changeset has not ended, it has not already been recorded as integrated,
+unreadable came after it, the changeset has not ended, the integration branch does not already hold it,
 and the tree still matches what the review looked at (ignoring `changesets/<cs>/`). It reads no other
 ref, and every failed condition is reported in one run. `change unready` checks
 only for a clean tree, since the marker it writes is empty. `init` warns
@@ -706,25 +706,25 @@ and two fields report that they cannot answer — `uncommitted` is `null` and `s
 both describe the checkout rather than the commit, and `next_action` names the branch to switch to.
 `abandoned` is true once `change abandon` has ended the changeset, with `abandoned_commit` naming the
 terminal marker; `state` stays `WORKING`, because the ending is a fact beside the state rather than a
-state value of its own. `archive_ref` and `archive_commit` describe the
-durable pair and stay `""` while work is in flight, because nothing writes a ref before landing —
-their name is derivable from the changeset, so their existence is the only fact worth reporting.
-`integrated` is true once `git pair integration record` has recorded where
-the work landed, with `integrated_commit` naming that commit and `integration_ref` the ref that holds
-it, and `state` is untouched by it: landing
+state value of its own. `landed` is true when the integration branch's tree carries the changeset's
+directory, `landed_commit` names the commit it arrived in, and `landed_branch` names the branch the read was
+taken from — the pair is the answer, because a bare `true` would not say which branch decided. Landing is
+read from the destination rather than from a ref, so a clone that has fetched nothing but the integration
+branch answers it the same way. `chain_base` and `chain_head` bound the run of work the destination carries
+behind the directory — the span a reviewer read, and where the markers they left sit — and are `""` exactly
+when the landing carried no chain: a squash or a cherry-pick brings the tree and leaves the history behind.
+`reviewed` says the chain carries a permitting verdict, and is `false` in that case whatever happened on the
+branch, because nothing in the destination kept it. `state` is untouched by all of it: landing
 is a fact beside the state, not a state value of its own. `integrating` and `integrate_commit` are the
 other pair beside it, and the only one that is also a state: `INTEGRATING` while a `git pair change
 integrate` declaration (§9.9) is the newest marker, the commit named so the author can see what they did
 and not only what it produced. The human surface prints no "run
-`git pair integration record`" beside a ref that already exists — the finding for a landing with no record
-is `LANDED, UNRECORDED`, which names the command with the changeset in it. Reading a landed changeset by id
-(`status --changeset <id>`, no branch carrying it) keeps that split: `state` stays what the span says while
-the reviews come from the archived chain, because after a merge landing the archived head sits below the
-base and `base..head` is empty for exactly the changeset whose verdicts matter most. `integrated_in_default_branch` says whether that
-commit is in the history of the branch git-pair calls the integration branch, and
-`integrated_default_branch` names that branch — work that retired into `release/2.x` and never reached
-the default branch must not read like a default-branch landing, and what git-pair reports is the
-containment it can derive rather than a branch name no ref stores. A recorded changeset's own two refs
+`git pair integration record`" beside a landing that has happened — the finding for work in the destination
+that the destination holds no approval of is `LANDED UNREVIEWED`, which prints a read rather than a command. Reading a
+landed changeset by id (`status --changeset <id>`, no branch carrying it) reads the same chain, so its
+`state`, its verdict and its thread files come from the destination's history — with the squash case above
+the honest limit, and the fields say so rather than reporting an empty range as a verdict. A recorded
+changeset's own two refs
 say what it became and not where that reached, so `stack` walks the chain the child's `parent-changeset:`
 starts: one entry per ancestor, nearest first, with the ancestor's id, the branch it was stacked on and
 whether this clone still has that branch, its recorded commit and ref, and whether that commit is in the
@@ -751,11 +751,14 @@ further to record instead.
   "head": "8065dae",
   "head_full": "8065dae53c0475596bfc174927075895d9fb8b76",
   "latest_review": null,
-  "archive_ref": "",
-  "archive_commit": "",
+  "landed": false,
+  "landed_commit": "",
+  "landed_branch": "",
+  "chain_base": "",
+  "chain_head": "",
+  "reviewed": false,
   "uncommitted": false,
   "abandoned": false,
-  "integrated": false,
   "reviews": 0,
   "reason": "marked ready by 8065dae",
   "span": "main...current",
@@ -800,10 +803,18 @@ carries with no integration ref: that is a merge whose record never ran, and it 
     }
   ],
   "parent_notes": ["waitlist-rebooking: parent booking-transaction landed as 4f2b8c1 — the branch booking-transaction is stale — it holds nothing the record does not"],
-  "landed_unrecorded": [
+  "landed_unreviewed": [
     {
       "changeset": "waitlist-rebooking",
-      "command": "git pair integration record --changeset waitlist-rebooking"
+      "commit": "4f2b8c1",
+      "chain": "",
+      "reason": "the landing carried the directory in one commit, so no review markers came with it"
+    },
+    {
+      "changeset": "offer-expiry",
+      "commit": "9d1c07e",
+      "chain": "3b6a2f1..d40c81a",
+      "reason": "the approval (d40c81a) names 41e7b19, which the destination does not carry: the landing replayed the run, so what was approved is not what landed"
     }
   ]
 }
@@ -819,16 +830,22 @@ waiting for a reviewer"; this is "what a reviewer approved and the author has ha
 in both: a declaration is a marker, so a branch carrying one is not `READY`. The human form prints them
 under `AWAITING INTEGRATION`, and prints nothing when there are none — the array is `[]` either way.
 
-`landed_unrecorded` is the queue's second job: work that reached the integration branch while nobody
-wrote its record. Each entry carries the invocation that closes the gap, and the human form prints the
-same thing under its own heading:
+`landed_unreviewed` is the queue's second job: work that reached the integration branch with nothing in the
+destination approving what arrived. Nothing closes it with a command, so the heading prints the read that
+goes and looks, and the `reason` says which of the three it is — no verdict in the chain, a chain that came
+with no verdict-bearing commits at all (the squash, which leaves `chain` empty), or an approval that names a
+commit the destination does not hold (a replayed run, which does not).
 
 ```text
-LANDED, UNRECORDED
+LANDED UNREVIEWED
 
   waitlist-rebooking
-    in main with no integration record. Record it with:
-      git pair integration record --changeset waitlist-rebooking
+    on main at 4f2b8c1: the landing carried the directory in one commit, so no review markers came with it
+  offer-expiry
+    on main at 9d1c07e, chain 3b6a2f1..d40c81a: the approval (d40c81a) names 41e7b19, which the destination
+    does not carry: the landing replayed the run, so what was approved is not what landed
+
+  read one with `git pair status --changeset <id>`
 ```
 
 The state is the one the merge leaves behind when the step after it is skipped: the directory is in
@@ -838,7 +855,7 @@ its exit-2 "no changeset for this branch" answer, which stays exit 2 because the
 no work in progress. On that branch `status` also runs the published-or-not comparison, so the destination
 branch — the branch every changeset eventually lands on, and the one where a record that never left the
 clone was invisible — reports both halves. Its `--json` there is a document rather than only an error:
-`reason`, `landed_unrecorded`, `unpublished` and `unpublished_note`, with the two lists present and empty
+`reason`, `landed_unreviewed`, `unpublished` and `unpublished_note`, with the two lists present and empty
 when there is nothing to report.
 
 When the destination already holds the directory, the answer says the changeset landed. It then names
@@ -852,7 +869,7 @@ ran arrives with `git fetch origin 'refs/git-pair/*:refs/git-pair/*'` — or wit
 fetched record is a record; a mirror is only a comparison, and nothing answers "is this recorded" from
 one — and they are two fetches, because the mirror side is pruned and the record side must never be.
 What the mirrors are for is the finding `queue` prints as `RECORDED, NOT PUBLISHED`, beside
-`LANDED, UNRECORDED`: changesets whose record this clone holds and the remote, as last fetched, does not.
+`LANDED UNREVIEWED`: changesets whose record this clone holds and the remote, as last fetched, does not.
 `status` prints it on a changeset branch after its report, and on the destination branch beside the failure
 that says there is nothing there to report.
 Half a pair on the remote is its own, louder case — the remote has a hint and no way to reconstruct the
@@ -913,7 +930,7 @@ handling two shapes), and `policy` records which rule produced the verdict — `
 comparing the verdict built one of them and the other is the end of the lineage comparison.
 `reviewed_head` is the commit the newest permitting review named; it is reported whichever way the
 verdict went and omitted only when that marker names no head. Nothing else in the verdict reads a
-durable ref except `integrated`, which reports a changeset already recorded as landed (PRD §11.3).
+durable ref except `landed`, which reports a changeset the integration branch already holds (PRD §11.3).
 
 This form carries the verdict in `ready` rather than in the exit code: a not-ready run prints its
 JSON and exits 0, so a job piping it into `jq` keeps git-pair's answer separate from the pipeline's.
@@ -945,7 +962,7 @@ git pair check --json | jq -e '.ready and .integrating'
     "content outside changesets/feat/ changed since 1a2b3c4: src/service.ts"
   ],
   "policy": "approve-only",
-  "integrated": false,
+  "landed": false,
   "integrating": false
 }
 ```
@@ -1168,9 +1185,9 @@ lands on its base branch, that branch later lands on trunk, and the re-run again
 whose own first parent did not yet hold the record. That answers "already recorded at <the recorded commit>,
 and <this commit> carries it into <destination>", writes nothing, and reports `carried_by` in `--json`. A
 commit whose first parent already held the record is a second landing on the same branch — a backport — and
-a different reviewed head is a different claim, so both stay conflicts. Once the record
-exists `check` refuses the changeset as already integrated and the commands that write markers refuse it
-too.
+a different reviewed head is a different claim, so both stay conflicts. Once the integration branch
+carries the directory, `check` refuses the changeset as already landed and the commands that write markers
+refuse it too — the record is not what decides, and a landing on some other branch is not a landing.
 
 What the recorder refuses is what makes the pair worth reading later, and all four checks are refusals
 rather than warnings:
@@ -2019,8 +2036,8 @@ A changeset that reads as uninitialised on its own branch, or that has vanished 
 sibling merged your unlanded branch and *that* landed. Your directory is in trunk's tree, which is
 precisely what the rule tests, so the cure is to land your own branch rather than someone else's
 merge of it. `git ls-tree <integration-branch> changesets/` shows whether the directory is there — and
-if it is there while no integration record names it, `queue` does not leave you to work that out:
-it prints the changeset under `LANDED, UNRECORDED`.
+when it is, `queue` does not leave you to work out what came with it: it prints the changeset under
+`LANDED UNREVIEWED` unless the chain behind it carries an approval of the commits that arrived.
 
 `ABOUT.md already has content: changesets/<cs>/ABOUT.md is not empty (pass --set-about to
 replace it)` (exit 2) — `init --about` refuses to discard a description that is
@@ -2085,8 +2102,11 @@ and every bullet names which:
 - **The policy refused.** The newest review is `feedback`, which the default policy does not accept; the
   bullet says so, and `--allow-feedback` is the switch.
 
-A fourth bullet, `changeset is already integrated at …`, is not a problem to fix: the record says the
-review is over, and re-running the gate after a landing reports that rather than a second opinion.
+A fourth bullet, `changeset is already landed at …`, is not a problem to fix: the integration branch holds
+the directory, so the review is over, and re-running the gate after a landing reports that rather than a
+second opinion. A merge into a branch that is *not* the integration branch produces no such bullet, and the
+work stays offerable: the release line can revert the merge, and the changeset may still have to reach the
+integration branch on its own.
 `check` is also the one command that ignores your
 working tree: it asserts the commit, and uncommitted edits are not in `HEAD` to be reviewed.
 
@@ -2105,12 +2125,25 @@ heads, and each row prints the branch it speaks for. A branch it cannot resolve 
 branch, say — is named in `skipped` rather than left out quietly.
 
 A missing entry that is *not* work in progress is reported rather than hidden. A changeset directory the
-integration branch carries with no integration record is a landing nobody recorded, and `queue`
-gives it its own `LANDED, UNRECORDED` heading with the `git pair integration record` invocation that
-closes the gap; `git pair status` on a branch carrying no changeset of its own says the same inside its
-exit-2 answer. It is the one state where the paper trail is nothing but the merge commit, which is why
-the queue looks for it instead of waiting to be asked. Read it as "not recorded *here*" until
-`git fetch origin 'refs/git-pair/*:refs/git-pair/*'` says otherwise.
+integration branch carries whose chain holds no approving verdict is work that reached the destination
+without a review licensing it, and `queue` gives it its own `LANDED UNREVIEWED` heading; `git pair status`
+on a branch carrying no changeset of its own says the same inside its exit-2 answer. The heading prints a
+read (`git pair status --changeset <id>`) rather than a command, because no command closes it: the reasons it
+prints — a chain that carries no verdict, a landing that carried the directory in one commit and kept none of
+the history, and an approval naming a commit the destination does not hold — are all facts about git's
+history, and only the first is a complaint about the review.
+
+`reviewed` and `check` ask the same question of the same trailer, which is the only reason the two surfaces
+agree. `check` asks whether an approval still licenses the branch in front of it, and refuses a live branch
+whose approval names a commit the branch no longer holds. `reviewed` asks whether the destination holds an
+approval of what the destination holds, and fails a landing whose approval names a commit the destination
+never received — the run was replayed between the approval and the landing, by a rebase merge or by the
+author rewriting under an approval. Those two replays leave identical commits behind, so nothing in the
+destination separates the merge that did the rewriting from the author who rewrote and was merged anyway;
+the strict answer covers both, and it is also why the answer cannot be taken before the merge, when the
+difference was still visible. One false finding comes with it, and it is worth naming: an approval written
+before `Review-Head` existed names no commit, so `reviewed` says false for work that was reviewed. Two
+changesets in this repository's own trunk are in that shape.
 
 A hand-written ready marker counts only if `Review-State: ready` and `Review-Changeset: <slug>`
 sit in a real trailer block, separated from the subject by a blank line and from each other by
@@ -2118,7 +2151,7 @@ no blank line.
 
 A head whose newest review does not permit integration is `check`'s problem, and it reports it as a
 `NOT READY:` bullet with exit 1 — the gate working, and every other failed condition in the same run.
-A changeset whose work is recorded as landed is refused by the commands that would move it instead:
+A changeset the integration branch holds is refused by the commands that would move it instead:
 `change ready`, `change unready`, `change abandon` and `review submit` all say
-`changeset <id> is recorded as integrated at <sha>, so git-pair records nothing further for it` (exit 1)
-and write nothing.
+`changeset <id> is landed on <branch> at changesets/<id>, so git-pair records nothing further for it`
+(exit 1) and write nothing.

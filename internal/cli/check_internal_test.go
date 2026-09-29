@@ -146,28 +146,33 @@ func TestIntegrationReasons(t *testing.T) {
 			contains: []string{"not one git-pair can classify"},
 		},
 		{
-			// Every other condition says pass, and the record still says no. A pipeline that runs
-			// this gate before integrating gets a clear answer when it re-runs after integrating.
-			name:    "an integrated changeset is not integration-ready again",
+			// Every other condition says pass, and the destination's tree still says no: the directory
+			// is on main, so the work has landed. A pipeline that runs this gate before integrating gets
+			// a clear answer when it re-runs after integrating.
+			name:    "a landed changeset is not integration-ready again",
 			summary: lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
 			head:    head,
 			landed:  landing{Commit: landedSHA, BranchKnown: true, DefaultBranch: "main", InDefaultBranch: true},
 			n:       1,
 			contains: []string{
-				"changeset is already integrated at " + short(landedSHA),
+				"changeset is already landed at " + short(landedSHA),
 				"reachable from main",
 			},
-			// The record outranks everything else: the drift question below it describes work
+			// Landing outranks everything else: the drift question below it describes work
 			// still in progress.
 			not: []string{"changed since"},
 		},
 		{
+			// The reach clause of the sentence, which the gate's own derivation always answers
+			// "reachable" — it reads the destination's first-parent line, so a landing it can name is
+			// on that line by construction. The other two clauses stay asserted because `landing` is
+			// shared with the surfaces that still ask where a commit sits.
 			name:     "a landing outside the default branch says so",
 			summary:  lifecycle.Summary{Marker: approve, LatestReview: approve, State: model.StateApproved},
 			head:     head,
 			landed:   landing{Commit: landedSHA, BranchKnown: true, DefaultBranch: "main", InDefaultBranch: false},
 			n:        1,
-			contains: []string{"already integrated at", "not reachable from main"},
+			contains: []string{"already landed at", "not reachable from main"},
 		},
 		{
 			// "I cannot tell which branch is the integration branch" must not come out as "it is
@@ -177,7 +182,7 @@ func TestIntegrationReasons(t *testing.T) {
 			head:     head,
 			landed:   landing{Commit: landedSHA},
 			n:        1,
-			contains: []string{"already integrated at " + short(landedSHA)},
+			contains: []string{"already landed at " + short(landedSHA)},
 			not:      []string{"reachable from"},
 		},
 	}

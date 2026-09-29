@@ -224,6 +224,18 @@ type session struct {
 	trunk changeset.DefaultBranchRef
 }
 
+// destination is the integration branch this run should measure against, or the zero value when the
+// repository cannot name one. The zero value has an empty Ref, which is what every tree-based question
+// reads as "cannot tell, so do not refuse" — the failure mode a caller wants: a clone that has not worked
+// out which branch is main keeps answering about the work instead of blaming it for the clone.
+func (a *app) destination(ctx context.Context, repo *git.Repo) changeset.DefaultBranchRef {
+	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
+	if err != nil {
+		return changeset.DefaultBranchRef{}
+	}
+	return db
+}
+
 // loadFor resolves the session a changeset-scoped read should work from: the
 // checked-out changeset, or the one named by `--changeset`.
 func (a *app) loadFor(ctx context.Context, slug string) (*session, error) {
@@ -292,38 +304,46 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 		}
 	}
 	if len(branches) == 0 {
-		// No branch carries the slug, so the durable pair is the only place its history can be
-		// read — which is exactly what a reader asking about a landed changeset wants. For a
-		// changeset that never landed there is nothing to read: the branch was the record, and it
-		// is gone. Deriving from the archive can only report what the branch claimed before it
-		// disappeared, which is why it is a fallback and not a second source of state (PRD §12).
-		anchor, err := reviewref.ResolveArchive(ctx, repo, slug)
-		if errors.Is(err, reviewref.ErrNoArchiveRef) {
+		// No branch carries the slug, so the destination's own history is the only place its record can be
+		// read — which is exactly what a reader asking about a landed changeset wants. For a changeset that
+		// never landed there is nothing to read: the branch was the record, and it is gone. The walk reports
+		// what the destination carries and nothing more, which is why it answers rather than becoming a second
+		// source of state (PRD §12).
+		if db.Ref == "" {
 			return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
-				fmt.Errorf("no branch carries changeset %q; `git pair queue` lists what this repository has", slug)}
+				fmt.Errorf("no branch carries changeset %q, and this clone cannot name the destination to look in: pass --default-branch", slug)}
+		}
+		chain, err := changeset.LandedChain(ctx, repo, db.Ref, slug)
+		if errors.Is(err, changeset.ErrNoChain) {
+			return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
+				fmt.Errorf("no branch carries changeset %q, and %s holds no directory for it either: `git pair queue` lists what this repository has",
+					slug, displayRef(db.LocalName()))}
 		}
 		if err != nil {
 			return changeset.Changeset{}, lifecycle.Summary{}, "", err
 		}
-		// The stack keys come from the same read as the base, because the record read needs them for the
-		// same reason a branch read does: a changeset that landed on a branch that has since been tidied
-		// away has only its yaml to say what it was stacked on, and the chain above it is the difference
-		// between "this reached trunk" and "this reached a branch that later did".
+		// The range end is the newest commit in the run, and the range start is what the run sits on, so the
+		// markers, the verdict and the thread files are read from the same span the branch carried before it
+		// was merged away.
+		anchor := chain.Head
+		// The stack keys come from the same read as the base, because the landed read needs them for the same
+		// reason a branch read does: a changeset that landed on a branch since tidied away has only its yaml
+		// to say what it was stacked on, and the chain above it is the difference between "this reached
+		// trunk" and "this reached a branch that later did".
 		stack, err := changeset.StackAt(ctx, repo, anchor, slug)
+		if errors.Is(err, git.ErrUnknownPath) {
+			return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
+				fmt.Errorf("changeset %q is on %s at %s but carries no %s", slug, displayRef(db.LocalName()),
+					short(anchor), changeset.MetadataFile)}
+		}
 		if err != nil {
-			if errors.Is(err, git.ErrUnknownPath) {
-				return changeset.Changeset{}, lifecycle.Summary{}, "", &usageError{
-					fmt.Errorf("changeset %q is recorded at %s but carries no %s", slug, short(anchor), changeset.MetadataFile)}
-			}
 			return changeset.Changeset{}, lifecycle.Summary{}, "", err
 		}
-		// A landed child is usually read after its parent branch has been tidied away, and then the base
-		// its yaml names is a revision this clone may not have — the same reason a stack is relinked on
-		// the branch path (changeset.relinkStacks). The parent's integration ref is that same boundary in
-		// the durable namespace: the commit the parent's work became. Relinking to it keeps `Base:`
-		// meaningful and lets the chain above it be read; nothing is invented, because the branch name
-		// stays in ParentBranch for anything that needs to say the parent has landed.
-		base := stack.Base
+		// The chain's own start is the base for the read: it is where the run sits, which is the range the
+		// markers live in. A stacked child still relinks below, because the parent's tip as recorded in the
+		// child's yaml can name a revision this clone has not fetched — the same reason a stack is relinked
+		// on the branch path. Milestone M3 replaces that relink with a derived base and retires this one.
+		base := chain.Base
 		if stack.Parent != "" && stack.ParentChangeset != "" {
 			if _, err := repo.RevParse(ctx, "refs/heads/"+stack.Parent); err != nil {
 				if _, err := reviewref.ResolveIntegration(ctx, repo, stack.ParentChangeset); err == nil {
@@ -363,7 +383,8 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 		// With nothing in the span, the span's reason ("no commits above the base yet") is a true statement
 		// about a range nobody meant to ask about. Say what the read was.
 		if len(summary.Events) == 0 {
-			summary.Reason = "read from the durable refs; the archived chain is below the base, so there is no span to report"
+			summary.Reason = fmt.Sprintf("read from %s's history; the chain is below the base, so there is no span to report",
+				displayRef(db.LocalName()))
 		}
 		// cs.Branch stays empty: there is no branch, and a reader must be able to tell.
 		return cs, summary, anchor, nil

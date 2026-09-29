@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"strings"
 
+	"gitpair/internal/changeset"
 	"gitpair/internal/git"
 	"gitpair/internal/model"
-	"gitpair/internal/reviewref"
 )
 
 // Message is a constructed lifecycle commit message.
@@ -153,8 +153,8 @@ func ReviewMessage(slug string, outcome model.Outcome, head, parentHead, body st
 // Commit writes a marker commit and returns its SHA. Review submissions may be
 // empty (an approval with no edits is a legitimate review), so empty commits are
 // always allowed here.
-func Commit(ctx context.Context, repo *git.Repo, msg Message) (string, error) {
-	if err := refuseIfIntegrated(ctx, repo, msg); err != nil {
+func Commit(ctx context.Context, repo *git.Repo, msg Message, db changeset.DefaultBranchRef) (string, error) {
+	if err := refuseIfIntegrated(ctx, repo, msg, db); err != nil {
 		return "", err
 	}
 	rendered, err := msg.Render()
@@ -169,8 +169,8 @@ func Commit(ctx context.Context, repo *git.Repo, msg Message) (string, error) {
 
 // CommitPaths writes a marker commit covering exactly the given paths, so
 // scaffolding commits cannot sweep unrelated staged work off the author's index.
-func CommitPaths(ctx context.Context, repo *git.Repo, msg Message, paths []string) (string, error) {
-	if err := refuseIfIntegrated(ctx, repo, msg); err != nil {
+func CommitPaths(ctx context.Context, repo *git.Repo, msg Message, paths []string, db changeset.DefaultBranchRef) (string, error) {
+	if err := refuseIfIntegrated(ctx, repo, msg, db); err != nil {
 		return "", err
 	}
 	rendered, err := msg.Render()
@@ -183,41 +183,51 @@ func CommitPaths(ctx context.Context, repo *git.Repo, msg Message, paths []strin
 	return repo.Head(ctx)
 }
 
-// refuseIfIntegrated is the write gate: once a changeset's integration record exists, git-pair
-// writes no marker for it.
+// refuseIfIntegrated is the write gate: once a changeset's directory is in the destination's tree,
+// git-pair writes no marker for it.
 //
-// The record closes the paper trail, so a marker after it would be a claim about a review that
-// cannot happen. The gate also keeps a stale checkout honest: an author who forgot the branch was
-// left behind cannot put a landed changeset back in the queue, and a reviewer working from an old
+// The destination carrying the directory closes the paper trail, so a marker after it would be a claim
+// about a review that cannot happen. The gate also keeps a stale checkout honest: an author who forgot the
+// branch was left behind cannot put a landed changeset back in the queue, and a reviewer working from an old
 // clone cannot approve work that has already become something else.
-func refuseIfIntegrated(ctx context.Context, repo *git.Repo, msg Message) error {
-	return RefuseIntegrated(ctx, repo, msg.changesetID())
+func refuseIfIntegrated(ctx context.Context, repo *git.Repo, msg Message, db changeset.DefaultBranchRef) error {
+	return RefuseIntegrated(ctx, repo, msg.changesetID(), db)
 }
 
 // RefuseIntegrated is the same gate for a caller that is about to write nothing. `marker.Commit`
-// cannot produce a marker for a recorded changeset, but a command can decide on its own that there is
+// cannot produce a marker for a landed changeset, but a command can decide on its own that there is
 // nothing to record and report success — and `change unready` on a changeset its author has already
 // merged is not a no-op, it is a mistake. The answer to both is the same sentence.
-func RefuseIntegrated(ctx context.Context, repo *git.Repo, id string) error {
-	if id == "" {
+//
+// It asks the destination's tree, not a ref: `changesets/<id>/` in the destination is the fact, and a
+// clone that has never fetched a namespace answers the same question as one that has. Where no destination
+// can be named at all, the gate stays open — refusing because git-pair could not work out which branch is
+// main would blame the work for a clone, and the caller's own checks still apply.
+func RefuseIntegrated(ctx context.Context, repo *git.Repo, id string, db changeset.DefaultBranchRef) error {
+	if id == "" || db.Ref == "" {
 		return nil
 	}
-	at, err := reviewref.ResolveIntegration(ctx, repo, id)
-	if errors.Is(err, reviewref.ErrNotIntegrated) {
+	present, moved := changeset.CarriesDir(ctx, repo, db.Ref, id)
+	if !present {
 		return nil
 	}
-	if err != nil {
-		return err
+	path := changeset.ActiveDirPath(id)
+	if moved {
+		path = changeset.LandedDirPath(id)
 	}
-	return fmt.Errorf("changeset %s is recorded as integrated at %s, so git-pair records nothing further for it",
-		id, short(at))
+	return fmt.Errorf("changeset %s is landed on %s at %s, so git-pair records nothing further for it",
+		id, displayBranch(db), path)
 }
 
-func short(sha string) string {
-	if len(sha) > 7 {
-		return sha[:7]
+// displayBranch names the destination the way a person reads it rather than the way git stores it.
+func displayBranch(db changeset.DefaultBranchRef) string {
+	name := db.LocalName()
+	for _, prefix := range []string{"refs/heads/", "refs/remotes/"} {
+		if strings.HasPrefix(name, prefix) {
+			return strings.TrimPrefix(name, prefix)
+		}
 	}
-	return sha
+	return name
 }
 
 // changesetID is the changeset a marker speaks about, read from the trailer that exists to answer

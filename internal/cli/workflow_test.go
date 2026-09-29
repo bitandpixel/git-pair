@@ -186,8 +186,8 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	mustContain(t, recorded.stdout, integrationRef(slug), "and the integration ref")
 	mustContain(t, recorded.stdout, "reachable from main", "and the reachability it verified")
 
-	if got := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").json(t)["integrated"]; got != true {
-		t.Errorf("integrated = %v, want true: the record is how a landing is known", got)
+	if got := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").json(t)["landed"]; got != true {
+		t.Errorf("landed = %v, want true: the destination's tree is how a landing is known", got)
 	}
 	if got := f.RefSHA(archiveRef(slug)); got != reviewed {
 		t.Errorf("archive = %s, want the reviewed head %s", got, reviewed)
@@ -195,10 +195,16 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	if got := f.RefSHA(integrationRef(slug)); got != landing {
 		t.Errorf("integration record = %s, want the landing %s", got, landing)
 	}
-	// Recording changed no lifecycle state: landing is not a marker, and a state value for it would put
-	// a derived fact inside the machine that markers move.
-	if got := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").json(t)["state"]; got != "APPROVED" {
-		t.Errorf("state = %v, want APPROVED", got)
+	// This landing carries the directory without carrying the ancestry — the fixture checks the reviewed
+	// tree out onto main and commits it, the shape a squash or a cherry-pick leaves. There is therefore no
+	// chain on main to read, and the state stays what the destination's own history says rather than
+	// borrowing a verdict from a range that does not exist here. The archived chain is still reported
+	// beside it, which is the half the durable refs hold: milestone M5 of
+	// docs/plans/simplify-architecture/plan.md deletes those refs, and PRD §13 has to state at the same
+	// moment that a landing of this shape keeps nothing. A merge landing keeps all of it —
+	// TestStatusOfARecordReadReportsTheChainAsState is that case.
+	if got := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").json(t)["state"]; got != "WORKING" {
+		t.Errorf("state = %v, want WORKING: a landing with no ancestry has no chain to read", got)
 	}
 
 	// The archival promise: after the branch is gone, the complete unsquashed chain is still

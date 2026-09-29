@@ -1,7 +1,10 @@
 package changeset
 
 import (
+	"context"
 	"path/filepath"
+
+	"gitpair/internal/git"
 )
 
 // The landed namespace.
@@ -57,6 +60,20 @@ func ActiveDirPath(id string) string {
 // which is exactly why a walk over history asks for both (DirPathspecs) instead of picking one.
 func LandedDirPath(id string) string {
 	return filepath.Join(Root, LandedDir, id)
+}
+
+// DirAt reports the path one changeset's directory has in a revision's tree, and whether it is there at
+// all: `changesets/<id>/`, or `changesets/.landed/<id>/` once it has been tidied. Every reader that takes
+// a slug and a revision asks this before it reads a file, because a reader that hard-codes the active
+// spelling stops finding a changeset the moment somebody tidies it.
+func DirAt(ctx context.Context, repo *git.Repo, rev, id string) (string, bool) {
+	if present, moved := CarriesDir(ctx, repo, rev, id); present {
+		if moved {
+			return LandedDirPath(id), true
+		}
+		return ActiveDirPath(id), true
+	}
+	return "", false
 }
 
 // DirPathspecs returns both spellings of one changeset's directory, active first, each with the

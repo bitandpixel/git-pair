@@ -4,9 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitpair/internal/changeset"
 	"gitpair/internal/gittest"
-	"gitpair/internal/reviewref"
 )
 
 // Every lifecycle transition is a commit on the changeset's branch, and nothing else. This is the
@@ -77,9 +75,9 @@ func TestChangeAbandonWritesNoRefs(t *testing.T) {
 	if out["abandoned_commit"] == "" {
 		t.Error("abandoned_commit is empty; the marker that ended the changeset is nameable")
 	}
-	if out["archive_ref"] != "" || out["archive_commit"] != "" {
-		t.Errorf("archive_ref = %v, archive_commit = %v; nothing durable is written for an abandoned changeset",
-			out["archive_ref"], out["archive_commit"])
+	if out["landed_commit"] != "" || out["chain_head"] != "" {
+		t.Errorf("landed_commit = %v, chain = %v; abandoning a changeset does not put it in the destination",
+			out["landed_commit"], out["chain_head"])
 	}
 }
 
@@ -116,49 +114,51 @@ func TestQueueListsInFlightChangesetsWithNoRefs(t *testing.T) {
 	mustContain(t, queue.stdout, slug, "the offered changeset is in the queue with nothing recorded")
 }
 
-// status names the recorded refs only once landing has written them. Before that the honest answer to
-// "where is the durable record?" is nothing at all, and a slug-derived ref name in the output could
-// never answer the question its key appeared to ask.
-func TestStatusReportsTheRecordedRefsOnlyOnceLandingHappens(t *testing.T) {
+// The landed fields say nothing until the destination carries the directory. Before that the honest answer
+// to "has this landed?" is the empty string, and a value the command could derive from the slug would
+// answer a question the key was never asked: chain_base is only meaningful as an address into the
+// destination's history, and there is no such address while the work is in flight.
+func TestStatusReportsTheLandingOnlyOnceTheDestinationCarriesIt(t *testing.T) {
 	f, slug := newChangeset(t, "booking-transaction", "main")
-	ref := archiveRef(slug)
 
 	before := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status").json(t)
-	if before["archive_ref"] != "" || before["archive_commit"] != "" {
-		t.Errorf("archive_ref = %v, archive_commit = %v; a changeset nobody has landed has no record",
-			before["archive_ref"], before["archive_commit"])
+	if before["landed"] != false || before["landed_commit"] != "" || before["chain_head"] != "" {
+		t.Errorf("landed = %v/%v/%v; a changeset nobody has landed has landed nowhere",
+			before["landed"], before["landed_commit"], before["chain_head"])
 	}
 	human := runIn(t, f.Dir(), "status").mustSucceed(t, "status").stdout
-	mustNotContain(t, human, ref, "the text surface says nothing about a ref that does not exist")
+	mustNotContain(t, human, "Landed:", "the text surface says nothing about a landing that has not happened")
 
 	// The transitions people used to expect a ref for.
 	ready(t, f)
 	submit(t, f, "approve")
 	still := runIn(t, f.Dir(), "status").mustSucceed(t, "status").stdout
-	mustNotContain(t, still, ref, "and an approved, offered changeset still has no record")
+	mustNotContain(t, still, "Landed:", "and an approved, offered changeset has landed nowhere either")
 
-	// Landing writes it, and the record is what the branch no longer has to be. The landing carries
-	// the changeset directory, as a merge, squash or cherry-pick would: `changesets/` is committed
-	// content, and it is what makes a landed changeset nameable without its branch.
+	// The landing is a merge, so the chain behind the directory is the branch that was reviewed, and the
+	// verdict the reviewer left is readable from the destination alone -- the branch is deleted below.
 	f.SwitchTo("main")
-	source := f.RevParse("booking-transaction")
-	f.MustGit("checkout", source, "--", changeset.Root+"/"+slug)
-	landed := f.Commit("booking-transaction: land the reviewed work", gittest.WithFile("landed.md", "landed\n"))
-	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landed).mustSucceed(t, "integration", "record")
+	f.Commit("main: prepare the destination", gittest.WithFile("notes.md", "notes\n"))
+	f.MustGit("merge", "--no-ff", "-m", "booking-transaction: merge the reviewed branch", "booking-transaction")
+	landing := f.Head()
 	f.ForceDeleteBranch("booking-transaction")
 
 	after := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").mustSucceed(t, "status").json(t)
-	if after["archive_ref"] != ref {
-		t.Errorf("archive_ref = %v, want %s", after["archive_ref"], ref)
+	if after["landed"] != true {
+		t.Fatalf("landed = %v; the destination carries the directory", after["landed"])
 	}
-	if after["archive_commit"] != f.Short(source) {
-		t.Errorf("archive_commit = %v, want the recorded head %s", after["archive_commit"], f.Short(source))
+	if after["landed_commit"] != f.Short(landing) {
+		t.Errorf("landed_commit = %v, want the merge %s", after["landed_commit"], f.Short(landing))
 	}
-	if after["integrated_commit"] != f.Short(landed) {
-		t.Errorf("integrated_commit = %v, want %s", after["integrated_commit"], f.Short(landed))
+	if after["chain_base"] == "" || after["chain_head"] == "" {
+		t.Errorf("chain = %v..%v, want the run the merge carried", after["chain_base"], after["chain_head"])
+	}
+	if after["reviewed"] != true {
+		t.Errorf("reviewed = %v, want true: the approval the branch left is in the chain", after["reviewed"])
 	}
 	text := runIn(t, f.Dir(), "status", "--changeset", slug).mustSucceed(t, "status").stdout
-	mustContain(t, text, ref, "the text surface names the archive ref once it exists")
-	mustContain(t, text, "points at: "+f.Short(source), "and the commit it names")
-	mustContain(t, text, reviewref.Integration(slug), "and the integration ref beside it")
+	mustContain(t, text, "Landed:", "the text surface reports the landing")
+	mustContain(t, text, f.Short(landing), "naming the commit the directory arrived in")
+	mustContain(t, text, "chain:  "+after["chain_base"].(string), "and the range it read")
+	mustContain(t, text, "the chain carries an approval", "and what the chain said")
 }

@@ -149,7 +149,7 @@ func runChangeIntegrate(ctx context.Context, a *app, opts *integrateOptions) err
 	}
 	// The recorder's gate, run here rather than inherited: a changeset with a record has landed, and a
 	// declaration on top of it would be a request to merge work that is already merged.
-	if err := marker.RefuseIntegrated(ctx, s.repo, s.cs.Slug); err != nil {
+	if err := marker.RefuseIntegrated(ctx, s.repo, s.cs.Slug, s.trunk); err != nil {
 		return err
 	}
 
@@ -169,7 +169,7 @@ func runChangeIntegrate(ctx context.Context, a *app, opts *integrateOptions) err
 	if at := alreadyDeclared(s); at != "" {
 		return reportIntegrate(a, s, dest, integrateResult{Commit: at}, g.Summary.State)
 	}
-	sha, err := marker.Commit(ctx, s.repo, marker.IntegrateMessage(s.cs.Slug, s.head))
+	sha, err := marker.Commit(ctx, s.repo, marker.IntegrateMessage(s.cs.Slug, s.head), s.trunk)
 	if err != nil {
 		return fmt.Errorf("creating integrate marker: %w", err)
 	}

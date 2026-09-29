@@ -114,8 +114,8 @@ func TestChangeUnreadyWithdrawalIsReadableWhileTheBranchStands(t *testing.T) {
 	}
 	mustContain(t, fmt.Sprint(out["reason"]), "marked unready by",
 		"and names the retraction as the newest marker rather than an offer")
-	if out["archive_ref"] != "" {
-		t.Errorf("archive_ref = %v, want empty: the marker is the whole record", out["archive_ref"])
+	if out["chain_base"] != "" || out["chain_head"] != "" {
+		t.Errorf("chain = %v/%v, want empty: the marker is the whole record", out["chain_base"], out["chain_head"])
 	}
 	if queueListsChangeset(t, runIn(t, f.Dir(), "queue", "--json"), slug) {
 		t.Error("the withdrawn changeset is in the queue with its branch standing")

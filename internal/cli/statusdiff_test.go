@@ -20,7 +20,7 @@ func TestStatusJSONEmitsPRDKeySet(t *testing.T) {
 
 	out := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status", "--json").json(t)
 
-	for _, key := range []string{"changeset", "branch", "base", "state", "head", "latest_review", "archive_ref"} {
+	for _, key := range []string{"changeset", "branch", "base", "state", "head", "latest_review", "landed", "chain_base", "chain_head", "reviewed"} {
 		if _, ok := out[key]; !ok {
 			t.Errorf("status --json is missing %q: %v", key, out)
 		}
@@ -42,8 +42,8 @@ func TestStatusJSONEmitsPRDKeySet(t *testing.T) {
 	}
 	// The key is there and empty. The record is what landing writes, and a consumer should read one
 	// shape here whether or not anything has landed.
-	if out["archive_ref"] != "" {
-		t.Errorf("archive_ref = %v, want empty for work in flight (slug %s)", out["archive_ref"], slug)
+	if out["chain_head"] != "" {
+		t.Errorf("chain_head = %v, want empty for work in flight (slug %s)", out["chain_head"], slug)
 	}
 	latest, ok := out["latest_review"].(map[string]any)
 	if !ok {

@@ -74,9 +74,13 @@ func TestPublishSendsThePairAndAnotherCloneReadsIt(t *testing.T) {
 	clone := filepath.Join(t.TempDir(), "reader")
 	f.MustGit("clone", "--quiet", remote, clone)
 	gitIn(t, clone, "checkout", "--quiet", "-b", "booking", "origin/booking")
-	out := runIn(t, clone, "status", "--fetch", "--json").mustSucceed(t, "status", "--fetch", "--json").json(t)
-	if out["integrated"] != true {
-		t.Fatalf("a fresh clone still cannot see the record after publish + --fetch: %v", out["integrated"])
+	// What the publish carries is the durable records, and the readable surface for those is
+	// `git pair integration published`, asserted below. `status` answers a different question now, and this
+	// fixture's record names a commit the integration branch never carried: a published pair of refs claims
+	// no landing in any clone.
+	out := runIn(t, clone, "status", "--json").mustSucceed(t, "status", "--json").json(t)
+	if out["landed"] != false {
+		t.Fatalf("landed = %v: the record was published and the destination still carries no directory", out["landed"])
 	}
 }
 

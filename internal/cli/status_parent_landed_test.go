@@ -147,10 +147,11 @@ func TestStatusSaysWhenTheLandingDidNotReachTheDefaultBranch(t *testing.T) {
 	}
 }
 
-// Work in the destination with no record behind it is the finding §22 exists to make detectable, and a
-// child stacked under it is the reader most likely to notice. The hedge stays: "no record" is a statement
-// about this clone until the namespace has been fetched.
-func TestStatusSaysALandedParentHasNoRecordHere(t *testing.T) {
+// Work in the destination with nothing durable beside it is the state the durable layer used to call a gap.
+// It is not one: the destination's tree and history are the record, so there is no command to name and no
+// hedge to offer about what this clone has fetched. A child stacked under it is the reader most likely to
+// notice, and what it needs to know is that the ground under its base has moved.
+func TestStatusSaysALandedParentHasReachedTheDestination(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("alpha")
 	f.CommitChangeset("alpha", "main")
@@ -161,11 +162,14 @@ func TestStatusSaysALandedParentHasNoRecordHere(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "no integration record",
-		"the parent's work is in main and git-pair has nothing durable about it")
-	mustContain(t, res.stdout, "git pair integration record --changeset alpha",
-		"naming the command that closes the gap, with this changeset in it")
-	mustContain(t, res.stdout, "none in this clone", "and the hedge that keeps the other reading open")
+	mustContain(t, res.stdout, "is in main: the parent's work has reached the destination",
+		"the parent's work is in main, which is the fact worth saying")
+	mustContain(t, res.stdout, "status --changeset alpha",
+		"and the read that shows the landing, not a command that writes one")
+	mustNotContain(t, res.stdout, "git pair integration record",
+		"nothing is missing, so nothing is offered")
+	mustNotContain(t, res.stdout, "this clone",
+		"and the answer is not a claim about what this clone has fetched")
 
 	p := parentJSONOf(t, f, "beta")
 	if p["landed"] != false {

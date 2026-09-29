@@ -291,7 +291,7 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 	if err != nil {
 		return err
 	}
-	result, err := reviewops.Submit(ctx, s.repo, s.cs, outcome, opts.message, !opts.noStage, parent.Tip)
+	result, err := reviewops.Submit(ctx, s.repo, s.cs, outcome, opts.message, !opts.noStage, parent.Tip, s.trunk)
 	if err != nil {
 		return err
 	}
