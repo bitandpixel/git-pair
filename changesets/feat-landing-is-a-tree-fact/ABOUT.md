@@ -56,12 +56,36 @@ safe is the gate, which refuses on the landing before it asks the drift question
 workflow lands in exactly that shape and now asserts `WORKING` rather than `APPROVED`. PRD §13 has to state
 the limit in the commit that deletes the refs (M5), which is why that claim is not made here.
 > what will the end status be for a changeset that's been squash-merged into trunk?
+**Answer, measured against a scratch repository with this branch's binary.** `status --changeset <id>` reports
+`landed: true`, `landed_commit` the commit that carried the directory in, `landed_branch: main`,
+`chain_base` and `chain_head` empty, `reviewed: false`, and `next_action` "landed at `<sha>` in main: nothing
+further is recorded for a changeset that has landed". `queue` lists it under `LANDED UNREVIEWED` with the
+reason "the landing carried the directory in one commit, so no review markers came with it". `check` run on a
+branch that still carries the directory exits 2 with the landed sentence and the `status --changeset`
+pointer.
+
+`state` is `WORKING`, and that is the part of the answer worth arguing about. `state` is derived from the
+markers in the chain, and a squash carries none, so the honest derivation has nothing to report. The fields
+that answer "what happened to this work" are `landed`, `landed_commit` and `reviewed`; `state` answers a
+different question — what the markers in the span say — and inventing a state for the landing would make
+landing a state, which PRD §13 and the skill both refuse to do. One sentence is awkward as measured: the
+header says `Branch: none (read from the landed chain)` and the reason says "no git-pair lifecycle markers
+on this branch". Both are true of the derivation and neither reads well alone; the rephrasing belongs in M5,
+which rewrites this surface again, so it is not changed here.
 
 **The cost contract moved honestly.** The queue's landing report used to cost nothing per landing because
 it read one ref listing. It now costs a bounded few reads per landing — measured at 11 git invocations each,
 bounded at 14 — which is the price of the answer being true in a clone that has fetched nothing but the
 destination. `TestReviewQueueCostPerLandedChangesetIsBounded` measures it.
 > is this cost per-changeset? or for the whole report?
+**Per landed changeset, on top of a fixed cost for the report.** The test runs `queue --json` twice over one
+repository — once with an empty destination, once with the destination carrying 300 landed directories — and
+bounds `(withDirs - empty) / 300`. The number under the bound is the marginal cost of one landing; `empty` is
+the report's own cost and is deliberately not bounded, because it does not grow with the landings. Measured:
+11 invocations per landing in this repository's fixture and 10.0 in a smaller scratch one, bounded at 14;
+the report itself cost 18 invocations in the same scratch run. So a destination with fifty landings costs
+roughly 570 invocations, which is the price of the answer being true in a clone that fetched nothing but the
+destination.
 
 ## Validation
 
@@ -99,3 +123,16 @@ destination. `TestReviewQueueCostPerLandedChangesetIsBounded` measures it.
   review happened and the landing kept none of it" more loudly than a sentence? The reason line does the
   work today; the shape is the same heading either way.
 > could we have a REVIEW DISCARDED status that's derivable?
+**Not derivable in the sense this plan requires.** What the destination proves is that the chain behind the
+directory carries no permitting verdict. At least three histories produce exactly that tree: never reviewed;
+reviewed and squash-merged; reviewed, merged, and then rewritten away. `REVIEW DISCARDED` would name the
+second of the three, and the destination cannot tell them apart — that is the limit PRD §13.3 states in the
+milestone that deletes the refs.
+
+It *is* derivable in one narrower case: the branch is still here, so its own markers still carry the approval.
+That is precisely the class of answer this plan retires — true in the clone that did the merge, false in a
+fresh clone that fetched only the destination — and the queue's answer has to be the same in both. So the
+finding stays the disjunction, and the reason line says which shape the *landing* is: a chain that carries no
+verdict, or no chain at all. Where the distinction is worth keeping, the fix is upstream of the read:
+`--no-ff` keeps the chain in the destination, and `change tidy` (M4) moves the directory on a branch that
+still holds it.
