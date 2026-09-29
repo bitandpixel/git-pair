@@ -348,11 +348,14 @@ func TestLandedChangesetRefusesFurtherWork(t *testing.T) {
 	}
 }
 
-// Landing means the destination. Work merged into some other branch — a release line the author keeps
-// separately — has not reached where it was headed, so the branch is still work in progress and the author
-// can still ask for the merge. This is what milestone M1 of docs/plans/simplify-architecture/plan.md buys
-// and what it pays: the durable record used to refuse here, and it refused on a fact about a command that
-// was run rather than about the destination's tree.
+// Landed means the integration branch, and work merged somewhere else is not landed. The release line can
+// revert the merge; the changeset may still have to reach `main` on its own; until the integration branch
+// holds the directory the work is unfinished, offerable, and able to ask for the merge. The durable record
+// refused this state — once a record existed for the id, every in-flight command refused whatever branch it
+// named — and that refusal is gone with the record, which is the point: the record said a command had been
+// run, and the tree says whether the work is finished. `merge into:` still names the branch the changeset's
+// own base and stack ask to be merged into, which is a different question from this one and reads a
+// different tree.
 func TestLandingOnAnotherBranchLeavesTheWorkInProgress(t *testing.T) {
 	f, slug, source, interim := recordFixture(t)
 	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", interim,
