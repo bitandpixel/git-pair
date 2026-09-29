@@ -8,15 +8,13 @@ import (
 	"gitpair/internal/gittest"
 )
 
-// TestPRDTwentyNineGoldenWorkflow replays PRD §29 end to end through the CLI only:
-// init, implement, ready, queue, review block, response, the surviving-additions refusal, ready
-// again, approve, the gate, the landing, and the record. Assertions are on git state (commits,
-// trailers, refs, reachability) rather than on formatted output.
+// TestPRDTwentyNineGoldenWorkflow replays PRD §29 end to end through the CLI only: init, implement,
+// ready, queue, review block, response, the surviving-additions refusal, ready again, approve, the gate,
+// and the landing. Assertions are on git state (commits, trailers, refs) rather than on formatted output.
 //
-// The shape worth naming: through all of the review, nothing is written to refs/git-pair. The two
-// durable refs appear together, at landing, and the archive half is what makes the unsquashed chain
-// readable after the branch is deleted — which is the whole promise, moved from a ref maintained
-// during the work to a record written once at the end of it.
+// The shape worth naming: through the whole lifecycle — init to landing — nothing is written to
+// refs/git-pair. git-pair writes no refs. A landing is a commit the destination's tree reports, and the
+// history a squash does not carry is stated as a limit (PRD §13) rather than papered over with a record.
 func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	const slug = "booking-transaction"
 	f := gittest.New(t)
@@ -146,20 +144,20 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	mustContain(t, check.stdout, "OK: "+slug+" is integration-ready", "the gate clears the work")
 
 	// Nothing has been written to `refs/git-pair` through the whole lifecycle so far: init, the
-	// implementation, two ready markers, a blocking review, a response, an approval. The refs are what
-	// landing records, which is the property this workflow exists to pin.
+	// implementation, two ready markers, a blocking review, a response, an approval. Nothing writes a
+	// ref at any point in the lifecycle, which is the property this workflow exists to pin.
 	if got := durableRefs(t, f); len(got) != 0 {
 		t.Fatalf("durable refs before any landing: %v", got)
 	}
 
-	// --- author: land it, then record it ------------------------------------------
-	// The chain the record must preserve: everything committed up to the approval, including the
-	// blocking review and the response to it — the history a squash would destroy.
-	chain := f.RevList("HEAD")
-	reviewed := f.Head()
-
+	// --- author: land it ---------------------------------------------------------
+	// The landing is an ordinary git merge, performed by whoever owns the destination, and it is the
+	// whole of the write. git-pair is not in the path and writes nothing durable on the way through.
+	//
 	// The history is the noisy-but-honest lifecycle PRD §2.3 describes, in order. Read before the
 	// landing, because the landing is a commit on the integration branch rather than on this one.
+	// `reviewed` is the head the approval names, and the tree it carries is what arrives on main.
+	reviewed := f.Head()
 	want := []string{
 		"git-pair: initialize changeset " + slug,
 		"implement booking transaction locking",
@@ -176,67 +174,50 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 
 	f.SwitchTo("main")
 	// Squash-merged: the reviewed content arrives on main as one commit, with none of the ancestry
-	// that made it. The changeset directory is committed content, so it arrives with the work.
+	// that made it. The changeset directory is committed content, so it arrives with the work — and
+	// arriving is what makes it landed, with no second step to tell anyone.
 	f.MustGit("checkout", reviewed, "--", filepath.Join("changesets", slug))
 	landing := f.Commit(slug+": land the reviewed work", gittest.WithFile("landed.md", "landed\n"))
 
-	recorded := runIn(t, f.Dir(), "integration", "record", "--source", reviewed, "--commit", landing,
-		"--target", "main").mustSucceed(t, "integration", "record")
-	mustContain(t, recorded.stdout, archiveRef(slug), "the record must print the archive ref it wrote")
-	mustContain(t, recorded.stdout, integrationRef(slug), "and the integration ref")
-	mustContain(t, recorded.stdout, "reachable from main", "and the reachability it verified")
-
-	if got := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").json(t)["landed"]; got != true {
-		t.Errorf("landed = %v, want true: the destination's tree is how a landing is known", got)
+	after := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").mustSucceed(t, "status").json(t)
+	if after["landed"] != true {
+		t.Errorf("landed = %v, want true: the destination's tree is how a landing is known", after["landed"])
 	}
-	if got := f.RefSHA(archiveRef(slug)); got != reviewed {
-		t.Errorf("archive = %s, want the reviewed head %s", got, reviewed)
+	if after["landed_commit"] != shortOf(landing) {
+		t.Errorf("landed_commit = %v, want the landing %s", after["landed_commit"], shortOf(landing))
 	}
-	if got := f.RefSHA(integrationRef(slug)); got != landing {
-		t.Errorf("integration record = %s, want the landing %s", got, landing)
+	if after["landed_branch"] != "main" {
+		t.Errorf("landed_branch = %v, want main", after["landed_branch"])
 	}
 	// This landing carries the directory without carrying the ancestry — the fixture checks the reviewed
 	// tree out onto main and commits it, the shape a squash or a cherry-pick leaves. There is therefore no
 	// chain on main to read, and the state stays what the destination's own history says rather than
-	// borrowing a verdict from a range that does not exist here. The archived chain is still reported
-	// beside it, which is the half the durable refs hold: milestone M5 of
-	// docs/plans/simplify-architecture/plan.md deletes those refs, and PRD §13 has to state at the same
-	// moment that a landing of this shape keeps nothing. A merge landing keeps all of it —
-	// TestStatusOfARecordReadReportsTheChainAsState is that case.
-	if got := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").json(t)["state"]; got != "WORKING" {
-		t.Errorf("state = %v, want WORKING: a landing with no ancestry has no chain to read", got)
+	// borrowing a verdict from a range that does not exist here. PRD §13 states that limit at the same
+	// moment the durable refs disappear: a landing of this shape keeps nothing, and a merge landing keeps
+	// all of it — TestStatusOfARecordReadReportsTheChainAsState is that case.
+	if after["state"] != "WORKING" {
+		t.Errorf("state = %v, want WORKING: a landing with no ancestry has no chain to read", after["state"])
+	}
+	if after["reviewed"] != false {
+		t.Errorf("reviewed = %v, want false: nothing in the destination says this was approved", after["reviewed"])
+	}
+	if after["chain_base"] != "" || after["chain_head"] != "" {
+		t.Errorf("chain = %s..%s, want both empty: no range exists to name",
+			after["chain_base"], after["chain_head"])
 	}
 
-	// The archival promise: after the branch is gone, the complete unsquashed chain is still
-	// reachable — through the record, which is the only thing that was ever written to hold it. And
-	// the landing is the only thing main gained.
-	f.ForceDeleteBranch(slug)
+	// And the landing is the only thing main gained.
 	if got := f.RevParse("main"); got != landing {
 		t.Errorf("main = %s, want the landing commit %s", got, landing)
 	}
 	if got := f.RevListCount(mainBefore + "..main"); got != 1 {
 		t.Errorf("main gained %d commits from this changeset, want the one landing commit", got)
 	}
-	reachable := map[string]bool{}
-	for _, sha := range f.RevList(archiveRef(slug)) {
-		reachable[sha] = true
-	}
-	for _, sha := range chain {
-		if !reachable[sha] {
-			t.Errorf("%s is not reachable from %s after `git branch -D`", sha, archiveRef(slug))
-		}
-	}
-	// The reviewed head itself — the commit the approval names — is reachable, which is what a later
-	// reader follows to see what was reviewed and what the author answered.
-	if !f.ReachableFrom(reviewed, archiveRef(slug)) {
-		t.Errorf("the reviewed head %s is not reachable from %s", reviewed, archiveRef(slug))
-	}
 
-	// And the record is idempotent, because the pipeline that wrote it may run again.
-	again := runIn(t, f.Dir(), "integration", "record", "--source", reviewed, "--commit", landing,
-		"--target", "main").mustSucceed(t, "integration", "record")
-	mustContain(t, again.stdout, "already recorded", "a retry says so rather than failing or pretending")
-	if got := durableRefs(t, f); len(got) != 2 {
-		t.Errorf("durable refs at the end = %v, want exactly the pair", got)
+	// Nothing was written to `refs/git-pair` through the whole lifecycle: init, the implementation, two
+	// ready markers, a blocking review, a response, an approval, a landing. git-pair writes no refs at
+	// all, which is the property this workflow exists to pin.
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Errorf("durable refs at the end: %v, want none", got)
 	}
 }

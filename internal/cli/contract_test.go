@@ -116,21 +116,19 @@ func TestApprovedStateNamesTheLandingAndTheRecord(t *testing.T) {
 	if st["head_full"] != head {
 		t.Errorf("status head_full = %v, want the approved head %s", st["head_full"], head)
 	}
-	// The landing contract (PRD §29) in one string, asserted as a whole because the *order* is the
-	// contract: record, then publish, and only then may the branch go. Spelled once in
+	// The landing contract (PRD §29) in one string, asserted as a whole because the sentence is
+	// the contract: the gate, then the merge with ordinary git, and nothing afterwards. Spelled once in
 	// `landingNextAction`, and every command that offers it has to offer the same sentence.
-	want := "`git pair check`, then merge into main with ordinary git, then " +
-		"`git pair integration record`, then `git pair integration publish`"
+	want := "`git pair check`, then merge into main with ordinary git"
 	if st["next_action"] != want {
 		t.Errorf("status next_action = %v, want %q", st["next_action"], want)
 	}
-	if i, j := strings.Index(want, "integration record"), strings.Index(want, "integration publish"); i < 0 || j < 0 || i > j {
-		t.Errorf("the landing contract must read record before publish: %q", want)
+	if strings.Contains(want, "integration record") || strings.Contains(want, "integration publish") {
+		t.Errorf("the landing contract names a command that no longer exists: %q", want)
 	}
-	// The next step is landing, so nothing may report it already done — and the two halves of the
-	// record are reported differently on purpose, which is worth pinning rather than rediscovering:
-	// `archive_ref`/`archive_commit` are present and empty so a consumer sees one shape either way,
-	// while `integration_ref`/`integrated_commit` appear only with the record itself (README, PRD §11.1).
+	// The next step is landing, so nothing may report it already done — and the landing fields are
+	// reported together on purpose, which is worth pinning rather than rediscovering: `landed_commit` and
+	// `landed_branch` are present and empty so a consumer sees one shape either way (README, PRD §11.1).
 	if st["landed"] != false || st["reviewed"] != false {
 		t.Errorf("status landed/reviewed = %v/%v on a changeset the destination does not carry", st["landed"], st["reviewed"])
 	}
@@ -377,29 +375,6 @@ func TestJSONKeySets(t *testing.T) {
 		}
 	})
 
-	t.Run("integration record", func(t *testing.T) {
-		f, slug, source, landing := recordFixture(t)
-		args := []string{"integration", "record", "--source", source, "--commit", landing,
-			"--target", "release/2.x", "--json"}
-		out := runIn(t, f.Dir(), args...).mustSucceed(t, args...).json(t)
-		assertKeys(t, out, "changeset", "source", "commit", "target", "archive_ref", "integration_ref",
-			"recorded", "already_recorded")
-		if out["changeset"] != slug {
-			t.Errorf("changeset = %v, want %q", out["changeset"], slug)
-		}
-		// Full SHAs, because the consumer is a pipeline holding the SHA it built.
-		if out["source"] != source || out["commit"] != landing {
-			t.Errorf("source/commit = %v/%v, want %s/%s", out["source"], out["commit"], source, landing)
-		}
-		if out["archive_ref"] != archiveRef(slug) || out["integration_ref"] != integrationRef(slug) {
-			t.Errorf("refs = %v/%v, want %s and %s", out["archive_ref"], out["integration_ref"],
-				archiveRef(slug), integrationRef(slug))
-		}
-		if out["recorded"] != true || out["already_recorded"] != false {
-			t.Errorf("recorded = %v, already_recorded = %v, want the pair written by this call",
-				out["recorded"], out["already_recorded"])
-		}
-	})
 }
 
 func assertKeys(t *testing.T, object map[string]any, keys ...string) {

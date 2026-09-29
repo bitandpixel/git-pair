@@ -315,9 +315,9 @@ func TestChangeIntegrateRefusesAChildWhoseParentHasNotLanded(t *testing.T) {
 	if res.code != exitRefusal {
 		t.Fatalf("integrate on an unlanded parent exited %d, want %d\nstdout: %s", res.code, exitRefusal, res.stdout)
 	}
-	mustContain(t, res.stdout, "the parent alpha has no integration record",
+	mustContain(t, res.stdout, "the parent alpha is not landed on the integration branch",
 		"the refusal names the parent and the missing fact about it")
-	mustContain(t, res.stdout, "git pair integration record",
+	mustContain(t, res.stdout, "merge with ordinary git",
 		"and the step that would have made the parent land")
 	if f.Head() != before {
 		t.Error("a refused declaration still wrote a commit")
@@ -337,8 +337,8 @@ func TestChangeIntegrateRefusesAChildWhoseParentHasNotLanded(t *testing.T) {
 	mustContain(t, res.stdout, "merge into:  main (where alpha landed)",
 		"the destination is the branch the parent landed on, which the child's own base no longer names")
 
-	if got := durableRefs(t, f); len(got) != 2 {
-		t.Errorf("durable refs = %v, want only the parent's record: a declaration writes none", got)
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Errorf("durable refs = %v, want none: git-pair writes no refs at all, and a declaration least of all", got)
 	}
 }
 

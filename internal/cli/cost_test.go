@@ -5,14 +5,17 @@ import (
 	"testing"
 
 	"gitpair/internal/gittest"
-	"gitpair/internal/reviewref"
 )
 
 // The queue resolves every branch, so its cost has to follow the branches and not the number
 // of changesets the repository has ever had. The formulation this rule replaced asked a question
 // per archive ref, which was invisible in a young repository and unusable in an old one, so the
-// assertion is the scaling: the same queue over the same branches, with 300 review refs added,
-// must not notice.
+// assertion is the scaling: the same queue over the same branches, with 300 changesets' worth of
+// noise added, must not notice.
+//
+// The noise here is refs under git-pair's retired namespace — what a repository that used the old
+// layout still holds. Nothing reads them any more, so they are worth the one `for-each-ref` that
+// lists branches and cannot name a changeset.
 func TestReviewQueueCostFollowsBranchesNotExistingChangesets(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("work")
@@ -27,7 +30,7 @@ func TestReviewQueueCostFollowsBranchesNotExistingChangesets(t *testing.T) {
 
 	base := f.Head()
 	for i := 0; i < 300; i++ {
-		f.MustGit("update-ref", reviewref.Archive(fmt.Sprintf("cs-%03d", i)), base)
+		f.MustGit("update-ref", "refs/git-pair/archive/"+fmt.Sprintf("cs-%03d", i), base)
 	}
 
 	before = count()

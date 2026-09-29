@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"gitpair/internal/gittest"
-	"gitpair/internal/reviewref"
 )
 
 // gitIn runs git in one directory. The CI tests need a second and third repository — a scratch
@@ -23,113 +22,22 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// publishAndClone pushes every ref the fixture has — branches and the git-pair namespace — to a
-// scratch bare remote, then clones it the way a CI job does.
+// ciClone pushes the fixture's branches to a scratch bare remote and clones it the way a CI job does.
 //
-// The remote having the refs is the point. A clone maps `refs/heads/*` into `refs/remotes/*` and
-// nothing else, so the durable refs are absent from the clone even though they were published
-// perfectly: this is the case where the fix is one line in the checkout, and the only way to prove
-// the message sends the reader there is to build the checkout that needs it.
-func publishAndClone(t *testing.T, f *gittest.Fixture) string {
+// The clone is the whole point: a `git clone` maps `refs/heads/*` into `refs/remotes/*` and nothing
+// else, so it holds no `refs/git-pair/` ref of any kind. Nothing in git-pair writes one any more, so
+// that absence is the ordinary shape of a pipeline checkout and no command may read it as a problem.
+func ciClone(t *testing.T, f *gittest.Fixture) string {
 	t.Helper()
-	// The remote has to hold *something* in the namespace for the clone's silence to mean "the
-	// refspec was missing" rather than "nobody ever wrote a ref". An integration record for another
-	// changeset does that without touching the one under test.
-	if len(f.RefNames(reviewref.NamespaceRoot)) == 0 {
-		f.MustGit("update-ref", reviewref.Integration("already-landed"), f.RevParse("main"))
-	}
 	remote := filepath.Join(t.TempDir(), "remote.git")
 	f.MustGit("init", "--bare", "-b", "main", remote)
 	f.MustGit("push", "--quiet", remote, "--all")
-	f.MustGit("push", "--quiet", remote, reviewref.FetchRefspec)
 	clone := filepath.Join(t.TempDir(), "ci")
 	f.MustGit("clone", "--quiet", remote, clone)
-	if got := gitIn(t, clone, "for-each-ref", "--format=%(refname)", reviewref.NamespaceRoot); got != "" {
-		t.Fatalf("the clone already holds the namespace, so it proves nothing: %s", got)
-	}
-	if got := gitIn(t, remote, "for-each-ref", "--format=%(refname)", reviewref.NamespaceRoot); got == "" {
-		t.Fatal("the remote holds no git-pair refs, so the fetch cannot be the fix")
+	if got := gitIn(t, clone, "for-each-ref", "--format=%(refname)", "refs/git-pair"); got != "" {
+		t.Fatalf("the clone holds git-pair refs, which nothing should have written: %s", got)
 	}
 	return clone
-}
-
-// §24 is the difference between two failures that look identical. A clone that was never given
-// `refs/git-pair/changesets/*` has no archive for any changeset, and a verdict built from that is
-// not a verdict about the changeset: `check` would report the review history as unanchored, and
-// `integration record` would report a changeset nobody archived. Both are true of the clone and
-// false of the work, and both send someone to `change ready` — a command on the author's branch —
-// when the fix is a refspec.
-//
-// The assertion that carries the weight is the second half: after the fetch, the same commands give
-// different answers. That is what shows the first answer was about the clone.
-func TestCICloneWithoutTheGitPairRefsSaysSo(t *testing.T) {
-	f, slug, source, landing := recordFixture(t)
-	// Offered again, so `check` has one clear thing left to say once the refs arrive. The record names
-	// the head the approval spoke about, not this re-offer: a head whose newest marker is `ready` has no
-	// verdict on it, and the recorder refuses it for the same reason `check` refuses it below.
-	f.SwitchTo("booking")
-	runIn(t, f.Dir(), "change", "ready").mustSucceed(t, "change", "ready")
-	clone := publishAndClone(t, f)
-	gitIn(t, clone, "switch", "--quiet", "booking")
-
-	// `check` reads the derivation and the trunk and no durable ref, so an empty namespace changes
-	// nothing about its verdict — which is the point of moving the refs out of the gate. The command
-	// that reads the namespace is the one that has to say the refs are missing.
-	absent := runIn(t, clone, "check")
-	if absent.code != 1 {
-		t.Fatalf("check in a clone without the refs exited %d, want 1\n%s%s", absent.code, absent.stdout, absent.stderr)
-	}
-	mustContain(t, absent.stdout, "has not been reviewed since",
-		"the verdict is the changeset's own, with or without the refs")
-	mustNotContain(t, absent.stdout, "this clone has no", "and it does not blame the clone for something it never read")
-
-	record := runIn(t, clone, "integration", "record", "--source", source, "--commit", landing,
-		"--target", "origin/release/2.x")
-	record.mustSucceed(t, "integration", "record")
-	mustContain(t, record.stderr, "holds no refs/git-pair/* refs at all", "the recorder says so, because it reads the namespace")
-	mustContain(t, record.stderr, "git fetch origin", "and prints the command")
-
-	after := runIn(t, clone, "integration", "record", "--source", source, "--commit", landing,
-		"--target", "origin/release/2.x")
-	after.mustSucceed(t, "integration", "record")
-	if got := gitIn(t, clone, "rev-parse", reviewref.Integration(slug)); len(got) != 40 {
-		t.Errorf("the record written from the clone is %q, want a commit sha", got)
-	}
-}
-
-// `status` and `queue` read branches and commits, so the durable namespace is not load-bearing
-// for them and a CI job that fetched nothing custom must not be told its repository is broken. What
-// they do need is the default branch — the tree rule compares against it — and that refusal is
-// #TestOneBranchCheckoutNamesTheFetchItIsMissing's business, not this one.
-func TestStatusAndQueueWorkWithoutTheGitPairRefs(t *testing.T) {
-	f, slug, _, _ := recordFixture(t)
-	f.SwitchTo("booking")
-	runIn(t, f.Dir(), "change", "ready").mustSucceed(t, "change", "ready")
-	clone := publishAndClone(t, f)
-	gitIn(t, clone, "switch", "--quiet", "booking")
-
-	status := runIn(t, clone, "status", "--json").mustSucceed(t, "status")
-	got := status.json(t)
-	if got["changeset"] != slug {
-		t.Errorf("changeset = %v, want %s: the branch alone is enough to resolve it", got["changeset"], slug)
-	}
-	if got["state"] != "READY" {
-		t.Errorf("state = %v, want READY: markers are commits, not custom refs", got["state"])
-	}
-	if got["landed"] != false {
-		t.Errorf("landed = %v, want false: the destination does not carry the directory, and nothing invents a landing", got["landed"])
-	}
-	// The trunk fields matter most in exactly this shape: a clone where "has this landed?" is a
-	// comparison against a ref the job fetched, and nothing else in the output says which.
-	if got["default_branch"] != "origin/main" || got["default_branch_source"] != "origin-head" {
-		t.Errorf(`default_branch = %v from %v, want origin/main from origin-head`, got["default_branch"], got["default_branch_source"])
-	}
-	if got["default_branch_commit"] != shortOf(f.RevParse("main")) {
-		t.Errorf("default_branch_commit = %v, want %s", got["default_branch_commit"], shortOf(f.RevParse("main")))
-	}
-
-	queue := runIn(t, clone, "queue").mustSucceed(t, "queue")
-	mustContain(t, queue.stdout, slug, "the offered changeset is in the queue with no git-pair refs fetched")
 }
 
 // The other CI mistake, and the one that looks like a repository fault: a job that checked out one
@@ -138,7 +46,7 @@ func TestStatusAndQueueWorkWithoutTheGitPairRefs(t *testing.T) {
 // work out that their checkout is the thing at fault, and a message mentioning the changeset would
 // send them to fix a changeset that is fine.
 func TestOneBranchCheckoutNamesTheFetchItIsMissing(t *testing.T) {
-	f, _, _, _ := recordFixture(t)
+	f, _ := newChangeset(t, "booking", "main")
 	remote := filepath.Join(t.TempDir(), "remote.git")
 	f.MustGit("init", "--bare", "-b", "main", remote)
 	f.MustGit("push", "--quiet", remote, "--all")
@@ -165,8 +73,7 @@ func TestOneBranchCheckoutNamesTheFetchItIsMissing(t *testing.T) {
 // same way whether the branch was named by flag or found in the checkout, since the two halves of
 // the comparison both have to be in the log for the log to explain itself.
 func TestStatusExplainsWhatLandedWasMeasuredAgainst(t *testing.T) {
-	f, _, _, _ := recordFixture(t)
-	f.SwitchTo("booking")
+	f, _ := newChangeset(t, "booking", "main")
 
 	out := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status").json(t)
 	if out["default_branch"] != "main" {

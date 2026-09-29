@@ -451,30 +451,35 @@ step "too small for even the overlay: it names the width it needs"
 expect "the refusal names the columns the overlay needs" 0 "$T/tiny.raw" "the preview wants 40 columns"
 expect "and the terminal it has" 0 "$T/tiny.raw" "this terminal has 30"
 
-# `integration configure` is consent as a command, and the property worth painting is that it stays one:
-# PRD §22 makes the CLI the agent surface, so a command that writes configuration must not become a
-# conversation because it found a terminal. Sent no keystrokes, with a timeout, the run has to finish on
-# its own and paint its answer. Its own repository, because it writes config and the fixture above has no
-# business having any.
-step "a command that writes config asks for nothing at a terminal"
-CR="$T/configrepo"
+# `change tidy` is the command this release added for moving a landing's directory out of the way, and it
+# writes a commit. The property PRD §22 cares about is that the CLI is the agent surface, so a command that
+# writes must not become a conversation because it found a terminal: sent no keystrokes, with a timeout, the
+# run has to finish on its own and paint its answer. Its own repository, because it commits and the fixture
+# above has no business holding a landing.
+step "a command that writes a commit asks for nothing at a terminal"
+CR="$T/tidyrepo"
 git init -q -b main "$CR"
 git -C "$CR" config user.email p@example.com
 git -C "$CR" config user.name Painter
 git -C "$CR" config commit.gpgsign false
 printf 'one\n' > "$CR/file.txt"
 git -C "$CR" add -A && git -C "$CR" commit -qm "start"
-git init -q --bare -b main "$T/config-remote.git"
-(cd "$CR" && git remote add origin "$T/config-remote.git" && git push -q origin --all)
+git -C "$CR" checkout -qb tidied
+mkdir -p "$CR/changesets/tidied"
+printf 'base: main\n' > "$CR/changesets/tidied/CHANGESET.yaml"
+printf 'Summary: work that lands, then gets out of the way.\n' > "$CR/changesets/tidied/ABOUT.md"
+printf 'tidied\n' > "$CR/tidied.md"
+git -C "$CR" add -A && git -C "$CR" commit -qm "tidied: the work"
+git -C "$CR" switch -q main
+git -C "$CR" merge -q --no-ff -m "tidied: land it" tidied
 
-python3 "$DRIVER" --raw "$T/configure.raw" --settle 1 --timeout 20 --term "${PTY_TERM:-xterm-256color}" \
-  "$COLS" "$ROWS" "$CR" "" "$G" integration configure >"$T/configure.exit" 2>"$T/configure.err"
+python3 "$DRIVER" --raw "$T/tidy.raw" --settle 1 --timeout 20 --term "${PTY_TERM:-xterm-256color}" \
+  "$COLS" "$ROWS" "$CR" "" "$G" change tidy tidied >"$T/tidy.exit" 2>"$T/tidy.err"
 case $? in
-  0) ok "the configuration finished with nobody typing" ;;
-  124) fail "the configuration is waiting at a prompt; no command in git-pair asks" ;;
-  *) fail "the configuration exited $?" ;;
+  0) ok "the tidy finished with nobody typing" ;;
+  124) fail "the tidy is waiting at a prompt; no command in git-pair asks" ;;
+  *) fail "the tidy exited $?"; [ -s "$T/tidy.err" ] && sed 's/^/      ! /' "$T/tidy.err" ;;
 esac
-[ -s "$T/configure.err" ] && sed 's/^/      ! /' "$T/configure.err"
 # Nothing was typed, so there is no keystroke marker to window on: this is the whole session's output.
 expectall() { # expectall <description> <raw file> <literal string>
   out=$(paintedall "$2")
@@ -482,29 +487,25 @@ expectall() { # expectall <description> <raw file> <literal string>
     fail "$1 — no '$3' in what painted"; printf '%s\n' "$out" | head -14 | sed 's/^/      | /'
   fi
 }
-expectall "it names the key it wrote" "$T/configure.raw" "remote.origin.fetch"
-expectall "and the other one" "$T/configure.raw" "remote.origin.push"
-expectall "and the refspec, not a paraphrase of it" "$T/configure.raw" "+refs/git-pair/*"
-expectall "and says what comes next" "$T/configure.raw" "git pair integration publish"
-if git -C "$CR" config --local --get-all remote.origin.fetch | grep -qF -- \
-     '+refs/git-pair/*:refs/remotes/origin/refs/git-pair/*'; then
-  ok "and the config file really holds it"
+expectall "it names the move it made" "$T/tidy.raw" "changesets/tidied -> changesets/.landed/tidied"
+expectall "and the commit it wrote" "$T/tidy.raw" "committed"
+if git -C "$CR" rev-parse --quiet --verify HEAD:changesets/.landed/tidied/CHANGESET.yaml >/dev/null; then
+  ok "and the move it painted is the move it committed"
 else
-  fail "it painted a config line it did not write"
+  fail "it painted a move the repository does not hold"
 fi
-# The same invocation through a pipe, on the state the pty run left: it must reach the same conclusion
-# without a terminal under it, and write each line once rather than again. Same command, two worlds, one
-# answer — which is what "consent is an argument" has to mean for a pipeline.
-out=$(cd "$CR" && "$G" integration configure 2>&1)
-printf '%s' "$out" | grep -qF -- "already fetches the durable mirrors" \
-  && ok "through a pipe it reports that it wrote nothing" \
-  || { fail "the piped run did not report idempotence: $out"; }
-count=$(git -C "$CR" config --local --get-all remote.origin.fetch | grep -cF -- '+refs/git-pair/*')
-[ "$count" = 1 ] && ok "and the refspec is in the config exactly once" \
-  || fail "the refspec appears $count times; the write is meant to be idempotent"
-count=$(git -C "$CR" config --local --get-all remote.origin.push | grep -cF -- 'refs/git-pair/*:refs/git-pair/*')
-[ "$count" = 1 ] && ok "and so is the push one" \
-  || fail "the push refspec appears $count times; the write is meant to be idempotent"
+if git -C "$CR" diff --name-status HEAD~1 HEAD | grep -qv '^R'; then
+  fail "the commit the terminal painted carries more than renames: $(git -C "$CR" diff --name-status HEAD~1 HEAD)"
+else
+  ok "and it is a move a reviewer reads as one"
+fi
+# The same invocation through a pipe, on the state the pty run left: with nothing left to move it says so,
+# with no terminal under it. Same command, two worlds, one answer — which is what "consent is an argument"
+# has to mean for a pipeline.
+out=$(cd "$CR" && "$G" change tidy tidied 2>&1)
+printf '%s' "$out" | grep -qF -- "already tidied" \
+  && ok "through a pipe it reports there is nothing left to move" \
+  || fail "the piped run did not report idempotence: $out"
 
 # --- verdict ---------------------------------------------------------------
 printf '\n'

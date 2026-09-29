@@ -51,8 +51,8 @@ func TestStatusReportsADeclaration(t *testing.T) {
 	}
 	// The landing contract is still in the sentence: the declaration does not end the author's obligations,
 	// it moves the merge to whoever owns the destination branch.
-	if !strings.Contains(next, "integration record") {
-		t.Errorf("next_action = %q, want it to keep naming the record", next)
+	if !strings.Contains(next, "merge into main with ordinary git") {
+		t.Errorf("next_action = %q, want it to keep naming the merge", next)
 	}
 	if j["abandoned"] != false {
 		t.Errorf("abandoned = %v on a declared changeset", j["abandoned"])
@@ -166,23 +166,20 @@ func TestQueueListsDeclaredWorkSeparatelyFromReview(t *testing.T) {
 	}
 }
 
-// The queue's rows are per branch, and the same rule that keeps two branches carrying one ready changeset
-// visible separately keeps a declared branch visible while its sibling is under review.
-func TestQueueDoesNotListARecordedChangesetAsAwaitingIntegration(t *testing.T) {
+// A declared changeset the destination already carries has landed, and the queue has nothing left to ask
+// of it: neither of its lists is for finished work. The destination's tree is what says so — the merge is
+// the record, so there is no second step for the row to be waiting on.
+func TestQueueDoesNotListALandedChangesetAsAwaitingIntegration(t *testing.T) {
 	f, slug, _ := declaredChangeset(t)
-	source := f.Parent(f.Head()) // the approved head the declaration stands on
 	f.SwitchTo("main")
 	f.MustGit("merge", "--no-ff", "--no-edit", "-m", "land "+slug, slug)
-	landing := f.Head()
-	runIn(t, f.Dir(), "integration", "record", "--changeset", slug, "--source", source,
-		"--commit", landing).mustSucceed(t, "integration", "record")
 
 	j := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue")
 	if rows := j.jsonList(t, "awaiting_integration"); len(rows) != 0 {
-		t.Errorf("awaiting_integration = %v after the record, want it empty", rows)
+		t.Errorf("awaiting_integration = %v after the landing, want it empty", rows)
 	}
 	if rows := j.jsonList(t, "ready_for_review"); len(rows) != 0 {
-		t.Errorf("ready_for_review = %v after the record, want it empty", rows)
+		t.Errorf("ready_for_review = %v after the landing, want it empty", rows)
 	}
 	mustNotContain(t, runIn(t, f.Dir(), "queue").mustSucceed(t, "queue").stdout, "AWAITING INTEGRATION",
 		"and the human surface does not print an empty second list")

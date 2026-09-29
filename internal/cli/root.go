@@ -49,12 +49,6 @@ type app struct {
 	// landed?" needs the integration branch to answer, and CI passes this because a checkout
 	// built with `init` and one `fetch` has no recorded remote default to read.
 	defaultBranch string
-	// durableRemote and durableRemoteKnown cache which remote the durable refs belong to. One run asks
-	// twice — `--fetch` wants the one to fetch, the published-or-not comparison wants the one whose
-	// mirrors to read — and the answer cannot change mid-command. A third `git rev-parse` for the same
-	// string is the kind of cost that grows silently, so it is remembered rather than re-derived.
-	durableRemote      string
-	durableRemoteKnown bool
 }
 
 // Execute builds the command tree and runs it, returning the process exit code.
@@ -148,13 +142,14 @@ func newRootCommand(a *app) *cobra.Command {
 refs. It does not replace git, your editor, your difftool, or your forge.
 
 Review state lives in the repository: a changeset directory holds ABOUT.md and
-review threads, lifecycle markers are commits carrying Review-* trailers, and
-refs/git-pair/* holds the two durable refs written when a changeset lands.
+review threads, lifecycle markers are commits carrying Review-* trailers, and a
+landing is the changeset directory in the history of the branch it merged into.
+git-pair writes no ref of its own.
 
 Author commands:   git pair init, then git pair change use | ready | integrate | unready | abandon
 Reviewer commands: git pair review open | about | thread | submit | history
 Reading state:     git pair queue | status | diff
-Gates and record:  git pair check, then git pair integration record`,
+Gate:              git pair check, then merge into the destination with ordinary git`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if jsonFlag, err := cmd.Flags().GetBool("json"); err == nil {
 				a.json = jsonFlag
@@ -179,7 +174,6 @@ Gates and record:  git pair check, then git pair integration record`,
 		newStatusCommand(a),
 		newDiffCommand(a),
 		newCheckCommand(a),
-		newIntegrationCommand(a),
 		newSkillCommand(a),
 	)
 	return root
@@ -339,10 +333,15 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 			return changeset.Changeset{}, lifecycle.Summary{}, "", err
 		}
 		// The chain's own start is the base for the read: it is where the run sits, which is the range the
-		// markers live in. A stacked child whose parent branch is gone gets the same derivation every other
-		// surface uses, so the chain read and the branch read cannot print two bases for one changeset.
+		// markers live in. It is a derived base, so it is named as one — the reader of a landed changeset
+		// sees a commit and the reason for it rather than a bare object id. A stacked child whose parent
+		// branch is gone gets the same derivation every other surface uses, so the chain read and the
+		// branch read cannot print two bases for one changeset.
 		base := chain.Base
-		baseWhy := ""
+		baseWhy := "the run the destination's chain carries"
+		// Derived, so that nothing downstream mistakes it for a place work can land: a commit the run sits
+		// on is a measurement point, and the question "where does this go" has to be answered one level up.
+		baseDerived := true
 		if stack.Parent != "" && stack.ParentChangeset != "" {
 			if _, err := repo.RevParse(ctx, "refs/heads/"+stack.Parent); errors.Is(err, git.ErrUnknownRevision) {
 				b, berr := changeset.BaseFor(ctx, repo, changeset.Changeset{Slug: slug, Base: base,
@@ -351,7 +350,7 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 					return changeset.Changeset{}, lifecycle.Summary{}, "", berr
 				}
 				if b.Ref != "" {
-					base, baseWhy = b.Ref, b.Why
+					base, baseWhy, baseDerived = b.Ref, b.Why, b.Derived
 				}
 			}
 		}
@@ -360,6 +359,7 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 			Dir:             filepath.Join(changeset.Root, slug),
 			Base:            base,
 			BaseWhy:         baseWhy,
+			BaseDerived:     baseDerived,
 			ParentBranch:    stack.Parent,
 			ParentChangeset: stack.ParentChangeset,
 			Exists:          true,

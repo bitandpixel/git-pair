@@ -5,8 +5,8 @@ package model
 // commit history rather than stored.
 //
 // There is no state for a landed changeset. Landing happens with ordinary git, and git-pair
-// derives state from a changeset's own markers, so it does not derive the merge: the record
-// written by `git pair integration record` is reported by `status`, beside the state rather than
+// derives state from a changeset's own markers, so it does not derive the merge: the landing
+// is reported by `status`, read out of the destination's history, beside the state rather than
 // as another value of it. Markers are the only thing that moves state.
 //
 // INTEGRATING is the one state that is about the merge without pretending to be it. It is the
@@ -112,7 +112,7 @@ const (
 	// StateValueIntegrating is written by `change integrate`, and unlike `working` and
 	// `abandoned` it *is* a state: INTEGRATING is the answer to "has the author handed this
 	// over?", which is the question a merge gate asks. The value is a declaration about the
-	// next merge, not a claim that one happened — the record of a landing stays the pair of
-	// durable refs (`git pair integration record`).
+	// next merge, not a claim that one happened — the record of a landing is the changeset
+	// directory in the destination's history, written by the merge itself.
 	StateValueIntegrating = "integrating"
 )

@@ -5,18 +5,19 @@ description: Use when working in a repository whose changes go through git-pair 
 
 # git-pair
 
-git-pair puts a thin review protocol on top of ordinary git commits, files and refs. It does not
-replace git, your editor, your difftool, or your forge. It writes no merge, rewrites no history, and
-pushes nothing except the two durable refs of a recorded landing.
+git-pair puts a thin review protocol on top of ordinary git commits and files. It does not
+replace git, your editor, your difftool, or your forge. It writes no merge, rewrites no history, moves no
+ref, and pushes nothing.
 
 Review state is derived, never stored. `changesets/<id>/` holds `ABOUT.md` and review threads;
-lifecycle transitions are commits carrying `Review-*` trailers; `refs/git-pair/archive/<id>` and
-`refs/git-pair/integrations/<id>` hold the durable pair written when work lands, so the review survives a
-merge that does not carry those commits. A squash or a cherry-pick may leave no `Review-*` trailer reachable
-from the destination branch, and the diffs of the intermediate review commits are gone from the merged
-history too; the archive ref still names the unsquashed tip, so the whole implementation/review/fix chain
-stays reachable. There is no state file and no queue file, so `status` cannot be stale and a deleted branch
-cannot orphan a queue entry.
+lifecycle transitions are commits carrying `Review-*` trailers; a changeset is landed when the destination
+branch carries `changesets/<id>/`, which is the whole record — git-pair writes no ref at landing, so a clone
+needs no special fetch to answer "did this land". A squash or a cherry-pick keeps the content and destroys
+the ancestry, so the `Review-*` trailers and the intermediate review diffs are gone from the destination and
+`status` reports `reviewed: false` with an empty chain. Where a repository squashes, `git pair change tidy`
+moves the directory to `changesets/.landed/<id>/` in a commit, on a branch that still holds the chain, before
+that branch is deleted. There is no state file and no queue file, so `status` cannot be stale and a deleted
+branch cannot orphan a queue entry.
 
 ## Roles
 
@@ -24,15 +25,15 @@ Two roles share one repository, and the commands answer different questions. Kee
 
 - **Author** — writes the change. Usually the agent. `git pair init`, then `change use | ready |
   integrate | unready | abandon | wait | feedback`, plus the reads: `status`, `queue`, `diff`,
-  `review history`, `check`.
+  `review history`, `check`. `change tidy` belongs to whoever maintains trunk, not to this loop.
 - **Reviewer** — a human. `review open | reopen | about | thread | submit`.
 
 Do not cross the line:
 
 - Never run `review submit`, in any form, and never approve your own work. Nothing in git-pair checks
   who ran it — identity is out of scope — so keeping approval on the human side is your discipline.
-- Never run `git pair integration record` or `git pair integration publish`. Each states a fact about a
-  merge somebody else performed; the person who merged, or CI, runs them.
+- There is no landing command to run. The merge into the destination is the landing, and it is ordinary git
+  run by whoever owns that branch; git-pair reads the landing from the destination's tree afterwards.
 - Never run `review` with no subcommand, `review open`, `review reopen`, `review about`, or
   `review thread`. They need a terminal and refuse with exit 2 when stdin or stdout is a pipe or a file.
   Read and write `ABOUT.md` and the thread files directly instead — they are ordinary files.
@@ -67,6 +68,7 @@ is coming.
 | `git pair change unready` | withdraws the offer when the work is not finished after all. Do it before continuing, rather than leaving a reviewer looking at a stale offer. It withdraws a declaration too |
 | `git pair change integrate` | declares the approved head ready to be merged, as one marker commit. It merges nothing, pushes nothing and writes no ref, and it refuses anything `check` refuses — so run it after a passing gate, never instead of it. Not needed when a person does the merge by hand |
 | `git pair change abandon` | ends the changeset. Terminal: `change ready`, `change unready` and `review submit` refuse against it afterwards |
+| `git pair change tidy [<id>…]` | moves the directory of a changeset the destination already holds to `changesets/.landed/<id>/`, as one commit of renames on this branch — trunk housekeeping, run by whoever maintains trunk, and `change ready` refuses a changeset still in flight on one it would move. `--all-landed`, `--dry-run` |
 | `git pair change wait` | blocks while the changeset is `READY` and exits the moment it becomes `BLOCKED`, `FEEDBACK` or `APPROVED`. Read-only, non-interactive. `--fetch` first, so a review submitted in another clone ends the wait; `--interval` (default `10s`) and `--timeout` are go durations |
 | `git pair change feedback` | the most recent submission as a diff (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together. `--stat`, `--name-only` to scope it |
 | `git pair status` | derived state, the reason for it, and a `next_action`. Observing, not deciding |
@@ -143,7 +145,7 @@ substance only when it needs further discussion, elaboration, or another person:
 | --- | --- | --- |
 | 0 | success | — |
 | 1 | the invocation was right and the repository said no: surviving additions, dirty tree, missing `ABOUT.md`, `check` printing `NOT READY:`, `change integrate` refusing work the gate would refuse or a child whose parent has not landed, `change wait` timing out or finding a `WORKING` changeset | fix the state, retry |
-| 2 | usage error: unknown flag or subcommand, detached HEAD, no changeset for this branch, ambiguous changeset, `--fetch` with no remote, TUI or editor command without a terminal | fix the command; retrying unchanged fails again |
+| 2 | usage error: unknown flag or subcommand, detached HEAD, no changeset for this branch, ambiguous changeset, TUI or editor command without a terminal | fix the command; retrying unchanged fails again |
 | 3 | git itself failed: not a repository, a git subprocess failed | fix the repository |
 
 The split between 1 and 2 is load-bearing for agents: 1 means the repository changed under you, 2 means
@@ -170,8 +172,8 @@ itself, and `--json` says so on stderr.
 ## States
 
 `WORKING`, `READY`, `BLOCKED`, `FEEDBACK`, `APPROVED`, `INTEGRATING`. There is no state for a landed
-changeset: landing is ordinary git, and the record is reported beside the state rather than as another
-value of it.
+changeset: landing is ordinary git, and `landed`, `landed_commit` and `landed_branch` are reported beside the
+state rather than as another value of it.
 
 - `READY` — offered for review; `change wait` has something to wait for.
 - `BLOCKED` — a `--block` review must be answered before the work can go forward.
@@ -186,17 +188,16 @@ value of it.
 
 ## What is not yours
 
-Landing is five steps, and you take part in the first two:
+Landing is three steps, and you take part in the first two:
 
 1. `git pair check` — the gate, run by the author and by CI alike.
 2. `git pair change integrate` — the author's request that this head be merged. Run it when the merge is
    somebody else's job; it performs none of it.
-3. The merge, with ordinary git, by whoever owns the destination branch.
-4. `git pair integration record` — the only command in git-pair that writes a ref.
-5. `git pair integration publish` — those refs sent to the shared remote.
+3. The merge, with ordinary git, by whoever owns the destination branch. It is the last step: the destination
+   carrying `changesets/<id>/` is what makes the change landed, and there is nothing to write afterwards.
 
-An agent asked "may this land?" runs `git pair check` and stops there. Do not merge, and do not record.
-Asking for the merge is yours; performing it is not, and `change integrate` is written so that the
+An agent asked "may this land?" runs `git pair check` and stops there. Do not merge. Asking for the merge is
+yours; performing it is not, and `change integrate` is written so that the
 request cannot outlive the gate that cleared it.
 
 Two things to know, because you may be asked about them. Rebasing after an approval invalidates it:
@@ -205,10 +206,11 @@ committed outside that directory after an approval makes the approval stale. Re-
 `change ready` and wait again. Never edit a review marker's `Review-Head` to make the comparison line
 up — that trailer is the reviewer's statement about what they looked at, not yours to amend.
 
-`git pair status` and `git pair queue` also report two findings that are somebody's unfinished
-housekeeping, not your change's state: `LANDED, UNRECORDED` (a merge happened, no record was written)
-and `RECORDED, NOT PUBLISHED` (the record exists and has not reached the remote). Both print the
-invocation that closes the gap. Report them; do not run them.
+`git pair status` and `git pair queue` also report a finding that is somebody's unfinished housekeeping and
+not your change's state: `LANDED UNREVIEWED`, a changeset whose directory is in the destination while the
+destination holds no approval of what it carries: no approval at all, a squash that brought no markers, or an
+approval naming commits the landing left behind. Read it with `git pair status --changeset <id>`. No
+command closes it — there is nothing to write — so report it and leave it.
 
 ## Mistakes that cost a review cycle
 

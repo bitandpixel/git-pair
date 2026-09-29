@@ -7,20 +7,17 @@ import (
 	"gitpair/internal/gittest"
 )
 
-// landAndRecord offers, approves, lands the checked-out branch on target with a merge, and records the
-// pair — the whole §29 loop, so a chain test can talk about the chain instead of about setup.
+// landAndRecord offers, approves, and lands the checked-out branch on target with a merge — the whole
+// §29 loop, so a chain test can talk about the chain instead of about setup. The name keeps "record"
+// because the loop it sets up is the one that used to end in `integration record`; what ends it now is
+// the merge, since the directory in the destination is the record.
 func landAndRecord(t *testing.T, f *gittest.Fixture, slug, target string) string {
 	t.Helper()
 	ready(t, f)
 	submit(t, f, "approve")
-	source := f.Head()
 	f.SwitchTo(target)
 	f.MustGit("merge", "--no-ff", "--no-edit", "-m", "land "+slug, slug)
 	landing := f.Head()
-	// `--changeset` because a stacked child's source carries its parents' directories too, which is the
-	// case the flag exists for.
-	runIn(t, f.Dir(), "integration", "record", "--changeset", slug, "--source", source, "--commit", landing,
-		"--target", target).mustSucceed(t, "integration", "record")
 	return landing
 }
 
@@ -60,9 +57,9 @@ func TestStatusPrintsTheRecordedStackChain(t *testing.T) {
 	res := runIn(t, f.Dir(), "status", "--changeset", "gamma")
 	res.mustSucceed(t, "status")
 	mustContain(t, res.stdout, "Stack:", "a landed child has a stack to report")
-	mustContain(t, res.stdout, "record: beta (branch beta) -> "+shortOf(lb)+", reachable from main",
+	mustContain(t, res.stdout, "landed: beta (branch beta) -> "+shortOf(lb)+", reachable from main",
 		"the nearest ancestor first, with the commit its own record names")
-	mustContain(t, res.stdout, "record: alpha (branch alpha) -> "+shortOf(la)+", reachable from main",
+	mustContain(t, res.stdout, "landed: alpha (branch alpha) -> "+shortOf(la)+", reachable from main",
 		"and the chain continues through the ancestor's own yaml, one step per changeset")
 
 	steps := runIn(t, f.Dir(), "status", "--changeset", "gamma", "--json").jsonList(t, "stack")
@@ -79,8 +76,8 @@ func TestStatusPrintsTheRecordedStackChain(t *testing.T) {
 		if step["changeset"] != want.id {
 			t.Errorf("stack step %d is %v, want %s", i, step["changeset"], want.id)
 		}
-		if step["integration_commit"] != want.commit {
-			t.Errorf("stack step %d records %v, want %s", i, step["integration_commit"], want.commit)
+		if step["landed_commit"] != want.commit {
+			t.Errorf("stack step %d landed %v, want %s", i, step["landed_commit"], want.commit)
 		}
 		if step["branch_exists"] != true {
 			t.Errorf("stack step %d says the branch is gone: %v", i, step)
@@ -107,7 +104,7 @@ func TestStatusStackChainReportsAGoneParentBranch(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "record: alpha (branch alpha is gone)",
+	mustContain(t, res.stdout, "landed: alpha (branch alpha is gone)",
 		"the branch the child was stacked on has been tidied away")
 	mustContain(t, res.stdout, "reachable from main",
 		"and the record still says where the work reached")
@@ -118,9 +115,9 @@ func TestStatusStackChainReportsAGoneParentBranch(t *testing.T) {
 	}
 }
 
-// An ancestor with no record here is a finding, not a gap to hide: the child's chain stops being provable
-// at that step, and `--fetch` is what closes it.
-func TestStatusStackChainNamesAnAncestorWithNoRecord(t *testing.T) {
+// Deleting the durable record of an ancestor changes nothing about its chain. The landing is a fact of the
+// integration branch's tree, so the step still reports it and the walk still continues from the destination.
+func TestStatusStackChainIgnoresADeletedRecord(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("alpha")
 	f.CommitChangeset("alpha", "main")
@@ -132,9 +129,9 @@ func TestStatusStackChainNamesAnAncestorWithNoRecord(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "record: alpha", "the step is still there")
-	mustContain(t, res.stdout, "no record in this clone", "and says what is missing")
-	mustContain(t, res.stdout, "--fetch", "and the command that fixes it")
+	mustContain(t, res.stdout, "landed: alpha (branch alpha) -> ", "the landing is still reported with its commit")
+	mustContain(t, res.stdout, "reachable from main", "and still placed in the integration branch")
+	mustNotContain(t, res.stdout, "--fetch", "nothing is fetched to answer this; the destination is read as it is")
 }
 
 // CHANGESET.yaml is committed content, so `parent-changeset` can be edited into a loop. The walk is
@@ -147,7 +144,7 @@ func TestStatusStackChainStopsOnACycle(t *testing.T) {
 	res := runIn(t, f.Dir(), "status", "--changeset", "ouroboros")
 	res.mustSucceed(t, "status")
 	mustContain(t, res.stdout, "named twice", "a stack that names its own ancestor says so")
-	if strings.Contains(res.stdout, "record: ouroboros ->") {
+	if strings.Contains(res.stdout, "landed: ouroboros ->") {
 		t.Errorf("the cycle was walked once as a real step:\n%s", res.stdout)
 	}
 }
@@ -169,32 +166,71 @@ func TestStatusStackChainIsEmptyForAnUnstackedChangeset(t *testing.T) {
 	}
 }
 
-// The chain is a read on top of a read, so its cost belongs to it: one listing of the branch names for the
-// whole walk, then one `CHANGESET.yaml` read and one `merge-base` per ancestor. Measured at four invocations
-// for a third ancestor, against the nine the two-ancestor chain costs over an unstacked changeset in the
-// same repository — the remainder is the deeper changeset's own history, which the walk does not touch.
-// Bounding the marginal is the point: a walk that re-listed the namespace per step, or followed a chain
-// twice, would blow through this on a stack of any depth.
+// The chain is a read on top of a read, so its cost belongs to it: one listing of the branch names for
+// the whole walk, then two tree reads (does the destination carry the ancestor, and which commit brought
+// it in) and one `CHANGESET.yaml` read per ancestor. Measured at 5 invocations per step once the chain is
+// three deep, and flat beyond that — 79, 84, 89 for depths 3, 4 and 5 in this repository.
+//
+// The assertion is the marginal at steady state, not the cost of a repository that grew: a run measured
+// straight after one more landing has been added also pays for the extra commits the status walk now
+// reads over, which is the changeset's own history and not the chain's. A walk that re-derived a chain per
+// step, listed the namespace per step, or followed the chain twice would not be flat.
 func TestStatusStackChainCostsABoundedReadPerStep(t *testing.T) {
+	ids := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
 	f := newRepo(t)
-	f.CreateBranch("alpha")
-	f.CommitChangeset("alpha", "main")
-	f.Commit("alpha work", gittest.WithFile("a.go", "package main\n"))
-	landAndRecord(t, f, "alpha", "main")
-	stackedChangeset(t, f, "beta", "alpha", "alpha", "b.go")
-	landAndRecord(t, f, "beta", "main")
-	stackedChangeset(t, f, "gamma", "beta", "beta", "g.go")
-	landAndRecord(t, f, "gamma", "main")
+	for i, id := range ids {
+		if i == 0 {
+			f.CreateBranch(id)
+			f.CommitChangeset(id, "main")
+			f.Commit(id+" work", gittest.WithFile(id+".go", "package main\n"))
+		} else {
+			stackedChangeset(t, f, id, ids[i-1], ids[i-1], id+".go")
+		}
+		landAndRecord(t, f, id, "main")
+	}
 
-	count := f.SpawnShim(t)
-	runIn(t, f.Dir(), "status", "--changeset", "gamma").mustSucceed(t, "status")
-	two := count()
+	const budget = 5
+	measured := map[string]int{}
+	for _, id := range []string{"gamma", "delta", "epsilon"} {
+		count := f.SpawnShim(t)
+		runIn(t, f.Dir(), "status", "--changeset", id).mustSucceed(t, "status")
+		measured[id] = count()
+		if got := measured[id] - measured["gamma"]; id != "gamma" && got > budget*(indexIn(ids, id)-indexIn(ids, "gamma")) {
+			t.Errorf("%s costs %d invocations over %s, more than %d per extra ancestor: the walk is not one bounded read per step",
+				id, measured[id], "gamma", budget)
+		}
+	}
+	if measured["delta"] <= measured["gamma"] {
+		t.Errorf("delta cost %d and gamma %d: the counter measured nothing, so the bound above proves nothing",
+			measured["delta"], measured["gamma"])
+	}
+}
 
-	stackedChangeset(t, f, "delta", "gamma", "gamma", "d.go")
-	landAndRecord(t, f, "delta", "main")
-	count = f.SpawnShim(t)
-	runIn(t, f.Dir(), "status", "--changeset", "delta").mustSucceed(t, "status")
-	if marginal := count() - two; marginal > 5 {
-		t.Errorf("one more ancestor cost %d git invocations, want at most 5 (one yaml read, one merge-base, and the deeper changeset's own work)", marginal)
+func indexIn(xs []string, want string) int {
+	for i, x := range xs {
+		if x == want {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestZZCostProfile(t *testing.T) {
+	ids := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
+	f := newRepo(t)
+	for i, id := range ids {
+		if i == 0 {
+			f.CreateBranch(id)
+			f.CommitChangeset(id, "main")
+			f.Commit(id+" work", gittest.WithFile(id+".go", "package main\n"))
+		} else {
+			stackedChangeset(t, f, id, ids[i-1], ids[i-1], id+".go")
+		}
+		landAndRecord(t, f, id, "main")
+	}
+	for i, id := range ids {
+		count := f.SpawnShim(t)
+		runIn(t, f.Dir(), "status", "--changeset", id).mustSucceed(t, "status")
+		t.Logf("depth %d (%s): %d invocations", i+1, id, count())
 	}
 }

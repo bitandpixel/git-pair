@@ -10,7 +10,6 @@ import (
 	"gitpair/internal/changeset"
 	"gitpair/internal/cli"
 	"gitpair/internal/gittest"
-	"gitpair/internal/reviewref"
 )
 
 // Exit codes are the agent-facing contract (plan: "Stable for agents"). They are
@@ -230,17 +229,30 @@ func approvedChangeset(t *testing.T) (*gittest.Fixture, string, string, string) 
 	return f, slug, reviewed, f.Head()
 }
 
-// archiveRef and integrationRef name the two durable refs for a changeset. They ask the package
-// rather than spelling the paths out, so a change of layout is one line here and not a grep across
-// the suite. Neither exists while work is in flight: both are written by `integration record`.
-func archiveRef(slug string) string     { return reviewref.Archive(slug) }
-func integrationRef(slug string) string { return reviewref.Integration(slug) }
+// gitPairNamespace is the ref namespace git-pair used to write its durable records under. Nothing
+// writes it any more, so the helpers below exist to prove a command wrote nothing there. They spell
+// the paths out because there is no package left to ask.
+const gitPairNamespace = "refs/git-pair"
 
-// durableRefs are every ref git-pair ever writes, which is the set a test asserts is empty when a
-// command claims to write no refs.
+func archiveRef(slug string) string     { return gitPairNamespace + "/archive/" + slug }
+func integrationRef(slug string) string { return gitPairNamespace + "/integrations/" + slug }
+
+// durableRefs are every ref under git-pair's old namespace, which is the set a test asserts is empty
+// when a command claims to write no refs.
 func durableRefs(t *testing.T, f *gittest.Fixture) []string {
 	t.Helper()
-	return f.RefNames(reviewref.NamespaceRoot)
+	return f.RefNames(gitPairNamespace)
+}
+
+// remoteWith points the fixture at a fresh bare remote under origin. Tests that need a remote for
+// resolution or for a clone build it this way; the fixture itself has none, so a test that asserts
+// "no remote" gets one without having to remove anything.
+func remoteWith(t *testing.T, f *gittest.Fixture) string {
+	t.Helper()
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	f.MustGit("init", "--bare", "-b", "main", remote)
+	f.MustGit("remote", "add", "origin", remote)
+	return remote
 }
 
 func mustContain(t *testing.T, haystack, needle, what string) {

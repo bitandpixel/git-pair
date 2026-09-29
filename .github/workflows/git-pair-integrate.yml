@@ -2,8 +2,9 @@
 #
 # An author only asks (PRD §9.9): `git pair change integrate` writes a commit that says "this is ready to be
 # integrated", and pushes it. What performs the merge is whatever the destination branch's owner decides to
-# run, and this is one shape of that — ordinary git, run by a job that is allowed to touch the branch, with
-# the record written afterwards by the command that verifies it. Nothing here is a git-pair subcommand; the
+# run, and this is one shape of that — ordinary git, run by a job that is allowed to touch the branch. The
+# pushed branch is then the whole record of the landing (PRD §13.4): the job writes no ref and runs nothing
+# after the push. Nothing here is a git-pair subcommand; the
 # logic lives in scripts/ci/git-pair-integrate.sh so it can be replayed without a runner
 # (`scripts/gates/ci-integrate.sh`).
 #
@@ -65,9 +66,9 @@ on:
 #   a test workflow      `workflow_run` names one by `name:`. No such workflow, no trigger — and dropping
 #                        `--require-ci` is the honest response, not a probe that always says green.
 #
-# The merge commit is a commit on the destination branch, and the record is a ref write. `contents: write`
-# covers both: the merge is pushed as an ordinary commit and the pair under refs/git-pair/ is pushed by
-# `integration publish`, unforced.
+# `contents: write` is the whole ask, because the merge is an ordinary commit on the destination branch.
+# There is no second push: git-pair writes no ref, so this job has no namespace to publish into and nothing
+# to keep in sync with the merge (PRD §13.4).
 permissions:
   contents: write
   checks: read
@@ -88,9 +89,9 @@ jobs:
     # be told no wastes a runner and puts a green-looking row in the list.
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     steps:
-      # The full history, not the tip. `integration record` verifies that `--commit` really added
-      # changesets/<id>/ to the destination, and the gate reads the approval out of the source's history:
-      # both need commits, not a snapshot.
+      # The full history, not the tip. The gate reads the approval out of the source's history, and a
+      # landing is read out of the destination's — both walk commits, so a shallow clone answers "no
+      # review" about work that was reviewed. `fetch-depth: 0` is what makes those answers true.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -105,7 +106,7 @@ jobs:
           go build -o "$HOME/.local/bin/git-pair" ./cmd/git-pair
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: gate it, merge it, record it, publish it
+      - name: gate it, merge it, push it
         env:
           # Passed to git-pair as --default-branch below, and used as the destination when a changeset's own
           # destination names no branch. Set it as a repository variable to move off `main`.
@@ -138,7 +139,7 @@ jobs:
           scripts/ci/git-pair-integrate.sh "$@"
 
       # The log a human reads. After the run it answers the only two questions that matter here: what is
-      # still waiting, and what landed without a record.
+      # still waiting, and what landed without a review.
       - name: what the queue says now
         if: always()
         run: git-pair queue

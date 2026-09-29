@@ -17,7 +17,6 @@ import (
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/marker"
 	"gitpair/internal/model"
-	"gitpair/internal/reviewref"
 	"gitpair/internal/survival"
 )
 
@@ -245,7 +244,7 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 	}
 	// The marker commit is the whole operation: no ref is written, and nothing is anchored. The
 	// branch holds the chain from here, and it is the only thing that does until landing — which is
-	// why `integration record` runs before the branch goes away rather than after (PRD §13).
+	// why the merge happens before the branch goes away rather than after (PRD §13.3).
 	printReady(a, s, sha, report, opts.allowSurviving)
 	return nil
 }
@@ -337,10 +336,10 @@ INTEGRATING. On a changeset that is WORKING or BLOCKED there is nothing to withd
 succeeds without recording anything and a script can unready unconditionally.
 
 It records a marker and nothing else. There is no ref to move: the retraction lives on the branch
-beside the offer it withdraws, and ` + "`git pair integration record`" + ` is what makes a changeset's
-history permanent — for the work that lands.
+beside the offer it withdraws. What makes a changeset's history permanent is the merge — landing
+puts the directory, and the chain under it, into the destination.
 
-Once the changeset has an integration record, this refuses. A changeset that has landed has no readiness
+Once the changeset has landed, this refuses. A changeset that has landed has no readiness
 to withdraw, and "nothing to withdraw" would be an answer about the branch rather than about the work
 being finished.`,
 		Example: `  git pair change unready
@@ -449,9 +448,9 @@ the record — ` + "`git log`" + ` shows it, ` + "`git pair status`" + ` reports
 ended.
 
 Nothing is anchored and no ref is written. The chain stays on the branch, so deleting the branch loses
-it: ` + "`git pair integration record`" + ` is what makes a changeset's history permanent, and it applies
-to work that landed. Abandoning is the case where it does not, and that is accepted — an ending nobody
-integrated has no landing to point at.
+it. Landing is what makes a changeset's history permanent, by putting the directory in the destination, and
+abandoning is the case where that does not happen — an ending nobody integrated has no landing to point at
+(PRD §13.3).
 
 Unlike ` + "`change unready`" + `, which withdraws an offer for now, this one closes the changeset:
 ` + "`change ready`" + `, ` + "`change unready`" + ` and ` + "`review submit`" + ` refuse against it
@@ -483,7 +482,7 @@ func runChangeAbandon(ctx context.Context, a *app) error {
 	if err := marker.RefuseIntegrated(ctx, s.repo, s.cs.Slug, s.trunk); err != nil {
 		return err
 	}
-	at, err := terminalRecord(ctx, s.repo, s.cs.Slug, s.cs.Base, s.summary)
+	at, err := terminalRecord(s.summary)
 	if err != nil {
 		return err
 	}
@@ -532,38 +531,21 @@ func branchOrHead(s *session) string {
 	return s.cs.Branch
 }
 
-// terminalRecord returns the newest abandon marker for a changeset, looking at the branch chain it
-// was derived from and then at the archive ref. Both have to be consulted, for different reasons: the
-// branch is where an ending is written, and the archive ref is what a recorded changeset leaves behind
-// after the branch is gone — so a slug recreated after `git branch -D` still cannot be reopened, and
-// an ending on a landed changeset still reads as an ending.
-//
-// Before landing there is no archive ref to consult, which is the accepted shape of the trade: an
-// abandoned changeset has no landing to be recorded against, so whether it ended is knowledge that
-// lives on its branch.
-func terminalRecord(ctx context.Context, repo *git.Repo, slug, base string, derived lifecycle.Summary) (*lifecycle.Event, error) {
-	if derived.Abandoned != nil {
-		return derived.Abandoned, nil
-	}
-	anchor, err := reviewref.ResolveArchive(ctx, repo, slug)
-	if errors.Is(err, reviewref.ErrNoArchiveRef) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	summary, err := lifecycle.Summarize(ctx, repo, slug, base, anchor)
-	if err != nil {
-		return nil, err
-	}
-	return summary.Abandoned, nil
+// terminalRecord returns the newest abandon marker for a changeset from the chain summary the caller
+// already has. It used to fall back to the archive ref, which held the unsquashed chain after the branch
+// was deleted, so a slug recreated after `git branch -D` could not be reopened. The durable refs are gone,
+// so the branch (or, for a landed changeset, the destination's history) is the only place an ending is
+// read from. The limit is stated in PRD §13.3: an abandon marker whose chain no clone can walk is not a
+// finding git-pair can report.
+func terminalRecord(derived lifecycle.Summary) (*lifecycle.Event, error) {
+	return derived.Abandoned, nil
 }
 
 // refuseIfAbandoned is the write gate: nothing records a marker onto a changeset that
 // has ended. Exit 1 rather than 2 — the repository says no, and re-running after undoing
 // the abandonment (there is no such command; the marker is history) is not a retry.
 func (a *app) refuseIfAbandoned(ctx context.Context, s *session) error {
-	at, err := terminalRecord(ctx, s.repo, s.cs.Slug, s.cs.Base, s.summary)
+	at, err := terminalRecord(s.summary)
 	if err != nil {
 		return err
 	}

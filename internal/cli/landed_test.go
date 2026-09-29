@@ -323,3 +323,40 @@ func TestAnApprovalThatNamesNoCommitLicensesNothing(t *testing.T) {
 		t.Errorf("reason %q, want it to say the approval names no commit rather than that no review happened", reason)
 	}
 }
+
+// A landing is the destination carrying the directory, and the destination is the branch the changeset
+// names, which is not always the default one. The trunk scan cannot see such a landing: the directory is
+// absent from trunk and the branch is still here, so the changeset would be an ordinary review row. The
+// queue reads the destination itself and says where the work went, rather than dropping the row in
+// silence — a changeset that leaves the queue without a word is a mystery to the person reading it.
+func TestQueueNamesALandingOnABranchThatIsNotTheDefault(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("release/2.x")
+	f.Commit("the release line", gittest.WithFile("release.md", "2.x\n"))
+	// The changeset names the release branch as its base, so that branch is its destination.
+	f.CreateBranch("booking", "release/2.x")
+	f.CommitChangeset("booking", "release/2.x")
+	f.Commit("booking work", gittest.WithFile("b.go", "package main\n"))
+	ready(t, f)
+	f.SwitchTo("release/2.x")
+	f.MustGit("merge", "--no-ff", "--no-edit", "-m", "booking: land on the release line", "booking")
+	landing := f.Head()
+	f.SwitchTo("booking")
+
+	res := runIn(t, f.Dir(), "queue")
+	res.mustSucceed(t, "queue")
+	mustContain(t, res.stderr, "booking (landed on release/2.x at "+f.Short(landing)+")",
+		"the skip note names the landing the trunk scan cannot see")
+
+	doc := runIn(t, f.Dir(), "queue", "--json").json(t)
+	for _, row := range doc["ready_for_review"].([]any) {
+		entry, ok := row.(map[string]any)
+		if ok && entry["changeset"] == "booking" {
+			t.Errorf("the queue offers a changeset the destination already carries for review: %v", entry)
+		}
+	}
+	if got := len(doc["landed_unreviewed"].([]any)); got != 0 {
+		t.Errorf("landed_unreviewed = %v: a landing on a branch that is not the integration branch is not that finding",
+			doc["landed_unreviewed"])
+	}
+}

@@ -1,23 +1,25 @@
 # The landing contract, for an agent who does not run it
 
-Landing is five steps, in this order, and nothing else. You take part in the first two and report on the
-rest; the merge and the record belong to the person who owns the destination branch and to CI.
+Landing is three steps, in this order, and nothing else. You take part in the first two and report on the
+last; the merge belongs to the person who owns the destination branch.
 
 ```bash
 git pair check                       # 1. the gate — yours
 git pair change integrate            # 2. the request that this head be merged — yours, when the merge is
                                      #    somebody else's job; skip it when a person merges by hand
 # 3. the landing, with ordinary git: merge, squash-merge, or the forge button this repository uses
-git pair integration record          # 4. the only command in git-pair that writes a ref
-git pair integration publish         # 5. those refs sent to the shared remote, unforced
 ```
 
-git-pair writes no merge and no ref at all while work is in flight. There is no `git pair merge`, no
-`git pair land`, no `git pair push`, and none is coming: integration stays ordinary git, decided by the
-human. `git pair change integrate` is not an exception to that sentence — it is a marker commit that asks
-for the merge, and the merge is still performed by somebody else. What it changes is who waits: instead of
-an author standing between an approval and the merge button, the request sits on the branch and whoever
-owns the destination acts on it.
+git-pair writes no merge and no ref at all. There is no `git pair merge`, no `git pair land`, no
+`git pair push`, and none is coming: integration stays ordinary git, decided by the human.
+`git pair change integrate` is not an exception to that sentence — it is a marker commit that asks for the
+merge, and the merge is still performed by somebody else. What it changes is who waits: instead of an
+author standing between an approval and the merge button, the request sits on the branch and whoever owns
+the destination acts on it.
+
+Nothing about a landing is written down separately either. A changeset is landed when the destination
+branch carries `changesets/<id>/`, and that directory is the whole record. There is no fifth step to
+forget, no ref to publish, and no configuration that makes the answer better.
 
 ## 1. The gate you run
 
@@ -29,9 +31,9 @@ git pair check --allow-feedback             # when this repository's policy says
 
 `check` asks what a merge would act on: the newest marker is a review whose outcome permits integration
 (or a `change integrate` declaration standing on such a review, in which case the review underneath is the
-verdict), nothing unreadable came after it, the changeset has not ended, it has not already been recorded as
-integrated, and the tree still matches what the review looked at — ignoring `changesets/<id>/`. It reads
-no other ref, and every failed condition is reported in one run.
+verdict), nothing unreadable came after it, the changeset has not ended, the destination does not already
+carry it, and the tree still matches what the review looked at — ignoring `changesets/<id>/`. It reads
+branches and commits and nothing else, and every failed condition is reported in one run.
 
 It reports `integrating` beside the verdict, which is why the gate for an automatic merge is one command
 and two fields: `jq -e '.ready and .integrating'`. `ready` is "may this merge"; `integrating` is "did the
@@ -58,58 +60,34 @@ Recover by re-offering: `git pair change ready`, then `git pair change wait`. Ne
 marker's `Review-Head` to make the comparison line up — that trailer is the reviewer's statement about
 what they looked at, not the author's to amend.
 
-## 3-4. Record and publish, which you do not run
+## What survives a landing, and what does not
 
-`git pair integration record` writes the durable pair for one changeset, create-only:
+A merge landing keeps everything: the branch's commits are in the destination's history, so the approval,
+the responses and the thread replies are all readable from the destination, and `status --changeset <id>`
+reports them.
 
-| Ref | Holds |
-| --- | --- |
-| `refs/git-pair/archive/<id>` | the real unsquashed, unrebased tip: implementation and review history together |
-| `refs/git-pair/integrations/<id>` | the commit that introduced the changeset into the destination branch |
+A squash, cherry-pick, or forge button keeps only the content. The directory arrives, so the changeset is
+landed, and the chain behind it is gone: `status` reports `reviewed: false` with an empty `chain_base` and
+`chain_head`, because nothing in the destination says the work was approved. PRD §13 states this limit.
+Where the review has to survive a squash, the repository merges with `--no-ff` instead, or tidies the
+changeset (`git pair change tidy <id>`, which moves the directory to `changesets/.landed/<id>/` on a branch
+whose history still holds the chain) before it deletes the branch.
 
-Those two refs are why a branch can be deleted without losing the review. They are written after the
-merge, never before, and never moved: the same pair again is a no-op success, and a different pair is a
-refusal rather than a race to win.
+## 1 finding you will be asked about
 
-**Record before tidy.** The record is asked of the branch that still carries the reviewed head and the
-changeset directory, so with the branch present it needs no flags at all. After the branch is gone it can
-only be told (`--source` and `--commit`), and if the reviewed head was never pushed it cannot be derived
-at all. Publish in the same breath: once the branch is deleted, the refs on the remote are the only copy
-of the archive chain.
+`LANDED UNREVIEWED` — a `changesets/<id>/` directory is in the integration branch's tree and the chain
+behind it carries no approving verdict. Either the work reached the branch without a review, or it arrived
+by a route that rewrote the review away (the squash above). `git pair queue` prints it under its own
+heading and `git pair status` prints it on a branch that carries no changeset of its own, in human output
+and in `landed_unreviewed`.
 
-## 2 findings you will be asked about
-
-Both are somebody's unfinished housekeeping, and both print the invocation that closes the gap. Report
-them; do not run them.
-
-`LANDED, UNRECORDED` — a `changesets/<id>/` directory is in the integration branch's tree and no
-integration ref exists. The merge happened and step 3 did not. The tree rule makes this invisible in the
-ordinary way: the directory is in trunk, so the rules that find work in progress stop seeing it, and the
-branch may already be deleted. `git pair queue` prints it under its own heading and `git pair status`
-prints it on a branch that carries no changeset of its own.
-
-`RECORDED, NOT PUBLISHED` — this clone holds the pair and the remote, as last fetched, does not. Step 4
-has not run, or has not reached here. `--fetch` is how a record written where the merge ran becomes
-visible here; a record is a claim, and a clone acquires claims by asking.
-
-A clone can stop asking every time, and that is a person's or a pipeline's decision rather than yours:
-`git pair integration configure` appends the mirror refspec to `remote.<name>.fetch`, so an ordinary fetch
-keeps this comparison possible, and `refs/git-pair/*:refs/git-pair/*` to `remote.<name>.push`, so an
-ordinary push publishes what that clone records. It is the only configuration git-pair writes, no command
-writes it on anyone's behalf, and the findings above name it when they meet its absence — so reporting the
-finding reports the remedy, and running it stays on their side.
-
-Half a pair on the remote is the louder case: the remote has a hint and no way to reconstruct the record
-from it. `status --json` reports that as `unpublished`, with `unpublished_note` when there was nothing to
-compare against.
-
-Neither finding changes `check`'s verdict. A record that has not travelled is a durability risk, not a bad
-review.
+Report it; do not try to close it. No command closes this one — the answer is a review, and running
+something is not one. The old finding this replaced (`LANDED, UNRECORDED`) reported a step that had not
+been run and printed the command that ran it; there is no step left to run.
 
 ## Reading a changeset that is no longer on a branch
 
-`git pair status --changeset <id>` resolves a slug from whichever branch carries it, and falls back to
-the durable refs when no branch does. That is the read for "what happened to that change", and it is
-read-only: it reports `integrated`, `integrated_commit`, `integration_ref`, and `integrated_in_default_branch`
-with the branch it measured against. A landed child whose parent branch has been tidied away gets its
-`base:` relinked to the parent's integration ref, and `stack` walks the ancestors that remain.
+`git pair status --changeset <id>` resolves a slug from whichever branch carries it, including the
+destination's own tree and `changesets/.landed/`. That is the read for "what happened to that change", and
+it is read-only: it reports `landed`, `landed_commit` and `landed_branch`, the chain it could read
+(`chain_base`, `chain_head`, `reviewed`), and `stack`, which walks the ancestors that remain.

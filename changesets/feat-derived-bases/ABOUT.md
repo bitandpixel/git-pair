@@ -6,7 +6,7 @@ What a changeset is measured against is derived from the integration branch, and
 answer travels with it. The stacked child of a landed parent no longer needs a ref of git-pair's own to know
 where its own work begins.
 
-This is milestone M3 of `docs/plans/simplify-architecture/plan.md`. It removes the last read of
+This is milestone M3 of `docs/plans/completed/simplify-architecture/plan.md`. It removes the last read of
 `refs/git-pair/*` from the surfaces an author uses every day: the base of a stack, the state of a parent, and
 the uniqueness of an id.
 

@@ -18,8 +18,7 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 	f.Commit("implement locking", gittest.WithFile("service.go", "package main\n\nfunc Lock() {}\n"))
 	ready(t, f)
 	f.Write("service.go", "package main\n\n// Please use a transaction here\nfunc Lock() {}\n")
-	submit(t, f, "block")
-	lowerReview := f.Head()
+	submit(t, f, "block") // the lower changeset's own history, which the upper one must not inherit
 
 	// Upper changeset, stacked on the lower branch.
 	f.CreateBranch("booking-transaction-tests", "booking-transaction")
@@ -103,29 +102,22 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 		t.Errorf("upper reviews = %v, want its own approve", reviews)
 	}
 
-	// The record is per changeset: landing the upper one records the upper one, and the lower
-	// changeset still has nothing durable written for it. That is the independence PRD §21 asks for,
-	// held by the id being the whole name of both refs rather than by any bookkeeping at review time.
+	// Landing is per changeset: the destination carrying the upper directory makes the upper one landed
+	// and says nothing about the lower, which is still work. That is the independence PRD §21 asks for,
+	// and it is held by the directory being the whole fact rather than by any bookkeeping at review time.
 	f.SwitchTo("main")
-	f.MustGit("checkout", upperHead, "--",
-		"changesets/booking-transaction", "changesets/booking-transaction-tests")
-	landing := f.Commit("land the upper changeset", gittest.WithFile("landed.md", "landed\n"))
-	runIn(t, f.Dir(), "integration", "record", "--source", upperHead, "--commit", landing,
-		"--changeset", "booking-transaction-tests").mustSucceed(t, "integration", "record")
+	f.MustGit("checkout", upperHead, "--", "changesets/booking-transaction-tests")
+	f.Commit("land the upper changeset", gittest.WithFile("landed.md", "landed\n"))
 
-	if !f.HasRef(integrationRef("booking-transaction-tests")) {
-		t.Error("the upper changeset has no integration record")
+	upper := runIn(t, f.Dir(), "status", "--changeset", "booking-transaction-tests", "--json").
+		mustSucceed(t, "status").json(t)
+	if upper["landed"] != true {
+		t.Errorf("upper landed = %v, want true: the destination carries its directory", upper["landed"])
 	}
-	for _, ref := range []string{archiveRef("booking-transaction"), integrationRef("booking-transaction")} {
-		if f.HasRef(ref) {
-			t.Errorf("%s exists: the lower changeset was never landed, and its name is not this record's", ref)
-		}
-	}
-	// The upper record's chain reaches down through the stack, which is what makes the lower
-	// changeset's reviewed history readable after both branches are deleted — read through the
-	// changeset that was actually recorded.
-	if !f.ReachableFrom(lowerReview, archiveRef("booking-transaction-tests")) {
-		t.Error("the lower changeset's review commit is not reachable from the upper record")
+	lower := runIn(t, f.Dir(), "status", "--changeset", "booking-transaction", "--json").
+		mustSucceed(t, "status").json(t)
+	if lower["landed"] != false {
+		t.Errorf("lower landed = %v, want false: its directory is nowhere the destination holds it", lower["landed"])
 	}
 }
 

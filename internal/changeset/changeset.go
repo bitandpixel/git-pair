@@ -44,7 +44,7 @@ var (
 )
 
 // ID is the changeset's canonical identity: the name of its directory, which is what
-// `changesets/<id>/` and the durable refs are named after. The field carrying it is
+// `changesets/<id>/` is named after, and every derivation of a landing starts from it. The field carrying it is
 // called Slug for historical reasons; it is the id, and the branch name is only where
 // the default came from (PRD §4).
 
@@ -65,6 +65,11 @@ type Changeset struct {
 	// branch shares with the destination, or the fallback. It is empty for a base the changeset recorded
 	// itself, and a surface that prints a derived base prints this beside it: a SHA alone cannot be read.
 	BaseWhy string
+	// BaseDerived says `Base` was derived from the destination rather than recorded by the changeset. It
+	// matters beyond the sentence in `BaseWhy` because a derived base is a measurement point, not a place
+	// work can land: a caller that asks "where does this go" has to be able to tell a commit the child
+	// shares with the integration branch apart from a branch it was measured against.
+	BaseDerived bool
 	// ParentBranch is the branch named by `parent:`, empty for a changeset measured straight
 	// against the integration branch. It stays the branch name even when the measurement base has
 	// been derived from the destination, so the stack and the diff base can be
@@ -326,9 +331,9 @@ func ParentOf(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranch
 	if c.Base == "" {
 		return Parent{}, nil
 	}
-	// The branch is the stack. `Base` can name the parent's integration ref instead of its branch,
-	// because a landed parent is still measured against — see relinkStacks — and the branch name is
-	// where the two cases are told apart.
+	// The branch is the stack. `Base` can name the parent's landing commit instead of its branch,
+	// because a landed parent is still measured against, and the branch name is where the two
+	// cases are told apart.
 	if c.ParentBranch != "" {
 		return parentOfBranch(ctx, repo, c.ParentBranch, c.Branch, db)
 	}
@@ -344,6 +349,15 @@ func ParentOf(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranch
 	}
 	sha, err := repo.RevParse(ctx, name)
 	if errors.Is(err, git.ErrUnknownRevision) {
+		// Not a branch. It may still name a commit: the landed read measures a changeset whose branch is
+		// gone against the commit its chain sits on, and a commit is a measurement point rather than a
+		// stack. Reporting it as a parent would tell a reader that a changeset never stacked on anything
+		// has a parent branch that went away. Only a name that resolves to nothing at all is that.
+		if _, cerr := repo.RevParse(ctx, c.Base); cerr == nil {
+			return Parent{}, nil
+		} else if !errors.Is(cerr, git.ErrUnknownRevision) {
+			return Parent{}, cerr
+		}
 		return Parent{Branch: strings.TrimPrefix(name, "refs/heads/")}, nil
 	}
 	if err != nil {
@@ -555,7 +569,7 @@ func noChangesetHere(ctx context.Context, repo *git.Repo, db DefaultBranchRef, c
 // the two spellings are two answers to "what does this diff against?" and they will not stay in
 // agreement. `parent-changeset:` records the changeset living on that branch — the durable half of
 // the relationship, which is what still means something after the parent branch is deleted and its
-// work has become an integration ref.
+// work has become a landing commit.
 const (
 	ParentKey          = "parent"
 	ParentChangesetKey = "parent-changeset"

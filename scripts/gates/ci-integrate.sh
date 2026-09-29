@@ -4,12 +4,12 @@
 # Usage: bash scripts/gates/ci-integrate.sh [/path/to/git-pair]
 #        (default: the name `mise run build` installs from this repository)
 #
-# What it proves, in order: a declared and ready changeset is merged as a merge commit, recorded, and
-# published; a re-run does nothing twice; an undeclared changeset and a drifted declaration are left alone;
-# the queue-driven poll finds a declaration with no event behind it; a head that is not proven green is not
-# merged, whether the probe says "no" or "I cannot tell", and the probe is asked about the declared commit;
-# a dry run writes nothing; a merge that conflicts is aborted, unrecorded, and reported red; and the two
-# workflow files still name each other, so a rename fails a build instead of stalling a merge.
+# What it proves, in order: a declared and ready changeset is merged as a merge commit and pushed, leaving
+# the remote nothing but branches; a re-run does nothing twice; an undeclared changeset and a drifted
+# declaration are left alone; the queue-driven poll finds a declaration with no event behind it; a head that
+# is not proven green is not merged, whether the probe says "no" or "I cannot tell", and the probe is asked
+# about the declared commit; a dry run writes nothing; a merge that conflicts is aborted and reported red;
+# and the two workflow files still name each other, so a rename fails a build instead of stalling a merge.
 #
 # What it does not: it is not a GitHub Actions test. The workflow file is thin on purpose — build, then this
 # script — so the behaviour worth proving lives here, and the file's own claims (permissions, triggers,
@@ -113,7 +113,7 @@ git -C "$T/work" push -q origin flow/merge flow/quiet flow/drift >/dev/null 2>&1
 DECL=$(git -C "$T/origin.git" rev-parse refs/heads/flow/merge)
 ok "origin holds three branches and one declaration at ${DECL:0:7}"
 
-step "the job: gate, merge, push, record, publish"
+step "the job: gate, merge, push"
 
 CI1=$(clone ci1) || { echo "cannot clone for ci1" >&2; exit 1; }
 out=$(cigr "$CI1" flow/merge); code=$?
@@ -121,7 +121,7 @@ show "$out"
 check "the run succeeds" 0 $code
 contains "$out" "flow-merge: declared by ${DECL:0:7} for merge into main" "it names the declaration it read and the branch it chose"
 contains "$out" "merged as" "it reports the merge commit"
-contains "$out" "merged, recorded, published" "it says the whole handoff finished"
+contains "$out" "pushed to main" "and it says where the landing went"
 
 TIP=$(git -C "$T/origin.git" rev-parse main)
 if [ "$TIP" = "$MAIN0" ]; then fail "the destination moved"; else ok "the destination moved"; fi
@@ -132,12 +132,18 @@ if [ "$SECOND" = "$DECL" ]; then ok "the merge's second parent is the head that 
 contains "$(git -C "$T/origin.git" log -1 --format=%s "$TIP")" "Merge flow/merge into main" "the merge commit says what it merged"
 # The merge was authored by the job: this clone ran with no global or system git configuration at all.
 contains "$(git -C "$T/origin.git" log -1 --format='%ae' "$TIP")" "git-pair-ci@localhost" "the job set an author for the commit it made"
-# `for-each-ref` patterns do not match across a `/`, so this asks for the namespace by prefix and greps the
-# names, rather than writing a glob that quietly matches nothing at two levels deep.
-REMOTE_REFS=$(git -C "$T/origin.git" for-each-ref --format='%(refname)' 'refs/git-pair/' | tr '\n' ' ')
-contains "$REMOTE_REFS" "refs/git-pair/integrations/flow-merge" "the record reached the remote"
-contains "$REMOTE_REFS" "refs/git-pair/archive/flow-merge" "and so did its archive copy"
-no_contains "$REMOTE_REFS" "awaiting-merge" "and no durable ref was written for the declaration itself"
+# The whole claim of PRD §13.4, checked on the shared remote rather than in a clone: a landing leaves
+# nothing there but branches. There is no namespace to publish into, so there is nothing to keep in sync with
+# the merge, and no command that has to run after the push for the landing to be true.
+REMOTE_REFS=$(git -C "$T/origin.git" for-each-ref --format='%(refname)' | grep -v '^refs/heads/' | tr '\n' ' ')
+if [ -z "$REMOTE_REFS" ]; then
+  ok "the remote holds branches and nothing else"
+else
+  fail "the job put refs on the remote that no branch needs: $REMOTE_REFS"
+fi
+git -C "$T/origin.git" cat-file -e "$TIP:changesets/flow-merge/CHANGESET.yaml" 2>/dev/null \
+  && ok "the destination's tree carries the directory, which is the record of the landing" \
+  || fail "the merge reached the destination without the changeset directory"
 
 step "the job again: a second event for a changeset already handled"
 
@@ -146,7 +152,8 @@ show "$out"
 check "the re-run succeeds" 0 $code
 contains "$out" "nothing to merge here" "it says there is nothing to do"
 if [ "$(git -C "$T/origin.git" rev-parse main)" = "$TIP" ]; then ok "and the destination did not move again"; else fail "the destination moved twice"; fi
-check "one record, not two" 1 "$(git -C "$T/origin.git" for-each-ref --format='%(refname)' 'refs/git-pair/integrations/*' | wc -l | tr -d ' ')"
+ADDS=$(git -C "$T/origin.git" log --format=%h --diff-filter=A main -- changesets/flow-merge/CHANGESET.yaml | wc -l | tr -d ' ')
+check "and the directory entered the destination exactly once" 1 "$ADDS"
 
 step "what must be left alone"
 
@@ -171,9 +178,15 @@ out=$(cigr "$CI2"); code=$?
 show "$out"
 check "the poll succeeds with no branch named" 0 $code
 contains "$out" "flow-poll: declared by" "it found the declaration with no event behind it"
-contains "$out" "merged, recorded, published" "and finished the handoff"
+contains "$out" "pushed to main" "and finished the handoff"
 if [ "$(git -C "$T/origin.git" rev-parse main)" != "$TIP" ]; then ok "the destination moved for the poll"; else fail "the poll merged nothing"; fi
-check "two changesets are now recorded" 2 "$(git -C "$T/origin.git" for-each-ref --format='%(refname)' 'refs/git-pair/integrations/*' | wc -l | tr -d ' ')"
+for id in flow-merge flow-poll; do
+  if git -C "$T/origin.git" cat-file -e "main:changesets/$id/CHANGESET.yaml" 2>/dev/null; then
+    ok "the destination carries $id, read from its tree"
+  else
+    fail "the destination does not carry $id"
+  fi
+done
 
 step "the head has to be proven green"
 
@@ -226,7 +239,7 @@ if [ "$(git -C "$T/origin.git" rev-parse main)" = "$MAIN_BEFORE_CI" ]; then ok "
 out=$(ci_probe_run 0 'green: 12 checks, all finished' "$CI5" --expect-head "$DECL_CI" flow/ci); code=$?
 show "$out"
 check "green, and this is the commit CI finished with: merged" 0 $code
-contains "$out" "merged, recorded, published" "the handoff finishes"
+contains "$out" "pushed to main" "the handoff finishes"
 check "the probe was asked about the declared head" "$DECL_CI" "$(tail -1 "$T/probe-calls")"
 
 step "the dry run"
@@ -235,7 +248,6 @@ declare_changeset flow/dry src/d.ts 'export const d = 5' || { echo "fixture: flo
 git -C "$T/work" checkout -q flow/dry && wing change integrate >/dev/null || { echo "fixture: declare flow/dry" >&2; exit 1; }
 git -C "$T/work" push -q origin flow/dry >/dev/null 2>&1
 BEFORE=$(git -C "$T/origin.git" rev-parse main)
-REFS0=$(git -C "$T/origin.git" for-each-ref --format='%(refname)' 'refs/git-pair/integrations/*' | wc -l | tr -d ' ')
 CI3=$(clone ci3) || { echo "cannot clone for ci3" >&2; exit 1; }
 out=$(cigr "$CI3" --dry-run flow/dry); code=$?
 show "$out"
@@ -243,10 +255,10 @@ check "the dry run succeeds" 0 $code
 contains "$out" "dry run: would merge" "it says what it would have done"
 contains "$out" "into main" "and names the destination"
 if [ "$(git -C "$T/origin.git" rev-parse main)" = "$BEFORE" ]; then ok "and it merged nothing"; else fail "the dry run merged"; fi
-if [ "$(git -C "$T/origin.git" for-each-ref --format='%(refname)' 'refs/git-pair/integrations/*' | wc -l | tr -d ' ')" = "$REFS0" ]; then
-  ok "and it wrote no record"
+if [ "$(git -C "$T/origin.git" for-each-ref --format='%(refname)' | grep -cv '^refs/heads/')" = 0 ]; then
+  ok "and it left nothing behind on the remote but branches"
 else
-  fail "the dry run wrote a record"
+  fail "the dry run wrote a ref"
 fi
 
 step "the merge that cannot be made"
@@ -271,18 +283,17 @@ git -C "$T/work" checkout -q flow/clash &&
   { echo "fixture: declare flow/clash" >&2; exit 1; }
 git -C "$T/work" push -q origin flow/clash >/dev/null 2>&1
 BEFORE=$(git -C "$T/origin.git" rev-parse main)
-REFS0=$(git -C "$T/origin.git" for-each-ref --format='%(refname)' 'refs/git-pair/integrations/*' | wc -l | tr -d ' ')
 CI4=$(clone ci4) || { echo "cannot clone for ci4" >&2; exit 1; }
 out=$(cigr "$CI4" flow/clash); code=$?
 show "$out"
 check "a conflicting merge is a red run" 1 $code
 contains "$out" "the merge conflicted" "it says so"
-contains "$out" "nothing merged, nothing recorded" "and says what it did not do"
+contains "$out" "nothing merged" "and says what it did not do"
 if [ "$(git -C "$T/origin.git" rev-parse main)" = "$BEFORE" ]; then ok "the destination is untouched"; else fail "a conflicted merge reached the destination"; fi
-if [ "$(git -C "$T/origin.git" for-each-ref --format='%(refname)' 'refs/git-pair/integrations/*' | wc -l | tr -d ' ')" = "$REFS0" ]; then
-  ok "no record was written for a merge that did not happen"
+if git -C "$T/origin.git" merge-base --is-ancestor refs/heads/flow/clash main; then
+  fail "the branch the job could not merge is in the destination anyway"
 else
-  fail "a record was written for a merge that did not happen"
+  ok "and the branch it could not merge is still outside the destination"
 fi
 if [ -z "$(git -C "$CI4" status --porcelain)" ]; then ok "the clone was left clean"; else fail "the clone was left dirty"; fi
 if [ -f "$CI4/.git/MERGE_HEAD" ]; then fail "a merge was left half-done"; else ok "and no merge was left half-done"; fi

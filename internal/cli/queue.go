@@ -52,7 +52,6 @@ type integrationEntry struct {
 }
 
 func newQueueCommand(a *app) *cobra.Command {
-	var doFetch bool
 	cmd := &cobra.Command{
 		Use:   "queue",
 		Short: "List changesets awaiting review, and those handed over for merging",
@@ -65,37 +64,28 @@ Entries are ordered longest-waiting first.
 
 The second list is the author's half of an automatic merge: approved work with a declaration on its tip,
 waiting for whoever owns the destination branch to perform it. git-pair performs nothing itself and writes
-nothing durable while work is in flight (PRD §26) — ` + "`git pair integration record`" + ` after the merge
-is what turns a row here into a record.
+nothing durable while work is in flight (PRD §26).
 
 Branches are read from the repository, not from the checked-out directory, so the
 queue says the same thing on main as it does on the changeset's own branch. A
-changeset whose content has landed in its base is not listed, and says nothing.
+changeset whose content has landed in its destination is not listed, and says nothing.
 
 --json is the stable contract for notifications, dashboards, and agent
-supervisors.
-
---fetch asks the remote for the durable refs and their mirrors first, which is what makes the queue
-able to see a landing recorded in another clone. Without it the queue reads this repository and says
-so.`,
+supervisors.`,
 		Example: `  git pair queue
   git pair queue --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runReviewQueue(cmd.Context(), a, doFetch)
+			return runReviewQueue(cmd.Context(), a)
 		},
 	}
-	fetchFlag(cmd, &doFetch)
 	return cmd
 }
 
-func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
+func runReviewQueue(ctx context.Context, a *app) error {
 	repo, err := a.loadRepo(ctx)
 	if err != nil {
 		return err
-	}
-	if doFetch {
-		a.fetchDurableRefs(ctx, repo, "")
 	}
 	// Branches, not directories. Only a branch can be reviewed, so only a branch
 	// can be queued; a changeset directory whose branch is gone is a record rather
@@ -103,7 +93,7 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 	//
 	// One trunk listing serves the whole queue; per branch it costs a tree listing and one batch
 	// read. That is what makes "resolve every branch" affordable — the formulation this replaced
-	// asked a question per durable ref for each branch.
+	// asked a question per ref for each branch.
 	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
 	if err != nil {
 		return err
@@ -121,19 +111,7 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 	var skipped []string
 	// Stacks whose parent has moved on. A note, not a row: see behindParent.
 	var stale []string
-	// One read of the durable namespace for the whole command. Three things in here are questions about
-	// those refs — has this changeset landed, does this orphan have a chain to read, which landings carry
-	// no record — and each used to ask git separately, once per changeset. The queue's cost now follows
-	// the branches, not the number of changesets the repository has ever had.
-	durable, err := indexDurableRefs(ctx, repo)
-	if err != nil {
-		return err
-	}
 	unreviewed := a.unreviewedLandings(ctx, repo, db, scan.TrunkIDs)
-	// The same one read of the namespace answers both halves of "did the paper trail survive": is there a
-	// record, and did the record get anywhere. The branch is empty here because the queue spans branches,
-	// so no branch's upstream is the right answer and the repository's origin is.
-	rep := a.publicationReport(ctx, repo, "", durable, "`git pair queue --fetch` asks for them", doFetch)
 	for _, br := range scan.Branches {
 		if br.Err != nil {
 			skipped = append(skipped, br.Branch+" (unreadable changeset metadata: "+br.Err.Error()+")")
@@ -149,22 +127,23 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 		cs := br.Resolution.Selected.Changeset
 		cs.Branch = br.Branch
 		seen[cs.Slug] = true
-		// A changeset with an integration ref has landed, and a review queue has nothing to ask of
-		// it. This is the case the queue could not answer before the record existed: the landing
-		// went to a branch that is not the default one, so the directory is still absent from trunk
-		// and the tree rule still reads it as live work. It is named in the skip note rather than
-		// dropped silently, because unlike a trunk landing this branch is still here and its
-		// disappearance from the queue would otherwise be a mystery.
+		// A changeset the destination already carries has landed, and a review queue has nothing to ask of
+		// it. The trunk case is covered by the scan itself; this read catches the landing that went to a
+		// branch that is not the default one, where the directory is still absent from trunk and the branch
+		// is still here. It is named in the skip note rather than dropped silently, because a changeset that
+		// disappears from the queue without a word is a mystery.
 		//
 		// The note is per changeset and printed once, even though the rows below are per branch: two
 		// branches can carry one landed changeset, and "it landed at 4f2b8c1" is one fact, repeated
 		// twice for the same reason.
-		if sha, ok := durable.Integrated[cs.Slug]; ok {
-			if !noted[cs.Slug] {
-				noted[cs.Slug] = true
-				skipped = append(skipped, fmt.Sprintf("%s (integrated at %s)", cs.Slug, short(sha)))
+		if dest, derr := changeset.DestinationFor(ctx, repo, cs, db); derr == nil {
+			if chain, cerr := changeset.LandedChain(ctx, repo, dest.Ref, cs.Slug); cerr == nil {
+				if !noted[cs.Slug] {
+					noted[cs.Slug] = true
+					skipped = append(skipped, fmt.Sprintf("%s (landed on %s at %s)", cs.Slug, displayRef(dest.Ref), short(chain.Landing)))
+				}
+				continue
 			}
-			continue
 		}
 		// One row per branch, because one review lives on one branch. Two branches can carry the same
 		// changeset — a copy made to try a different approach, a parent and the child branched off it —
@@ -194,8 +173,8 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 					cs.Slug, br.Branch, plural(behind, "commit", "commits"), entry.Base))
 			}
 			// A landed parent is the case `behindParent` cannot see: it counts parent commits the branch
-			// does not have, and a merge into the destination leaves the parent's branch with none. The
-			// record is what says the base is finished, and it is already in the index this loop reads.
+			// does not have, and a merge into the destination leaves the parent's branch with none.
+			// One read of the destination's history says whether the base is finished.
 			if note, err := a.landedParentNote(ctx, repo, cs, db, entry.Head); err == nil && note != "" {
 				stale = append(stale, note)
 			}
@@ -239,27 +218,22 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 
 	if a.json {
 		out := map[string]any{
-			// Every array here is `[]` rather than null, including `landed_unreviewed` and `unpublished`.
+			// Every array here is `[]` rather than null, including `landed_unreviewed`.
 			// An empty list is the answer "asked, and none", and a missing key is "this build did not look".
 			"ready_for_review":     orEmpty(entries),
 			"awaiting_integration": orEmpty(integrations),
 			"skipped":              orEmpty(skipped),
 			"landed_unreviewed":    unreviewed,
-			"unpublished":          rep.Findings,
 			// The notes the text surface prints to stderr: a row whose parent has landed, or moved.
 			// They were prose-only, which left a machine reading the queue with no way to learn that the
 			// base a row is being reviewed against has already been integrated.
 			"parent_notes": orEmpty(stale),
-		}
-		if rep.Note != "" {
-			out["unpublished_note"] = rep.Note
 		}
 		return a.emitJSON(out)
 	}
 	if len(entries) == 0 {
 		a.printf("READY FOR REVIEW\n\n  nothing is ready\n")
 		a.printUnreviewed(unreviewed, displayRef(db.Ref), true)
-		a.printUnpublished(rep, true)
 		printSkipped(a, skipped)
 		printBehindParent(a, stale)
 		printAwaitingIntegration(a, integrations)
@@ -277,7 +251,6 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 		a.printf("\n")
 	}
 	a.printUnreviewed(unreviewed, displayRef(db.Ref), false)
-	a.printUnpublished(rep, false)
 	printSkipped(a, skipped)
 	printBehindParent(a, stale)
 	printAwaitingIntegration(a, integrations)

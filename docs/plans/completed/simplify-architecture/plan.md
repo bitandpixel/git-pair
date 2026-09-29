@@ -286,7 +286,7 @@ Two things measured while building those fixtures, because they change later mil
   the recording step asserts both `LANDED UNREVIEWED` sentences (no verdict, and one-commit landing), the
   `--json` key, the exit-2 `status` carry, and that writing the record changes nothing — the finding is
   about the chain, not the paper trail; and the queue's landed/unreviewed path is read with the branch gone.
-- [ ] Decided during execution, and it is the design rather than a loss: **landed means the integration
+- [x] Decided during execution, and it is the design rather than a loss: **landed means the integration
   branch, and a merge into some other branch leaves the changeset live.** The durable record refused here —
   once `integration record --target release/2.x` had run, `change ready`, `change unready`, `review submit`,
   `change abandon` and `change integrate` all refused — and the tree model does not, because nothing
@@ -395,7 +395,7 @@ branch.
 
 - [x] `internal/cli/tidy_test.go`: the move, its renames-only diff, the no-op second run, the two refusals,
   `--dry-run`, the two usage errors, the JSON shape, the surfaces after the move, the empty array.
-- [ ] `mise run gates` for this changeset, then `git pair change ready` and push. The branch is
+- [x] `mise run gates` for this changeset, then `git pair change ready` and push. The branch is
   `feat/change-tidy` (worktree `/home/david/dev/worktrees/git-pair/change-tidy`), stacked on
   `feat/derived-bases`; it moves onto new `origin/main` before the handoff.
 
@@ -409,32 +409,38 @@ branch.
 
 #### Tasks
 
-- [ ] Carried from M3: `internal/changeset/destination.go:60-125` still reads a parent's `CHANGESET.yaml`
-  from the landing commit's tree, so a landing that carried no directory loses the parent link; and
-  `internal/cli/status.go`'s `Stack:` block still prints `record:` per ancestor from the ref index, with
+- [x] Carried from M3: `internal/changeset/destination.go` reads the parent's `CHANGESET.yaml` from the
+  integration branch (`StackAt(ctx, repo, db.Ref, parent)`), in either directory spelling, and no longer
+  imports `internal/reviewref`. `Changeset.BaseDerived` distinguishes a derived measurement base from a
+  destination. Two rules came with it: a walked base naming a directory the destination carries is a landed
+  changeset to walk through, not a destination; and a parent merged only into a release branch is not landed,
+  so the child's destination stays the live parent branch.
+- [x] Carried from M3: `internal/cli/status.go`'s `Stack:` block still prints `record:` per ancestor from the ref index, with
   `--json`'s `stack[].integration` beside it. Both read the durable shape and move with this milestone.
-- [ ] Delete `internal/reviewref` (467), `internal/cli/integration.go` (1366), `internal/cli/publish.go`
+- [x] Delete `internal/reviewref` (467), `internal/cli/integration.go` (1366), `internal/cli/publish.go`
   (415), `internal/cli/configure.go` (281), `internal/cli/published.go` (210), the ref half of
   `internal/cli/landed.go` (184), `internal/git/push.go` (204), and their tests (~3.0k lines).
-- [ ] Delete the commands and their registrations: `integration`, `integration record`,
+- [x] Delete the commands and their registrations: `integration`, `integration record`,
   `integration publish`, `integration configure`. `git pair change integrate` stays.
-- [ ] `internal/hygiene/hygiene_test.go`: drop the single-`update-ref` rule (`:647-736`) and the audited-push
-  fence (`:89-110`); add, in the same syntax-reading style, that no shipped file passes `update-ref`,
-  `symbolic-ref`, or `git tag` to git, and that no string literal under `refs/git-pair/` is built outside
-  test fixtures. Keep the layer A/B/C structure so a spread slice cannot hide a write.
-- [ ] `--fetch`: delete `internal/cli/fetch.go` (113) — its help text already says the flag exists for the
+- [x] `internal/hygiene/hygiene_test.go`: drop the single-`update-ref` rule (`:647-736`) and the audited-push
+  fence (`:89-110`); add, in the same syntax-reading style, `TestShippedCodeNeverWritesARef` — no shipped
+  file passes `update-ref`, `symbolic-ref`, or `git tag` to git, with `symbolic-ref` allowed at exactly one
+  file and only in the read-only `--quiet --short HEAD` form, checked by the AST pass. Keep the layer
+  A/B/C structure so a spread slice cannot hide a write, and keep the fixture self-test proving the ref
+  rule set catches an injected write and ignores a read.
+- [x] `--fetch`: delete `internal/cli/fetch.go` (113) — its help text already says the flag exists for the
   durable refs and their mirrors (`:24`), and its three users are `status.go:58`, `check.go:72`, and
   `queue.go:88`. `change wait --fetch` is a separate flag (`internal/cli/change.go:713`) that polls for
   somebody else's commits, and stays. README's `--fetch` rows and the agent contract go in the same commit.
-- [ ] `.github/workflows/git-pair-integrate.yml`: drop the record and publish steps and the `fetch-depth: 0`
+- [x] `.github/workflows/git-pair-integrate.yml`: drop the record and publish steps and the `fetch-depth: 0`
   justification (`:69-70`, `:91-96`); the job's remaining work is gate, merge, push. Keep the
   `workflow_run`→`schedule`→`dispatch` shape and the comment explaining why there is no `push` trigger.
-- [ ] `scripts/gates/ci-integrate.sh` (313 lines): drop the record, publish, and "already recorded"
+- [x] `scripts/gates/ci-integrate.sh` (313 lines): drop the record, publish, and "already recorded"
   scenarios; keep gate, merge, re-run-is-a-no-op, conflicting-merge, and probe cases; keep the assertion
   that the two workflow files still name each other.
-- [ ] Mark `docs/plans/review-architecture-v2/`, `docs/plans/publish-the-records/`, and
+- [x] Mark `docs/plans/review-architecture-v2/`, `docs/plans/publish-the-records/`, and
   `docs/plans/legacy-refs-and-remote-branches/` superseded, each with a line pointing here.
-- [ ] PRD §13, §12, §21, §22, §26, §29 and README §Concepts, §Command reference, §JSON contracts,
+- [x] PRD §13, §12, §21, §22, §26, §29 and README §Concepts, §Command reference, §JSON contracts,
   §Configuration, §Landing a declared change from CI: rewrite in the same commits as the deletions, and
   state the squash limitation (D2) where §13 currently promises the archive.
 
@@ -456,16 +462,24 @@ branch.
 
 #### Tasks
 
-- [ ] `internal/cli/docs_contract_test.go:117-127`: `TestRefPathsInTheDocsAreOnesWeWrite` becomes
-  "no `refs/git-pair/` path appears in any document, README, PRD, or skill file", with no whitelist. The
-  migration prose that needed the old whitelist entry becomes a paragraph in this plan, which is not a
-  document the test reads.
-- [ ] `skills/git-pair/SKILL.md` and `references/integration.md` (11 mentions between them): the lifecycle
+- [x] `internal/cli/docs_contract_test.go:117-127`: `TestRefPathsInTheDocsAreOnesWeWrite` becomes
+  `TestNoDocNamesADurableRef` — "no path under `refs/git-pair/` appears in any document, README, PRD, or
+  skill file", with no whitelist. The migration prose that needed the old whitelist entry lives in the
+  retired chapters of PRD §27 instead, which the test does not read as a promise.
+- [x] `skills/git-pair/SKILL.md` and `references/integration.md` (11 mentions between them): the lifecycle
   story without refs — ready, review, submit, integrate, merge with ordinary git, tidy when the list grows.
   `references/cli.md` (10 mentions) loses the three commands.
-- [ ] README §The agent skill and §Agent contract: what an agent can now assume about a landed changeset,
+- [x] README §The agent skill and §Agent contract: what an agent can now assume about a landed changeset,
   and what it must not assume about a squashed one.
-- [ ] Sweep PRD and README for prose that assumes a second statement of a fact — "recorded", "unrecorded",
+- [x] The gate scripts, which are contracts and had to change with the behaviour rather than be loosened:
+  `scripts/gates/e2e-29.sh` loses the record and publish steps and gains a landing on a branch that is not
+  the destination (the source branch stays live, `--default-branch` makes the same history answer "landed,
+  reviewed", and the destination still answers after the branch is deleted); `scripts/gates/ci-integrate.sh`
+  asserts the remote holds branches and nothing else; `scripts/gates/pty-walkthrough.sh` moves its
+  "a command that writes asks for nothing at a terminal" subject from `integration configure` to
+  `change tidy`; `scripts/ci/git-pair-integrate.sh` and `.github/workflows/git-pair-integrate.yml` end at
+  the push.
+- [x] Sweep PRD and README for prose that assumes a second statement of a fact — "recorded", "unrecorded",
   "published", "paper trail" — and rewrite each to the tree fact or delete it.
 
 #### Verification
@@ -552,3 +566,40 @@ was checking.
 
 | Date | Audit | Summary |
 | ---- | ----- | ------- |
+
+## As built
+
+Executed 2026-09-29, one changeset per milestone, each handed off green.
+
+| Milestone | Branch | Shipped |
+| --------- | ------ | ------- |
+| M1 | `feat/landed-tree-model` (merged, `81f01e2`) | `.landed/` in the tree model: `Reserved`, `ActiveIDs`, `LandedIDs`, `DirAt`, `DirPathspecs` |
+| M2 | `feat/landing-is-a-tree-fact` | `CarriesDir`, `LandedChain`, `LandingCommit`; `LANDED UNREVIEWED`; `status`'s landing block read from the destination |
+| M3 | `feat/derived-bases` | `BaseFor` with the rule attached (`base_ref`, `base_why`), the destination walk past a landed parent (`destination_via`) |
+| M4 | `feat/change-tidy` | `git pair change tidy`, renames-only, `--dry-run`, `--all-landed`, JSON `actions` |
+| M5 | `feat/durable-refs-gone` | `internal/reviewref`, the five `integration`-family files, `internal/git/push.go` and ~5.7k lines of them deleted; `internal/cli/landing.go` added; the hygiene ref-write ban |
+| M6 | same branch | PRD §3–§30, README, the shipped skill and `references/`; `TestNoDocNamesADurableRef`; the supersession notices; the gate scripts |
+
+Three things the plan did not predict:
+
+- **The gates were the largest single surface.** `e2e-29.sh` gained a step rather than losing one — a merge
+  into a release line plus `--default-branch` naming it — and now carries 110 `ok:` steps where it had 72.
+  `pty-walkthrough.sh`'s "a command that writes asks for nothing at a terminal" needed a new subject and got
+  `change tidy`. Neither script was loosened; both were rewritten with the behaviour.
+- **A gate assertion can fail because of the shell, not the product.** `cmd | grep -q` under `set -o
+  pipefail` turns a successful match into a SIGPIPE exit when the producer is still writing, which showed up
+  as a flaky failure in the new landing step. The gate captures output into a variable before matching, the
+  way its other long-output assertions already did.
+- **The queue's landed skip note has no subject in the tree model's ordinary cases.** `queue` names a
+  changeset as `landed on <destination> at <sha>` only when the destination is a branch other than the
+  integration branch *and* the branch still carries a live candidate; every landing the gates replay is
+  either on trunk (the resolver drops the candidate) or a release line the reader has to name. It stays
+  because a changeset that vanishes from the queue silently is a mystery. Nothing tested its text, so
+  walking the skill added `TestQueueNamesALandingOnABranchThatIsNotTheDefault`, which also pins that such a
+  changeset is not offered for review.
+- **Reading the shipped skill against a scratch repository found a bug.** `status --changeset <id>` for a
+  landed changeset whose branch is gone rebuilds the changeset from the chain the destination carries, whose
+  start is a commit. `ParentOf` looked for `refs/heads/<that sha>`, found none, and reported the base as a
+  parent branch that had gone away, advising a reader of a changeset that was never stacked to choose a new
+  parent. The read now asks git whether the name resolves as an object before concluding it was a branch,
+  and names its base as derived rather than printing a bare object id.

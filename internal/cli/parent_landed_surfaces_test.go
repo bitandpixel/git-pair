@@ -2,12 +2,10 @@ package cli_test
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"gitpair/internal/gittest"
-	"gitpair/internal/reviewref"
 )
 
 // The landing is one fact with three readers. `status` is where an author looks, `check` is the gate that
@@ -139,9 +137,9 @@ func TestQueueNotesAReadyChildSittingOnALandedParent(t *testing.T) {
 	}
 }
 
-// The note reads the namespace index the queue already built and costs one containment question per READY
-// child that has a recorded parent. The assertion is the shape the other queue cost tests use: the same
-// repository with three hundred refs added must not notice.
+// The note asks the destination one question per READY child that has a landed parent. The assertion is
+// the shape the other queue cost tests use: the same repository with three hundred retired refs added
+// must not notice, because nothing reads that namespace any more.
 func TestQueueLandedParentNoteCostsNothingPerRef(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("alpha")
@@ -158,7 +156,7 @@ func TestQueueLandedParentNoteCostsNothingPerRef(t *testing.T) {
 
 	base := f.Head()
 	for i := 0; i < 300; i++ {
-		f.MustGit("update-ref", reviewref.Archive(fmt.Sprintf("cs-%03d", i)), base)
+		f.MustGit("update-ref", "refs/git-pair/archive/"+fmt.Sprintf("cs-%03d", i), base)
 	}
 	count = f.SpawnShim(t)
 	before = count()
@@ -179,97 +177,65 @@ func TestQueueLandedParentNoteCostsNothingPerRef(t *testing.T) {
 // approval is a different finding from a parent that lands.
 func landApproved(t *testing.T, f *gittest.Fixture, slug, target string) string {
 	t.Helper()
-	source := f.Head()
 	f.SwitchTo(target)
 	f.MustGit("merge", "--no-ff", "--no-edit", "-m", "land "+slug, slug)
-	landing := f.Head()
-	runIn(t, f.Dir(), "integration", "record", "--changeset", slug, "--source", source,
-		"--commit", landing, "--target", target).mustSucceed(t, "integration", "record")
-	return landing
+	return f.Head()
 }
 
-// trunkFixture lands and records two changesets on main, points the repository at a bare remote, and
-// publishes only one of the two pairs — the state where a record exists only in the clone that wrote it.
-func trunkFixture(t *testing.T) *gittest.Fixture {
+// landedAndUnreviewed builds the shape the destination-branch report exists for: one changeset merged
+// into main whose chain carries no verdict at all, and one merged through a review, and the checkout is
+// left standing on main — the branch that holds no work in progress.
+func landedAndUnreviewed(t *testing.T) *gittest.Fixture {
 	t.Helper()
 	f := newRepo(t)
 	f.CreateBranch("alpha")
-	f.CommitChangeset("alpha", "main")
-	f.Commit("alpha work", gittest.WithFile("a.go", "package main\n"))
-	landAndRecord(t, f, "alpha", "main")
+	f.StageChangeset("alpha", "main")
+	f.Write(f.ChangesetPath("alpha", "CHANGESET.yaml"), "id: alpha\nbase: main\n")
+	f.Write(f.ChangesetPath("alpha", "ABOUT.md"), "# alpha\n")
+	f.Commit("changeset alpha", gittest.WithFile("a.go", "package main\n"))
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "--no-edit", "-m", "land alpha", "alpha")
 	f.CreateBranch("beta")
 	f.CommitChangeset("beta", "main")
 	f.Commit("beta work", gittest.WithFile("b.go", "package main\n"))
 	landAndRecord(t, f, "beta", "main")
-
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	f.MustGit("init", "--bare", "-b", "main", remote)
-	f.MustGit("push", "--quiet", remote, "--all")
-	f.MustGit("remote", "add", "origin", remote)
-	for _, family := range []func(string) string{reviewref.Archive, reviewref.Integration} {
-		f.MustGit("push", "--quiet", "origin", family("alpha")+":"+family("alpha"))
-	}
+	f.SwitchTo("main")
 	return f
 }
 
-// The destination branch is the branch every changeset eventually lands on, and the one branch where
-// `status` asked nothing about publication: it failed on "no changeset for this branch" before the
-// comparison ran. Two records here, one of them never published, and the answer was one line.
-func TestStatusOnTheDestinationBranchReportsUnpublishedRecords(t *testing.T) {
-	f := trunkFixture(t)
-	f.SwitchTo("main")
+// The destination branch is the branch every changeset eventually lands on, and the branch where a
+// landing that no review permitted is easiest to miss: it holds no work in progress, so `status` there
+// fails on "no changeset for this branch" and the finding has to ride along with that answer.
+func TestStatusOnTheDestinationBranchReportsUnreviewedLandings(t *testing.T) {
+	f := landedAndUnreviewed(t)
 
-	res := runIn(t, f.Dir(), "status", "--fetch")
+	res := runIn(t, f.Dir(), "status")
 	if res.code != 2 {
 		t.Fatalf("status on the destination branch exited %d, want 2: the branch really holds no work in progress\n%s\n%s",
 			res.code, res.stdout, res.stderr)
 	}
 	mustContain(t, res.stderr, "no changeset for this branch",
 		"the first half of the answer is unchanged")
-	mustContain(t, res.stdout, "RECORDED, NOT PUBLISHED", "and the second half now runs")
-	mustContain(t, res.stdout, "beta", "naming the record that never left the clone")
-	mustNotContain(t, res.stdout, "alpha\n", "the published one is not a finding")
+	mustContain(t, res.stderr, "LANDED UNREVIEWED", "and the second half rides on the same error")
+	mustContain(t, res.stderr, "alpha", "naming the landing whose chain carries no verdict")
 }
 
 // `--json` on that failure answers with a document, because the caller is a machine that has to tell
-// "nothing is waiting" from "this build could not look". Both keys are present and empty when there is
+// "nothing is waiting" from "this build could not look". The key is present and empty when there is
 // nothing to report, which is the convention `status` already commits to on its success path.
-func TestStatusOnTheDestinationBranchJSONCarriesBothLists(t *testing.T) {
-	f := trunkFixture(t)
-	f.SwitchTo("main")
+func TestStatusOnTheDestinationBranchJSONCarriesTheList(t *testing.T) {
+	f := landedAndUnreviewed(t)
 
-	res := runIn(t, f.Dir(), "status", "--fetch", "--json")
+	res := runIn(t, f.Dir(), "status", "--json")
 	if res.code != 2 {
 		t.Fatalf("exit %d, want 2", res.code)
 	}
 	out := res.json(t)
-	unpub := out["unpublished"].([]any)
-	if len(unpub) != 1 {
-		t.Fatalf("unpublished = %v, want the one record on this clone and not on origin", out["unpublished"])
+	unreviewed := out["landed_unreviewed"].([]any)
+	if len(unreviewed) != 1 {
+		t.Fatalf("landed_unreviewed = %v, want the one landing whose chain carries no verdict", out["landed_unreviewed"])
 	}
-	if pair := unpub[0].(map[string]any); pair["changeset"] != "beta" {
-		t.Errorf("unpublished[0] = %v, want beta", unpub[0])
+	if row := unreviewed[0].(map[string]any); row["changeset"] != "alpha" {
+		t.Errorf("landed_unreviewed[0] = %v, want alpha", unreviewed[0])
 	}
-	if rec := out["landed_unreviewed"].([]any); len(rec) != 0 {
-		t.Errorf("landed_unreviewed = %v, want the empty list: both directories here arrived through a review",
-			out["landed_unreviewed"])
-	}
-}
-
-// With no remote there is no comparison to make, and the answer is the sentence that says so rather than
-// an empty list, which a reader would take for "all published".
-func TestStatusOnTheDestinationBranchSaysWhenNothingCanBeClaimed(t *testing.T) {
-	f := newRepo(t)
-	f.CreateBranch("alpha")
-	f.CommitChangeset("alpha", "main")
-	f.Commit("alpha work", gittest.WithFile("a.go", "package main\n"))
-	landAndRecord(t, f, "alpha", "main")
-	f.SwitchTo("main")
-
-	res := runIn(t, f.Dir(), "status")
-	if res.code != 2 {
-		t.Fatalf("exit %d, want 2", res.code)
-	}
-	mustContain(t, res.stdout+res.stderr, "no remote to compare against",
-		"the question cannot be asked here, and that is what gets said")
 }

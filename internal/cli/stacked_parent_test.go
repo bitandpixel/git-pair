@@ -128,19 +128,18 @@ func TestUnchangedParentLeavesTheChildApproved(t *testing.T) {
 	}
 }
 
-// The durable half of the stack: once the parent has landed and its branch is gone, the integration
-// ref is what the relationship means. The child stays measurable — its diff is against the commit the
+// The durable half of the stack: once the parent has landed and its branch is gone, the destination's
+// tree is what the relationship means. The child stays measurable — its diff is against the commit the
 // parent's work became — and `check` says where the parent went rather than failing to resolve a
-// branch that no longer exists.
+// branch that no longer exists. This landing is a squash, the shape that keeps no ancestry at all: the
+// answer comes from the directory the destination carries, not from a walk of the branch.
 func TestChildOfALandedParentIsToldWhereTheWorkWent(t *testing.T) {
 	f, _, _ := stackedPair(t)
 
 	f.SwitchTo("main")
-	parentSHA := f.RefSHA("booking")
 	f.MustGit("merge", "--squash", "booking")
 	f.MustGit("commit", "-m", "landed booking")
 	landing := f.RevParse("HEAD")
-	runIn(t, f.Dir(), "integration", "record", "--commit", "HEAD", "--source", parentSHA).mustSucceed(t)
 	f.ForceDeleteBranch("booking")
 
 	f.SwitchTo("booking-tests")

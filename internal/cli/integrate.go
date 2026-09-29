@@ -20,8 +20,8 @@ import (
 // gate, the merge, and the record were three steps one person ran in sequence, and CI could only take the
 // merge over by ignoring the author. After it, the author says once — in a commit, on the branch, where
 // every reader sees it — that the work is approved and should be merged, and whoever owns the destination
-// branch acts on that. The merge is still ordinary git and the record is still `integration record`: what
-// moved is only who waits.
+// branch acts on that. The merge is still ordinary git, and git-pair writes no ref when it happens:
+// the destination's tree is the record. What moved is only who waits.
 //
 // It stays inside PRD §26. git-pair writes no merge, pushes nothing, and writes no ref; the declaration is
 // a request that somebody else performs the merge, and `check` remains the gate that merge runs.
@@ -49,15 +49,14 @@ network. Push the branch and it is the trigger. The gate a merge runs is still
 pipeline that merged on the first alone would take the decision out of the author's hands, which is why
 git-pair has never merged anything (PRD §26) and never will.
 
-This command is not a merge and not a queue. git-pair performs no merge and writes no durable ref while
-work is in flight: after the merge happens, ` + "`git pair integration record`" + ` writes the pair of refs
-that make the landing permanent, and ` + "`git pair integration publish`" + ` sends them (PRD §29). What the
-declaration changes is who waits for whom.
+This command is not a merge and not a queue. git-pair performs no merge and writes no ref while work is
+in flight, before it or after it: the landing is the changeset directory in the destination's tree, which
+ordinary git writes (PRD §13.4). What the declaration changes is who waits for whom.
 
 The gate is ` + "`git pair check`" + `, run before the commit is written, and it is the same code rather
 than an imitation of it: no approval standing, the approved commit rewritten out of this history, content
 outside ` + "`changesets/<id>/`" + ` changed since the approval, a stacked parent that moved or ended, and an
-abandoned or already-recorded changeset are each refused, every failed condition named in one run.
+abandoned or already-landed changeset are each refused, every failed condition named in one run.
 
 Two things about a declaration are worth holding onto:
 
@@ -69,10 +68,10 @@ It is not a verdict. The approval underneath it stays the thing that permits the
 ` + "`check`" + ` keeps passing after you run this and keeps refusing after anything that would have made it
 refuse before.
 
-A stacked child is refused until its parent has an integration record. The automatic merge would land the
-child on a branch that review can still rewrite, and a durable ref naming a commit on such a branch can end
-up pointing at history that no longer exists. Merging a child onto its parent by hand and recording that
-stays open — ` + "`integration record`" + ` was built for it — it is only not queued.
+A stacked child is refused until its parent is landed. Declaring the child would ask for a merge onto a
+branch that review can still rewrite, and a declaration whose base review can move is a declaration a gate
+cannot check. Merging a child onto its parent by hand stays open — git-pair declines to queue it, not to
+allow it.
 
 Re-running at the same head records nothing and succeeds, so a script can declare unconditionally. A commit
 after the declaration moves the head it names, and the next run declares that one instead.
@@ -181,25 +180,25 @@ func runChangeIntegrate(ctx context.Context, a *app, opts *integrateOptions) err
 //
 // It belongs here and not in `integrationReasons`, and the difference is the two questions. `check` asks
 // "may this merge?", and a person who owns both branches can answer yes to merging a child onto a parent
-// that has not landed — that landing is what `integration record` calls carried, and it is a supported
-// shape. This command asks "merge this without asking me again". A branch whose own review is still open
-// can be rebased, amended, or blocked an hour from now, and a create-only ref naming a commit on it cannot
-// follow it: the durable record would be left pointing at history that stopped existing. Refusing the
-// request is the whole mitigation; the human path stays open, so nothing is lost but the automation.
+// that has not landed — that shape is still supported, it just stays a human decision. This command asks
+// "merge this without asking me again". A branch whose own review is still open can be rebased, amended,
+// or blocked an hour from now, and an unattended merge into it would be performed against history that
+// stopped existing. Refusing the request is the whole mitigation; the human path stays open, so nothing is
+// lost but the automation.
 func unlandedParentReason(cs changeset.Changeset, parent parentStatus) []string {
 	if parent.Branch == "" || parent.Landed != "" {
 		return nil
 	}
 	if parent.Changeset == "" {
-		// There is no record to look for, so there is no way to satisfy the rule from here. "Cannot
+		// The stack names no parent changeset, so there is nothing to ask the destination about. "Cannot
 		// tell" goes the direction that asks a person to look again, which is how every other
 		// unanswerable comparison in this codebase is resolved.
 		return []string{fmt.Sprintf(
-			"this changeset is stacked on %s, which records no parent changeset, so git-pair cannot show that branch has landed: record the relationship with `git pair init --parent %s --set-parent`, or land %s and record it before declaring this one",
+			"this changeset is stacked on %s, which records no parent changeset, so git-pair cannot show that branch has landed: record the relationship with `git pair init --parent %s --set-parent`, or land %s on the integration branch before declaring this one",
 			parent.Branch, parent.Branch, parent.Branch)}
 	}
 	return []string{fmt.Sprintf(
-		"the parent %s has no integration record, so declaring %s would ask for a merge onto %s — a branch review can still rewrite. Land the parent first: `git pair check`, merge with ordinary git, `git pair integration record`. Merging %s onto %s by hand and recording that stays open; git-pair declines to queue it, not to record it",
+		"the parent %s is not landed on the integration branch, so declaring %s would ask for a merge onto %s — a branch review can still rewrite. Land the parent first: `git pair check`, then merge with ordinary git. Merging %s onto %s by hand stays open; git-pair declines to queue it, not to allow it",
 		parent.Changeset, cs.Slug, parent.Branch, cs.Slug, parent.Branch)}
 }
 
