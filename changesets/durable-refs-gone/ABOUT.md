@@ -90,6 +90,13 @@ the tool's answer to their clutter is `git pair change tidy`, in its own changes
 Deleting a landed changeset's directory would delete the statement the destination carries, which is the
 thing this plan exists to protect.
 
+`docs/plans/simplify-architecture/handoff.md` is deleted rather than moved. It was written by the session that
+executed M1-M4 as a handoff: verified state, then the next concrete action, in order. The actions it lists are
+M5 and M6, which is what this changeset does, so filing it under `completed/` would keep a stale instruction
+list beside a finished plan. Nothing reads it — no code, no test, no document, no skill — and the two other
+completed plans in this repository keep `audits/<date>-completion.md` rather than a handoff note. What the file
+recorded survives in the plan's as-built section and in each changeset's `ABOUT.md`.
+
 The exception, so the diff is not a surprise: this changeset moves the plan into `docs/plans/completed/`, and
 three `ABOUT.md` files outside its own point at the old path — M2's (already on trunk), M3's and M4's. Each
 gets that one line, the path, and nothing else. Their design claims are left exactly as their own changesets
