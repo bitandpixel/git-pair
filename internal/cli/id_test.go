@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gitpair/internal/gittest"
 )
 
 // The ID is what git-pair calls the work from here on, so an explicit one has to survive
@@ -70,39 +72,50 @@ func TestChangeInitAdoptsTheDirectoryItInherits(t *testing.T) {
 	}
 }
 
-// A durable ref outlives its branch, so a name one of the two families holds is spoken for even with
-// no directory anywhere. Matching is on the two exact paths, so `booking-transaction` is not blocked by
-// `booking-transaction-v2`, which shares its prefix.
-//
-// The two families block equally: a changeset with only an archive ref is a record half-written, and
-// handing its id to a new changeset would strand that chain on a stranger's work.
-func TestChangeInitRefusesAnIDItsRefsAlreadyUse(t *testing.T) {
+// An id belongs to the changeset that carries it: in the working tree, on the current branch, or landed in
+// the destination. A landed changeset keeps its directory until it is tidied, and a branch that cannot see
+// the landing must still refuse to take the name, because two changesets under one id is two sets of records
+// with one address.
+func TestChangeInitRefusesAnIDALandedChangesetAlreadyUses(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
-	f.MustGit("update-ref", "refs/git-pair/integrations/booking-transaction-v2", f.Head())
-	// A ref from the retired `refs/git-pair/changesets/<id>/archive` layout reserves nothing: its id
-	// is not readable as a component of either family, so treating it as a claim would block names
-	// that no longer belong to anything.
-	f.MustGit("update-ref", "refs/git-pair/changesets/legacy/archive", f.Head())
-
-	runIn(t, f.Dir(), "init", "--id", "booking-transaction", "--base", "main").
-		mustSucceed(t, "init")
-	runIn(t, f.Dir(), "init", "--id", "legacy", "--base", "main").mustSucceed(t, "init")
-
+	f.CommitChangeset("booking", "main")
+	f.Commit("booking work", gittest.WithFile("b.go", "package main\n"))
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "-m", "booking: merge the branch", "booking")
 	f.CreateBranch("second")
-	r := runIn(t, f.Dir(), "init", "--id", "booking-transaction-v2", "--base", "main")
-	if r.code != exitUsage {
-		t.Fatalf("reusing a name with a record exited %d, want %d\nstderr: %s", r.code, exitUsage, r.stderr)
-	}
-	mustContain(t, r.stderr, "refs already exist", "the refusal must say what holds the name")
 
-	// The other family the same way.
-	f.CreateBranch("third")
-	f.MustGit("update-ref", "refs/git-pair/archive/half-written", f.Head())
-	r = runIn(t, f.Dir(), "init", "--id", "half-written", "--base", "main")
-	if r.code != exitUsage {
-		t.Errorf("reusing a name with an archive ref only exited %d, want %d\nstderr: %s", r.code, exitUsage, r.stderr)
+	r := runIn(t, f.Dir(), "init", "--id", "booking", "--base", "main")
+	if r.code != exitRefusal {
+		t.Fatalf("reusing a landed id exited %d, want %d\nstderr: %s", r.code, exitRefusal, r.stderr)
 	}
+	mustContain(t, r.stderr, "changesets/booking", "the refusal names the directory that holds the id")
+	mustContain(t, r.stderr, "is landed on main", "and says where the changeset landed")
+
+	runIn(t, f.Dir(), "init", "--id", "booking-transaction", "--base", "main").mustSucceed(t, "init")
+}
+
+// A tidied landing leaves `changesets/.landed/<id>` behind on the integration branch. The id is still spoken
+// for: the directory is there, and the work it describes is closed. A new changeset taking the name would put
+// two histories under one address, so the refusal is the ordinary one and it names the path.
+func TestChangeInitRefusesAnIDALandedDirectoryHolds(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking", "main")
+	f.Commit("booking work", gittest.WithFile("b.go", "package main\n"))
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "-m", "booking: merge the branch", "booking")
+	f.Commit("main: open the landed shelf", gittest.WithFile("changesets/.landed/README", "tidied landings\n"))
+	f.MustGit("mv", "changesets/booking", "changesets/.landed/booking")
+	f.Commit("main: tidy the landing", gittest.WithFile("notes.md", "notes\n"))
+	f.CreateBranch("second")
+
+	r := runIn(t, f.Dir(), "init", "--id", "booking", "--base", "main")
+	if r.code != exitRefusal {
+		t.Fatalf("reusing an id a landed directory holds exited %d, want %d\nstderr: %s", r.code, exitRefusal, r.stderr)
+	}
+	mustContain(t, r.stderr, "is landed on main at changesets/.landed/booking",
+		"the refusal names the landed directory that holds the name, and says where it landed")
 }
 
 // A branch may hold more than one changeset — that is what a stacked branch that starts its

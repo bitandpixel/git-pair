@@ -191,9 +191,15 @@ func ForID(id string) (Changeset, error) {
 type DirectoryState struct {
 	Worktree  bool
 	Committed bool
+	// Landed says the directory this commit carries is the landed spelling, `changesets/.landed/<id>/`.
+	// It matters because absence from the working tree means two different things: a deletion nobody
+	// committed, and a landing that has been tidied.
+	Landed bool
 }
 
-// DirectoryAt reports where the directory for id is present.
+// DirectoryAt reports where the directory for id is present: in the working tree, and whether this commit
+// carries it — under either spelling, because a landed changeset keeps its name until it is tidied and the
+// name is spoken for the whole time.
 func DirectoryAt(ctx context.Context, repo *git.Repo, id string) (DirectoryState, error) {
 	var st DirectoryState
 	if err := ValidateID(id); err != nil {
@@ -204,14 +210,17 @@ func DirectoryAt(ctx context.Context, repo *git.Repo, id string) (DirectoryState
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return st, err
 	}
-	dirs, err := ActiveIDs(ctx, repo, "HEAD")
-	if err != nil {
-		return st, err
-	}
-	for _, d := range dirs {
-		if d == id {
-			st.Committed = true
-			break
+	for i, list := range []func(context.Context, *git.Repo, string) ([]string, error){ActiveIDs, LandedIDs} {
+		dirs, err := list(ctx, repo, "HEAD")
+		if err != nil {
+			return st, err
+		}
+		for _, d := range dirs {
+			if d == id {
+				st.Committed = true
+				st.Landed = i == 1
+				return st, nil
+			}
 		}
 	}
 	return st, nil

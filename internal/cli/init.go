@@ -12,7 +12,6 @@ import (
 	"gitpair/internal/console"
 	"gitpair/internal/git"
 	"gitpair/internal/marker"
-	"gitpair/internal/reviewref"
 )
 
 // --- init -------------------------------------------------------------------
@@ -153,12 +152,20 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	if err != nil {
 		return err
 	}
-	if dir.Committed && !dir.Worktree {
+	if dir.Committed && !dir.Worktree && !dir.Landed {
 		// Retiring a changeset is a commit. Until the deletion is committed the directory's
-		// history is still live here, so the name is not free yet.
+		// history is still live here, so the name is not free yet. A landed directory is the other
+		// reason a path is missing from the working tree, and nothing is pending there.
 		return &usageError{fmt.Errorf("changesets/%s/ is deleted in your working tree but the deletion is not committed; commit the deletion before starting a changeset with that name again", id)}
 	}
 	cs.Exists = dir.Worktree
+	if db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch); err == nil {
+		// A landed changeset is closed, and arriving at one by id is the same mistake `change ready` refuses.
+		// The answer comes from the destination's tree, so it does not depend on which command noticed.
+		if err := marker.RefuseIntegrated(ctx, repo, id, db); err != nil {
+			return err
+		}
+	}
 	if !cs.Exists {
 		if err := refuseTakenID(ctx, repo, id); err != nil {
 			return err
@@ -278,16 +285,11 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	return nil
 }
 
-// refuseTakenID enforces the uniqueness PRD §5 asks for: an id may not already be in
-// use, as a directory or as a ref. Nothing is suffixed to dodge a collision — an id
-// chosen for you is an id nobody chose, and it is baked into refs the moment the
+// refuseTakenID enforces the uniqueness PRD §5 asks for: an id may not already be in use, as a directory —
+// active or landed, in the working tree or carried by the current branch. Nothing is suffixed to dodge a
+// collision — an id chosen for you is an id nobody chose, and it is baked into the directory the moment the
 // changeset is readied. A suggestion is offered only when the candidate is itself free.
 func refuseTakenID(ctx context.Context, repo *git.Repo, id string) error {
-	if taken, err := reviewref.Taken(ctx, repo, id); err != nil {
-		return err
-	} else if taken {
-		return idTakenError(ctx, repo, id, "git-pair refs already exist for it")
-	}
 	if dir, err := changeset.DirectoryAt(ctx, repo, id); err != nil {
 		return err
 	} else if dir.Worktree || dir.Committed {
