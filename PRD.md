@@ -2025,8 +2025,9 @@ writes git-pair makes outside `.git` are the changeset files it creates, and the
 directory, with `git mv`, in `change tidy`.
 
 This is pinned rather than hoped for. A hygiene test fails the build if shipped code shells out to
-`update-ref`, `symbolic-ref` or `git tag`, and the documents name no `refs/git-pair/*` path, because a
-document describing a ref the code no longer writes is worse than no document.
+`update-ref`, `symbolic-ref` or `git tag`, and a contract test fails the build if any document names a path
+under the namespace this tool used to own, because a document describing a ref the code no longer writes is
+worse than no document.
 
 The absence is the feature. There is no ref for a clone to be missing, no namespace for a CI job to fetch
 before it can answer a question, no create-only pair to leave half-written by an interrupted run, no
@@ -2897,7 +2898,7 @@ Each branch has:
 -   its own threads,
 -   its own review history,
 -   its own review outcome,
--   its own durable record, written when it lands (§13).
+-   its own landing, read from the destination when it has one (§13).
 
 There is no shared review content between stacked branches in MVP.
 
@@ -3054,9 +3055,7 @@ git pair check
 git pair change integrate
 ```
 
-`git pair integration record` (§11.4) is the agent's to *read about* and not to run. It belongs to
-whoever does the landing, which is CI in the intended setup.
-
+There is no landing command for an agent to run or to read about: git-pair writes nothing at landing (§13).
 `--json` has one contract. Every array it prints is `[]` for "asked, and none", never null. A job then
 branches on a field, not on the presence of a key. Two fields answer null on purpose.
 
@@ -3087,8 +3086,8 @@ Agent behavior:
     pushes nothing, and it refuses anything `check` would refuse — so an agent may run it unconditionally
     after a passing gate and read the refusal if there is one.
 15. stop there. Landing is not the agent's step: the merge is ordinary git run by whoever owns the
-    destination branch, and `git pair integration record` then `git pair integration publish` (§11.4, §13)
-    follow it — in that order, and before the branch is deleted (§29).
+    destination branch (§13). There is nothing to run afterwards — the destination carrying
+    `changesets/<id>/` is what makes the work landed.
 
 An agent that rebases a branch after an approval has invalidated it, and `check` will say so (§12). The
 response is to re-offer the work — `change ready`, then wait for a reviewer — and not to argue with the
@@ -3108,20 +3107,20 @@ An agent must **not approve its own work**.
 Approval remains a reviewer action, and so is the merge: git-pair hands the work on and stays out of
 the destination branch (§9.5). Nothing an agent runs makes a changeset landable — `git pair check` is
 what asserts the gate, and it accepts `feedback` only when told to — and nothing an agent runs preserves
-history on the reviewer's behalf, because the refs that do that are written once, by the landing.
+history on the reviewer's behalf: the chain is whatever the merge carried (§13.3).
 
-Recording the landing (§11.4) belongs to whoever performs the merge, which in practice is CI, not to
-the agent: an agent that recorded its own integration would be asserting a fact about the forge's
-action rather than about its own. `git pair check`'s `integrated` is the field a pipeline reads to
-learn the record already exists.
+There is no recording step, so there is nothing for the agent to assert about the merge: landing is a
+fact about the destination's tree, and `git pair check`'s `integrated` is the field a pipeline reads to
+learn the work is already finished.
 
-That the step can be skipped is why it is detectable. A changeset directory in the integration branch
-with no integration ref is a merge whose record never ran, `git pair queue` prints it under
-`LANDED, UNRECORDED` with the invocation that fixes it, and `git pair status` says the same on a branch
-carrying no work of its own (§4's *Landed, unrecorded*). A supervisor agent that runs the queue between
-steps sees a landing that lost its paper trail instead of a changeset that quietly disappeared, which is
-what makes the sequence above a contract rather than an expectation.
-
+Nothing of the landing can be skipped, because there is no step; what can be wrong is the review, and
+that is what the finding is for. A changeset directory in the destination with no approving verdict behind
+it is either a squash that left the review on a branch that no longer exists or a merge that arrived
+without one. `git pair queue` prints it under
+`LANDED UNREVIEWED`, and `git pair status` says the same on a branch
+carrying no work of its own (§4's *Landed, unreviewed*). A supervisor agent that runs the queue between
+steps sees a landing whose review did not reach the destination instead of a changeset that quietly
+disappeared, which is what makes the sequence above a contract rather than an expectation.
 ---
 
 # 23. Review Outcomes
@@ -3226,13 +3225,8 @@ squash merge
 clean main history
 ```
 
-while:
-
-```text
-refs/git-pair/*
-```
-
-preserves the detailed human–agent development/review history, once the work has landed (§13).
+and the history of how the work got there rides in the destination branch, as far as the merge carried
+it (§13.3).
 
 ---
 
@@ -3261,27 +3255,23 @@ The MVP should explicitly not attempt to:
 -   implement notifications directly,
 -   implement remote review-ref enforcement initially.
 
-The list has exactly one carve-out, and it is stated narrowly on purpose: **git-pair may push refs under
-`refs/git-pair/`, and nothing else.** The durable refs (§13) are the memory of a landing, and a memory that
-never leaves the clone that wrote it ends with the laptop; `git pair integration publish` (§11.4) is the
-command that discharges it. The carve-out grants a namespace, not a verb:
+There is no carve-out. **git-pair may not push anything**, at any point in a lifecycle. There used to be
+one, for a namespace of landing records, and it existed because that memory was local: a record that never
+left the clone ended with the laptop. The memory of a landing is now the destination branch, which lives on
+the remote by definition, so there is nothing left to publish — and a landing that is not on the remote has
+not happened, which is the correct thing for a tool to report rather than to repair.
 
-- the audited helper takes no options at all, and refuses anything option-shaped before git sees it;
-- it never forces, so a remote holding a different value rejects the push instead of being overwritten —
-  which is the create-only rule (§11.4) surviving the trip to a forge rather than being local to it;
-- it cannot delete a ref, so what §13 warns about `git push --delete` still holds against everything
-  outside git-pair;
-- `merge`, `rebase`, `reset`, `switch`, `checkout` and branch management stay forbidden exactly as above,
-  and the hygiene test enforces the carve-out as a *location*: `internal/git/push.go` is the only shipped
-  file that may invoke `push`, `internal/cli/publish.go` is the only file that may call it, and a planted
-  call site anywhere else fails the build.
+- nothing in shipped code invokes `push`, `update-ref`, `symbolic-ref` or `git tag`; the hygiene test fails
+  the build on any of them, and a planted call site anywhere fails it too;
+- `merge`, `rebase`, `reset`, `switch`, `checkout` and branch management stay forbidden exactly as above;
+- the only thing git-pair moves is a directory, with `git mv`, in `change tidy` (§13.5).
 
 `git pair change integrate` (§9.9) is inside this list, not an exception to it. It declares that a merge is
-wanted; it performs none, pushes nothing, and writes no ref while work is in flight. The distinction is what
+wanted; it performs none, pushes nothing, and writes no ref. The distinction is what
 makes the feature compatible with the rule at all: git-pair has never merged anything, and the command that
 asks for a merge is the reason that stays true — the merge is still ordinary git, performed by whoever owns
 the destination branch, and `git pair check` (§11.3) is still the gate they run. A future command that
-performed the merge would need a second carve-out of the kind above, and this list has one.
+performed the merge would need a carve-out of the kind this list no longer has.
 
 ---
 
@@ -3291,18 +3281,17 @@ Potential later enhancements include:
 
 ## Deferred by review-architecture-v2
 
-Explicitly given up while the two-ref design was being built, each with what it would cost:
-
+Explicitly given up while the durable-ref layer was being taken out, each with what it would cost:
 -   **Per-review anchors.** Attaching threads and marks to a specific review submission rather than
     to the changeset. Cost: the anchor has to survive the rewrite it describes — a rebase renames
     every commit around it — so it means either a content hash beside the anchor or a rule about
     which anchors die, and both are user-visible in the middle of a review.
--   **Publishing the two ref families, and namespace-protected variants of them.** Today
-    `refs/git-pair/*` is fetched like any other ref and written only by whoever lands the work.
-    Pushing it by policy, or moving the records to a namespace a forge protects
-    (`refs/git-pair/…` under branch protection, or an out-of-band notes ref), costs a migration
-    story for every existing clone plus a per-forge matrix — and a protection rule cannot be tested
-    locally, which is how the last generation of this design rotted.
+-   **A durable memory of a landing of its own** — a forge-protected ref family, or an out-of-band notes
+    ref, holding the reviewed chain beside the work. Under this model there is no local memory of a
+    landing to publish, so the question is whether git-pair should keep one at all. Cost: the layer this
+    design just removed — create-only rules, publication consent, half-written pairs, unfetched
+    namespaces, and a carve-out in §26 for the one command allowed to push. If chains lost to squash
+    merges become the problem that justifies it, `change tidy` (§13.5) answers it with commits.
 -   **Patch-equivalent carry-forward of approvals.** Letting a child's approval survive its parent
     landing when the child's diff against the new base is provably the diff that was reviewed
     (§21). Cost: a patch-id equivalence rule that has to be right, because every case where it is
@@ -3354,20 +3343,16 @@ git pair queue --global
 
 ## Remote record enforcement
 
-`git pair integration publish` (§13) closed part of this list: the refs reach the shared remote, they
-reach it unforced, and a remote holding a different value rejects the push rather than being overwritten.
-What this plan deliberately did not take on stays here, and the reason is the same as before — each of these
-would make git-pair responsible for a forge or a server rather than for a repository:
+There is nothing local left to enforce. A landing is a branch on the remote, and the remote already
+governs branches; the durable refs this section was written against are gone (§13.4). What stays deferred
+is the family of mechanisms that would make git-pair responsible for a forge or a server rather than for a
+repository:
 
 -   pre-push hooks,
 -   server-side validation,
--   **automatic** pushing of `refs/git-pair/*` — publishing is a command somebody runs, or a line in the
-    repository's own git configuration written by `git pair integration configure` (§13), never a side
-    effect of an unrelated command,
--   forge-level protection of the namespace, and any variant of it that depends on a forge honouring
-    protection rules outside `refs/heads/*` and `refs/tags/*`,
--   protection against destructive rewrites of a changeset whose record has been written: the client
-    refuses to force one, which is not the same as being unable to.
+-   forge-level protection of anything outside `refs/heads/*` and `refs/tags/*`,
+-   protection against destructive rewrites of a changeset that has landed: the client refuses to write
+    markers on one, and refuses to force or rewrite anything, which is not the same as being unable to.
 
 ## Forge projection
 
@@ -3528,16 +3513,15 @@ At this point:
 -   the branch can safely be pushed and squash-merged,
 -   `main` can retain a single clean feature commit.
 
-The owner lands it with ordinary git and git-pair records where it went:
+The owner lands it with ordinary git, and the destination branch is the record of where it went:
 
 ```bash
-git pair integration record --source <approved-head> --commit <landing-commit> --target main
-git pair integration publish
+git pair status --changeset booking-transaction   # landed at <merge commit>, with the chain the merge carried
 ```
 
 ## The landing contract
 
-Landing is five steps, in this order, and nothing else:
+Landing is three steps, in this order, and nothing else:
 
 1.  `git pair check` — the gate, run by the author and by CI alike.
 2.  `git pair change integrate` — the author declares this head ready to be merged (§9.9), on the branch,
@@ -3545,50 +3529,37 @@ Landing is five steps, in this order, and nothing else:
     performed without it is a merge nobody asked for, which is why CI's gate is `jq -e '.ready and
     .integrating'` rather than `ready` alone.
 3.  The landing itself, with **ordinary git**: merge, squash-merge, or whatever forge button the
-    repository uses. git-pair writes no merge, and no ref at all while work is in flight.
-4.  `git pair integration record` — the one command that writes the two durable refs, and the only
-    place in git-pair that writes a ref at all (§13.4).
-5.  `git pair integration publish` — the refs sent to the shared remote (§13), unforced.
+    repository uses. git-pair writes no merge, no ref, and nothing afterwards.
 
 The declaration changes who waits, not who decides. Step 2 is a commit the author makes; step 3 is still
-performed by whoever owns the destination branch, and steps 4 and 5 are unchanged — a landing the author
-asked for still needs its own record, because the record is the fact that it happened and not the fact that
-somebody wanted it.
+performed by whoever owns the destination branch. There is no step 4: the destination carrying
+`changesets/<id>/` is the fact that the work landed, not a fact that needs somebody to state it (§13).
 
-**Record and publish before tidy.** The record is written before the branch is deleted or the working copy
-is cleaned up. It is asked of the branch that still carries the reviewed head and the changeset directory,
-so running it first means reading rather than reconstructing: with the branch present the command needs no
-flags at all, and after the branch is gone it can only be told. A landing that was tidied first is still
-recordable — with `--source` and `--commit`, or not at all if the reviewed head was never pushed — but that
-is recovery, not the loop.
+**What the merge carried is what the landing keeps.** A merge brings the reviewed chain with it, so
+`git pair status --changeset <id>` reads the approval, the chain and the thread files out of the destination
+afterwards. A squash, a rebase-merge or a cherry-pick brings the content and leaves the chain behind, and the
+status report says `reviewed: false` with an empty chain (§13.3). Where that loss matters, the order that
+preserves the history is: land, then `git pair change tidy` the directory into
+`changesets/.landed/<id>/` from a branch that still holds the chain, before the branch goes. A repository
+that squashes and tidies keeps the review history in commits; a repository that squashes and deletes does
+not, and no later command can recover it.
 
-Publishing belongs in the same sentence as recording, for a reason that is not about tidiness: once the
-branch is deleted, the refs are the only copy of the archive chain. A delete that happens before a publish
-leaves the chain reachable from nothing outside the laptop that recorded it, and "we had a review history
-for that" becomes a claim nobody can check. `git pair status` and `git pair queue` report the state as
-`RECORDED, NOT PUBLISHED` (§13), and the finding exists because the ordering is the part people forget.
-
-From then on the durable pair holds the story: the complete unsquashed history is reachable from
-`refs/git-pair/archive/<id>`, the landing is `refs/git-pair/integrations/<id>`, and the branch can be
-deleted without losing the detailed review history (§13).
-
-**A pipeline can run steps 3 to 5.** This repository carries one shape of that: a workflow file whose only
+**A pipeline can run step 3.** This repository carries one shape of that: a workflow file whose only
 job is the triggers, the permissions and the build, and a shell script that holds the sequence — the gate of
 step 1, the head's own checks proven green where the repository has them (the forge's answer, not git-pair's,
 and asked about the commit the declaration names), an ordinary `git merge --no-ff` into the destination the
-queue names, the push, then steps 4 and 5.
+queue names, and the push.
 `scripts/gates/ci-integrate.sh` replays that job against scratch remotes, which is what keeps the example
 true without a runner. It is an example and not a contract: the merge is ordinary git, no part of it is a
 git-pair subcommand (§26), and a repository that lands with a forge button instead needs only the same two
-fields (§11.3) and the same record.
-
+fields (§11.3) and the same push.
 ---
 
 # 30. Product Thesis
 
 `git-pair` treats Git itself as the protocol for agent-era peer review.
 
-The codebase contains the review context. Git commits establish review boundaries. Markdown provides natural high-level conversation. Existing editors and difftools remain the code-review surface. Dedicated refs preserve the complete review history without forcing that noise into `main`.
+The codebase contains the review context. Git commits establish review boundaries. Markdown provides natural high-level conversation. Existing editors and difftools remain the code-review surface. Nothing beyond git carries the review: the destination branch's tree says what landed and the merge carries the chain as far as it can (§13), so no ref of the tool's own is needed to keep the history findable.
 
 The tool's role is deliberately narrow:
 
