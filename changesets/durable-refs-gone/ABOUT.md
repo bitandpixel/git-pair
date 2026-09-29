@@ -7,10 +7,8 @@ one change told twice: M5 deletes the durable-ref subsystem, and M6 is the sweep
 promising it. git-pair writes no ref at any point in a lifecycle, and `refs/git-pair/` becomes a namespace the
 code neither reads nor writes — and now no document names it either, which `TestNoDocNamesADurableRef` holds
 with no whitelist. M6's own verification item, following the skill top to bottom against a scratch repository,
-is the run described under Validation rather than a diff. Against `origin/main` the branch is 89 files, +3557/−9243 — that number is the whole stack, with M2's landing
-read and M3's and M4's work inside it. This changeset is 80 files, +2091/−9027 against its base
-`feat/change-tidy`; the deletion proper is `eff70d3`, 46 files and 6521 of those deletions, and what follows
-it is the rest of the system being told.
+is the run described under Validation rather than a diff. Its base is trunk, so the review diff is the changeset itself: 80 files, +2130/−9085. The deletion proper is
+`5abeb3a` — 46 files, 6521 of those deletions — and what follows it is the rest of the system being told.
 
 ## What is gone
 
@@ -104,15 +102,22 @@ wrote them, including the ones that describe the durable layer as if it were sti
 
 ## State of the stack
 
-M1 `81f01e2` and M2 `4ccc9c7` are on trunk. M3 `feat/derived-bases` stands at `fbb94bd` and M4
-`feat/change-tidy` at `9a21f20`, both restacked onto the merged M2, and this branch is stacked on M4: the
-review diff is against `feat/change-tidy`, and `base: feat/change-tidy` says so.
+Everything below this changeset has merged: M1 `81f01e2`, M2 `4ccc9c7`, M3 `dad07da`, M4 `a230d60`. The branch
+is stacked on trunk directly, and `base: main` says so.
 
-The restack moved every commit in this changeset, so the ids in this file are the ones to trust rather than
-the ones this changeset carried when it was first offered. Two replayed gate commits were already on the
-trunk line and are not repeated here: the pipefail fix, which M2 hardened further while it was in review by
-matching the painted transcript in bash instead of piping it to `grep -q`, and the bash-matching fix, which
-was cherry-picked into M2 outright. The first survives for its e2e half alone, the second is gone.
+That field read `feat/change-tidy` until M4 merged, and it is not only where the review diff starts —
+`change integrate` takes the declaration's destination from it (`destination_source: "base"`). Left naming a
+branch whose work is already in trunk, the declaration would have asked CI to merge this changeset onto a
+branch nobody owns, which is what M4 needed the same edit for one hop below. The durable fix is a follow-up
+rather than something this changeset can do: derive the destination from the tree instead of trusting the
+authored field. That derivation already exists behind `parent-changeset:`, and this stack cannot reach it
+because these changesets were created with `init` and no `--parent`, so the field was never written.
+
+The branch has been restacked as each parent merged, and every id in this file is from the current history, not
+the one it was first offered with. Two replayed gate commits are absent by decision rather than by accident:
+the pipefail fix, which M2 hardened further while it was in review by matching the painted transcript in bash
+instead of piping it to `grep -q`, and the bash-matching fix, which was cherry-picked into M2 outright. The
+first survives for its e2e half alone; the second is gone.
 
 One hunk was resolved wrongly during the restack, and it is worth naming because the gate caught it rather
 than the reviewer having to: the tidy step asserted the landing message `check` returns for a branch that
