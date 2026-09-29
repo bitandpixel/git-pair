@@ -27,14 +27,11 @@ fi
 DRIVER="$HERE/pty-tui.py"
 PLAIN="$HERE/pty-plain.py"
 T=$(mktemp -d /tmp/git-pair-pty.XXXXXX)
-# A failed scenario is worth more kept than re-run: the transcripts are the only record of what the
-# terminal actually received, and a check that fails once in twenty does not reproduce on demand.
-trap 'if [ "${FAILED:-0}" = 1 ]; then echo "PTY: transcripts kept for inspection in $T"; else rm -rf "$T"; fi' EXIT
 # The replayed commands get stdin from /dev/null. `git pair init` reads a pipe as piped `--about` content,
 # so a harness that leaves stdin open would leave a fixture `init` blocked forever. The pty drivers build
 # their own terminal for the program they run, so this does not touch what the TUI reads.
 exec < /dev/null
-trap 'rm -rf "$T"' EXIT
+trap '[ "${FAILED:-0}" = 1 ] && { echo KEEPING $T; exit 1; }; rm -rf "$T"' EXIT
 FAILED=0
 COLS=100
 ROWS=30
@@ -43,20 +40,17 @@ step()  { printf '\n\033[1m### %s\033[0m\n' "$1"; }
 ok()    { printf '  ok: %s\n' "$1"; }
 fail()  { printf '  FAIL: %s\n' "$1"; FAILED=1; }
 
-# What painted is captured first and matched in bash, with a substring test. Neither half of that is
-# stylistic. Piping the replay into `grep -q` under `pipefail` makes an assertion fail when it succeeds:
-# `grep -q` exits at the first match, the writer's next call takes SIGPIPE, and the pipeline reports the
-# signal instead of the match — which is how one run of this gate came out red on a screen whose own dump
-# plainly contained the string. `refuse` is the worse half, because there a SIGPIPE is indistinguishable
-# from the string being absent. Matching in bash removes the ordering entirely: nothing else is running
-# while the answer is decided, so a pass and a fail cannot disagree about the same bytes.
+# The painted transcript is captured before it is matched, and the match runs against the capture. Piping
+# `python3` into `grep -q` under `pipefail` makes an assertion fail when it succeeds: `grep -q` exits at the
+# first match, python's next write takes SIGPIPE, and the pipeline reports that instead of the match. `refuse`
+# is the worse half — a SIGPIPE there looks exactly like the string being absent.
 painted() { python3 "$PLAIN" --after "$1" "$2"; }          # painted <window> <raw file>
 paintedall() { python3 "$PLAIN" "$1"; }                    # paintedall <raw file>
 
 # expect <description> <window> <raw file> <literal string>
 expect() {
   out=$(painted "$2" "$3")
-  if [[ "$out" == *"$4"* ]]; then ok "$1"; else
+  if printf '%s' "$out" | grep -qF -- "$4"; then ok "$1"; else
     fail "$1 — no '$4' in what painted after key $2"
     printf '%s\n' "$out" | head -14 | sed 's/^/      | /'
   fi
@@ -64,7 +58,7 @@ expect() {
 # refuse <description> <window> <raw file> <literal string>
 refuse() {
   out=$(painted "$2" "$3")
-  if [[ "$out" == *"$4"* ]]; then
+  if printf '%s' "$out" | grep -qF -- "$4"; then
     fail "$1 — '$4' appeared after key $2 and should not have"
   else ok "$1"; fi
 }
@@ -478,7 +472,7 @@ esac
 # Nothing was typed, so there is no keystroke marker to window on: this is the whole session's output.
 expectall() { # expectall <description> <raw file> <literal string>
   out=$(paintedall "$2")
-  if [[ "$out" == *"$3"* ]]; then ok "$1"; else
+  if printf '%s' "$out" | grep -qF -- "$3"; then ok "$1"; else
     fail "$1 — no '$3' in what painted"; printf '%s\n' "$out" | head -14 | sed 's/^/      | /'
   fi
 }
