@@ -28,6 +28,17 @@ All clean. Nothing in M5 is pushed.
    candidate - under the tree rule, when the integration branch is read as carrying its directory. The
    durable-index path is not the cause: it returns its error and `queue` propagates it. Check the tree
    first: `git ls-tree --name-only main changesets/` in the scratch clone, inserted before line 438.
+
+   Measured answer (run on `feat/change-tidy`, debug inserted then reverted): at that point the clone holds
+   `booking-transaction booking-tests feat/change-tidy integrated-interface main review-comments
+   unrecorded-landing` — no `awaiting-merge` branch — and `main`'s `changesets/` holds
+   `booking-transaction booking-tests awaiting-merge`. The note is emitted only from the per-branch candidate
+   path (`queue.go:150-169`), so with no branch there is nothing to print it from and the assertion cannot
+   pass; the directory in `main` is also why no other branch offers it. The note does appear later in the
+   same script, so the branch is created after this step. Decide one of: the step creates or fetches the
+   branch before asserting the note, or it asserts the durable fact (the record is present, nothing offers the
+   changeset for review) instead of a per-branch note. Either is a decision about the step's claim — do not
+   relax the grep until that is settled.
 2. Rerun `mise run gates` in `change-tidy` with nothing else running, then `git pair change ready` and
    `git push -u origin feat/change-tidy`.
 3. **M5.** Resolve the two questions in `changesets/durable-refs-gone/ABOUT.md`, then follow the order in
