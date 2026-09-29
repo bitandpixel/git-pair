@@ -50,6 +50,8 @@ refs unusable, relocated to the surface a reviewer reads most. And the drift tes
 compare trees at, which a moving name cannot give. The merge base with the child moves only when the child's
 own history does or its parent lands, and those are the two moments the span is supposed to move.
 
+Ah I see, and there could potentially be merge conflicts with newly added commits to the trunk as well right?
+
 **The rebased child is the case that beats a ref.** A base naming the landing commit widens the child's diff
 to everything the destination gained after that commit; `merge-base` does not. `TestRelinkAfterARebaseOntoTrunkShowsOnlyTheChildsOwnWork`
 asserts the child's own commits are the whole span, which is the behaviour the durable ref could not give.
