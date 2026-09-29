@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"gitpair/internal/git"
-	"gitpair/internal/reviewref"
 )
 
 // Destination is the branch a changeset's work lands on — the branch a merge targets. It is not the
@@ -39,45 +37,35 @@ const destinationWalkLimit = 16
 
 // DestinationFor resolves where a changeset's work lands.
 //
-// The changeset's own base answers this in the ordinary case, and stops answering it for a child whose
-// parent has landed: the resolver re-points that base at the parent's integration ref (`relinkStacks`),
-// which names the commit the parent's work became and no branch at all. A durable ref is not a
-// destination — `integration record` refuses one as a `--target` for exactly this reason — so the answer
-// has to come from further up the stack.
+// The changeset's own base answers this in the ordinary case, and stops answering it in two others. A base
+// the resolver derived from the destination (`BaseDerived`) is a measurement point — the run the child shares
+// with the integration branch — and a commit is not a destination, the same reason `integration record`
+// refuses one as a `--target`. A base that names nothing this clone can resolve is the other: a branch
+// tidied away, or a value written by the durable-ref layout this repository no longer keeps.
 //
-// It comes from the record, because that is where the fact is written: the commit an integration ref
-// names carries the parent's `changesets/<id>/CHANGESET.yaml`, and the base recorded there is the branch
-// the parent was measured against — the branch the parent *said* it was going to. Walking it means a
-// stack keeps one destination rule whether its parent landed on trunk, on a release branch, or on a
-// branch that has since been tidied away.
+// Both cases ask the same question one level up, and the answer comes out of the integration branch: a
+// landed parent's `changesets/<id>/CHANGESET.yaml` is in the destination's tree, in either spelling, and the
+// base recorded there is the branch the parent said it was going to. Walking it means a stack keeps one
+// destination rule whether its parent landed on trunk, on a release branch, or on a branch that has since
+// been tidied away — and it needs no ref of git-pair's own to do it.
 //
-// "Said it was going to" is a limit worth stating: a parent landed somewhere other than its own base
-// makes this answer wrong, and it is wrong in the direction `integration record` catches — the record
-// refuses a landing commit that is not reachable from the destination it derived — and `--target` is the
-// named way to say so. Guessing the branch from which refs contain the landing commit would be a second,
-// weaker reading of the same fact, and the record already has the stronger one.
+// "Said it was going to" is a limit worth stating: a parent landed somewhere other than its own base makes
+// this answer wrong, and it is wrong in the direction the write gate catches. Guessing the branch from which
+// history contains the landing would be a second, weaker reading of the same fact.
 //
-// Nothing is invented: a walk that cannot resolve an answer falls back to the default branch and says so
-// in `Why`, and a base that resolves to nothing at all leaves `Ref` empty — "this clone cannot name a
+// Nothing is invented: a walk that cannot resolve an answer falls back to the default branch and says so in
+// `Why`, and a destination that cannot be named at all leaves `Ref` empty — "this clone cannot name a
 // destination" is a fact a caller has to be able to tell apart from a guess.
 func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranchRef) (Destination, error) {
 	out := Destination{}
 	base, parentChangeset := c.Base, c.ParentChangeset
+	if c.BaseDerived {
+		// A derived base is where the child's own work starts, not where the work is going. Ask the parent.
+		base = ""
+	}
 	seen := map[string]bool{}
 	for hops := 0; hops < destinationWalkLimit; hops++ {
-		// The relink rule, applied here as well as in the resolver: a stack whose parent has a record is
-		// measured against that record, so its destination is whatever its parent's was. Applying it inside
-		// the walk rather than relying on the resolver to have done it is what lets the same rule answer for
-		// a parent's own recorded stack, read out of a landed tree two hops up.
-		if parentChangeset != "" && !underNamespace(base) {
-			if _, err := reviewref.ResolveIntegration(ctx, repo, parentChangeset); err == nil {
-				base = reviewref.Integration(parentChangeset)
-			}
-		}
-		if base == "" {
-			break
-		}
-		if !underNamespace(base) {
+		if base != "" {
 			why := "base"
 			if hops > 0 {
 				// Only the walked values need proving: a changeset measured against a base this clone
@@ -96,26 +84,19 @@ func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db Default
 			out.Ref, out.Why = base, why
 			return out, nil
 		}
-		id, ok := reviewref.IntegrationID(base)
-		if !ok || seen[id] {
-			// An archive ref, a retired layout, or a loop: nothing above this says where work goes.
+		// Nothing usable to answer with. The parent's own record, read from the integration branch, is
+		// the next place the destination is written down.
+		if parentChangeset == "" || db.Ref == "" || seen[parentChangeset] {
 			break
 		}
-		seen[id] = true
-		out.Via = append(out.Via, id)
-		commit, err := reviewref.ResolveIntegration(ctx, repo, id)
-		if errors.Is(err, reviewref.ErrNotIntegrated) {
-			break
-		}
-		if err != nil {
-			return out, err
-		}
+		seen[parentChangeset] = true
+		out.Via = append(out.Via, parentChangeset)
 		// The whole of the parent's stack, not just its base: the answer above it depends on whether the
 		// parent was itself stacked on something that has since landed.
-		stack, err := StackAt(ctx, repo, commit, id)
+		stack, err := StackAt(ctx, repo, db.Ref, parentChangeset)
 		if errors.Is(err, git.ErrUnknownPath) {
-			// The landing carried no changeset directory for its own id — a hand-made record, or a
-			// record written against a branch that never carried one. There is no base to read.
+			// The destination carries no directory for that id, so there is no base to read: the parent
+			// landed as content alone, or the id names nothing.
 			break
 		}
 		if err != nil {
@@ -129,14 +110,6 @@ func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db Default
 		out.Ref, out.Why = "", ""
 	}
 	return out, nil
-}
-
-// underNamespace is true for anything under git-pair's durable ref namespace. Only one family in it
-// (integrations) says anything about where work lands, and the base is never a plain branch name once it
-// is in there at all — so the namespace decides "a durable ref, walk it or refuse it" and
-// isIntegrationRef decides which family can be walked.
-func underNamespace(ref string) bool {
-	return strings.HasPrefix(ref, reviewref.NamespaceRoot+"/")
 }
 
 // String is the form a test failure prints: the answer and the reason for it together, because

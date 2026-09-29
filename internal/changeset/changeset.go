@@ -65,6 +65,11 @@ type Changeset struct {
 	// branch shares with the destination, or the fallback. It is empty for a base the changeset recorded
 	// itself, and a surface that prints a derived base prints this beside it: a SHA alone cannot be read.
 	BaseWhy string
+	// BaseDerived says `Base` was derived from the destination rather than recorded by the changeset. It
+	// matters beyond the sentence in `BaseWhy` because a derived base is a measurement point, not a place
+	// work can land: a caller that asks "where does this go" has to be able to tell a commit the child
+	// shares with the integration branch apart from a branch it was measured against.
+	BaseDerived bool
 	// ParentBranch is the branch named by `parent:`, empty for a changeset measured straight
 	// against the integration branch. It stays the branch name even when the measurement base has
 	// been derived from the destination, so the stack and the diff base can be

@@ -612,6 +612,7 @@ func applyBases(ctx context.Context, repo *git.Repo, candidates []Candidate, db 
 		}
 		candidates[i].Changeset.Base = b.Ref
 		candidates[i].Changeset.BaseWhy = b.Why
+		candidates[i].Changeset.BaseDerived = b.Derived
 	}
 	return nil
 }
