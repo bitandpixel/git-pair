@@ -136,3 +136,8 @@ finding stays the disjunction, and the reason line says which shape the *landing
 verdict, or no chain at all. Where the distinction is worth keeping, the fix is upstream of the read:
 `--no-ff` keeps the chain in the destination, and `change tidy` (M4) moves the directory on a branch that
 still holds it.
+ok I think this is fine. If the user of this library wants to have accurate review history, they'll have to use
+a different merge strategy than squash-merge. I think this is fine, because squash-merge likely means they already
+do not care about a meticulous history, and more of a streamlined trunk. The one case I'm still unsure about is the
+rebase-merge. Do we treat that as UNREVIEWED as well, or are we planning to somehow derive the review state from trailers?
+And can you move all these reviewer notes and answers to a Discussion section below?
