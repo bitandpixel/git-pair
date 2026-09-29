@@ -11,7 +11,7 @@ action, in order. The plan itself is `plan.md` beside this file; the M5 decision
 | M1 `.landed/` in the tree model | - | merged, `81f01e2` |
 | M2 landing is a tree fact | `feat/landing-is-a-tree-fact` | pushed, `mise run gates` green, `change ready`, in review |
 | M3 derived bases | `feat/derived-bases` | pushed, gates green, `change ready` head `677e59c`, in review |
-| M4 `change tidy` | `feat/change-tidy` @ `e19673d` | code, 9 tests, README row, PRD §9.10, cli.md row, e2e step. Go suite green. Gates red on one assertion, see below. Not readied, not pushed |
+| M4 `change tidy` | `feat/change-tidy` @ `5551add` | **handed off**: `mise run gates` exit 0 (`E2E: all checks passed`, zero `FAIL:`), `change ready` head `5551add`, pushed, `origin/main` verified as an ancestor. The e2e:438 assertion was rewritten to the two facts the step claims (below) |
 | M5 delete the durable-ref subsystem | `feat/durable-refs-gone` @ `e3a3b45` | draft. `BaseDerived` added, `DestinationFor` walks the integration branch, `internal/changeset` no longer imports `reviewref`, two namespace-only tests deleted. Two destination tests red pending the decisions in the changeset |
 | M6 documents | - | not started |
 
