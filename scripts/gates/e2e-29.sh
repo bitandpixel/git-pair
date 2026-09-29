@@ -32,6 +32,11 @@ git config user.name Reviewer
 git config commit.gpgsign false
 
 step() { printf '\n\033[1m### %s\033[0m\n' "$1"; }
+# A live git-pair process must never be piped straight into `grep -q` under `pipefail`. `grep -q` exits at
+# the first match, the producer's next write gets SIGPIPE, and the pipeline's status becomes that failure --
+# so an assertion whose text is present in the output reports FAIL. The fix is to capture the output into a
+# variable and let `printf` (one small write, already finished before `grep` decides) do the matching. The
+# `git ...` pipes below are safe as they are: their output is one small record written in a single call.
 check() { # check <description> <expected-exit> <actual-exit>
   if [ "$2" = "$3" ]; then printf '  ok: %s\n' "$1"; else printf '  FAIL: %s (exit %s, want %s)\n' "$1" "$3" "$2"; FAILED=1; fi
 }
@@ -64,7 +69,8 @@ $G queue --json > /tmp/q.json; check "queue --json" 0 $?
 step "author: withdraw the offer, then re-offer"
 # Committing does not take a changeset out of the queue; a command does (PRD §12).
 $G change unready; check "change unready" 0 $?
-if $G queue | grep -q booking-transaction; then
+out=$($G queue)
+if printf '%s' "$out" | grep -q booking-transaction; then
   echo "  FAIL: an unreadied changeset is still in the queue"; FAILED=1
 else
   echo "  ok: the queue dropped it"
@@ -312,7 +318,8 @@ printf '%s' "$out" | grep -qE "READY|NOT READY" \
   && echo "  ok: and it still answers the question it was asked (exit $code)" \
   || { echo "  FAIL: check printed no verdict: $out"; FAILED=1; }
 git switch -q main
-$G queue 2>&1 | grep -q "booking-transaction" \
+out=$($G queue 2>&1)
+printf '%s' "$out" | grep -q "booking-transaction" \
   && echo "  ok: the queue still accounts for the changeset, branch and all" \
   || { echo "  FAIL: the queue lost a changeset whose branch is live"; FAILED=1; }
 [ "$(git rev-parse "$ARCHIVE")" = "$SOURCE" ] && [ "$(git rev-parse "$INTEGRATION")" = "$LANDING" ] \
@@ -435,7 +442,8 @@ done
 # survive: the request was made here, the merge happened elsewhere, and the paper trail that says so has to
 # reach the author's machine or the author is looking at a changeset that appears to still be waiting.
 git fetch -q "$DECLREMOTE" 'refs/git-pair/*:refs/git-pair/*'
-if $G queue 2>&1 | grep -q "awaiting-merge (integrated at"; then
+out=$($G queue 2>&1)
+if printf '%s' "$out" | grep -q "awaiting-merge (integrated at"; then
   echo "  ok: with the record fetched, this clone stops listing the request"
 else
   echo "  FAIL: the author's clone still lists a changeset the other clone landed and recorded"
@@ -488,7 +496,8 @@ printf '%s' "$out" | grep -q "unrecorded-landing" \
 printf '%s' "$out" | grep -q "status --changeset" \
   && echo "  ok: and prints the read that goes and looks, not a command that writes" \
   || { echo "  FAIL: the heading offered a command instead of a read: $out"; FAILED=1; }
-$G queue --json | grep -q '"landed_unreviewed"' \
+out=$($G queue --json)
+printf '%s' "$out" | grep -q '"landed_unreviewed"' \
   && echo "  ok: the machine surface carries the same finding" \
   || { echo "  FAIL: queue --json has no landed_unreviewed"; FAILED=1; }
 out=$($G status 2>&1); code=$?
@@ -498,7 +507,8 @@ printf '%s' "$out" | grep -q "no changeset for this branch" \
   && printf '%s' "$out" | grep -q "LANDED UNREVIEWED" \
   && echo "  ok: and its answer carries the finding" \
   || { echo "  FAIL: status said only that the branch has no changeset: $out"; FAILED=1; }
-$G status --changeset unreviewed-merge --json | grep -q '"landed": true' \
+out=$($G status --changeset unreviewed-merge --json)
+printf '%s' "$out" | grep -q '"landed": true' \
   && echo "  ok: and a landed changeset read by name says landed, from the tree" \
   || { echo "  FAIL: status --changeset did not report the landing"; FAILED=1; }
 # Nothing closes the heading with a command. Writing the record -- the invocation this step used to print as
@@ -506,7 +516,8 @@ $G status --changeset unreviewed-merge --json | grep -q '"landed": true' \
 # replaced. The record is still written, because the publish step below needs a pair to send.
 $G integration record --changeset unrecorded-landing >/dev/null 2>&1
 check "recording the landing is a success" 0 $?
-if ! $G queue 2>&1 | grep -q "LANDED UNREVIEWED"; then
+out=$($G queue 2>&1)
+if ! printf '%s' "$out" | grep -q "LANDED UNREVIEWED"; then
   echo "  FAIL: the report went quiet when a record was written, so it was never about the work"; FAILED=1
 else
   echo "  ok: and the report is still there, because the finding is about the chain, not the paper trail"

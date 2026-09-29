@@ -40,16 +40,25 @@ step()  { printf '\n\033[1m### %s\033[0m\n' "$1"; }
 ok()    { printf '  ok: %s\n' "$1"; }
 fail()  { printf '  FAIL: %s\n' "$1"; FAILED=1; }
 
+# The painted transcript is captured before it is matched, and the match runs against the capture. Piping
+# `python3` into `grep -q` under `pipefail` makes an assertion fail when it succeeds: `grep -q` exits at the
+# first match, python's next write takes SIGPIPE, and the pipeline reports that instead of the match. `refuse`
+# is the worse half — a SIGPIPE there looks exactly like the string being absent.
+painted() { python3 "$PLAIN" --after "$1" "$2"; }          # painted <window> <raw file>
+paintedall() { python3 "$PLAIN" "$1"; }                    # paintedall <raw file>
+
 # expect <description> <window> <raw file> <literal string>
 expect() {
-  if python3 "$PLAIN" --after "$2" "$3" | grep -qF -- "$4"; then ok "$1"; else
+  out=$(painted "$2" "$3")
+  if printf '%s' "$out" | grep -qF -- "$4"; then ok "$1"; else
     fail "$1 — no '$4' in what painted after key $2"
-    python3 "$PLAIN" --after "$2" "$3" --head 14 | sed 's/^/      | /'
+    printf '%s\n' "$out" | head -14 | sed 's/^/      | /'
   fi
 }
 # refuse <description> <window> <raw file> <literal string>
 refuse() {
-  if python3 "$PLAIN" --after "$2" "$3" | grep -qF -- "$4"; then
+  out=$(painted "$2" "$3")
+  if printf '%s' "$out" | grep -qF -- "$4"; then
     fail "$1 — '$4' appeared after key $2 and should not have"
   else ok "$1"; fi
 }
@@ -462,8 +471,9 @@ esac
 [ -s "$T/configure.err" ] && sed 's/^/      ! /' "$T/configure.err"
 # Nothing was typed, so there is no keystroke marker to window on: this is the whole session's output.
 expectall() { # expectall <description> <raw file> <literal string>
-  if python3 "$PLAIN" "$2" | grep -qF -- "$3"; then ok "$1"; else
-    fail "$1 — no '$3' in what painted"; python3 "$PLAIN" --head 14 "$2" | sed 's/^/      | /'
+  out=$(paintedall "$2")
+  if printf '%s' "$out" | grep -qF -- "$3"; then ok "$1"; else
+    fail "$1 — no '$3' in what painted"; printf '%s\n' "$out" | head -14 | sed 's/^/      | /'
   fi
 }
 expectall "it names the key it wrote" "$T/configure.raw" "remote.origin.fetch"

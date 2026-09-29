@@ -76,7 +76,13 @@ destination. `TestReviewQueueCostPerLandedChangesetIsBounded` measures it.
 - `TestDurableRefsDisagreeWithTheTreeAndChangeNothing`: both ref families written, both lying, every answer
   unchanged. This is the test that says M5 is safe.
 - `scripts/gates/e2e-29.sh`: 121 assertions green, including both `LANDED UNREVIEWED` sentences, the
-  branch-deleted `status --changeset` read, and the record-that-changes-nothing.
+  branch-deleted `status --changeset` read, and the record-that-changes-nothing. The step that reads the
+  author's clone after another clone landed and published failed on the second review round, and the product
+  was innocent: the note it looks for was in the output, and `set -o pipefail` reported `grep -q`'s early exit
+  as the producer's SIGPIPE. Six sites in `e2e-29.sh` and three helpers in `pty-walkthrough.sh` piped a live
+  git-pair or `python3` process straight into `grep -q`; all nine now capture first and match against the
+  capture. No assertion was weakened — one that reports failure while its own text is present is not an
+  assertion, and `refuse` in particular would have passed on the SIGPIPE.
 - `mise run gates` (check, e2e-29, pty-walkthrough, ci-integrate) — see the note in this changeset's review
   thread for the run this branch was handed over with.
 
