@@ -133,8 +133,8 @@ func TestStatusStackChainNamesAnAncestorWithNoRecord(t *testing.T) {
 	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
 	res.mustSucceed(t, "status")
 	mustContain(t, res.stdout, "landed: alpha", "the step is still there")
-	mustContain(t, res.stdout, "no record in this clone", "and says what is missing")
-	mustContain(t, res.stdout, "--fetch", "and the command that fixes it")
+	mustContain(t, res.stdout, "so the chain above it is read from this branch", "and says what is missing")
+	mustNotContain(t, res.stdout, "--fetch", "nothing is fetched to answer this; the destination is read as it is")
 }
 
 // CHANGESET.yaml is committed content, so `parent-changeset` can be edited into a loop. The walk is
