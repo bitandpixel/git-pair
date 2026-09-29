@@ -13,7 +13,7 @@ destination is reviewed only if it holds that commit as well as the approval. A 
 approval and the landing — a rebase merge, or an author rewriting under an approval — therefore lands
 unreviewed, along with the squash that brings no marker at all.
 
-This is milestone M2 of `docs/plans/simplify-architecture/plan.md`, stacked on M1 (`landed-tree-model`).
+This is milestone M2 of `docs/plans/completed/simplify-architecture/plan.md`, stacked on M1 (`landed-tree-model`).
 
 ## What changed
 

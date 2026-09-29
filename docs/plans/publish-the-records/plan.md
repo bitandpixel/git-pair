@@ -1,6 +1,6 @@
 # Publish the records: getting `refs/git-pair/*` off the laptop
 
-> **Superseded by `docs/plans/simplify-architecture/plan.md`.** This plan replicated a namespace that
+> **Superseded by `docs/plans/completed/simplify-architecture/plan.md`.** This plan replicated a namespace that
 > no longer exists. There is nothing to publish, nothing to `--fetch`, no mirror refspec, and no
 > consent command: the merge that puts a changeset directory in the destination is the record, and a
 > clone given the branches can read it (PRD §13.4). Its milestones were implemented and are undone by

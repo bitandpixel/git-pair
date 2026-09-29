@@ -566,3 +566,32 @@ was checking.
 
 | Date | Audit | Summary |
 | ---- | ----- | ------- |
+
+## As built
+
+Executed 2026-09-29, one changeset per milestone, each handed off green.
+
+| Milestone | Branch | Shipped |
+| --------- | ------ | ------- |
+| M1 | `feat-landed-tree-model` (merged, `81f01e2`) | `.landed/` in the tree model: `Reserved`, `ActiveIDs`, `LandedIDs`, `DirAt`, `DirPathspecs` |
+| M2 | `feat-landing-is-a-tree-fact` | `CarriesDir`, `LandedChain`, `LandingCommit`; `LANDED UNREVIEWED`; `status`'s landing block read from the destination |
+| M3 | `feat-derived-bases` | `BaseFor` with the rule attached (`base_via`, `destination_via`), the destination walk past a landed parent |
+| M4 | `feat-change-tidy` | `git pair change tidy`, renames-only, `--dry-run`, `--all`, JSON `actions` |
+| M5 | `feat/durable-refs-gone` | `internal/reviewref`, the five `integration`-family files, `internal/git/push.go` and ~5.7k lines of them deleted; `internal/cli/landing.go` added; the hygiene ref-write ban |
+| M6 | same branch | PRD §3–§30, README, the shipped skill and `references/`; `TestNoDocNamesADurableRef`; the supersession notices; the gate scripts |
+
+Three things the plan did not predict:
+
+- **The gates were the largest single surface.** `e2e-29.sh` gained a step rather than losing one — a merge
+  into a release line plus `--default-branch` naming it — and now carries 110 `ok:` steps where it had 72.
+  `pty-walkthrough.sh`'s "a command that writes asks for nothing at a terminal" needed a new subject and got
+  `change tidy`. Neither script was loosened; both were rewritten with the behaviour.
+- **A gate assertion can fail because of the shell, not the product.** `cmd | grep -q` under `set -o
+  pipefail` turns a successful match into a SIGPIPE exit when the producer is still writing, which showed up
+  as a flaky failure in the new landing step. The gate captures output into a variable before matching, the
+  way its other long-output assertions already did.
+- **The queue's landed skip note has no subject in the tree model's ordinary cases.** `queue` names a
+  changeset as `landed on <destination> at <sha>` only when the destination is a branch other than the
+  integration branch *and* the branch still carries a live candidate; every landing the gates replay is
+  either on trunk (the resolver drops the candidate) or a release line the reader has to name. It stays
+  because a changeset that vanishes from the queue silently is a mystery, and it is covered by the Go tests.

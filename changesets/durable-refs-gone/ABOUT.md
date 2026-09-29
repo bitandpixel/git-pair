@@ -2,7 +2,7 @@
 
 ## Summary
 
-Milestone M5 of `docs/plans/simplify-architecture/plan.md`: delete the durable-ref subsystem. git-pair
+Milestone M5 of `docs/plans/completed/simplify-architecture/plan.md`: delete the durable-ref subsystem. git-pair
 writes no ref at any point in a lifecycle, and `refs/git-pair/` becomes a namespace the code neither reads
 nor writes. 99 files, -9914/+4701 across the branch; the deletion proper is `5e987db`, and what follows it
 is the rest of the system being told.

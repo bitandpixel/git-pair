@@ -1,6 +1,6 @@
 # One durable ref layout, and every branch the clone can name
 
-> **Superseded by `docs/plans/simplify-architecture/plan.md`.** M1 retired a retired layout; the plan
+> **Superseded by `docs/plans/completed/simplify-architecture/plan.md`.** M1 retired a retired layout; the plan
 > that replaced this one retired the layout. There is no `refs/git-pair/` namespace left to normalize,
 > so the legacy reading, `KindLegacyIntegration`, and the guard built on "nothing under
 > `refs/git-pair/``" all went with it. M2's remote-branch claims are unaffected in principle, and were

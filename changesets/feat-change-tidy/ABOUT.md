@@ -5,7 +5,7 @@
 `git pair change tidy` moves the directory of a changeset that has landed out of `changesets/` and into
 `changesets/.landed/`, as one commit of renames on the branch you are on.
 
-This is milestone M4 of `docs/plans/simplify-architecture/plan.md`. Landing has stopped being something
+This is milestone M4 of `docs/plans/completed/simplify-architecture/plan.md`. Landing has stopped being something
 git-pair has to be told about (M2) and stopped being something a stack measures itself against by name (M3).
 What is left of the paper trail is the directory itself, still sitting among the work in progress months
 after it stopped being work in progress. This moves it, the way an ordinary commit does.

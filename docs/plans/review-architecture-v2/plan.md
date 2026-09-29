@@ -1,6 +1,6 @@
 # Review architecture v2: two frozen refs, local-first landing
 
-> **Superseded by `docs/plans/simplify-architecture/plan.md`.** This plan's design was the pair of
+> **Superseded by `docs/plans/completed/simplify-architecture/plan.md`.** This plan's design was the pair of
 > durable refs and the create-only invariants around them. The plan that replaced it deletes the
 > namespace: a landing is the changeset directory in the destination branch's history, so there is no
 > ref to freeze, no create-only rule to hold, and no recorder to audit. Read the goal and the
