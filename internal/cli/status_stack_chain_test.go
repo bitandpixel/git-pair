@@ -60,9 +60,9 @@ func TestStatusPrintsTheRecordedStackChain(t *testing.T) {
 	res := runIn(t, f.Dir(), "status", "--changeset", "gamma")
 	res.mustSucceed(t, "status")
 	mustContain(t, res.stdout, "Stack:", "a landed child has a stack to report")
-	mustContain(t, res.stdout, "record: beta (branch beta) -> "+shortOf(lb)+", reachable from main",
+	mustContain(t, res.stdout, "landed: beta (branch beta) -> "+shortOf(lb)+", reachable from main",
 		"the nearest ancestor first, with the commit its own record names")
-	mustContain(t, res.stdout, "record: alpha (branch alpha) -> "+shortOf(la)+", reachable from main",
+	mustContain(t, res.stdout, "landed: alpha (branch alpha) -> "+shortOf(la)+", reachable from main",
 		"and the chain continues through the ancestor's own yaml, one step per changeset")
 
 	steps := runIn(t, f.Dir(), "status", "--changeset", "gamma", "--json").jsonList(t, "stack")
@@ -79,8 +79,8 @@ func TestStatusPrintsTheRecordedStackChain(t *testing.T) {
 		if step["changeset"] != want.id {
 			t.Errorf("stack step %d is %v, want %s", i, step["changeset"], want.id)
 		}
-		if step["integration_commit"] != want.commit {
-			t.Errorf("stack step %d records %v, want %s", i, step["integration_commit"], want.commit)
+		if step["landed_commit"] != want.commit {
+			t.Errorf("stack step %d landed %v, want %s", i, step["landed_commit"], want.commit)
 		}
 		if step["branch_exists"] != true {
 			t.Errorf("stack step %d says the branch is gone: %v", i, step)
@@ -107,7 +107,7 @@ func TestStatusStackChainReportsAGoneParentBranch(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "record: alpha (branch alpha is gone)",
+	mustContain(t, res.stdout, "landed: alpha (branch alpha is gone)",
 		"the branch the child was stacked on has been tidied away")
 	mustContain(t, res.stdout, "reachable from main",
 		"and the record still says where the work reached")
@@ -132,7 +132,7 @@ func TestStatusStackChainNamesAnAncestorWithNoRecord(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "record: alpha", "the step is still there")
+	mustContain(t, res.stdout, "landed: alpha", "the step is still there")
 	mustContain(t, res.stdout, "no record in this clone", "and says what is missing")
 	mustContain(t, res.stdout, "--fetch", "and the command that fixes it")
 }
@@ -147,7 +147,7 @@ func TestStatusStackChainStopsOnACycle(t *testing.T) {
 	res := runIn(t, f.Dir(), "status", "--changeset", "ouroboros")
 	res.mustSucceed(t, "status")
 	mustContain(t, res.stdout, "named twice", "a stack that names its own ancestor says so")
-	if strings.Contains(res.stdout, "record: ouroboros ->") {
+	if strings.Contains(res.stdout, "landed: ouroboros ->") {
 		t.Errorf("the cycle was walked once as a real step:\n%s", res.stdout)
 	}
 }

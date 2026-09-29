@@ -111,9 +111,10 @@ type stackStep struct {
 	// a clone that has never fetched it says the same thing, which is why the human wording says "is
 	// gone" only where the reader is being told about the chain, not about a verdict.
 	BranchExists bool `json:"branch_exists"`
-	// Integration and IntegrationRef are the parent's record as this clone holds it: empty when this
-	// clone has no record of that ancestor, which `--fetch` is the answer to.
-	Integration    string `json:"integration_commit,omitempty"`
+	// LandedCommit is the commit the ancestor's work became in the integration branch, empty when the
+	// integration branch does not hold that ancestor. It is derived from the destination's history, so no
+	// ref of git-pair's own and no fetch is involved; `landed_in_default_branch` is then true by construction.
+	LandedCommit   string `json:"landed_commit,omitempty"`
 	IntegrationRef string `json:"integration_ref,omitempty"`
 	// InDefaultBranch says the parent's recorded commit is in the integration branch's history. The
 	// branch itself is reported once, at the top of the status JSON.
@@ -343,23 +344,21 @@ func (a *app) stackChain(ctx context.Context, s *session, idx refIndex) ([]stack
 			return steps, fmt.Sprintf("the chain is deeper than %d changesets, so the walk stops there", stackDepthCap)
 		}
 		step := stackStep{Changeset: id, Branch: branch, BranchExists: branch != "" && held[branch]}
-		if sha, ok := idx.Integrated[id]; ok {
-			step.Integration = sha
-			step.IntegrationRef = idx.IntegratedRef[id]
-			if s.trunk.Ref != "" {
-				in, err := s.repo.IsAncestor(ctx, sha, s.trunk.Ref)
-				if err != nil {
-					return steps, fmt.Sprintf("the chain could not ask whether %s reaches %s (%s)", id, displayRef(s.trunk.Ref), err)
-				}
-				step.InDefaultBranch = in
+		if s.trunk.Ref != "" {
+			// The destination either carries the ancestor's directory or it does not; when it does, the run
+			// behind it names the commit the ancestor's work became. A step with no landing is still a step:
+			// the ancestor may be live work, which is a fact about the chain rather than a gap in it.
+			if chain, err := changeset.LandedChain(ctx, s.repo, s.trunk.Ref, id); err == nil {
+				step.LandedCommit = chain.Landing
+				step.InDefaultBranch = true
 			}
 		}
 		steps = append(steps, step)
 
-		// The next hop comes from the ancestor's own yaml, read where it is known to live: its landing
-		// commit, or failing that this changeset's head, whose tree carries the directories of everything
-		// it was stacked on.
-		at := step.Integration
+		// The next hop comes from the ancestor's own yaml, read where the tree keeps it: in the integration
+		// branch once the ancestor landed there, and otherwise in this changeset's head, whose tree carries
+		// the directories of everything it was stacked on.
+		at := s.trunk.Ref
 		if at == "" {
 			at = s.head
 		}
@@ -626,15 +625,11 @@ func printStatus(a *app, v *statusView) {
 					who += " (branch " + st.Branch + " is gone)"
 				}
 			}
-			if st.Integration == "" {
-				a.printf("  record: %s — no record in this clone; `--fetch` brings what the remote holds\n", who)
+			if st.LandedCommit == "" {
+				a.printf("  landed: %s — not in %s, so the chain above it is read from this branch\n", who, j.DefaultBranch)
 				continue
 			}
-			reach := "not reachable from " + j.DefaultBranch
-			if st.InDefaultBranch {
-				reach = "reachable from " + j.DefaultBranch
-			}
-			a.printf("  record: %s -> %s, %s\n", who, short(st.Integration), reach)
+			a.printf("  landed: %s -> %s, reachable from %s\n", who, short(st.LandedCommit), j.DefaultBranch)
 		}
 		if j.StackNote != "" {
 			a.printf("  note:   %s\n", j.StackNote)
