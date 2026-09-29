@@ -262,8 +262,13 @@ is the rule answering the question it was given.
 ### Landed, unreviewed
 
 The rule above has a second half, and it is a report rather than a reading. A `changesets/<id>/`
-directory present in the destination's tree whose chain behind it carries **no approving verdict** is work
-that landed without review reaching the destination. The tree rule makes that state invisible: the
+directory present in the destination's tree **without a landing licence** is work that landed without
+review reaching the destination. The licence is two conditions, both read from the destination: the chain
+behind the directory carries a verdict that permits a merge, and that verdict names a commit the
+destination holds as well (`landingLicence`, `internal/cli/landed.go`). An approval is a statement about a
+commit, so a chain that brought the statement and left the commit behind licenses nothing — the same test
+the write gate has always run against a rewritten branch, asked where the work arrived instead of where it
+was written. The tree rule makes that state invisible: the
 changeset stops being a claim, its branch may be deleted, and the paper trail is the merge commit alone. So
 the state is detected and reported, by name, with the read that goes and looks:
 
@@ -288,12 +293,20 @@ Two properties the wording has to hold:
   verdict either happened somewhere the destination cannot see or it did not happen. The report prints a
   read (`git pair status --changeset <id>`), never an invocation, and never changes the exit code of the
   command that found it.
-- **The reason says which of the two readings applies.** `no approving verdict in the chain behind it`
-  means the chain came along and carries `ready`, `feedback` or `block` and never an `approve`; `the
-  landing carried the directory in one commit, so no review markers came with it` means a squash, a
-  rebase-merge or a cherry-pick brought the content and left the history on a branch that may already be
-  gone (§13). The second is the common case and the honest limit of the model: git-pair reports it rather
-  than inferring a verdict from a patch ID it cannot verify.
+- **The reason says which reading applies.** `the chain carries no review verdict` means the chain came
+  along and holds no marker to read. `the newest verdict is feedback (<sha>), which does not license a
+  merge` and `the newest verdict is a block (<sha>)` name the verdict that was newest. A squash or a
+  cherry-pick — `the landing carried the directory in one commit, so no review markers came with it` —
+  brought the content and left the history on a branch that may already be gone (§13). Then the strict
+  half, in its own words: `the approval (<sha>) names <commit>, which the destination does not carry: the
+  landing replayed the run, so what was approved is not what landed` is a rebase merge, or an amend the
+  author made under an approval; `the approval (<sha>) names no commit, so the destination cannot be
+  checked against it` is a marker whose `Review-Head` trailer was lost. Both say one thing about a
+  destination that cannot show its approval: the record arrived, and what it licensed did not.
+
+The verdict stays strict where it cannot be checked, rather than passing for want of a counter-example. Two
+changesets in this repository's own trunk are in that shape, and a rule that read an unchecked approval as
+a licence would have reported neither of them.
 
 The finding is capped where it is printed — ten changesets, the rest counted — because the queue is also
 a notification surface, and because a repository with fifty unreviewed landings has a workflow problem
@@ -1297,7 +1310,7 @@ destination does not carry is work in flight, and the queue lists it or explains
 here consults a ref: the answer comes from the destination's tree and history, so a clone with only its
 branches and trunk gives the same queue as a clone with everything (§13).
 
-Work that reached the destination with **no approving verdict behind it** is the opposite case, and the queue
+Work that reached the destination with **no approval the destination can show** is the opposite case, and the queue
 is where it is reported: its own `LANDED UNREVIEWED` heading, naming each changeset and printing the
 read that goes and looks (§4's *Landed, unreviewed*). It is not a skip note, because "nothing to do" is
 the wrong reading of a merge whose review never reached the destination, and it names no command, because
@@ -1549,7 +1562,7 @@ raises.
 
 On a branch that carries no changeset of its own the command has nothing to report, and the answer is a
 usage refusal. When that branch is the integration branch the refusal also names the landings it carries
-whose chain has no approving verdict, as the `LANDED UNREVIEWED` finding (§4's *Landed, unreviewed*):
+that hold no approval of what they carry, as the `LANDED UNREVIEWED` finding (§4's *Landed, unreviewed*):
 "this branch holds no work in progress" and "work landed here with no review behind it" are two halves of
 one situation, and a reader told only the first goes looking for a branch they forgot rather than at the
 merge in front of them. It names no command, because none closes it. The exit code is
@@ -1984,8 +1997,11 @@ told about and the branch a pipeline would merge into cannot disagree.
   every merge shape.
 - `chain_base` and `chain_head` bound the run of work the destination carries behind the directory — the
   span a reviewer read, and where the markers they left sit.
-- `reviewed` says the chain carries a permitting verdict (`approve`, or `feedback` where the repository
-  accepts it).
+- `reviewed` says the destination holds a permitting verdict (`approve`, or `feedback` where the repository
+  accepts it) **and** the commit that verdict names. It is `false` for a chain with no approval, for an
+  approval whose commit the destination does not carry, and for an approval that names no commit.
+  `state` still reports the marker the chain carries, because what was written and what the destination can
+  show are two questions, and a replayed landing is the case where they come apart.
 
 Reading a landed changeset by id, with no branch carrying it, reads the same chain: the `state`, the
 verdict and the thread files come from the destination's history. The stack above a child is walked the
@@ -3114,9 +3130,9 @@ fact about the destination's tree, and `git pair check`'s `integrated` is the fi
 learn the work is already finished.
 
 Nothing of the landing can be skipped, because there is no step; what can be wrong is the review, and
-that is what the finding is for. A changeset directory in the destination with no approving verdict behind
-it is either a squash that left the review on a branch that no longer exists or a merge that arrived
-without one. `git pair queue` prints it under
+that is what the finding is for. A changeset directory in the destination with no approval it can show is
+either a squash that left the review on a branch that no longer exists, a merge that arrived without one, or
+a landing that replayed the run and so carried the approval without the commits it named. `git pair queue` prints it under
 `LANDED UNREVIEWED`, and `git pair status` says the same on a branch
 carrying no work of its own (§4's *Landed, unreviewed*). A supervisor agent that runs the queue between
 steps sees a landing whose review did not reach the destination instead of a changeset that quietly

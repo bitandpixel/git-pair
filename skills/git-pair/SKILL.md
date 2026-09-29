@@ -208,8 +208,8 @@ up — that trailer is the reviewer's statement about what they looked at, not y
 
 `git pair status` and `git pair queue` also report a finding that is somebody's unfinished housekeeping and
 not your change's state: `LANDED UNREVIEWED`, a changeset whose directory is in the destination while the
-chain behind it carries no approving verdict. It usually means the work was squash-merged, so the history
-that held the approval is gone from the destination; read it with `git pair status --changeset <id>`. No
+destination holds no approval of what it carries: no approval at all, a squash that brought no markers, or an
+approval naming commits the landing left behind. Read it with `git pair status --changeset <id>`. No
 command closes it — there is nothing to write — so report it and leave it.
 
 ## Mistakes that cost a review cycle

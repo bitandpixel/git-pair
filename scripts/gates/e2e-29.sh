@@ -568,7 +568,11 @@ else
 fi
 git switch -q tidied-landing
 out=$($G check 2>&1); code=$?
-if [ "$code" = 2 ] && printf '%s' "$out" | grep -q "changeset is already landed at"; then
+# The message comes from the no-changeset-on-this-branch path, which is where a branch whose directory has
+# been tidied away arrives: the directory is no longer here, so the answer is the one that names the
+# destination as the holder of the work. Asserting the string `check` prints when a branch *does* carry the
+# changeset would pass for the wrong reason and fail the moment the two paths are untangled again.
+if [ "$code" = 2 ] && printf '%s' "$out" | grep -q "the integration branch already holds it"; then
   echo "  ok: the branch the work was done on refuses it as landed after the move too"
 else
   echo "  FAIL: check on the source branch after the tidy exited $code: $out"; FAILED=1

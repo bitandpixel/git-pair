@@ -582,7 +582,7 @@ landed.
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history |
 | `review history` | `--changeset <slug>` | only review marker commits, indexed from `0`, each naming the commit it reviewed under `REVIEWED` and the reviewer who submitted it under `REVIEWER` |
-| `queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus a `LANDED UNREVIEWED` heading for a landing whose chain carries no approving verdict (a finding no command closes); read from the repository, not the checkout. A second list, `AWAITING INTEGRATION` / `awaiting_integration`, holds approved work whose author has asked for the merge (§9.9) with the branch it is asking to land on — never in both lists, because a declaration is a marker and a branch carrying one is not `READY` |
+| `queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus a `LANDED UNREVIEWED` heading for a landing whose destination holds no approval of what it carries (a finding no command closes); read from the repository, not the checkout. A second list, `AWAITING INTEGRATION` / `awaiting_integration`, holds approved work whose author has asked for the merge (§9.9) with the branch it is asking to land on — never in both lists, because a declaration is a marker and a branch carrying one is not `READY` |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug, plus the landing read from the destination's tree: `landed`, `landed_commit`, `landed_branch`, and the chain that arrived with it (`chain_base`, `chain_head`, `reviewed`) |
 | `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition — the review's outcome, whether the commit it approved is still in this history, and whether the content still matches; reports `integrating` beside the verdict, so CI's gate is one command and two fields (`jq -e '.ready and .integrating'`); no `--changeset`, because it is the gate a forge runs *on* a revision |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
@@ -651,8 +651,9 @@ read from the destination rather than from a ref, so a clone that has fetched no
 branch answers it the same way. `chain_base` and `chain_head` bound the run of work the destination carries
 behind the directory — the span a reviewer read, and where the markers they left sit — and are `""` exactly
 when the landing carried no chain: a squash or a cherry-pick brings the tree and leaves the history behind.
-`reviewed` says the chain carries a permitting verdict, and is `false` in that case whatever happened on the
-branch, because nothing in the destination kept it. `state` is untouched by all of it: landing
+`reviewed` says the destination holds a permitting verdict **and** the commit that verdict names, so it is
+`false` for a chain with no approval, for an approval whose commit the destination does not carry, and for an
+approval that names no commit. `state` is untouched by all of it: landing
 is a fact beside the state, not a state value of its own. `integrating` and `integrate_commit` are the
 other pair beside it, and the only one that is also a state: `INTEGRATING` while a `git pair change
 integrate` declaration (§9.9) is the newest marker, the commit named so the author can see what they did
@@ -707,7 +708,7 @@ resolution rule cannot settle between two changesets, a changeset the destinatio
 one names the commit and the branch, because the branch is usually still here and its disappearance from the
 queue would otherwise be a mystery — or a changeset directory with no branch and no landing. A changeset
 that has landed in its destination is silent — it is not work a reviewer can act on. What is *not* silent is a
-directory the destination carries whose chain has no approving verdict: that is a merge whose review never
+directory the destination carries with no approval it can show: that is a merge whose review never
 reached the destination, and it is reported by name.
 
 ```json
@@ -1775,13 +1776,15 @@ it needs the directory here. A clone that has only trunk says this even though t
 rename commit must contain renames and nothing else.
 
 `LANDED UNREVIEWED` in `queue`, or the same heading in `status` on a branch with no changeset of its own
-(exit 2) — a directory is in the destination and the chain behind it carries no approving verdict. Two
-readings, and the `reason` says which: `the landing carried the directory in one commit, so no review markers
-came with it` means a squash, a rebase-merge or a cherry-pick brought the content and left the history on a
-branch this clone can no longer reach; `no approving verdict in the chain behind it` means the merge went in
-without one. Neither has a command that closes it — there is nothing to write — so read the changeset with
-`git pair status --changeset <id>` and decide whether the review happened somewhere the destination cannot
-see. `check` refuses to call an unreviewed head integration-ready; a landing it cannot see is a merge it was
+(exit 2) — a directory is in the destination, and the destination holds no approval of what it carries. The
+`reason` says which of three readings applies. `the landing carried the directory in one commit, so no
+review markers came with it` is a squash or a cherry-pick: the content arrived and the history stayed on a
+branch this clone can no longer reach. `the chain carries no review verdict`, or a newest verdict of feedback
+or a block, is a merge that went in without an approval. `the approval (<sha>) names <commit>, which the
+destination does not carry` is the strict one: the landing replayed the run, so what the destination
+records as approved is not what the destination holds. None of them has a command that closes it — there is
+nothing to write — so read the changeset with `git pair status --changeset <id>` and decide whether the
+review happened somewhere the destination cannot see. `check` refuses to call an unreviewed head integration-ready; a landing it cannot see is a merge it was
 never asked about.
 
 `cannot tell which branch is the integration branch` (exit 2) — the destination is what every landing question
@@ -1927,8 +1930,8 @@ heads, and each row prints the branch it speaks for. A branch it cannot resolve 
 branch, say — is named in `skipped` rather than left out quietly.
 
 A missing entry that is *not* work in progress is reported rather than hidden. A changeset directory the
-integration branch carries whose chain holds no approving verdict is work that reached the destination
-without a review licensing it, and `queue` gives it its own `LANDED UNREVIEWED` heading; `git pair status`
+integration branch carries, with no approval it can show, is work that reached the destination without a
+review licensing it, and `queue` gives it its own `LANDED UNREVIEWED` heading; `git pair status`
 on a branch carrying no changeset of its own says the same inside its exit-2 answer. The heading prints a
 read (`git pair status --changeset <id>`) rather than a command, because no command closes it: the reasons it
 prints — a chain that carries no verdict, a landing that carried the directory in one commit and kept none of
