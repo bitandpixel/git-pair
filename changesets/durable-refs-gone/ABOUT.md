@@ -50,9 +50,17 @@ A squash, cherry-pick or rebase-merge landing whose commit carries no directory 
 its chain read has no markers to report. PRD §13 has to state that limit in the commit that removes the refs,
 because the refs were the thing that made such a landing knowable.
 
+## Two tests that die with `integration record`, not with `DestinationFor`
+
+`integration_destination_test.go:60` and `:78` fail on this draft. They do not come from the destination
+helper: `integration record` derives its own target from the parent's integration ref inside
+`internal/cli/integration.go`. Verified by experiment — changing `DestinationFor`'s fallback to
+`db.LocalName()` left both failures identical, so the edit was reverted rather than kept as a contract change
+nobody asked for. Resolve them by deleting the command and its tests in step 3 of the order below.
+
 ## Open questions (M5 design, unresolved)
 
-1. A parent merged only into a release branch is not landed (D1), so its child measures against the parent
+**Resolved in `a304707`.** 1. A parent merged only into a release branch is not landed (D1), so its child measures against the parent
    branch. Without the record, nothing says where that child is meant to land: `DestinationFor` can either
    answer the live parent branch (`booking (base)`) or fall back to the integration branch and say the
    parent's own base (`release/2.x`) is unreachable. `TestDestinationFallsBackWhenTheParentBaseIsGone`
