@@ -642,7 +642,7 @@ else
 fi
 git switch -q tidied-landing
 out=$($G check 2>&1); code=$?
-if [ "$code" = 1 ] && printf '%s' "$out" | grep -qi "landed"; then
+if [ "$code" = 2 ] && printf '%s' "$out" | grep -q "the integration branch already holds it"; then
   echo "  ok: the branch the work was done on refuses it as landed too"
 else
   echo "  FAIL: check on the source branch exited $code: $out"; FAILED=1
