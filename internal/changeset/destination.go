@@ -11,7 +11,7 @@ import (
 
 // Destination is the branch a changeset's work lands on — the branch a merge targets. It is not the
 // measurement base, and for a stack whose parent has landed the two are different answers on purpose:
-// the base is the parent's integration ref, which is a commit and cannot be merged into, while the
+// the base is the parent's landing commit, which is a commit and cannot be merged into, while the
 // destination is the branch the parent's own work was measured against.
 type Destination struct {
 	// Ref is the branch to merge into, as the caller named it or as git keeps it. Empty means this
@@ -40,7 +40,7 @@ const destinationWalkLimit = 16
 //
 // The changeset's own base answers this in the ordinary case, and stops answering it in two others. A base
 // the resolver derived from the destination (`BaseDerived`) is a measurement point — the run the child shares
-// with the integration branch — and a commit is not a destination, the same reason `integration record`
+// with the integration branch — and a commit is not a destination, the same reason a landing is never
 // refuses one as a `--target`. A base that names nothing this clone can resolve is the other: a branch
 // tidied away, or a value written by the durable-ref layout this repository no longer keeps.
 //

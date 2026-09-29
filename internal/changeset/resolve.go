@@ -3,7 +3,7 @@
 // The rule is a content test, not a pointer: the changesets on a revision are the
 // `changesets/<id>/` directories present in its tree and absent from the integration
 // branch's tree. A directory that has reached the integration branch is landed work, so it
-// drops out without needing an integration ref and without depending on whether the landing
+// drops out without needing a ref of any kind and without depending on whether the landing
 // was a merge, a squash or a cherry-pick. A directory that exists only here is work in
 // progress, whichever branch line it sits on — which is what lets a parent branch and the
 // child branched off it resolve to the same changeset instead of one of them inventing a
@@ -109,7 +109,7 @@ func (d DefaultBranchRef) BaseName() string {
 // that has fetched and not branched off trunk — the ordinary state — the integration branch is only
 // `refs/remotes/origin/main`, so a comparison of `main` to that ref says "stacked on a branch called
 // main", which `status` prints as a parent line and `change integrate` refuses over: an unlanded parent
-// is a refusal, and trunk never has an integration record. So every spelling of the same branch counts:
+// is a refusal, and trunk is never a stack base. So every spelling of the same branch counts:
 // the ref as found, the name with its root removed, and that name under `refs/heads/`.
 //
 // A branch really named `origin/main` would answer true here and be mistaken for trunk. That is the
@@ -125,7 +125,7 @@ func (d DefaultBranchRef) IsBranch(name string) bool {
 // DefaultBranch resolves the integration branch.
 //
 // A caller-supplied ref wins outright; it is what CI passes, and it matches how
-// `integration record` takes `--target` rather than storing where a landing went.
+// the caller names the destination it merged into rather than git-pair storing where a landing went.
 // Otherwise git's own answer is used: `git clone` records the remote's default branch in
 // `refs/remotes/origin/HEAD`, so a human clone needs no configuration at all. A CI job
 // built with `init`, `remote add` and a fetch of one branch does not have it, which is why
@@ -573,7 +573,7 @@ func parentID(base string) string {
 }
 
 // stackParentID names the branch a candidate is stacked on, whether the stack recorded it as a
-// branch or the resolver redirected the measurement base to the parent's integration ref.
+// branch or the resolver redirected the measurement base to the parent's landing commit.
 func stackParentID(c Candidate) string {
 	if c.Changeset.ParentBranch != "" {
 		return c.Changeset.ParentBranch

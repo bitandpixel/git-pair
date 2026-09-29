@@ -215,8 +215,7 @@ func SummarizeAgainstTreeHEAD(ctx context.Context, repo *git.Repo, slug, base st
 //
 // The range summaries answer "what happened between base and head". This answers the narrower
 // question a caller asks when it holds one commit and wants to know what that commit records —
-// the commit `integration record --source` names, or the landing whose record must not be written
-// for work that was abandoned. It uses the same
+// the commit a landing put in the destination, or the history of work that was abandoned. It uses the same
 // trailer parsing as the range walk, so the two cannot disagree about what a marker says, and it
 // needs no base: a caller holding a SHA from a ref should not have to resolve a branch that may
 // never have been fetched.
@@ -264,7 +263,7 @@ type MarkerScan struct {
 // State is a different question, and this does not answer it: PRD §13.4 is explicit that the archive
 // reports what the branch claimed before it disappeared, and is not a second source of state. A caller that
 // derived state from a full lineage walk would report a landed child as READY, which is a worse mistake than
-// reporting it WORKING beside an integration ref.
+// reporting it WORKING beside a landing.
 func ReviewsInLineage(ctx context.Context, repo *git.Repo, slug, rev string) ([]Event, error) {
 	fields := []string{"%H", "%h", "%ct", "%an", "%s", "%(trailers:only,unfold)"}
 	records, err := repo.LogFields(ctx, rev, fields...)

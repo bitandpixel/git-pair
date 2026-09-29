@@ -28,7 +28,7 @@ func (r Result) Empty() bool { return len(r.Files) == 0 }
 // Submit records a review submission.
 //
 // It writes a commit and nothing else. There is no ref to move: while work is in flight the branch
-// is the whole story, and the durable refs are written at landing by `git pair integration record`,
+// is the whole story, and no ref is written at landing or at any other point,
 // once, from a head that has stopped moving. A review commit is therefore its own record — `Review-*`
 // trailers on an ordinary commit, reachable from the branch, greppable with the tools the reviewer
 // already uses.

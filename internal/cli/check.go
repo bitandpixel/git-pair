@@ -111,7 +111,7 @@ type checkJSON struct {
 	// into WORKING and `ready` off, and the declaration is still the newest marker on the branch.
 	Integrating     bool   `json:"integrating"`
 	IntegrateCommit string `json:"integrate_commit,omitempty"`
-	// ParentLanded says the branch this changeset is stacked on has an integration record: the base is
+	// ParentLanded says the branch this changeset is stacked on has landed: the base is
 	// finished work. It sits beside the verdict and never inside `reasons`, because a parent that landed
 	// changes nothing this child owns — the diff the reviewer approved is the diff still under test.
 	// Refusing it would ask for a re-review of unchanged content.
@@ -361,11 +361,11 @@ func eventSHA(e *lifecycle.Event) string {
 func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summary,
 	head string, allowFeedback bool, landed landing, lineage, parent string) []string {
 	if landed.Commit != "" {
-		// The other early return, and it comes first. Once the record exists the review is over:
-		// the drift question below it describes a changeset still being worked on, which this one
-		// is not. It outranks the abandoned check because an integration record is a record that
-		// was written, and git-pair writes no marker for a changeset that has landed, so an
-		// abandonment cannot have been recorded after it.
+		// The other early return, and it comes first. Once the destination carries the directory the
+		// review is over: the drift question below it describes a changeset still being worked on,
+		// which this one is not. It outranks the abandoned check because a landing happened, and
+		// git-pair writes no marker for a changeset that has landed, so an abandonment cannot have
+		// followed one.
 		return []string{fmt.Sprintf("changeset is already landed at %s%s", short(landed.Commit), landed.reach())}
 	}
 	if terminal != nil {

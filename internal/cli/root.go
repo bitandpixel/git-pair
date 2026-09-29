@@ -142,13 +142,14 @@ func newRootCommand(a *app) *cobra.Command {
 refs. It does not replace git, your editor, your difftool, or your forge.
 
 Review state lives in the repository: a changeset directory holds ABOUT.md and
-review threads, lifecycle markers are commits carrying Review-* trailers, and
-refs/git-pair/* holds the two durable refs written when a changeset lands.
+review threads, lifecycle markers are commits carrying Review-* trailers, and a
+landing is the changeset directory in the history of the branch it merged into.
+git-pair writes no ref of its own.
 
 Author commands:   git pair init, then git pair change use | ready | integrate | unready | abandon
 Reviewer commands: git pair review open | about | thread | submit | history
 Reading state:     git pair queue | status | diff
-Gates and record:  git pair check, then git pair integration record`,
+Gate:              git pair check, then merge into the destination with ordinary git`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if jsonFlag, err := cmd.Flags().GetBool("json"); err == nil {
 				a.json = jsonFlag

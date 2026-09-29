@@ -196,8 +196,8 @@ func (a *app) parentLanded(ctx context.Context, repo *git.Repo, c changeset.Chan
 	commit := chain.Landing
 	st.Landed = short(commit)
 	st.landedFull = commit
-	// The chain was derived from the destination, so its containment there is not a question to ask again;
-	// the reach sentence a durable ref needed has nothing left to hedge about.
+	// The chain was derived from the destination, so its containment there is not a question to ask
+	// again, and there is no reach sentence left to hedge about.
 	st.LandedInDefaultBranch = true
 	st.LandedReach = ""
 	if head == "" {

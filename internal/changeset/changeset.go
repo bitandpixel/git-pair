@@ -44,7 +44,7 @@ var (
 )
 
 // ID is the changeset's canonical identity: the name of its directory, which is what
-// `changesets/<id>/` and the durable refs are named after. The field carrying it is
+// `changesets/<id>/` is named after, and every derivation of a landing starts from it. The field carrying it is
 // called Slug for historical reasons; it is the id, and the branch name is only where
 // the default came from (PRD §4).
 
@@ -331,9 +331,9 @@ func ParentOf(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranch
 	if c.Base == "" {
 		return Parent{}, nil
 	}
-	// The branch is the stack. `Base` can name the parent's integration ref instead of its branch,
-	// because a landed parent is still measured against — see relinkStacks — and the branch name is
-	// where the two cases are told apart.
+	// The branch is the stack. `Base` can name the parent's landing commit instead of its branch,
+	// because a landed parent is still measured against, and the branch name is where the two
+	// cases are told apart.
 	if c.ParentBranch != "" {
 		return parentOfBranch(ctx, repo, c.ParentBranch, c.Branch, db)
 	}
@@ -560,7 +560,7 @@ func noChangesetHere(ctx context.Context, repo *git.Repo, db DefaultBranchRef, c
 // the two spellings are two answers to "what does this diff against?" and they will not stay in
 // agreement. `parent-changeset:` records the changeset living on that branch — the durable half of
 // the relationship, which is what still means something after the parent branch is deleted and its
-// work has become an integration ref.
+// work has become a landing commit.
 const (
 	ParentKey          = "parent"
 	ParentChangesetKey = "parent-changeset"

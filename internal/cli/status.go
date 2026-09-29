@@ -73,8 +73,9 @@ type parentJSON struct {
 	Reason    string `json:"reason,omitempty"`
 	Next      string `json:"next,omitempty"`
 	Note      string `json:"note,omitempty"`
-	// Landed says the parent has an integration record in this clone: its work is in a destination, and
-	// the branch named above is what is left of it. The record is the only thing that can say this. A
+	// Landed says the parent's work is in a destination: the directory it carried is in a branch's
+	// history, and the branch named above is what is left of it. The destination is the only thing that
+	// can say this. A
 	// `--no-ff` merge leaves the parent's branch exactly where the approval recorded it, so every
 	// tip comparison in this file reads "nothing happened" in the one case where the work finished.
 	Landed bool `json:"landed"`
