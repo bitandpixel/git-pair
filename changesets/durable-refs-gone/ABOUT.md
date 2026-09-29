@@ -4,8 +4,9 @@
 
 Milestone M5 of `docs/plans/completed/simplify-architecture/plan.md`: delete the durable-ref subsystem. git-pair
 writes no ref at any point in a lifecycle, and `refs/git-pair/` becomes a namespace the code neither reads
-nor writes. 99 files, -9914/+4701 across the branch; the deletion proper is `5e987db`, and what follows it
-is the rest of the system being told.
+nor writes. Against `origin/main` the branch is 99 files, +4832/−9915 — that number is the whole stack.
+This changeset is 79 files, +2067/−9015 against its base `feat/change-tidy`; the deletion proper is
+`5e987db`, and what follows it is the rest of the system being told.
 
 ## What is gone
 
@@ -80,8 +81,9 @@ thing this plan exists to protect.
 
 ## State of the stack
 
-M1 `81f01e2` (trunk), M2 `feat/landing-is-a-tree-fact`, M3 `feat/derived-bases`, M4 `feat/change-tidy`;
-this branch is stacked on M4 and moves onto the new `origin/main` before `change ready`.
+M1 `81f01e2` (trunk), M2 `feat/landing-is-a-tree-fact`, M3 `feat/derived-bases`, M4 `feat/change-tidy`.
+None of M2–M4 has merged, so `origin/main` is still M1 and this branch stays stacked on M4: the review diff
+is against `feat/change-tidy`, and `base: feat/change-tidy` says so.
 
 ## Validation
 
