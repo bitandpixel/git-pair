@@ -182,4 +182,17 @@ run is present in the destination, not about which merge button was pressed. One
 shape is already in Known limitations: with no merge commit, `landed_commit` names the first commit of the
 replayed run that carries the directory, and `chain_head` the newest one still carrying it.
 
+**Keep the two fields apart, because the rewrite treats them differently.** A marker carries
+`Review-Changeset` (the name) and `Review-Head` (the commit the reviewer looked at), and they do different
+work. Identity runs on the name: `lifecycle` admits a marker only when `Review-Changeset` is this slug, and
+the chain selects commits by whether the tree carries `changesets/<id>/`. Nothing selects by SHA, and
+`reviewedHead` checks the trailer's shape without resolving it, so a rewrite cannot detach a verdict from
+its changeset — which is the whole reason the answer above comes out `reviewed: true`. The drift question
+runs on the SHA, and there the rewrite is fatal on purpose: rebase a *live* branch after an approval, without
+landing it, and `check` refuses — "review `<sha>` reviewed `<head>`, which is no longer in this history: the
+branch was rewritten since the review, so the approval does not license integration". Measured both ways:
+landed, the verdict reads in a fresh `--no-local` clone where the commit `Review-Head` names is not even
+present; unlanded, the same rewrite costs the head its licence. A rebase keeps the record attached to the
+changeset and does not keep the approval current for work that has not landed.
+
 The move asked for is this section.
