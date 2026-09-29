@@ -442,13 +442,23 @@ done
 # survive: the request was made here, the merge happened elsewhere, and the paper trail that says so has to
 # reach the author's machine or the author is looking at a changeset that appears to still be waiting.
 git fetch -q "$DECLREMOTE" 'refs/git-pair/*:refs/git-pair/*'
-out=$($G queue 2>&1)
-if printf '%s' "$out" | grep -q "awaiting-merge (integrated at"; then
-  echo "  ok: with the record fetched, this clone stops listing the request"
-else
-  echo "  FAIL: the author's clone still lists a changeset the other clone landed and recorded"
-  $G queue 2>&1 | sed 's/^/    /'
+# The two facts the step's claim is made of, asserted directly. The record arrived: that is what "published"
+# means for this clone, and it is the only thing this clone can check about another clone's merge. And the
+# changeset is not offered for review: the queue spans branches, and this clone has no branch carrying it, so
+# there is no row to withhold — a row would be the failure, and it is what the next assertion forbids. The
+# queue output is captured before it is matched, for the reason given above the `check` helper: an early
+# `grep -q` exit turns the writer's SIGPIPE into a failed assertion under `pipefail`.
+out=$($G queue --json 2>&1)
+if ! git show-ref --verify --quiet refs/git-pair/integrations/awaiting-merge; then
+  echo "  FAIL: the fetch brought no record for the changeset the other clone landed"
+  git for-each-ref --format='    %(refname)' refs/git-pair
   FAILED=1
+elif printf '%s' "$out" | grep -q '"slug": *"awaiting-merge"'; then
+  echo "  FAIL: with the record fetched, this clone still offers the landed changeset for review"
+  printf '%s\n' "$out" | sed 's/^/    /'
+  FAILED=1
+else
+  echo "  ok: with the record fetched, this clone holds the landing and stops offering the request"
 fi
 rm -rf "$DECL"
 
