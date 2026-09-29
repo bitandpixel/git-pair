@@ -41,11 +41,9 @@ type parentStatus struct {
 	// Note is a one-line observation that is not a refusal — the parent moved, or there was
 	// nothing to compare — for `status` and `queue` to show.
 	Note string
-	// Landed is the commit the parent's integration record points at, empty when this clone holds no
-	// record for the parent. It is the record's claim and not a merge's: a directory in the destination
-	// with no record behind it is the `no integration record` note, because nothing durable says the work
-	// is finished. Landing outranks every reading of the branch tip, because `--no-ff`, squash and
-	// cherry-pick all leave the parent's branch exactly where the approval recorded it.
+	// Landed is the commit the destination carries the parent's work at, empty when the destination holds
+	// no directory for the parent. Landing outranks every reading of the branch tip, because `--no-ff`,
+	// squash and cherry-pick all leave the parent's branch exactly where the approval recorded it.
 	Landed string
 	// LandedInDefaultBranch says the landing commit is in the history of the branch git-pair calls the
 	// integration branch. False covers "it reached a release branch" and "this clone cannot name the
@@ -55,7 +53,7 @@ type parentStatus struct {
 	// no branch identifies itself as the destination.
 	LandedReach string
 	// StaleBranch says the child's own head already carries the landing, so the parent's branch is dead
-	// weight — the record holds the chain the branch was holding. It is false for a child that has not
+	// weight — the destination holds the chain the branch was holding. It is false for a child that has not
 	// rebased yet, where that branch is still the base the child is measured on, and false when the branch
 	// is gone, because stale is a statement about a branch that is here.
 	StaleBranch bool
@@ -63,7 +61,7 @@ type parentStatus struct {
 	// `git branch -D <parent>` would fail. It is read only where the deletion is being advised, and named
 	// as text: removing a worktree is not git-pair's to do (PRD §26).
 	ParentWorktree string
-	// landedFull is the record's commit in full, for the comparisons that hand a revision to git. The
+	// landedFull is the landing commit in full, for the comparisons that hand a revision to git. The
 	// reported fields are shortened; git is not.
 	landedFull string
 }
@@ -122,7 +120,7 @@ func (a *app) parentLive(ctx context.Context, repo *git.Repo, c changeset.Change
 			st.parentName(), st.Branch, st.Next)
 		return st, nil
 	}
-	// The record before the tip comparison, and before the early return below: a parent that landed by
+	// The landing before the tip comparison, and before the early return below: a parent that landed by
 	// merge has not moved its branch, so `Recorded == Tip` is true and reads as "nothing happened"
 	// exactly when the work left the branch.
 	if st, err = a.parentLanded(ctx, repo, c, db, head, st); err != nil {
@@ -145,14 +143,14 @@ func (a *app) parentLive(ctx context.Context, repo *git.Repo, c changeset.Change
 			return st, nil
 		}
 		// The parent landed and its branch did not move, so the only thing that changed is what the base
-		// points at: the parent's record instead of its branch. An approval is a claim about content, so
+		// points at: the landing commit instead of the parent's branch. An approval is a claim about content, so
 		// content decides whether it follows the base (PRD §21).
 		same, err := landedBaseIsTheSameWork(ctx, repo, st.Recorded, st.landedFull, head)
 		if err != nil {
 			return st, err
 		}
 		if same {
-			st.Note = fmt.Sprintf("%s; the base moved onto the record and the content under it did not, so the approval still measures this work",
+			st.Note = fmt.Sprintf("%s; the base moved onto the landing and the content under it did not, so the approval still measures this work",
 				st.Note)
 			return st, nil
 		}
@@ -238,7 +236,7 @@ func (a *app) parentLanded(ctx context.Context, repo *git.Repo, c changeset.Chan
 // branch's name where the landing commit belongs, and vice versa.
 func landedParentStep(cs changeset.Changeset, st parentStatus) string {
 	if st.StaleBranch {
-		step := fmt.Sprintf("the branch %s is stale — it holds nothing the record does not: `git branch -D %s`",
+		step := fmt.Sprintf("the branch %s is stale — it holds nothing the destination does not: `git branch -D %s`",
 			st.Branch, st.Branch)
 		if st.ParentWorktree != "" {
 			// The deletion will fail there, and the remedy is not git-pair's to run (PRD §26): naming the
@@ -352,7 +350,7 @@ func (a *app) parentGone(ctx context.Context, repo *git.Repo, c changeset.Change
 			return st, err
 		}
 		if same {
-			st.Note = fmt.Sprintf("parent %s landed as %s%s; the base moved onto the record and the content under it did not, so the approval still measures this work",
+			st.Note = fmt.Sprintf("parent %s landed as %s%s; the base moved onto the landing and the content under it did not, so the approval still measures this work",
 				st.parentName(), st.Landed, st.LandedReach)
 			return st, nil
 		}

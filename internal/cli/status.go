@@ -92,9 +92,9 @@ type parentJSON struct {
 	StaleBranch bool `json:"stale_branch"`
 }
 
-// stackStep is one changeset the reported one was stacked on. The step reports what the record and the
-// branch say from here, not what they promised at the time: a parent whose branch is gone and whose record
-// is in the integration branch's history is a landed parent, and that is the fact the reader of a child's
+// stackStep is one changeset the reported one was stacked on. The step reports what the destination and the
+// branch say from here, not what they promised at the time: a parent whose branch is gone and whose
+// directory the destination carries is a landed parent, and that is the fact the reader of a child's
 // status needs.
 type stackStep struct {
 	Changeset string `json:"changeset"`
@@ -105,12 +105,11 @@ type stackStep struct {
 	// a clone that has never fetched it says the same thing, which is why the human wording says "is
 	// gone" only where the reader is being told about the chain, not about a verdict.
 	BranchExists bool `json:"branch_exists"`
-	// LandedCommit is the commit the ancestor's work became in the integration branch, empty when the
-	// integration branch does not hold that ancestor. It is derived from the destination's history, so no
-	// ref of git-pair's own and no fetch is involved; `landed_in_default_branch` is then true by construction.
-	LandedCommit   string `json:"landed_commit,omitempty"`
-	IntegrationRef string `json:"integration_ref,omitempty"`
-	// InDefaultBranch says the parent's recorded commit is in the integration branch's history. The
+	// LandedCommit is the commit the ancestor's work became in the destination branch, empty when the
+	// destination does not hold that ancestor. It is derived from the destination's tree and history, so no
+	// ref of git-pair's own and no fetch is involved; `in_default_branch` is then true by construction.
+	LandedCommit string `json:"landed_commit,omitempty"`
+	// InDefaultBranch says the ancestor's landing is in the integration branch's history. The
 	// branch itself is reported once, at the top of the status JSON.
 	InDefaultBranch bool `json:"in_default_branch"`
 }
