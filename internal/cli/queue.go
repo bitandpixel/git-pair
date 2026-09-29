@@ -209,7 +209,7 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 	if err != nil && !git.IsUnknownRevision(err) {
 		return err
 	}
-	dirs, err := changeset.DirsAt(ctx, repo, head)
+	dirs, err := changeset.ActiveIDs(ctx, repo, head)
 	if err != nil {
 		return err
 	}
