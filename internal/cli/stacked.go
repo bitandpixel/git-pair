@@ -188,7 +188,7 @@ func (a *app) parentLanded(ctx context.Context, repo *git.Repo, c changeset.Chan
 	}
 	commit, err := reviewref.ResolveIntegration(ctx, repo, c.ParentChangeset)
 	if errors.Is(err, reviewref.ErrNotIntegrated) {
-		return a.parentInTrunkUnrecorded(ctx, repo, c, db, st)
+		return a.parentInDestination(ctx, repo, c, db, st)
 	}
 	if err != nil {
 		return st, err
@@ -284,11 +284,12 @@ func worktreeHolding(ctx context.Context, repo *git.Repo, branch string) (string
 	return "", nil
 }
 
-// parentInTrunkUnrecorded is the sibling finding: the parent's branch tip is in the integration branch and
-// no integration ref exists for it, which is §22's gap seen from the child. The child cannot be measured
-// against a durable ref that was never written, so this is reported as a note naming the command rather
-// than as a landing.
-func (a *app) parentInTrunkUnrecorded(ctx context.Context, repo *git.Repo, c changeset.Changeset,
+// parentInDestination is the sibling finding seen from the child: the parent's branch tip is already an
+// ancestor of the integration branch, so the parent's work has reached the destination and this child is
+// measured against ground that has moved. It is a note rather than a state because the child's own markers
+// have not moved, and it names no command because there is nothing left to write — the destination's tree
+// and its history are the record, and `git pair status --changeset <parent>` reads them.
+func (a *app) parentInDestination(ctx context.Context, repo *git.Repo, c changeset.Changeset,
 	db changeset.DefaultBranchRef, st parentStatus) (parentStatus, error) {
 	if db.Ref == "" || st.Tip == "" {
 		return st, nil
@@ -297,8 +298,9 @@ func (a *app) parentInTrunkUnrecorded(ctx context.Context, repo *git.Repo, c cha
 	if err != nil || !in {
 		return st, err
 	}
-	st.Note = fmt.Sprintf("%s is in %s with no integration record: `git pair integration record --changeset %s`, and %s",
-		st.parentName(), displayRef(db.LocalName()), c.ParentChangeset, unrecordedHedge(false))
+	st.Note = fmt.Sprintf("%s is in %s: the parent's work has reached the destination, so this branch is "+
+		"measured against ground that has moved (`git pair status --changeset %s` reads the landing)",
+		st.parentName(), displayRef(db.LocalName()), c.ParentChangeset)
 	return st, nil
 }
 

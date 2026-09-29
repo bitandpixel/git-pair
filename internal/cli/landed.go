@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -173,6 +174,62 @@ func unreviewedReason(c changeset.Chain, verdict *lifecycle.Event) string {
 	}
 }
 
+// landingView is what `status` reports about a changeset that has reached the integration branch: the
+// commit the directory arrived in, the run of work that came with it, and whether that run carries a
+// permitting verdict. Every field is read out of the destination, so a clone with no branches and no
+// git-pair refs in it answers the question the same way the machine that did the merge does — which is the
+// property the durable refs were invented to provide and never could, since a ref is only as current as
+// the last fetch.
+//
+// `reviewed` is the field a reader will ask about, and it is the one with a limit worth stating in its own
+// terms: it says whether the chain the destination carries holds an approval, not whether the work was
+// ever approved. A squash or a cherry-pick brings the tree and leaves the history behind, and then the
+// honest answer is false. `chain_base` and `chain_head` are empty in exactly that case, so the two fields
+// together distinguish "no verdict" from "nothing to read".
+type landingView struct {
+	Landed bool `json:"landed"`
+	// Commit is the commit that put the directory on the integration branch, and Branch is that branch's
+	// display name. Landing is not a marker, so it sits beside `state` for the reason `abandoned` does.
+	Commit string `json:"landed_commit,omitempty"`
+	Branch string `json:"landed_branch,omitempty"`
+	// ChainBase and ChainHead bound the run behind the directory: the span a reviewer read, and where
+	// their markers are. Empty when the landing carried no chain to bound.
+	ChainBase string `json:"chain_base,omitempty"`
+	ChainHead string `json:"chain_head,omitempty"`
+	// Reviewed says the chain carries a permitting verdict. See the type comment for what it does not say.
+	Reviewed bool `json:"reviewed"`
+}
+
+func (a *app) landingView(ctx context.Context, repo *git.Repo, trunk changeset.DefaultBranchRef,
+	branchName, id string) (landingView, error) {
+	out := landingView{}
+	if trunk.Ref == "" {
+		return out, nil
+	}
+	if present, _ := changeset.CarriesDir(ctx, repo, trunk.Ref, id); !present {
+		return out, nil
+	}
+	out.Landed, out.Branch = true, branchName
+	chain, err := changeset.LandedChain(ctx, repo, trunk.Ref, id)
+	if errors.Is(err, changeset.ErrNoChain) {
+		return out, nil
+	}
+	if err != nil {
+		return out, err
+	}
+	out.Commit = short(chain.Landing)
+	if !chain.Squash {
+		out.ChainBase, out.ChainHead = short(chain.Base), short(chain.Head)
+	}
+	summary, err := lifecycle.Summarize(ctx, repo, id, chain.Base, chain.Head)
+	if err != nil {
+		return out, err
+	}
+	verdict := integrationVerdict(summary)
+	out.Reviewed = verdict != nil && verdict.Outcome == model.OutcomeApprove
+	return out, nil
+}
+
 // printUnreviewed writes the queue's own section for the finding. It gets a heading rather than a line
 // among the skip notes because the finding is not "nothing to do here": work reached trunk that nobody
 // approved, and the reader has to decide what that means. There is no command to print, which is the
@@ -228,14 +285,4 @@ func unreviewedInStatus(orig error, found []unreviewedLanding, dest string) erro
 		orig, plural(len(found), "changeset directory is", "changeset directories are"), dest,
 		strings.Join(lines, "\n"))
 	return &usageError{fmt.Errorf("%s", msg)}
-}
-
-// unrecordedHedge is the one sentence that keeps both readings of the finding available.
-func unrecordedHedge(namespaceEmpty bool) string {
-	if namespaceEmpty {
-		return "this clone holds no refs/git-pair/* refs at all, so \"no record\" here may mean \"not " +
-			"fetched yet\": " + reviewref.FetchCommand
-	}
-	return "\"no record\" here means none in this clone: a record written where the merge ran arrives with " +
-		reviewref.FetchCommand
 }

@@ -140,10 +140,12 @@ func TestRelinkDropsAnApprovalWhoseDiffDiffers(t *testing.T) {
 	mustContain(t, res.stdout+res.stderr, "differs", "and says why: the measured diff is not the one the review saw")
 }
 
-// A clone that has never fetched `refs/git-pair/*` cannot relink, and must not try: the base it has is the
-// branch, and the branch answers. The failure this replaces is an `unknown revision` from a base that was
-// written down by a different clone.
-func TestRelinkNeedsTheRecordAndSaysWhatIsMissingWithoutIt(t *testing.T) {
+// A clone that has never fetched `refs/git-pair/*` cannot relink from a record, and must not try: the base
+// it has is the branch, and the branch answers. The failure this replaces is an `unknown revision` from a
+// base that was written down by a different clone. Milestone M3 of docs/plans/simplify-architecture/plan.md
+// replaces the record hop with a derivation from the destination, after which the branch and the landing are
+// the same read.
+func TestRelinkWithoutARecordMeasuresAgainstTheBranch(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("alpha")
 	f.CommitChangeset("alpha", "main")
@@ -155,9 +157,10 @@ func TestRelinkNeedsTheRecordAndSaysWhatIsMissingWithoutIt(t *testing.T) {
 	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
 	res.mustSucceed(t, "status")
 	mustContain(t, res.stdout, "Base: alpha", "the branch is still the base this clone can measure against")
-	mustContain(t, res.stdout, "git pair integration record --changeset alpha",
-		"the note says the record is what is missing, with the invocation that writes it")
-	mustContain(t, res.stdout, "none in this clone", "and that it is a claim about this clone, not about the work")
+	mustContain(t, res.stdout, "the parent's work has reached the destination",
+		"and the note says what is true about the parent rather than what this clone is missing")
+	mustNotContain(t, res.stdout, "git pair integration record",
+		"with no invocation offered: the landing needs no record to be known")
 }
 
 // `Review-Parent-Head` is the value two clones have to agree on when they submit the same review, so it

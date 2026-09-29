@@ -41,8 +41,9 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 	}
 	// No ref for either changeset: the stack is in flight, and the durable refs are what landing
 	// writes. Independence of the two changesets is not something a ref has to preserve any more.
-	if status["archive_ref"] != "" {
-		t.Errorf("archive_ref = %v, want empty: nothing has landed", status["archive_ref"])
+	if status["chain_head"] != "" || status["landed_commit"] != "" {
+		t.Errorf("chain = %v / landed_commit = %v, want empty: nothing has landed",
+			status["chain_head"], status["landed_commit"])
 	}
 
 	// Independent review history: the upper changeset has never been reviewed, even

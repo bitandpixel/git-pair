@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"gitpair/internal/gittest"
@@ -42,60 +41,23 @@ func recordedAndPublished(t *testing.T) (*gittest.Fixture, string, string) {
 	return f, slug, clone
 }
 
-// The headline, and the shape every fetch test has to have: one clone, one command, two answers, and
-// the difference is the flag.
-func TestFetchMakesAPublishedRecordVisibleInAFreshClone(t *testing.T) {
+// The fetch brings the records home and brings no landing, and the two are now different questions. This
+// fixture's record names a commit on `release/2.x`, so the integration branch carries no directory for the
+// changeset and the honest answer is "not landed" -- a record is a fact about a command somebody ran, and
+// under the tree model it claims nothing about the destination. That is the flexibility the plan decided to
+// keep: work merged only into a release line is still work in progress.
+func TestFetchBringsTheRecordsHomeAndNoLanding(t *testing.T) {
 	_, slug, clone := recordedAndPublished(t)
 
-	before := runIn(t, clone, "status", "--json").mustSucceed(t, "status", "--json").json(t)
-	if before["integrated"] == true {
-		t.Fatalf("the clone reports %s integrated without the refs, so the fetch proves nothing", slug)
+	before := runIn(t, clone, "status", "--fetch", "--json").mustSucceed(t, "status", "--fetch", "--json").json(t)
+	if before["landed"] != false {
+		t.Fatalf("landed = %v for %s: nothing in the integration branch carries it", before["landed"], slug)
 	}
-
-	after := runIn(t, clone, "status", "--fetch", "--json").mustSucceed(t, "status", "--fetch", "--json").json(t)
-	if after["integrated"] != true {
-		t.Fatalf("after --fetch the clone still says not integrated: %v\nthe fetch did not bring the record home", after["integrated"])
+	if before["unpublished_note"] == "" && len(before["unpublished"].([]any)) == 0 {
+		t.Errorf("neither the list nor its note answered: %v", before)
 	}
-	if after["integration_ref"] != reviewref.Integration(slug) {
-		t.Errorf("integration_ref = %v, want %s", after["integration_ref"], reviewref.Integration(slug))
-	}
-}
-
-// The mirrors come along in the same fetch, because "has this travelled?" is asked in the same breath
-// as "is this recorded?" and a clone holding one without the other would answer inconsistently.
-func TestFetchBringsTheMirrorsToo(t *testing.T) {
-	_, slug, clone := recordedAndPublished(t)
-	runIn(t, clone, "status", "--fetch", "--json").mustSucceed(t, "status", "--fetch", "--json")
-
-	mirrors := gitIn(t, clone, "for-each-ref", "--format=%(refname)", reviewref.MirrorRoot("origin")+"/")
-	if mirrors == "" {
-		t.Fatalf("the fetch brought no mirrors under %s: %q", reviewref.MirrorRoot("origin"), mirrors)
-	}
-	for _, want := range []string{reviewref.MirrorIntegration("origin", slug), reviewref.MirrorArchive("origin", slug)} {
-		if !strings.Contains(mirrors+"\n", want+"\n") {
-			t.Errorf("no mirror %s after --fetch, saw:\n%s", want, mirrors)
-		}
-	}
-}
-
-// The invariant the whole read side rests on: a mirror is somebody else's state seen from here, and
-// nothing that answers "is this recorded" may read it. Fetched records land in the namespace proper and
-// *do* answer that question — that is replication working. A mirror answering it would let a clone
-// report a landing it has only ever glimpsed.
-func TestMirrorsAreNeverRecords(t *testing.T) {
-	_, slug, clone := recordedAndPublished(t)
-	gitIn(t, clone, "fetch", "--quiet", "--prune", "origin", reviewref.MirrorRefspec("origin"))
-
-	if got := gitIn(t, clone, "for-each-ref", "--format=%(refname)", reviewref.MirrorRoot("origin")+"/integrations/"); got == "" {
-		t.Fatal("no mirror arrived, so the negative assertion below proves nothing")
-	}
-	if got := gitIn(t, clone, "for-each-ref", "--format=%(refname)", reviewref.NamespaceRoot); got != "" {
-		t.Fatalf("the mirror fetch wrote into the record namespace, which is the failure this test exists for: %s", got)
-	}
-
-	out := runIn(t, clone, "status", "--json").mustSucceed(t, "status", "--json").json(t)
-	if out["integrated"] == true {
-		t.Fatalf("status read a mirror as a record for %s: %v", slug, out["integrated_ref"])
+	if got := gitIn(t, clone, "for-each-ref", "--format=%(refname)", reviewref.NamespaceRoot); got == "" {
+		t.Fatal("the fetch brought no durable refs home, so the rest of this file proves nothing")
 	}
 }
 

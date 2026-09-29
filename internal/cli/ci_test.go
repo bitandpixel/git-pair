@@ -116,8 +116,8 @@ func TestStatusAndQueueWorkWithoutTheGitPairRefs(t *testing.T) {
 	if got["state"] != "READY" {
 		t.Errorf("state = %v, want READY: markers are commits, not custom refs", got["state"])
 	}
-	if got["integrated"] != false {
-		t.Errorf("integrated = %v, want false: no record is present, and none is invented", got["integrated"])
+	if got["landed"] != false {
+		t.Errorf("landed = %v, want false: the destination does not carry the directory, and nothing invents a landing", got["landed"])
 	}
 	// The trunk fields matter most in exactly this shape: a clone where "has this landed?" is a
 	// comparison against a ref the job fetched, and nothing else in the output says which.

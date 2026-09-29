@@ -108,7 +108,8 @@ func TestApprovedStateNamesTheLandingAndTheRecord(t *testing.T) {
 	head := f.Head()
 
 	st := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status", "--json").json(t)
-	assertKeys(t, st, "state", "head", "head_full", "next_action", "integrated", "archive_ref", "archive_commit")
+	assertKeys(t, st, "state", "head", "head_full", "next_action", "landed", "landed_commit",
+		"landed_branch", "chain_base", "chain_head", "reviewed")
 	if st["state"] != "APPROVED" {
 		t.Errorf("status state = %v, want APPROVED", st["state"])
 	}
@@ -130,11 +131,11 @@ func TestApprovedStateNamesTheLandingAndTheRecord(t *testing.T) {
 	// record are reported differently on purpose, which is worth pinning rather than rediscovering:
 	// `archive_ref`/`archive_commit` are present and empty so a consumer sees one shape either way,
 	// while `integration_ref`/`integrated_commit` appear only with the record itself (README, PRD §11.1).
-	if st["integrated"] != false {
-		t.Errorf("status integrated = %v on an unrecorded changeset", st["integrated"])
+	if st["landed"] != false || st["reviewed"] != false {
+		t.Errorf("status landed/reviewed = %v/%v on a changeset the destination does not carry", st["landed"], st["reviewed"])
 	}
-	if st["archive_ref"] != "" || st["archive_commit"] != "" {
-		t.Errorf("status reports an archive before one exists: %v / %v", st["archive_ref"], st["archive_commit"])
+	if st["landed_commit"] != "" || st["chain_head"] != "" {
+		t.Errorf("status reports a landing before one exists: %v / %v", st["landed_commit"], st["chain_head"])
 	}
 	if _, present := st["integration_ref"]; present {
 		t.Errorf("status carries integration_ref = %v with no record to name", st["integration_ref"])
@@ -270,14 +271,15 @@ func TestJSONKeySets(t *testing.T) {
 		f, _ := newChangeset(t, "booking", "main")
 		ready(t, f)
 		out := runIn(t, f.Dir(), "status", "--json").json(t)
-		assertKeys(t, out, "changeset", "branch", "base", "state", "head", "latest_review", "archive_ref", "archive_commit")
+		assertKeys(t, out, "changeset", "branch", "base", "state", "head", "latest_review", "landed",
+			"landed_commit", "landed_branch", "chain_base", "chain_head", "reviewed")
 		if out["state"] != "READY" {
 			t.Errorf("state = %v, want READY", out["state"])
 		}
 		// The keys are always present and empty while work is in flight: the record is what landing
 		// writes, and a consumer should not have to handle two shapes for "there is no record yet".
-		if out["archive_ref"] != "" || out["archive_commit"] != "" {
-			t.Errorf("archive_ref = %v, archive_commit = %v; nothing has landed", out["archive_ref"], out["archive_commit"])
+		if out["landed_commit"] != "" || out["chain_head"] != "" {
+			t.Errorf("landed_commit = %v, chain = %v; nothing has landed", out["landed_commit"], out["chain_head"])
 		}
 	})
 

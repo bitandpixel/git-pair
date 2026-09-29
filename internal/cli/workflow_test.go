@@ -186,8 +186,8 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	mustContain(t, recorded.stdout, integrationRef(slug), "and the integration ref")
 	mustContain(t, recorded.stdout, "reachable from main", "and the reachability it verified")
 
-	if got := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").json(t)["integrated"]; got != true {
-		t.Errorf("integrated = %v, want true: the record is how a landing is known", got)
+	if got := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").json(t)["landed"]; got != true {
+		t.Errorf("landed = %v, want true: the destination's tree is how a landing is known", got)
 	}
 	if got := f.RefSHA(archiveRef(slug)); got != reviewed {
 		t.Errorf("archive = %s, want the reviewed head %s", got, reviewed)

@@ -83,9 +83,12 @@ func TestReviewQueueCostPerLandedChangesetIsBounded(t *testing.T) {
 		t.Fatalf("the queue counted %d invocations: the shim measured nothing, so the bound below proves nothing", empty)
 	}
 	const landings = 300
-	// Measured on this repository: about 5 invocations per landing. The bound is twice that, so a change
-	// that adds one read per landing still passes and one that adds a walk per commit does not.
-	if per := float64(withDirs-empty) / landings; per > 10 {
+	// Measured on this repository: 11 invocations per directory the destination carries. They are the chain
+	// (the boundary walk, the tip revision, two containment reads, a parent count), the lifecycle walk over
+	// the range the chain names, and the orphan classification — which now has to ask the destination whether
+	// it carries the directory before it can stay silent about it. The bound is a third above that, so a
+	// change that adds one read per landing still passes and one that walks the branch per landing does not.
+	if per := float64(withDirs-empty) / landings; per > 14 {
 		t.Errorf("queue costs %.1f git invocations per landed changeset (empty queue %d, %d with %d landings): "+
 			"the finding is meant to cost a bounded few reads each, not a walk of the destination",
 			per, empty, withDirs, landings)

@@ -371,44 +371,37 @@ func TestLandingOnAnotherBranchLeavesTheWorkInProgress(t *testing.T) {
 	mustContain(t, declared.stdout, "merge into:  main", "the declaration names the destination the work has not reached")
 }
 
-// status reports the record beside the state, and says which branch it measured the landing against
-// — the distinction between landing on trunk and retiring into a release branch.
-func TestStatusReportsIntegration(t *testing.T) {
+// A record names a commit somebody declared a landing, on whichever branch they named. It is not the
+// integration branch carrying the directory, and nothing reads a landing from it any more: work merged into
+// release/2.x is still work in progress, because the release line can revert the merge and the changeset may
+// still have to reach main on its own. The command-side half of this decision is
+// TestLandingOnAnotherBranchLeavesTheWorkInProgress; this is the reporting half.
+func TestARecordAgainstAnotherBranchClaimsNoLanding(t *testing.T) {
 	f, _, source, landing := recordFixture(t)
 	f.SwitchTo("booking")
 
 	before := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status").json(t)
-	if before["integrated"] != false {
-		t.Fatalf("integrated = %v before the record; the branch alone must not claim a landing", before["integrated"])
+	if before["landed"] != false {
+		t.Fatalf("landed = %v before anything happened at all", before["landed"])
 	}
 
 	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--target", "release/2.x").mustSucceed(t, "integration", "record")
 	after := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status").json(t)
-	if after["integrated"] != true {
-		t.Fatalf("integrated = %v after the record", after["integrated"])
+	if after["landed"] != false || after["landed_commit"] != "" || after["chain_head"] != "" {
+		t.Errorf("landed = %v/%v/%v; the record names %s and the integration branch carries no directory",
+			after["landed"], after["landed_commit"], after["chain_head"], shortOf(landing))
 	}
-	if after["integrated_commit"] != shortOf(landing) {
-		t.Errorf("integrated_commit = %v, want %s", after["integrated_commit"], shortOf(landing))
-	}
-	// The state is untouched: landing is not a marker, and a state value for it would put a
-	// derived fact inside the machine that markers move.
+	// The state is untouched, for the reason it always was: landing is not a marker, and a state value for
+	// it would put a derived fact inside the machine that markers move. What the record must not do is stop
+	// the report promising the work that is still owed.
 	if after["state"] != before["state"] {
-		t.Errorf("state moved from %v to %v; integration is reported beside state, not inside it", before["state"], after["state"])
+		t.Errorf("state moved from %v to %v; a record is reported beside state, not inside it", before["state"], after["state"])
 	}
-	// B is on release/2.x, so it is not in the branch git-pair calls the default one. This is the
-	// distinction the fields exist for: work that retired into a release branch and never reached
-	// the default branch must not read like a default-branch landing.
-	if after["integrated_in_default_branch"] != false {
-		t.Errorf("integrated_in_default_branch = %v; the landing is on release/2.x", after["integrated_in_default_branch"])
-	}
-	if after["integrated_default_branch"] != "main" {
-		t.Errorf("integrated_default_branch = %v, want main", after["integrated_default_branch"])
-	}
-	mustContain(t, str(t, after, "next_action"), "integrated at "+shortOf(landing), "the next action must stop promising work")
-
+	mustNotContain(t, str(t, after, "next_action"), "integrated at",
+		"the next action still has work to ask for")
 	text := runIn(t, f.Dir(), "status").mustSucceed(t, "status").stdout
-	mustContain(t, text, "Integrated:", "the text surface says it too")
-	mustContain(t, text, "not reachable from main", "and names where it did land")
+	mustNotContain(t, text, "Integrated:", "the text surface claims no landing either")
+	mustNotContain(t, text, "Landed:", "and says nothing about a landing that has not happened")
 }
 
 // The other half of the containment fact, and the shape a landed changeset really has: the branch
@@ -428,14 +421,18 @@ func TestStatusReportsALandingOnTrunk(t *testing.T) {
 	// git-pair derives is the one the record should be verified against.
 	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing).mustSucceed(t, "integration", "record")
 	got := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").mustSucceed(t, "status").json(t)
-	if got["integrated"] != true {
-		t.Fatalf("integrated = %v, want true", got["integrated"])
+	if got["landed"] != true {
+		t.Fatalf("landed = %v, want true: main carries the directory", got["landed"])
 	}
-	if got["integrated_in_default_branch"] != true {
-		t.Errorf("integrated_in_default_branch = %v, want true: the landing is in main", got["integrated_in_default_branch"])
+	if got["landed_branch"] != "main" {
+		t.Errorf("landed_branch = %v, want main: the branch the read was taken from is part of the answer", got["landed_branch"])
 	}
-	if got["integrated_default_branch"] != "main" {
-		t.Errorf("integrated_default_branch = %v, want main", got["integrated_default_branch"])
+	// This landing is a squash, so the destination holds the tree and none of the work's history: there is
+	// no chain to bound and no verdict to report. The two empty fields are the limit stated honestly, and
+	// the branch's own review is gone from the destination's point of view.
+	if got["chain_head"] != "" || got["reviewed"] != false {
+		t.Errorf("chain = %v with reviewed = %v; a squash landing carries no chain to read",
+			got["chain_head"], got["reviewed"])
 	}
 	if got["branch"] != "" {
 		t.Errorf("branch = %v, want the empty string: the branch is gone and the record is what remains", got["branch"])

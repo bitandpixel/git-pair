@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"gitpair/internal/changeset"
 	"gitpair/internal/gittest"
-	"gitpair/internal/reviewref"
 )
 
 // --- review submit (PRD §10.4) ----------------------------------------------
@@ -624,35 +624,41 @@ func TestReviewQueueIgnoresDirectoriesThatWereNeverOffered(t *testing.T) {
 	}
 }
 
-// The other side of the same directory: work with a durable record whose content is *not* in its
-// base, and no branch left to review it. Silence here would hide the only surviving record of the
-// work, so it gets one line, naming what it is anchored to and what it is missing from.
+// The other side of the same directory: content that is *not* in its base, left in a branch that accounts
+// for a different changeset, with no branch of the changeset's own name behind it. Silence here would hide
+// the only surviving copy of the work, so it gets one line naming what it is missing from.
 //
-// The record is written by hand: in the real workflow the archive ref arrives with the landing, and an
-// orphan with a chain and no landing is what a fetch, an interrupted record, or another person's clone
-// leaves behind. Either way the queue's answer is the same, and it is not silence.
-func TestReviewQueueNamesArchivedWorkThatNeverLanded(t *testing.T) {
-	f, slug := newChangeset(t, "booking", "main")
-	ready(t, f)
-	offered := f.Head()
-	f.MustGit("update-ref", reviewref.Archive(slug), offered)
-
+// Two directories are needed on purpose: a branch carrying one changeset directory treats it as the work it
+// is doing, and only a *second* directory on that branch is the leftover this note is about. The base has to
+// be a branch that really lacks the work too, because the anchor is no longer a ref somebody wrote — it is
+// the directory's own history on the branch that carries it. The destination holding the directory is the
+// other answer (a landing), and it is reported under its own heading instead.
+func TestReviewQueueNamesWorkWhoseBranchWentMissing(t *testing.T) {
+	const stray = "zook"
+	f := newRepo(t)
+	f.CreateBranch(stray)
+	f.CommitChangeset(stray, "main")
+	f.Commit(stray+": work", gittest.WithFile("z.go", "package main\n"))
+	copied := f.Head()
+	// The branch carries the copy before it has its own changeset, so the directory it works on is the one it
+	// accounts for and the copy is the leftover.
 	f.SwitchTo("main")
-	f.Write(filepath.Join("changesets", slug, "CHANGESET.yaml"), "base: main\n")
-	f.Write(filepath.Join("changesets", slug, "ABOUT.md"), "# booking\n\nA different description than the recorded one.\n")
-	f.Commit("note the booking change")
-	f.ForceDeleteBranch("booking")
+	f.CreateBranch("other")
+	f.MustGit("checkout", copied, "--", changeset.Root+"/"+stray)
+	f.Commit("other: carry a copy of the zook directory", gittest.WithFile("carry.md", "carry\n"))
+	f.CommitChangeset("other", "main")
+	f.ForceDeleteBranch(stray)
 
 	res := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
-	if queueListsChangeset(t, res, slug) {
+	if queueListsChangeset(t, res, stray) {
 		t.Errorf("work with no branch behind it is not reviewable:\n%s", res.stdout)
 	}
 	skipped, ok := res.json(t)["skipped"].([]any)
 	if !ok || len(skipped) != 1 {
-		t.Fatalf("skipped = %v, want one note naming the recorded work", res.json(t)["skipped"])
+		t.Fatalf("skipped = %v, want one note naming the work nobody carries", res.json(t)["skipped"])
 	}
 	note := skipped[0].(string)
-	for _, want := range []string{slug, "archived at " + f.Short(offered), "is not in main"} {
+	for _, want := range []string{stray, "is not in main", "no branch carries it"} {
 		if !strings.Contains(note, want) {
 			t.Errorf("skipped note %q does not mention %q", note, want)
 		}
