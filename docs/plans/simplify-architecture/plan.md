@@ -169,6 +169,33 @@ Recorded so a later reader finds a decision rather than an omission.
 Reads move before writes are deleted, so the replays keep proving behaviour until the moment they cannot.
 One commit per milestone, `mise run check` per commit, `mise run gates` at the end of each milestone.
 
+Every milestone starts from a fetched `origin/main` — not from the local `main`, and not from a previous
+milestone's head once that one has landed:
+
+```bash
+git fetch origin
+git switch -c feat/<milestone> origin/main
+git pair init --base main
+```
+
+The local `main` is an ordinary checkout and it lags: it sat six commits behind `origin/main` while M1 was
+under review. A branch cut from it carries a base nobody else's `check` has run against, and the merge the
+reviewer is being asked to approve is then not the merge that will happen. `origin/main` answers "what has
+landed", which is the same question the product answers from the destination's tree.
+
+One exception, and it goes in the changeset's `ABOUT.md` when taken: a milestone whose predecessor has not
+landed yet branches from that predecessor's head, because the code it builds on exists nowhere else, and
+stacks with `git pair init --parent <predecessor-branch>`. When the predecessor lands, move the child onto
+the new `origin/main` **before** `change ready` rather than after: `check` compares the tree against what the
+review looked at, so a rebase that follows an approval invalidates it and the branch goes back through review
+anyway.
+
+The base check before any handoff is one command, and it is worth running even when the branch felt fresh:
+
+```bash
+git fetch origin && git merge-base --is-ancestor origin/main HEAD && echo "up to date"
+```
+
 ### M1 — `.landed/` enters the tree model
 
 #### Deliverables

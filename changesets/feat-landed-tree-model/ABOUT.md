@@ -29,6 +29,11 @@ the listing bug that would otherwise make the first `tidy` break every branch th
 - `internal/changeset/resolve.go`: `onTrunk` is built from `LandedIDs`, so a directory the destination
   carries under `.landed` counts as landed exactly as one it carries directly.
 - `internal/cli/{status,queue,integration}.go`: the six `DirsAt` call sites are renamed. No logic change.
+- `docs/plans/simplify-architecture/plan.md`: M1's four tasks ticked, the two fixture measurements recorded,
+  and a base rule added to the Milestones preamble. The rule: every milestone branches from a fetched
+  `origin/main`, never from the local `main`, and a milestone stacked on an unlanded predecessor moves onto
+  the new `origin/main` before `change ready` rather than after an approval. The local `main` was six commits
+  behind `origin/main` while this changeset was written, which is the case it is written against.
 
 ## Design decisions
 
