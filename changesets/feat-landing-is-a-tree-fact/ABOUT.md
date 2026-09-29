@@ -1,4 +1,3 @@
-can you rebase on a freshly fetched main branch? this is already landed on remote
 # feat-landing-is-a-tree-fact
 
 ## Summary
