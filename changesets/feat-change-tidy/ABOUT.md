@@ -71,6 +71,23 @@ integrate` works.
 The commit is a rename of a directory tree. `git log --follow` on a *file* inside it continues to work; a
 tool that pinned a path in an older commit sees the old path, which is what the old path was.
 
+## Discussion
+
+**The parent merged while this changeset was in review, so `base:` moved to `main`.** That field names the
+branch the review diff runs against and, for `change integrate`, the destination the declaration asks for
+(`destination_source: "base"`). Left pointing at `feat/derived-bases` — a branch whose work is now in trunk —
+the declaration would have asked CI to merge this into a branch nobody owns, and `check`'s next step read
+"merge into feat/derived-bases with ordinary git". No content changed; this is the metadata that says where
+the work is meant to land.
+
+**The branch was restacked onto the merged main** (`dad07da`) at the same time: 12 commits replayed, no
+conflicts. The approval `df449a1` is a child of the rebased tip `317fdce`, so it approves the branch as it now
+stands rather than the pre-restack history.
+
+**The handoff note this changeset wrote is deleted by M5,** at review's request: its content was the next
+concrete action after M1-M4, which is the work M5 performs, and nothing reads the file. M5's `ABOUT.md` carries
+the account.
+
 ## Open questions
 
 Whether `--all-landed` should also offer to delete directories whose landing is old enough that nobody will
