@@ -81,6 +81,21 @@ func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db Default
 				}
 				why = "parent"
 			}
+			// A parent's recorded base that names a directory the integration branch carries is a landed
+			// changeset, not a destination: the branch outlived the work it carried, which is the same fact
+			// that moves a child's measurement base. Keep walking, through that changeset's own record.
+			if hops > 0 && db.Ref != "" {
+				ids, err := LandedIDs(ctx, repo, db.Ref)
+				if err != nil {
+					return out, err
+				}
+				if slices.Contains(ids, base) && !seen[base] {
+					seen[base] = true
+					out.Via = append(out.Via, base)
+					base, parentChangeset = "", base
+					continue
+				}
+			}
 			out.Ref, out.Why = base, why
 			return out, nil
 		}
