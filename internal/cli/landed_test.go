@@ -191,23 +191,22 @@ func TestDurableRefsDisagreeWithTheTreeAndChangeNothing(t *testing.T) {
 	}
 }
 
-// A rebase-merge lands the branch's commits themselves, so the markers arrive with them and the verdict
-// survives. `LANDED UNREVIEWED` is for the landing that carries no marker commit at all — a squash, a
-// cherry-pick — not for every landing that was not a `--no-ff` merge. The reviewer asked which of the two a
-// rebase is; the derivation-level answer is `TestLandedChainOfARebaseLanding`, and this is the same answer on
-// the command surface, beside the squash case above that says the opposite.
-func TestARebaseLandingKeepsTheReviewItCarried(t *testing.T) {
+// TestAReplayedLandingIsUnreviewedBecauseTheApprovedCommitsDidNotArrive is the strict half of the landing
+// verdict. An approval is a statement about a commit. A landing that replayed the run — the "rebase and
+// merge" button, or an amend or rebase the author made after the approval — brings the statement across and
+// leaves the commits it was about behind, so the destination holds no approval of what the destination
+// holds. The record and the licence are different questions, and only one of them survives a rewrite.
+func TestAReplayedLandingIsUnreviewedBecauseTheApprovedCommitsDidNotArrive(t *testing.T) {
 	f, slug := newChangeset(t, "booking", "main")
 	ready(t, f)
 	submit(t, f, "approve")
 
-	// The shape a "rebase and merge" button produces: trunk moves, the branch rebases onto it, and then
-	// lands by fast-forward — every commit on the branch is a new commit with an old message.
 	f.SwitchTo("main")
 	f.Commit("trunk moves on", gittest.WithFile("trunk.md", "moved\n"))
 	f.SwitchTo(slug)
 	f.MustGit("rebase", "--quiet", "main")
-	reviewed := f.Head()
+	replayed := f.Head()
+	named := reviewHeadOf(t, f.MustGit("log", "-1", "--format=%B"))
 	f.SwitchTo("main")
 	f.MustGit("merge", "--quiet", "--ff-only", slug)
 	f.ForceDeleteBranch(slug)
@@ -216,19 +215,111 @@ func TestARebaseLandingKeepsTheReviewItCarried(t *testing.T) {
 	if out["landed"] != true {
 		t.Fatalf("landed = %v: the destination carries the directory", out["landed"])
 	}
-	if out["reviewed"] != true {
-		t.Errorf("reviewed = %v, want true: the rebase replayed the approve marker as a commit and its "+
-			"trailer came with it (%v..%v)", out["reviewed"], out["chain_base"], out["chain_head"])
+	if out["reviewed"] != false {
+		t.Errorf("reviewed = %v, want false: the replay carried the approve marker and not the commit it "+
+			"names (%s)", out["reviewed"], named)
 	}
-	if out["chain_head"] != f.Short(reviewed) {
-		t.Errorf("chain_head = %v, want the rebased review commit %s", out["chain_head"], f.Short(reviewed))
+	if out["chain_head"] != f.Short(replayed) {
+		t.Errorf("chain_head = %v, want the replayed review commit %s", out["chain_head"], f.Short(replayed))
 	}
 	if out["state"] != "APPROVED" {
-		t.Errorf("state = %v, want APPROVED: the chain's own markers derive it", out["state"])
+		t.Errorf("state = %v, want APPROVED: the markers are in the chain, and what they recorded is a "+
+			"different question from what they license", out["state"])
 	}
 
 	q := runIn(t, f.Dir(), "queue", "--json").json(t)
+	list, ok := q["landed_unreviewed"].([]any)
+	if !ok || len(list) != 1 {
+		t.Fatalf("landed_unreviewed = %v, want this landing alone", q["landed_unreviewed"])
+	}
+	entry, ok := list[0].(map[string]any)
+	if !ok || entry["changeset"] != slug {
+		t.Fatalf("landed_unreviewed[0] = %v, want %s", list[0], slug)
+	}
+	reason, _ := entry["reason"].(string)
+	for _, want := range []string{named[:7], "does not carry", "replayed the run"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("reason %q does not say %q: a reader has to be able to tell this from a squash, and "+
+				"to be able to go and look at what is missing", reason, want)
+		}
+	}
+}
+
+// reviewHeadOf reads the commit an approval names out of the marker's own message. A test that argues about
+// Review-Head quotes the trailer rather than a SHA it guessed at, which is the difference between testing
+// the rule and testing the fixture.
+func reviewHeadOf(t *testing.T, marker string) string {
+	t.Helper()
+	for _, line := range strings.Split(marker, "\n") {
+		if v, ok := strings.CutPrefix(line, "Review-Head:"); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	t.Fatalf("the marker carries no Review-Head trailer, so the fixture is not what the test claims:\n%s", marker)
+	return ""
+}
+
+// TestAMergeCommitLandingKeepsTheReviewItCarried is the counterweight that keeps the rule from meaning
+// "flag every landing". This repository lands by merge commit, which carries the run without rewriting it,
+// so the commit the approval names is in the destination and the approval covers what landed. A verdict that
+// refused this shape too would fire on every landing in the repository and say nothing about any of them.
+func TestAMergeCommitLandingKeepsTheReviewItCarried(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	ready(t, f)
+	submit(t, f, "approve")
+
+	f.SwitchTo("main")
+	f.Commit("trunk moves on", gittest.WithFile("trunk.md", "moved\n"))
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "Merge booking into main", slug)
+	f.ForceDeleteBranch(slug)
+
+	out := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").mustSucceed(t, "status").json(t)
+	if out["reviewed"] != true {
+		t.Errorf("reviewed = %v, want true: the merge carried the run without rewriting it, so the commit "+
+			"the approval names is here (chain %v..%v)", out["reviewed"], out["chain_base"], out["chain_head"])
+	}
+	q := runIn(t, f.Dir(), "queue", "--json").json(t)
 	if got := q["landed_unreviewed"]; len(got.([]any)) != 0 {
-		t.Errorf("landed_unreviewed = %v, want none: a landing that carried its verdict is not a finding", got)
+		t.Errorf("landed_unreviewed = %v, want none: a landing that brought the approved commits is not a "+
+			"finding", got)
+	}
+}
+
+// TestAnApprovalThatNamesNoCommitLicensesNothing is the strict edge chosen deliberately rather than arrived
+// at: what cannot be checked cannot license a merge either. The record survives — the chain still carries
+// the approve marker, so `state` is still APPROVED — and the answer is still no, because there is no commit
+// to compare the destination against. Two changesets in this repository's own trunk are in that shape.
+func TestAnApprovalThatNamesNoCommitLicensesNothing(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	ready(t, f)
+	submit(t, f, "approve")
+
+	named := reviewHeadOf(t, f.MustGit("log", "-1", "--format=%B"))
+	unnames := strings.TrimRight(strings.Replace(f.MustGit("log", "-1", "--format=%B"),
+		"Review-Head: "+named+"\n", "", 1), "\n")
+	// A marker commit changes no files, so amending it needs `--allow-empty`: git is refusing to make an
+	// empty commit empty, not refusing the test.
+	f.MustGit("commit", "--amend", "--quiet", "--allow-empty", "-m", unnames)
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--ff-only", slug)
+	f.ForceDeleteBranch(slug)
+
+	out := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").mustSucceed(t, "status").json(t)
+	if out["reviewed"] != false {
+		t.Errorf("reviewed = %v, want false: an approval with no commit named cannot be checked against "+
+			"the destination", out["reviewed"])
+	}
+	if out["state"] != "APPROVED" {
+		t.Errorf("state = %v, want APPROVED: the verdict is still recorded, it just proves nothing here", out["state"])
+	}
+	q := runIn(t, f.Dir(), "queue", "--json").json(t)
+	list, ok := q["landed_unreviewed"].([]any)
+	if !ok || len(list) != 1 {
+		t.Fatalf("landed_unreviewed = %v, want this landing alone", q["landed_unreviewed"])
+	}
+	entry, _ := list[0].(map[string]any)
+	reason, _ := entry["reason"].(string)
+	if !strings.Contains(reason, "names no commit") {
+		t.Errorf("reason %q, want it to say the approval names no commit rather than that no review happened", reason)
 	}
 }

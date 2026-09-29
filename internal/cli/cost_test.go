@@ -79,8 +79,37 @@ func TestReviewQueueCostPerLandedChangesetIsBounded(t *testing.T) {
 	runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 	withDirs := count() - before
 
+	// The three hundred above came in through one commit, so every one of them is a squash: the landing
+	// verdict short-circuits on "no markers came with it" and never asks the destination for an ancestor.
+	// A destination whose landings carry markers does ask, and that is the shape the queue meets in a real
+	// repository, so measure it too — twenty runs, each brought in by a merge commit with its ready marker
+	// and its approval behind it. Without this, the bound below would have been silently lifted by the read
+	// `landingLicence` adds, because the fixture could not reach it.
+	marked := 20
+	for i := 0; i < marked; i++ {
+		id := fmt.Sprintf("marked-%02d", i)
+		f.CreateBranch(id)
+		f.CommitChangeset(id, "main")
+		ready(t, f)
+		submit(t, f, "approve")
+		f.SwitchTo("main")
+		f.MustGit("merge", "--quiet", "--no-ff", "-m", "Merge "+id+" into main", id)
+	}
+	before = count()
+	runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
+	markedCost := count() - before
+
 	if empty < 1 {
 		t.Fatalf("the queue counted %d invocations: the shim measured nothing, so the bound below proves nothing", empty)
+	}
+	// Measured here: 16 invocations per landing whose chain carries markers, against the 11 above. The extra
+	// five are what a real chain costs — the boundary walk a squash never takes, the lifecycle walk over the
+	// run, and the one ancestor question the verdict asks. The bound is a third above, which still leaves
+	// room for one more read per landing and no room for walking a branch per landing.
+	if per := float64(markedCost-withDirs) / float64(marked); per > 21 {
+		t.Errorf("queue costs %.1f git invocations per marked landing (%d with %d marked landings, %d without): "+
+			"a landing whose chain carries an approval asks the destination one ancestor question, and nothing "+
+			"else should grow with it", per, markedCost, marked, withDirs)
 	}
 	const landings = 300
 	// Measured on this repository: 11 invocations per directory the destination carries. They are the chain

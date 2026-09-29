@@ -720,7 +720,7 @@ other pair beside it, and the only one that is also a state: `INTEGRATING` while
 integrate` declaration (§9.9) is the newest marker, the commit named so the author can see what they did
 and not only what it produced. The human surface prints no "run
 `git pair integration record`" beside a landing that has happened — the finding for work in the destination
-with no approving verdict is `LANDED UNREVIEWED`, which prints a read rather than a command. Reading a
+that the destination holds no approval of is `LANDED UNREVIEWED`, which prints a read rather than a command. Reading a
 landed changeset by id (`status --changeset <id>`, no branch carrying it) reads the same chain, so its
 `state`, its verdict and its thread files come from the destination's history — with the squash case above
 the honest limit, and the fields say so rather than reporting an empty range as a verdict. A recorded
@@ -809,6 +809,12 @@ carries with no integration ref: that is a merge whose record never ran, and it 
       "commit": "4f2b8c1",
       "chain": "",
       "reason": "the landing carried the directory in one commit, so no review markers came with it"
+    },
+    {
+      "changeset": "offer-expiry",
+      "commit": "9d1c07e",
+      "chain": "3b6a2f1..d40c81a",
+      "reason": "the approval (d40c81a) names 41e7b19, which the destination does not carry: the landing replayed the run, so what was approved is not what landed"
     }
   ]
 }
@@ -824,16 +830,20 @@ waiting for a reviewer"; this is "what a reviewer approved and the author has ha
 in both: a declaration is a marker, so a branch carrying one is not `READY`. The human form prints them
 under `AWAITING INTEGRATION`, and prints nothing when there are none — the array is `[]` either way.
 
-`landed_unreviewed` is the queue's second job: work that reached the integration branch with no approving
-verdict in the chain behind it. Nothing closes it with a command, so the heading prints the read that goes
-and looks; the `reason` separates a chain that carries no verdict from a landing that carried the directory
-in one commit and kept none of the history.
+`landed_unreviewed` is the queue's second job: work that reached the integration branch with nothing in the
+destination approving what arrived. Nothing closes it with a command, so the heading prints the read that
+goes and looks, and the `reason` says which of the three it is — no verdict in the chain, a chain that came
+with no verdict-bearing commits at all (the squash, which leaves `chain` empty), or an approval that names a
+commit the destination does not hold (a replayed run, which does not).
 
 ```text
 LANDED UNREVIEWED
 
   waitlist-rebooking
     on main at 4f2b8c1: the landing carried the directory in one commit, so no review markers came with it
+  offer-expiry
+    on main at 9d1c07e, chain 3b6a2f1..d40c81a: the approval (d40c81a) names 41e7b19, which the destination
+    does not carry: the landing replayed the run, so what was approved is not what landed
 
   read one with `git pair status --changeset <id>`
 ```
@@ -2027,7 +2037,7 @@ sibling merged your unlanded branch and *that* landed. Your directory is in trun
 precisely what the rule tests, so the cure is to land your own branch rather than someone else's
 merge of it. `git ls-tree <integration-branch> changesets/` shows whether the directory is there — and
 when it is, `queue` does not leave you to work out what came with it: it prints the changeset under
-`LANDED UNREVIEWED` unless the chain behind it carries an approving verdict.
+`LANDED UNREVIEWED` unless the chain behind it carries an approval of the commits that arrived.
 
 `ABOUT.md already has content: changesets/<cs>/ABOUT.md is not empty (pass --set-about to
 replace it)` (exit 2) — `init --about` refuses to discard a description that is
@@ -2118,10 +2128,22 @@ A missing entry that is *not* work in progress is reported rather than hidden. A
 integration branch carries whose chain holds no approving verdict is work that reached the destination
 without a review licensing it, and `queue` gives it its own `LANDED UNREVIEWED` heading; `git pair status`
 on a branch carrying no changeset of its own says the same inside its exit-2 answer. The heading prints a
-read (`git pair status --changeset <id>`) rather than a command, because no command closes it: the two
-reasons it prints — a chain that carries no verdict, and a landing that carried the directory in one commit
-and kept none of the history — are both facts about git's history, and only the first is a complaint about
-the review.
+read (`git pair status --changeset <id>`) rather than a command, because no command closes it: the reasons it
+prints — a chain that carries no verdict, a landing that carried the directory in one commit and kept none of
+the history, and an approval naming a commit the destination does not hold — are all facts about git's
+history, and only the first is a complaint about the review.
+
+`reviewed` and `check` ask the same question of the same trailer, which is the only reason the two surfaces
+agree. `check` asks whether an approval still licenses the branch in front of it, and refuses a live branch
+whose approval names a commit the branch no longer holds. `reviewed` asks whether the destination holds an
+approval of what the destination holds, and fails a landing whose approval names a commit the destination
+never received — the run was replayed between the approval and the landing, by a rebase merge or by the
+author rewriting under an approval. Those two replays leave identical commits behind, so nothing in the
+destination separates the merge that did the rewriting from the author who rewrote and was merged anyway;
+the strict answer covers both, and it is also why the answer cannot be taken before the merge, when the
+difference was still visible. One false finding comes with it, and it is worth naming: an approval written
+before `Review-Head` existed names no commit, so `reviewed` says false for work that was reviewed. Two
+changesets in this repository's own trunk are in that shape.
 
 A hand-written ready marker counts only if `Review-State: ready` and `Review-Changeset: <slug>`
 sit in a real trailer block, separated from the subject by a blank line and from each other by

@@ -96,11 +96,16 @@ const unreviewedDisplayCap = 10
 // run — a fact about git-pair's own paper trail, closable by running the command it printed. This one
 // reports that the reviewers never approved what is now in trunk, which no command closes.
 //
-// The two ways to be in this state are worth separating, because they are different questions to ask of
-// the history. A chain that carries no verdict means the work reached the branch without a review, or the
-// verdict was rewritten away. A landing that carried no ancestry — a squash, a cherry-pick — means the
-// review may have happened and nothing in the destination kept it: PRD §13 states that limit, and the
-// reason line here names it instead of leaving the reader to guess which of the two they are looking at.
+// The ways to be in this state are worth separating, because they are different questions to ask of the
+// history, and the reason line names which one the reader is looking at rather than leaving them to guess.
+//
+// A chain that carries no verdict means the work reached the branch without a review, or the verdict was
+// rewritten away. A landing that carried no ancestry — a squash, a cherry-pick — means the review may have
+// happened and nothing in the destination kept it. And a chain that carries an approval whose commit the
+// destination does not hold means the approval was about commits that did not arrive: the run was replayed
+// between the approval and the landing, so what main holds is not what was approved. The last of the three
+// is what keeps `reviewed` from meaning "somebody approved this at some point", and it is the same test
+// `check` runs against the branch, which is why the two surfaces cannot disagree.
 type unreviewedLanding struct {
 	Changeset string `json:"changeset"`
 	// Commit is the landing commit, shortened the way every other surface shortens a SHA it prints.
@@ -111,11 +116,11 @@ type unreviewedLanding struct {
 	Reason string `json:"reason"`
 }
 
-// unreviewedLandings asks, of each directory the integration branch carries, whether the chain behind it
-// carries a permitting verdict.
+// unreviewedLandings asks, of each directory the integration branch carries, whether the destination holds
+// an approval covering what it now holds.
 //
-// Cost: one chain derivation and one lifecycle walk per landed changeset, which follows the landings the
-// destination holds rather than the branches this clone has. It is the price of the finding being a fact
+// Cost: one chain derivation, one lifecycle walk and one `merge-base --is-ancestor` per landed changeset,
+// which follows the landings the destination holds rather than the branches this clone has. It is the price of the finding being a fact
 // about the destination — a clone that has fetched nothing but trunk gives the same answer, which is the
 // whole argument for reading the tree. A read that fails is skipped rather than reported: a destination
 // this clone cannot walk is not a finding about the work in it.
@@ -134,15 +139,15 @@ func (a *app) unreviewedLandings(ctx context.Context, repo *git.Repo, trunk chan
 		if err != nil {
 			continue
 		}
-		verdict := integrationVerdict(summary)
-		if verdict != nil && verdict.Outcome == model.OutcomeApprove {
+		licensed, reason := a.landingLicence(ctx, repo, trunk.Ref, chain, integrationVerdict(summary))
+		if licensed {
 			continue
 		}
 		found = append(found, unreviewedLanding{
 			Changeset: id,
 			Commit:    short(chain.Landing),
 			Chain:     chainRange(chain),
-			Reason:    unreviewedReason(chain, verdict),
+			Reason:    reason,
 		})
 	}
 	return found
@@ -157,10 +162,15 @@ func chainRange(c changeset.Chain) string {
 	return short(c.Base) + ".." + short(c.Head)
 }
 
-// unreviewedReason is the sentence that tells the reader which of the two findings this is.
+// unreviewedReason is the half of the decision that needs no git: what the chain itself said, in the
+// reader's terms. Empty means the chain carries an approval, which is not yet the whole answer — see
+// landingLicence, which then asks whether the destination holds the commit that approval names.
 func unreviewedReason(c changeset.Chain, verdict *lifecycle.Event) string {
 	if c.Squash {
 		return "the landing carried the directory in one commit, so no review markers came with it"
+	}
+	if verdict != nil && verdict.Outcome == model.OutcomeApprove {
+		return ""
 	}
 	switch {
 	case verdict == nil:
@@ -174,6 +184,47 @@ func unreviewedReason(c changeset.Chain, verdict *lifecycle.Event) string {
 	}
 }
 
+// landingLicence decides whether the destination holds an approval that covers the commits it now holds.
+// Both halves have to be true, and they fail for different reasons.
+//
+// The chain behind the directory must carry an approving verdict, which is what `unreviewedReason` decides.
+// And the commit that verdict names has to be in the destination as well. An approval is a statement about
+// a commit (`Review-Head`), and a landing that replayed the run — a rebase merge, or an amend or rebase the
+// author made between the approval and the merge — carries the marker commits across and leaves the
+// approved commits behind. The destination then holds a record of approving commits it does not have, which
+// is not an approval of what it does have. The two ways that happens leave the same history behind, so no
+// reading separates the merge that did the rewriting from the author who rewrote under an approval and was
+// merged anyway; the strict answer covers both. An approval that names no commit cannot be checked, so it
+// covers nothing either.
+//
+// The ancestor question is asked of the destination's tip rather than of the landing commit, because the
+// landing commit is the first commit of the run that carried the directory and usually sits *behind* the
+// approval it is being checked against.
+//
+// IsAncestor answers an error for a name this repository cannot resolve. That is taken as the same answer as
+// false: a destination that does not have the commit does not license it, whatever the reason the commit is
+// missing.
+func (a *app) landingLicence(ctx context.Context, repo *git.Repo, dest string, chain changeset.Chain,
+	verdict *lifecycle.Event) (bool, string) {
+	if reason := unreviewedReason(chain, verdict); reason != "" {
+		return false, reason
+	}
+	head := verdict.ReviewedHead
+	if head == "" {
+		return false, fmt.Sprintf("the approval (%s) names no commit, so the destination cannot be checked against it",
+			verdict.Short)
+	}
+	in, err := repo.IsAncestor(ctx, head, dest)
+	if err != nil {
+		in = false
+	}
+	if !in {
+		return false, fmt.Sprintf("the approval (%s) names %s, which the destination does not carry: the landing "+
+			"replayed the run, so what was approved is not what landed", verdict.Short, short(head))
+	}
+	return true, ""
+}
+
 // landingView is what `status` reports about a changeset that has reached the integration branch: the
 // commit the directory arrived in, the run of work that came with it, and whether that run carries a
 // permitting verdict. Every field is read out of the destination, so a clone with no branches and no
@@ -182,10 +233,13 @@ func unreviewedReason(c changeset.Chain, verdict *lifecycle.Event) string {
 // the last fetch.
 //
 // `reviewed` is the field a reader will ask about, and it is the one with a limit worth stating in its own
-// terms: it says whether the chain the destination carries holds an approval, not whether the work was
-// ever approved. A squash or a cherry-pick brings the tree and leaves the history behind, and then the
-// honest answer is false. `chain_base` and `chain_head` are empty in exactly that case, so the two fields
-// together distinguish "no verdict" from "nothing to read".
+// terms: it says whether the destination holds an approval of the commits it holds, not whether the work
+// was ever approved. It is false when no approval came with the run — a squash or a cherry-pick brings the
+// tree and leaves the history behind — and false when an approval came but names a commit the destination
+// does not have, which is what a replayed run looks like. `chain_base` and `chain_head` are empty in the
+// first case and not in the second, so the three fields together say which of them you are looking at.
+// `state` keeps its own meaning throughout: it is what the markers in the run recorded, so a replayed
+// landing can read APPROVED while `reviewed` says the approval does not cover what landed.
 type landingView struct {
 	Landed bool `json:"landed"`
 	// Commit is the commit that put the directory on the integration branch, and Branch is that branch's
@@ -225,14 +279,15 @@ func (a *app) landingView(ctx context.Context, repo *git.Repo, trunk changeset.D
 	if err != nil {
 		return out, err
 	}
-	verdict := integrationVerdict(summary)
-	out.Reviewed = verdict != nil && verdict.Outcome == model.OutcomeApprove
+	licensed, _ := a.landingLicence(ctx, repo, trunk.Ref, chain, integrationVerdict(summary))
+	out.Reviewed = licensed
 	return out, nil
 }
 
 // printUnreviewed writes the queue's own section for the finding. It gets a heading rather than a line
-// among the skip notes because the finding is not "nothing to do here": work reached trunk that nobody
-// approved, and the reader has to decide what that means. There is no command to print, which is the
+// among the skip notes because the finding is not "nothing to do here": work reached trunk that trunk holds
+// no approval of, whether because nobody approved it or because the approval is about commits that did not
+// arrive, and the reader has to decide what that means. There is no command to print, which is the
 // difference between this heading and the one it replaced — the action is to read the chain, and the
 // line names the read that shows it.
 func (a *app) printUnreviewed(found []unreviewedLanding, dest string, gap bool) {
