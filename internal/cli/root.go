@@ -25,7 +25,6 @@ import (
 	"gitpair/internal/changeset"
 	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
-	"gitpair/internal/reviewref"
 )
 
 // Version is stamped by the build.
@@ -340,14 +339,19 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 			return changeset.Changeset{}, lifecycle.Summary{}, "", err
 		}
 		// The chain's own start is the base for the read: it is where the run sits, which is the range the
-		// markers live in. A stacked child still relinks below, because the parent's tip as recorded in the
-		// child's yaml can name a revision this clone has not fetched — the same reason a stack is relinked
-		// on the branch path. Milestone M3 replaces that relink with a derived base and retires this one.
+		// markers live in. A stacked child whose parent branch is gone gets the same derivation every other
+		// surface uses, so the chain read and the branch read cannot print two bases for one changeset.
 		base := chain.Base
+		baseWhy := ""
 		if stack.Parent != "" && stack.ParentChangeset != "" {
-			if _, err := repo.RevParse(ctx, "refs/heads/"+stack.Parent); err != nil {
-				if _, err := reviewref.ResolveIntegration(ctx, repo, stack.ParentChangeset); err == nil {
-					base = reviewref.Integration(stack.ParentChangeset)
+			if _, err := repo.RevParse(ctx, "refs/heads/"+stack.Parent); errors.Is(err, git.ErrUnknownRevision) {
+				b, berr := changeset.BaseFor(ctx, repo, changeset.Changeset{Slug: slug, Base: base,
+					ParentBranch: stack.Parent, ParentChangeset: stack.ParentChangeset}, chain.Head, db)
+				if berr != nil && !errors.Is(berr, changeset.ErrNoDefaultBranch) {
+					return changeset.Changeset{}, lifecycle.Summary{}, "", berr
+				}
+				if b.Ref != "" {
+					base, baseWhy = b.Ref, b.Why
 				}
 			}
 		}
@@ -355,6 +359,7 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 			Slug:            slug,
 			Dir:             filepath.Join(changeset.Root, slug),
 			Base:            base,
+			BaseWhy:         baseWhy,
 			ParentBranch:    stack.Parent,
 			ParentChangeset: stack.ParentChangeset,
 			Exists:          true,
@@ -446,8 +451,8 @@ func (a *app) load(ctx context.Context) (*session, error) {
 }
 
 // explainBrokenStack turns "the base does not resolve" into what that means for a stack. A child is
-// measured against its parent branch; when that branch is gone and there is no integration ref to
-// relink the stack to, every command that measures answers with git's own unknown-revision error,
+// measured against its parent branch; when that branch is gone and the integration branch holds no landing
+// to measure against instead, every command that measures answers with git's own unknown-revision error,
 // which names neither the parent nor the way out. The stack needs a decision from its author, so the
 // message says so (PRD §21).
 func (a *app) explainBrokenStack(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
@@ -458,13 +463,14 @@ func (a *app) explainBrokenStack(ctx context.Context, repo *git.Repo, cs changes
 	if _, e := repo.RevParse(ctx, "refs/heads/"+cs.ParentBranch); e == nil {
 		return err
 	}
-	if cs.ParentChangeset != "" {
-		if _, e := reviewref.ResolveIntegration(ctx, repo, cs.ParentChangeset); e == nil {
+	if cs.ParentChangeset != "" && db.Ref != "" {
+		if landed, _ := changeset.CarriesDir(ctx, repo, db.Ref, cs.ParentChangeset); landed {
 			return err
 		}
 	}
-	return fmt.Errorf("%s is stacked on %s, which is gone with no integration record: the stack is unreconciled — choose a new base with `git pair init --parent <branch> --set-parent`, or land the parent and record it: %w",
-		cs.Slug, cs.ParentBranch, err)
+	return fmt.Errorf("%s is stacked on %s, which is gone and has no landing in %s: the stack is unreconciled — "+
+		"choose a new base with `git pair init --parent <branch> --set-parent`, or land the parent first: %w",
+		cs.Slug, cs.ParentBranch, displayRef(db.LocalName()), err)
 }
 
 // loadRepo resolves the repository without requiring a changeset.

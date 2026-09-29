@@ -10,7 +10,6 @@ import (
 	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
-	"gitpair/internal/reviewref"
 )
 
 // A stacked changeset is measured against its parent branch, and the parent does not wait: it takes
@@ -174,38 +173,35 @@ func (a *app) parentLive(ctx context.Context, repo *git.Repo, c changeset.Change
 	return st, nil
 }
 
-// parentLanded reads the parent's record and says what it means for the child in front of us.
+// parentLanded reads the parent's landing where landing lives — the destination's tree and history — and
+// says what it means for the child in front of us.
 //
-// Two git reads and one ref, and only for a stack that names a parent changeset: the record, whether the
-// child's head already carries it, and whether the destination branch does. The order is the cheap one —
-// a parent with no record here costs the ref lookup and nothing else.
+// One chain derivation, and only for a stack that names a parent changeset: the destination either carries
+// the parent's directory or it does not, and the run behind it names the commit the parent's work became.
+// A parent that reached some other branch is not landed, which is the same answer the write gate and the
+// queue give; `parentInDestination` covers the case where the parent's tip is in the destination without its
+// directory having arrived.
 func (a *app) parentLanded(ctx context.Context, repo *git.Repo, c changeset.Changeset,
 	db changeset.DefaultBranchRef, head string, st parentStatus) (parentStatus, error) {
-	if c.ParentChangeset == "" {
-		// The yaml names a branch and no changeset, so there is no record to ask. Silence is the answer:
-		// the branch is here, its tip is reported, and nothing about it is claimed from a name.
+	if c.ParentChangeset == "" || db.Ref == "" {
+		// The yaml names a branch and no changeset, so there is nothing to look for in the destination.
+		// Silence is the answer: the branch is here, its tip is reported, and nothing is claimed from a name.
 		return st, nil
 	}
-	commit, err := reviewref.ResolveIntegration(ctx, repo, c.ParentChangeset)
-	if errors.Is(err, reviewref.ErrNotIntegrated) {
+	chain, err := changeset.LandedChain(ctx, repo, db.Ref, c.ParentChangeset)
+	if errors.Is(err, changeset.ErrNoChain) {
 		return a.parentInDestination(ctx, repo, c, db, st)
 	}
 	if err != nil {
 		return st, err
 	}
+	commit := chain.Landing
 	st.Landed = short(commit)
 	st.landedFull = commit
-	if db.Ref != "" {
-		in, err := repo.IsAncestor(ctx, commit, db.Ref)
-		if err != nil {
-			return st, err
-		}
-		st.LandedInDefaultBranch = in
-		st.LandedReach = ", reachable from " + displayRef(db.LocalName())
-		if !in {
-			st.LandedReach = ", not reachable from " + displayRef(db.LocalName())
-		}
-	}
+	// The chain was derived from the destination, so its containment there is not a question to ask again;
+	// the reach sentence a durable ref needed has nothing left to hedge about.
+	st.LandedInDefaultBranch = true
+	st.LandedReach = ""
 	if head == "" {
 		return st, nil
 	}
@@ -313,9 +309,10 @@ func (st parentStatus) parentName() string {
 	return st.Branch
 }
 
-// parentGone decides what a vanished parent branch means. The branch is where an active parent lives,
-// so its absence is read from the durable records: an integration ref says it landed, nothing says it
-// ended, and either way the child needs a decision from its author rather than a new default.
+// parentGone decides what a vanished parent branch means. The destination is where a landed parent lives,
+// so its history is what the absence is read against: the destination carries the parent's directory, or it
+// carries neither the branch nor the landing and the child needs a decision from its author rather than a
+// new default.
 func (a *app) parentGone(ctx context.Context, repo *git.Repo, c changeset.Changeset,
 	db changeset.DefaultBranchRef, head string, approved *lifecycle.Event, st parentStatus) (parentStatus, error) {
 	if st.Changeset == "" {
@@ -323,30 +320,27 @@ func (a *app) parentGone(ctx context.Context, repo *git.Repo, c changeset.Change
 		st.Reason = fmt.Sprintf("parent branch %s is gone and the stack records no parent changeset to look for: the stack is unreconciled — %s", st.Branch, st.Next)
 		return st, nil
 	}
-	commit, err := reviewref.ResolveIntegration(ctx, repo, st.Changeset)
-	if errors.Is(err, reviewref.ErrNotIntegrated) {
-		st.Next = "choose a new base with `git pair init --parent <branch> --set-parent`, or land the parent and record it"
-		st.Reason = fmt.Sprintf("parent %s is gone with no integration record: the stack is unreconciled — %s", st.Changeset, st.Next)
+	if db.Ref == "" {
+		st.Next = "choose a new base with `git pair init --parent <branch> --set-parent`"
+		st.Reason = fmt.Sprintf("parent %s is gone and this repository has no integration branch to read: the stack is unreconciled — %s", st.Changeset, st.Next)
+		return st, nil
+	}
+	chain, err := changeset.LandedChain(ctx, repo, db.Ref, st.Changeset)
+	if errors.Is(err, changeset.ErrNoChain) {
+		st.Next = "choose a new base with `git pair init --parent <branch> --set-parent`, or land the parent first"
+		st.Reason = fmt.Sprintf("parent %s is gone and %s carries no directory for it: the stack is unreconciled — %s",
+			st.Changeset, displayRef(db.LocalName()), st.Next)
 		return st, nil
 	}
 	if err != nil {
 		return st, err
 	}
-	l, err := a.describeLanding(ctx, repo, commit)
-	if err != nil {
-		return st, err
-	}
+	commit := chain.Landing
 	st.Landed = short(commit)
 	st.landedFull = commit
-	st.LandedInDefaultBranch = l.InDefaultBranch
-	st.LandedReach = l.reach()
-	destination := "the branch that carries it"
-	switch {
-	case l.InDefaultBranch:
-		destination = l.DefaultBranch
-	case l.BranchKnown:
-		destination = fmt.Sprintf("%s, or the branch that carries it", l.DefaultBranch)
-	}
+	st.LandedInDefaultBranch = true
+	st.LandedReach = ""
+	destination := displayRef(db.LocalName())
 	// The same rule `parentLive` applies, for the case that has always relinked: the landing moves the
 	// base, and an approval is a claim about content. A squash, a rebase-merge and a cherry-pick move the
 	// content the review saw into commits the child never had, so the comparison says "different" and the

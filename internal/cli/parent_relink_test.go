@@ -162,8 +162,8 @@ func TestADerivedBaseNeedsNoRecordInThisClone(t *testing.T) {
 	res.mustSucceed(t, "status")
 	mustContain(t, res.stdout, "Base: "+shortOf(landing)+" — the parent alpha landed",
 		"the same base the record used to name, derived rather than read")
-	mustContain(t, res.stdout, "the parent's work has reached the destination",
-		"and the note says what is true about the parent rather than what this clone is missing")
+	mustContain(t, res.stdout, "landed as "+shortOf(landing),
+		"and the parent is reported landed from the destination, with no ref left in the repository")
 	mustNotContain(t, res.stdout, "git pair integration record",
 		"with no invocation offered: the landing needs no record to be known")
 }
