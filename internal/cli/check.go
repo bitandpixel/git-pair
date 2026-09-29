@@ -124,6 +124,11 @@ type checkJSON struct {
 	// fields to believe. An agent reading this verdict rather than the exit code should not have to
 	// parse a sentence to learn what comes next.
 	NextAction string `json:"next_action,omitempty"`
+	// Recommendations is advice a person can act on that the gate neither requires nor refuses: what would
+	// make the next round easier about the file rather than about the code. It is an array in both verdicts
+	// for the reason `reasons` is one, and empty in the ordinary case, so a consumer that ignores it loses
+	// nothing.
+	Recommendations []string `json:"recommendations"`
 }
 
 func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
@@ -150,6 +155,9 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		LandedCommit: short(g.Landed),
 		LandedAt:     g.Where,
 		Reasons:      g.Reasons,
+		// Advice the verdict does not depend on. It is computed after the gate, never inside it: a reason
+		// refuses a merge, and this does not.
+		Recommendations: stackLinkRecommendations(ctx, a, s),
 		// The CI half of the gate. `ready` answers "may this merge"; `integrating` answers "did the
 		// author ask for one", and a pipeline that merges on the first alone takes the decision out of
 		// the author's hands. Both in one command is the point: a CI job should not have to run a second
@@ -177,6 +185,10 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		// gate passed — is already in `ready`.
 		out.Reasons = []string{}
 	}
+	if out.Recommendations == nil {
+		// The same argument applies to the advice: one shape, in both verdicts.
+		out.Recommendations = []string{}
+	}
 
 	if a.json {
 		return a.emitJSON(out)
@@ -186,6 +198,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		for _, r := range out.Reasons {
 			a.printf("- %s\n", r)
 		}
+		a.printRecommendations(out.Recommendations)
 		// The verdict is the output, so it is not also an error message: `git pair check`
 		// failing is this command working, and CI reads the exit code rather than a
 		// `git-pair:` line prefixed over its own answer.
@@ -206,8 +219,40 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		a.printf("parent: %s landed as %s — %s\n", g.Parent.parentName(), g.Parent.Landed,
 			landedParentStep(s.cs, g.Parent))
 	}
+	a.printRecommendations(out.Recommendations)
 	a.printf("next:  %s\n", out.NextAction)
 	return nil
+}
+
+// printRecommendations writes the advice that is not part of the verdict. `recommend:` rather than the `- `
+// of a reason, because a reader who cannot tell the two apart will start treating advice as a refusal - and
+// the same prefix in both verdicts, since the advice does not change when the gate falls.
+func (a *app) printRecommendations(recs []string) {
+	for _, r := range recs {
+		a.printf("recommend: %s\n", r)
+	}
+}
+
+// stackLinkRecommendations is the advice for the shape `init` no longer leaves behind: a `base:` naming a
+// branch that carries exactly one unlanded changeset, with no stack recorded beside it. It is deliberately
+// not a reason. A changeset written before this rule existed must not be held by it, and which key a file
+// chose to name its parent with is not a condition a merge should depend on.
+func stackLinkRecommendations(ctx context.Context, a *app, s *session) []string {
+	if s.cs.Base == "" || s.cs.ParentChangeset != "" || s.cs.ParentBranch != "" {
+		return nil
+	}
+	db := a.destination(ctx, s.repo)
+	if db.Ref == "" || db.IsBranch(s.cs.Base) {
+		// Measuring against the integration branch is not a stack. That is the common case, and it is
+		// answered without reading the repository, so `check` costs what it cost before this existed.
+		return nil
+	}
+	pcs, candidates, _ := parentChangesetOn(ctx, s.repo, s.cs.Base, db)
+	if pcs == "" || len(candidates) != 1 {
+		return nil
+	}
+	return []string{fmt.Sprintf("base %s carries changeset %s, so it is your parent rather than your base: record the stack with `git pair init --parent %s`",
+		s.cs.Base, pcs, s.cs.Base)}
 }
 
 // integrationGate asks everything the integration policy asks, in one read of the repository, and

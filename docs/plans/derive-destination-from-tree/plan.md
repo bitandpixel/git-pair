@@ -79,15 +79,25 @@ comment justifying the guards at `:72-75`, the guards themselves at `:71` and `:
 
 #### Tasks
 
-- [ ] `init`: when the base is not the integration branch (already refused at `init.go:190`) and the branch it
+- [x] `init`: when the base is not the integration branch (already refused at `init.go:190`) and the branch it
   names carries exactly one unlanded changeset, record that id as `parent-changeset:`, reusing
   `parentChangesetOn` (`init.go:193`) rather than writing a second lookup.
-- [ ] `init`: two or more active changesets on that branch means no guess - leave the field empty and warn,
+- [x] `init`: two or more active changesets on that branch means no guess - leave the field empty and warn,
   naming every candidate so the author can pass the right one.
-- [ ] `check`: one reason for a stacked changeset with no `parent-changeset:` whose base names a branch
+- [x] `check`: one reason for a stacked changeset with no `parent-changeset:` whose base names a branch
   carrying exactly one unlanded changeset. Print the id it would have recorded. Non-blocking: it is a
   recommendation, and it must not gate a merge.
-- [ ] Confirm no read-time path calls the new inference: the inference lives in the writer, not the resolver.
+- [x] Confirm no read-time path calls the new inference: the inference lives in the writer, not the resolver.
+
+#### Discovery during execution
+
+The pair is recorded, not the id alone. `parent-changeset:` beside a plain `base:` would break the
+measurement base rather than improve it: `BaseFor` rule 1 keeps measuring against a live parent only when
+`parent:` names it, so an id without the branch skips straight to the derived base while the parent is still
+unlanded - the child's diff would then include the parent's work. `renderMetadata` drops
+`parent-changeset:` when `parent:` is absent, which is the same rule seen from the writer. So `init` records
+`parent:` and `parent-changeset:` and says out loud that it did, which is also the shape PRD §21 already
+spells. A `check` recommendation covers the files written before the rule existed.
 
 #### Verification
 
@@ -156,6 +166,15 @@ Unit tests in `internal/changeset/destination_test.go` for the five shapes; `int
 single-string claim across the surfaces that print it; the gate scripts for the end-to-end replay of the trap;
 one run of the whole flow against a scratch repository with a real remote, because the failure was only visible
 where a CI job would act on the answer.
+
+## Follow-ups discovered during execution
+
+- **The integrator never fires for a branch outside `feat/**` and `feature/**`.**
+  `.github/workflows/git-pair-integrate.yml` triggers on `workflow_run` from `CI` with that branch filter,
+  while `ci.yml` triggers on `**`. A changeset on `docs/derive-destination-from-tree` went green at 20:10 and
+  no merge job ran for it; the `*/15` schedule poll or a `workflow_dispatch` is the only way it lands. The
+  filter also disagrees with what `git pair init` accepts as a branch name. Worth its own changeset: the
+  integrator should follow the queue, not a list of branch-name patterns.
 
 ## Open decision, needed before M2 lands
 

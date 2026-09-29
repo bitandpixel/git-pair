@@ -47,7 +47,10 @@ func TestChangeInitCreatesScaffoldingFromBranchName(t *testing.T) {
 	}
 }
 
-// PRD §9.1 and §21: a stacked branch names its sibling changeset as its base.
+// PRD §9.1 and §21: a stacked branch names its sibling changeset as its base. The base handed to `init`
+// names a branch carrying exactly one unlanded changeset, so the stack is what gets recorded: `parent:` is
+// the base, and `parent-changeset:` is the half that still names the relationship after the parent lands and
+// its branch is gone.
 func TestChangeInitRecordsRequestedBase(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking-transaction")
@@ -57,8 +60,11 @@ func TestChangeInitRecordsRequestedBase(t *testing.T) {
 	f.CreateBranch("booking-transaction-tests", "booking-transaction")
 	runIn(t, f.Dir(), "init", "--base", "booking-transaction").mustSucceed(t, "init")
 
-	if got := f.MetadataBase("booking-transaction-tests"); got != "booking-transaction" {
-		t.Errorf("base = %q, want booking-transaction", got)
+	md := f.Read("changesets/booking-transaction-tests/CHANGESET.yaml")
+	for _, want := range []string{"parent: booking-transaction\n", "parent-changeset: booking-transaction\n"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("CHANGESET.yaml is missing %q:\n%s", want, md)
+		}
 	}
 	// The lower changeset's data is untouched.
 	if got := f.MetadataBase("booking-transaction"); got != "main" {
