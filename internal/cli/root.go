@@ -333,10 +333,15 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 			return changeset.Changeset{}, lifecycle.Summary{}, "", err
 		}
 		// The chain's own start is the base for the read: it is where the run sits, which is the range the
-		// markers live in. A stacked child whose parent branch is gone gets the same derivation every other
-		// surface uses, so the chain read and the branch read cannot print two bases for one changeset.
+		// markers live in. It is a derived base, so it is named as one — the reader of a landed changeset
+		// sees a commit and the reason for it rather than a bare object id. A stacked child whose parent
+		// branch is gone gets the same derivation every other surface uses, so the chain read and the
+		// branch read cannot print two bases for one changeset.
 		base := chain.Base
-		baseWhy := ""
+		baseWhy := "the run the destination's chain carries"
+		// Derived, so that nothing downstream mistakes it for a place work can land: a commit the run sits
+		// on is a measurement point, and the question "where does this go" has to be answered one level up.
+		baseDerived := true
 		if stack.Parent != "" && stack.ParentChangeset != "" {
 			if _, err := repo.RevParse(ctx, "refs/heads/"+stack.Parent); errors.Is(err, git.ErrUnknownRevision) {
 				b, berr := changeset.BaseFor(ctx, repo, changeset.Changeset{Slug: slug, Base: base,
@@ -345,7 +350,7 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 					return changeset.Changeset{}, lifecycle.Summary{}, "", berr
 				}
 				if b.Ref != "" {
-					base, baseWhy = b.Ref, b.Why
+					base, baseWhy, baseDerived = b.Ref, b.Why, b.Derived
 				}
 			}
 		}
@@ -354,6 +359,7 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 			Dir:             filepath.Join(changeset.Root, slug),
 			Base:            base,
 			BaseWhy:         baseWhy,
+			BaseDerived:     baseDerived,
 			ParentBranch:    stack.Parent,
 			ParentChangeset: stack.ParentChangeset,
 			Exists:          true,

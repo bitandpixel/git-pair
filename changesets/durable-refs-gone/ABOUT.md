@@ -34,6 +34,11 @@ branch, what chain does that history carry.
   is deleted: it was true whenever `parent.landed` was, and the index it came from is gone.
 - `change integrate` refuses a stacked child whose parent is not landed, and the reason names what to do
   (`git pair check`, then merge with ordinary git) instead of a record to write.
+- A changeset whose branch is gone is read from the destination's chain, and that read names its base as
+  derived (`base_why`: the run the chain carries) rather than printing a bare object id. It reports no
+  parent when `base:` is the integration branch: the commit the chain sits on is a measurement point, not a
+  branch that went away, and the reader of a changeset that was never stacked should not be told to go and
+  choose one.
 
 ## The rule that keeps it gone
 

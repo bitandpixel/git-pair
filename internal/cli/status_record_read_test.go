@@ -68,3 +68,30 @@ func TestStatusOfARecordReadReportsTheChainAsState(t *testing.T) {
 		t.Errorf("check passed on a branch whose changeset has landed: %s", got.stdout)
 	}
 }
+
+// A changeset measured against the integration branch has no parent, and the landed read must not invent
+// one. The base that read uses is a commit — where the run the destination carries sits — and a commit is
+// not a branch that can be gone. Printing it as a parent told the reader of a changeset that was never
+// stacked to go and choose a new one, and printed the base as a bare object id nobody can read.
+func TestLandedReadOfAnUnstackedChangesetReportsNoParent(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("alpha")
+	f.CommitChangeset("alpha", "main")
+	f.Commit("alpha work", gittest.WithFile("a.go", "package main\n"))
+	landAndRecord(t, f, "alpha", "main")
+	f.MustGit("branch", "-d", "alpha") // the tidy that leaves the chain as the only read
+
+	out := runIn(t, f.Dir(), "status", "--changeset", "alpha", "--json").mustSucceed(t, "status").json(t)
+	if out["parent"] != nil {
+		t.Errorf("parent = %v, want none: `base: main` is the integration branch, not a stack", out["parent"])
+	}
+	if out["base_why"] == "" {
+		t.Errorf("base_why = %q: the base is derived from the destination, and the reader has to be told", out["base_why"])
+	}
+
+	res := runIn(t, f.Dir(), "status", "--changeset", "alpha").mustSucceed(t, "status").stdout
+	mustNotContain(t, res, "Stack:", "there is no stack above a changeset measured against the integration branch")
+	mustNotContain(t, res, "the branch is gone", "the commit the chain sits on is not a parent branch that went away")
+	mustContain(t, res, "Base: "+shortOf(out["base"].(string))+" — the run the destination's chain carries",
+		"the base is printed short, with the rule that produced it")
+}

@@ -349,6 +349,15 @@ func ParentOf(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranch
 	}
 	sha, err := repo.RevParse(ctx, name)
 	if errors.Is(err, git.ErrUnknownRevision) {
+		// Not a branch. It may still name a commit: the landed read measures a changeset whose branch is
+		// gone against the commit its chain sits on, and a commit is a measurement point rather than a
+		// stack. Reporting it as a parent would tell a reader that a changeset never stacked on anything
+		// has a parent branch that went away. Only a name that resolves to nothing at all is that.
+		if _, cerr := repo.RevParse(ctx, c.Base); cerr == nil {
+			return Parent{}, nil
+		} else if !errors.Is(cerr, git.ErrUnknownRevision) {
+			return Parent{}, cerr
+		}
 		return Parent{Branch: strings.TrimPrefix(name, "refs/heads/")}, nil
 	}
 	if err != nil {
