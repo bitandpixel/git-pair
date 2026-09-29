@@ -1,5 +1,12 @@
 # Review architecture v2: two frozen refs, local-first landing
 
+> **Superseded by `docs/plans/simplify-architecture/plan.md`.** This plan's design was the pair of
+> durable refs and the create-only invariants around them. The plan that replaced it deletes the
+> namespace: a landing is the changeset directory in the destination branch's history, so there is no
+> ref to freeze, no create-only rule to hold, and no recorder to audit. Read the goal and the
+> constraints as history — the reasoning about what a landing must survive is still there, answered
+> from the destination's tree (PRD §13).
+
 ## Goal
 
 Take git-pair's durable layer out of the active review loop entirely. While work is in flight the branch
