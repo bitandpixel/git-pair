@@ -1,8 +1,8 @@
 // Package git wraps the git plumbing that git-pair is built on.
 //
-// Only read operations and two mutating verbs live here: `commit` and
-// `update-ref`. git-pair deliberately has no wrapper for push, merge, rebase,
-// reset, or branch deletion — see the source-hygiene test.
+// Only read operations and one mutating verb live here: `commit`. git-pair writes no ref
+// at any point in a lifecycle (§13.4), so it deliberately has no wrapper for push, update-ref,
+// symbolic-ref, merge, rebase, reset, or branch deletion — see the source-hygiene test.
 package git
 
 import (
@@ -509,40 +509,6 @@ func (r *Repo) Upstream(ctx context.Context, branch string) (string, error) {
 	return up, nil
 }
 
-// ConfigValues reads one key with `--get-all`, which is how a multi-valued key has to be read: a
-// single-valued read of `remote.origin.fetch` returns the first line and hides the rest, and the keys
-// git-pair writes are lists by construction.
-//
-// A key that is not set is an empty answer rather than an error. git exits 1 for it, and every caller of a
-// config read wants "not configured" to be an ordinary value rather than a failure to interpret.
-func (r *Repo) ConfigValues(ctx context.Context, key string) ([]string, error) {
-	out, err := r.Git(ctx, "config", "--local", "--get-all", key)
-	if err != nil {
-		var ge *Error
-		if errors.As(err, &ge) && ge.ExitCode == 1 {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var values []string
-	for _, line := range strings.Split(out, "\n") {
-		if line = strings.TrimRight(line, "\r"); line != "" {
-			values = append(values, line)
-		}
-	}
-	return values, nil
-}
-
-// ConfigAdd appends one value to a key in the repository's local config.
-//
-// `--add`, deliberately: `remote.<name>.fetch` is a list, and writing it with a plain `git config` would
-// replace the clone's branch fetch refspec — a repository silently losing its own configuration because a
-// review tool recorded a landing.
-func (r *Repo) ConfigAdd(ctx context.Context, key, value string) error {
-	_, err := r.Git(ctx, "config", "--local", "--add", key, value)
-	return err
-}
-
 // Fetch refreshes remote-tracking refs. It changes nothing in the working tree or index,
 // which is what makes it safe for `change wait` to run unattended.
 func (r *Repo) Fetch(ctx context.Context, remote string) error {
@@ -554,84 +520,8 @@ func (r *Repo) Fetch(ctx context.Context, remote string) error {
 	return err
 }
 
-// FetchRefs brings explicit refspecs and prunes nothing.
-//
-// The absence of `--prune` is load-bearing, not an oversight. git prunes the destination subtree of
-// *every* refspec in the command, so fetching `refs/git-pair/*:refs/git-pair/*` with `--prune` deletes
-// this clone's own records whenever the remote lacks them — which is exactly the state of a clone that
-// recorded a landing and has not published it. A read that quietly deletes the paper trail it came to
-// read is worse than a read that misses something. (Found by a test: the fixture recorded, fetched, and
-// arrived at its own report with the record gone.)
-func (r *Repo) FetchRefs(ctx context.Context, remote string, refspecs ...string) error {
-	return r.fetch(ctx, false, remote, refspecs...)
-}
-
-// FetchPruned fetches explicit refspecs and prunes the namespaces they address. It is the shape the
-// mirror side of `--fetch` needs: `--prune` so a mirror cannot outlive the ref it mirrors and keep
-// reporting a deleted record as published.
-//
-// Pruning stays scoped to what the refspecs address — measured, not assumed: a prune with the durable
-// namespace's mirror refspec leaves `refs/remotes/origin/main` and unrelated remote-tracking entries
-// alone. That scoping is why the two sides are separate calls: the mirror wants it and the record
-// namespace must never get it.
-func (r *Repo) FetchPruned(ctx context.Context, remote string, refspecs ...string) error {
-	return r.fetch(ctx, true, remote, refspecs...)
-}
-
-func (r *Repo) fetch(ctx context.Context, prune bool, remote string, refspecs ...string) error {
-	if len(refspecs) == 0 {
-		return errors.New("git: fetch requires at least one refspec")
-	}
-	args := []string{"fetch", "--quiet", "--no-tags"}
-	if prune {
-		args = append(args, "--prune")
-	}
-	if remote != "" {
-		args = append(args, remote)
-	}
-	args = append(args, refspecs...)
-	_, err := r.Git(ctx, args...)
-	return err
-}
-
 func (r *Repo) ResolveRef(ctx context.Context, ref string) (string, error) {
 	return r.RevParse(ctx, ref)
-}
-
-// zeroOID is git's null object id, which is what `update-ref` accepts as an old value meaning "this
-// ref must not exist yet".
-const zeroOID = "0000000000000000000000000000000000000000"
-
-// ErrRefTaken reports that a create-only ref write found the name already held by a different
-// commit. It is a condition rather than a failure of git, so the caller can turn it into its own
-// refusal with its own wording.
-var ErrRefTaken = errors.New("ref already exists at a different commit")
-
-// CreateRefIfAbsent points ref at sha only when ref does not already exist. It reports whether the
-// ref was created by this call.
-//
-// The create is atomic at the git level: `update-ref <ref> <new> <old>` with the all-zeros old value
-// fails if the ref has come into existence, so two processes recording the same fact cannot both win,
-// and the caller's "did it already exist?" answer is git's rather than a read that could go stale
-// between checking and writing. A refusal is re-read, because the only reason a ref that was absent a
-// moment ago is now present is that somebody else won: the same target is a no-op success, and a
-// different one is ErrRefTaken naming both commits — "what is on the record, and what did I ask for"
-// is the question a re-run is actually asking.
-func (r *Repo) CreateRefIfAbsent(ctx context.Context, ref, sha string) (bool, error) {
-	if _, err := r.Git(ctx, "update-ref", ref, sha, zeroOID); err != nil {
-		existing, readErr := r.ResolveRef(ctx, ref)
-		if readErr != nil {
-			// Either the ref is gone by the time we looked, or the write failed for a reason that has
-			// nothing to do with ownership: report what git said.
-			return false, err
-		}
-		if existing == sha {
-			return false, nil // the same writer, or a retry of it
-		}
-		return false, fmt.Errorf("%w: %s names %s, and %s was asked for",
-			ErrRefTaken, ref, short(existing), short(sha))
-	}
-	return true, nil
 }
 
 // short abbreviates a commit sha the way git's own messages do, for text a human reads.

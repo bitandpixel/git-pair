@@ -13,10 +13,10 @@ import (
 // `git rev-parse --verify --quiet <rev>` reports an unresolvable revision by exiting 1
 // with *no stderr at all*. That is why git.Error carries an exit code: a caller that
 // only reads the message cannot tell "this ref does not exist" from "git failed", and
-// would report a missing review ref as a repository error.
+// would report an absent ref as a repository error.
 //
 // These tests pin that distinction at the layer that has to get it right, because every
-// consumer above it — CreateRefIfAbsent, the review-ref lookup, `status` before the
+// consumer above it — a base that does not resolve, `status` before the
 // first review — depends on reading absence as absence.
 
 // openFixture returns a fixture repository with one commit, plus a git.Repo on the same
@@ -97,51 +97,10 @@ func TestRevParseMapsUnknownRefToSentinel(t *testing.T) {
 func TestUnknownRefIsAbsenceForEveryReader(t *testing.T) {
 	f, repo := openFixture(t)
 	ctx := context.Background()
-	head := f.Head()
-	const ref = "refs/git-pair/archive/booking-transaction"
+	const ref = "refs/heads/nope-not-here"
 
 	if _, err := repo.ResolveRef(ctx, ref); !errors.Is(err, git.ErrUnknownRevision) {
 		t.Errorf("ResolveRef on an absent ref = %v, want ErrUnknownRevision", err)
-	}
-
-	// CreateRefIfAbsent must be able to tell "absent" from "git broke", because on the
-	// latter it must not write.
-	created, err := repo.CreateRefIfAbsent(ctx, ref, head)
-	if err != nil {
-		t.Fatalf("CreateRefIfAbsent = %v, want no error for an absent ref", err)
-	}
-	if !created {
-		t.Error("CreateRefIfAbsent reported no creation for a ref that did not exist")
-	}
-	got, err := repo.ResolveRef(ctx, ref)
-	if err != nil || got != head {
-		t.Errorf("%s = %q (%v), want %s", ref, got, err, head)
-	}
-
-	// Re-asking for the commit the ref already names is a no-op that succeeds: agents retry, and the
-	// retry has to complete a record rather than fail on the half that already worked.
-	created, err = repo.CreateRefIfAbsent(ctx, ref, head)
-	if err != nil || created {
-		t.Errorf("re-creating the same ref = (%v, %v), want a no-op that succeeds", created, err)
-	}
-
-	// Asking for a different commit is a condition the caller names in its own words, and the ref
-	// does not move. This is the whole difference between a record and a pointer.
-	f.Commit("second", gittest.WithFile("b.txt", "2\n"))
-	created, err = repo.CreateRefIfAbsent(ctx, ref, f.Head())
-	if !errors.Is(err, git.ErrRefTaken) {
-		t.Fatalf("second CreateRefIfAbsent = %v, want ErrRefTaken", err)
-	}
-	if created {
-		t.Error("CreateRefIfAbsent reported creating a ref that already exists")
-	}
-	// The message carries both commits, because "what is recorded, and what did I ask for" is the
-	// question a re-run is asking.
-	if msg := err.Error(); !strings.Contains(msg, head[:7]) || !strings.Contains(msg, f.Head()[:7]) {
-		t.Errorf("ErrRefTaken = %q, want it to name both the recorded and the requested commit", msg)
-	}
-	if got, err := repo.ResolveRef(ctx, ref); err != nil || got != head {
-		t.Errorf("%s moved from %s to %q (%v)", ref, head, got, err)
 	}
 
 	// A missing path at a real revision is absence too.
