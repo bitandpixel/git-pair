@@ -90,6 +90,11 @@ the tool's answer to their clutter is `git pair change tidy`, in its own changes
 Deleting a landed changeset's directory would delete the statement the destination carries, which is the
 thing this plan exists to protect.
 
+The exception, so the diff is not a surprise: this changeset moves the plan into `docs/plans/completed/`, and
+three `ABOUT.md` files outside its own point at the old path — M2's (already on trunk), M3's and M4's. Each
+gets that one line, the path, and nothing else. Their design claims are left exactly as their own changesets
+wrote them, including the ones that describe the durable layer as if it were still there.
+
 ## State of the stack
 
 M1 `81f01e2` and M2 `4ccc9c7` are on trunk. M3 `feat/derived-bases` stands at `fbb94bd` and M4
