@@ -1,3 +1,2 @@
 id: feat-landing-is-a-tree-fact
-parent: feat/landed-tree-model
-parent-changeset: feat-landed-tree-model
+base: main
