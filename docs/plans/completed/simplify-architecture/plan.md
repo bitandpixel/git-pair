@@ -573,10 +573,10 @@ Executed 2026-09-29, one changeset per milestone, each handed off green.
 
 | Milestone | Branch | Shipped |
 | --------- | ------ | ------- |
-| M1 | `feat-landed-tree-model` (merged, `81f01e2`) | `.landed/` in the tree model: `Reserved`, `ActiveIDs`, `LandedIDs`, `DirAt`, `DirPathspecs` |
-| M2 | `feat-landing-is-a-tree-fact` | `CarriesDir`, `LandedChain`, `LandingCommit`; `LANDED UNREVIEWED`; `status`'s landing block read from the destination |
-| M3 | `feat-derived-bases` | `BaseFor` with the rule attached (`base_via`, `destination_via`), the destination walk past a landed parent |
-| M4 | `feat-change-tidy` | `git pair change tidy`, renames-only, `--dry-run`, `--all`, JSON `actions` |
+| M1 | `feat/landed-tree-model` (merged, `81f01e2`) | `.landed/` in the tree model: `Reserved`, `ActiveIDs`, `LandedIDs`, `DirAt`, `DirPathspecs` |
+| M2 | `feat/landing-is-a-tree-fact` | `CarriesDir`, `LandedChain`, `LandingCommit`; `LANDED UNREVIEWED`; `status`'s landing block read from the destination |
+| M3 | `feat/derived-bases` | `BaseFor` with the rule attached (`base_ref`, `base_why`), the destination walk past a landed parent (`destination_via`) |
+| M4 | `feat/change-tidy` | `git pair change tidy`, renames-only, `--dry-run`, `--all-landed`, JSON `actions` |
 | M5 | `feat/durable-refs-gone` | `internal/reviewref`, the five `integration`-family files, `internal/git/push.go` and ~5.7k lines of them deleted; `internal/cli/landing.go` added; the hygiene ref-write ban |
 | M6 | same branch | PRD §3–§30, README, the shipped skill and `references/`; `TestNoDocNamesADurableRef`; the supersession notices; the gate scripts |
 
@@ -594,4 +594,12 @@ Three things the plan did not predict:
   changeset as `landed on <destination> at <sha>` only when the destination is a branch other than the
   integration branch *and* the branch still carries a live candidate; every landing the gates replay is
   either on trunk (the resolver drops the candidate) or a release line the reader has to name. It stays
-  because a changeset that vanishes from the queue silently is a mystery, and it is covered by the Go tests.
+  because a changeset that vanishes from the queue silently is a mystery. Nothing tested its text, so
+  walking the skill added `TestQueueNamesALandingOnABranchThatIsNotTheDefault`, which also pins that such a
+  changeset is not offered for review.
+- **Reading the shipped skill against a scratch repository found a bug.** `status --changeset <id>` for a
+  landed changeset whose branch is gone rebuilds the changeset from the chain the destination carries, whose
+  start is a commit. `ParentOf` looked for `refs/heads/<that sha>`, found none, and reported the base as a
+  parent branch that had gone away, advising a reader of a changeset that was never stacked to choose a new
+  parent. The read now asks git whether the name resolves as an object before concluding it was a branch,
+  and names its base as derived rather than printing a bare object id.
