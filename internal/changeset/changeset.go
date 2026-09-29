@@ -356,9 +356,16 @@ func parentOfBranch(ctx context.Context, repo *git.Repo, branch, own string, db 
 	return Parent{Branch: branch, Tip: sha}, nil
 }
 
-// StackAt reads the stack relationship a changeset directory recorded at a revision.
+// StackAt reads the stack relationship a changeset directory recorded at a revision, under either
+// spelling of the directory.
 func StackAt(ctx context.Context, repo *git.Repo, rev, slug string) (Stack, error) {
-	md, err := metadataAt(ctx, repo, rev, filepath.Join(Root, slug))
+	dir, ok := DirAt(ctx, repo, rev, slug)
+	if !ok {
+		// Ask for the active spelling anyway, so the error a caller already handles is the one it gets:
+		// `git.ErrUnknownPath` naming the path a reader would look for first.
+		dir = ActiveDirPath(slug)
+	}
+	md, err := metadataAt(ctx, repo, rev, dir)
 	if err != nil {
 		return Stack{}, err
 	}

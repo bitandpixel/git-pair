@@ -531,7 +531,7 @@ func printStatus(a *app, v *statusView) {
 	} else {
 		// A changeset read from its durable record has no branch to name; saying "Branch:" with
 		// nothing after it would read as a bug rather than as an absence.
-		a.printf("Branch: none (read from the durable record)\n")
+		a.printf("Branch: none (read from the landed chain)\n")
 	}
 	a.printf("Base: %s\n", j.Base)
 	a.printf("State: %s\n", j.State)
