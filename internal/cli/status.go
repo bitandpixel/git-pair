@@ -448,7 +448,7 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 		// Last, because it supersedes both answers above. The destination holds the directory, so the work
 		// has been handed on: nothing in git-pair moves the tree, and no git-pair command is the next step.
 		// What is left of the branch's life is ordinary git.
-		view.json.NextAction = fmt.Sprintf("landed at %s in %s: nothing further is recorded for a changeset that has landed",
+		view.json.NextAction = fmt.Sprintf("landed at %s in %s: nothing further to do for a changeset that has landed",
 			view.json.LandedCommit, view.json.LandedBranch)
 	}
 	return view, nil
@@ -616,7 +616,7 @@ func nextAction(s lifecycle.Summary, base string) string {
 		// The state is WORKING, which would otherwise read as "keep going". Nothing is
 		// owed on an abandoned changeset, and `change ready` refuses it, so the honest
 		// next step is none. (PRD §9.7)
-		return "abandoned: nothing further is recorded; `git pair review history --changeset <slug>` reads what happened"
+		return "abandoned: nothing further to do; `git pair review history --changeset <slug>` reads what happened"
 	}
 	switch s.State {
 	case model.StateWorking:
