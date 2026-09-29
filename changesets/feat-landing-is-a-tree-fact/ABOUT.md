@@ -55,11 +55,13 @@ safe is the gate, which refuses on the landing before it asks the drift question
 `chain_base`/`chain_head` are empty and `reviewed` is false whatever happened on the branch. The §29 golden
 workflow lands in exactly that shape and now asserts `WORKING` rather than `APPROVED`. PRD §13 has to state
 the limit in the commit that deletes the refs (M5), which is why that claim is not made here.
+> what will the end status be for a changeset that's been squash-merged into trunk?
 
 **The cost contract moved honestly.** The queue's landing report used to cost nothing per landing because
 it read one ref listing. It now costs a bounded few reads per landing — measured at 11 git invocations each,
 bounded at 14 — which is the price of the answer being true in a clone that has fetched nothing but the
 destination. `TestReviewQueueCostPerLandedChangesetIsBounded` measures it.
+> is this cost per-changeset? or for the whole report?
 
 ## Validation
 
@@ -96,3 +98,4 @@ destination. `TestReviewQueueCostPerLandedChangesetIsBounded` measures it.
 - Should `queue`'s `LANDED UNREVIEWED` heading distinguish "the branch was merged without review" from "the
   review happened and the landing kept none of it" more loudly than a sentence? The reason line does the
   work today; the shape is the same heading either way.
+> could we have a REVIEW DISCARDED status that's derivable?
