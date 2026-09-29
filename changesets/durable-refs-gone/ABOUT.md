@@ -2,11 +2,15 @@
 
 ## Summary
 
-Milestone M5 of `docs/plans/completed/simplify-architecture/plan.md`: delete the durable-ref subsystem. git-pair
-writes no ref at any point in a lifecycle, and `refs/git-pair/` becomes a namespace the code neither reads
-nor writes. Against `origin/main` the branch is 99 files, +4832/−9915 — that number is the whole stack.
-This changeset is 79 files, +2067/−9015 against its base `feat/change-tidy`; the deletion proper is
-`5e987db`, and what follows it is the rest of the system being told.
+Milestones M5 and M6 of `docs/plans/completed/simplify-architecture/plan.md`, in one changeset because they are
+one change told twice: M5 deletes the durable-ref subsystem, and M6 is the sweep that stops the documents
+promising it. git-pair writes no ref at any point in a lifecycle, and `refs/git-pair/` becomes a namespace the
+code neither reads nor writes — and now no document names it either, which `TestNoDocNamesADurableRef` holds
+with no whitelist. M6's own verification item, following the skill top to bottom against a scratch repository,
+is the run described under Validation rather than a diff. Against `origin/main` the branch is 89 files, +3557/−9243 — that number is the whole stack, with M2's landing
+read and M3's and M4's work inside it. This changeset is 80 files, +2091/−9027 against its base
+`feat/change-tidy`; the deletion proper is `eff70d3`, 46 files and 6521 of those deletions, and what follows
+it is the rest of the system being told.
 
 ## What is gone
 
@@ -24,8 +28,12 @@ branch, what chain does that history carry.
 ## What a reader sees instead
 
 - `LANDED, UNRECORDED` is now `LANDED UNREVIEWED`, and it is a different finding: work reached the
-  destination with no permitting verdict in the chain the destination carries. Nothing closes it with a
-  command, so there is no closing command to print; the fix printed is `git pair status --changeset <id>`.
+  destination with no approval the destination can show. The licence is two conditions, both read from the
+  destination — its chain carries a permitting verdict, and that verdict names a commit the destination holds
+  as well — so a squash that brought no markers, an approval whose commits the landing left behind, and an
+  approval that names no commit are all reported, while a merge commit that carried the run is not. Nothing
+  closes it with a command, so there is no closing command to print; the fix printed is
+  `git pair status --changeset <id>`.
   The findings ride `status`'s exit-2 error on stderr, and `queue --json` carries `landed_unreviewed`.
 - `next_action` for a ready head is one sentence — `` `git pair check`, then merge into main with ordinary
   git `` — because there is no step after the merge. `contract_test.go` pins that string, and
@@ -59,13 +67,16 @@ chain the merge carried — after the branch is deleted as well as before. A clo
 the landing without being told to fetch. `scripts/gates/ci-integrate.sh` now asserts the shared remote holds
 branches and nothing else, and that the directory entered the destination exactly once.
 `scripts/gates/pty-walkthrough.sh` moves its "a command that writes asks for nothing at a terminal" subject
-from `integration configure` to `change tidy`. 110 `ok:` steps in e2e-29 where there were 72.
+from `integration configure` to `change tidy`. 113 `ok:` steps in e2e-29 where there were 72.
 
 ## Known limitations, stated where the refs used to promise otherwise
 
-- A squash, cherry-pick or rebase-merge landing that carries no markers keeps nothing: `chain_base`,
-  `chain_head` empty and `reviewed: false`. PRD §13.3 says so, and `change tidy` is the mitigation for the
-  clutter it leaves. A `--no-ff` merge keeps the whole chain, which is the shape the gates replay.
+- A squash or cherry-pick landing that carries no markers keeps nothing: `chain_base`, `chain_head` empty
+  and `reviewed: false`. PRD §13.3 says so, and `change tidy` is the mitigation for the clutter it leaves. A
+  rebase merge is the second shape, and it fails the other way: the marker commits come across and the
+  commits they approved do not, so the record survives — `state` stays `APPROVED` — while `reviewed` is false,
+  because an approval of commits the destination does not hold licenses nothing. A `--no-ff` merge keeps the
+  chain and the approval together, which is how this repository lands and what the gates replay.
 - A landing on a branch that is not the changeset's destination is not landed. That is D1, not a bug: the
   answers come from the destination, and `--default-branch` names the destination for a read.
 - An abandoned changeset's history lives on its branch. Deleting the branch deletes the finding, which is
@@ -81,13 +92,29 @@ thing this plan exists to protect.
 
 ## State of the stack
 
-M1 `81f01e2` (trunk), M2 `feat/landing-is-a-tree-fact`, M3 `feat/derived-bases`, M4 `feat/change-tidy`.
-None of M2–M4 has merged, so `origin/main` is still M1 and this branch stays stacked on M4: the review diff
-is against `feat/change-tidy`, and `base: feat/change-tidy` says so.
+M1 `81f01e2` and M2 `4ccc9c7` are on trunk. M3 `feat/derived-bases` stands at `fbb94bd` and M4
+`feat/change-tidy` at `9a21f20`, both restacked onto the merged M2, and this branch is stacked on M4: the
+review diff is against `feat/change-tidy`, and `base: feat/change-tidy` says so.
+
+The restack moved every commit in this changeset, so the ids in this file are the ones to trust rather than
+the ones this changeset carried when it was first offered. Two replayed gate commits were already on the
+trunk line and are not repeated here: the pipefail fix, which M2 hardened further while it was in review by
+matching the painted transcript in bash instead of piping it to `grep -q`, and the bash-matching fix, which
+was cherry-picked into M2 outright. The first survives for its e2e half alone, the second is gone.
+
+One hunk was resolved wrongly during the restack, and it is worth naming because the gate caught it rather
+than the reviewer having to: the tidy step asserted the landing message `check` returns for a branch that
+still carries the changeset, and after a tidy moves the directory away no branch does — the answer comes from
+the path that reports no work in progress and names the destination as the holder. The assertion reads that
+message now.
 
 ## Validation
 
-- `mise run gates` green: the sharded suite, e2e-29 (110 steps), pty-walkthrough, ci-integrate (60 checks).
+- `mise run gates` green: the sharded suite, e2e-29 (113 steps), pty-walkthrough, ci-integrate (60 checks).
+- The strict licence is tested at its three edges — a landing that replayed the run, a merge commit that
+  carried it, and an approval naming no commit — in `internal/cli/landed_test.go`. `cost_test.go` measures a
+  destination whose landings carry markers as well as one whose do not, because the ancestor question is only
+  asked in the first, and a bound measured on the second would have been lifted in silence.
 - `go test ./internal/cli/ -run 'TestCommandsNamedInTheDocsExist|TestEveryCommandIsNamedInTheDocs|TestNoDocNamesADurableRef'`
   green, so no document names a path under the retired namespace and no help text names a deleted command.
 - `git grep -n 'refs/git-pair' -- '*.go'` is empty outside the test fixtures that plant inert refs to prove
