@@ -51,8 +51,8 @@ func TestStatusReportsADeclaration(t *testing.T) {
 	}
 	// The landing contract is still in the sentence: the declaration does not end the author's obligations,
 	// it moves the merge to whoever owns the destination branch.
-	if !strings.Contains(next, "integration record") {
-		t.Errorf("next_action = %q, want it to keep naming the record", next)
+	if !strings.Contains(next, "merge into main with ordinary git") {
+		t.Errorf("next_action = %q, want it to keep naming the merge", next)
 	}
 	if j["abandoned"] != false {
 		t.Errorf("abandoned = %v on a declared changeset", j["abandoned"])

@@ -497,9 +497,9 @@ func printStatus(a *app, v *statusView) {
 		a.printf("\nDeclared:\n  ready to integrate at %s (`git pair change integrate`)\n", j.IntegrateCommit)
 	}
 	if j.Landed {
-		// Nothing here tells the reader to run `git pair integration record`: this block prints because the
-		// destination already holds the directory, and the `--json` answer on the same facts is "nothing
-		// further is recorded for a changeset that has landed". Work that reached the destination with no
+		// Nothing here tells the reader to run a command: this block prints because the destination
+		// already holds the directory, and the `--json` answer on the same facts is "nothing further to
+		// do for a changeset that has landed". Work that reached the destination with no
 		// approving verdict is a different finding — LANDED UNREVIEWED, which `queue` prints and `status`
 		// attaches to the exit-2 answer on the destination branch.
 		a.printf("\nLanded:\n  %s in %s\n", j.LandedCommit, j.LandedBranch)
@@ -659,9 +659,8 @@ func landingNextAction(base string) string {
 	if base == "" {
 		base = "the base branch"
 	}
-	// The steps are the landing contract (PRD §29): record, then publish, then the branch may go. Publish
-	// is spelled here because after the branch is deleted the refs are the only copy of the chain, and a
-	// reader told only to record has been told to leave that copy unpublished.
-	return fmt.Sprintf("`git pair check`, then merge into %s with ordinary git, then "+
-		"`git pair integration record`, then `git pair integration publish`", base)
+	// The steps are the landing contract (PRD §29): the gate, then the merge with ordinary git. There is
+	// no step after the merge — the destination carrying `changesets/<id>/` is the record, and git-pair
+	// writes no ref that could be left unpublished.
+	return fmt.Sprintf("`git pair check`, then merge into %s with ordinary git", base)
 }
