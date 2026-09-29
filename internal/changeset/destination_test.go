@@ -155,10 +155,13 @@ func TestDestinationWalksAParentChain(t *testing.T) {
 	}
 }
 
-// The walk ends where the chain has no answer, and says which answer it fell back to: the branch a
-// parent's own record named is gone from this clone, so the only branch left to name is the destination
-// branch. `Unreachable` is what keeps that fallback from reading as a fact about the work.
-func TestDestinationFallsBackWhenTheParentBaseIsGone(t *testing.T) {
+// A parent merged only into a release branch is not landed (§12: the integration branch holds the directory
+// or it does not), so the child's stack still stands on the parent branch — and that branch is where the
+// child's work is asked to land. The record used to answer this by reading the parent's own base out of the
+// landing commit and, when that branch had been deleted, falling back to the integration branch and naming
+// it unreachable. With the refs gone there is no such reading: the tree says the parent is live work, and the
+// destination is the branch the stack sits on.
+func TestDestinationIsTheLiveParentBranchWhenTheParentReachedOnlyAReleaseLine(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
 	f.CreateBranch("release/2.x")
@@ -170,19 +173,21 @@ func TestDestinationFallsBackWhenTheParentBaseIsGone(t *testing.T) {
 	f.Commit("test work", gittest.WithFile("booking_test.txt", "1\n"))
 
 	f.SwitchTo("release/2.x")
-	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land booking", "booking")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "merge booking into the release line", "booking")
 	recordLanding(t, f, "booking", f.Head(), tip)
-	// The branch the parent said it was going to is gone, and its work is only in the record now.
 	f.SwitchTo("main")
 	f.ForceDeleteBranch("release/2.x")
 
 	f.SwitchTo("booking-tests")
 	got := destinationOf(t, f, "booking-tests")
-	if got.Ref == "" || got.Why != "default" {
-		t.Errorf("destination = %s, want the default branch, resolved by the fallback", got)
+	if got.Ref != "booking" || got.Why != "base" {
+		t.Errorf("destination = %s, want booking (base): the parent is live work and the stack sits on it", got)
 	}
-	if got.Unreachable != "release/2.x" {
-		t.Errorf("unreachable = %q, want release/2.x: the reader learns the fallback ran", got.Unreachable)
+	if got.Unreachable != "" {
+		t.Errorf("unreachable = %q, want empty: nothing in the tree names a branch that went away", got.Unreachable)
+	}
+	if len(got.Via) != 0 {
+		t.Errorf("via = %v, want none: nothing was crossed", got.Via)
 	}
 }
 
