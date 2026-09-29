@@ -90,9 +90,9 @@ func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db Default
 				if err != nil {
 					return out, err
 				}
+				// The loop guard belongs to the walk below, which marks the id before it reads the record. Marking
+				// it here would make the walk refuse the very hop this rule just decided to take.
 				if slices.Contains(ids, base) && !seen[base] {
-					seen[base] = true
-					out.Via = append(out.Via, base)
 					base, parentChangeset = "", base
 					continue
 				}
