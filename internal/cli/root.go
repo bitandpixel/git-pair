@@ -215,6 +215,9 @@ type session struct {
 	// session because "which changeset is this?" is a comparison against trunk, and a surface
 	// that reports the answer should be able to report the other side of it.
 	trunk changeset.DefaultBranchRef
+	// reads memoizes the destination's directory listing and the records of the changesets in it, for the
+	// surfaces in this command that describe the same stack twice. See changeset.Reads.
+	reads *changeset.Reads
 }
 
 // destination is the integration branch this run should measure against, or the zero value when the

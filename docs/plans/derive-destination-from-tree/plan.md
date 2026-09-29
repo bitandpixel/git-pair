@@ -137,17 +137,40 @@ parses to a plain base, because `stackOf` has no branch to attach the id to.
 
 #### Tasks
 
-- [ ] At hop 0, test the base against both `LandedIDs` and `SlugFromBranch(base)`, keeping the `underNamespace`
+- [x] At hop 0, test the base against both `LandedIDs` and `SlugFromBranch(base)`, keeping the `underNamespace`
   guard the walked side keeps.
-- [ ] On a landed match, continue the walk through that changeset's record (`base, parentChangeset = "", base`)
+- [x] On a landed match, continue the walk through that changeset's record (`base, parentChangeset = "", base`)
   instead of returning the default branch, so a two-deep stack stops at the first live parent.
-- [ ] At hop 0, run the existence proof; on `ErrUnknownRevision` set `Unreachable` and fall back to the default
+- [x] At hop 0, run the existence proof; on `ErrUnknownRevision` set `Unreachable` and fall back to the default
   branch with `why = "default"`. Keep any other error an error.
-- [ ] Give the override its own `DestinationSource` value, distinct from `"base"` and from `"default"`, so the
+- [x] Give the override its own `DestinationSource` value, distinct from `"base"` and from `"default"`, so the
   substitution is visible in `--json` and in the human surface.
-- [ ] Feed `landingNextAction` (`status.go:659`) the computed destination rather than `s.cs.Base`
+- [x] Feed `landingNextAction` (`status.go:659`) the computed destination rather than `s.cs.Base`
   (`check.go:162`), so the sentence cannot go stale while the declaration is correct.
-- [ ] PRD: one passage naming the asymmetry with `BaseFor`, the two proofs, and the tie-break decision below.
+- [x] PRD: one passage naming the asymmetry with `BaseFor`, the two proofs, and the tie-break decision below.
+
+#### Discoveries during execution
+
+- **The tree fact is asked before the ref exists, at every hop.** An authored base may name the changeset by
+  its id (`feature-x`), which resolves to no ref at all; proving existence first reported it unreachable. The
+  same ordering also removed one `rev-parse` per hop on the walked side.
+- **The destination walk duplicated the chain walk, and the cost test caught it.** `status` describes the
+  stack (chain surface) and now answers where the work lands, over the same ancestors. The marginal read per
+  ancestor doubled, which `status_stack_chain_test.go` refuses. The fix is `changeset.Reads` - a per-command
+  memo of the destination's directory listing and each ancestor's record, passed as an argument rather than
+  hidden in `git.Repo`, because a command writes markers and moves refs while it runs. The bound stayed where
+  it was.
+- **`change integrate` refused the shape the fix is for.** `unlandedParentReason` declined a child whose stack
+  recorded no parent changeset, "so git-pair cannot show that branch has landed". The destination's tree can
+  show it, and does: the gate now asks the tree, and the refusal stands when the directory is not there -
+  which is what makes the refusal mean "this is live work" rather than "this file is incomplete". Without that,
+  the replay below needed a hand edit, which the plan rules out.
+- **Hop-0 recognition only meets plain bases.** For a stack that recorded `parent:`, the resolver already
+  replaces the measurement base with the derived one, so the walk starts one level up and answers `parent`.
+  Both paths are asserted; they are the two spellings of the same relationship.
+- **`Why` carries the override** (`base-landed`) beside `base`, `parent` and `default`, and `Overrode` names the
+  field that was refused, in the spelling it was written. A separate `DestinationSource` type would have been a
+  second way to say what `Why` already says.
 
 #### Verification
 

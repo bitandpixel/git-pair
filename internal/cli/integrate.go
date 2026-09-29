@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/spf13/cobra"
 
 	"gitpair/internal/changeset"
+	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/marker"
 	"gitpair/internal/model"
@@ -157,8 +159,8 @@ func runChangeIntegrate(ctx context.Context, a *app, opts *integrateOptions) err
 		return err
 	}
 	reasons := append(append([]string{}, g.Reasons...),
-		unlandedParentReason(s.cs, g.Parent)...)
-	dest, err := changeset.DestinationFor(ctx, s.repo, s.cs, s.trunk)
+		unlandedParentReason(ctx, s.repo, s.cs, s.trunk, g.Parent, s.stackReads())...)
+	dest, err := changeset.DestinationForReads(ctx, s.repo, s.cs, s.trunk, s.stackReads())
 	if err != nil {
 		return err
 	}
@@ -185,14 +187,26 @@ func runChangeIntegrate(ctx context.Context, a *app, opts *integrateOptions) err
 // or blocked an hour from now, and an unattended merge into it would be performed against history that
 // stopped existing. Refusing the request is the whole mitigation; the human path stays open, so nothing is
 // lost but the automation.
-func unlandedParentReason(cs changeset.Changeset, parent parentStatus) []string {
+func unlandedParentReason(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
+	db changeset.DefaultBranchRef, parent parentStatus, reads *changeset.Reads) []string {
 	if parent.Branch == "" || parent.Landed != "" {
 		return nil
 	}
 	if parent.Changeset == "" {
-		// The stack names no parent changeset, so there is nothing to ask the destination about. "Cannot
-		// tell" goes the direction that asks a person to look again, which is how every other
-		// unanswerable comparison in this codebase is resolved.
+		// The stack named no parent changeset, which used to mean there was nothing to ask the destination.
+		// It does not: the destination's tree carries the directory either way, and a branch whose changeset
+		// directory the destination carries has landed whatever the file chose to call it. Asking is what
+		// makes the refusal mean "this is live work" rather than "this file is incomplete" - and the child of
+		// a merged parent is then declarable, which is the shape that used to need a hand edit to the yaml
+		// before CI could be told where the work goes.
+		if id, err := changeset.SlugFromBranch(parent.Branch); err == nil && db.Ref != "" {
+			if ids, err := reads.LandedIDs(ctx, repo, db.Ref); err == nil && slices.Contains(ids, id) {
+				return nil
+			}
+		}
+		// "Cannot tell" still goes the direction that asks a person to look again, which is how every other
+		// unanswerable comparison in this codebase is resolved: no directory in the destination, no proof the
+		// parent is finished.
 		return []string{fmt.Sprintf(
 			"this changeset is stacked on %s, which records no parent changeset, so git-pair cannot show that branch has landed: record the relationship with `git pair init --parent %s --set-parent`, or land %s on the integration branch before declaring this one",
 			parent.Branch, parent.Branch, parent.Branch)}
@@ -291,6 +305,14 @@ func integrateNextAction(s *session, dest changeset.Destination) string {
 func destinationNote(dest changeset.Destination) string {
 	switch dest.Why {
 	case "parent":
+		return fmt.Sprintf(" (where %s landed)", dest.Via[len(dest.Via)-1])
+	case "base-landed":
+		// The authored `base:` named a changeset the destination already carries. Naming both the field and
+		// what it matched is the whole of the explanation: the reader wrote that line, and the answer they
+		// are being handed did not come from it.
+		if dest.Overrode != "" {
+			return fmt.Sprintf(" (base %s landed as %s)", displayRef(dest.Overrode), dest.Via[len(dest.Via)-1])
+		}
 		return fmt.Sprintf(" (where %s landed)", dest.Via[len(dest.Via)-1])
 	case "default":
 		if dest.Unreachable != "" {

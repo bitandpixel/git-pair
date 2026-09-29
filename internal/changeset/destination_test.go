@@ -22,9 +22,10 @@ func destinationOf(t *testing.T, f *gittest.Fixture, slug string) changeset.Dest
 	if err != nil {
 		t.Fatalf("DefaultBranch: %v", err)
 	}
-	// The changeset comes from the resolver rather than being typed by hand, because the relink that
-	// makes this question interesting happens there: `DestinationFor` is asked about the base the rest of
-	// the product measures against, not the string a yaml file happens to carry.
+	// The changeset comes from the resolver rather than being typed by hand, because that is the shape the
+	// product asks the question about: `DestinationFor` is asked about the base the rest of the product
+	// measures against - what the resolver put in `Base`, derived where the stack needs it derived - and not
+	// about the string a yaml file happens to carry.
 	res := resolveAt(t, f, "HEAD")
 	if res.Selected == nil || res.Selected.Changeset.Slug != slug {
 		t.Fatalf("resolved %q, want %q (candidates %v)", selectedID(res), slug, candidateIDs(res))
@@ -63,7 +64,7 @@ func TestDestinationIsTheBaseForUnstackedWork(t *testing.T) {
 
 // A child stacked on a parent that has not landed still has the branch as its base, and the branch as its
 // destination: this is the stacked landing that stays a human decision (git-pair records a child landed on
-// its parent branch — see `integration record`'s carried answer — it only declines to queue one).
+// its parent branch, and `change tidy` is what moves such a directory once the branch is gone).
 func TestDestinationIsTheParentBranchWhileTheParentIsUnlanded(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
@@ -82,8 +83,8 @@ func TestDestinationIsTheParentBranchWhileTheParentIsUnlanded(t *testing.T) {
 
 // The case the rule exists for. The parent landed on trunk, the child's base became the parent's
 // integration ref, and a destination of `refs/git-pair/integrations/booking` would name a commit and no
-// branch — `integration record` refuses one as `--target` for exactly that reason. The answer comes from
-// the parent's own record, which landed with the parent's directory.
+// branch, and a merge target has to be a branch. The answer comes from the parent's own record, which
+// landed with the parent's directory.
 func TestDestinationFollowsALandedParentToItsBase(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
@@ -176,3 +177,163 @@ func TestDestinationIsTheLiveParentBranchWhenTheParentReachedOnlyAReleaseLine(t 
 }
 
 // A base under `refs/git-pair/` that is not an integration ref — an archive ref, a stray, a retired
+
+// The five shapes of the hop-0 rule. `DestinationFor` used to prove only the values it walked, which left
+// the authored `base:` returned unchecked - so a stack whose parent merged kept being told to merge into the
+// parent's branch, by a command that reads the file rather than the destination. Each shape asserts the answer
+// and the reason for it together, because "main" on its own says nothing about which rule produced it.
+
+// Shape 1, and the one the rule exists for: the base names a branch whose changeset the destination already
+// carries. The authored field is refused, the walk continues through the landed record, and the refusal is
+// reported rather than applied in silence.
+func TestDestinationRefusesABaseThatNamesALandedChangeset(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("feature/x")
+	f.CommitChangeset("feature-x", "main")
+	f.Commit("x work", gittest.WithFile("x.txt", "1\n"))
+	f.CreateBranch("ui", "feature/x")
+	f.StageChangeset("ui", "feature/x")
+	f.Write(f.ChangesetPath("ui", "CHANGESET.yaml"), "id: ui\nbase: feature/x\n")
+	f.Commit("ui work", gittest.WithFile("ui.txt", "1\n"))
+
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land feature/x", "feature/x")
+
+	f.SwitchTo("ui")
+	got := destinationOf(t, f, "ui")
+	if got.Ref != "main" || got.Why != "base-landed" {
+		t.Errorf("destination = %s, want main (base-landed)", got)
+	}
+	if len(got.Via) != 1 || got.Via[0] != "feature-x" {
+		t.Errorf("via = %v, want [feature-x]: the report names the changeset it crossed", got.Via)
+	}
+	if got.Overrode != "feature/x" {
+		t.Errorf("overrode = %q, want feature/x: the field that was refused is named, in the spelling it was written", got.Overrode)
+	}
+	if got.Unreachable != "" {
+		t.Errorf("unreachable = %q, want empty: the base resolved, it was just not a destination", got.Unreachable)
+	}
+}
+
+// Shape 2: the base names nothing this clone can resolve. The old code handed that back as the destination,
+// so the sentence told somebody to merge into a branch that does not exist. The answer falls back to the
+// integration branch and says which branch was missing - and the measurement base is untouched, because that
+// is `BaseFor`'s question and it has its own fallback.
+func TestDestinationFallsBackWhenTheOwnBaseDoesNotResolve(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("solo")
+	f.StageChangeset("solo", "feature/gone")
+	f.Write(f.ChangesetPath("solo", "CHANGESET.yaml"), "id: solo\nbase: feature/gone\n")
+	f.Commit("solo work", gittest.WithFile("solo.txt", "1\n"))
+
+	db, err := changeset.DefaultBranch(context.Background(), repo(f), "")
+	if err != nil {
+		t.Fatalf("DefaultBranch: %v", err)
+	}
+	got := destinationOf(t, f, "solo")
+	if got.Ref != db.Ref || got.Why != "default" {
+		t.Errorf("destination = %s, want %s (default)", got, db.Ref)
+	}
+	if got.Unreachable != "feature/gone" || got.Overrode != "feature/gone" {
+		t.Errorf("unreachable = %q, overrode = %q, want feature/gone in both", got.Unreachable, got.Overrode)
+	}
+
+	base, err := changeset.BaseFor(context.Background(), repo(f), resolveAt(t, f, "HEAD").Selected.Changeset, f.Head(), db)
+	if err != nil {
+		t.Fatalf("BaseFor: %v", err)
+	}
+	if base.Ref != "feature/gone" {
+		t.Errorf("measurement base = %q, want feature/gone: a destination fallback is not a re-measurement", base.Ref)
+	}
+}
+
+// Shape 3, the one this rule could break silently: a base naming a branch that is live work. Nothing is
+// landed, so nothing is overridden, and the answer is the authored base exactly as written.
+func TestDestinationKeepsALiveParentsBranchAsTheBase(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("feature/x")
+	f.CommitChangeset("feature-x", "main")
+	f.Commit("x work", gittest.WithFile("x.txt", "1\n"))
+	f.CreateBranch("ui", "feature/x")
+	f.StageChangeset("ui", "feature/x")
+	f.Write(f.ChangesetPath("ui", "CHANGESET.yaml"), "id: ui\nbase: feature/x\n")
+	f.Commit("ui work", gittest.WithFile("ui.txt", "1\n"))
+
+	got := destinationOf(t, f, "ui")
+	if got.Ref != "feature/x" || got.Why != "base" {
+		t.Errorf("destination = %s, want feature/x (base): live work is a destination", got)
+	}
+	if got.Overrode != "" || len(got.Via) != 0 || got.Unreachable != "" {
+		t.Errorf("destination = %s via %v overrode %q unreachable %q, want an unremarked answer", got, got.Via, got.Overrode, got.Unreachable)
+	}
+}
+
+// Shape 4: the same fact written two ways. A branch name and the changeset id it normalises to are the same
+// base, and the answer prints the id it matched - `SlugFromBranch` is many-to-one, so the author's spelling
+// cannot be echoed back as if it were the id.
+func TestDestinationRecognisesTheLandedChangesetByBranchAndByID(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("feature/x")
+	f.CommitChangeset("feature-x", "main")
+	f.Commit("x work", gittest.WithFile("x.txt", "1\n"))
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land feature/x", "feature/x")
+
+	for _, tc := range []struct{ child, base, spelling string }{
+		{"ui-branch", "feature/x", "the branch name"},
+		{"ui-id", "feature-x", "the changeset id"},
+	} {
+		f.CreateBranch(tc.child, "main")
+		f.StageChangeset(tc.child, tc.base)
+		f.Write(f.ChangesetPath(tc.child, "CHANGESET.yaml"), "id: "+tc.child+"\nbase: "+tc.base+"\n")
+		f.Commit(tc.child+" work", gittest.WithFile(tc.child+".txt", "1\n"))
+
+		f.SwitchTo(tc.child)
+		got := destinationOf(t, f, tc.child)
+		if got.Ref != "main" || got.Why != "base-landed" {
+			t.Errorf("%s (%s): destination = %s, want main (base-landed)", tc.child, tc.spelling, got)
+		}
+		if len(got.Via) != 1 || got.Via[0] != "feature-x" {
+			t.Errorf("%s (%s): via = %v, want [feature-x]: the matched id, not the spelling", tc.child, tc.spelling, got.Via)
+		}
+		if got.Overrode != tc.base {
+			t.Errorf("%s (%s): overrode = %q, want %q", tc.child, tc.spelling, got.Overrode, tc.base)
+		}
+		f.SwitchTo("main")
+	}
+}
+
+// Shape 5: the walk continues rather than jumping to the default branch, and stops at the first hop that is
+// still live work. `beta` landed with `alpha`'s directory retired, so trunk carries `beta` and not `alpha`,
+// and `alpha` is a live branch below it. A rule that gave up after one override would answer main here.
+func TestDestinationStopsAtTheLiveParentAboveALandedOne(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("alpha")
+	f.CommitChangeset("alpha", "main")
+	f.Commit("alpha work", gittest.WithFile("alpha.txt", "1\n"))
+	f.CreateBranch("beta", "alpha")
+	stageStacked(t, f, "beta", "alpha", "alpha")
+	f.Commit("beta work", gittest.WithFile("beta.txt", "1\n"))
+	f.MustGit("rm", "-r", "--quiet", "changesets/alpha")
+	f.MustGit("commit", "-q", "-m", "retire alpha's directory")
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land beta", "beta")
+
+	f.CreateBranch("gamma", "main")
+	f.StageChangeset("gamma", "beta")
+	f.Write(f.ChangesetPath("gamma", "CHANGESET.yaml"), "id: gamma\nbase: beta\n")
+	f.Commit("gamma work", gittest.WithFile("gamma.txt", "1\n"))
+
+	got := destinationOf(t, f, "gamma")
+	if got.Ref != "alpha" || got.Why != "base-landed" {
+		t.Errorf("destination = %s, want alpha (base-landed): the walk stops at the hop that is live work", got)
+	}
+	if len(got.Via) != 1 || got.Via[0] != "beta" {
+		t.Errorf("via = %v, want [beta]", got.Via)
+	}
+}

@@ -184,3 +184,53 @@ func TestQueueDoesNotListALandedChangesetAsAwaitingIntegration(t *testing.T) {
 	mustNotContain(t, runIn(t, f.Dir(), "queue").mustSucceed(t, "queue").stdout, "AWAITING INTEGRATION",
 		"and the human surface does not print an empty second list")
 }
+
+// One answer, printed by four commands. The landing sentence used to read the authored `base:` while
+// `change integrate` asked `DestinationFor`, and the two disagreed on exactly the changeset where it mattered:
+// a stack whose parent had merged. The author was told to merge into the parent's branch in the same breath in
+// which the declaration was about to ask CI for the destination. These assertions are that disagreement's
+// grave: the surfaces that tell a person what to run print the derived destination, notes included.
+func TestTheLandingSentenceFollowsTheDestination(t *testing.T) {
+	f, parent := newChangeset(t, "feature/x", "main")
+	f.CreateBranch("ui", "feature/x")
+	f.CommitChangeset("ui", "feature/x")
+	f.Commit("ui work", gittest.WithFile("ui.go", "package main\n"))
+
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land feature/x", "feature/x")
+	f.SwitchTo("ui")
+	ready(t, f)
+	submitted := submit(t, f, "approve")
+
+	want := "merge into main with ordinary git (base feature/x landed as feature-x)"
+	if parent != "feature-x" {
+		t.Fatalf("fixture slug = %q, want feature-x", parent)
+	}
+
+	check := runIn(t, f.Dir(), "check", "--json").mustSucceed(t, "check").json(t)
+	if next, _ := check["next_action"].(string); !strings.Contains(next, want) {
+		t.Errorf("check next_action = %q,\nwant it to contain %q", next, want)
+	}
+	status := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status").json(t)
+	if next, _ := status["next_action"].(string); !strings.Contains(next, want) {
+		t.Errorf("status next_action = %q,\nwant it to contain %q", next, want)
+	}
+	if out := submitted.stdout + submitted.stderr; !strings.Contains(out, want) {
+		t.Errorf("review submit printed:\n%s\nwant it to contain %q", out, want)
+	}
+	declared := runIn(t, f.Dir(), "change", "integrate").mustSucceed(t, "change", "integrate")
+	mustContain(t, declared.stdout, "merge into:  main", "the declaration names the derived destination")
+	mustContain(t, declared.stdout, "(base feature/x landed as feature-x)", "and the same note the sentences carry")
+
+	// The trap's signature: no surface in this run offers the branch that already merged.
+	for _, out := range []string{
+		runIn(t, f.Dir(), "check").stdout,
+		runIn(t, f.Dir(), "status").stdout,
+		submitted.stdout + submitted.stderr,
+		declared.stdout,
+	} {
+		if strings.Contains(out, "merge into feature/x") {
+			t.Errorf("a surface still offers the merged parent branch:\n%s", out)
+		}
+	}
+}

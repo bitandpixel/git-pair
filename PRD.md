@@ -1965,6 +1965,25 @@ rather than guessed once for the repository:
    `refs/remotes/origin/HEAD`, then a sole `origin/main` or `origin/master`, then a local `main` or
    `master`.
 
+Rule 1 is not taken on trust. Both proofs the walk asks of a value it derived are asked of the authored
+`base:` as well: it must name something this clone can resolve, and it must not name a changeset the
+destination already carries. A base that fails the second test is a stack whose parent has merged - the field
+still names the branch, and the branch outlived the work it carried - so the answer keeps walking, through that
+changeset's own record, rather than jumping to the integration branch: a stack stops at the first hop that is
+still live work. That answer reports itself as `base-landed` and carries the field it refused, because the
+refused value is committed content a person wrote and the substitution has to be nameable. A base that fails
+the first test is reported as `unreachable`, and the destination falls back to the integration branch. Neither
+test touches the *measurement* base, which is `BaseFor`'s question and has its own fallback (§21).
+
+**The tie-break, when both readings apply.** A `base:` can name a branch that is still live work *and* a
+changeset that has landed: `feat/tidy` is a branch name, and a changeset of that slug can already sit in the
+destination's tree. Landedness wins, and the id matched is printed. The alternative - the branch wins while
+this clone can resolve it - was considered and refused, because it lets the answer depend on which refs a clone
+happens to hold. That is the property this repository gave up when it deleted its durable ref layer, and a
+destination is the last place to take it back. The matching is by `SlugFromBranch`, which is many-to-one
+(`feat/tidy` and `feat-tidy` collapse), so a collapsed name can match a changeset the author did not mean: the
+answer names the id it matched rather than echoing the spelling, and the refused value travels beside it.
+
 If none resolves the command refuses rather than inventing a trunk (§22's exit 2). A merge into a branch
 that is *not* the destination is not a landing for these rules, and the changeset keeps reading as live
 work: the queue lists it, `status` offers a next action, and no command will move its directory. That is
@@ -1975,7 +1994,11 @@ a merge.
 
 The destination is also what the automatic merge asks for (§9.9): `queue --json` prints it per declared
 changeset as `destination`, and the same derivation answers both questions, so the branch a reviewer is
-told about and the branch a pipeline would merge into cannot disagree.
+told about and the branch a pipeline would merge into cannot disagree. It is the same answer the landing sentence
+is built from: `status`, `check`, `review submit` and `change wait` each print the merge target this derivation
+gives, with the same note beside it. That is the other half of the rule - a sentence that read the authored
+`base:` directly could tell an author to merge into a branch that had already merged, in the same run where
+`change integrate` was about to ask CI for the destination.
 
 ## 13.2 What a landing reports
 

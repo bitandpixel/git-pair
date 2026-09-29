@@ -809,7 +809,7 @@ func runChangeWait(ctx context.Context, a *app, opts *waitOptions) error {
 		return err
 	}
 	seen.TimedOut = !found
-	return reportWait(a, s.cs.Slug, s.cs.Base, seen)
+	return reportWait(a, s.cs.Slug, landingDestination(ctx, a, s), seen)
 }
 
 // pollUntil calls check every interval until it reports a result, the timeout elapses,
@@ -899,7 +899,7 @@ func (s *session) observeReview(ctx context.Context, branch string, includeRemot
 	return seen, nil
 }
 
-func reportWait(a *app, slug, base string, r waitInput) error {
+func reportWait(a *app, slug string, dest changeset.Destination, r waitInput) error {
 	out := waitResult{
 		Changeset: slug, PreviousState: r.PreviousState, State: stateName(r.State),
 		Ref: r.Ref, Fetches: r.Fetches, WaitedSeconds: r.Waited, TimedOut: r.TimedOut,
@@ -908,7 +908,7 @@ func reportWait(a *app, slug, base string, r waitInput) error {
 		out.ReviewCommit = r.Review.Short
 		out.ReviewCommitFull = r.Review.SHA
 	}
-	out.NextAction = waitNextAction(r.State, r.Ref, base)
+	out.NextAction = waitNextAction(r.State, r.Ref, dest)
 
 	if a.json {
 		if err := a.emitJSON(out); err != nil {
@@ -952,7 +952,7 @@ func stateName(s model.State) string {
 	return string(s)
 }
 
-func waitNextAction(s model.State, ref, base string) string {
+func waitNextAction(s model.State, ref string, dest changeset.Destination) string {
 	if s == "" {
 		return "nothing has changed yet; run `git pair status --json` to see where things stand"
 	}
@@ -969,9 +969,9 @@ func waitNextAction(s model.State, ref, base string) string {
 			return fmt.Sprintf("the review landed on %s; bring it into this branch with ordinary "+
 				"Git, then `git pair change feedback`", ref)
 		}
-		return "`git pair change feedback`; feedback is non-blocking, " + landingNextAction(base)
+		return "`git pair change feedback`; feedback is non-blocking, " + landingNextAction(dest)
 	case model.StateApproved:
-		return landingNextAction(base)
+		return landingNextAction(dest)
 	case model.StateReady, model.StateWorking:
 		// Only reachable on a timeout: nothing became actionable.
 		return "still waiting for review activity; run `git pair change wait` again or check `git pair status --json`"

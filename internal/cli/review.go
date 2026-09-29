@@ -303,6 +303,7 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 	if s.summary.LatestReview != nil {
 		previous = s.summary.LatestReview.SHA
 	}
+	dest := landingDestination(ctx, a, s)
 	if a.json {
 		return a.emitJSON(map[string]any{
 			"changeset":       s.cs.Slug,
@@ -312,7 +313,7 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 			"files":           orEmpty(result.Files),
 			"empty":           result.Empty(),
 			"previous_review": previous,
-			"next_action":     nextActionFor(result.Outcome, s.cs.Base),
+			"next_action":     nextActionFor(result.Outcome, dest),
 		})
 	}
 	a.printf("Review submitted: %s\n", s.cs.Slug)
@@ -330,22 +331,22 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 		a.printf("  supersedes: %s (the newest submission decides the state)\n",
 			reviewLabel(s.summary.LatestReview))
 	}
-	a.printf("  next:    %s\n", nextActionFor(result.Outcome, s.cs.Base))
+	a.printf("  next:    %s\n", nextActionFor(result.Outcome, dest))
 	if clean, err := s.repo.IsClean(ctx); err == nil && !clean {
 		a.warn("\nwarning: the working tree is still dirty; those changes are not part of this review\n")
 	}
 	return nil
 }
 
-func nextActionFor(o model.Outcome, base string) string {
+func nextActionFor(o model.Outcome, dest changeset.Destination) string {
 	switch o {
 	case model.OutcomeBlock:
 		return "author: `git pair change feedback`, address it, then `git pair change ready`"
 	case model.OutcomeFeedback:
 		return "author: `git pair change feedback` to read it; feedback is non-blocking, " +
-			landingNextAction(base)
+			landingNextAction(dest)
 	case model.OutcomeApprove:
-		return "author: " + landingNextAction(base)
+		return "author: " + landingNextAction(dest)
 	}
 	return ""
 }

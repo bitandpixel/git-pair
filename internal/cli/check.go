@@ -167,11 +167,12 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	}
 	out.Ready = len(out.Reasons) == 0
 	if out.Ready {
-		out.NextAction = landingNextAction(s.cs.Base)
+		out.NextAction = landingNextAction(landingDestination(ctx, a, s))
 		if g.Parent.Landed != "" {
 			// Spelled beside the landing contract rather than inside it: `landingNextAction` is one string
-			// shared by `status`, `check`, `change ready` and `review`, it takes only a base, and teaching it
-			// about parents would make the same sentence mean two things in four commands.
+			// shared by `status`, `check`, `change ready` and `review`, and the parent step is a different
+			// fact from where the work lands - a parent that landed is why the destination moved, not a
+			// second destination.
 			out.NextAction += fmt.Sprintf("; parent %s landed as %s — %s", g.Parent.parentName(), g.Parent.Landed,
 				landedParentStep(s.cs, g.Parent))
 		}

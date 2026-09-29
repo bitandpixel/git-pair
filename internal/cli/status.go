@@ -277,6 +277,16 @@ type statusView struct {
 //
 // Cost: one `for-each-ref` for the branch names, then two tree reads and one `CHANGESET.yaml` read per
 // step — the landing and the ancestor's own record, and nothing that walks the destination's history.
+// stackReads is the memo this command shares between the reads that describe the stack: the chain surface and
+// the destination answer walk the same ancestors, and an author five deep must not pay for the walk twice.
+// Built on first use, so a changeset with no stack builds nothing.
+func (s *session) stackReads() *changeset.Reads {
+	if s.reads == nil {
+		s.reads = changeset.NewReads()
+	}
+	return s.reads
+}
+
 func (a *app) stackChain(ctx context.Context, s *session) ([]stackStep, string) {
 	steps := []stackStep{}
 	held, err := localBranchSet(ctx, s.repo)
@@ -316,7 +326,7 @@ func (a *app) stackChain(ctx context.Context, s *session) ([]stackStep, string) 
 		if at == "" {
 			at = s.head
 		}
-		stack, err := changeset.StackAt(ctx, s.repo, at, id)
+		stack, err := s.stackReads().StackAt(ctx, s.repo, at, id)
 		if err != nil {
 			return steps, fmt.Sprintf("changesets/%s/ cannot be read at %s, so the chain above it is unread here", id, short(at))
 		}
@@ -352,7 +362,7 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 		Uncommitted: uncommitted(s),
 		Reviews:     len(s.summary.Reviews),
 		Reason:      s.summary.Reason,
-		NextAction:  nextAction(s.summary, s.cs.Base),
+		NextAction:  nextAction(s.summary, landingDestination(ctx, a, s)),
 	}
 	// A derived base is reported beside the recorded one rather than over it: `base` is what the changeset
 	// says its stack is, and `base_ref` is what every diff in this document was measured against.
@@ -612,7 +622,7 @@ func yesNo(b bool) string {
 
 // nextAction tells an agent what to run next, so it does not have to re-derive
 // the lifecycle from the state name.
-func nextAction(s lifecycle.Summary, base string) string {
+func nextAction(s lifecycle.Summary, dest changeset.Destination) string {
 	if s.Abandoned != nil {
 		// The state is WORKING, which would otherwise read as "keep going". Nothing is
 		// owed on an abandoned changeset, and `change ready` refuses it, so the honest
@@ -631,14 +641,14 @@ func nextAction(s lifecycle.Summary, base string) string {
 			return "the head moved since the review: read it with `git pair change feedback`, " +
 				"then `git pair change ready` to offer the new head"
 		}
-		return "optionally address feedback (read it with `git pair change feedback`), then " + landingNextAction(base)
+		return "optionally address feedback (read it with `git pair change feedback`), then " + landingNextAction(dest)
 	case model.StateApproved:
 		if s.Stale {
 			// The gate asks the tree, and it refuses this head (PRD §9.5). Pointing an agent at it
 			// anyway would be a surprise it cannot predict from `state`.
 			return "the head moved since the review: `git pair change ready` to offer it for review again"
 		}
-		return landingNextAction(base)
+		return landingNextAction(dest)
 	case model.StateIntegrating:
 		// The author's step is over; the merge belongs to whoever owns the destination branch, and git-pair
 		// performs none of it (PRD §26). The push is named first because until the branch is on the remote
@@ -647,7 +657,7 @@ func nextAction(s lifecycle.Summary, base string) string {
 			// A declaration is about a commit, and a commit has landed on top of the one it named.
 			return "the head moved since the declaration: `git pair change integrate` to declare this head"
 		}
-		return "push the branch so whoever merges can see the request; then " + landingNextAction(base)
+		return "push the branch so whoever merges can see the request; then " + landingNextAction(dest)
 	}
 	return ""
 }
@@ -656,12 +666,30 @@ func nextAction(s lifecycle.Summary, base string) string {
 // an author this same thing and a fifth spelling is how a contract drifts. git-pair performs the gate and the
 // record and nothing in between: the merge itself is ordinary git, performed by whoever owns the
 // branch, which is what keeps PRD §26's no-merge posture intact.
-func landingNextAction(base string) string {
-	if base == "" {
-		base = "the base branch"
+//
+// It takes the computed destination rather than the authored `base:` because the sentence and the declaration
+// have to be the same answer. Reading the field was how the two disagreed: a changeset whose parent had
+// merged was told to merge into the parent's branch by `status`, while `change integrate` - which asks
+// `DestinationFor` - was about to ask CI for the destination. The note is the one `change integrate` prints,
+// so an author who compares the two sentences sees one fact described twice rather than two facts.
+func landingNextAction(dest changeset.Destination) string {
+	target := displayRef(dest.Ref)
+	if target == "" {
+		target = "the base branch"
 	}
 	// The steps are the landing contract (PRD §29): the gate, then the merge with ordinary git. There is
 	// no step after the merge — the destination carrying `changesets/<id>/` is the record, and git-pair
 	// writes no ref that could be left unpublished.
-	return fmt.Sprintf("`git pair check`, then merge into %s with ordinary git", base)
+	return fmt.Sprintf("`git pair check`, then merge into %s with ordinary git%s", target, destinationNote(dest))
+}
+
+// landingDestination answers where this changeset's work lands, for the surfaces that tell an author what to
+// run. A `DestinationFor` failure is a git error that the same command's other reads report; the sentence
+// falls back to the authored base rather than making `status` fail on a question it did not ask before.
+func landingDestination(ctx context.Context, a *app, s *session) changeset.Destination {
+	dest, err := changeset.DestinationForReads(ctx, s.repo, s.cs, s.trunk, s.stackReads())
+	if err != nil {
+		return changeset.Destination{Ref: s.cs.Base, Why: "base"}
+	}
+	return dest
 }

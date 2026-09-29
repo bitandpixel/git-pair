@@ -309,6 +309,68 @@ check "and the merge job names it back" 1 "$(grep -c "^[[:space:]]*- 'CI'\$" "$R
 check "CI runs on branch pushes, whose checks are the ones on the head the probe reads" 1 "$(grep -c '^    branches:$' "$ROOT/.github/workflows/ci.yml")"
 check "and the merge job has no push trigger that would make it certify its own check run" 0 "$(grep -c '^  push:$' "$ROOT/.github/workflows/git-pair-integrate.yml")"
 
+step "a stack whose parent merged: the destination comes from the tree, not from the field"
+
+# The trap this replay exists for, replayed in the order it happened: a child stacked on a parent branch, the
+# parent merged into trunk, and the child left pointing at the branch by name. `check` then told the author to
+# merge into finished work and the declaration asked CI for the same thing. Nothing here edits a file to make
+# the answer correct, and every assertion below fails if the parent's landing did not really happen - which is
+# how this scenario read a stale remote-tracking ref the first time it was written.
+git -C "$T/work" fetch -q origin >/dev/null 2>&1
+git -C "$T/work" checkout -q main && git -C "$T/work" merge -q --ff-only origin/main >/dev/null 2>&1
+declare_changeset stack/parent src/p.ts 'export const p = 1' || { echo "fixture: stack/parent" >&2; exit 1; }
+git -C "$T/work" push -q origin stack/parent >/dev/null 2>&1
+
+# The child, created while its parent is still live work: `init` sees one unlanded changeset on the base and
+# records the pair, which is the shape a stack is supposed to have.
+git -C "$T/work" checkout -q -b stack/child stack/parent
+wing init --base stack/parent >/dev/null
+PAIR=$(sed -n 's/^parent-changeset: //p' "$T/work/changesets/stack-child/CHANGESET.yaml")
+check "init recorded the parent the base revealed" stack-parent "$PAIR"
+printf 'export const child = 1\n' > "$T/work/src/child.ts"
+git -C "$T/work" add -A >/dev/null && git -C "$T/work" commit -qm "stack/child: the work above it" >/dev/null
+
+# Now the parent lands, and the field that named it goes stale by itself.
+git -C "$T/work" checkout -q main
+git -C "$T/work" merge -q --no-ff -m "land stack/parent" stack/parent >/dev/null 2>&1 &&
+  git -C "$T/work" push -q origin main >/dev/null 2>&1
+check "the parent branch is landed on main with ordinary git" 0 $?
+check "and the destination carries the directory that proves it" 1 \
+  "$(git -C "$T/work" ls-tree -d --name-only refs/remotes/origin/main -- changesets/ | grep -c '^changesets/stack-parent$')"
+
+git -C "$T/work" checkout -q stack/child
+wing change ready >/dev/null; wing review submit --approve >/dev/null
+out=$(wing check); check "the child passes the gate" 0 $?
+contains "$out" "merge into main with ordinary git" "check names the integration branch"
+no_contains "$out" "merge into stack/parent" "and never offers the branch that already merged"
+out=$(wing change integrate); check "the child is declarable" 0 $?
+contains "$out" "merge into:  main" "the declaration asks for the destination the tree supports"
+git -C "$T/work" push -q origin stack/child >/dev/null 2>&1
+
+CISTACK=$(clone ci-stack) || { echo "cannot clone for ci-stack" >&2; exit 1; }
+out=$(cigr "$CISTACK" stack/child); code=$?
+show "$out"
+check "the job merges the child of a merged parent" 0 $code
+contains "$out" "stack-child: declared by" "it read the child's declaration"
+contains "$out" "for merge into main" "and merged it against the integration branch"
+
+# The other half: a child created *after* the parent landed, with a file that names the merged branch as its
+# base and records no parent changeset - the shape `init` wrote before it recorded the pair, and the shape
+# nothing but the destination's tree can answer. The answer is the same, and it says which field it refused.
+git -C "$T/work" fetch -q origin >/dev/null 2>&1
+git -C "$T/work" checkout -q main && git -C "$T/work" merge -q --ff-only origin/main >/dev/null 2>&1
+git -C "$T/work" checkout -q -b legacy/child main
+wing init --base stack/parent >/dev/null
+printf 'id: legacy-child\nbase: stack/parent\n' > "$T/work/changesets/legacy-child/CHANGESET.yaml"
+git -C "$T/work" add -A >/dev/null && git -C "$T/work" commit -qm "legacy/child: a file an older init wrote" >/dev/null
+wing change ready >/dev/null; wing review submit --approve >/dev/null
+out=$(wing check); check "the shape a legacy file carries passes the gate too" 0 $?
+contains "$out" "merge into main with ordinary git (base stack/parent landed as stack-parent)" \
+  "the sentence names the branch it refused and the changeset it matched"
+no_contains "$out" "merge into stack/parent" "and still never offers the merged branch"
+out=$(wing change integrate); check "and it is declarable with no edit to the file" 0 $?
+contains "$out" "merge into:  main" "the same destination, from the same reading"
+
 step "usage"
 
 out=$(cd "$T" && "$CI" --help 2>&1); check "--help works" 0 $?
