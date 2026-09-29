@@ -589,6 +589,8 @@ printf 'Summary: work that lands, then gets out of the way.\n' > changesets/tidi
 printf 'tidied\n' > tidied.md && git add -A && git commit -qm "tidied-landing: the work"
 git switch -q main
 git merge -q --no-ff -m "tidied-landing: merge it" tidied-landing
+# The move rides a changeset, so it happens on a branch and reaches trunk the way any other change does.
+git switch -qc tidy-up main
 out=$($G change tidy tidied-landing --dry-run 2>&1); code=$?
 if [ "$code" = 0 ] && printf '%s' "$out" | grep -q "changesets/tidied-landing -> changesets/.landed/tidied-landing"; then
   echo "  ok: the dry run names the move it would make"
@@ -621,7 +623,7 @@ else
   echo "  FAIL: the second run exited $code: $out"; FAILED=1
 fi
 out=$($G init --id tidied-landing --base main 2>&1); code=$?
-if [ "$code" != 0 ] && printf '%s' "$out" | grep -q "changesets/.landed/tidied-landing"; then
+if [ "$code" != 0 ] && printf '%s' "$out" | grep -q "changeset tidied-landing is landed on main at changesets/"; then
   echo "  ok: the name is still held by the landing, and the refusal says by what"
 else
   echo "  FAIL: reusing a tidied landing's id exited $code: $out"; FAILED=1
@@ -638,7 +640,8 @@ if [ "$code" = 1 ]; then
 else
   echo "  FAIL: check exited $code: $out"; FAILED=1
 fi
-git branch -q -D tidied-landing
+git switch -q main
+git branch -q -D tidy-up tidied-landing
 
 step "queue is empty again"
 $G queue | sed 's/^/  /'

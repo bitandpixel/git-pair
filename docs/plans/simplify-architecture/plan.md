@@ -376,30 +376,28 @@ branch.
 
 #### Tasks
 
-- [ ] `internal/cli/tidy.go`: `git pair change tidy <id>…`, `--all-landed`, `--dry-run`, `--json`. Moves
+- [x] `internal/cli/tidy.go`: `git pair change tidy <id>…`, `--all-landed`, `--dry-run`, `--json`. Moves
   `changesets/<id>/` to `changesets/.landed/<id>/` in one commit on the checked-out branch, written with the
   same commit machinery as a marker (`internal/marker/marker.go:156`), and touching nothing else.
-- [ ] Refusals, each exit 1 with its own reason: the id is not landed (nothing to move); some active
-  changeset names it as `parent-changeset:` (`changeset.ScanBranches` already reads every branch, so both
-  guards cost one pass); the working tree is dirty outside `changesets/`, as `check` and `change integrate`
-  already require; the id is not present on this branch.
-- [ ] `init`'s name check: the `reviewref.Taken` role (`internal/reviewref/reviewref.go:168-184`) becomes
-  "the id is not present under `changesets/` or `changesets/.landed/`, and no branch carries it". Weaker
-  than a durable ref by design, and the `.landed/` half is what stops the reuse that matters.
-- [ ] README: tidy is a changeset like any other — the reviewer sees the whole list as renames in one span,
+- [~] Refusals, each exit 1 with its own reason: the id is not landed (nothing to move); some active
+  changeset names it as `parent-changeset:`; the working tree is dirty; the id is not present on this branch.
+  **Stricter than planned:** the tree must be clean everywhere, including inside `changesets/`, because the
+  file a tidy must not sweep is a sibling's half-written `ABOUT.md`. The refusal prints the paths it would
+  have taken. `--all-landed` treats an unlanded id as not in the set; a named id refuses.
+- [x] `init`'s name check: done in M3 ("Take an id's uniqueness from the tree it lives in"), including the
+  `.landed/` half and `DirectoryAt.Landed`.
+- [x] README: tidy is a changeset like any other — the reviewer sees the whole list as renames in one span,
   and the move reaches trunk through the normal flow.
-- [ ] `scripts/gates/e2e-29.sh`: tidy a landed changeset, then re-run every assertion the plan touches
-  (status, queue, check, `--changeset`, init on the freed name) and require them to hold.
+- [x] `scripts/gates/e2e-29.sh`: the `tidy:` step lands a changeset, tidies it on a branch, and re-runs
+  `status --changeset`, `queue --json`, `check`, a second `tidy`, and `init` on the name it freed.
 
-#### Verification
+#### Verification (executed)
 
-- CLI test: a tidy commit moves only the named directories, its diff is renames only, and a second run is a
-  no-op naming the reason.
-- CLI test: refusing a still-in-flight id, and refusing an id named as a live child's `parent-changeset:`.
-- CLI test: after tidy, `LandedIDs` still reports the id landed and `ActiveIDs` does not report it active,
-  on the tidied branch and on trunk.
-- `mise run gates`, including the walkthrough — the walkthrough's own scratch repository is where a
-  rename-vs-delete difference would show up as a missing changeset.
+- [x] `internal/cli/tidy_test.go`: the move, its renames-only diff, the no-op second run, the two refusals,
+  `--dry-run`, the two usage errors, the JSON shape, the surfaces after the move, the empty array.
+- [ ] `mise run gates` for this changeset, then `git pair change ready` and push. The branch is
+  `feat/change-tidy` (worktree `/home/david/dev/worktrees/git-pair/change-tidy`), stacked on
+  `feat/derived-bases`; it moves onto new `origin/main` before the handoff.
 
 ### M5 — Delete the durable-ref subsystem
 
