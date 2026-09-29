@@ -61,9 +61,13 @@ type Changeset struct {
 	// Base is the ref the changeset's diff is measured against. For stacked
 	// branches this is another changeset's branch name — whichever key recorded it.
 	Base string
+	// BaseWhy names the rule that produced `Base` when it was derived — the parent branch, the run this
+	// branch shares with the destination, or the fallback. It is empty for a base the changeset recorded
+	// itself, and a surface that prints a derived base prints this beside it: a SHA alone cannot be read.
+	BaseWhy string
 	// ParentBranch is the branch named by `parent:`, empty for a changeset measured straight
 	// against the integration branch. It stays the branch name even when the measurement base has
-	// been redirected to the parent's integration ref, so the stack and the diff base can be
+	// been derived from the destination, so the stack and the diff base can be
 	// reported separately (§21).
 	ParentBranch string
 	// ParentChangeset is the changeset this one is stacked on, from `parent-changeset:`. It is

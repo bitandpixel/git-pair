@@ -35,7 +35,6 @@ import (
 	"strings"
 
 	"gitpair/internal/git"
-	"gitpair/internal/reviewref"
 )
 
 // ErrNoDefaultBranch means nothing identifies the integration branch, so "has this landed?"
@@ -320,7 +319,10 @@ func (r *resolver) at(ctx context.Context, repo *git.Repo, rev string) (Resoluti
 		}
 		candidates = append(candidates, c)
 	}
-	res.Candidates = relinkStacks(ctx, repo, candidates)
+	if err := applyBases(ctx, repo, candidates, r.db, revSHA); err != nil {
+		return res, err
+	}
+	res.Candidates = candidates
 	if err := nearness(ctx, repo, revSHA, res.Candidates); err != nil {
 		return res, err
 	}
@@ -579,42 +581,39 @@ func stackParentID(c Candidate) string {
 	return parentID(c.Changeset.Base)
 }
 
-// relinkStacks points a stacked changeset at its parent's integration ref once the parent has been
-// recorded, which is the ordinary state of a child whose parent has landed.
+// applyBases sets each stacked candidate's measurement base to the answer `BaseFor` gives, which is the
+// point where the durable record used to sit.
 //
-// Without this the child answers nothing at all: every command measures against the base, the base is
-// a branch that no longer exists, and the answer to "what does this changeset contain?" is an
-// unknown-revision error. The integration ref is the durable half of the relationship — the bridge
-// requirements §Stacked Changesets describes — and it holds the commit the parent's work became, which
-// is what the child should be measured against now. Nothing is invented: the branch name stays in
-// ParentBranch, so the child can still be told its parent has landed rather than merely moved.
-//
-// The trigger used to be the missing branch, and it was too narrow: landing does not delete anything, so
-// the branch is usually still there. A branch that outlives its work is worse than a missing one, because
-// it does not error — it measures. Diffing a child against a branch the landing never moved reads the
-// landed work as still sitting under the child, and a child rebased onto trunk after a merge landing
-// prints trunk's commits as its own work. The record is the fact; the branch is where the record used to
-// live.
+// Without a derived base a stacked child whose parent has landed answers nothing at all, or worse, answers
+// wrongly: every command measures against the base, and a base that names a branch the landing never moved
+// reads the landed work as still sitting under the child — a child rebased onto trunk after a merge landing
+// prints trunk's commits as its own work. `BaseFor` derives the answer from the destination instead: the
+// parent branch while it stands, the run this branch shares with the destination once it does not, and the
+// destination itself as the last resort. Nothing is invented: the branch name stays in `ParentBranch`, so a
+// child can still be told its parent has landed rather than merely moved, and `BaseWhy` travels with the
+// value so a surface printing a SHA can say which rule produced it.
 //
 // Whether an approval survives the move is not decided here. PRD §21 makes that a question about content,
 // and the content comparison belongs where the approval is read (`internal/cli/stacked.go`), which has a
 // head to compare against and this resolver does not.
-func relinkStacks(ctx context.Context, repo *git.Repo, candidates []Candidate) []Candidate {
+func applyBases(ctx context.Context, repo *git.Repo, candidates []Candidate, db DefaultBranchRef, head string) error {
 	for i, c := range candidates {
-		if c.Changeset.ParentBranch == "" || c.Changeset.ParentChangeset == "" {
+		if c.Changeset.ParentBranch == "" && c.Changeset.ParentChangeset == "" {
 			continue
 		}
-		// The record has to resolve, in both cases. Pointing a base at a ref this clone does not have would
-		// trade a working branch base for an unknown-revision error, which is the failure this function
-		// exists to remove: a clone that has never fetched `refs/git-pair/*` keeps measuring against the
-		// branch, and `status` says which half of the relationship it is missing.
-		ref := reviewref.Integration(c.Changeset.ParentChangeset)
-		if _, err := repo.RevParse(ctx, ref); err != nil {
+		b, err := BaseFor(ctx, repo, c.Changeset, head, db)
+		if errors.Is(err, ErrNoDefaultBranch) {
+			// No destination to measure against, so the recorded base stays: that is the answer this clone is
+			// able to give, and `status` names the half of the relationship it is missing.
 			continue
 		}
-		candidates[i].Changeset.Base = ref
+		if err != nil {
+			return err
+		}
+		candidates[i].Changeset.Base = b.Ref
+		candidates[i].Changeset.BaseWhy = b.Why
 	}
-	return candidates
+	return nil
 }
 
 // dropNamed removes the candidates that another candidate names, keeping the list untouched

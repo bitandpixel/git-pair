@@ -8,17 +8,20 @@ import (
 )
 
 // The base a stacked child is measured against is a branch, and a branch is the half of a landed parent
-// that stops being the truth. `relinkStacks` already points a child at its parent's integration ref when
-// the parent's branch is deleted, because otherwise every command that measures the child asks git for a
-// revision that does not exist. The trigger was too narrow: the branch is usually still there — landing
-// does not delete anything — and a branch that outlives its work is the case that produces the wrong diff,
-// not the case that produces an error.
+// that stops being the truth. The branch is usually still there — landing deletes nothing — and a branch that
+// outlives its work is the case that produces the wrong diff, not the case that produces an error: diffing a
+// child against a branch the landing never moved reads the landed work as still sitting under the child.
 //
-// What the relink must not do is invalidate a review for free. The rule settled in PRD §21 is content, not
-// bookkeeping: an approval stands while `base...head` names the same files under the old base and the new
+// `changeset.BaseFor` answers the question from the destination: the parent branch while it stands and its
+// work has not landed, the run the child shares with the destination once it has, and the destination itself
+// when neither resolves. The rule travels with the value (`Base:` prints both, `--json` as `base_ref` and
+// `base_why`) because a SHA alone cannot be read.
+//
+// What the base moving must not do is invalidate a review for free. The rule settled in PRD §21 is content,
+// not bookkeeping: an approval stands while `base...head` names the same files under the old base and the new
 // one, and falls when it does not.
 
-func TestRelinkMeasuresAChildOnItsParentsRecordWhileTheBranchIsHere(t *testing.T) {
+func TestADerivedBaseReplacesTheParentBranchWhileTheBranchIsHere(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("alpha")
 	f.CommitChangeset("alpha", "main")
@@ -29,20 +32,21 @@ func TestRelinkMeasuresAChildOnItsParentsRecordWhileTheBranchIsHere(t *testing.T
 
 	res := runIn(t, f.Dir(), "status")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "Base: refs/git-pair/integrations/alpha",
-		"the durable half of the relationship is the base once the parent is recorded")
+	mustContain(t, res.stdout, "Base: "+shortOf(landing)+" — the parent alpha landed",
+		"the base is the run the child shares with the destination, and the rule is printed with it")
 	mustContain(t, res.stdout, "landed as "+shortOf(landing),
-		"and the stack line names the commit the parent became, not just the ref that holds it")
-	mustContain(t, res.stdout, "Span: refs/git-pair/integrations/alpha...current",
+		"and the stack line names the commit the parent became")
+	mustContain(t, res.stdout, "Span: "+landing+"...current",
 		"and the span starts there rather than at a branch tip that no longer carries the work")
 	if _, err := f.Git("rev-parse", "--verify", "refs/heads/alpha"); err != nil {
-		t.Fatalf("the fixture deleted the parent branch, which is the case relinkStacks already handled")
+		t.Fatalf("the fixture deleted the parent branch, which is the easy case")
 	}
+	mustNotContain(t, res.stdout, "refs/git-pair/", "and no durable ref is named anywhere in the answer")
 }
 
-// The rebased-and-trunk-moved case, which is the one the narrow trigger gets wrong. Trunk advanced after
-// the parent branched; the child is rebased onto trunk, so measuring it against the parent's branch tip
-// counts the trunk commits it inherited as its own work.
+// The rebased-and-trunk-moved case, which is the one a ref-named base gets wrong. Trunk advanced after the
+// parent branched; the child is rebased onto the landing, so a base naming anything older counts the trunk
+// commits it inherited as its own work.
 func TestRelinkAfterARebaseOntoTrunkShowsOnlyTheChildsOwnWork(t *testing.T) {
 	f := newRepo(t)
 	f.Commit("trunk note", gittest.WithFile("d.go", "package main\n"))
@@ -63,15 +67,15 @@ func TestRelinkAfterARebaseOntoTrunkShowsOnlyTheChildsOwnWork(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "status")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "Span: refs/git-pair/integrations/alpha...current",
-		"the span names the record, so the trunk commits the rebase inherited are not the child's")
+	mustContain(t, res.stdout, "Span: "+landing+"...current",
+		"the span starts at the landing the child was rebased onto, so the trunk commits it inherited are not the child's")
 	own := f.SubjectsAbove(landing, f.Head())
 	if len(own) == 0 || !strings.Contains(strings.Join(own, "\n"), "changeset beta") {
 		t.Errorf("above the landing the child carries %v, want its own commits only", own)
 	}
 	for _, s := range own {
 		if strings.Contains(s, "trunk moves on") || strings.Contains(s, "alpha work") {
-			t.Errorf("the span counts %q as this child's work, which is the noise the relink removes", s)
+			t.Errorf("the span counts %q as this child's work, which is the noise the derived base removes", s)
 		}
 	}
 }
@@ -96,8 +100,8 @@ func TestRelinkKeepsAnApprovalWhoseDiffIsIdentical(t *testing.T) {
 	f.SwitchTo("beta")
 
 	out := runIn(t, f.Dir(), "status", "--json").json(t)
-	if out["base"] != "refs/git-pair/integrations/alpha" {
-		t.Fatalf("base is %v: the test needs the relink to have happened to prove the approval survives it", out["base"])
+	if out["base_why"] == nil || out["base_why"] == "" {
+		t.Fatalf("base = %v with no base_why: the test needs the base to have been derived, to prove the approval survives it", out["base"])
 	}
 	res := runIn(t, f.Dir(), "check", "--json")
 	res.mustSucceed(t, "check", "--json")
@@ -140,23 +144,24 @@ func TestRelinkDropsAnApprovalWhoseDiffDiffers(t *testing.T) {
 	mustContain(t, res.stdout+res.stderr, "differs", "and says why: the measured diff is not the one the review saw")
 }
 
-// A clone that has never fetched `refs/git-pair/*` cannot relink from a record, and must not try: the base
-// it has is the branch, and the branch answers. The failure this replaces is an `unknown revision` from a
-// base that was written down by a different clone. Milestone M3 of docs/plans/simplify-architecture/plan.md
-// replaces the record hop with a derivation from the destination, after which the branch and the landing are
-// the same read.
-func TestRelinkWithoutARecordMeasuresAgainstTheBranch(t *testing.T) {
+// The derivation needs nothing from this clone's refs: with the parent's record deleted from the repository
+// the base is the same commit, because the answer comes out of the destination's history and not out of
+// git-pair's paper trail. The failure this replaces is an `unknown revision` from a base another clone wrote
+// down, and the failure before that is the same error from a base naming a branch that has gone.
+func TestADerivedBaseNeedsNoRecordInThisClone(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("alpha")
 	f.CommitChangeset("alpha", "main")
 	f.Commit("alpha work", gittest.WithFile("a.go", "package main\n"))
-	landAndRecord(t, f, "alpha", "main")
+	landing := landAndRecord(t, f, "alpha", "main")
 	stackedChangeset(t, f, "beta", "alpha", "alpha", "b.go")
 	f.MustGit("update-ref", "-d", "refs/git-pair/integrations/alpha")
+	f.MustGit("update-ref", "-d", "refs/git-pair/archive/alpha")
 
 	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "Base: alpha", "the branch is still the base this clone can measure against")
+	mustContain(t, res.stdout, "Base: "+shortOf(landing)+" — the parent alpha landed",
+		"the same base the record used to name, derived rather than read")
 	mustContain(t, res.stdout, "the parent's work has reached the destination",
 		"and the note says what is true about the parent rather than what this clone is missing")
 	mustNotContain(t, res.stdout, "git pair integration record",
