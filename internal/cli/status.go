@@ -278,7 +278,7 @@ func (a *app) landingsOnNoChangeset(ctx context.Context, slug string, doFetch bo
 	if derr != nil {
 		return err
 	}
-	dirs, derr := changeset.DirsAt(ctx, repo, db.Ref)
+	dirs, derr := changeset.ActiveIDs(ctx, repo, db.Ref)
 	if derr != nil {
 		return err
 	}

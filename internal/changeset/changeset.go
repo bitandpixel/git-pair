@@ -141,6 +141,10 @@ func ValidateID(id string) error {
 	if id == "." || id == ".." {
 		return fmt.Errorf("changeset id %q is not a usable directory name", id)
 	}
+	if Reserved(id) {
+		return fmt.Errorf("changeset id %q is reserved: %s/ holds the directories of changesets that have landed, so no changeset may take that name",
+			id, filepath.Join(Root, LandedDir))
+	}
 	if strings.ContainsAny(id, "/\\") {
 		return fmt.Errorf("changeset id %q must not contain a path separator", id)
 	}
@@ -196,7 +200,7 @@ func DirectoryAt(ctx context.Context, repo *git.Repo, id string) (DirectoryState
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return st, err
 	}
-	dirs, err := DirsAt(ctx, repo, "HEAD")
+	dirs, err := ActiveIDs(ctx, repo, "HEAD")
 	if err != nil {
 		return st, err
 	}
@@ -220,7 +224,7 @@ func worktreeDirs(repo *git.Repo) ([]string, error) {
 	}
 	var dirs []string
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() && !Reserved(e.Name()) {
 			dirs = append(dirs, e.Name())
 		}
 	}
@@ -242,6 +246,12 @@ func changesetDir(path string) (string, bool) {
 	}
 	id := strings.TrimPrefix(rest, prefix)
 	if id == "" || strings.Contains(id, "/") {
+		return "", false
+	}
+	// A `CHANGESET.yaml` written directly under the landed namespace is not a changeset claiming
+	// to be called `.landed`, so this reader refuses it rather than naming it. Same trap, third
+	// reader; see the comment on LandedDir.
+	if Reserved(id) {
 		return "", false
 	}
 	return id, true
@@ -355,19 +365,68 @@ func StackAt(ctx context.Context, repo *git.Repo, rev, slug string) (Stack, erro
 	return stackOf(md)
 }
 
-// DirsAt lists the changeset directories present in a revision's tree. It reads the tree and
-// never the working tree, so a changeset that was merged and whose branch has gone is still
-// visible as the directory it left behind.
-func DirsAt(ctx context.Context, repo *git.Repo, rev string) ([]string, error) {
-	out, err := repo.Git(ctx, "ls-tree", "-d", "--name-only", rev, "--", Root+"/")
+// ActiveIDs lists the changeset directories present in a revision's tree: the immediate children of
+// `changesets/`, minus the landed namespace. It reads the tree and never the working tree, so a
+// changeset that was merged and whose branch has gone is still visible as the directory it left
+// behind.
+//
+// The exclusion is not cosmetic, and `Reserved` names the trap it avoids: a listing that returned
+// `.landed` would hand every caller a changeset id with no `CHANGESET.yaml`, and each of them would
+// report the branch as broken instead of reporting the namespace.
+//
+// Ask for this when the question is "what work does this revision carry". Ask for LandedIDs when the
+// question is "has this reached the destination", because a tidied directory is landed and is not
+// listed here.
+func ActiveIDs(ctx context.Context, repo *git.Repo, rev string) ([]string, error) {
+	dirs, err := dirsUnder(ctx, repo, rev, Root)
+	if err != nil {
+		return nil, err
+	}
+	return withoutReserved(dirs), nil
+}
+
+// LandedIDs lists the changesets a destination branch has: every directory it carries under
+// `changesets/`, plus every directory it carries under `changesets/.landed/`.
+//
+// It is one fact with two spellings. A landed changeset's directory arrives on the destination as
+// `changesets/<id>/` and stays there until somebody tidies it to `changesets/.landed/<id>/`. Either
+// way the work landed, and a reader that asks only one of the two questions reports a landed
+// changeset as work in progress — the directory is simply not where it looked. Both halves come from
+// the destination's own tree, so there is nothing to keep in sync and nothing to fetch.
+func LandedIDs(ctx context.Context, repo *git.Repo, trunkRef string) ([]string, error) {
+	active, err := ActiveIDs(ctx, repo, trunkRef)
+	if err != nil {
+		return nil, err
+	}
+	moved, err := dirsUnder(ctx, repo, trunkRef, ActiveDirPath(LandedDir))
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(active)+len(moved))
+	for _, id := range append(active, moved...) {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// dirsUnder lists the immediate child directories of one path in a revision's tree, sorted, and
+// tolerates a revision or a path that is not there by returning nothing.
+func dirsUnder(ctx context.Context, repo *git.Repo, rev, dir string) ([]string, error) {
+	out, err := repo.Git(ctx, "ls-tree", "-d", "--name-only", rev, "--", dir+"/")
 	if err != nil {
 		if git.IsUnknownRevision(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	prefix := Root + "/"
-	var out2 []string
+	prefix := dir + "/"
+	var names []string
 	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		line = strings.TrimSpace(strings.TrimSuffix(line, "/"))
 		if line == "" {
@@ -377,11 +436,11 @@ func DirsAt(ctx context.Context, repo *git.Repo, rev string) ([]string, error) {
 			continue
 		}
 		if name := strings.TrimPrefix(line, prefix); name != "" && !strings.Contains(name, "/") {
-			out2 = append(out2, name)
+			names = append(names, name)
 		}
 	}
-	sort.Strings(out2)
-	return out2, nil
+	sort.Strings(names)
+	return names, nil
 }
 
 // Current resolves the changeset for the checked-out branch.

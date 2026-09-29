@@ -238,13 +238,18 @@ func Resolve(ctx context.Context, repo *git.Repo, rev string, db DefaultBranchRe
 // resolver holds what every revision in one command compares against: the directories the
 // integration branch has. It is the same for every branch in the repository, so a command that asks
 // about many revisions builds one of these instead of listing the same tree once per branch.
+//
+// `onTrunk` is built from LandedIDs, so a directory the destination carries under `changesets/.landed/`
+// counts as landed exactly as one it carries under `changesets/` does. That is the question the field
+// answers — "is this id already on the destination" — and answering it from one spelling alone would
+// offer a tidied changeset as work in progress on every branch that still carries its directory.
 type resolver struct {
 	db      DefaultBranchRef
 	onTrunk map[string]bool
 }
 
 func newResolver(ctx context.Context, repo *git.Repo, db DefaultBranchRef) (*resolver, error) {
-	landed, err := DirsAt(ctx, repo, db.Ref)
+	landed, err := LandedIDs(ctx, repo, db.Ref)
 	if err != nil {
 		return nil, err
 	}
@@ -256,6 +261,7 @@ func newResolver(ctx context.Context, repo *git.Repo, db DefaultBranchRef) (*res
 }
 
 // trunkIDs returns the destination's directories in a stable order, for callers reporting them.
+// Both spellings are in here, so a report built from it cannot name a landed changeset as work.
 func (r *resolver) trunkIDs() []string {
 	out := make([]string, 0, len(r.onTrunk))
 	for id := range r.onTrunk {
@@ -408,10 +414,11 @@ type BranchResolution struct {
 type Scan struct {
 	DefaultBranch DefaultBranchRef
 	Branches      []BranchResolution
-	// TrunkIDs names the changeset directories present in the destination branch, sorted. They are
-	// landed work whether or not anyone wrote a record — the tree rule (PRD §12) makes a directory
-	// the destination carries no claim on anything — which is why the listing travels with the scan
-	// instead of being read again by whoever asks "has anything landed unrecorded?".
+	// TrunkIDs names the changeset directories present in the destination branch, sorted, in either
+	// spelling: `changesets/<id>/` and `changesets/.landed/<id>/`. They are landed work whether or not
+	// anyone wrote a record — the tree rule (PRD §12) makes a directory the destination carries no claim
+	// on anything — which is why the listing travels with the scan instead of being read again by whoever
+	// asks "has anything landed unrecorded?".
 	TrunkIDs []string
 }
 

@@ -285,7 +285,7 @@ func TestCurrentDetachedHeadAndMissingDirectory(t *testing.T) {
 	}
 }
 
-func TestDirsAtAndThreads(t *testing.T) {
+func TestActiveIDsAndThreads(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
 	repo := &git.Repo{Dir: f.Dir()}
@@ -307,17 +307,17 @@ func TestDirsAtAndThreads(t *testing.T) {
 	f.Write(filepath.Join("changesets", "not-a-changeset", "NOTES.md"), "scratch\n")
 	f.Commit("add the changeset directories")
 
-	names, err := changeset.DirsAt(context.Background(), repo, "HEAD")
+	names, err := changeset.ActiveIDs(context.Background(), repo, "HEAD")
 	if err != nil {
-		t.Fatalf("DirsAt: %v", err)
+		t.Fatalf("ActiveIDs: %v", err)
 	}
 	want := []string{"booking-transaction", "booking-ui", "not-a-changeset"}
 	if len(names) != len(want) {
-		t.Fatalf("DirsAt = %v, want %v sorted", names, want)
+		t.Fatalf("ActiveIDs = %v, want %v sorted", names, want)
 	}
 	for i := range want {
 		if names[i] != want[i] {
-			t.Errorf("DirsAt = %v, want %v sorted", names, want)
+			t.Errorf("ActiveIDs = %v, want %v sorted", names, want)
 			break
 		}
 	}

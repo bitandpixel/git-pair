@@ -179,18 +179,18 @@ One commit per milestone, `mise run check` per commit, `mise run gates` at the e
 
 #### Tasks
 
-- [ ] In `internal/changeset`, exclude `.landed` from the active-children listing in `DirsAt`
+- [x] In `internal/changeset`, exclude `.landed` from the active-children listing in `DirsAt`
   (`internal/changeset/changeset.go:361-385`). Verified necessary: `DirsAt` lists every immediate child
   directory with no dotfile or underscore exclusion, so `changesets/.landed` currently becomes a changeset
   id named `.landed` and `candidateFor` then fails the branch on a missing `CHANGESET.yaml`
   (`internal/changeset/resolve.go:445-453`). One fix inside `DirsAt` covers every caller.
-- [ ] Export `ActiveIDs(ctx, repo, rev)` (children of `changesets/`, minus `.landed`) and
+- [x] Export `ActiveIDs(ctx, repo, rev)` (children of `changesets/`, minus `.landed`) and
   `LandedIDs(ctx, repo, trunkRef)` (`ActiveIDs` of trunk, plus the children of `changesets/.landed/`).
   `onTrunk` and `TrunkIDs` become the two, so nothing re-implements either.
-- [ ] `internal/changeset/tidy.go`: `LandedDirPath(id)` and the pair of pathspecs
+- [x] `internal/changeset/tidy.go`: `LandedDirPath(id)` and the pair of pathspecs
   (`changesets/<id>/`, `changesets/.landed/<id>/`) that history walks need. M4 uses them and M2's chain
   walk depends on them, so they exist before either caller.
-- [ ] Move the `.landed` literal and the exclusion rule into one place with a comment naming the `DirsAt`
+- [x] Move the `.landed` literal and the exclusion rule into one place with a comment naming the `DirsAt`
   trap, so the next namespace added under `changesets/` is a decision rather than an accident.
 
 #### Verification
@@ -201,6 +201,15 @@ One commit per milestone, `mise run check` per commit, `mise run gates` at the e
 - Unit test: `ActiveIDs` of a revision with no `changesets/` at all is empty, not an error, matching the
   `DirsAt` unknown-revision tolerance at `internal/changeset/changeset.go:364-366`.
 - `mise run gates` unchanged in behaviour: nothing reads `LandedIDs` yet.
+
+Two things measured while building those fixtures, because they change later milestones:
+
+- `git mv` does not create the destination's parent directory. A move into `changesets/.landed/` needs that
+  directory present first, so M4's tidy creates it as part of the move.
+- `ls-tree` reports an unresolvable revision as `Not a valid object name`, which `git.IsUnknownRevision`
+  does not match, so the tree read's unknown-revision tolerance does not fire on that path. M2 reads the
+  destination's tree through `LandedIDs` for every command, so either the messages get lined up in `internal/git`
+  or M2 must resolve the revision first — the same choice `--default-branch` in a fresh clone already forces.
 
 ### M2 — Landing is a tree fact
 

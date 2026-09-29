@@ -470,7 +470,7 @@ func changesetToDerive(ctx context.Context, repo *git.Repo, dests []string) (str
 	}
 	var all, unfinished []string
 	for _, dest := range dests {
-		dirs, err := changeset.DirsAt(ctx, repo, dest)
+		dirs, err := changeset.ActiveIDs(ctx, repo, dest)
 		if err != nil {
 			return "", err
 		}
@@ -911,7 +911,7 @@ func derivedNote(rec *integrationRecord) string {
 // safe: the flagless flow has no `--changeset` to decide between candidates, and a caller who is handed a
 // choice between two finished records cannot tell that the command has nothing to do.
 func changesetsAtSource(ctx context.Context, repo *git.Repo, source string, in integrationRecordInput, named string) ([]string, error) {
-	here, err := changeset.DirsAt(ctx, repo, source)
+	here, err := changeset.ActiveIDs(ctx, repo, source)
 	if err != nil {
 		return nil, err
 	}
@@ -940,9 +940,9 @@ func changesetsAtSource(ctx context.Context, repo *git.Repo, source string, in i
 	landed := map[string]bool{}
 	for _, dest := range dests {
 		// Both spellings of the destination are one branch, and a clone that fetched it has it under
-		// `refs/remotes/` rather than `refs/heads/`. `DirsAt` reads a tree, so each spelling it can resolve
+		// `refs/remotes/` rather than `refs/heads/`. `ActiveIDs` reads a tree, so each spelling it can resolve
 		// answers the same question.
-		dirs, err := changeset.DirsAt(ctx, repo, dest)
+		dirs, err := changeset.ActiveIDs(ctx, repo, dest)
 		if err != nil {
 			continue
 		}
