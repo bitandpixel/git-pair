@@ -442,13 +442,23 @@ done
 # survive: the request was made here, the merge happened elsewhere, and the paper trail that says so has to
 # reach the author's machine or the author is looking at a changeset that appears to still be waiting.
 git fetch -q "$DECLREMOTE" 'refs/git-pair/*:refs/git-pair/*'
-out=$($G queue 2>&1)
-if printf '%s' "$out" | grep -q "awaiting-merge (integrated at"; then
-  echo "  ok: with the record fetched, this clone stops listing the request"
-else
-  echo "  FAIL: the author's clone still lists a changeset the other clone landed and recorded"
-  $G queue 2>&1 | sed 's/^/    /'
+# The two facts the step's claim is made of, asserted directly. The record arrived: that is what "published"
+# means for this clone, and it is the only thing this clone can check about another clone's merge. And the
+# changeset is not offered for review: the queue spans branches, and this clone has no branch carrying it, so
+# there is no row to withhold — a row would be the failure, and it is what the next assertion forbids. The
+# queue output is captured before it is matched, for the reason given above the `check` helper: an early
+# `grep -q` exit turns the writer's SIGPIPE into a failed assertion under `pipefail`.
+out=$($G queue --json 2>&1)
+if ! git show-ref --verify --quiet refs/git-pair/integrations/awaiting-merge; then
+  echo "  FAIL: the fetch brought no record for the changeset the other clone landed"
+  git for-each-ref --format='    %(refname)' refs/git-pair
   FAILED=1
+elif printf '%s' "$out" | grep -q '"slug": *"awaiting-merge"'; then
+  echo "  FAIL: with the record fetched, this clone still offers the landed changeset for review"
+  printf '%s\n' "$out" | sed 's/^/    /'
+  FAILED=1
+else
+  echo "  ok: with the record fetched, this clone holds the landing and stops offering the request"
 fi
 rm -rf "$DECL"
 
@@ -575,6 +585,81 @@ printf '%s' "$out" | grep -q '"unpublished": \[\]' \
   && echo "  ok: a clone with nothing to publish answers with an empty list, not an absent key" \
   || { echo "  FAIL: the queue JSON omitted the answer: $out"; FAILED=1; }
 rm -rf "$PUBDIR"
+
+step "tidy: a landing's directory moves aside, and every answer about it holds"
+# Landing keeps the directory, which is right the moment it lands and scenery a release later.
+# `change tidy` moves it out of the way as one commit of renames, and the point of the step is the
+# second half: every question the tool answers about that changeset has to be answered the same way
+# on both sides of the move, because nothing about the work changed.
+git switch -q main
+git checkout -qb tidied-landing
+mkdir -p changesets/tidied-landing
+printf 'base: main\n' > changesets/tidied-landing/CHANGESET.yaml
+printf 'Summary: work that lands, then gets out of the way.\n' > changesets/tidied-landing/ABOUT.md
+printf 'tidied\n' > tidied.md && git add -A && git commit -qm "tidied-landing: the work"
+git switch -q main
+git merge -q --no-ff -m "tidied-landing: merge it" tidied-landing
+# The move rides a changeset, so it happens on a branch and reaches trunk the way any other change does.
+git switch -qc tidy-up main
+out=$($G change tidy tidied-landing --dry-run 2>&1); code=$?
+if [ "$code" = 0 ] && printf '%s' "$out" | grep -q "changesets/tidied-landing -> changesets/.landed/tidied-landing"; then
+  echo "  ok: the dry run names the move it would make"
+else
+  echo "  FAIL: the dry run did not report the move: $out"; FAILED=1
+fi
+git rev-parse --quiet --verify HEAD:changesets/tidied-landing/CHANGESET.yaml >/dev/null \
+  && echo "  ok: and committed nothing" \
+  || { echo "  FAIL: the dry run moved the directory"; FAILED=1; }
+out=$($G change tidy tidied-landing 2>&1); code=$?
+check "the tidy succeeds" 0 "$code"
+if git diff --name-status HEAD~1 HEAD | grep -qv '^R'; then
+  echo "  FAIL: the tidy commit carries more than renames: $(git diff --name-status HEAD~1 HEAD)"; FAILED=1
+else
+  echo "  ok: the commit is renames only, so a reviewer reads it as a move"
+fi
+git rev-parse --quiet --verify HEAD:changesets/.landed/tidied-landing/CHANGESET.yaml >/dev/null \
+  && echo "  ok: the directory is where the tidy said it would be" \
+  || { echo "  FAIL: the landed spelling is not in HEAD"; FAILED=1; }
+out=$($G status --changeset tidied-landing 2>&1); code=$?
+if [ "$code" = 0 ] && printf '%s' "$out" | grep -qi "landed"; then
+  echo "  ok: status still reports it landed, read from where it now sits"
+else
+  echo "  FAIL: status after the tidy exited $code: $out"; FAILED=1
+fi
+out=$($G change tidy tidied-landing 2>&1); code=$?
+if [ "$code" = 0 ] && printf '%s' "$out" | grep -q "already tidied"; then
+  echo "  ok: the second run is a no-op that names the reason"
+else
+  echo "  FAIL: the second run exited $code: $out"; FAILED=1
+fi
+out=$($G init --id tidied-landing --base main 2>&1); code=$?
+if [ "$code" != 0 ] && printf '%s' "$out" | grep -q "changeset tidied-landing is landed on main at changesets/"; then
+  echo "  ok: the name is still held by the landing, and the refusal says by what"
+else
+  echo "  FAIL: reusing a tidied landing's id exited $code: $out"; FAILED=1
+fi
+out=$($G queue --json 2>&1)
+if printf '%s' "$out" | grep -q '"slug": *"tidied-landing"'; then
+  echo "  FAIL: the queue lists a tidied landing as work in review"; FAILED=1
+else
+  echo "  ok: the queue does not list it as work"
+fi
+out=$($G status --changeset tidied-landing --json 2>&1); code=$?
+if [ "$code" = 0 ] && printf '%s' "$out" | grep -q '"landed": *true'; then
+  echo "  ok: the machine surface still says landed, from the directory's new home"
+else
+  echo "  FAIL: status --json after the tidy exited $code: $out"; FAILED=1
+fi
+git switch -q tidied-landing
+out=$($G check 2>&1); code=$?
+if [ "$code" = 2 ] && printf '%s' "$out" | grep -q "the integration branch already holds it"; then
+  echo "  ok: the branch the work was done on refuses it as landed too"
+else
+  echo "  FAIL: check on the source branch exited $code: $out"; FAILED=1
+fi
+git switch -q tidy-up
+git switch -q main
+git branch -q -D tidy-up tidied-landing
 
 step "queue is empty again"
 $G queue | sed 's/^/  /'

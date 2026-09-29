@@ -580,10 +580,11 @@ that:
    doubled hyphen — is refused. Silently turning `booking v2` into `booking-v2` would name
    refs after a string nobody typed.
 2. **It is unique.** An ID already in use stops the command rather than gaining a suffix.
-   In use means a `changesets/<id>/` directory in the working tree or in `HEAD`'s tree, or a
-   durable ref already belonging to that ID (§13). A suffix would be an identity nobody
-   chose, baked into refs the moment the changeset is readied, so the command fails and
-   offers a free candidate to type instead:
+   In use means a `changesets/<id>/` directory in the working tree or in `HEAD`'s tree, in either
+   spelling — a landed changeset keeps its name in `changesets/.landed/<id>/` until
+   `git pair change tidy` (§9.10) moves it there, and it keeps it afterwards. A suffix would be an
+   identity nobody chose, baked into the directory the moment the changeset is readied, so the command
+   fails and offers a free candidate to type instead:
 
    ```text
    changeset ID "feature-booking" is already in use: changesets/feature-booking already
@@ -1025,6 +1026,48 @@ pipeline to perform it can copy one: `.github/workflows/git-pair-integrate.yml` 
 permissions, `scripts/ci/git-pair-integrate.sh` for the sequence, and `scripts/gates/ci-integrate.sh` to
 replay that job against scratch remotes. Its shape is an example; what a job gates on is §11.3's two fields,
 and what makes the landing a fact is §11.4's record.
+
+---
+
+## 9.10 `git pair change tidy [<changeset-id>...]`
+
+Moves the directory of a changeset the integration branch already holds from `changesets/<id>/` to
+`changesets/.landed/<id>/`, as one commit of renames on the checked-out branch.
+
+Landing keeps the directory (§12). That is right at the moment it lands — the directory is the record of what
+was reviewed, and the tree is what makes the landing a fact — and it is scenery a release later: a reader
+looking at `changesets/` wants the work still open, and a directory that has finished its review is not that.
+Deleting it would throw away the record, so the command moves it aside instead, into a namespace git-pair owns
+and every listing excludes.
+
+It is a changeset like any other. The move is a commit on the branch you are on, so it rides a changeset and a
+review, the reviewer sees the whole list as `R100` renames in one span, and it reaches the integration branch
+through the same flow as any other change. Nothing is pushed, and no ref is written.
+
+Because the directory's new path is still a directory the integration branch carries, `LandedIDs`,
+`ActiveIDs`, `status`, `queue`, `check` and the destination walk answer every question about the changeset the
+same way on both sides of the move. What changes is the path, and the name: the ID stays taken while the
+landed directory holds it (§5).
+
+Flags: `--all-landed` takes the set this branch carries that the integration branch already holds, instead of
+refusing the ones that have not landed; `--dry-run` reports the plan and commits nothing; `--json` emits
+`changesets` (always an array, each entry `id`, `from`, `to`, `action`), `commit`, `dry_run`, `destination`.
+
+Refusals, each with its own reason, and none of them moving part of the list:
+
+1. the ID is not landed on the integration branch — the directory is the record of work still open, and
+   hiding it would take a live changeset out of every list;
+2. a changeset still in flight is stacked on it — the child measures itself against its parent's directory,
+   and moving that path out of the active spelling would change the diff a reviewer is looking at;
+3. the working tree is not clean, anywhere — including inside `changesets/`, because the file a tidy must not
+   sweep is a sibling changeset's half-written `ABOUT.md`;
+4. this branch carries no `changesets/<id>/` to move.
+
+`change tidy` with neither IDs nor `--all-landed` is a usage error, as is naming IDs beside `--all-landed`:
+two different answers to the same question, and the caller has to pick before anything moves. A second run at
+the same set is a no-op that names the directory it found.
+
+Exit codes: `0` moved or nothing to do, `1` refused, `2` usage, `3` git failed (§22).
 
 ---
 
