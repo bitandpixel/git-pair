@@ -118,9 +118,9 @@ func TestStatusStackChainReportsAGoneParentBranch(t *testing.T) {
 	}
 }
 
-// An ancestor with no record here is a finding, not a gap to hide: the child's chain stops being provable
-// at that step, and `--fetch` is what closes it.
-func TestStatusStackChainNamesAnAncestorWithNoRecord(t *testing.T) {
+// Deleting the durable record of an ancestor changes nothing about its chain. The landing is a fact of the
+// integration branch's tree, so the step still reports it and the walk still continues from the destination.
+func TestStatusStackChainIgnoresADeletedRecord(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("alpha")
 	f.CommitChangeset("alpha", "main")
@@ -132,8 +132,8 @@ func TestStatusStackChainNamesAnAncestorWithNoRecord(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "landed: alpha", "the step is still there")
-	mustContain(t, res.stdout, "so the chain above it is read from this branch", "and says what is missing")
+	mustContain(t, res.stdout, "landed: alpha (branch alpha) -> ", "the landing is still reported with its commit")
+	mustContain(t, res.stdout, "reachable from main", "and still placed in the integration branch")
 	mustNotContain(t, res.stdout, "--fetch", "nothing is fetched to answer this; the destination is read as it is")
 }
 
