@@ -11,8 +11,8 @@ The three rules that cost the most to get wrong:
 - `git pair change ready` is the handoff. Do not also ask for review in prose.
 - `git pair change feedback` is how a review is read. `git pair diff --unreviewed` is the reviewer's
   question, and it reads empty immediately after a submission.
-- `git pair check` is where you stop. The merge, `git pair integration record` and
-  `git pair integration publish` belong to whoever owns the destination branch, and to CI.
+- `git pair check` is where you stop. The merge belongs to whoever owns the destination branch, and to CI:
+  git-pair merges nothing, pushes nothing, and writes no ref, so the pushed branch is the record.
 
 Exit codes are part of the interface: 1 means the repository said no to a correct command, and 2 means
 the command was wrong and will fail again unchanged.

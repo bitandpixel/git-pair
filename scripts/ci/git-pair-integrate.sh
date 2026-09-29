@@ -11,7 +11,7 @@
 #   -b, --base     the integration branch: passed to git-pair as --default-branch, and the branch to
 #                  merge into when the changeset's own destination names none (default
 #                  $GIT_PAIR_DEFAULT_BRANCH, else main)
-#   -R, --remote   the remote to push the merge to and publish the refs through (default origin)
+#   -R, --remote   the remote to fetch from and to push the merge to (default origin)
 #   -c, --require-ci
 #                  do not merge until the head is proven green by --ci-probe. Without it the job asks
 #                  git-pair's gate and nothing else, which is right for a repository whose CI is somebody
@@ -28,8 +28,9 @@
 # The exit code is 0 when every changeset considered was merged, was already handled, or was legitimately
 # not ready — a job triggered by a push runs before anybody has declared anything, and a red build for
 # "nothing to do yet" trains people to ignore the build. A head that is merely not green yet is the same
-# kind of nothing-yet, so it is a skip too. It is 1 when a merge, a push or a record failed, and 2 for a bad
+# kind of nothing-yet, so it is a skip too. It is 1 when a merge or a push failed, and 2 for a bad
 # invocation. `--require` turns the refusals into errors, which is what a hand-run of one branch wants.
+# A merge that reaches the destination needs nothing after it: the destination's tree is the record.
 #
 # Why the sequence is in this order (PRD §29):
 #
@@ -44,13 +45,10 @@
 #                         cannot be about a head that arrived while this job was starting.
 #   merge --no-ff           ordinary git, run by whoever owns the destination — here the job, on the
 #                           owner's behalf, because the author's declaration asked for exactly that.
-#   push <destination>      the landing exists when the destination branch says it does.
-#   integration record      the only git-pair ref write, and deliberately after the push: a record of a
-#                           landing that failed to travel is a claim about a merge nobody can reach. The
-#                           recorder verifies `--commit` is in `--target` and is the commit that added
-#                           changesets/<id>/ there, which makes it the check that the merge did what this
-#                           job believes it did.
-#   integration publish     the pair to the shared remote, unforced, before anything gets tidied.
+#   push <destination>      the landing exists when the destination branch says it does, and the pushed
+#                           branch's tree is then the whole record of it (PRD §13.4). Nothing follows this
+#                           push: no ref to write, nothing to publish, and no second command for anybody
+#                           to run. If the push fails, the landing did not happen.
 #
 # This is an example, not the product: git-pair still merges nothing, and nothing here is a git-pair
 # subcommand (PRD §26). It is the merge a repository's owner chooses to run on their own branches.
@@ -144,7 +142,7 @@ ci_green() {
 #
 # Every value it acts on comes from git-pair rather than from a guess: the head from the gate that cleared
 # it, the destination from the queue rather than from `base:` (for the child of a landed parent the base is
-# the parent's integration ref, and a ref is not a branch anything can merge into), and the changeset id
+# the parent's landing commit, and a commit is not a branch anything can merge into), and the changeset id
 # from the gate too, because a stacked child's source carries its parents' directories as well.
 integrate_one() {
   local branch=$1 cs src decl dest head_now merge subject
@@ -236,7 +234,7 @@ integrate_one() {
   say "$cs: declared by ${decl:0:7} for merge into $dest"
 
   if [ "$DRY" = 1 ]; then
-    note "dry run: would merge --no-ff ${src:0:7} into $dest, push $REMOTE/$dest, record, publish"
+    note "dry run: would merge --no-ff ${src:0:7} into $dest and push $REMOTE/$dest"
     return 0
   fi
 
@@ -244,9 +242,10 @@ integrate_one() {
   # destination actually holds, not what this clone last happened to have.
   git checkout -q -B "$BASE_LOCAL" "$REMOTE/$dest" || { note "cannot check out $REMOTE/$dest"; return 1; }
   if git merge-base --is-ancestor "$src" HEAD; then
-    # Nothing to merge. The changeset is in the destination and unrecorded — the queue calls that
-    # LANDED, UNRECORDED, and `integration record` is the command to run, by hand, with the SHAs.
-    note "$cs: $dest already holds ${src:0:7}; record it with git pair integration record --changeset $cs"
+    # Nothing to merge: the destination already carries the work. `git pair status --changeset $cs` reads
+    # that landing out of the branch, and `git pair change tidy $cs` moves the directory aside when the
+    # destination's owner wants the room.
+    note "$cs: $dest already holds ${src:0:7} — already landed, nothing to merge"
     return 0
   fi
 
@@ -256,29 +255,19 @@ integrate_one() {
     # A conflict is the author's or the reviewer's to resolve, never a job's to guess at: put the branch
     # back the way it was and let the red build say so.
     git merge --abort >/dev/null 2>&1
-    note "$cs: the merge conflicted against $dest — nothing merged, nothing recorded"
+    note "$cs: the merge conflicted against $dest — nothing merged"
     return 1
   fi
   merge=$(git rev-parse HEAD)
-  note "merged as ${merge:0:7}"
+  note "merged as ${merge:0:7} against ${dest}"
 
   if ! git push -q "$REMOTE" "HEAD:refs/heads/$dest"; then
-    note "$cs: the push to $dest was refused — the merge stays local and NO record was written"
+    # The landing is the pushed branch. A merge that stayed in this job's clone is not one, and there is
+    # nothing here to leave half-written: no ref, no record, no second remote to reconcile.
+    note "$cs: the push to $dest was refused — the landing did not happen"
     return 1
   fi
-  # The push updated $REMOTE/$dest locally, so the recorder can verify the landing against the destination
-  # it is claiming, rather than against a branch this clone invented.
-  if ! "$GP" integration record --changeset "$cs" --source "$src" --commit "$merge" \
-       --target "$REMOTE/$dest" --default-branch "$BASE"; then
-    note "$cs: the merge is in $dest and the record refused — the queue will call this LANDED, UNRECORDED"
-    return 1
-  fi
-  if ! "$GP" integration publish "$cs" --remote "$REMOTE" --default-branch "$BASE"; then
-    note "$cs: recorded locally, but the pair did not reach $REMOTE"
-    return 1
-  fi
-  note "$cs: merged, recorded, published"
-  return 0
+  note "$cs: pushed to $dest — the destination's tree is the record of the landing"
 }
 
 # declared_row is the queue's read-only statement that somebody asked for this merge: it has a row for the
@@ -314,10 +303,8 @@ if ! git fetch -q "$REMOTE" "+refs/heads/*:refs/heads/*"; then
   printf 'fetching %s failed\n' "$REMOTE" >&2
   exit 1
 fi
-# The records too, because a destination is read through them: where the child of a landed parent lands is
-# the branch its parent landed on, and this job learns that from the parent's ref. A repository with no
-# records yet has nothing to match, which git reports as a failure of the fetch rather than an empty one.
-git fetch -q "$REMOTE" "+refs/git-pair/*:refs/git-pair/*" 2>/dev/null || true
+# Nothing else is fetched. git-pair reads a landing out of the branches themselves, so a job that has the
+# branches has everything (PRD §13.4).
 
 if [ ${#BRANCHES[@]} -eq 0 ]; then
   while IFS= read -r b; do

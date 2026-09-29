@@ -85,10 +85,10 @@ $G review thread "concurrency tests" </dev/null; check "review thread (no tty re
 [ -f changesets/booking-transaction/concurrency-tests.md ] && echo "  ok: thread file created" || { echo "  FAIL: thread not created"; FAILED=1; }
 $G review submit --block; check "review submit --block" 0 $?
 $G review history; check "review history" 0 $?
-# Nothing under refs/git-pair yet. A review is a commit on a branch; the two durable refs are what
-# `integration record` writes at the end, and nothing before that point has anything to record.
+# Nothing under refs/git-pair. A review is a commit on the branch and nothing else: git-pair writes no ref at
+# any point in a lifecycle, so there is no namespace for a submission to have written (PRD §13.4).
 [ -z "$(git for-each-ref refs/git-pair)" ] && echo "  ok: a review submission writes no ref" \
-  || { echo "  FAIL: reviewing wrote a durable ref: $(git for-each-ref refs/git-pair)"; FAILED=1; }
+  || { echo "  FAIL: reviewing wrote a ref: $(git for-each-ref refs/git-pair)"; FAILED=1; }
 
 step "author: ready must fail on surviving review additions"
 $G change ready; check "change ready blocked" 1 $?
@@ -134,7 +134,7 @@ SOURCE=$(git rev-parse HEAD)
 $G check; check "check: the approved head is integration-ready" 0 $?
 # An integration-ready changeset is still a branch and some commits. The record is written by the
 # landing, not by the gate clearing.
-[ -z "$(git for-each-ref refs/git-pair)" ] && echo "  ok: integration-ready, and still no durable ref" \
+[ -z "$(git for-each-ref refs/git-pair)" ] && echo "  ok: integration-ready, and still no ref of git-pair's own" \
   || { echo "  FAIL: the gate wrote a ref: $(git for-each-ref refs/git-pair)"; FAILED=1; }
 # The two ways a passed gate stops meaning what it passed: the reviewed content moved, and the author
 # withdrew the offer. Both are exit 1 with a bullet naming which, which is what makes the gate usable
@@ -193,54 +193,102 @@ git switch -q booking-transaction
 git branch -D rewritten >/dev/null
 git branch -D trunk-moved >/dev/null
 
-step "integration: record where the work landed"
-# The landing goes to a branch that is not the default one, which is the case only the record can
-# answer for: the changeset directory is still absent from trunk, so the tree rule reads the branch
-# as live work until someone says where the change went. The landing commit shares no ancestry with
-# the reviewed head, the way a squash leaves them.
-# `--source` is the commit the approval speaks about, identified by the changeset directory its tree
-# carries — not by a ref, and not by whatever HEAD happens to be.
+step "a landing on a branch that is not the destination leaves the work live"
+# The merge is ordinary git and it can go anywhere. `landed` is a claim about one particular branch — the
+# changeset's destination (PRD §13.1) — so a merge into a release line is a merge, not a landing: main does
+# not carry the directory, the work is still in progress, and review can still rewrite the branch. There is
+# no record to write and no flag to say where the work went: naming the destination is a read parameter, and
+# the history that answers "landed, and reviewed?" is already in the branch it merged into (PRD §13.3).
+# The branch last moved on a withdrawal, so offer it and approve it once more: this merge is the landing an
+# approval permits, and the head it speaks about is the head the chain ends at.
+git switch -q booking-transaction
+$G change ready >/dev/null; check "re-offered for the landing" 0 $?
+$G review submit --approve >/dev/null; check "and approved again" 0 $?
+SOURCE=$(git rev-parse HEAD)
 git switch -qc release/2.x main
-git checkout "$SOURCE" -- changesets/booking-transaction
-git commit -qm "booking-transaction: land the reviewed work"
+git merge -q --no-ff -m "booking-transaction: land the reviewed work" booking-transaction
 LANDING=$(git rev-parse HEAD)
 if git merge-base --is-ancestor "$SOURCE" "$LANDING"; then
-  echo "  FAIL: the fixture landing should not descend from the reviewed head"; FAILED=1
-fi
-ARCHIVE=refs/git-pair/archive/booking-transaction
-INTEGRATION=refs/git-pair/integrations/booking-transaction
-# The recorder verifies before it writes, and the destination is one of the four things it verifies. No
-# --target here means git-pair names the destination itself — the changeset's `base:`, then the default
-# branch — and this landing is in neither, so the refusal is the answer, with the flag that settles it.
-# Landing on a release branch is allowed; it is only not allowed to be silent.
-out=$($G integration record --source "$SOURCE" --commit "$LANDING" 2>&1); code=$?
-if [ "$code" = 1 ] && printf '%s\n' "$out" | grep -q "is not reachable from main" \
-   && printf '%s\n' "$out" | grep -q "changeset's own \`base:\`" \
-   && printf '%s\n' "$out" | grep -q -- "--target <ref>"; then
-  echo "  ok: an unnamed destination outside trunk is refused, and says how to name it"
+  echo "  ok: the merge carries the reviewed head, so the chain arrives with the directory"
 else
-  echo "  FAIL: the unnamed destination was not refused as expected (exit $code)"; printf '%s\n' "$out" | sed 's/^/    /'; FAILED=1
+  echo "  FAIL: the landing does not contain the reviewed head"; FAILED=1
 fi
-[ -z "$(git for-each-ref refs/git-pair)" ] && echo "  ok: a refused record writes nothing" \
-  || { echo "  FAIL: a refused record wrote a ref"; FAILED=1; }
-$G integration record --source "$SOURCE" --commit "$LANDING" --target release/2.x; check "integration record" 0 $?
-[ "$(git rev-parse "$ARCHIVE")" = "$SOURCE" ] && echo "  ok: the archive names the reviewed head" \
-  || { echo "  FAIL: the archive does not name the reviewed head"; FAILED=1; }
-[ "$(git rev-parse "$INTEGRATION")" = "$LANDING" ] && echo "  ok: the integration ref names the landing" \
-  || { echo "  FAIL: the integration ref is wrong"; FAILED=1; }
-[ "$(git for-each-ref refs/git-pair | wc -l)" = "2" ] \
-  && echo "  ok: the pair is all git-pair writes" || { echo "  FAIL: git-pair wrote other refs"; FAILED=1; }
+# The claim PRD §13.4 makes about the whole tool, checked where a ref used to be written: a landing writes
+# nothing outside the destination's history.
+[ -z "$(git for-each-ref refs/git-pair)" ] && echo "  ok: a landing writes no ref of git-pair's own" \
+  || { echo "  FAIL: a landing wrote a ref: $(git for-each-ref refs/git-pair)"; FAILED=1; }
+CHAIN=$(git rev-list --count "$LANDING")
+[ "$CHAIN" -gt 5 ] && echo "  ok: the unsquashed chain survives in the destination ($CHAIN commits)" \
+  || { echo "  FAIL: the landing lost history: $CHAIN commits behind it"; FAILED=1; }
+landing_log=$(git log "$LANDING" --format=%B)
+printf '%s' "$landing_log" | grep -q '^Review-Outcome: approve$' \
+  && echo "  ok: the approval is readable in the destination's history, which is what a landing keeps" \
+  || { echo "  FAIL: the approval did not arrive with the merge"; FAILED=1; }
 
-# A clone is the shape CI gets: `refs/heads/*` mapped into `refs/remotes/*`, and nothing else. The
-# durable refs were published perfectly and are still absent, so the command that reads them has to
-# describe the checkout rather than sentence the work — and `check` is no longer that command, because
-# its verdict is the derivation and the trunk and needs no custom ref to be right.
+# On the branch the work was done on, nothing has finished: the gate answers its ordinary question, and the
+# landing refusal that belongs to a landed changeset is absent. This is the half of the design a stored
+# record could not express — a ref held an object id and no question about the destination.
+git switch -q booking-transaction
+out=$($G check 2>&1); code=$?
+if printf '%s' "$out" | grep -q "already landed"; then
+  echo "  FAIL: check refused work the destination never took: $out"; FAILED=1
+else
+  echo "  ok: check has no landing refusal for a release-line merge"
+fi
+printf '%s' "$out" | grep -q "merge into main with ordinary git" \
+  && echo "  ok: and it still names the destination the work is measured against (exit $code)" \
+  || { echo "  FAIL: check did not name the destination: $out"; FAILED=1; }
+$G change unready >/dev/null 2>&1; check "a changeset merged only into release/2.x can still be withdrawn" 0 $?
+$G change ready >/dev/null 2>&1; check "and offered again" 0 $?
+git switch -q main
+# A record used to make this changeset a finished thing in every report. The tree says what the destination
+# says: main never took it, so the work is still here — offered, and not landed — which is the half of the
+# design a stored record could not express, because a ref named an object and no destination.
+out=$($G status --changeset booking-transaction --json 2>&1)
+printf '%s' "$out" | grep -q '"state": "READY"' \
+  && printf '%s' "$out" | grep -q '"landed": false' \
+  && echo "  ok: the branch the work was done on is still work in progress" \
+  || { echo "  FAIL: the release landing made the changeset a finished thing: $out"; FAILED=1; }
+
+# Where the answers differ is in the destination, and naming it is the only thing that changes them. Measured
+# against main the changeset is unlanded work; measured against the branch that carries the directory it is a
+# landing whose chain carries the approval. One read, two branches, no write.
+out=$($G status --changeset booking-transaction --json 2>&1)
+printf '%s' "$out" | grep -q '"landed": false' \
+  && printf '%s' "$out" | grep -q '"landed_branch": ""' \
+  && echo "  ok: measured against main, it is not landed" \
+  || { echo "  FAIL: status measured against the wrong branch: $out"; FAILED=1; }
+out=$($G status --changeset booking-transaction --default-branch release/2.x --json 2>&1)
+printf '%s' "$out" | grep -q '"landed": true' \
+  && printf '%s' "$out" | grep -q '"landed_branch": "release/2.x"' \
+  && printf '%s' "$out" | grep -q '"reviewed": true' \
+  && echo "  ok: named as the destination, the same history reports it landed and reviewed" \
+  || { echo "  FAIL: naming the destination did not report the landing: $out"; FAILED=1; }
+printf '%s' "$out" | grep -q "\"chain_head\": \"${SOURCE:0:7}\"" \
+  && echo "  ok: and names the head the approval spoke about (${SOURCE:0:7})" \
+  || { echo "  FAIL: the derived chain did not name the reviewed head: $out"; FAILED=1; }
+# Once the branch is gone, the landing is the only account of the work, and it is enough: the queue has
+# nothing to ask, and the read by name still walks the chain out of the destination.
+git switch -q main
+git branch -q -D booking-transaction
+out=$($G status --changeset booking-transaction --default-branch release/2.x --json 2>&1)
+printf '%s' "$out" | grep -q '"landed": true' \
+  && printf '%s' "$out" | grep -q '"chain_base": "' \
+  && echo "  ok: after the branch is deleted, the destination still answers for it" \
+  || { echo "  FAIL: deleting the branch lost the changeset: $out"; FAILED=1; }
+queued=$($G queue 2>&1)
+printf '%s' "$queued" | grep -q "LANDED UNREVIEWED" \
+  && { echo "  FAIL: a landing whose chain carries an approval was reported unreviewed"; FAILED=1; } \
+  || echo "  ok: and it is not a landing to complain about, because the chain carries the approval"
+
+# A clone is the shape CI gets: `refs/heads/*` mapped into `refs/remotes/*`, and nothing else. Nothing has
+# to be fetched beyond the branches, so the command that reads a landing has to describe the checkout rather
+# than sentence the work — and it must not blame the clone for a namespace it was never given.
 REMOTE=$(mktemp -d)/remote.git; CLONE=$(mktemp -d)/ci
 git init -q --bare -b main "$REMOTE"
 git push -q "$REMOTE" --all
-git push -q "$REMOTE" 'refs/git-pair/*:refs/git-pair/*'
 git clone -q "$REMOTE" "$CLONE"
-git -C "$CLONE" switch -q booking-transaction
+git -C "$CLONE" switch -q release/2.x
 # A clone carries no identity of its own. Whoever runs this gate may or may not have a global git config —
 # a CI runner has none — and the fixtures below commit in these clones, which needs an author. Set where the
 # work happens rather than depending on whose laptop the gate runs on.
@@ -253,93 +301,15 @@ printf '%s' "$status" | grep -q '"default_branch": "origin/main"' \
   && printf '%s' "$status" | grep -q '"default_branch_source": "origin-head"' \
   && echo "  ok: status names the trunk it compared against and how it knew" \
   || { echo "  FAIL: status did not explain its comparison: $status"; FAILED=1; }
-out=$(cd "$CLONE" && $G check 2>&1); code=$?
-check "check answers about the changeset with no durable refs fetched" 1 $code
-printf '%s' "$out" | grep -q "took the changeset out of review" \
-  && echo "  ok: the verdict is the changeset's own, refs or no refs" \
-  || { echo "  FAIL: the verdict was not the changeset's: $out"; FAILED=1; }
+out=$(cd "$CLONE" && $G status --changeset booking-transaction --default-branch release/2.x --json 2>&1); code=$?
+check "a clone that never saw the merge answers about the landing" 0 $code
+printf '%s' "$out" | grep -q '"landed": true' \
+  && printf '%s' "$out" | grep -q '"landed_branch": "release/2.x"' \
+  && echo "  ok: from the branches alone, with no namespace to fetch" \
+  || { echo "  FAIL: the clone could not read the landing: $out"; FAILED=1; }
 printf '%s' "$out" | grep -q "this clone has no" \
-  && { echo "  FAIL: check blamed the clone for something it never read"; FAILED=1; }
-# The recorder is the one that reads the namespace, and a record written without seeing the one
-# already pushed is a duplicate whose push cannot explain itself. It says so, and writes anyway: the
-# record it can write locally is the record this clone is able to write.
-out=$(cd "$CLONE" && $G integration record --source "$SOURCE" --commit "$LANDING" --target origin/release/2.x 2>&1); code=$?
-check "integration record still records from a clone that cannot see the refs" 0 $code
-printf '%s' "$out" | grep -q "holds no refs/git-pair/\* refs at all" \
-  && echo "  ok: and it says the clone is short of refs" \
-  || { echo "  FAIL: the recorder did not name the missing fetch: $out"; FAILED=1; }
-printf '%s' "$out" | grep -q "git fetch origin" \
-  && echo "  ok: and prints the fetch to run" \
-  || { echo "  FAIL: the recorder did not print the fix: $out"; FAILED=1; }
-git -C "$CLONE" fetch -q origin 'refs/git-pair/*:refs/git-pair/*'
-out=$(cd "$CLONE" && $G integration record --source "$SOURCE" --commit "$LANDING" --target origin/release/2.x 2>&1)
-check "with the refs fetched, the same call is a plain no-op" 0 $?
-printf '%s' "$out" | grep -q "already recorded" \
-  && echo "  ok: it found the record it could not see before" \
-  || { echo "  FAIL: after the fetch the record said something else: $out"; FAILED=1; }
-printf '%s' "$out" | grep -q "holds no refs/git-pair" \
-  && { echo "  FAIL: the warning outlived the fetch"; FAILED=1; }
-
-git switch -q booking-transaction
-out=$($G integration record --source "$SOURCE" --commit "$LANDING" 2>&1)
-check "recording the same pair twice is a success that changed nothing" 0 $?
-printf '%s' "$out" | grep -q "already recorded" && echo "  ok: and it says so" \
-  || { echo "  FAIL: the second recording explained nothing: $out"; FAILED=1; }
-# A different pair for the same changeset is a different claim, and there is no answer that is both
-# safe and automatic: git-pair has no operation that moves a durable ref.
-git switch -q release/2.x
-printf 'backported\n' > backport.md && git add -A && git commit -qm "booking-transaction: backport it"
-BACKPORT=$(git rev-parse HEAD)
-out=$($G integration record --source "$SOURCE" --commit "$BACKPORT" --target release/2.x 2>&1)
-check "a second landing for a recorded changeset is refused" 1 $?
-printf '%s' "$out" | grep -q "$INTEGRATION records" \
-  && echo "  ok: the refusal names the record and its commit" \
-  || { echo "  FAIL: the refusal did not name what is on the record: $out"; FAILED=1; }
-printf '%s' "$out" | grep -q "never moves" \
-  && echo "  ok: and says plainly that there is no flag for this" \
-  || { echo "  FAIL: the refusal offered a way round it: $out"; FAILED=1; }
-[ "$(git rev-parse "$INTEGRATION")" = "$LANDING" ] && echo "  ok: the record did not move" \
-  || { echo "  FAIL: a refused recording moved the record"; FAILED=1; }
-
-# A landing on a branch that is not the integration branch leaves the work live. The record used to refuse
-# every in-flight command the moment it existed, whatever branch it named; the tree says what it says, and
-# the release line can still revert the merge or leave the changeset to reach main on its own. This is the
-# half of the design that a ref could not express, because a ref stored an object id and no question.
-git switch -q booking-transaction
-$G change unready >/dev/null 2>&1; check "a changeset merged only into release/2.x can still be withdrawn" 0 $?
-$G change ready >/dev/null 2>&1; check "and offered again" 0 $?
-out=$($G check 2>&1); code=$?
-if printf '%s' "$out" | grep -q "already landed"; then
-  echo "  FAIL: check refused work the integration branch never took: $out"; FAILED=1
-else
-  echo "  ok: check has no landing refusal for a release-line merge"
-fi
-printf '%s' "$out" | grep -qE "READY|NOT READY" \
-  && echo "  ok: and it still answers the question it was asked (exit $code)" \
-  || { echo "  FAIL: check printed no verdict: $out"; FAILED=1; }
-git switch -q main
-out=$($G queue 2>&1)
-printf '%s' "$out" | grep -q "booking-transaction" \
-  && echo "  ok: the queue still accounts for the changeset, branch and all" \
-  || { echo "  FAIL: the queue lost a changeset whose branch is live"; FAILED=1; }
-[ "$(git rev-parse "$ARCHIVE")" = "$SOURCE" ] && [ "$(git rev-parse "$INTEGRATION")" = "$LANDING" ] \
-  && echo "  ok: the record the release landing wrote is untouched by any of that" \
-  || { echo "  FAIL: a durable ref moved after the record"; FAILED=1; }
-BEFORE=$(git rev-list --count "$ARCHIVE")
-git branch -D booking-transaction >/dev/null
-AFTER=$(git rev-list --count "$ARCHIVE")
-echo "  archive ref: $ARCHIVE ($AFTER commits reachable after branch deletion)"
-[ "$BEFORE" = "$AFTER" ] && [ "$AFTER" -gt 5 ] && echo "  ok: full unsquashed chain survived branch deletion" \
-  || { echo "  FAIL: the record lost history"; FAILED=1; }
-# What the record does not hold: anything after the head it named. The withdrawal marker came after
-# the approval, so the record does not reach it and the branch was the only thing that did. That is the
-# window the design accepts, rather than closing with a ref four commands had to keep pointing at HEAD.
-if git merge-base --is-ancestor "$WITHDRAWAL" "$ARCHIVE" 2>/dev/null; then
-  echo "  FAIL: the archive reaches a commit recorded after the head it names"; FAILED=1
-else
-  echo "  ok: the archive stops at the head the record names"
-fi
-
+  && { echo "  FAIL: the clone was blamed for a namespace it was never given"; FAILED=1; } \
+  || echo "  ok: and it says nothing about refs it has no reason to hold"
 step "declaration: the author asks for the merge, and a pipeline reads that"
 # `git pair change integrate` (PRD §9.9) is the author's half of an automatic merge: a marker commit, and
 # no ref, no push, no merge. This step walks the request from the branch to a second clone, because a
@@ -374,7 +344,7 @@ git log -1 --format=%B | grep -q "^Review-Head: $(git rev-parse HEAD~1)$" \
 # Scoped to this changeset: the replay wrote booking-transaction's pair earlier, and "git-pair writes no
 # ref" is a claim about the command that ran, not about the repository's whole namespace.
 [ -z "$(git for-each-ref refs/git-pair/archive/awaiting-merge refs/git-pair/integrations/awaiting-merge)" ] \
-  && echo "  ok: a declaration writes no durable ref (PRD §26)" \
+  && echo "  ok: a declaration writes no ref (PRD §26)" \
   || { echo "  FAIL: a declaration wrote a ref"; FAILED=1; }
 $G check >/dev/null 2>&1; check "the gate still passes under the declaration" 0 $?
 out=$($G check --json 2>&1)
@@ -419,46 +389,31 @@ out=$(cd "$DECLCLONE" && $G check --json 2>&1)
 printf '%s' "$out" | grep -q '"ready": true' && printf '%s' "$out" | grep -q '"integrating": true' \
   && echo "  ok: a clone that never met the author gates on the same two fields" \
   || { echo "  FAIL: the clone could not see the request: $out"; FAILED=1; }
-# The merge is ordinary git, performed by whoever owns the destination — and the record follows it with no
-# flags, which is the CI shape: two SHAs a pipeline already holds are not needed when the branch is here.
+# The merge is ordinary git, performed by whoever owns the destination — here, the clone. Nothing follows it:
+# no ref to write, nothing to publish, no second command for the author to run (PRD §13.4). The author pulls,
+# and the branch itself is the news.
 git -C "$DECLCLONE" switch -q main
 git -C "$DECLCLONE" merge -q --no-ff -m "awaiting-merge: land the reviewed work" awaiting-merge
-out=$(cd "$DECLCLONE" && $G integration record 2>&1); code=$?
-check "the recorder needs no flags in the clone that merged" 0 $code
-printf '%s' "$out" | grep -q "verified reachable from main" \
-  && echo "  ok: and it verified the landing against the destination it derived" \
-  || { echo "  FAIL: the record did not verify a destination: $out"; FAILED=1; }
-out=$(cd "$DECLCLONE" && $G integration publish --remote origin 2>&1); code=$?
-check "and publishes the pair from there" 0 $code
-for family in integrations archive; do
-  if git --git-dir="$DECLREMOTE" for-each-ref --format='%(refname)' \
-       "refs/git-pair/$family/awaiting-merge" | grep -q .; then
-    echo "  ok: refs/git-pair/$family/awaiting-merge reached the remote"
-  else
-    echo "  FAIL: the declared landing's record never left the clone"; FAILED=1
-  fi
-done
-# The clone published the pair, and this clone reading it back is the last claim the declaration has to
-# survive: the request was made here, the merge happened elsewhere, and the paper trail that says so has to
-# reach the author's machine or the author is looking at a changeset that appears to still be waiting.
-git fetch -q "$DECLREMOTE" 'refs/git-pair/*:refs/git-pair/*'
-# The two facts the step's claim is made of, asserted directly. The record arrived: that is what "published"
-# means for this clone, and it is the only thing this clone can check about another clone's merge. And the
-# changeset is not offered for review: the queue spans branches, and this clone has no branch carrying it, so
-# there is no row to withhold — a row would be the failure, and it is what the next assertion forbids. The
-# queue output is captured before it is matched, for the reason given above the `check` helper: an early
-# `grep -q` exit turns the writer's SIGPIPE into a failed assertion under `pipefail`.
-out=$($G queue --json 2>&1)
-if ! git show-ref --verify --quiet refs/git-pair/integrations/awaiting-merge; then
-  echo "  FAIL: the fetch brought no record for the changeset the other clone landed"
-  git for-each-ref --format='    %(refname)' refs/git-pair
-  FAILED=1
-elif printf '%s' "$out" | grep -q '"slug": *"awaiting-merge"'; then
-  echo "  FAIL: with the record fetched, this clone still offers the landed changeset for review"
-  printf '%s\n' "$out" | sed 's/^/    /'
+# Whoever owns the destination pushes it. That is the person's git, not git-pair's: the tool's half of the
+# landing contract is that it performs neither the merge nor the push (PRD §26).
+git -C "$DECLCLONE" push -q origin main
+[ -z "$(git -C "$DECLCLONE" for-each-ref refs/git-pair)" ] \
+  && [ -z "$(git --git-dir="$DECLREMOTE" for-each-ref refs/git-pair)" ] \
+  && echo "  ok: the clone that merged writes no ref and publishes nothing (PRD §26)" \
+  || { echo "  FAIL: the landing wrote a ref: $(git -C "$DECLCLONE" for-each-ref refs/git-pair)"; FAILED=1; }
+git fetch -q "$DECLREMOTE" 'refs/heads/main:refs/heads/main'
+out=$($G status --changeset awaiting-merge --json 2>&1)
+printf '%s' "$out" | grep -q '"landed": true' \
+  && printf '%s' "$out" | grep -q '"landed_branch": "main"' \
+  && echo "  ok: the author's clone reads the landing out of the branch it just pulled" \
+  || { echo "  FAIL: the author cannot see the landing the other clone made: $out"; FAILED=1; }
+queued=$($G queue 2>&1)
+if printf '%s' "$queued" | grep -q "AWAITING INTEGRATION"; then
+  echo "  FAIL: the queue still lists a request the destination already carries"
+  printf '%s\n' "$queued" | sed 's/^/    /'
   FAILED=1
 else
-  echo "  ok: with the record fetched, this clone holds the landing and stops offering the request"
+  echo "  ok: and the queue stops asking, because the destination carries the work"
 fi
 rm -rf "$DECL"
 
@@ -521,70 +476,18 @@ out=$($G status --changeset unreviewed-merge --json)
 printf '%s' "$out" | grep -q '"landed": true' \
   && echo "  ok: and a landed changeset read by name says landed, from the tree" \
   || { echo "  FAIL: status --changeset did not report the landing"; FAILED=1; }
-# Nothing closes the heading with a command. Writing the record -- the invocation this step used to print as
-# the fix -- changes the finding not at all, which is the difference between this heading and the one it
-# replaced. The record is still written, because the publish step below needs a pair to send.
-$G integration record --changeset unrecorded-landing >/dev/null 2>&1
-check "recording the landing is a success" 0 $?
-out=$($G queue 2>&1)
-if ! printf '%s' "$out" | grep -q "LANDED UNREVIEWED"; then
-  echo "  FAIL: the report went quiet when a record was written, so it was never about the work"; FAILED=1
+# Nothing closes this heading by writing something. No command makes a squash landing carry the review it
+# lost, and the finding stays where the destination is until somebody reviews the work or tidies the
+# directory out of the way — so the read is re-run, and says the same thing the second time.
+queued=$($G queue 2>&1)
+if ! printf '%s' "$queued" | grep -q "LANDED UNREVIEWED"; then
+  echo "  FAIL: the report went quiet on its own, so it was never about the work"; FAILED=1
 else
-  echo "  ok: and the report is still there, because the finding is about the chain, not the paper trail"
+  echo "  ok: the finding does not expire, and the fix it prints is a read"
 fi
-
-step "publish: the refs leave the clone that wrote them"
-# The landing contract (PRD §29) is record, publish, then delete. This step walks the second step and
-# then checks it from somewhere else, because "published" means a different clone can read it — the
-# claim cannot be checked from the machine that made it.
-PUBDIR=$(mktemp -d /tmp/git-pair-pub.XXXXXX)
-PUBREMOTE="$PUBDIR/remote.git"
-git init -q --bare -b main "$PUBREMOTE"
-git remote add pub "$PUBREMOTE"
-git push -q pub --all
-out=$($G integration publish --remote pub 2>&1); code=$?
-check "integration publish" 0 $code
-printf '%s' "$out" | grep -q "unrecorded-landing: published to pub" \
-  && echo "  ok: it says what it published" \
-  || { echo "  FAIL: publish did not report the pair: $out"; FAILED=1; }
-for family in integrations archive; do
-  if git --git-dir="$PUBREMOTE" for-each-ref --format='%(refname)' \
-       "refs/git-pair/$family/unrecorded-landing" | grep -q .; then
-    echo "  ok: refs/git-pair/$family/unrecorded-landing reached the remote"
-  else
-    echo "  FAIL: refs/git-pair/$family/unrecorded-landing never arrived"; FAILED=1
-  fi
-done
-out=$($G integration publish --remote pub 2>&1)
-printf '%s' "$out" | grep -q "already published" \
-  && echo "  ok: re-running publishes nothing and says so" \
-  || { echo "  FAIL: a second publish did not report idempotence: $out"; FAILED=1; }
-
-git clone -q "$PUBREMOTE" "$PUBDIR/reader"
-(cd "$PUBDIR/reader" && git switch -q unrecorded-landing)
-# `--fetch` is the read side, and the check is that the record arrives in the reader's own namespace —
-# checked with plumbing here because every changeset in this scratch repository has landed, so `status`
-# has no live changeset to speak about. The claims about what a fetched record then *answers* live in
-# internal/cli/fetch_test.go, where a live changeset can be staged.
-out=$(cd "$PUBDIR/reader" && $G queue --fetch --json 2>&1); code=$?
-check "--fetch works from a clone that never saw the landing" 0 $code
-for family in integrations archive; do
-  if git -C "$PUBDIR/reader" for-each-ref --format='%(refname)' \
-       "refs/git-pair/$family/unrecorded-landing" | grep -q .; then
-    echo "  ok: --fetch brought refs/git-pair/$family/unrecorded-landing to a fresh clone"
-  else
-    echo "  FAIL: the published record is not readable elsewhere"; FAILED=1
-  fi
-done
-# A clone that holds no pairs of its own still answers the question, with an empty list rather than a
-# missing key: `[]` means "nothing here is waiting to be published" and nothing else. The finding itself —
-# a record that exists only locally, and half a pair — is covered by internal/cli/published_test.go, which
-# can stage those states without pretending a fresh clone holds records it never wrote.
-out=$(cd "$PUBDIR/reader" && $G queue --fetch --json 2>&1)
-printf '%s' "$out" | grep -q '"unpublished": \[\]' \
-  && echo "  ok: a clone with nothing to publish answers with an empty list, not an absent key" \
-  || { echo "  FAIL: the queue JSON omitted the answer: $out"; FAILED=1; }
-rm -rf "$PUBDIR"
+[ -z "$(git for-each-ref refs/git-pair)" ] \
+  && echo "  ok: with three landings done, the repository holds no git-pair ref anywhere (PRD §13.4)" \
+  || { echo "  FAIL: a landing wrote a ref: $(git for-each-ref refs/git-pair)"; FAILED=1; }
 
 step "tidy: a landing's directory moves aside, and every answer about it holds"
 # Landing keeps the directory, which is right the moment it lands and scenery a release later.
@@ -599,6 +502,19 @@ printf 'Summary: work that lands, then gets out of the way.\n' > changesets/tidi
 printf 'tidied\n' > tidied.md && git add -A && git commit -qm "tidied-landing: the work"
 git switch -q main
 git merge -q --no-ff -m "tidied-landing: merge it" tidied-landing
+# The branch the work was done on is where a reader arrives by habit. It answers the same way before the
+# tidy below and after it: there is no changeset there to check, because the destination already carries the
+# directory; the exit code is the one for "this command has no changeset to speak about", and the sentence
+# names the landing and the read that goes and looks.
+git switch -q tidied-landing
+out=$($G check 2>&1); code=$?
+if [ "$code" = 2 ] && printf '%s' "$out" | grep -qi "landed" \
+   && printf '%s' "$out" | grep -q "status --changeset tidied-landing"; then
+  echo "  ok: the branch the work was done on says it landed, before the tidy"
+else
+  echo "  FAIL: check on the source branch before the tidy exited $code: $out"; FAILED=1
+fi
+git switch -q main
 # The move rides a changeset, so it happens on a branch and reaches trunk the way any other change does.
 git switch -qc tidy-up main
 out=$($G change tidy tidied-landing --dry-run 2>&1); code=$?
@@ -652,10 +568,10 @@ else
 fi
 git switch -q tidied-landing
 out=$($G check 2>&1); code=$?
-if [ "$code" = 2 ] && printf '%s' "$out" | grep -q "the integration branch already holds it"; then
-  echo "  ok: the branch the work was done on refuses it as landed too"
+if [ "$code" = 2 ] && printf '%s' "$out" | grep -q "changeset is already landed at"; then
+  echo "  ok: the branch the work was done on refuses it as landed after the move too"
 else
-  echo "  FAIL: check on the source branch exited $code: $out"; FAILED=1
+  echo "  FAIL: check on the source branch after the tidy exited $code: $out"; FAILED=1
 fi
 git switch -q tidy-up
 git switch -q main

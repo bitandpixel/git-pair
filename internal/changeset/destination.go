@@ -40,8 +40,8 @@ const destinationWalkLimit = 16
 //
 // The changeset's own base answers this in the ordinary case, and stops answering it in two others. A base
 // the resolver derived from the destination (`BaseDerived`) is a measurement point — the run the child shares
-// with the integration branch — and a commit is not a destination, the same reason a landing is never
-// refuses one as a `--target`. A base that names nothing this clone can resolve is the other: a branch
+// with the integration branch — and a commit is not a destination. A base that names nothing this clone can
+// resolve is the other: a branch
 // tidied away, or a value written by the durable-ref layout this repository no longer keeps.
 //
 // Both cases ask the same question one level up, and the answer comes out of the integration branch: a
