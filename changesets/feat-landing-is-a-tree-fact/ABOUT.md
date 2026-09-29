@@ -55,37 +55,11 @@ safe is the gate, which refuses on the landing before it asks the drift question
 `chain_base`/`chain_head` are empty and `reviewed` is false whatever happened on the branch. The §29 golden
 workflow lands in exactly that shape and now asserts `WORKING` rather than `APPROVED`. PRD §13 has to state
 the limit in the commit that deletes the refs (M5), which is why that claim is not made here.
-> what will the end status be for a changeset that's been squash-merged into trunk?
-**Answer, measured against a scratch repository with this branch's binary.** `status --changeset <id>` reports
-`landed: true`, `landed_commit` the commit that carried the directory in, `landed_branch: main`,
-`chain_base` and `chain_head` empty, `reviewed: false`, and `next_action` "landed at `<sha>` in main: nothing
-further is recorded for a changeset that has landed". `queue` lists it under `LANDED UNREVIEWED` with the
-reason "the landing carried the directory in one commit, so no review markers came with it". `check` run on a
-branch that still carries the directory exits 2 with the landed sentence and the `status --changeset`
-pointer.
-
-`state` is `WORKING`, and that is the part of the answer worth arguing about. `state` is derived from the
-markers in the chain, and a squash carries none, so the honest derivation has nothing to report. The fields
-that answer "what happened to this work" are `landed`, `landed_commit` and `reviewed`; `state` answers a
-different question — what the markers in the span say — and inventing a state for the landing would make
-landing a state, which PRD §13 and the skill both refuse to do. One sentence is awkward as measured: the
-header says `Branch: none (read from the landed chain)` and the reason says "no git-pair lifecycle markers
-on this branch". Both are true of the derivation and neither reads well alone; the rephrasing belongs in M5,
-which rewrites this surface again, so it is not changed here.
 
 **The cost contract moved honestly.** The queue's landing report used to cost nothing per landing because
 it read one ref listing. It now costs a bounded few reads per landing — measured at 11 git invocations each,
 bounded at 14 — which is the price of the answer being true in a clone that has fetched nothing but the
 destination. `TestReviewQueueCostPerLandedChangesetIsBounded` measures it.
-> is this cost per-changeset? or for the whole report?
-**Per landed changeset, on top of a fixed cost for the report.** The test runs `queue --json` twice over one
-repository — once with an empty destination, once with the destination carrying 300 landed directories — and
-bounds `(withDirs - empty) / 300`. The number under the bound is the marginal cost of one landing; `empty` is
-the report's own cost and is deliberately not bounded, because it does not grow with the landings. Measured:
-11 invocations per landing in this repository's fixture and 10.0 in a smaller scratch one, bounded at 14;
-the report itself cost 18 invocations in the same scratch run. So a destination with fifty landings costs
-roughly 570 invocations, which is the price of the answer being true in a clone that fetched nothing but the
-destination.
 
 ## Validation
 
@@ -93,8 +67,9 @@ destination.
 - One test per landing shape at the derivation level (`internal/changeset/chain_test.go`): merge,
   fast-forward, rebase, squash, tidied directory, and a landing on a branch that is not the destination.
   At the CLI level (`internal/cli/landed_test.go`): a merge landing (chain read, verdict, `reviewed` true),
-  a squash landing (the limitation asserted, not hidden), and the negative — a reviewed merge landing
-  produces no finding.
+  a squash landing (the limitation asserted, not hidden), a rebase-merge landing (`reviewed` true, no finding —
+  `TestARebaseLandingKeepsTheReviewItCarried`, added for the second review round), and the negative — a
+  reviewed merge landing produces no finding.
 - `TestLandedChangesetRefusesFurtherWork`: five commands refuse, exit 1, nothing committed.
 - `TestLandingOnAnotherBranchLeavesTheWorkInProgress` and `TestARecordAgainstAnotherBranchClaimsNoLanding`:
   the release-line decision above, on the command surface and the reporting surface.
@@ -122,6 +97,42 @@ destination.
 - Should `queue`'s `LANDED UNREVIEWED` heading distinguish "the branch was merged without review" from "the
   review happened and the landing kept none of it" more loudly than a sentence? The reason line does the
   work today; the shape is the same heading either way.
+
+## Discussion
+
+Reviewer notes and the answers to them, kept out of the design prose above. Round 1 is review 48ff349,
+round 2 is review ef0bc65.
+
+### Round 1
+
+> what will the end status be for a changeset that's been squash-merged into trunk?
+**Answer, measured against a scratch repository with this branch's binary.** `status --changeset <id>` reports
+`landed: true`, `landed_commit` the commit that carried the directory in, `landed_branch: main`,
+`chain_base` and `chain_head` empty, `reviewed: false`, and `next_action` "landed at `<sha>` in main: nothing
+further is recorded for a changeset that has landed". `queue` lists it under `LANDED UNREVIEWED` with the
+reason "the landing carried the directory in one commit, so no review markers came with it". `check` run on a
+branch that still carries the directory exits 2 with the landed sentence and the `status --changeset`
+pointer.
+
+`state` is `WORKING`, and that is the part of the answer worth arguing about. `state` is derived from the
+markers in the chain, and a squash carries none, so the honest derivation has nothing to report. The fields
+that answer "what happened to this work" are `landed`, `landed_commit` and `reviewed`; `state` answers a
+different question — what the markers in the span say — and inventing a state for the landing would make
+landing a state, which PRD §13 and the skill both refuse to do. One sentence is awkward as measured: the
+header says `Branch: none (read from the landed chain)` and the reason says "no git-pair lifecycle markers
+on this branch". Both are true of the derivation and neither reads well alone; the rephrasing belongs in M5,
+which rewrites this surface again, so it is not changed here.
+
+> is this cost per-changeset? or for the whole report?
+**Per landed changeset, on top of a fixed cost for the report.** The test runs `queue --json` twice over one
+repository — once with an empty destination, once with the destination carrying 300 landed directories — and
+bounds `(withDirs - empty) / 300`. The number under the bound is the marginal cost of one landing; `empty` is
+the report's own cost and is deliberately not bounded, because it does not grow with the landings. Measured:
+11 invocations per landing in this repository's fixture and 10.0 in a smaller scratch one, bounded at 14;
+the report itself cost 18 invocations in the same scratch run. So a destination with fifty landings costs
+roughly 570 invocations, which is the price of the answer being true in a clone that fetched nothing but the
+destination.
+
 > could we have a REVIEW DISCARDED status that's derivable?
 **Not derivable in the sense this plan requires.** What the destination proves is that the chain behind the
 directory carries no permitting verdict. At least three histories produce exactly that tree: never reviewed;
@@ -141,3 +152,28 @@ a different merge strategy than squash-merge. I think this is fine, because squa
 do not care about a meticulous history, and more of a streamlined trunk. The one case I'm still unsure about is the
 rebase-merge. Do we treat that as UNREVIEWED as well, or are we planning to somehow derive the review state from trailers?
 And can you move all these reviewer notes and answers to a Discussion section below?
+
+### Round 2
+
+> ok I think this is fine. If the user of this library wants to have accurate review history, they'll have to use
+> a different merge strategy than squash-merge. I think this is fine, because squash-merge likely means they already
+> do not care about a meticulous history, and more of a streamlined trunk. The one case I'm still unsure about is the
+> rebase-merge. Do we treat that as UNREVIEWED as well, or are we planning to somehow derive the review state from trailers?
+> And can you move all these reviewer notes and answers to a Discussion section below?
+
+**A rebase-merge keeps the review. Measured with this branch's binary, in two shapes.** A rebase replays the
+branch's commits, and the markers *are* commits, so `review: approve` arrives on the destination as a commit
+with its trailer intact and the chain walk finds it. Rebase, fast-forward the destination, delete the branch:
+`state: APPROVED`, `landed: true`, `chain_base` and `chain_head` both naming the replayed run,
+`reviewed: true`, and `queue` reports no `LANDED UNREVIEWED`. Repeated with a rebase onto a `main` that had
+moved on, so every SHA on the branch was rewritten: same answer. Deriving the verdict from trailers in the
+chain is not a plan for later, it is what the read already does — there is nothing else for it to read, and
+M5 deletes the refs that were the alternative.
+
+So `UNREVIEWED` is reserved for the one case where no marker commit arrives at all: a squash or a
+cherry-pick, which is a single fresh commit with no run behind it. The rule is about whether the reviewed
+run is present in the destination, not about which merge button was pressed. One detail of the fast-forward
+shape is already in Known limitations: with no merge commit, `landed_commit` names the first commit of the
+replayed run that carries the directory, and `chain_head` the newest one still carrying it.
+
+The move asked for is this section.

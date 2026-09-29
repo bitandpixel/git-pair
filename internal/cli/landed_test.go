@@ -190,3 +190,45 @@ func TestDurableRefsDisagreeWithTheTreeAndChangeNothing(t *testing.T) {
 		t.Errorf("landed_unreviewed has %d findings where it had %d: a ref is on the queue's path", got, want)
 	}
 }
+
+// A rebase-merge lands the branch's commits themselves, so the markers arrive with them and the verdict
+// survives. `LANDED UNREVIEWED` is for the landing that carries no marker commit at all — a squash, a
+// cherry-pick — not for every landing that was not a `--no-ff` merge. The reviewer asked which of the two a
+// rebase is; the derivation-level answer is `TestLandedChainOfARebaseLanding`, and this is the same answer on
+// the command surface, beside the squash case above that says the opposite.
+func TestARebaseLandingKeepsTheReviewItCarried(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	ready(t, f)
+	submit(t, f, "approve")
+
+	// The shape a "rebase and merge" button produces: trunk moves, the branch rebases onto it, and then
+	// lands by fast-forward — every commit on the branch is a new commit with an old message.
+	f.SwitchTo("main")
+	f.Commit("trunk moves on", gittest.WithFile("trunk.md", "moved\n"))
+	f.SwitchTo(slug)
+	f.MustGit("rebase", "--quiet", "main")
+	reviewed := f.Head()
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--ff-only", slug)
+	f.ForceDeleteBranch(slug)
+
+	out := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").mustSucceed(t, "status").json(t)
+	if out["landed"] != true {
+		t.Fatalf("landed = %v: the destination carries the directory", out["landed"])
+	}
+	if out["reviewed"] != true {
+		t.Errorf("reviewed = %v, want true: the rebase replayed the approve marker as a commit and its "+
+			"trailer came with it (%v..%v)", out["reviewed"], out["chain_base"], out["chain_head"])
+	}
+	if out["chain_head"] != f.Short(reviewed) {
+		t.Errorf("chain_head = %v, want the rebased review commit %s", out["chain_head"], f.Short(reviewed))
+	}
+	if out["state"] != "APPROVED" {
+		t.Errorf("state = %v, want APPROVED: the chain's own markers derive it", out["state"])
+	}
+
+	q := runIn(t, f.Dir(), "queue", "--json").json(t)
+	if got := q["landed_unreviewed"]; len(got.([]any)) != 0 {
+		t.Errorf("landed_unreviewed = %v, want none: a landing that carried its verdict is not a finding", got)
+	}
+}
