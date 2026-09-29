@@ -38,6 +38,7 @@ deletion. `init` refuses a landed id from the destination's tree before it write
 **A derived base is printed with its rule.** `Base: 4f2b8c1` alone asks the reader to reconstruct why the
 measurement starts there. `base_why` is the same sentence the human sees, so an agent does not have to guess
 which of three rules ran.
+remind me why we have the base as a commit instead of the destination tip?
 
 **The rebased child is the case that beats a ref.** A base naming the landing commit widens the child's diff
 to everything the destination gained after that commit; `merge-base` does not. `TestRelinkAfterARebaseOntoTrunkShowsOnlyTheChildsOwnWork`
@@ -47,6 +48,7 @@ asserts the child's own commits are the whole span, which is the behaviour the d
 while `base...head` names the same files under the old base and the new one. `landedBaseIsTheSameWork` keeps
 its shape with the derived value on the "now" side, and a rebase-merge landing still reports "not the same
 work".
+names the same files or the changes to those files is identical?
 
 **A parent merged only into a release branch is not landed**, so its child keeps measuring against the parent
 branch. This is D1 applied to the stack. The durable ref offered a hedge — "landed, not reachable from main" —
