@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"gitpair/internal/changeset"
 	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
-	"gitpair/internal/reviewref"
 )
 
 // --- check ------------------------------------------------------------------
@@ -97,12 +97,14 @@ type checkJSON struct {
 	// whether or not the verdict is ready: when the gate refuses for lineage, the log has to
 	// name both ends of the comparison (PRD §11.3).
 	ReviewedHead string `json:"reviewed_head,omitempty"`
-	// Integrated says an integration record exists, and IntegratedAt where its commit sits. Like
-	// status's integration fields, they sit beside the verdict rather than changing what `ready`
-	// means: a changeset that has landed is not integration-ready again.
-	Integrated       bool    `json:"integrated"`
-	IntegratedCommit string  `json:"integrated_commit,omitempty"`
-	IntegratedAt     landing `json:"-"`
+	// Landed says the destination's tree carries this changeset's directory, and LandedCommit names the
+	// commit that brought it there. Like status's landing fields, they sit beside the verdict rather than
+	// changing what `ready` means: a changeset that has landed is not integration-ready again. They are
+	// read from the destination's tree, so they answer the same way in a clone that has never fetched a
+	// ref — the answer is a fact about the destination, not about what this machine was shown.
+	Landed       bool    `json:"landed"`
+	LandedCommit string  `json:"landed_commit,omitempty"`
+	LandedAt     landing `json:"-"`
 	// Integrating says the newest declaration from `git pair change integrate` is on this branch, and
 	// IntegrateCommit names the commit that wrote it. They sit beside `ready` for the same reason
 	// `integrated` does: "may this merge" and "did the author ask for one" are two questions, and CI's
@@ -144,15 +146,15 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool, doFetch bool) err
 		policy = policyApproveOrFeedback
 	}
 	out := checkJSON{
-		Changeset:        s.cs.Slug,
-		State:            string(g.Summary.State),
-		Head:             s.head,
-		Policy:           policy,
-		ReviewedHead:     g.ReviewedHead,
-		Integrated:       g.Recorded != "",
-		IntegratedCommit: short(g.Recorded),
-		IntegratedAt:     g.Where,
-		Reasons:          g.Reasons,
+		Changeset:    s.cs.Slug,
+		State:        string(g.Summary.State),
+		Head:         s.head,
+		Policy:       policy,
+		ReviewedHead: g.ReviewedHead,
+		Landed:       g.Landed != "",
+		LandedCommit: short(g.Landed),
+		LandedAt:     g.Where,
+		Reasons:      g.Reasons,
 		// The CI half of the gate. `ready` answers "may this merge"; `integrating` answers "did the
 		// author ask for one", and a pipeline that merges on the first alone takes the decision out of
 		// the author's hands. Both in one command is the point: a CI job should not have to run a second
@@ -230,10 +232,15 @@ type integrationGate struct {
 	Verdict *lifecycle.Event
 	// Terminal is the abandon marker, if this changeset has one.
 	Terminal *lifecycle.Event
-	// Recorded is the commit the integration ref names, empty when there is no record. Where is what
-	// git-pair can honestly say about that commit.
-	Recorded string
-	Where    landing
+	// Landed is the commit that brought this changeset's directory onto the destination's first-parent
+	// line, empty when the destination does not carry it. Where is what git-pair can honestly say about
+	// that commit.
+	//
+	// It is read from the destination's tree rather than from a ref, which is what makes the answer the
+	// same in a fresh clone as in one that has fetched everything: the directory is the record, and the
+	// tree is where the destination keeps it.
+	Landed string
+	Where  landing
 	// ReviewedHead is the commit the verdict spoke about, resolved to a full SHA where this clone can.
 	ReviewedHead string
 	// Parent is the stack reading: whether the branch this changeset is stacked on moved, landed, or
@@ -271,17 +278,26 @@ func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback boo
 	if g.Terminal, err = terminalRecord(ctx, s.repo, s.cs.Slug, s.cs.Base, reviewed); err != nil {
 		return nil, err
 	}
-	// Reported beside the verdict rather than folded into it: "already integrated" is not the same
-	// fact as "not ready", and a pipeline re-running this gate after its own landing needs to tell
-	// the two apart without matching on the wording of a reason.
-	landed, err := reviewref.ResolveIntegration(ctx, s.repo, s.cs.Slug)
-	if err != nil && !errors.Is(err, reviewref.ErrNotIntegrated) {
-		return nil, err
-	}
-	g.Recorded = landed
-	if landed != "" {
-		if g.Where, err = a.describeLanding(ctx, s.repo, landed); err != nil {
-			return nil, err
+	// Reported beside the verdict rather than folded into it: "already landed" is not the same fact as
+	// "not ready", and a pipeline re-running this gate after its own landing needs to tell the two apart
+	// without matching on the wording of a reason.
+	//
+	// The destination's tree answers it. Where no destination can be named — a clone that cannot work out
+	// which branch is main and was not told — the gate reports no landing and every other condition still
+	// applies, because refusing for a reason the reader cannot check is worse than the condition itself.
+	if s.trunk.Ref != "" {
+		if present, _ := changeset.CarriesDir(ctx, s.repo, s.trunk.Ref, s.cs.Slug); present {
+			if ch, err := changeset.LandedChain(ctx, s.repo, s.trunk.Ref, s.cs.Slug); err == nil {
+				g.Landed = ch.Landing
+				g.Where = landing{
+					Commit:          ch.Landing,
+					DefaultBranch:   displayRef(s.trunk.LocalName()),
+					InDefaultBranch: true,
+					BranchKnown:     true,
+				}
+			} else if !errors.Is(err, changeset.ErrNoChain) {
+				return nil, err
+			}
 		}
 	}
 	// The lineage question, asked of the same derivation so the two conditions cannot disagree about
@@ -355,7 +371,7 @@ func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summ
 		// is not. It outranks the abandoned check because an integration record is a record that
 		// was written, and git-pair writes no marker for a changeset that has landed, so an
 		// abandonment cannot have been recorded after it.
-		return []string{fmt.Sprintf("changeset is already integrated at %s%s", short(landed.Commit), landed.reach())}
+		return []string{fmt.Sprintf("changeset is already landed at %s%s", short(landed.Commit), landed.reach())}
 	}
 	if terminal != nil {
 		// The one condition that stops the list. Everything below it is fixable, and

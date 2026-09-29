@@ -40,7 +40,7 @@ func (r Result) Empty() bool { return len(r.Files) == 0 }
 // later be asked whether the parent has moved. Empty means "no parent", which is what an unstacked
 // changeset and a parent branch that is not present both look like; the caller decides.
 func Submit(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
-	outcome model.Outcome, body string, stageAll bool, parentHead string) (Result, error) {
+	outcome model.Outcome, body string, stageAll bool, parentHead string, db changeset.DefaultBranchRef) (Result, error) {
 
 	if !outcome.Valid() {
 		return Result{}, fmt.Errorf("invalid review outcome %q", outcome)
@@ -60,7 +60,7 @@ func Submit(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
 	// The submission names the commit it was made against. `before` is that commit and the
 	// new commit's first parent, so the trailer records the value a rebase changes — which is
 	// the whole point of writing it down rather than leaving it to be read off the graph.
-	sha, err := marker.Commit(ctx, repo, marker.ReviewMessage(cs.Slug, outcome, before, parentHead, body))
+	sha, err := marker.Commit(ctx, repo, marker.ReviewMessage(cs.Slug, outcome, before, parentHead, body), db)
 	if err != nil {
 		return Result{}, err
 	}

@@ -86,7 +86,7 @@ func LandedChain(ctx context.Context, repo *git.Repo, trunkRef, id string) (Chai
 	if err != nil {
 		return Chain{}, err
 	}
-	atTip, moved := carriesDir(ctx, repo, tip, id)
+	atTip, moved := CarriesDir(ctx, repo, tip, id)
 	if !atTip {
 		// The newest change to either path removed it rather than bringing it in, so the destination does
 		// not carry the changeset. `LandedIDs` reads the same tree and says the same thing.
@@ -98,7 +98,7 @@ func LandedChain(ctx context.Context, repo *git.Repo, trunkRef, id string) (Chai
 	// The newest change is not always the landing: a tidying move changed the path too, and its parent
 	// already carried the directory. The landing is the newest change whose parent did not.
 	for _, c := range changing {
-		if has, _ := carriesDir(ctx, repo, c+"^", id); has {
+		if has, _ := CarriesDir(ctx, repo, c+"^", id); has {
 			continue
 		}
 		ch.Landing = c
@@ -114,7 +114,7 @@ func LandedChain(ctx context.Context, repo *git.Repo, trunkRef, id string) (Chai
 		// The merge case, and the exact one. The chain is the branch that was merged, so it is under the
 		// second parent, and the range cannot widen into trunk's later commits.
 		second := landing + "^2"
-		if has, _ := carriesDir(ctx, repo, second, id); has {
+		if has, _ := CarriesDir(ctx, repo, second, id); has {
 			base, err := repo.Git(ctx, "merge-base", landing+"^1", second)
 			if err != nil {
 				return Chain{}, err
@@ -170,10 +170,12 @@ func pathChanges(ctx context.Context, repo *git.Repo, rev string, specs []string
 	return shas, nil
 }
 
-// carriesDir reports whether one revision's tree holds a changeset's directory, and whether it holds it
-// under the landed spelling. Two `rev-parse --verify` calls at most, and the active path is tried first
-// because that is where a directory usually is.
-func carriesDir(ctx context.Context, repo *git.Repo, rev, id string) (present, moved bool) {
+// CarriesDir reports whether one revision's tree holds a changeset's directory, and whether it holds it
+// under the landed spelling. It is the cheapest question the tree model answers — two `rev-parse --verify`
+// calls at most, with the active path tried first because that is where a directory usually is — and it is
+// exported because the write gate asks it directly: "may this changeset still be written to?" is the same
+// question as "is it on the destination?".
+func CarriesDir(ctx context.Context, repo *git.Repo, rev, id string) (present, moved bool) {
 	if repo.PathExistsAt(ctx, rev, ActiveDirPath(id)) {
 		return true, false
 	}

@@ -302,19 +302,21 @@ func TestIntegrationRecordRefusesWhatItMustRefuse(t *testing.T) {
 	}
 }
 
-// Once the pair exists, no in-flight command has anything left to write for this changeset. The
-// commands refuse on the record — they check the integration ref before committing, so the branch
-// never gains a marker that points at nothing — and there is no command that could move a ref even if
-// one asked: the package has no API for it, and the refusal is the human-facing half of that.
-func TestRecordedChangesetRefusesFurtherWork(t *testing.T) {
-	f, slug, source, landing := recordFixture(t)
-	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--target", "release/2.x").mustSucceed(t, "integration", "record")
+// Once the destination carries the changeset's directory, no in-flight command has anything left to
+// write for it. The commands refuse because the destination says so — not because a record was written,
+// which is a fact about a command somebody ran — and none of them may leave a marker behind: a marker on
+// landed work is a claim about a review that cannot happen.
+func TestLandedChangesetRefusesFurtherWork(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	ready(t, f)
+	submit(t, f, "approve")
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land booking", "booking")
 	f.SwitchTo("booking")
 
 	// Work on the branch after the landing: exactly what the moving ref used to chase.
-	f.Commit("note an edge case after the landing", gittest.WithFile("changesets/"+slug+"/ABOUT.md", "# booking\n\n## Summary\n\nnoted\n"))
-	before := f.RefSHA(reviewref.Archive(slug))
-	integrated := f.RefSHA(reviewref.Integration(slug))
+	f.Commit("note an edge case after the landing",
+		gittest.WithFile("changesets/"+slug+"/ABOUT.md", "# booking\n\n## Summary\n\nnoted\n"))
 	branchHead := f.Head()
 
 	for _, args := range [][]string{
@@ -322,67 +324,48 @@ func TestRecordedChangesetRefusesFurtherWork(t *testing.T) {
 		{"change", "unready"},
 		{"review", "submit", "--approve"},
 		{"change", "abandon"},
+		{"change", "integrate"},
 	} {
 		res := runIn(t, f.Dir(), args...)
-		if res.code != 1 {
-			t.Errorf("git-pair %v exited %d, want 1\n%s%s", args, res.code, res.stdout, res.stderr)
+		if res.code != exitUsage {
+			t.Errorf("git-pair %v exited %d, want %d\n%s%s", args, res.code, exitUsage, res.stdout, res.stderr)
 			continue
 		}
-		mustContain(t, res.stderr, "recorded as integrated at", "the refusal must name the record")
-		mustContain(t, res.stderr, slug, "and the changeset it belongs to")
+		mustContain(t, res.stderr, "that changeset landed", "the answer must say the work is already on the destination")
+		mustContain(t, res.stderr, slug, "and name the changeset it belongs to")
 	}
-	if got := f.RefSHA(reviewref.Archive(slug)); got != before {
-		t.Errorf("the archive moved to %s; the record says %s", got, before)
-	}
-	if got := f.RefSHA(reviewref.Integration(slug)); got != integrated {
-		t.Errorf("the integration record moved to %s", got)
-	}
-	// No command may leave a marker behind either. A marker commit on a branch whose record is
-	// already written is a claim that no derivation will ever be asked about, and it would be the
-	// half-write the write gate exists to prevent.
+
+	// No command may leave a marker behind either. A marker commit on landed work is the half-write the
+	// write gate exists to prevent.
 	if got := f.Head(); got != branchHead {
 		t.Errorf("a refused command committed: HEAD is %s (%s), was %s (%s)",
 			shortOf(got), f.Subject(got), shortOf(branchHead), f.Subject(branchHead))
 	}
+	// And nothing durable was written: the landing is a commit in the destination, and no command in
+	// git-pair moves a ref.
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Errorf("the landing left durable refs behind: %v", got)
+	}
+}
 
-	// The no-op paths have to refuse as well. `change unready` on a changeset that is not in review,
-	// and `change abandon` on one that has already ended, both succeed without writing anything — so
-	// without the command-layer gate a recorded changeset would get "nothing to withdraw" where the
-	// honest answer is that the work is finished. And `change abandon` is the one that would otherwise
-	// have written a marker onto landed work.
-	// A reviewed, landed, still-unoffered changeset: approved, then withdrawn, is the shape the reader
-	// of a landed changeset is actually standing in — `change unready` below has nothing to withdraw,
-	// and `change abandon` would write a marker onto landed work. The record names the approved head,
-	// which is what `integration record` requires: a head whose newest marker is a verdict (§11.4).
-	f2, slug2 := newChangeset(t, "booking", "main")
-	ready(t, f2)
-	submit(t, f2, "approve")
-	source2 := f2.RevParse("booking")
-	// The landing goes somewhere that is not the default branch, so the directory is still absent from
-	// trunk and the branch still resolves to the changeset.
-	f2.CreateBranch("release/2.x", "main")
-	f2.MustGit("checkout", source2, "--", changeset.Root+"/"+slug2)
-	landing2 := f2.Commit("booking: land the withdrawn work", gittest.WithFile("landed.md", "landed\n"))
-	runIn(t, f2.Dir(), "integration", "record", "--source", source2, "--commit", landing2, "--target", "release/2.x").
-		mustSucceed(t, "integration", "record")
-	f2.SwitchTo("booking")
+// Landing means the destination. Work merged into some other branch — a release line the author keeps
+// separately — has not reached where it was headed, so the branch is still work in progress and the author
+// can still ask for the merge. This is what milestone M1 of docs/plans/simplify-architecture/plan.md buys
+// and what it pays: the durable record used to refuse here, and it refused on a fact about a command that
+// was run rather than about the destination's tree.
+func TestLandingOnAnotherBranchLeavesTheWorkInProgress(t *testing.T) {
+	f, slug, source, interim := recordFixture(t)
+	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", interim,
+		"--target", "release/2.x").mustSucceed(t, "integration", "record")
+	f.SwitchTo(slug)
 
-	for _, args := range [][]string{{"change", "unready"}, {"change", "abandon"}} {
-		res := runIn(t, f2.Dir(), args...)
-		if res.code != 1 {
-			t.Errorf("git-pair %v on landed, unoffered work exited %d, want 1\n%s%s",
-				args, res.code, res.stdout, res.stderr)
-			continue
-		}
-		mustContain(t, res.stderr, "recorded as integrated at", "it refuses on the record, not on the state")
-		mustContain(t, res.stderr, slug2, "and names the changeset")
+	view := runIn(t, f.Dir(), "status", "--json").mustSucceed(t, "status").json(t)
+	if view["state"] != "APPROVED" || view["changeset"] != slug {
+		t.Fatalf("status = %v/%v, want %s APPROVED: a landing on another branch is not a landing",
+			view["changeset"], view["state"], slug)
 	}
-	if got := f2.Head(); got != source2 {
-		t.Errorf("a refused no-op committed: HEAD is %s, want %s", shortOf(got), shortOf(source2))
-	}
-	if got := f2.RefSHA(reviewref.Archive(slug2)); got != source2 {
-		t.Errorf("the archive moved to %s", got)
-	}
+	declared := runIn(t, f.Dir(), "change", "integrate").mustSucceed(t, "change", "integrate")
+	mustContain(t, declared.stdout, "merge into:  main", "the declaration names the destination the work has not reached")
 }
 
 // status reports the record beside the state, and says which branch it measured the landing against
@@ -456,28 +439,32 @@ func TestStatusReportsALandingOnTrunk(t *testing.T) {
 	}
 }
 
-// The gate's answer for a changeset that has landed. A pipeline that runs `check` before integrating
-// re-runs it after, and needs the exit code and the reason to say what already happened.
-func TestCheckFailsAnIntegratedChangeset(t *testing.T) {
-	f, _, source, landing := recordFixture(t)
+// The answer every in-flight command gives for a changeset the destination already holds. `check` gets
+// there through the resolver, which drops a landed directory from what a branch is working on, so the
+// command refuses before it reaches the gate: the branch is not working on that changeset any more. The
+// gate keeps its own landing clause for the path that reads a landed changeset by name, asserted in
+// TestIntegrationReasons and end-to-end once the trunk walk replaces the archive-ref fallback.
+func TestCheckRefusesAChangesetTheDestinationAlreadyHolds(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	ready(t, f)
+	submit(t, f, "approve")
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land booking", "booking")
+	landing := f.RevParse("main")
 	f.SwitchTo("booking")
-	runIn(t, f.Dir(), "check").mustSucceed(t, "check")
 
-	runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing, "--target", "release/2.x").mustSucceed(t, "integration", "record")
 	res := runIn(t, f.Dir(), "check")
-	if res.code != 1 {
-		t.Fatalf("check on an integrated changeset exited %d, want 1\n%s", res.code, res.stdout+res.stderr)
+	if res.code != exitUsage {
+		t.Fatalf("check on a landed changeset exited %d, want %d\n%s", res.code, exitUsage, res.stdout+res.stderr)
 	}
-	mustContain(t, res.stdout, "NOT READY", "the verdict is the output")
-	mustContain(t, res.stdout, "already integrated at "+shortOf(landing), "and it names the record")
-	mustContain(t, res.stdout, "not reachable from main", "including where the landing sits")
-
-	out := runIn(t, f.Dir(), "check", "--json").json(t)
-	if out["integrated"] != true {
-		t.Errorf("integrated = %v, want true; a pipeline must not parse prose to learn the work landed", out["integrated"])
+	mustContain(t, res.stderr, "that changeset landed", "the answer says the destination holds the work")
+	mustContain(t, res.stderr, slug, "and names the changeset")
+	// The landing is a commit in the destination and nothing else: no command wrote a ref.
+	if got := durableRefs(t, f); len(got) != 0 {
+		t.Errorf("the landing left durable refs behind: %v", got)
 	}
-	if out["integrated_commit"] != shortOf(landing) {
-		t.Errorf("integrated_commit = %v, want %s", out["integrated_commit"], shortOf(landing))
+	if f.RevParse("main") != landing {
+		t.Errorf("main moved from %s", shortOf(landing))
 	}
 }
 

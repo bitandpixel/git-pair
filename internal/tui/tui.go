@@ -1032,7 +1032,7 @@ func (m reviewModel) handleSubmitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	result, err := reviewops.Submit(m.ctx, m.sess.Repo(), m.sess.Changeset(),
-		outcome, "", true, parent.Tip)
+		outcome, "", true, parent.Tip, m.sess.Trunk())
 	if err != nil {
 		m.setStatus(err.Error(), true)
 		return m, nil

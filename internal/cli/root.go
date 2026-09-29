@@ -224,6 +224,18 @@ type session struct {
 	trunk changeset.DefaultBranchRef
 }
 
+// destination is the integration branch this run should measure against, or the zero value when the
+// repository cannot name one. The zero value has an empty Ref, which is what every tree-based question
+// reads as "cannot tell, so do not refuse" — the failure mode a caller wants: a clone that has not worked
+// out which branch is main keeps answering about the work instead of blaming it for the clone.
+func (a *app) destination(ctx context.Context, repo *git.Repo) changeset.DefaultBranchRef {
+	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
+	if err != nil {
+		return changeset.DefaultBranchRef{}
+	}
+	return db
+}
+
 // loadFor resolves the session a changeset-scoped read should work from: the
 // checked-out changeset, or the one named by `--changeset`.
 func (a *app) loadFor(ctx context.Context, slug string) (*session, error) {

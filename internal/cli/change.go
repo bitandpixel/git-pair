@@ -142,7 +142,7 @@ func runChangeUse(ctx context.Context, a *app, id string) error {
 	sha, err := marker.CommitPaths(ctx, repo, marker.Message{
 		Subject:  fmt.Sprintf("git-pair: work on changeset %s", id),
 		Trailers: []string{"Review-Changeset=" + id},
-	}, []string{cs.MetadataPath()})
+	}, []string{cs.MetadataPath()}, a.destination(ctx, repo))
 	if err != nil {
 		if isNothingToCommit(err) {
 			a.printf("nothing to commit (%s already records this choice)\n", cs.MetadataPath())
@@ -239,7 +239,7 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 			s.cs.AboutPath())
 	}
 
-	sha, err := marker.Commit(ctx, s.repo, marker.ReadyMessage(s.cs.Slug))
+	sha, err := marker.Commit(ctx, s.repo, marker.ReadyMessage(s.cs.Slug), s.trunk)
 	if err != nil {
 		return fmt.Errorf("creating ready marker: %w", err)
 	}
@@ -364,13 +364,13 @@ func runChangeUnready(ctx context.Context, a *app) error {
 	if err := a.refuseIfAbandoned(ctx, s); err != nil {
 		return err
 	}
-	if err := marker.RefuseIntegrated(ctx, s.repo, s.cs.Slug); err != nil {
+	if err := marker.RefuseIntegrated(ctx, s.repo, s.cs.Slug, s.trunk); err != nil {
 		return err
 	}
 	if !inReview(s.summary.State) {
 		return printUnready(a, s, "")
 	}
-	sha, err := marker.Commit(ctx, s.repo, marker.UnreadyMessage(s.cs.Slug))
+	sha, err := marker.Commit(ctx, s.repo, marker.UnreadyMessage(s.cs.Slug), s.trunk)
 	if err != nil {
 		return fmt.Errorf("creating unready marker: %w", err)
 	}
@@ -480,7 +480,7 @@ func runChangeAbandon(ctx context.Context, a *app) error {
 	if !s.clean {
 		return fmt.Errorf("working tree must be clean before abandoning %s; commit or stash your changes first", s.cs.Slug)
 	}
-	if err := marker.RefuseIntegrated(ctx, s.repo, s.cs.Slug); err != nil {
+	if err := marker.RefuseIntegrated(ctx, s.repo, s.cs.Slug, s.trunk); err != nil {
 		return err
 	}
 	at, err := terminalRecord(ctx, s.repo, s.cs.Slug, s.cs.Base, s.summary)
@@ -493,7 +493,7 @@ func runChangeAbandon(ctx context.Context, a *app) error {
 		return printAbandoned(a, s, at, "")
 	}
 
-	sha, err := marker.Commit(ctx, s.repo, marker.AbandonedMessage(s.cs.Slug))
+	sha, err := marker.Commit(ctx, s.repo, marker.AbandonedMessage(s.cs.Slug), s.trunk)
 	if err != nil {
 		return fmt.Errorf("creating abandon marker: %w", err)
 	}

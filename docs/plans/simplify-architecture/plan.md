@@ -278,6 +278,14 @@ Two things measured while building those fixtures, because they change later mil
   and rename `landed_unrecorded` to `landed_unreviewed`.
 - [ ] Rewrite `scripts/gates/e2e-29.sh`'s 43 durable-layer assertions to assert the tree facts instead, and
   add a case where the branch is deleted before `status --changeset` is asked about it.
+- [ ] Decided during execution, and it relaxes a refusal: a landing on a branch that is not the changeset's
+  destination no longer stops the in-flight commands. The durable record refused there (`record` had been run
+  against `release/2.x`, so `change ready`, `change unready`, `review submit`, `change abandon` and
+  `change integrate` all refused), and the tree model does not: D1 makes landing a fact about the
+  destination, and a record is a fact about a command somebody ran. `TestLandingOnAnotherBranchLeavesTheWorkInProgress`
+  asserts the new answer. The gate's own clause for the reachable case (`already landed at`) stays, and
+  `TestLandedChangesetRefusesFurtherWork` covers the five commands against a destination that does hold the
+  directory.
 
 #### Verification
 

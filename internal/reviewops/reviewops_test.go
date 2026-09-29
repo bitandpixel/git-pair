@@ -50,9 +50,18 @@ func (e *env) summary(t *testing.T) lifecycle.Summary {
 	return summary
 }
 
+func (e *env) trunk(t *testing.T) changeset.DefaultBranchRef {
+	t.Helper()
+	db, err := changeset.DefaultBranch(context.Background(), e.repo, "")
+	if err != nil {
+		t.Fatalf("DefaultBranch: %v", err)
+	}
+	return db
+}
+
 func (e *env) submit(t *testing.T, outcome model.Outcome, body string, stageAll bool) reviewops.Result {
 	t.Helper()
-	result, err := reviewops.Submit(context.Background(), e.repo, e.cs, outcome, body, stageAll, "")
+	result, err := reviewops.Submit(context.Background(), e.repo, e.cs, outcome, body, stageAll, "", e.trunk(t))
 	if err != nil {
 		t.Fatalf("Submit(%s): %v", outcome, err)
 	}
@@ -169,7 +178,7 @@ func TestSubmitRejectsInvalidOutcome(t *testing.T) {
 	e := newEnv(t)
 
 	if _, err := reviewops.Submit(context.Background(), e.repo, e.cs,
-		model.Outcome("approve-self"), "", true, ""); err == nil {
+		model.Outcome("approve-self"), "", true, "", changeset.DefaultBranchRef{}); err == nil {
 		t.Error("Submit accepted an outcome that is not block/feedback/approve")
 	}
 }
@@ -216,7 +225,7 @@ func TestSubmitRequiresCommits(t *testing.T) {
 	// No commits at all: there is nothing to review, and a marker commit would be
 	// the repository's root commit with no base to compare against.
 	if _, err := reviewops.Submit(context.Background(), repo, cs,
-		model.OutcomeApprove, "", true, ""); err == nil {
+		model.OutcomeApprove, "", true, "", changeset.DefaultBranchRef{}); err == nil {
 		t.Error("Submit succeeded with no commits in the repository")
 	}
 }

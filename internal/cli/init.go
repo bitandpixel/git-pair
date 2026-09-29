@@ -260,7 +260,7 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	sha, err := marker.CommitPaths(ctx, repo, marker.Message{
 		Subject:  fmt.Sprintf("git-pair: initialize changeset %s", cs.Slug),
 		Trailers: []string{"Review-Changeset=" + cs.Slug},
-	}, []string{cs.Dir})
+	}, []string{cs.Dir}, a.destination(ctx, repo))
 	if err != nil {
 		if isNothingToCommit(err) {
 			a.printf("nothing to commit (scaffolding is already tracked)\n")
