@@ -49,13 +49,13 @@ func nullKeys(t *testing.T, out string) []string {
 	return keys
 }
 
-// The three arrays that answered null before this rule had a test: two of `queue`'s lists, the empty
-// review's file list, and `status`'s stack on a changeset the walk did not run for.
+// The arrays that answered null before this rule had a test: `queue`'s lists, the empty review's file
+// list, and `status`'s stack on a changeset the walk did not run for.
 func TestEmptyListsAreEmptyArrays(t *testing.T) {
 	t.Run("queue with nothing ready", func(t *testing.T) {
 		f := newRepo(t)
 		for _, key := range []string{"ready_for_review", "awaiting_integration", "skipped",
-			"landed_unreviewed", "unpublished"} {
+			"landed_unreviewed", "parent_notes"} {
 			out := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json")
 			if got := out.json(t)[key]; got == nil {
 				t.Errorf("%s = null, want [] — an empty list is the answer %q\n%s", key, "asked, and none", out.stdout)
@@ -144,11 +144,10 @@ func TestNoJSONArrayIsEverNull(t *testing.T) {
 			runs: [][]string{{"status", "--json"}, {"check", "--json"}, {"queue", "--json"}},
 		},
 		{
-			name: "a recorded landing",
+			name: "a landing",
 			setup: func(t *testing.T) string {
-				f, _, source, landing := recordFixture(t)
-				runIn(t, f.Dir(), "integration", "record", "--source", source, "--commit", landing,
-					"--target", "release/2.x").mustSucceed(t, "integration", "record")
+				f, _ := newChangeset(t, "booking", "main")
+				landAndRecord(t, f, "booking", "main")
 				// The reader's position: standing on the destination branch, asking about a changeset no
 				// branch of this checkout is working on any more.
 				f.SwitchTo("main")
@@ -156,18 +155,6 @@ func TestNoJSONArrayIsEverNull(t *testing.T) {
 			},
 			runs: [][]string{
 				{"status", "--changeset", "booking", "--json"}, {"queue", "--json"},
-				{"integration", "record", "--changeset", "booking", "--target", "release/2.x", "--json"},
-			},
-		},
-		{
-			name: "a published record",
-			setup: func(t *testing.T) string {
-				f, _, _ := publishedFixture(t)
-				runIn(t, f.Dir(), "integration", "publish").mustSucceed(t, "integration", "publish")
-				return f.Dir()
-			},
-			runs: [][]string{
-				{"integration", "publish", "--json"}, {"queue", "--json"}, {"status", "--json"},
 			},
 		},
 	}

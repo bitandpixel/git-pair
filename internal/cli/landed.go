@@ -10,80 +10,21 @@ import (
 	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
-	"gitpair/internal/reviewref"
 )
 
-// A changeset directory in the destination branch with no integration record is work that landed and
-// lost its paper trail. Nothing else in git-pair says so. The tree rule (PRD §12) makes a directory the
-// destination carries stop being a claim, so the changeset leaves `status` and `queue` at the
-// moment it becomes most worth remembering, and the command that would have caught it — `integration
-// record` — is the one step the integration contract (PRD §22) allows to be skipped: the merge happens
-// outside git-pair, so nothing in this tool sees it.
+// A landed changeset whose chain carries no permitting verdict is work that reached the destination
+// without a review that permitted it. Nothing else in git-pair says so. The tree rule (PRD §12) makes a
+// directory the destination carries stop being a claim, so the changeset leaves `status` and `queue` at
+// the moment it becomes most worth looking at, and the merge itself happens outside git-pair — nothing in
+// this tool sees it happen.
 //
-// The detector is the reason that contract is enforceable rather than hoped for, and it is the cheapest
-// thing in the design that protects the durable-memory goal: directory present in the destination, no
-// integration ref ⇒ landed, unrecorded. It gets its own heading in `queue` rather than a line among the
-// skip notes, because the finding is not "nothing to do here" — it is "someone stopped one command
-// early, and the history is only in the merge commit until they come back".
+// The detector is the cheapest thing in the design that protects the reviewer: the directory is in the
+// destination, and the run of history behind it carries no approve. It gets its own heading in `queue`
+// rather than a line among the skip notes, because the finding is not "nothing to do here" — it is
+// "what is on the destination branch was never approved", and no command closes it.
 //
-// The destination branch is the one the queue can name without guessing, which is also where the loss is
+// The destination branch is the one the queue can name without guessing, which is also where the gap is
 // silent: a landing on a release branch still shows its branch, its markers, and its own refusals.
-
-// unrecordedDisplayCap bounds the printed list. A repository with fifty unrecorded landings has a
-// workflow problem that a fifty-line queue will not fix, and the queue is also a notification surface —
-// so it prints a counted sample and `--json` carries the whole answer.
-const unrecordedDisplayCap = 10
-
-// refIndex is one read of the durable namespace, indexed by changeset.
-//
-// It exists because three questions in `queue` are questions about the same refs — has this changeset
-// landed, does this orphan have a chain to read, which landings carry no record — and each of them used
-// to ask git separately, once per changeset. One `for-each-ref` answers all three, and the count of git
-// invocations a queue makes stops following the number of changesets a repository has ever had.
-type refIndex struct {
-	// Archive holds the changesets whose unsquashed chain this clone can read.
-	Archive map[string]string
-	// Integrated holds the changesets whose landing this clone has a record of, and the commit each
-	// record names. Only the two families are records: a ref under the namespace that is not one of them —
-	// a stray, or the retired `refs/git-pair/changesets/<id>/integration` the pre-two-ref code wrote —
-	// records nothing here, and a landing written down only there is reported as unrecorded.
-	Integrated map[string]string
-	// IntegratedRef is the ref that holds each of those records, keyed the same way. It is in the index
-	// because a surface that names a ref has to name the one that exists rather than rebuild a path from
-	// the changeset id, which is the rule the whole namespace lives by.
-	IntegratedRef map[string]string
-	// NamespaceEmpty says this clone holds no ref of any kind under `refs/git-pair/`. That is a fact about
-	// the fetch, not about any changeset (PRD §13.4), and it is deliberately not "holds no durable ref of
-	// ours": a namespace holding only a retired-layout ref, or only a stray, has been fetched, and a report
-	// saying it never was points the reader at a fetch that cannot help them. It belongs in the index
-	// because the read that produced the answers already knows it — a caller that printed a fetch hint per
-	// changeset would be
-	// blaming the work for a clone.
-	NamespaceEmpty bool
-}
-
-func indexDurableRefs(ctx context.Context, repo *git.Repo) (refIndex, error) {
-	idx := refIndex{
-		Archive:       map[string]string{},
-		Integrated:    map[string]string{},
-		IntegratedRef: map[string]string{},
-	}
-	entries, err := reviewref.List(ctx, repo)
-	if err != nil {
-		return idx, err
-	}
-	idx.NamespaceEmpty = len(entries) == 0
-	for _, e := range entries {
-		switch e.Kind {
-		case reviewref.KindArchive:
-			idx.Archive[e.ID] = e.SHA
-		case reviewref.KindIntegration:
-			idx.Integrated[e.ID] = e.SHA
-			idx.IntegratedRef[e.ID] = e.Ref
-		}
-	}
-	return idx, nil
-}
 
 // unreviewedDisplayCap bounds the printed list. A repository with fifty landed changesets nobody
 // approved has a workflow problem a fifty-line queue will not fix, and the queue is also a notification

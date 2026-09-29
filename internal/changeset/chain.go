@@ -152,6 +152,33 @@ func LandedChain(ctx context.Context, repo *git.Repo, trunkRef, id string) (Chai
 	return ch, nil
 }
 
+// LandingCommit names the commit that brought a changeset's directory onto a revision's first-parent
+// line, or "" when the revision does not carry it.
+//
+// It is the one question `status`'s stack walk asks per ancestor, and it is answered with two git calls:
+// one `rev-list` over the directory's two pathspecs, and one parent check for the case where the newest
+// change to those paths is a tidying move rather than the arrival. `LandedChain` answers this too, and
+// answers more — the range, its shape, whether it is under a merge's second parent — which the walk does
+// not ask and would pay for on every step.
+//
+// It answers only for a revision that carries the directory at its tip. A revision that carried it and
+// dropped it is not a landing, and the caller is told so by the empty answer rather than by an error: the
+// stack walk reads ancestors that may be live work, and a missing directory there is not a failure.
+func LandingCommit(ctx context.Context, repo *git.Repo, rev, id string) string {
+	changing, err := pathChanges(ctx, repo, rev, DirPathspecs(id))
+	if err != nil || len(changing) == 0 {
+		return ""
+	}
+	if has, _ := CarriesDir(ctx, repo, changing[0]+"^", id); has {
+		// The newest change to either path only moved the directory; the arrival is the next one down.
+		if len(changing) < 2 {
+			return ""
+		}
+		return changing[1]
+	}
+	return changing[0]
+}
+
 // pathChanges lists the commits on a revision's first-parent line where any of the given paths changed,
 // newest first. It is the cheap boundary: the count follows the times a directory arrived, moved, or left,
 // not the length of the branch.

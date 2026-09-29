@@ -17,7 +17,6 @@ import (
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/marker"
 	"gitpair/internal/model"
-	"gitpair/internal/reviewref"
 	"gitpair/internal/survival"
 )
 
@@ -483,7 +482,7 @@ func runChangeAbandon(ctx context.Context, a *app) error {
 	if err := marker.RefuseIntegrated(ctx, s.repo, s.cs.Slug, s.trunk); err != nil {
 		return err
 	}
-	at, err := terminalRecord(ctx, s.repo, s.cs.Slug, s.cs.Base, s.summary)
+	at, err := terminalRecord(s.summary)
 	if err != nil {
 		return err
 	}
@@ -532,38 +531,21 @@ func branchOrHead(s *session) string {
 	return s.cs.Branch
 }
 
-// terminalRecord returns the newest abandon marker for a changeset, looking at the branch chain it
-// was derived from and then at the archive ref. Both have to be consulted, for different reasons: the
-// branch is where an ending is written, and the archive ref is what a recorded changeset leaves behind
-// after the branch is gone — so a slug recreated after `git branch -D` still cannot be reopened, and
-// an ending on a landed changeset still reads as an ending.
-//
-// Before landing there is no archive ref to consult, which is the accepted shape of the trade: an
-// abandoned changeset has no landing to be recorded against, so whether it ended is knowledge that
-// lives on its branch.
-func terminalRecord(ctx context.Context, repo *git.Repo, slug, base string, derived lifecycle.Summary) (*lifecycle.Event, error) {
-	if derived.Abandoned != nil {
-		return derived.Abandoned, nil
-	}
-	anchor, err := reviewref.ResolveArchive(ctx, repo, slug)
-	if errors.Is(err, reviewref.ErrNoArchiveRef) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	summary, err := lifecycle.Summarize(ctx, repo, slug, base, anchor)
-	if err != nil {
-		return nil, err
-	}
-	return summary.Abandoned, nil
+// terminalRecord returns the newest abandon marker for a changeset from the chain summary the caller
+// already has. It used to fall back to the archive ref, which held the unsquashed chain after the branch
+// was deleted, so a slug recreated after `git branch -D` could not be reopened. The durable refs are gone,
+// so the branch (or, for a landed changeset, the destination's history) is the only place an ending is
+// read from. The limit is stated in PRD §13: an abandon marker whose chain no clone can walk is not a
+// finding git-pair can report.
+func terminalRecord(derived lifecycle.Summary) (*lifecycle.Event, error) {
+	return derived.Abandoned, nil
 }
 
 // refuseIfAbandoned is the write gate: nothing records a marker onto a changeset that
 // has ended. Exit 1 rather than 2 — the repository says no, and re-running after undoing
 // the abandonment (there is no such command; the marker is history) is not a retry.
 func (a *app) refuseIfAbandoned(ctx context.Context, s *session) error {
-	at, err := terminalRecord(ctx, s.repo, s.cs.Slug, s.cs.Base, s.summary)
+	at, err := terminalRecord(s.summary)
 	if err != nil {
 		return err
 	}

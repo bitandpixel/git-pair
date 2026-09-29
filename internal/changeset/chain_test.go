@@ -236,3 +236,77 @@ func short(sha string) string {
 	}
 	return sha
 }
+
+// LandingCommit is the cheap form of one question `LandedChain` answers: which commit brought the
+// directory here. The stack walk in `status` asks it per ancestor and nothing else, so it must cost two
+// git calls rather than a chain derivation — and it must still agree with the derivation, which is what
+// these three landing shapes pin. The tidied one is the case that makes the second call necessary: the
+// newest change to the paths is the move, and naming it as the arrival would print a tidy as a landing.
+func TestLandingCommitNamesTheArrivalInEveryShape(t *testing.T) {
+	t.Run("a merge landing", func(t *testing.T) {
+		f := gittest.New(t)
+		f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+		f.CreateBranch("booking")
+		f.CommitChangeset("booking", "main")
+		f.Commit("booking work", gittest.WithFile("booking.txt", "1\n"))
+		f.SwitchTo("main")
+		f.MustGit("merge", "--quiet", "--no-ff", "-m", "land booking", "booking")
+		f.Commit("later trunk work", gittest.WithFile("later.txt", "1\n"))
+
+		want := chainFor(t, f, "main", "booking").Landing
+		if got := changeset.LandingCommit(context.Background(), repo(f), "main", "booking"); got != want {
+			t.Errorf("LandingCommit = %s, want the chain's landing %s", short(got), short(want))
+		}
+	})
+
+	t.Run("a fast-forward landing", func(t *testing.T) {
+		f := gittest.New(t)
+		f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+		f.CreateBranch("booking")
+		f.CommitChangeset("booking", "main")
+		f.Commit("booking work", gittest.WithFile("booking.txt", "1\n"))
+		f.SwitchTo("main")
+		f.MustGit("merge", "--quiet", "--ff", "booking")
+
+		want := chainFor(t, f, "main", "booking").Landing
+		if got := changeset.LandingCommit(context.Background(), repo(f), "main", "booking"); got != want {
+			t.Errorf("LandingCommit = %s, want the chain's landing %s", short(got), short(want))
+		}
+	})
+
+	t.Run("a tidied changeset", func(t *testing.T) {
+		f := gittest.New(t)
+		f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+		f.CreateBranch("done")
+		f.CommitChangeset("done", "main")
+		f.Commit("done work", gittest.WithFile("done.txt", "1\n"))
+		f.SwitchTo("main")
+		f.MustGit("merge", "--quiet", "--no-ff", "-m", "land done", "done")
+		f.Write(filepath.Join("changesets", ".landed", ".keep"), "the namespace, tracked\n")
+		f.MustGit("mv", "changesets/done", filepath.Join("changesets", ".landed", "done"))
+		f.Commit("tidy done")
+
+		want := chainFor(t, f, "main", "done").Landing
+		got := changeset.LandingCommit(context.Background(), repo(f), "main", "done")
+		if got != want {
+			t.Errorf("LandingCommit = %s, want the arrival %s, not the move", short(got), short(want))
+		}
+		if got == f.Head() {
+			t.Error("LandingCommit named the tidying move as the landing")
+		}
+	})
+
+	t.Run("a changeset the destination does not carry", func(t *testing.T) {
+		f := gittest.New(t)
+		f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+		f.CreateBranch("work")
+		f.CommitChangeset("work", "main")
+		f.Commit("work", gittest.WithFile("work.txt", "1\n"))
+
+		for _, id := range []string{"work", "never-existed"} {
+			if got := changeset.LandingCommit(context.Background(), repo(f), "main", id); got != "" {
+				t.Errorf("LandingCommit(main, %s) = %s, want the empty answer", id, short(got))
+			}
+		}
+	})
+}

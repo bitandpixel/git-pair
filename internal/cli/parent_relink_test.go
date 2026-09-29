@@ -192,24 +192,3 @@ func TestSubmissionRecordsTheParentBranchTipAfterTheParentLanded(t *testing.T) {
 		t.Errorf("Review-Parent-Head resolves to %s, want the parent branch tip %s", got, tip)
 	}
 }
-
-// A base under `refs/git-pair/` is a measurement base, not a destination. `integration record` derives its
-// destinations from the changeset's base and the default branch, and a durable ref in that list would be
-// git-pair offering its own record as the place a landing went.
-func TestRecordDoesNotOfferADurableRefAsADestination(t *testing.T) {
-	f := newRepo(t)
-	f.CreateBranch("alpha")
-	f.CommitChangeset("alpha", "main")
-	f.Commit("alpha work", gittest.WithFile("a.go", "package main\n"))
-	landAndRecord(t, f, "alpha", "main")
-	stackedChangeset(t, f, "beta", "alpha", "alpha", "b.go")
-	f.SwitchTo("beta")
-
-	res := runIn(t, f.Dir(), "integration", "record", "--changeset", "beta")
-	if res.code == 0 {
-		t.Fatalf("record succeeded on a branch that has not landed:\n%s", res.stdout)
-	}
-	mustNotContain(t, res.stderr, "refs/git-pair/integrations/alpha",
-		"the candidates it names are branches a landing could have reached")
-	mustContain(t, res.stderr, "main", "and the branch it could reach is still named")
-}

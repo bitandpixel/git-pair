@@ -19,7 +19,6 @@ import (
 
 func newStatusCommand(a *app) *cobra.Command {
 	var changesetSlug string
-	var doFetch bool
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show the effective state of a changeset",
@@ -31,30 +30,25 @@ Review-* trailers, and state moves when a git-pair command records one:
 review submission answers it. Ordinary commits do not change state; they are named
 in the reason, and they are what ` + "`git pair check`" + ` refuses to pass.
 
-While work is in flight the branch is the whole story: no ref is written by any of those commands,
-and the only durable refs git-pair has are the two that ` + "`git pair integration record`" + ` writes
-once the work has landed. ` + "`status`" + ` reports both, beside the state, when they exist.
+While work is in flight the branch is the whole story, and so is a landing: a changeset is landed when
+the destination branch carries ` + "`changesets/<id>/`" + `, which ` + "`status`" + ` reads from that branch's tree.
+Nothing here reaches the network.
 
 --changeset reads another changeset by slug, from whichever branch carries it, so
 you can ask about work you do not have checked out. Reads are the only commands
 that do: a marker is a commit, and a commit lands on the branch you are standing on.
 
-With --json the output is a stable contract for agents and automation.
-
---fetch asks the remote for the durable refs and their mirrors before answering, which is how you see
-a landing recorded in somebody else's clone. Without it nothing here reaches the network, and what
-status says about other clones is limited to what this one has fetched.`,
+With --json the output is a stable contract for agents and automation.`,
 		Example: `  git pair status
   git pair status --json
   git pair status --changeset booking-transaction`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStatus(cmd.Context(), a, changesetSlug, doFetch)
+			return runStatus(cmd.Context(), a, changesetSlug)
 		},
 	}
 	cmd.Flags().StringVar(&changesetSlug, "changeset", "",
 		"read the changeset with this slug, from whichever branch carries it")
-	fetchFlag(cmd, &doFetch)
 	return cmd
 }
 
@@ -178,17 +172,10 @@ type statusJSON struct {
 	// "did the author ask" two ways.
 	Integrating     bool   `json:"integrating"`
 	IntegrateCommit string `json:"integrate_commit,omitempty"`
-	// Unpublished lists changesets whose record this clone holds and whose remote — as this clone last
-	// fetched it — does not, or does not identically (§11.1). Never null: an empty list answers "nothing
-	// is waiting to be published" and a missing key would answer "this build does not know how to look".
-	Unpublished []unpublishedPair `json:"unpublished"`
-	// UnpublishedNote is the one sentence for why the list is empty when the question could not be asked
-	// at all — no remote, or a mirror namespace this clone has never fetched.
-	UnpublishedNote string `json:"unpublished_note,omitempty"`
 	// Stack is the chain of changesets this one was stacked on, nearest first, read from
 	// `parent-changeset` and each ancestor's own record. Never null: an empty list answers "this
 	// changeset sat on the integration branch", and a missing key answers "this build cannot look".
-	// It is filled for a recorded changeset, whose chain is the difference between a landing that
+	// It is filled for a landed changeset, whose chain is the difference between a landing that
 	// reached the integration branch and one that only reached a branch that later did (§11.4).
 	Stack []stackStep `json:"stack"`
 	// StackNote is the one sentence for where the walk stopped — a cycle, a depth cap, or a read that
@@ -201,35 +188,22 @@ type statusJSON struct {
 	Unrecognised []string `json:"unrecognised_markers,omitempty"`
 }
 
-func runStatus(ctx context.Context, a *app, slug string, doFetch bool) error {
+func runStatus(ctx context.Context, a *app, slug string) error {
 	s, err := a.loadFor(ctx, slug)
 	if err != nil {
-		return a.landingsOnNoChangeset(ctx, slug, doFetch, err)
+		return a.landingsOnNoChangeset(ctx, slug, err)
 	}
-	if doFetch {
-		a.fetchDurableRefs(ctx, s.repo, s.cs.Branch)
-	}
-	// The published-or-not comparison needs the namespace indexed by changeset, which `buildStatus`
-	// reads for its own reasons without sharing it. One extra `for-each-ref` is the price of not
-	// threading an index through a constructor that has no use for one; `queue`, where the cost actually
-	// matters, reuses the index it already has.
-	idx, err := indexDurableRefs(ctx, s.repo)
-	if err != nil {
-		return err
-	}
-	rep := a.publicationReport(ctx, s.repo, s.cs.Branch, idx, "`git pair status --fetch` asks for them", doFetch)
 	view, err := buildStatus(ctx, a, s)
 	if err != nil {
 		return err
 	}
-	view.json.Unpublished = rep.Findings
-	view.json.UnpublishedNote = rep.Note
-	// The chain is only worth walking for a changeset that has a record: before that the answer to
+	// The chain is only worth walking for a changeset that has a landing: before that the answer to
 	// "where does this sit" is the branch under the reader's feet, which the `parent:` line above the
-	// fold already says. Once the changeset is recorded its history is two refs and a yaml file, and the
-	// question "did any of it reach trunk" stops being answerable from the checkout.
+	// fold already says. Once the directory is in the destination its history is a yaml file and a
+	// first-parent run, and the question "did any of it reach trunk" stops being answerable from the
+	// checkout.
 	if view.json.Landed {
-		view.json.Stack, view.json.StackNote = a.stackChain(ctx, s, idx)
+		view.json.Stack, view.json.StackNote = a.stackChain(ctx, s)
 	}
 	if a.json {
 		// `stack` is `[]` when the walk did not run, so the key never arrives as a null: the reader cannot
@@ -239,10 +213,6 @@ func runStatus(ctx context.Context, a *app, slug string, doFetch bool) error {
 		return a.emitJSON(view.json)
 	}
 	printStatus(a, view)
-	// Published-or-not is a separate question from anything `printStatus` answers, and it is asked of
-	// the whole namespace rather than of this changeset, so it goes after the per-changeset report rather
-	// than inside it.
-	a.printUnpublished(rep, true)
 	return nil
 }
 
@@ -250,21 +220,14 @@ func runStatus(ctx context.Context, a *app, slug string, doFetch bool) error {
 //
 // "No changeset for this branch" is true and stays the answer — exit 2, because the command asked about
 // work in progress and this branch holds none. But when the branch is the destination, the same
-// repository may also be holding directories that landed with no record written, and a reader told only
-// the first half goes looking for a branch they forgot instead of the record they did not write. The
-// finding is printed where a reader on that branch will see it, with the invocation that closes the gap
-// (PRD §22's contract, made detectable).
+// repository may also be holding directories whose chains carry no permitting verdict, and a reader told
+// only the first half goes looking for a branch they forgot instead of the review that never happened.
+// The finding is printed where a reader on that branch will see it. No command closes it: the answer is a
+// review, not an invocation.
 //
 // Every step of the detection is best-effort: this path already has an answer, and a report about
 // landings is never a reason to fail in a new way.
-//
-// The published-or-not comparison belongs here too, for the reason the section title states: the
-// destination branch is the branch every changeset eventually lands on, and it was the one branch where a
-// record that never left the clone was invisible. It costs one `for-each-ref` over the mirrors and no
-// network, and `lookupDurableRemote` already defines an empty branch as "no particular branch", so origin
-// is the answer. `--fetch` reaches this path only now: the fetch used to sit behind a successful load, so
-// on the destination branch it never ran at all.
-func (a *app) landingsOnNoChangeset(ctx context.Context, slug string, doFetch bool, err error) error {
+func (a *app) landingsOnNoChangeset(ctx context.Context, slug string, err error) error {
 	if slug != "" || !errors.Is(err, changeset.ErrNoChangeset) {
 		return err
 	}
@@ -280,30 +243,19 @@ func (a *app) landingsOnNoChangeset(ctx context.Context, slug string, doFetch bo
 	if derr != nil {
 		return err
 	}
-	durable, derr := indexDurableRefs(ctx, repo)
-	if derr != nil {
-		return err
-	}
-	if doFetch {
-		a.fetchDurableRefs(ctx, repo, "")
-	}
-	rep := a.publicationReport(ctx, repo, "", durable, "`git pair status --fetch` asks for them", doFetch)
 	unreviewed := a.unreviewedLandings(ctx, repo, db, dirs)
 	if a.json {
 		// A document on stdout and the failure on stderr, because the caller is a machine that has to tell
-		// "asked, and none" from "this build could not look". Both lists are present and empty when there is
+		// "asked, and none" from "this build could not look". The list is present and empty when there is
 		// nothing to report, which is the shape `statusJSON` commits to on the success path.
 		_ = a.emitJSON(map[string]any{
 			"reason":            messageOf(err),
 			"landed_unreviewed": orEmpty(unreviewed),
-			"unpublished":       orEmpty(rep.Findings),
-			"unpublished_note":  rep.Note,
 		})
 		return unreviewedInStatus(err, unreviewed, displayRef(db.Ref))
 	}
-	// Printed before the error returns so both halves reach the reader who asked the question: the
-	// findings on stdout, the reason for the exit code on stderr.
-	a.printUnpublished(rep, false)
+	// The findings ride on the error, so both halves reach the reader who asked the question on the same
+	// stream as the reason for the exit code.
 	return unreviewedInStatus(err, unreviewed, displayRef(db.Ref))
 }
 
@@ -320,12 +272,12 @@ type statusView struct {
 // parent's record, not this one.
 //
 // The walk is bounded twice over — a `parent-changeset` cycle and a depth cap — because CHANGESET.yaml is
-// committed content and can say anything. A step whose ancestor has no record here is reported rather than
-// skipped: the absence is the finding, and `--fetch` is the answer to it.
+// committed content and can say anything. A step whose ancestor the destination does not carry is
+// reported rather than skipped: the absence is the finding.
 //
-// Cost: one `for-each-ref` for the branch names (the records themselves are already in the index the caller
-// holds), then one `merge-base` and one tree read per step.
-func (a *app) stackChain(ctx context.Context, s *session, idx refIndex) ([]stackStep, string) {
+// Cost: one `for-each-ref` for the branch names, then two tree reads and one `CHANGESET.yaml` read per
+// step — the landing and the ancestor's own record, and nothing that walks the destination's history.
+func (a *app) stackChain(ctx context.Context, s *session) ([]stackStep, string) {
 	steps := []stackStep{}
 	held, err := localBranchSet(ctx, s.repo)
 	if err != nil {
@@ -345,11 +297,13 @@ func (a *app) stackChain(ctx context.Context, s *session, idx refIndex) ([]stack
 		}
 		step := stackStep{Changeset: id, Branch: branch, BranchExists: branch != "" && held[branch]}
 		if s.trunk.Ref != "" {
-			// The destination either carries the ancestor's directory or it does not; when it does, the run
-			// behind it names the commit the ancestor's work became. A step with no landing is still a step:
-			// the ancestor may be live work, which is a fact about the chain rather than a gap in it.
-			if chain, err := changeset.LandedChain(ctx, s.repo, s.trunk.Ref, id); err == nil {
-				step.LandedCommit = chain.Landing
+			// The destination either carries the ancestor's directory or it does not; when it does, the
+			// commit that brought it in is the landing. A step with no landing is still a step: the
+			// ancestor may be live work, which is a fact about the chain rather than a gap in it. The cheap
+			// question is asked here deliberately — the walk wants the landing and nothing else about the
+			// chain, and `status --changeset <ancestor>` is where the range itself is derived.
+			if landing := changeset.LandingCommit(ctx, s.repo, s.trunk.Ref, id); landing != "" {
+				step.LandedCommit = landing
 				step.InDefaultBranch = true
 			}
 		}

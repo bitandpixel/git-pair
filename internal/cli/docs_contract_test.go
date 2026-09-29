@@ -114,25 +114,15 @@ func TestEveryCommandIsNamedInTheDocs(t *testing.T) {
 
 // TestRefPathsInTheDocsAreOnesWeWrite checks the durable namespace, where drift is expensive: a
 // document naming a ref family the code never writes teaches a reader to fetch nothing.
-func TestRefPathsInTheDocsAreOnesWeWrite(t *testing.T) {
-	prefixes := []string{"refs/git-pair/archive/", "refs/git-pair/integrations/",
-		// Named in the migration prose, and named truthfully: `List` reports these retired paths so a
-		// clone holding only them is not called unfetched, and nothing reads either one as a record.
-		"refs/git-pair/changesets/"}
+func TestNoDocNamesADurableRef(t *testing.T) {
+	// git-pair writes no refs. A document that names one teaches a reader to fetch, configure a refspec
+	// for, or audit something that does not exist, and every such line in the past was a promise the tool
+	// kept by writing a ref nobody needed. The bare namespace is allowed only in the prose that explains
+	// what was retired; anything shaped like a ref path under it is not.
 	path := regexp.MustCompile(`refs/git-pair/[A-Za-z0-9_.<>*-]+(?:/[A-Za-z0-9_.<>*-]+)*`)
 	for _, file := range docFiles(t) {
-	text:
 		for _, m := range path.FindAllString(readDoc(t, file), -1) {
-			switch m {
-			case "refs/git-pair", "refs/git-pair/*", "refs/git-pair/":
-				continue
-			}
-			for _, p := range prefixes {
-				if strings.HasPrefix(m, p) {
-					continue text
-				}
-			}
-			t.Errorf("%s names %s, which is not a ref family git-pair writes", filepath.Base(file), m)
+			t.Errorf("%s names %s: git-pair writes no refs, so no document should name one", filepath.Base(file), m)
 		}
 	}
 }

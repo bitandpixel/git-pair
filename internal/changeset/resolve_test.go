@@ -9,7 +9,6 @@ import (
 	"gitpair/internal/changeset"
 	"gitpair/internal/git"
 	"gitpair/internal/gittest"
-	"gitpair/internal/reviewref"
 )
 
 // The rule under test: the changesets on a revision are the `changesets/<id>/` directories in
@@ -137,9 +136,9 @@ func TestResolveChildOfLandedParent(t *testing.T) {
 	}
 }
 
-// Resolution reads trees, so a repository with no git-pair refs at all still answers. That is the
-// ordinary shape now rather than a degenerate one: nothing writes a ref until a changeset lands, so
-// every branch in a young repository resolves with the namespace empty.
+// Resolution reads trees. Nothing in git-pair writes a ref any more, so the whole `refs/git-pair/`
+// namespace staying empty is the ordinary shape of a repository, not a degenerate one, and a resolve
+// that needed a ref would fail in every repository.
 func TestResolveWithoutAnyRefs(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
@@ -147,8 +146,8 @@ func TestResolveWithoutAnyRefs(t *testing.T) {
 	f.CommitChangeset("booking", "main")
 	f.Commit("work", gittest.WithFile("booking.txt", "1\n"))
 
-	if refs := f.RefNames(reviewref.NamespaceRoot); len(refs) != 0 {
-		t.Fatalf("fixture should hold no git-pair refs, got %v", refs)
+	if refs := f.RefNames("refs/git-pair"); len(refs) != 0 {
+		t.Fatalf("git-pair wrote refs %v; nothing in it writes any", refs)
 	}
 	if got := resolveAt(t, f, "HEAD"); selectedID(got) != "booking" {
 		t.Errorf("selected %q, want booking", selectedID(got))
@@ -462,8 +461,8 @@ func TestResolveRefusesAMismatchedID(t *testing.T) {
 }
 
 // The cost is a property of the implementation. This repository holds three hundred changesets that
-// landed — their directories are on trunk, and each has a record in the namespace — and a rule that
-// asked a question per durable ref would scale with them.
+// landed — their directories are on trunk — and a rule that asked a question per landed changeset, or
+// per ref of any kind, would scale with them.
 func TestResolveCostDoesNotGrowWithExistingChangesets(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
@@ -473,10 +472,7 @@ func TestResolveCostDoesNotGrowWithExistingChangesets(t *testing.T) {
 		files["changesets/"+id+"/CHANGESET.yaml"] = "id: " + id + "\nbase: main\n"
 	}
 	f.Commit("land three hundred changesets", gittest.WithFiles(files))
-	landed := f.Head()
-	for i := 0; i < 300; i++ {
-		f.MustGit("update-ref", reviewref.Integration("cs-"+itoa(i)), landed)
-	}
+	f.Head()
 
 	f.CreateBranch("work")
 	f.CommitChangeset("work", "main")
@@ -504,7 +500,7 @@ func TestResolveCostDoesNotGrowWithExistingChangesets(t *testing.T) {
 		t.Fatalf("Resolve cost %d invocations: the counter measured nothing, so the bound below proves nothing", spawns)
 	}
 	if spawns > 10 {
-		t.Errorf("Resolve cost %d git invocations with 300 landed changesets and 300 records present, want a handful", spawns)
+		t.Errorf("Resolve cost %d git invocations with 300 landed changesets, want a handful", spawns)
 	}
 }
 

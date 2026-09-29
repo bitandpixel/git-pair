@@ -181,25 +181,25 @@ func runChangeIntegrate(ctx context.Context, a *app, opts *integrateOptions) err
 //
 // It belongs here and not in `integrationReasons`, and the difference is the two questions. `check` asks
 // "may this merge?", and a person who owns both branches can answer yes to merging a child onto a parent
-// that has not landed — that landing is what `integration record` calls carried, and it is a supported
-// shape. This command asks "merge this without asking me again". A branch whose own review is still open
-// can be rebased, amended, or blocked an hour from now, and a create-only ref naming a commit on it cannot
-// follow it: the durable record would be left pointing at history that stopped existing. Refusing the
-// request is the whole mitigation; the human path stays open, so nothing is lost but the automation.
+// that has not landed — that shape is still supported, it just stays a human decision. This command asks
+// "merge this without asking me again". A branch whose own review is still open can be rebased, amended,
+// or blocked an hour from now, and an unattended merge into it would be performed against history that
+// stopped existing. Refusing the request is the whole mitigation; the human path stays open, so nothing is
+// lost but the automation.
 func unlandedParentReason(cs changeset.Changeset, parent parentStatus) []string {
 	if parent.Branch == "" || parent.Landed != "" {
 		return nil
 	}
 	if parent.Changeset == "" {
-		// There is no record to look for, so there is no way to satisfy the rule from here. "Cannot
+		// The stack names no parent changeset, so there is nothing to ask the destination about. "Cannot
 		// tell" goes the direction that asks a person to look again, which is how every other
 		// unanswerable comparison in this codebase is resolved.
 		return []string{fmt.Sprintf(
-			"this changeset is stacked on %s, which records no parent changeset, so git-pair cannot show that branch has landed: record the relationship with `git pair init --parent %s --set-parent`, or land %s and record it before declaring this one",
+			"this changeset is stacked on %s, which records no parent changeset, so git-pair cannot show that branch has landed: record the relationship with `git pair init --parent %s --set-parent`, or land %s on the integration branch before declaring this one",
 			parent.Branch, parent.Branch, parent.Branch)}
 	}
 	return []string{fmt.Sprintf(
-		"the parent %s has no integration record, so declaring %s would ask for a merge onto %s — a branch review can still rewrite. Land the parent first: `git pair check`, merge with ordinary git, `git pair integration record`. Merging %s onto %s by hand and recording that stays open; git-pair declines to queue it, not to record it",
+		"the parent %s is not landed on the integration branch, so declaring %s would ask for a merge onto %s — a branch review can still rewrite. Land the parent first: `git pair check`, then merge with ordinary git. Merging %s onto %s by hand stays open; git-pair declines to queue it, not to allow it",
 		parent.Changeset, cs.Slug, parent.Branch, cs.Slug, parent.Branch)}
 }
 

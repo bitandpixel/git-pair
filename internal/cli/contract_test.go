@@ -377,29 +377,6 @@ func TestJSONKeySets(t *testing.T) {
 		}
 	})
 
-	t.Run("integration record", func(t *testing.T) {
-		f, slug, source, landing := recordFixture(t)
-		args := []string{"integration", "record", "--source", source, "--commit", landing,
-			"--target", "release/2.x", "--json"}
-		out := runIn(t, f.Dir(), args...).mustSucceed(t, args...).json(t)
-		assertKeys(t, out, "changeset", "source", "commit", "target", "archive_ref", "integration_ref",
-			"recorded", "already_recorded")
-		if out["changeset"] != slug {
-			t.Errorf("changeset = %v, want %q", out["changeset"], slug)
-		}
-		// Full SHAs, because the consumer is a pipeline holding the SHA it built.
-		if out["source"] != source || out["commit"] != landing {
-			t.Errorf("source/commit = %v/%v, want %s/%s", out["source"], out["commit"], source, landing)
-		}
-		if out["archive_ref"] != archiveRef(slug) || out["integration_ref"] != integrationRef(slug) {
-			t.Errorf("refs = %v/%v, want %s and %s", out["archive_ref"], out["integration_ref"],
-				archiveRef(slug), integrationRef(slug))
-		}
-		if out["recorded"] != true || out["already_recorded"] != false {
-			t.Errorf("recorded = %v, already_recorded = %v, want the pair written by this call",
-				out["recorded"], out["already_recorded"])
-		}
-	})
 }
 
 func assertKeys(t *testing.T, object map[string]any, keys ...string) {

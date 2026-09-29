@@ -6,7 +6,6 @@ import (
 
 	"gitpair/internal/changeset"
 	"gitpair/internal/gittest"
-	"gitpair/internal/reviewref"
 )
 
 // The rule under test: where a changeset's work lands is not always the base it is measured against. For
@@ -37,9 +36,6 @@ func destinationOf(t *testing.T, f *gittest.Fixture, slug string) changeset.Dest
 	return got
 }
 
-// recordLanding writes the pair `integration record` would have written for slug at commit, which is what
-// a destination walk has to read. The archive half is the branch's own tip, so the fixture says what the
-// recorder would have said instead of the test inventing a ref path.
 // stageStacked writes a changeset directory stacked on a parent branch. `parent:` is the base, and the
 // parent's changeset is recorded beside it — the pair that still names the relationship once the parent
 // has landed and its branch has been tidied away.
@@ -48,14 +44,6 @@ func stageStacked(t *testing.T, f *gittest.Fixture, slug, parentBranch, parentSl
 	f.StageChangeset(slug, parentBranch)
 	f.Write(f.ChangesetPath(slug, "CHANGESET.yaml"),
 		"id: "+slug+"\nparent: "+parentBranch+"\nparent-changeset: "+parentSlug+"\n")
-}
-
-func recordLanding(t *testing.T, f *gittest.Fixture, slug, commit, source string) {
-	t.Helper()
-	if _, err := reviewref.CreatePair(context.Background(), repo(f),
-		reviewref.Pair{ID: slug, Archive: source, Integration: commit}); err != nil {
-		t.Fatalf("record %s: %v", slug, err)
-	}
 }
 
 // A changeset measured against a branch has the simplest answer, and it is worth pinning because every
@@ -101,14 +89,13 @@ func TestDestinationFollowsALandedParentToItsBase(t *testing.T) {
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
 	f.CreateBranch("booking")
 	f.CommitChangeset("booking", "main")
-	parentTip := f.Commit("booking work", gittest.WithFile("booking.txt", "1\n"))
+	f.Commit("booking work", gittest.WithFile("booking.txt", "1\n"))
 	f.CreateBranch("booking-tests")
 	stageStacked(t, f, "booking-tests", "booking", "booking")
 	f.Commit("test work", gittest.WithFile("booking_test.txt", "1\n"))
 
 	f.SwitchTo("main")
 	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land booking", "booking")
-	recordLanding(t, f, "booking", f.Head(), parentTip)
 
 	f.SwitchTo("booking-tests")
 	got := destinationOf(t, f, "booking-tests")
@@ -130,20 +117,18 @@ func TestDestinationWalksAParentChain(t *testing.T) {
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
 	f.CreateBranch("alpha")
 	f.CommitChangeset("alpha", "main")
-	alphaTip := f.Commit("alpha work", gittest.WithFile("alpha.txt", "1\n"))
+	f.Commit("alpha work", gittest.WithFile("alpha.txt", "1\n"))
 	f.CreateBranch("beta")
 	stageStacked(t, f, "beta", "alpha", "alpha")
-	betaTip := f.Commit("beta work", gittest.WithFile("beta.txt", "1\n"))
+	f.Commit("beta work", gittest.WithFile("beta.txt", "1\n"))
 	f.CreateBranch("gamma")
 	stageStacked(t, f, "gamma", "beta", "beta")
 	f.Commit("gamma work", gittest.WithFile("gamma.txt", "1\n"))
 
 	f.SwitchTo("main")
 	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land beta", "beta")
-	recordLanding(t, f, "beta", f.Head(), betaTip)
 	f.SwitchTo("alpha")
 	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land alpha", "alpha")
-	recordLanding(t, f, "alpha", f.Head(), alphaTip)
 
 	f.SwitchTo("gamma")
 	got := destinationOf(t, f, "gamma")
@@ -167,14 +152,13 @@ func TestDestinationIsTheLiveParentBranchWhenTheParentReachedOnlyAReleaseLine(t 
 	f.CreateBranch("release/2.x")
 	f.CreateBranch("booking")
 	f.CommitChangeset("booking", "release/2.x")
-	tip := f.Commit("booking work", gittest.WithFile("booking.txt", "1\n"))
+	f.Commit("booking work", gittest.WithFile("booking.txt", "1\n"))
 	f.CreateBranch("booking-tests")
 	stageStacked(t, f, "booking-tests", "booking", "booking")
 	f.Commit("test work", gittest.WithFile("booking_test.txt", "1\n"))
 
 	f.SwitchTo("release/2.x")
 	f.MustGit("merge", "--quiet", "--no-ff", "-m", "merge booking into the release line", "booking")
-	recordLanding(t, f, "booking", f.Head(), tip)
 	f.SwitchTo("main")
 	f.ForceDeleteBranch("release/2.x")
 

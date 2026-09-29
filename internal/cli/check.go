@@ -18,7 +18,6 @@ import (
 
 func newCheckCommand(a *app) *cobra.Command {
 	var allowFeedback bool
-	var doFetch bool
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Assert that this changeset is integration-ready",
@@ -54,9 +53,9 @@ cannot invalidate a review of it, so a dirty working tree does not change the an
 Without ` + "`--changeset`" + `, on purpose: this is the check a forge runs *on* a revision, and naming a
 second changeset would make the verdict ambiguous about what was gated.
 
-Passing the gate is the first of three steps: the gate, then an ordinary git merge or squash into the
-base branch performed by whoever owns it, then ` + "`git pair integration record`" + ` to write the durable
-record. git-pair does the gate and the record and nothing in between.
+Passing the gate is the first of two steps: the gate, then an ordinary git merge or squash into the
+destination branch performed by whoever owns it. git-pair does the gate and nothing in between, and the
+landing itself is what git-pair reads afterwards — the directory in the destination's tree is the record.
 
 Exit codes: 0 integration-ready, 1 not ready, 2 usage, 3 git failed.`,
 		Example: `  git pair check
@@ -64,12 +63,11 @@ Exit codes: 0 integration-ready, 1 not ready, 2 usage, 3 git failed.`,
   git pair check --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCheck(cmd.Context(), a, allowFeedback, doFetch)
+			return runCheck(cmd.Context(), a, allowFeedback)
 		},
 	}
 	cmd.Flags().BoolVar(&allowFeedback, "allow-feedback", false,
 		"accept non-blocking feedback as sufficient for integration")
-	fetchFlag(cmd, &doFetch)
 	return cmd
 }
 
@@ -128,13 +126,10 @@ type checkJSON struct {
 	NextAction string `json:"next_action,omitempty"`
 }
 
-func runCheck(ctx context.Context, a *app, allowFeedback bool, doFetch bool) error {
+func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	s, err := a.load(ctx)
 	if err != nil {
 		return err
-	}
-	if doFetch {
-		a.fetchDurableRefs(ctx, s.repo, s.cs.Branch)
 	}
 	g, err := a.integrationGate(ctx, s, allowFeedback)
 	if err != nil {
@@ -275,7 +270,7 @@ func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback boo
 		return nil, err
 	}
 	g := &integrationGate{Summary: reviewed, Verdict: integrationVerdict(reviewed)}
-	if g.Terminal, err = terminalRecord(ctx, s.repo, s.cs.Slug, s.cs.Base, reviewed); err != nil {
+	if g.Terminal, err = terminalRecord(reviewed); err != nil {
 		return nil, err
 	}
 	// Reported beside the verdict rather than folded into it: "already landed" is not the same fact as
