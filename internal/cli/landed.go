@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"gitpair/internal/changeset"
 	"gitpair/internal/git"
+	"gitpair/internal/lifecycle"
+	"gitpair/internal/model"
 	"gitpair/internal/reviewref"
 )
 
@@ -29,14 +32,6 @@ import (
 // workflow problem that a fifty-line queue will not fix, and the queue is also a notification surface —
 // so it prints a counted sample and `--json` carries the whole answer.
 const unrecordedDisplayCap = 10
-
-// unrecordedLanding is one changeset whose landing nobody recorded, and the way to close the gap. The
-// invocation is part of the finding rather than a hint: the state exists because someone did not know
-// they were supposed to run a command, and the report that names it is the one that gets followed.
-type unrecordedLanding struct {
-	Changeset string `json:"changeset"`
-	Command   string `json:"command"`
-}
 
 // refIndex is one read of the durable namespace, indexed by changeset.
 //
@@ -89,87 +84,149 @@ func indexDurableRefs(ctx context.Context, repo *git.Repo) (refIndex, error) {
 	return idx, nil
 }
 
-// unrecordedLandings asks which of the directories the destination carries that no integration record
-// names. It costs nothing: the answer is the difference between a tree listing the branch scan already
-// took and the index above.
+// unreviewedDisplayCap bounds the printed list. A repository with fifty landed changesets nobody
+// approved has a workflow problem a fifty-line queue will not fix, and the queue is also a notification
+// surface — so it prints a counted sample and `--json` carries the whole answer.
+const unreviewedDisplayCap = 10
+
+// unreviewedLanding is work that reached the integration branch with no permitting verdict in the chain
+// the destination carries. It is the finding that survived deleting the durable refs, and it is a
+// different finding from the one it replaces. `LANDED, UNRECORDED` reported that a command had not been
+// run — a fact about git-pair's own paper trail, closable by running the command it printed. This one
+// reports that the reviewers never approved what is now in trunk, which no command closes.
 //
-// The returned slice is never nil. This key is the answer to a question, so `[]` and null would be
-// answers to different questions — and a supervisor agent reading `--json` cannot tell a repository with
-// nothing unrecorded from a build old enough not to have been asked.
-func (idx refIndex) unrecordedLandings(trunkIDs []string) []unrecordedLanding {
-	found := []unrecordedLanding{}
-	for _, id := range trunkIDs {
-		if _, ok := idx.Integrated[id]; ok {
+// The two ways to be in this state are worth separating, because they are different questions to ask of
+// the history. A chain that carries no verdict means the work reached the branch without a review, or the
+// verdict was rewritten away. A landing that carried no ancestry — a squash, a cherry-pick — means the
+// review may have happened and nothing in the destination kept it: PRD §13 states that limit, and the
+// reason line here names it instead of leaving the reader to guess which of the two they are looking at.
+type unreviewedLanding struct {
+	Changeset string `json:"changeset"`
+	// Commit is the landing commit, shortened the way every other surface shortens a SHA it prints.
+	Commit string `json:"commit"`
+	// Chain is the range the verdict was looked for in, `base..head`, empty when there was none to read.
+	Chain string `json:"chain"`
+	// Reason says what the chain said, in the reader's terms rather than the derivation's.
+	Reason string `json:"reason"`
+}
+
+// unreviewedLandings asks, of each directory the integration branch carries, whether the chain behind it
+// carries a permitting verdict.
+//
+// Cost: one chain derivation and one lifecycle walk per landed changeset, which follows the landings the
+// destination holds rather than the branches this clone has. It is the price of the finding being a fact
+// about the destination — a clone that has fetched nothing but trunk gives the same answer, which is the
+// whole argument for reading the tree. A read that fails is skipped rather than reported: a destination
+// this clone cannot walk is not a finding about the work in it.
+func (a *app) unreviewedLandings(ctx context.Context, repo *git.Repo, trunk changeset.DefaultBranchRef,
+	ids []string) []unreviewedLanding {
+	found := []unreviewedLanding{}
+	if trunk.Ref == "" {
+		return found
+	}
+	for _, id := range ids {
+		chain, err := changeset.LandedChain(ctx, repo, trunk.Ref, id)
+		if err != nil {
 			continue
 		}
-		found = append(found, unrecordedLanding{
+		summary, err := lifecycle.Summarize(ctx, repo, id, chain.Base, chain.Head)
+		if err != nil {
+			continue
+		}
+		verdict := integrationVerdict(summary)
+		if verdict != nil && verdict.Outcome == model.OutcomeApprove {
+			continue
+		}
+		found = append(found, unreviewedLanding{
 			Changeset: id,
-			Command:   "git pair integration record --changeset " + id,
+			Commit:    short(chain.Landing),
+			Chain:     chainRange(chain),
+			Reason:    unreviewedReason(chain, verdict),
 		})
 	}
 	return found
 }
 
-// printUnrecorded writes the queue's own section for the finding, and the one note that keeps both
-// readings of it alive: nobody wrote the record, or somebody did and this clone has not been shown it.
-// The note is single and shared for the same reason §13.4's is — an unfetched clone is one condition,
-// not one per changeset.
-func (a *app) printUnrecorded(found []unrecordedLanding, namespaceEmpty bool, dest string, gap bool) {
+// chainRange names the range the verdict was looked for in, so a reader can go and look. An unreadable
+// chain prints nothing, which is the difference between "we looked here" and "there was nowhere to look".
+func chainRange(c changeset.Chain) string {
+	if c.Base == "" || c.Head == "" || c.Squash {
+		return ""
+	}
+	return short(c.Base) + ".." + short(c.Head)
+}
+
+// unreviewedReason is the sentence that tells the reader which of the two findings this is.
+func unreviewedReason(c changeset.Chain, verdict *lifecycle.Event) string {
+	if c.Squash {
+		return "the landing carried the directory in one commit, so no review markers came with it"
+	}
+	switch {
+	case verdict == nil:
+		return "the chain carries no review verdict"
+	case verdict.Outcome == model.OutcomeFeedback:
+		return fmt.Sprintf("the newest verdict is feedback (%s), which does not license a merge", verdict.Short)
+	case verdict.Outcome == model.OutcomeBlock:
+		return fmt.Sprintf("the newest verdict is a block (%s)", verdict.Short)
+	default:
+		return fmt.Sprintf("the newest verdict is %s (%s), not an approval", verdict.Outcome, verdict.Short)
+	}
+}
+
+// printUnreviewed writes the queue's own section for the finding. It gets a heading rather than a line
+// among the skip notes because the finding is not "nothing to do here": work reached trunk that nobody
+// approved, and the reader has to decide what that means. There is no command to print, which is the
+// difference between this heading and the one it replaced — the action is to read the chain, and the
+// line names the read that shows it.
+func (a *app) printUnreviewed(found []unreviewedLanding, dest string, gap bool) {
 	if len(found) == 0 {
 		return
 	}
-	// The queue's own spacing puts a blank line *after* each section, so a section that follows one needs
-	// none. Its empty answer is a sentence rather than a section, and ends without one.
 	if gap {
 		a.printf("\n")
 	}
-	a.printf("LANDED, UNRECORDED\n\n")
+	a.printf("LANDED UNREVIEWED\n\n")
 	shown := found
-	if len(shown) > unrecordedDisplayCap {
-		shown = shown[:unrecordedDisplayCap]
+	if len(shown) > unreviewedDisplayCap {
+		shown = shown[:unreviewedDisplayCap]
 	}
 	for _, u := range shown {
 		a.printf("  %s\n", u.Changeset)
-		a.printf("    in %s with no integration record. Record it with:\n", dest)
-		a.printf("      %s\n", u.Command)
+		if u.Chain != "" {
+			a.printf("    on %s at %s, chain %s: %s\n", dest, u.Commit, u.Chain, u.Reason)
+			continue
+		}
+		a.printf("    on %s at %s: %s\n", dest, u.Commit, u.Reason)
 	}
 	if extra := len(found) - len(shown); extra > 0 {
 		a.printf("  and %d more (`git pair queue --json` lists every one)\n", extra)
 	}
-	a.printf("\n")
-	if namespaceEmpty {
-		a.warn("%s\n", namespaceAbsentWarning)
-		return
-	}
-	a.warn("note: \"no integration record\" means none *in this clone* — a record written where the merge ran arrives with %s\n",
-		reviewref.FetchCommand)
+	a.printf("\n  read one with `git pair status --changeset <id>`\n\n")
 }
 
-// unrecordedInStatus is the same finding placed where `status` can put it: on the error that says this
-// branch carries no changeset.
-//
-// That error is the right host. `status` on the destination branch has nothing to report about work in
-// progress, and exit 2 is still the honest code — the command asked a question this branch cannot answer.
-// What the branch can answer is that the destination holds directories with no record behind them, and a
-// reader who is told only "no changeset for this branch" will go looking for a branch they forgot rather
-// than for a record they did not write. The original error stays at the front of the message: it is
-// still true, and it is the reason the exit code is 2.
-func unrecordedInStatus(orig error, found []unrecordedLanding, namespaceEmpty bool, dest string) error {
+// unreviewedInStatus is the same finding placed where `status` can put it: on the error that says this
+// branch carries no changeset. That error is the right host for the same reason it was the host before —
+// the destination branch has nothing to report about work in progress, and exit 2 is still the honest
+// code — and what the branch *can* answer is that it holds landed work nobody approved. A reader told only
+// "no changeset for this branch" goes looking for a branch they forgot rather than for a review that never
+// happened. The original error stays at the front: it is still true, and it is why the exit code is 2.
+func unreviewedInStatus(orig error, found []unreviewedLanding, dest string) error {
 	if len(found) == 0 {
 		return orig
 	}
-	lines := make([]string, 0, unrecordedDisplayCap)
+	lines := make([]string, 0, unreviewedDisplayCap)
 	for i, u := range found {
-		if i == unrecordedDisplayCap {
+		if i == unreviewedDisplayCap {
 			lines = append(lines, fmt.Sprintf("  and %d more", len(found)-i))
 			break
 		}
-		lines = append(lines, "  "+u.Command)
+		lines = append(lines, fmt.Sprintf("  %s on %s at %s: %s", u.Changeset, dest, u.Commit, u.Reason))
 	}
-	msg := fmt.Sprintf("%s\n\n%s in %s with no integration record: the work landed, and nobody wrote the "+
-		"record. Close the gap with\n\n%s\n\n%s",
+	msg := fmt.Sprintf("%s\n\nLANDED UNREVIEWED\n\n%s in %s with no approving verdict in its chain: the work reached\n"+
+		"the destination and no review in it approved what landed. Read one with\n"+
+		"`git pair status --changeset <id>`:\n\n%s",
 		orig, plural(len(found), "changeset directory is", "changeset directories are"), dest,
-		strings.Join(lines, "\n"), unrecordedHedge(namespaceEmpty))
+		strings.Join(lines, "\n"))
 	return &usageError{fmt.Errorf("%s", msg)}
 }
 

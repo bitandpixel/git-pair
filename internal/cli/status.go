@@ -290,23 +290,23 @@ func (a *app) landingsOnNoChangeset(ctx context.Context, slug string, doFetch bo
 		a.fetchDurableRefs(ctx, repo, "")
 	}
 	rep := a.publicationReport(ctx, repo, "", durable, "`git pair status --fetch` asks for them", doFetch)
-	unrecorded := durable.unrecordedLandings(dirs)
+	unreviewed := a.unreviewedLandings(ctx, repo, db, dirs)
 	if a.json {
 		// A document on stdout and the failure on stderr, because the caller is a machine that has to tell
 		// "asked, and none" from "this build could not look". Both lists are present and empty when there is
 		// nothing to report, which is the shape `statusJSON` commits to on the success path.
 		_ = a.emitJSON(map[string]any{
 			"reason":            messageOf(err),
-			"landed_unrecorded": orEmpty(unrecorded),
+			"landed_unreviewed": orEmpty(unreviewed),
 			"unpublished":       orEmpty(rep.Findings),
 			"unpublished_note":  rep.Note,
 		})
-		return unrecordedInStatus(err, unrecorded, durable.NamespaceEmpty, displayRef(db.Ref))
+		return unreviewedInStatus(err, unreviewed, displayRef(db.Ref))
 	}
 	// Printed before the error returns so both halves reach the reader who asked the question: the
 	// findings on stdout, the reason for the exit code on stderr.
 	a.printUnpublished(rep, false)
-	return unrecordedInStatus(err, unrecorded, durable.NamespaceEmpty, displayRef(db.Ref))
+	return unreviewedInStatus(err, unreviewed, displayRef(db.Ref))
 }
 
 type statusView struct {

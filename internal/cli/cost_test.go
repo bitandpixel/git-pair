@@ -45,14 +45,17 @@ func TestReviewQueueCostFollowsBranchesNotExistingChangesets(t *testing.T) {
 	}
 }
 
-// The unrecorded-landing report reads the destination's directories, which the branch scan had already
-// listed, and one `for-each-ref` for the namespace — so a repository full of landings nobody recorded
-// must cost the queue nothing per landing. The assertion is the same shape as the one above it: the same
-// queue over the same branches, with three hundred directories added to the destination, must not notice.
+// The finding that landed-but-unreviewed work is a fact about the destination, so the queue pays for it
+// per landing: one chain derivation and one lifecycle walk each. That is the price of the answer being
+// true in a clone that has fetched nothing but the destination — the reason the report reads the tree at
+// all — and this test is what keeps the price bounded rather than quietly quadratic in the size of the
+// repository. It is the same queue over the same branches, with three hundred landed directories added to
+// the destination, measured against the queue that has none.
 //
-// This is the second half of the reason the report reads the scan's trunk listing rather than asking for
-// its own. The first is that it is the same answer.
-func TestReviewQueueCostDoesNotGrowWithUnrecordedLandings(t *testing.T) {
+// The bound is per landing, and the number is measured rather than guessed: four git invocations is the
+// chain (the boundary walk, two revisions, one parent count) plus the walk over the range the chain names.
+// A landing whose chain is short costs its own length, which is why the assertion allows slack.
+func TestReviewQueueCostPerLandedChangesetIsBounded(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("work")
 	f.CommitChangeset("work", "main")
@@ -79,7 +82,12 @@ func TestReviewQueueCostDoesNotGrowWithUnrecordedLandings(t *testing.T) {
 	if empty < 1 {
 		t.Fatalf("the queue counted %d invocations: the shim measured nothing, so the bound below proves nothing", empty)
 	}
-	if withDirs > empty+1 {
-		t.Errorf("queue cost %d git invocations with 300 unrecorded landings in the destination and %d without: the report is reading per landing", withDirs, empty)
+	const landings = 300
+	// Measured on this repository: about 5 invocations per landing. The bound is twice that, so a change
+	// that adds one read per landing still passes and one that adds a walk per commit does not.
+	if per := float64(withDirs-empty) / landings; per > 10 {
+		t.Errorf("queue costs %.1f git invocations per landed changeset (empty queue %d, %d with %d landings): "+
+			"the finding is meant to cost a bounded few reads each, not a walk of the destination",
+			per, empty, withDirs, landings)
 	}
 }

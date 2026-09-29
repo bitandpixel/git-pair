@@ -129,7 +129,7 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 	if err != nil {
 		return err
 	}
-	unrecorded := durable.unrecordedLandings(scan.TrunkIDs)
+	unreviewed := a.unreviewedLandings(ctx, repo, db, scan.TrunkIDs)
 	// The same one read of the namespace answers both halves of "did the paper trail survive": is there a
 	// record, and did the record get anywhere. The branch is empty here because the queue spans branches,
 	// so no branch's upstream is the right answer and the repository's origin is.
@@ -239,12 +239,12 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 
 	if a.json {
 		out := map[string]any{
-			// Every array here is `[]` rather than null, including `landed_unrecorded` and `unpublished`.
+			// Every array here is `[]` rather than null, including `landed_unreviewed` and `unpublished`.
 			// An empty list is the answer "asked, and none", and a missing key is "this build did not look".
 			"ready_for_review":     orEmpty(entries),
 			"awaiting_integration": orEmpty(integrations),
 			"skipped":              orEmpty(skipped),
-			"landed_unrecorded":    unrecorded,
+			"landed_unreviewed":    unreviewed,
 			"unpublished":          rep.Findings,
 			// The notes the text surface prints to stderr: a row whose parent has landed, or moved.
 			// They were prose-only, which left a machine reading the queue with no way to learn that the
@@ -258,7 +258,7 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 	}
 	if len(entries) == 0 {
 		a.printf("READY FOR REVIEW\n\n  nothing is ready\n")
-		a.printUnrecorded(unrecorded, durable.NamespaceEmpty, displayRef(db.Ref), true)
+		a.printUnreviewed(unreviewed, displayRef(db.Ref), true)
 		a.printUnpublished(rep, true)
 		printSkipped(a, skipped)
 		printBehindParent(a, stale)
@@ -276,7 +276,7 @@ func runReviewQueue(ctx context.Context, a *app, doFetch bool) error {
 		a.printf("  head: %s\n", short(e.Head))
 		a.printf("\n")
 	}
-	a.printUnrecorded(unrecorded, durable.NamespaceEmpty, displayRef(db.Ref), false)
+	a.printUnreviewed(unreviewed, displayRef(db.Ref), false)
 	a.printUnpublished(rep, false)
 	printSkipped(a, skipped)
 	printBehindParent(a, stale)

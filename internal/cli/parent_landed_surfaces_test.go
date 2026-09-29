@@ -250,8 +250,9 @@ func TestStatusOnTheDestinationBranchJSONCarriesBothLists(t *testing.T) {
 	if pair := unpub[0].(map[string]any); pair["changeset"] != "beta" {
 		t.Errorf("unpublished[0] = %v, want beta", unpub[0])
 	}
-	if rec := out["landed_unrecorded"].([]any); len(rec) != 0 {
-		t.Errorf("landed_unrecorded = %v, want the empty list: both directories here are recorded", out["landed_unrecorded"])
+	if rec := out["landed_unreviewed"].([]any); len(rec) != 0 {
+		t.Errorf("landed_unreviewed = %v, want the empty list: both directories here arrived through a review",
+			out["landed_unreviewed"])
 	}
 }
 
