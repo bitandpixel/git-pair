@@ -409,9 +409,13 @@ branch.
 
 #### Tasks
 
-- [ ] Carried from M3: `internal/changeset/destination.go:60-125` still reads a parent's `CHANGESET.yaml`
-  from the landing commit's tree, so a landing that carried no directory loses the parent link; and
-  `internal/cli/status.go`'s `Stack:` block still prints `record:` per ancestor from the ref index, with
+- [x] Carried from M3: `internal/changeset/destination.go` reads the parent's `CHANGESET.yaml` from the
+  integration branch (`StackAt(ctx, repo, db.Ref, parent)`), in either directory spelling, and no longer
+  imports `internal/reviewref`. `Changeset.BaseDerived` distinguishes a derived measurement base from a
+  destination. Two rules came with it: a walked base naming a directory the destination carries is a landed
+  changeset to walk through, not a destination; and a parent merged only into a release branch is not landed,
+  so the child's destination stays the live parent branch.
+- [ ] Carried from M3: `internal/cli/status.go`'s `Stack:` block still prints `record:` per ancestor from the ref index, with
   `--json`'s `stack[].integration` beside it. Both read the durable shape and move with this milestone.
 - [ ] Delete `internal/reviewref` (467), `internal/cli/integration.go` (1366), `internal/cli/publish.go`
   (415), `internal/cli/configure.go` (281), `internal/cli/published.go` (210), the ref half of
