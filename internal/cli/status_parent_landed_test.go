@@ -69,8 +69,8 @@ func TestStatusCallsALandedParentStaleWhileItsBranchIsPresent(t *testing.T) {
 		"and the branch is what is left of a landed parent")
 	mustContain(t, res.stdout, "git branch -D alpha",
 		"printed as the command, because an author translating \"delete it\" into arguments gets the order wrong")
-	mustContain(t, res.stdout, "Base: refs/git-pair/integrations/alpha",
-		"and the base follows the record: the branch is only where the measurement used to start")
+	mustContain(t, res.stdout, "Base: "+shortOf(landing)+" — the parent alpha landed",
+		"and the base follows the destination: the branch is only where the measurement used to start")
 	mustNotContain(t, res.stdout, "stale:  ",
 		"a note is not a refusal: this child has nothing the reviewer has to look at again")
 
@@ -118,40 +118,37 @@ func TestStatusNotesALandedParentTheChildHasNotRebasedOnto(t *testing.T) {
 	}
 }
 
-// A landing into a release branch is a landing, and it is not a landing on the integration branch. The
-// two claims travel separately for the reason §13 gives the integration ref: it stores an object id and
-// no branch name, so what reached where is read from the history rather than remembered.
-func TestStatusSaysWhenTheLandingDidNotReachTheDefaultBranch(t *testing.T) {
+// A merge into a release branch is not a landing on the integration branch, and the child of that parent
+// keeps measuring against the parent branch: the release line can revert the merge, and the parent may still
+// have to reach the integration branch on its own. The record the release landing wrote claims nothing here.
+func TestAParentMergedOnlyIntoAReleaseBranchIsNotLanded(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("release/2.x")
 	f.SwitchTo("main")
 	f.CreateBranch("alpha")
 	f.CommitChangeset("alpha", "main")
 	f.Commit("alpha work", gittest.WithFile("a.go", "package main\n"))
-	landing := landAndRecord(t, f, "alpha", "release/2.x")
+	landAndRecord(t, f, "alpha", "release/2.x")
 	f.SwitchTo("main")
 	stackedChangeset(t, f, "beta", "alpha", "alpha", "b.go")
 
 	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "landed as "+shortOf(landing), "the record is the record")
-	mustContain(t, res.stdout, "not reachable from main",
-		"and the branch it did not reach is named rather than assumed")
+	mustNotContain(t, res.stdout, "landed as", "the release merge claims no landing for the child to rebase onto")
+	mustNotContain(t, res.stdout, "not reachable from main",
+		"and there is no reach to hedge about once nothing is being claimed")
+	mustContain(t, res.stdout, "Base: alpha", "so the child is measured against the parent branch it sits on")
 
 	p := parentJSONOf(t, f, "beta")
-	if p["landed"] != true {
-		t.Errorf("parent.landed is %v, want true: a release-branch landing has a record too", p["landed"])
-	}
-	if p["landed_in_default_branch"] != false {
-		t.Errorf("parent.landed_in_default_branch is %v, want false", p["landed_in_default_branch"])
+	if p["landed"] != false {
+		t.Errorf("parent.landed is %v: a merge into a release line is a merge, not a landing", p["landed"])
 	}
 }
 
-// Work in the destination with nothing durable beside it is the state the durable layer used to call a gap.
-// It is not one: the destination's tree and history are the record, so there is no command to name and no
-// hedge to offer about what this clone has fetched. A child stacked under it is the reader most likely to
-// notice, and what it needs to know is that the ground under its base has moved.
-func TestStatusSaysALandedParentHasReachedTheDestination(t *testing.T) {
+// A parent whose work is in the integration branch is landed whether or not anything was written about it,
+// and the child is told so from the destination's history. The state the durable layer called a gap is the
+// ordinary state of a merge that nobody recorded.
+func TestAParentLandedWithoutARecordIsStillLanded(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("alpha")
 	f.CommitChangeset("alpha", "main")
@@ -162,19 +159,38 @@ func TestStatusSaysALandedParentHasReachedTheDestination(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "is in main: the parent's work has reached the destination",
-		"the parent's work is in main, which is the fact worth saying")
-	mustContain(t, res.stdout, "status --changeset alpha",
-		"and the read that shows the landing, not a command that writes one")
+	mustContain(t, res.stdout, "landed as ", "the destination carries the parent, which is the whole claim")
 	mustNotContain(t, res.stdout, "git pair integration record",
 		"nothing is missing, so nothing is offered")
 	mustNotContain(t, res.stdout, "this clone",
 		"and the answer is not a claim about what this clone has fetched")
 
 	p := parentJSONOf(t, f, "beta")
-	if p["landed"] != false {
-		t.Errorf("parent.landed is %v without a record: landed is a record's claim, not a merge's", p["landed"])
+	if p["landed"] != true {
+		t.Errorf("parent.landed is %v: landing is the destination's fact, not a record's", p["landed"])
 	}
+}
+
+// The remaining shape `parentInDestination` answers for: the parent's commits are in the integration branch
+// and its directory is not — a landing that carried the work and left the changeset behind, which `change
+// tidy` will make ordinary. There is no chain to read and no landing commit to name, so the note says what
+// moved under the child and points at the read.
+func TestAParentWhoseWorkLandedWithoutItsDirectoryMovesTheChildsGround(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("alpha")
+	f.CommitChangeset("alpha", "main")
+	f.Commit("alpha work", gittest.WithFile("a.go", "package main\n"))
+	stackedOff(t, f, "beta", "alpha", "alpha", "b.go")
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "-m", "alpha: merge the branch", "alpha")
+	f.MustGit("rm", "-r", "--quiet", "changesets/alpha")
+	f.Commit("main: the merge carried no changeset directory", gittest.WithFile("notes.md", "notes\n"))
+
+	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
+	res.mustSucceed(t, "status")
+	mustContain(t, res.stdout, "is in main: the parent's work has reached the destination",
+		"the parent's work is in main, which is the fact worth saying")
+	mustContain(t, res.stdout, "status --changeset alpha", "and the read that goes and looks")
 }
 
 // The delete the stale note advises fails in the repository layout this project actually uses: the parent

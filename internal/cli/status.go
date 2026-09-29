@@ -129,6 +129,13 @@ type statusJSON struct {
 	Changeset string `json:"changeset"`
 	Branch    string `json:"branch"`
 	Base      string `json:"base"`
+	// BaseRef and BaseWhy appear when the measurement base was derived rather than recorded: `base` stays
+	// what the changeset's own file says (the stack relationship, which is what `parent:` recorded), and
+	// these name the commit every diff was actually measured against and the rule that picked it. A reader
+	// given only a SHA cannot tell the parent branch from a landing from a fallback, so the rule travels
+	// with the value.
+	BaseRef string `json:"base_ref,omitempty"`
+	BaseWhy string `json:"base_why,omitempty"`
 	// DefaultBranch is the integration branch this run compared the revision against,
 	// DefaultBranchCommit the commit it named, DefaultBranchSource how the run learned it: `flag`,
 	// `origin-head` or `sole-candidate`. The three belong together because a run that misreports
@@ -394,6 +401,11 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 		Reason:      s.summary.Reason,
 		NextAction:  nextAction(s.summary, s.cs.Base),
 	}
+	// A derived base is reported beside the recorded one rather than over it: `base` is what the changeset
+	// says its stack is, and `base_ref` is what every diff in this document was measured against.
+	if s.cs.BaseWhy != "" {
+		view.json.BaseRef, view.json.BaseWhy = s.cs.Base, s.cs.BaseWhy
+	}
 	for _, e := range s.summary.Unrecognised {
 		view.json.Unrecognised = append(view.json.Unrecognised, e.Short+" "+e.Subject)
 	}
@@ -511,7 +523,11 @@ func printStatus(a *app, v *statusView) {
 		// nothing after it would read as a bug rather than as an absence.
 		a.printf("Branch: none (read from the landed chain)\n")
 	}
-	a.printf("Base: %s\n", j.Base)
+	if j.BaseWhy != "" {
+		a.printf("Base: %s — %s\n", short(j.Base), j.BaseWhy)
+	} else {
+		a.printf("Base: %s\n", j.Base)
+	}
 	a.printf("State: %s\n", j.State)
 	a.printf("Head: %s\n", j.Head)
 	if j.Span != "" {

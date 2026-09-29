@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"gitpair/internal/gittest"
-	"gitpair/internal/reviewref"
 )
 
 // `git pair change integrate` is the author's half of an automatic merge: one empty commit that says the
@@ -368,8 +367,8 @@ func TestChangeIntegrateReportsADestinationInheritedFromALandedParent(t *testing
 	if len(via) != 1 || via[0] != "alpha" {
 		t.Errorf("destination_via = %v, want [alpha]", j["destination_via"])
 	}
-	if base, _ := j["base"].(string); base != reviewref.Integration("alpha") {
-		t.Errorf("base = %q, want the parent's integration ref: the measurement stays where the landing "+
+	if base, _ := j["base"].(string); base == "" || strings.HasPrefix(base, "refs/git-pair/") {
+		t.Errorf("base = %q, want a commit derived from the destination: the measurement stays where the landing "+
 			"moved it, and only the destination reads around it", base)
 	}
 }

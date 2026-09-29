@@ -321,37 +321,50 @@ Two things measured while building those fixtures, because they change later mil
 
 #### Tasks
 
-- [ ] `internal/changeset`: `BaseFor(ctx, repo, child, destination) (ref, why string)`, rules in order —
-  (1) parent branch exists and has not landed → the parent branch; (2) otherwise
-  `merge-base(childHead, destination)`, with `destination` from the walk below; (3) neither resolvable →
-  the default branch with `why` naming the fallback. Cache the value in the scan beside `onTrunk` so five
-  call sites cannot disagree; the known weakness recorded in
-  `docs/plans/lineage-in-the-surface/plan.md` M2 (two surfaces agreeing only because they print the same
-  literal) is the cautionary case.
-- [ ] `internal/changeset/resolve.go:596-610`: delete the ref-driven relink; `relinkStacks` becomes the
-  derived base or disappears into `BaseFor`.
-- [ ] `internal/cli/root.go:326-333`: same, on the chain-read path.
-- [ ] `internal/changeset/destination.go:60-125`: walk `ActiveIDs`/`LandedIDs` and read the parent's
-  `CHANGESET.yaml` from the tree instead of from the landing commit's tree. This also fixes the case the
-  current code breaks on — a landing that carried no directory of its own (`:109-113`).
-- [ ] `internal/cli/stacked.go:182-207` and `:316-345`: parent-landed and parent-gone read the tree.
-  `st.landedFull` becomes the derived base, and the `landedBaseIsTheSameWork` comparison (`:381-402`) keeps
-  its shape with the derived value on the "now" side.
-- [ ] `internal/cli/status.go:586-640`: the `Stack:` block prints landed-ness and reach per ancestor with
-  no per-ancestor ref read; the `record:` line becomes a `landed:` line.
-- [ ] `--json`: `stack[].integration` becomes `stack[].landed_commit`; `base_ref` gains `base_why`.
-  Contract tests in the same commit.
+- [x] `internal/changeset/base.go`: `BaseFor(ctx, repo, cs, head, db) (Base, error)` with `Base{Ref, Why,
+  Derived, ParentBranch}`. Rules in order — (1) the parent branch while it exists and
+  `!CarriesDir(destination, parent)`; (2) `merge-base(childHead, destination)`, `Why` naming the landing or
+  the gone branch; (3) the default branch itself; `ErrNoDefaultBranch` when neither resolves. A changeset
+  with no parent returns its recorded base with `Why "recorded base"`. `Changeset.BaseWhy` carries the rule
+  beside the value; the resolver caches it in `applyBases`, so the surfaces print what one read produced.
+- [x] `internal/changeset/resolve.go`: `relinkStacks` deleted; `applyBases(ctx, repo, candidates, db, head)`
+  runs before `nearness` and sets `Base` and `BaseWhy`.
+- [x] `internal/cli/root.go`: the chain-read path derives its base the same way when the parent branch is
+  gone; `explainBrokenStack` asks the destination instead of a ref.
+- [~] `internal/changeset/destination.go:60-125`: **deferred to M5.** The walk still reads the parent's
+  `CHANGESET.yaml` from the landing commit's tree, so a landing that carried no directory still loses the
+  parent link there. It is the last read of the durable shape outside the files M5 deletes, and the code
+  around it is rewritten when `integration record` goes.
+- [x] `internal/cli/stacked.go`: `parentLanded` and `parentGone` read `LandedChain`/`CarriesDir`.
+  `st.landedFull` is the derived landing and `landedBaseIsTheSameWork` keeps its shape with it on the
+  "now" side. `LandedReach` goes quiet for a derived landing — the chain is derived from the destination,
+  so containment is not a second question — and `describeLanding` survives only for `check`.
+- [~] `internal/cli/status.go`: the `Base:` line prints the rule. The `Stack:` block's per-ancestor
+  `record:` line and `--json`'s `stack[].integration` are **deferred to M5** with the index they read.
+- [x] `--json`: `base_ref` and `base_why` added beside `base`, which keeps its meaning as what the
+  changeset recorded about its stack. Contract tests in the same commit.
+- [x] `internal/cli/init.go`, `internal/changeset/changeset.go`: an id's uniqueness comes from the directory
+  that carries it — active or landed — instead of from a ref's name. `DirectoryAt` gained `Landed`, which is
+  what tells a tidied landing apart from an uncommitted deletion. `init` refuses a landed id from the
+  destination's tree before it writes anything.
+
+**Deviation.** A parent merged only into a release branch is not landed, and its child keeps measuring
+against the parent branch. That is D1 applied to the stack, and it replaces the reach hedge the durable ref
+offered ("landed, not reachable from main") with no claim at all until the directory reaches the integration
+branch.
 
 #### Verification
 
-- Unit tests for `BaseFor`, one per rule, plus the two landing shapes and the rebased-onto-trunk case. The
-  rebase case is the one that beats today's behaviour: assert the child's diff contains only its own work,
-  where a ref-named base would have included trunk's later commits.
-- The rebase-merge stack case: the parent's commits are replayed under the child, so
-  `landedBaseIsTheSameWork` reports "not the same work" and the advice names the rebase. Assert that, because
-  it is correct behaviour arriving from a derived value rather than from a rule.
-- A clone where the parent branch still exists after landing: rule (1) answers, and no derivation runs.
-- `mise run gates`.
+- [x] `internal/changeset/base_test.go`: seven tests, one per rule, plus the two landing shapes and the
+  rebased-onto-trunk case — the rebase case asserts the child's own commits are the whole diff, where a
+  ref-named base would have pulled in the destination's later work.
+- [x] The rebase-merge stack case: `landedBaseIsTheSameWork` reports "not the same work" and the advice
+  names the rebase (`internal/cli/parent_relink_test.go`).
+- [x] A clone where the parent branch still exists after landing: the derived base answers, and the branch
+  name appears nowhere (`TestADerivedBaseReplacesTheParentBranchWhileTheBranchIsHere`).
+- [x] With both of a parent's durable refs deleted from the repository the base is the same commit
+  (`TestADerivedBaseNeedsNoRecordInThisClone`), which is the difference between a fact and a paper trail.
+- [x] `mise run gates`.
 
 ### M4 — `git pair change tidy`
 
@@ -398,6 +411,10 @@ Two things measured while building those fixtures, because they change later mil
 
 #### Tasks
 
+- [ ] Carried from M3: `internal/changeset/destination.go:60-125` still reads a parent's `CHANGESET.yaml`
+  from the landing commit's tree, so a landing that carried no directory loses the parent link; and
+  `internal/cli/status.go`'s `Stack:` block still prints `record:` per ancestor from the ref index, with
+  `--json`'s `stack[].integration` beside it. Both read the durable shape and move with this milestone.
 - [ ] Delete `internal/reviewref` (467), `internal/cli/integration.go` (1366), `internal/cli/publish.go`
   (415), `internal/cli/configure.go` (281), `internal/cli/published.go` (210), the ref half of
   `internal/cli/landed.go` (184), `internal/git/push.go` (204), and their tests (~3.0k lines).
