@@ -50,6 +50,20 @@ A squash, cherry-pick or rebase-merge landing whose commit carries no directory 
 its chain read has no markers to report. PRD §13 has to state that limit in the commit that removes the refs,
 because the refs were the thing that made such a landing knowable.
 
+## Open questions (M5 design, unresolved)
+
+1. A parent merged only into a release branch is not landed (D1), so its child measures against the parent
+   branch. Without the record, nothing says where that child is meant to land: `DestinationFor` can either
+   answer the live parent branch (`booking (base)`) or fall back to the integration branch and say the
+   parent's own base (`release/2.x`) is unreachable. `TestDestinationFallsBackWhenTheParentBaseIsGone`
+   encodes the second, written when the record could tell us the parent's destination. Decide, then rewrite
+   the test and PRD §11.4/§21's destination rule together — `change integrate` refuses a stacked child whose
+   parent has no record today, and that refusal is deleted in this milestone.
+2. Walking past a parent whose recorded base is itself a landed branch needs the id for that branch. The tree
+   answer is `LandedIDs(db.Ref)` containing the base name (branch names are derived from ids by default) and
+   then `StackAt(db.Ref, base)`; the ref answer was `IntegrationID(base)`. Implement that rule and the chain
+   tests pass with their current expectations, or state a different rule and change both tests.
+
 ## Open questions
 
 Whether `parent.landed_in_default_branch` stays in `status --json` now that it is true whenever
