@@ -146,7 +146,8 @@ review threads, lifecycle markers are commits carrying Review-* trailers, and a
 landing is the changeset directory in the history of the branch it merged into.
 git-pair writes no ref of its own.
 
-Author commands:   git pair init, then git pair change use | ready | integrate | unready | abandon
+Author commands:   git pair init, then git pair change ready | integrate | unready | abandon, with
+                   change stack and change combine as the exits from a branch carrying two
 Reviewer commands: git pair review open | about | thread | submit | history
 Reading state:     git pair queue | status | diff
 Gate:              git pair check, then merge into the destination with ordinary git`,
@@ -522,7 +523,7 @@ func (a *app) sessionFor(ctx context.Context, repo *git.Repo, cs changeset.Chang
 // usageWrap marks an error as a usage problem rather than a git failure.
 //
 // A tie between two changesets belongs here: the command asked a question this branch cannot
-// answer, and both ways out — `--changeset <id>` for one command, `change use <id>` for the
+// answer, and both ways out — `--changeset <id>` for one command, the two exits for the
 // branch — are things the user can type, which is what separates exit 2 from exit 1.
 func usageWrap(err error) error {
 	if errors.Is(err, changeset.ErrDetachedHead) || errors.Is(err, changeset.ErrNoChangeset) ||

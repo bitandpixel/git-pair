@@ -333,8 +333,9 @@ your own branch all get the same answer.
 When two directories survive, the changeset whose directory this revision touched most recently
 decides, then the `base:` of a stack; when
 nothing orders them git-pair refuses, names both, and gives two ways out: `--changeset <id>` answers
-for one command, and `git pair change use <id>` records the choice in that changeset's
-`CHANGESET.yaml` and settles it for the branch. The integration
+for one command, and the two exits settle it for the branch: `git pair change stack --base <branch>` records the
+link when one directory is the work the other sits on, and `git pair change combine --into <id>` folds the two when
+they are one piece of work. The integration
 branch is what "landed" is measured against: `--default-branch <ref>` states it (this is what CI
 passes), otherwise git's own answer — `refs/remotes/origin/HEAD`, then a sole `origin/main` or
 `origin/master`, then a local `main` or `master`. If none exists the command refuses rather than
@@ -571,7 +572,6 @@ landed.
 | `change ready` | `--allow-surviving-review-additions` | fully non-interactive; checks below |
 | `change integrate` | `--allow-feedback` | declares the approved head ready to be merged, as one empty marker commit (`Review-State: integrating`, `Review-Head`): no ref, no push, no merge (§9.9). Runs `git pair check`'s gate first, as the same code, and names every failed condition — so a declaration cannot be made for work the gate would refuse. Refuses a stacked child whose parent is not landed: the automatic merge would land it on a branch review can still rewrite. Idempotent at the head it declared; a commit after that head is declared next time |
 | `change unready` | none | withdraws the changeset from the review queue; records `Review-State: working` when the changeset is in review (including a changeset whose declaration is being taken back), otherwise succeeds and records nothing; refuses a changeset the integration branch already holds |
-| `change use <id>` | none | records which changeset a branch carrying more than one is working on: writes `ignores: <other ids>` into the chosen changeset's `CHANGESET.yaml` and commits that file; refuses an id the branch does not offer and a record that would leave the branch still undecided; idempotent |
 | `change stack --base <branch>` | records the stack link between this branch's changeset and the one <branch> carries: writes `base: <branch>` and `base-changeset: <id>` into the child's `CHANGESET.yaml` and nowhere else, prints the old and new value of both keys, and says to offer the branch again; refuses when the two branches share no changeset, when more than one could be the level below, or when this branch carries more than one changeset of its own |
 | `change combine --into <id>` | `--threads` | folds one changeset into another when the two directories are one piece of work: the disappeared one moves whole to `changesets/<id>/.combined/<gone>/` and stays inert there, the survivor keeps its own `base:` and `base-changeset:` and gains one line pointing at the archive, and the command refuses while either changeset is offered or under review. `--threads` copies the disappeared threads, prefixed with its id |
 | `change abandon` | none | records the terminal `Review-State: abandoned` and nothing else; `change ready`, `change unready` and `review submit` refuse against it afterwards; refuses a changeset the integration branch already holds; idempotent |
@@ -1823,17 +1823,19 @@ changeset it was asked about — the refusal names the fetch shape
 
 ```text
 this revision contains more than one changeset: aaa and bbb; name the one you mean with
---changeset <id>, or record the choice with `git pair change use <id>`
-`git pair change stack --base <branch>` is the other half: when the directory beside yours is the work yours sits on top of, that is a stack rather than two changesets sharing a branch, and it is recorded by naming the base branch and the changeset on it. When the directory beside yours is instead the same work under a second name, `git pair change combine --into <id>` folds the two together and archives the other one inside the survivor.
+--changeset <id>, or record the shape with `git pair change stack --base <branch>` or
+`git pair change combine --into <id>`
 ```
+
+`git pair change stack --base <branch>` records the link when the directory beside yours is the work yours sits on
+top of; `git pair change combine --into <id>` folds the two when they are the same work under two names.
 
 (exit 2) — the branch carries two unlanded changeset directories and nothing in the branch's own
 history orders them: no commit touched one directory more recently than the other, and neither names the
 other as its `base:`. That is what a sibling merged in looks like, and what a branch created off a sibling looks
-like once it starts its own work. `git pair change use <id>` settles it for the branch, by recording
-the choice in the chosen changeset's `CHANGESET.yaml`; `--changeset <id>` answers for one command;
-and `git pair init --base <sibling>` at creation time is what makes a stack readable without
-any record at all.
+like once it starts its own work. `git pair change stack --base <sibling>` settles it for the branch, by recording
+the base branch and the changeset on it in the child's `CHANGESET.yaml`; `--changeset <id>` answers for one command;
+and `git pair init --base <sibling>` at creation time records the stack from the start.
 
 `main is the integration branch, so a changeset started on it can never contain anything` (exit 2
 from `init`) — a changeset is measured against the integration branch, so one started on it

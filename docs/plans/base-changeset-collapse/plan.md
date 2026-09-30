@@ -417,7 +417,7 @@ destination carries is landed and the resolver never offers it.
 
 ### M7 - the two exits: `change combine` and `change stack`
 
-**Status:** offered as `feat-two-exits`. This is where the M6 refusal stops being a dead end.
+**Status:** landed as `622f56f` from `feat-two-exits`. This is where the M6 refusal stops being a dead end.
 
 Four readings of this milestone's text, each the shipped behaviour:
 
@@ -511,6 +511,23 @@ must not read as one.
 
 ### M8 - `ignores:` loses its remaining case
 
+**Status:** offered as `feat-ignores-writer-gone`.
+
+The reviewer's decision on the one open task: `change use` is **deleted**, not narrowed to clearing. Nothing on this
+repository's 37 `CHANGESET.yaml` files carries the key, the invariant and the two exits cover every shape it could
+decide, and a record somebody made keeps its meaning because the reader is untouched - clearing a record nobody has
+does not justify a documented command and a code path.
+
+Two consequences the deliverables did not spell out:
+
+- The ambiguity error a reader sees, the root help's author-command list, and three comments named the command. They
+  name the exits now, and the docs contract has a test that fails when a document names a command that no longer
+  exists, so the eleven doc mentions across PRD, README, SKILL.md and the skill's cli reference had to go in the same
+  commit rather than be tidied later.
+- PRD 9.8 is now the two exits. The number is kept, because four other passages point at it and they point at the
+  right thing: the section that told a reader to settle a branch by recording `ignores:` is the section that tells
+  them to record a stack or fold the pair.
+
 #### Deliverables
 
 - Nothing writes `ignores:` any more. `git pair change use` is refused, or narrowed to clearing a record written
@@ -521,12 +538,12 @@ must not read as one.
 
 #### Tasks
 
-- [ ] Decide with the reviewer, in this milestone rather than earlier, whether `change use` is deleted or kept to
+- [x] Decide with the reviewer, in this milestone rather than earlier, whether `change use` is deleted or kept to
       clear old records. The plan does not assume an answer; the invariant in M6 removes the only shape the command
       could not otherwise decide.
-- [ ] Cut the PRD paragraphs that describe the key as live behaviour in the same commit that removes the writer, so
+- [x] Cut the PRD paragraphs that describe the key as live behaviour in the same commit that removes the writer, so
       the documentation and the command move together.
-- [ ] Keep the drop pass in `choose` while any file can still carry the key, which keeps M2's precedence rule live
+- [x] Keep the drop pass in `choose` while any file can still carry the key, which keeps M2's precedence rule live
       for as long as the pass exists.
 
 #### Verification
