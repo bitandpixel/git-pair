@@ -235,8 +235,9 @@ line most recently comes first - the commit that added it, not the commit that l
 a child branch edits its parent's directory without starting work on the parent. Two directories that
 joined on the same commit order nothing between them, and there the answer is **ambiguous**: the
 command refuses, names every candidate, and gives two ways out: `--changeset <id>` answers for one
-command, and
-`git pair change use <id>` (§9.8) settles it for the branch. Two unrelated changesets on one
+command, and the two exits (§9.8) settle it for the branch - `git pair change stack --base <branch>` records the
+link when one directory is the work the other sits on, and `git pair change combine --into <id>` folds the two when
+they are one piece of work. Two unrelated changesets on one
 branch is a state only the author can settle, and picking one silently would read the wrong diff
 base and offer the wrong diff to a reviewer — which is why a tie is a refusal rather than a
 heuristic.
@@ -376,9 +377,11 @@ not belong to a branch (§4): recording one would put per-branch state in the du
 same commits would then answer differently depending on which branch happened to be checked out —
 which is the disagreement the content rule exists to remove.
 
-A third key appears only where an author put it. `ignores: <id> [<id>...]`, written by
-`git pair change use` (§9.8), records that this changeset is the one its branch is working on and
-that the named changesets are only sharing the branch with it. It is read when the changeset that
+A third key appears only in a file somebody wrote before the branch-shape rule was written down.
+`ignores: <id> [<id>...]` recorded that this changeset is the one its branch is working on and that the named
+changesets are only sharing the branch with it. Nothing writes it: the command that did was removed once the
+invariant and the two exits covered every shape the key could decide (§9.8), and the pass that applies it stays
+while any file can still carry it, so a decision somebody recorded keeps explaining itself. It is read when the changeset that
 wrote it is a candidate, so it speaks about one branch: it is not a statement about the other
 changesets, and it cannot change what another branch resolves to.
 
@@ -636,10 +639,11 @@ that:
    itself.
 3. **It does not change.** The ID of a directory that exists is never rewritten, and a
    changeset that has landed keeps its ID for good (§5). Starting a *second* changeset on
-   a branch that already carries one is allowed — that is what a stacked branch that begins its
-   own work looks like — and `init` warns that the branch now holds two, because the tool has
-   two directories to order and the order is rarely what the author meant. `git pair change use`
-   (§9.8) is how the author settles it.
+   a branch that already carries one is allowed when the record says so — that is what a stacked branch
+   that begins its own work looks like — and `init` refuses a second directory that ties to nothing, because
+   a branch carries one changeset plus the ones it is stacked on (§4). `git pair change stack --base <branch>`
+   records the link and `git pair change combine --into <id>` folds two directories that are one piece of work
+   (§9.8).
 
 Deleting a changeset directory releases its ID only when the deletion is committed, since
 retiring a changeset's notes is a commit and not a local edit.
@@ -925,48 +929,40 @@ and `init` reserves an id only against the records that landed changesets leave 
 
 ---
 
-## 9.8 `git pair change use <changeset-id>`
+## 9.8 The two exits: `change stack` and `change combine`
 
-Records which changeset a branch is working on, so that the branch stops being ambiguous.
-
-A branch normally carries one unlanded changeset. It carries more when a sibling's branch is merged
-into it, and when a branch created off a sibling starts its own work without `--base` naming that
-stack. The rule (§4) subtracts what the candidates record as their base changesets, orders what it can — the
-changeset whose directory joined this line most recently wins — and refuses between the rest, because
-choosing one silently means reading the wrong diff base.
+A branch carries one unlanded changeset, plus the ones it is stacked on (§4). When a second directory arrives that
+no record ties to the first, the refusal cannot say which answer fits, because the history does not record why the
+directory is there. These two commands are the author's answer.
 
 ```bash
-git pair change use booking-transaction
+git pair change stack --base booking
+git pair change combine --into booking-transaction
 ```
 
-It writes one line, `ignores: <other ids>`, into the **chosen** changeset's `CHANGESET.yaml`, and
-commits that file on its own. The record belongs to the changeset that was chosen: clearing the
-others' records instead would write into another changeset's directory, which would then be read as
-part of this changeset's landing. The commit carries
-`Review-Changeset: <id>` and no `Review-State`, because recording which changeset a branch is about
-is not a lifecycle event — it must not move a changeset that is in review out of review. Like a
-ready marker it is a review artifact rather than an implementation change, so the comparison that
-decides integration (§11.3) ignores it.
+`git pair change stack --base <branch>` compares the unlanded changesets of this branch with those of `<branch>` and
+writes the pair into the child's `CHANGESET.yaml`: `base:` naming the branch, `base-changeset:` naming the changeset
+that branch carries. Nothing outside the child's file changes, because the parent's record belongs to its own branch.
+It refuses rather than guess. The two branches sharing no changeset means the named branch is not this branch's base;
+more than one candidate for the level below means the author settles that level first; this branch carrying two of its
+own means the answer is the other command.
 
-Checks, in order:
+`git pair change combine --into <id>` folds two directories that describe one change. The disappearing changeset moves
+whole into `changesets/<into>/.combined/<id>/`, which every reader treats as inert: it answers no id, it is neither
+landed nor active, and it is not offered as a thread. The survivor keeps its own `base:` and `base-changeset:` - a
+fold is not a licence to move the comparison a review is measured against - and its `ABOUT.md` gains one line pointing
+at the archive rather than a copy of the disappeared prose. `--threads` copies the disappeared threads into the
+survivor, each prefixed with its id so two threads called `scope.md` do not collide.
 
-1. `<changeset-id>` is a usable id (§9.1), else exit 2,
-2. if the branch already resolves to that id, succeed and record nothing — the useful answer is
-   "already", and a commit that changes nothing would be noise,
-3. the id is among the candidates. A directory that is present but dropped by another changeset's
-   record is refused by name, with the file and line to edit: the author can see that directory, so
-   "there is no such changeset here" would be a dead end,
-4. the record is simulated before it is written. If writing it would leave the branch undecided —
-   another candidate already records a choice that names this one — refuse with exit 2 and name the
-   line to remove. Contradicting records stay a refusal rather than becoming a newest-commit-wins
-   rule, because which of two hand-edited files is newer is not something git-pair can know reliably,
-   and the author can say outright which one they mean.
+Both commands refuse while either changeset is offered or under review, because a reviewer's diff must not change
+underneath them, and both leave the branch needing to be offered again: a record that changes the base changes what
+the diff means.
 
-A recorded choice is data, so it travels with the branch: a branch created from this one inherits
-the record, and the record only ever drops a changeset from consideration where the two would
-otherwise be tied on that revision. An author who changes their mind edits the file — it is one
-line, and the refusal message names it.
-
+**`ignores:` is read and never written.** A file written before this section existed can carry
+`ignores: <id> [<id>...]`, which recorded that this changeset is the one its branch is working on and that the named
+ones merely share the branch. The resolver still honours it, and the pass that applies it stays while any file can
+still carry the key, so a decision somebody recorded keeps explaining itself. Nothing writes it: the command that
+used to was removed once the invariant and the two exits above covered every shape the key could decide.
 ---
 
 ## 9.9 `git pair change integrate`

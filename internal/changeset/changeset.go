@@ -631,55 +631,10 @@ func stackOf(md map[string]string) (Stack, error) {
 }
 
 // IgnoresKey is the CHANGESET.yaml key naming the other changesets this one is merely sharing a
-// branch with, recorded by `git pair change use`.
+// branch with. Nothing writes it: `git pair change use` was removed once the branch-shape invariant and
+// the two exits covered every shape the key could decide, and a file written before then keeps being read
+// so the decision behind it still explains itself.
 const IgnoresKey = "ignores"
-
-// SetIgnores records in a changeset's own CHANGESET.yaml which other changesets it is merely
-// sharing a branch with. The record lives in the chosen changeset's file and nowhere else: to
-// clear the losing candidates' records instead would write into another changeset's directory,
-// which would then be read as part of this changeset's landing.
-//
-// Comments, unknown keys and their order survive; the file is rewritten only when the value
-// actually changes, so running the command twice records one commit rather than two.
-func SetIgnores(repo *git.Repo, c Changeset, ids []string) (changed bool, err error) {
-	sorted := append([]string(nil), ids...)
-	sort.Strings(sorted)
-	path := filepath.Join(repo.Dir, c.Dir, MetadataFile)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false, err
-	}
-
-	want := ""
-	if len(sorted) > 0 {
-		want = IgnoresKey + ": " + strings.Join(sorted, " ")
-	}
-	var out []string
-	placed := false
-	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
-		key, _, ok := strings.Cut(line, ":")
-		if ok && strings.EqualFold(strings.TrimSpace(key), IgnoresKey) {
-			if want != "" && !placed {
-				out = append(out, want)
-				placed = true
-			}
-			continue
-		}
-		out = append(out, line)
-	}
-	if want != "" && !placed {
-		out = append(out, want)
-	}
-
-	rewritten := strings.Join(out, "\n") + "\n"
-	if rewritten == string(data) {
-		return false, nil
-	}
-	if err := os.WriteFile(path, []byte(rewritten), 0o644); err != nil {
-		return false, err
-	}
-	return true, nil
-}
 
 // --- metadata ---------------------------------------------------------------
 
@@ -845,7 +800,7 @@ func Write(repo *git.Repo, c Changeset, opts WriteOptions) (written []string, er
 // renderMetadata writes CHANGESET.yaml: the keys git-pair owns, in the order that reads best, then
 // any key it does not recognise.
 //
-// The pass-through is not decoration. `change use` records `ignores:` in this same file, and an
+// The pass-through is not decoration. a file written while `change use` existed can still carry `ignores:`, and an
 // author's hand-edited key is a decision; a command that rewrites the base must not quietly delete
 // either one. Keys are sorted because a rewrite that reordered them would show up in a diff as a
 // change nobody made.

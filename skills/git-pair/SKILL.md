@@ -23,8 +23,9 @@ branch cannot orphan a queue entry.
 
 Two roles share one repository, and the commands answer different questions. Keep them straight.
 
-- **Author** — writes the change. Usually the agent. `git pair init`, then `change use | ready |
-  integrate | unready | abandon | wait | feedback`, plus the reads: `status`, `queue`, `diff`,
+- **Author** — writes the change. Usually the agent. `git pair init`, then `change ready |
+  integrate | unready | abandon | wait | feedback`, with `change stack` and `change combine` as the exits
+  from a branch carrying two, plus the reads: `status`, `queue`, `diff`,
   `review history`, `check`. `change tidy` belongs to whoever maintains trunk, not to this loop.
 - **Reviewer** — a human. `review open | reopen | about | thread | submit`.
 
@@ -63,7 +64,7 @@ is coming.
 | Command | What it is for |
 | --- | --- |
 | `git pair init --base <ref>` | creates `changesets/<id>/` with `CHANGESET.yaml` and a scaffolded `ABOUT.md`, then commits them. Commits only the changeset directory, so staged work elsewhere stays staged. `--parent <branch>` stacks the changeset instead of naming a base |
-| `git pair change use <id>` | settles which changeset a branch carrying more than one is working on. `--changeset <id>` answers the same question for one command |
+| `git pair change stack --base <branch>` | the two exits from a branch carrying more than one unlanded changeset, with `change combine --into <id>`: record the stack link, or fold two directories into one and archive the other. `--changeset <id>` answers the same question for one command |
 | `git pair change ready` | hands off. Checks, in order: clean working tree, `ABOUT.md` exists, the repository has commits, no blocking surviving review additions |
 | `git pair change unready` | withdraws the offer when the work is not finished after all. Do it before continuing, rather than leaving a reviewer looking at a stale offer. It withdraws a declaration too |
 | `git pair change integrate` | declares the approved head ready to be merged, as one marker commit. It merges nothing, pushes nothing and writes no ref, and it refuses anything `check` refuses — so run it after a passing gate, never instead of it. Not needed when a person does the merge by hand |
