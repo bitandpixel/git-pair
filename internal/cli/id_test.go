@@ -64,11 +64,23 @@ func TestChangeInitAdoptsTheDirectoryItInherits(t *testing.T) {
 	r := runIn(t, f.Dir(), "init", "--base", "main").mustSucceed(t, "init")
 	mustContain(t, r.stdout, "already initialised", "the inherited directory must be named as the answer")
 
-	// A genuinely second changeset still gets its own identity when it asks for one.
-	runIn(t, f.Dir(), "init", "--id", "feature-booking-2", "--base", "main").
-		mustSucceed(t, "init")
+	// A second changeset tied to nothing is refused on that branch, and `--id` does not buy the way past
+	// it: the id says what the directory is called, not that two unrelated directories belong together.
+	r = runIn(t, f.Dir(), "init", "--id", "feature-booking-2", "--base", "main")
+	if r.code != exitUsage {
+		t.Fatalf("a second unconnected changeset exited %d, want %d (you invoked init on the wrong branch)\nstderr: %s", r.code, exitUsage, r.stderr)
+	}
+	mustContain(t, r.stderr, "feature-booking-2", "the refusal names the changeset it would create")
+	mustContain(t, r.stderr, "feature-booking", "the refusal names the changeset already on the branch")
+	if f.HasWorktreeFile(filepath.Join("changesets", "feature-booking-2", "CHANGESET.yaml")) {
+		t.Error("the refused changeset was written anyway")
+	}
+
+	// The same id is usable on a branch of its own, which is the way out the refusal gives.
+	f.CreateBranch("feature-booking-2", "main")
+	runIn(t, f.Dir(), "init", "--id", "feature-booking-2", "--base", "main").mustSucceed(t, "init")
 	if !f.HasWorktreeFile(filepath.Join("changesets", "feature-booking-2", "CHANGESET.yaml")) {
-		t.Error("an explicit id was not usable")
+		t.Error("an explicit id was not usable on a branch of its own")
 	}
 }
 
@@ -118,22 +130,33 @@ func TestChangeInitRefusesAnIDALandedDirectoryHolds(t *testing.T) {
 		"the refusal names the landed directory that holds the name, and says where it landed")
 }
 
-// A branch may hold more than one changeset — that is what a stacked branch that starts its
-// own work looks like — so a second id is not refused. It is warned about, because the tool
-// now has to order two directories and the ordering is rarely what the author meant.
-func TestChangeInitWarnsWhenABranchTakesASecondChangeset(t *testing.T) {
+// The branch shape rule, at the door: a branch carries one changeset, plus the ones it is stacked on. Two
+// directories that no record ties together arrive when work from another branch comes onto this one, and the CI job
+// would merge the second with no approval of its own, so `init` refuses instead of warning (PRD 4).
+func TestChangeInitRefusesASecondChangesetThatTiesToNothing(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("booking")
 	runIn(t, f.Dir(), "init", "--id", "booking-work", "--base", "main").mustSucceed(t, "init")
 
-	r := runIn(t, f.Dir(), "init", "--id", "booking-work-v2", "--base", "main").
-		mustSucceed(t, "init")
-	mustContain(t, r.stderr, `already carries changeset "booking-work"`, "the warning must name what is already here")
-	mustContain(t, r.stderr, "--changeset", "the warning must say how to disambiguate")
-	for _, id := range []string{"booking-work", "booking-work-v2"} {
-		if !f.HasWorktreeFile(filepath.Join("changesets", id, "CHANGESET.yaml")) {
-			t.Errorf("changesets/%s/ is missing", id)
+	r := runIn(t, f.Dir(), "init", "--id", "booking-work-v2", "--base", "main")
+	if r.code != exitUsage {
+		t.Fatalf("a second changeset on a carrying branch exited %d, want %d (you invoked init on the wrong branch)\nstderr: %s", r.code, exitUsage, r.stderr)
+	}
+	out := r.stdout + r.stderr
+	for _, want := range []string{"booking-work", "booking-work-v2", "one changeset"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the refusal does not name %q:\n%s", want, out)
 		}
+	}
+	// Every command in the message has to exist in this build: the exits that are their own commands are the
+	// changeset after this one, and a reader sent to a command that does not answer learns nothing.
+	for _, want := range []string{"git restore --source=", "--set-base", "git fetch"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the refusal gives no way out containing %q:\n%s", want, out)
+		}
+	}
+	if f.HasWorktreeFile(filepath.Join("changesets", "booking-work-v2", "CHANGESET.yaml")) {
+		t.Error("init wrote the changeset it refused")
 	}
 }
 

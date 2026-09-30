@@ -120,7 +120,8 @@ func TestQueueListsDeclaredWorkSeparatelyFromReview(t *testing.T) {
 	f.Commit("offered work", gittest.WithFile("o.go", "package main\n"))
 	f.SwitchTo("offered")
 	ready(t, f)
-	f.CreateBranch("declared")
+	// Separate branches: one repository, two changesets, and no branch carrying work that is not its own.
+	f.CreateBranch("declared", "main")
 	f.CommitChangeset("declared", "main")
 	f.Commit("declared work", gittest.WithFile("d.go", "package main\n"))
 	f.SwitchTo("declared")
