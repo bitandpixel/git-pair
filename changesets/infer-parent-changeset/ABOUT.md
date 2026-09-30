@@ -48,18 +48,24 @@ revision carries more than one, orders them by which directory this branch touch
 is live, not which is a parent, and an ordering is not evidence of a relationship.
 is there a distinct reason that base: and parent-changeset: cant be used, and remove the parent: concept?
 
-**The branch is the live half, and an id cannot replace it.** A file with `base:` and `parent-changeset:` and no
-`parent:` is not rejected, and the id in it is read by nothing: `stackOf` takes `parent:` as the base, has no
-branch to attach the id to, and drops the field at parse time - so `check` recommends the pair for that file the
-same way it recommends it for any plain `base:`. The halves answer different questions, and neither one can be
-derived from the other. `parent:` names a ref, which is what makes a live parent measurable (`BaseFor` rule 1
-takes the diff against the parent's branch tip) and what makes "your parent moved since this approval" and "push
-here" sayable at all. `parent-changeset:` names a directory in the destination's tree, which is the half that
-survives the parent's branch being deleted and the half the destination rule reads. Dropping `parent:` means
-every consumer resolves id to branch by scanning this clone's branches for a directory: many-to-one, and a
-different answer in a fresh clone than in one holding stale refs, which is the property this repository deleted
-its durable ref layer to be rid of. Dropping the id is the same loss seen from the other side: once the branch
-is gone there is nothing left to ask the tree about.
+**`parent:` and `base:` differ by role, not by kind.** Both name a ref, so one key could carry the stack link
+with `parent-changeset:` beside it and the rule "an id present means that ref is a parent". The reason not to is
+that `Base` is a computed field in the model: `applyBases` replaces it from the stack link (`resolve.go` writes
+`Changeset.Base`, `BaseWhy` and `BaseDerived` from `BaseFor`), while the authored half of a stack is never
+rewritten. One key cannot be both the authored link and the derived measurement, and the two disagree exactly
+when it matters: once the parent lands, the measurement moves on and the link must not. `base:` is also the field
+M2's destination rule refuses and reports in `Overrode` - an override of an authored stack link would erase the
+fact this changeset exists to keep.
+
+Two smaller things follow from the same split. This rule is an inference from what the base carries, so coupling
+the meaning to `parent-changeset:` would let an inferred value silently re-classify an authored field; as
+written, `init` records a new pair and says so, and the authored `base:` it replaces is visible in the diff. And
+the id is a many-to-one collapse (`SlugFromBranch`), so it can name the wrong changeset - a wrong id under the
+coupling would move both the diff base and the merge destination, while a wrong id today cannot re-classify
+anything, because the link lives where the ref is stated.
+
+The cost of two keys is the incomplete pair, which is the shape a hand-edited file can reach and which parses to
+a plain base with the id dropped. The advice for it is the same advice `check` already gives.
 
 **A recommendation, not a reason.** A changeset written before this rule existed must not be held by it, and
 which key a file chose to name its parent with is not a condition a merge should depend on. `check` prints
