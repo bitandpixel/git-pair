@@ -355,8 +355,8 @@ base: main
 
 ```yaml
 id: booking-transaction-tests
-parent: booking-transaction
-parent-changeset: booking-transaction
+base: booking-transaction
+base-changeset: booking-transaction
 ```
 
 `id` is the changeset ID, and it is the directory's name rather than a second opinion
@@ -364,13 +364,16 @@ about it: a file whose `id` disagrees with the directory holding it is an error 
 correct, not a conflict to resolve. `base` is the ref the changeset's diff is measured
 against.
 
-A stacked changeset spells that ref as `parent:` instead, and names the changeset living on
-that branch as `parent-changeset:`. The branch is the active locator while the parent is in
-flight; the changeset ID is what still means something after the parent lands and its branch is
-deleted (§21). `parent:` **is** the base — everything that measures the changeset reads one value
-— so a file setting both `parent:` and `base:` is an error to correct, like an `id` that
-disagrees with its directory. Changing either takes an explicit flag (§9.1); git-pair never
-restacks a changeset on its own.
+A stacked changeset spells that ref as the branch it sits on, and names the changeset living on
+that branch as `base-changeset:`. The branch is the active locator while the parent is in flight;
+the changeset ID is what still means something after the parent lands and its branch is deleted
+(§21). The recorded branch **is** the base — everything that measures the changeset reads one value
+— so a file that sets both `parent:` and `base:` is an error to correct, like an `id` that
+disagrees with its directory: the two spellings answer one question and must not give two answers.
+`parent:` and `parent-changeset:` are read from files written before this pair existed, and nothing
+writes them: a record somebody made keeps being honoured, and a rewritten file would say the
+relationship changed when it did not. Changing either half of the pair takes an explicit flag
+(§9.1); git-pair never restacks a changeset on its own.
 
 Those two keys are what every changeset has. There is no branch field, because the directory does
 not belong to a branch (§4): recording one would put per-branch state in the durable data, and the
@@ -933,7 +936,8 @@ and `init` reserves an id only against the records that landed changesets leave 
 
 A branch carries one unlanded changeset, plus the ones it is stacked on (§4). When a second directory arrives that
 no record ties to the first, the refusal cannot say which answer fits, because the history does not record why the
-directory is there. These two commands are the author's answer.
+directory is there. Two of the answers are these commands; the full list the refusal prints is below, because a way
+out that appears only in an error message is a way out nobody reads twice.
 
 ```bash
 git pair change stack --base booking
@@ -963,6 +967,23 @@ the diff means.
 ones merely share the branch. The resolver still honours it, and the pass that applies it stays while any file can
 still carry the key, so a decision somebody recorded keeps explaining itself. Nothing writes it: the command that
 used to was removed once the invariant and the two exits above covered every shape the key could decide.
+
+**The four ways out, in the order the error prints them.** A branch carries one changeset, plus the changesets it is
+stacked on. The others arrive when work from another branch comes onto this one: a merge or a pull of a shared branch,
+a cherry-pick, a squash merge, or a branch cut from a branch that already carried both. The refusal prints this list
+and names the ids it found, because the reader has to work out which of the two is theirs before choosing:
+
+1. the changesets are a stack, so record the link between them - `git pair change stack --base <parent-branch>`,
+2. the two are one piece of work, so fold them together, where the disappeared one is archived inside the survivor and
+   nothing is deleted - `git pair change combine --into <survivor>`,
+3. the others belong elsewhere, so take them out of this branch, where `<ref>` is the branch or commit this one was
+   cut from - `git restore --source=<ref> -- changesets/<id>`,
+4. the other may have landed since this branch was cut, which makes it not a second changeset at all, so fetch and ask
+   again - `git fetch`.
+
+The first two are git-pair commands and the last two are git, and the order is not decoration: the record that makes
+the branch true is offered before the edits that make it true, because a directory moved out of the branch is a
+decision nobody can undo from the error message alone.
 ---
 
 ## 9.9 `git pair change integrate`
@@ -2915,19 +2936,19 @@ booking-transaction:
   base: main
 
 booking-transaction-tests:
-  parent: booking-transaction
-  parent-changeset: booking-transaction
+  base: booking-transaction
+  base-changeset: booking-transaction
 
 booking-transaction-ui:
-  parent: booking-transaction-tests
-  parent-changeset: booking-transaction-tests
+  base: booking-transaction-tests
+  base-changeset: booking-transaction-tests
 ```
 
 A base named at `init` is read by the same rule. When `--base` names a branch carrying exactly one unlanded
 changeset, the work is stacked on that branch, and `init` records the pair above in place of a plain `base:`.
-The two are not interchangeable: a `base:` keeps naming the branch after the work on it lands, which is the
-state in which every command that reads it names finished work as the destination, while `parent:` is read
-against the destination and answers the same question once the parent's branch is gone. Two or more unlanded
+The two halves are not interchangeable: `base:` keeps naming the branch after the work on it lands, which is the
+state in which every command that reads it names finished work as the destination, while `base-changeset:` names
+the changeset rather than the branch holding it, and so answers the same question once that branch is gone. Two or more unlanded
 changesets on that branch is not a guess `init` makes — one may be the parent and another a sibling sharing
 the branch — so the base stands as written and every candidate is named for the author to pick. `check`
 recommends the same declaration for a changeset whose file predates this; it recommends, and never refuses.

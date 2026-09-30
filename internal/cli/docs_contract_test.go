@@ -224,3 +224,56 @@ func readDoc(t *testing.T, rel string) string {
 	}
 	return string(text)
 }
+
+// TestStackedExamplesShowTheWrittenPair keeps an example of a stacked changeset honest about the keys git-pair
+// writes. §5 records that pair as `base:` plus `base-changeset:`; `parent:` and `parent-changeset:` are read from
+// files written before that pair existed, and nothing writes them any more. Prose is allowed to name the old keys -
+// someone reading a file that predates the change has to be told what they are looking at - so the check is scoped
+// to fenced blocks, which is where a document *shows* a changeset file rather than talking about one.
+//
+// The rule is "a block that assigns an old key must also assign the new pair" rather than "no old key may appear",
+// because a block that teaches the older spelling is worth keeping and would otherwise be deleted instead of
+// annotated. What it stops is the quiet case: an example copied forward from before M4, which a reader would follow
+// and produce a file that git-pair reads but never writes.
+func TestStackedExamplesShowTheWrittenPair(t *testing.T) {
+	stale := regexp.MustCompile(`(?m)^[ \t]*(?:parent|parent-changeset)[ \t]*:`)
+	written := regexp.MustCompile(`(?m)^[ \t]*base-changeset[ \t]*:`)
+	for _, file := range docFiles(t) {
+		for _, block := range fencedBlocks(t, file, readDoc(t, file)) {
+			if !stale.MatchString(block) || written.MatchString(block) {
+				continue
+			}
+			t.Errorf("%s shows a stacked changeset with `parent:` or `parent-changeset:` and no `base-changeset:`; "+
+				"the pair git-pair writes is `base:` plus `base-changeset:` (§5), so this example cannot be produced "+
+				"by any command:\n%s", filepath.Base(file), block)
+		}
+	}
+}
+
+// fencedBlocks returns the content of each ``` fence, opening delimiter included so a failure shows what the example
+// claims to be. A fence left open is reported: the blocks after it would go unchecked, and a document that quietly
+// stops being checked is the failure this file exists to prevent.
+func fencedBlocks(t *testing.T, file, text string) []string {
+	t.Helper()
+	var blocks []string
+	var current []string
+	in := false
+	for _, line := range strings.Split(text, "\n") {
+		fence := strings.HasPrefix(strings.TrimSpace(line), "```")
+		switch {
+		case fence && !in:
+			in = true
+			current = []string{line}
+		case fence && in:
+			current = append(current, line)
+			blocks = append(blocks, strings.Join(current, "\n"))
+			in = false
+		case in:
+			current = append(current, line)
+		}
+	}
+	if in {
+		t.Errorf("%s has an unclosed ``` fence, which would hide every example after it from this check", filepath.Base(file))
+	}
+	return blocks
+}

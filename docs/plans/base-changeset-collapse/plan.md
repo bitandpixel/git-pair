@@ -511,7 +511,7 @@ must not read as one.
 
 ### M8 - `ignores:` loses its remaining case
 
-**Status:** offered as `feat-ignores-writer-gone`.
+**Status:** landed as `7b38a5f` from `feat/ignores-writer-gone`.
 
 The reviewer's decision on the one open task: `change use` is **deleted**, not narrowed to clearing. Nothing on this
 repository's 37 `CHANGESET.yaml` files carries the key, the invariant and the two exits cover every shape it could
@@ -554,6 +554,37 @@ Two consequences the deliverables did not spell out:
 
 ### M9 - the PRD says the rule in this order
 
+**Status:** offered as `feat/prd-says-the-rule-in-order`.
+
+Two references in the deliverables were stale and were read as what they meant rather than obeyed literally:
+
+- "PRD §13.1 states which rules decide the active changeset and in what order" - §13.1 is *The destination*. The
+  selection order is in §4, which M5 rewrote and M8 touched again, so that deliverable was satisfied before this
+  milestone and needed no edit. The same applies to the verification bullet "reading the PRD from §13 forward":
+  §13 is landing, and the order a reader would reproduce is §4's.
+- "the same three ways out" - the refusal prints four. §9.8 now prints all four, in the order the error prints them,
+  and README's quoted output matches the message the code produces character for character.
+
+The stale passages the first task named were four, all of them describing `parent:` as the link an author writes:
+PRD §5 (the file's own description, and the example above it), the worked example in `# 21` and the paragraph under
+it, README's stacked-branch non-goal, and README's `CHANGESET.yaml` paragraph. All four now give `base:` beside
+`base-changeset:` as the pair that is written, and say that the older names are read and never written - which is
+the sentence the reader of a pre-M4 file needs, and the reason the new docs check is scoped the way it is.
+
+The docs contract rule: a fenced block that assigns `parent:` or `parent-changeset:` must also assign
+`base-changeset:`. Prose may name the older keys, because someone reading a file that predates the change has to be
+told what they are looking at; an example may not, because an example is what a person copies. Verified by adding a
+stale example to the PRD, watching the new test name the file and quote the block, and removing it.
+
+The gate measurement the last deliverable asked for, taken from a shim ahead of git on PATH while `check --json`
+runs: 25 invocations on a branch with no ancestor, 43 with one, 52 with two, 61 with three. The first hop costs more
+than the hops after it because below one level there is no parent to look for; each further hop costs nine - a tree
+read of that level, two landedness probes, a branch probe, and the log that reads its markers.
+`scripts/gates/ci-integrate.sh` pins the two-level count against a ceiling and pins the equality of successive hops,
+which is the property that matters: a change that re-walked the chain per level would grow quadratically and would
+otherwise show up as a slow CI job nobody investigates. Both assertions were verified by breaking them - one by
+tightening the ceiling, one by adding nine invocations to a single level - and each failed with its own reason.
+
 #### Deliverables
 
 - PRD §21 describes the stack link as one authored pair, `base:` plus `base-changeset:`, with the older
@@ -570,11 +601,11 @@ Two consequences the deliverables did not spell out:
 
 #### Tasks
 
-- [ ] Rewrite the passages in place rather than appending. The old text names `parent:` as the authored link and
+- [x] Rewrite the passages in place rather than appending. The old text names `parent:` as the authored link and
       describes selection by the most recently touched directory; both are wrong after M4 and M5.
-- [ ] Extend the docs contract tests to require the new key name wherever a document shows a stacked
+- [x] Extend the docs contract tests to require the new key name wherever a document shows a stacked
       `CHANGESET.yaml`, so a stale example fails the build.
-- [ ] Add the invocation-count check to `scripts/gates/ci-integrate.sh` in the shape `feat/destination-from-tree`
+- [x] Add the invocation-count check to `scripts/gates/ci-integrate.sh` in the shape `feat/destination-from-tree`
       used for its trap replay: a check that fails for the right reason, verified by breaking it once.
 
 #### Verification
