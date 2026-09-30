@@ -25,6 +25,10 @@ field. This is M2 of `docs/plans/derive-destination-from-tree/plan.md`, stacked 
 -   `internal/changeset/reads.go`: `changeset.Reads`, a per-command memo of the destination's directory
     listing and each ancestor's `CHANGESET.yaml`, passed from `status` to both the chain surface and the
     destination answer.
+-   `internal/cli/report.go`, `internal/cli/status.go`: the `Base:` line passed branch names to `short`, which
+    is a sha-width helper, so a parent branch called `feature/auth` printed as `feature`. Names now print in
+    full; the commit a landed parent leaves behind still abbreviates. Found while probing what the two
+    spellings of a stack link each answer, for the review question on M1.
 -   PRD §13.1: rule 1 is not taken on trust, and the tie-break is written down - landedness wins over a branch
     that still resolves.
 -   `scripts/gates/ci-integrate.sh`: the replay of the trap - a stack created against a live parent, the
@@ -61,6 +65,9 @@ refusal still fires when the directory is not in the destination, which is the c
     merged branch.
 -   `TestStatusStackChainCostsABoundedReadPerStep` passes on its original bound of five invocations per extra
     ancestor.
+-   `TestStatusNamesAParentBranchAtFullLength` asserts the parent branch is named in full on the `Base:` line
+    and that the sha-width abbreviation is gone from it.
+
 -   `go test ./...` green; `scripts/gates/ci-integrate.sh` 76 checks green; `mise run gates` reported below.
 
 ## Known limitations

@@ -22,6 +22,24 @@ func short(sha string) string {
 	return sha
 }
 
+// baseLabel names what the `Base:` line points at. That value is either a commit - the derived base, and the
+// landing commit of a parent that has merged - or a name somebody wrote down. `short` is right for the commit
+// and wrong for the name: it is a sha-width helper, and it was cutting a parent branch called `feature/auth`
+// to `feature` on the one line whose whole job is to tell the author where their work is measured from.
+func baseLabel(v string) string {
+	if len(v) == 40 && strings.IndexFunc(v, func(r rune) bool {
+		return !strings.ContainsRune("0123456789abcdef", r)
+	}) < 0 {
+		return short(v)
+	}
+	for _, prefix := range []string{"refs/remotes/", "refs/heads/", "refs/"} {
+		if strings.HasPrefix(v, prefix) && len(v) > len(prefix) {
+			return strings.TrimPrefix(v, prefix)
+		}
+	}
+	return v
+}
+
 // survivalCheck runs the surviving-review-additions diagnostic against the most
 // recent review submission, or returns nil when the changeset has none.
 //

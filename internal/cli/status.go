@@ -487,7 +487,7 @@ func printStatus(a *app, v *statusView) {
 		a.printf("Branch: none (read from the landed chain)\n")
 	}
 	if j.BaseWhy != "" {
-		a.printf("Base: %s — %s\n", short(j.Base), j.BaseWhy)
+		a.printf("Base: %s — %s\n", baseLabel(j.Base), j.BaseWhy)
 	} else {
 		a.printf("Base: %s\n", j.Base)
 	}
