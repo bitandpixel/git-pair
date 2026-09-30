@@ -432,8 +432,9 @@ func defaultBase(ctx context.Context, repo *git.Repo, override string) (string, 
 	// `refs/remotes/origin/HEAD`, which `git clone` records, so the ref it returns is usually a fetch ref even
 	// in a clone with a local trunk — and recording that spelling put `base: refs/remotes/origin/main` into a
 	// file other machines read, and made `status` report the base as a fetched remote ref for a change that
-	// had never been pushed anywhere. The name is tried under `refs/heads/` first and then under
-	// `refs/remotes/`, so where it resolves it is the same branch and the better thing to write.
+	// had never been pushed anywhere. What the name resolves to when a diff is measured is a second question,
+	// and `changeset.BaseFor` answers it with the fetched copy: the record stays portable, the measurement
+	// follows what this clone has fetched.
 	name := db.BaseName()
 	if _, err := repo.RevParse(ctx, name); err == nil {
 		return name, nil
@@ -445,10 +446,10 @@ func defaultBase(ctx context.Context, repo *git.Repo, override string) (string, 
 }
 
 // baseDivergence is the note for a base whose local copy and its remote copy are different commits — the
-// state behind a fresh branch reporting `ahead 1, behind 1` and a `Base:` line that resolves through
-// `refs/remotes/`: the trunk in this clone has commits the remote's does not, so the diff measured from here
-// is not the diff the forge will show. It is a note and not a refusal: a base may legitimately be ahead
-// locally, and pushing it is not git-pair's to do (§26).
+// state behind a fresh branch reporting `ahead 1, behind 1`. The case worth a sentence is the local copy
+// being ahead: the diff is measured against origin's copy (§4), so whatever this clone's trunk has that
+// origin does not arrives inside the new changeset's work, because the branch was cut from it. It is a note
+// and not a refusal: a base may legitimately be ahead locally, and pushing it is not git-pair's to do (§26).
 func baseDivergence(ctx context.Context, repo *git.Repo, base string) string {
 	if base == "" {
 		return ""
@@ -463,8 +464,8 @@ func baseDivergence(ctx context.Context, repo *git.Repo, base string) string {
 		return ""
 	}
 	return fmt.Sprintf("note: %s is not the same commit here and on origin: %s here that origin does not have, %s on origin that is not here. "+
-		"The diff git-pair measures is against the copy in this clone; the forge compares against the copy it has, and pushing %s is yours.",
-		base, countBetween(ctx, repo, local, remote), countBetween(ctx, repo, remote, local), base)
+		"The diff git-pair measures is against origin's copy, so what only this clone's %s has reads as part of this change until you push it; pushing %s is yours.",
+		base, countBetween(ctx, repo, local, remote), countBetween(ctx, repo, remote, local), base, base)
 }
 
 // countBetween is `git rev-list --count <exclude>..<from>`, and "?" when git will not say — a note that

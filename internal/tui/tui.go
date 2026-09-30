@@ -1413,9 +1413,11 @@ func boxLabel(word string) string {
 }
 
 // baseLine is the box's one row that is not a choice: what the span is measured against. The span
-// beside it is a row, because that is the one a reviewer changes.
+// beside it is a row, because that is the one a reviewer changes. Both are shortened the same way, so the
+// pair reads as one answer — `origin/main` and `origin/main...current` — rather than as two bases that
+// happen to agree.
 func (m reviewModel) baseLine() string {
-	return boxLabel("base") + m.sess.Header().Base
+	return boxLabel("base") + span.ShortRef(m.sess.Header().Base)
 }
 
 // boxInner is how wide a row inside the box may be: the list column less the border characters and the

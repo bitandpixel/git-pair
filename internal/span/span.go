@@ -271,7 +271,13 @@ func label(base, head Checkpoint, changesetBase string) string {
 	// base", which is what that endpoint is. Every other pair of endpoints is an ordinary
 	// two-dot range between two named commits.
 	if base.Kind == KindChangesetBase {
-		return changesetBase + "..." + display(head)
+		// The base arrives as the ref the span measures against, which is not always the spelling
+		// `base:` recorded: a changeset measured against the integration branch measures against the
+		// copy this clone has fetched (`changeset.BaseFor`), and a reviewer reading
+		// `refs/remotes/origin/main...current` learns nothing the shorter name withholds. A base that
+		// is a commit — the run a landed parent's child sits on — is not a ref, and keeps its own
+		// spelling rather than being trimmed into one.
+		return ShortRef(changesetBase) + "..." + display(head)
 	}
 	return display(base) + ".." + display(head)
 }
