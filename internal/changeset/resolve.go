@@ -481,10 +481,14 @@ func candidateFor(id string, md map[string]string) (Candidate, error) {
 // in hand. `ignores:` then removes the changesets this one has declared it is only sharing a
 // branch with — the recorded answer to an ambiguity `change use` was asked about.
 func choose(res Resolution) Resolution {
+	// Two passes remove candidates, and their order is the rule. `ignores:` is the author saying which changeset
+	// this branch is working on, so it is read first: a pass that removes the changeset which wrote the declaration
+	// leaves the declaration unread, and the remaining candidates get an answer invented for them. The stack link is
+	// an inference from a recorded value, and an inference outranks nothing.
+	res.Candidates = dropNamed(res.Candidates, func(c Candidate) []string { return c.Ignores })
 	res.Candidates = dropNamed(res.Candidates, func(c Candidate) []string {
 		return []string{stackParentID(c)}
 	})
-	res.Candidates = dropNamed(res.Candidates, func(c Candidate) []string { return c.Ignores })
 
 	sortCandidates(res.Candidates)
 	res.Selected = nil
