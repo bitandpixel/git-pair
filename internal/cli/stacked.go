@@ -84,7 +84,7 @@ func (a *app) parentSinceApproval(ctx context.Context, repo *git.Repo, c changes
 		return parentStatus{}, err
 	}
 	isApproval := approved != nil && approved.Kind == lifecycle.KindReview && approved.Outcome == model.OutcomeApprove
-	st := parentStatus{Branch: parent.Branch, Changeset: c.ParentChangeset, Tip: parent.Tip}
+	st := parentStatus{Branch: parent.Branch, Changeset: c.BaseChangeset, Tip: parent.Tip}
 	if isApproval {
 		st.Recorded = approved.ReviewedParentHead
 	}
@@ -181,12 +181,12 @@ func (a *app) parentLive(ctx context.Context, repo *git.Repo, c changeset.Change
 // directory having arrived.
 func (a *app) parentLanded(ctx context.Context, repo *git.Repo, c changeset.Changeset,
 	db changeset.DefaultBranchRef, head string, st parentStatus) (parentStatus, error) {
-	if c.ParentChangeset == "" || db.Ref == "" {
+	if c.BaseChangeset == "" || db.Ref == "" {
 		// The yaml names a branch and no changeset, so there is nothing to look for in the destination.
 		// Silence is the answer: the branch is here, its tip is reported, and nothing is claimed from a name.
 		return st, nil
 	}
-	chain, err := changeset.LandedChain(ctx, repo, db.Ref, c.ParentChangeset)
+	chain, err := changeset.LandedChain(ctx, repo, db.Ref, c.BaseChangeset)
 	if errors.Is(err, changeset.ErrNoChain) {
 		return a.parentInDestination(ctx, repo, c, db, st)
 	}
@@ -294,7 +294,7 @@ func (a *app) parentInDestination(ctx context.Context, repo *git.Repo, c changes
 	}
 	st.Note = fmt.Sprintf("%s is in %s: the parent's work has reached the destination, so this branch is "+
 		"measured against ground that has moved (`git pair status --changeset %s` reads the landing)",
-		st.parentName(), displayRef(db.LocalName()), c.ParentChangeset)
+		st.parentName(), displayRef(db.LocalName()), c.BaseChangeset)
 	return st, nil
 }
 
@@ -399,10 +399,10 @@ func landedBaseIsTheSameWork(ctx context.Context, repo *git.Repo, oldBase, lande
 // here.
 func parentAbandoned(ctx context.Context, repo *git.Repo, c changeset.Changeset,
 	db changeset.DefaultBranchRef, branch string) (bool, error) {
-	if c.ParentChangeset == "" || db.Ref == "" {
+	if c.BaseChangeset == "" || db.Ref == "" {
 		return false, nil
 	}
-	summary, err := lifecycle.Summarize(ctx, repo, c.ParentChangeset, db.Ref, "refs/heads/"+branch)
+	summary, err := lifecycle.Summarize(ctx, repo, c.BaseChangeset, db.Ref, "refs/heads/"+branch)
 	if err != nil {
 		if errors.Is(err, git.ErrUnknownRevision) {
 			return false, nil

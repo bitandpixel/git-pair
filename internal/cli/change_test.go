@@ -61,7 +61,10 @@ func TestChangeInitRecordsRequestedBase(t *testing.T) {
 	runIn(t, f.Dir(), "init", "--base", "booking-transaction").mustSucceed(t, "init")
 
 	md := f.Read("changesets/booking-transaction-tests/CHANGESET.yaml")
-	for _, want := range []string{"parent: booking-transaction\n", "parent-changeset: booking-transaction\n"} {
+	// The stack is recorded as a base plus the changeset on it. The file has no `parent:` key, because the
+	// branch it named is the thing that gets deleted when the parent lands, and the relationship has to outlive
+	// it. See `feat-base-changeset-always-recorded`.
+	for _, want := range []string{"base: booking-transaction\n", "base-changeset: booking-transaction\n"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("CHANGESET.yaml is missing %q:\n%s", want, md)
 		}

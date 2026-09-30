@@ -195,13 +195,13 @@ func TestRestackingTakesAnExplicitFlag(t *testing.T) {
 
 	runIn(t, f.Dir(), "init", "--parent", "rebased-onto", "--set-parent").mustSucceed(t)
 	md := f.Read("changesets/booking-tests/CHANGESET.yaml")
-	if !strings.Contains(md, "parent: rebased-onto") || strings.Contains(md, "parent: booking\n") {
+	if !strings.Contains(md, "base: rebased-onto") || strings.Contains(md, "base: booking\n") {
 		t.Fatalf("CHANGESET.yaml after restacking:\n%s", md)
 	}
 }
 
-// The metadata rules: `parent:` is the base, both keys at once is a file that means two things, and
-// the parent's own changeset is discovered rather than guessed.
+// The metadata rules: a stack is a base plus the changeset on it, both spellings of the base is a file that
+// means two things, and the changeset below is discovered rather than guessed.
 func TestInitParentWritesTheStackOnce(t *testing.T) {
 	f, parent := newChangeset(t, "booking", "main")
 	f.CreateBranch("booking-tests")
@@ -211,13 +211,13 @@ func TestInitParentWritesTheStackOnce(t *testing.T) {
 		t.Fatalf("init --parent exited %d\n%s%s", res.code, res.stdout, res.stderr)
 	}
 	md := f.Read("changesets/booking-tests/CHANGESET.yaml")
-	for _, want := range []string{"id: booking-tests", "parent: booking", "parent-changeset: " + parent} {
+	for _, want := range []string{"id: booking-tests", "base: booking", "base-changeset: " + parent} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("CHANGESET.yaml is missing %q:\n%s", want, md)
 		}
 	}
-	if strings.Contains(md, "base:") {
-		t.Fatalf("`parent:` is the base, so no `base:` belongs in:\n%s", md)
+	if strings.Contains(md, "parent:") {
+		t.Fatalf("the older spelling is read, never written, and this file was just written:\n%s", md)
 	}
 }
 

@@ -8,9 +8,10 @@ import (
 )
 
 // The tie-break for candidates that the records do not separate is the commit that added each
-// directory, not the commit that last edited one. These fixtures keep the ancestor drop out of the
-// way - a `base:` naming a branch is not a value the drop can match against a slug - so the ordering
-// is the only thing that can decide, which is where it belongs.
+// directory, not the commit that last edited one. The fixtures take the drop out of the way by leaving the
+// child's id unrecorded - a `base:` naming a branch is not a value the drop can match against a slug - so
+// the ordering is what decides. With the id recorded the drop decides, and the answer is the same child:
+// the two cases are the same question asked of two different rules, and both have to answer it.
 
 func twoCandidatesUnordered(t *testing.T, recorded bool) *gittest.Fixture {
 	t.Helper()
@@ -35,15 +36,15 @@ func twoCandidatesUnordered(t *testing.T, recorded bool) *gittest.Fixture {
 // evidence: the branch carries its parent's directory, and housekeeping there is not a decision to
 // start working on the parent.
 func TestTheChangesetAddedLastIsTheWorkInTheBranch(t *testing.T) {
-	// Both spellings of the child's file have to answer the same way. With the recorded id the answer may
-	// come from the record; without it, the commit that added each directory is the only evidence left, and
-	// it has to be enough on its own.
+	// Both shapes of the child's file answer the same way, by different rules: the recorded id removes the
+	// parent outright, and with no id recorded the commit that added each directory is the only evidence left.
+	// Which rule answered is worth knowing when one of them changes, so the pair is asserted together.
 	for _, tt := range []struct {
 		name     string
 		recorded bool
 	}{
-		{"with the recorded id", true},
-		{"with the record removed", false},
+		{"with the recorded id, which the drop answers", true},
+		{"with the record removed, which the add order answers", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			f := twoCandidatesUnordered(t, tt.recorded)
@@ -54,8 +55,8 @@ func TestTheChangesetAddedLastIsTheWorkInTheBranch(t *testing.T) {
 				t.Fatalf("the two directories were added by different commits, so the branch is decided: %v", candidateIDs(got))
 			}
 			if id := selectedID(got); id != "booking-tests" {
-				t.Errorf("selected %q, want booking-tests: it is the directory added last, and the newest edit is "+
-					"on the parent (candidates %v)", id, candidateIDs(got))
+				t.Errorf("selected %q, want booking-tests: the newest edit is on the parent, so only the recorded "+
+					"id or the order the directories were added can answer (candidates %v)", id, candidateIDs(got))
 			}
 		})
 	}
@@ -125,7 +126,9 @@ func TestTheRankingReadHappensOnlyWhenCandidatesRemain(t *testing.T) {
 			"filter could reduce it to one (invocations: %v)", n, matchingAny(stackedLines(), rankingReads))
 	}
 
-	multiple := twoCandidatesUnordered(t, true)
+	// The unrecorded shape is the one that still leaves two candidates: with `base-changeset:` present the
+	// ancestor drop answers the branch before any ordering, which is the case just above this one.
+	multiple := twoCandidatesUnordered(t, false)
 	multiple.Commit("later work", gittest.WithFile("notes.md", "notes\n"))
 	_, multipleLines := multiple.SpawnShimLines(t)
 	if got := resolveAt(t, multiple, "refs/heads/booking-tests"); got.Ambiguous {

@@ -230,7 +230,7 @@ func landedOn(ctx context.Context, repo *git.Repo, db changeset.DefaultBranchRef
 func stackedOn(scan changeset.Scan, id string) string {
 	for _, br := range scan.Branches {
 		for _, c := range br.Resolution.Candidates {
-			if c.Changeset.ParentChangeset == id {
+			if c.Changeset.BaseChangeset == id {
 				return br.Branch
 			}
 		}

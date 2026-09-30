@@ -238,7 +238,7 @@ func (a *app) printRecommendations(recs []string) {
 // not a reason. A changeset written before this rule existed must not be held by it, and which key a file
 // chose to name its parent with is not a condition a merge should depend on.
 func stackLinkRecommendations(ctx context.Context, a *app, s *session) []string {
-	if s.cs.Base == "" || s.cs.ParentChangeset != "" || s.cs.ParentBranch != "" {
+	if s.cs.Base == "" {
 		return nil
 	}
 	db := a.destination(ctx, s.repo)
@@ -247,12 +247,25 @@ func stackLinkRecommendations(ctx context.Context, a *app, s *session) []string 
 		// answered without reading the repository, so `check` costs what it cost before this existed.
 		return nil
 	}
-	pcs, candidates, _ := parentChangesetOn(ctx, s.repo, s.cs.Base, db)
+	pcs, candidates, _ := baseChangesetOn(ctx, s.repo, s.cs.Base, db)
 	if pcs == "" || len(candidates) != 1 {
 		return nil
 	}
-	return []string{fmt.Sprintf("base %s carries changeset %s, so it is your parent rather than your base: record the stack with `git pair init --parent %s`",
-		s.cs.Base, pcs, s.cs.Base)}
+	if s.cs.BaseChangeset == "" {
+		return []string{fmt.Sprintf("base %s carries changeset %s, so it is your parent rather than your base: record the stack with `git pair init --parent %s`",
+			s.cs.Base, pcs, s.cs.Base)}
+	}
+	// The recorded id is what the ancestor drop and the base derivation both read, so a file whose id and
+	// whose base disagree is read two ways at once: the branch says one changeset is below this one, the id
+	// says another. Which is stale is the author's fact - the parent may have been renamed, or this file may
+	// have been restacked by hand - so it is advice, never a reason. A reason here would gate a merge over a
+	// question the reviewer is worse placed to answer than the author.
+	if s.cs.BaseChangeset != pcs {
+		return []string{fmt.Sprintf("base %s carries changeset %s, while this file records %s: one of the two is stale, "+
+			"and the diff is measured against %s - correct it with `git pair init --parent %s --set-parent`",
+			s.cs.Base, pcs, s.cs.BaseChangeset, s.cs.Base, s.cs.Base)}
+	}
+	return nil
 }
 
 // integrationGate asks everything the integration policy asks, in one read of the repository, and
