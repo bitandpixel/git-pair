@@ -257,6 +257,15 @@ func (a *app) destination(ctx context.Context, repo *git.Repo) changeset.Default
 	return db
 }
 
+// measureBase is the ref this changeset's diff is measured against, which the recorded `base:` usually is
+// and the fetched copy of the integration branch is when the record names that branch. Every span resolves
+// through here so that the range a reviewer reads and the base printed above it are one answer; the record
+// itself is what `base:` and `--json`'s `base` report, because that is the value the file carries and other
+// machines read.
+func (s *session) measureBase(ctx context.Context) string {
+	return changeset.MeasureBase(ctx, s.repo, s.cs, s.trunk, s.head)
+}
+
 // loadFor resolves the session a changeset-scoped read should work from: the
 // checked-out changeset, or the one named by `--changeset`.
 func (a *app) loadFor(ctx context.Context, slug string) (*session, error) {

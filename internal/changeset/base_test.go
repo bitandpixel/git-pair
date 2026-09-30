@@ -198,3 +198,133 @@ func TestBaseOfAnUnstackedChangesetIsWhatItRecorded(t *testing.T) {
 		t.Errorf("base = %+v, want the recorded base and no derivation", b)
 	}
 }
+
+// fetched is the integration branch as `git clone` records it and `DefaultBranch` prefers it: the same
+// branch, reached through the fetch root instead of through a branch of this clone.
+func fetched() changeset.DefaultBranchRef {
+	return changeset.DefaultBranchRef{Ref: "refs/remotes/origin/main", Source: changeset.DefaultBranchRemoteHead}
+}
+
+func baseWith(t *testing.T, f *gittest.Fixture, db changeset.DefaultBranchRef, cs changeset.Changeset,
+	head string) changeset.Base {
+	t.Helper()
+	b, err := changeset.BaseFor(context.Background(), repo(f), cs, head, db)
+	if err != nil {
+		t.Fatalf("BaseFor(%s): %v", cs.Slug, err)
+	}
+	return b
+}
+
+// trunkBased is an unstacked changeset measured against the integration branch — the shape `init` records
+// when nothing was named, and the shape every first changeset of a stack has.
+func trunkBased(t *testing.T, f *gittest.Fixture) (changeset.Changeset, string) {
+	t.Helper()
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking", "main")
+	f.Commit("booking: the work", gittest.WithFile("booking.txt", "1\n"))
+	return changeset.Changeset{Slug: "booking", Branch: "booking", Base: "main"}, f.RevParse("booking")
+}
+
+// trunkMovesOnRemote leaves this clone holding a trunk behind its fetched copy, which is the ordinary state
+// of a person who fetches and never updates their local trunk: `git fetch` moves the fetch ref and does not
+// touch `refs/heads/main`.
+func trunkMovesOnRemote(t *testing.T, f *gittest.Fixture, subject, file string) string {
+	t.Helper()
+	f.SwitchTo("main")
+	f.CreateBranch("fetched")
+	there := f.Commit(subject, gittest.WithFile(file, "1\n"))
+	f.MustGit("update-ref", "refs/remotes/origin/main", there)
+	f.SwitchTo("main")
+	f.ForceDeleteBranch("fetched")
+	return there
+}
+
+// The base names the integration branch, and the name resolves under `refs/heads/` first. That branch is
+// where trunk stood the day this one was cut; the fetched copy is where trunk is. Measuring against the
+// local copy after a rebase onto the fetched trunk puts the destination's merged work in this changeset's
+// diff, which is the report this rule answers: `git pair review` showing a diff built on a trunk everyone
+// else has moved past.
+func TestBaseOfATrunkBasedChangesetIsTheFetchedCopy(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	cs, _ := trunkBased(t, f)
+	trunkMovesOnRemote(t, f, "main: someone else's merged work", "theirs.txt")
+
+	f.SwitchTo("booking")
+	f.MustGit("rebase", "refs/remotes/origin/main")
+	head := f.RevParse("booking")
+
+	b := baseWith(t, f, fetched(), cs, head)
+	if b.Ref != "refs/remotes/origin/main" {
+		t.Errorf("base = %q, want the fetched copy of the integration branch", b.Ref)
+	}
+	if b.Derived {
+		t.Error("derived = true for a base that is a branch this clone has")
+	}
+	if !strings.Contains(b.Why, "fetched") {
+		t.Errorf("why = %q, want the sentence that names the copy it chose", b.Why)
+	}
+	changed := changedBetween(t, f, b.Ref, head)
+	if strings.Contains(changed, "theirs.txt") {
+		t.Errorf("the diff measured from %s carries work the destination already has: %s", short(b.Ref), changed)
+	}
+	if !strings.Contains(changed, "booking.txt") {
+		t.Errorf("the diff lost the changeset's own work: %s", changed)
+	}
+}
+
+// The same repository read the other way, to keep the rule honest about what it changes: with a local trunk
+// and no fetch ref, the recorded name is the whole answer, and it is the answer that widens the diff.
+func TestBaseOfATrunkBasedChangesetIsTheRecordedNameWithoutAFetchRef(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	cs, head := trunkBased(t, f)
+
+	b := baseWith(t, f, db(), cs, head)
+	if b.Ref != "main" || b.Derived || !strings.Contains(b.Why, "recorded") {
+		t.Errorf("base = %+v, want the recorded name and no derivation where there is no fetched copy", b)
+	}
+}
+
+// A stack's parent is not the integration branch, and the fetched trunk does not replace it. The parent's
+// work is still being written on a branch of this clone, where it is ahead of anything pushed.
+func TestBaseOfAStackKeepsItsParentBranchWhenTrunkIsFetched(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	_, child, head := stacked(t, f)
+	trunkMovesOnRemote(t, f, "main: work below the parent", "theirs.txt")
+
+	b := baseWith(t, f, fetched(), child, head)
+	if b.Ref != "alpha" {
+		t.Errorf("base = %q, want the parent branch: a fetched trunk says nothing about where the parent's work is", b.Ref)
+	}
+	if !strings.Contains(b.Why, "parent branch") {
+		t.Errorf("why = %q, want the rule that named the branch", b.Why)
+	}
+}
+
+// MeasureBase is the answer for a caller that pins a commit and has nowhere to put the rule behind it. It
+// agrees with BaseFor where BaseFor answers, and falls back to the base as recorded where it cannot.
+func TestMeasureBaseAgreesWithBaseForAndFallsBack(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	cs, _ := trunkBased(t, f)
+	trunkMovesOnRemote(t, f, "main: someone else's merged work", "theirs.txt")
+
+	f.SwitchTo("booking")
+	f.MustGit("rebase", "refs/remotes/origin/main")
+	head := f.RevParse("booking")
+
+	if got, want := changeset.MeasureBase(context.Background(), repo(f), cs, fetched(), head), baseWith(t, f, fetched(), cs, head).Ref; got != want {
+		t.Errorf("MeasureBase = %q, want BaseFor's ref %q", got, want)
+	}
+	// No integration branch to name: the recorded base is what this clone can answer with, and it is what
+	// every one of these surfaces measured against before the base was a rule rather than a string.
+	if got := changeset.MeasureBase(context.Background(), repo(f), cs, changeset.DefaultBranchRef{}, head); got != "main" {
+		t.Errorf("MeasureBase without a destination = %q, want the recorded base", got)
+	}
+	// A caller that does not hold a head gets one read for it, and the same answer.
+	if got := changeset.MeasureBase(context.Background(), repo(f), cs, fetched(), ""); got != "refs/remotes/origin/main" {
+		t.Errorf("MeasureBase with no head = %q, want the fetched copy", got)
+	}
+}

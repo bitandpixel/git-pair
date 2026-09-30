@@ -195,7 +195,7 @@ func runDiff(ctx context.Context, a *app, opts *spanOptions, paths []string) err
 	if err != nil {
 		return err
 	}
-	sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, so)
+	sp, err := span.Resolve(ctx, s.repo, s.measureBase(ctx), s.summary, so)
 	if err != nil {
 		if errors.Is(err, span.ErrNoReviews) {
 			return &usageError{fmt.Errorf("%w; run `git pair diff` for the full changeset", err)}

@@ -254,15 +254,37 @@ landed.
 `init` records that branch in a changeset's `base:` as its **branch name** — `main`, not
 `refs/remotes/origin/main` — because `git clone` records the remote's default branch in
 `refs/remotes/origin/HEAD` and that is the answer the resolution above prefers, so the ref it returns is
-usually a fetch ref even in a clone with a local trunk. The name is tried under `refs/heads/` first and then
-under `refs/remotes/` every time a base is read, so where it resolves it is the same branch and the better
-thing to write; `base:` is a line other machines read, and a fetch ref written there reads as a different
-destination — and says *fetched* about a change that has never been pushed. Where the name resolves to
-nothing, which is a clone holding the integration branch only under the fetch root, the qualified ref is
-recorded instead: a base that does not resolve fails every command, and `cannot resolve changeset base` is the
-worse outcome. Where the local copy of the base and its remote copy are different commits, `init` notes it
-with the counts, and pushes nothing (§26): the diff measured from this clone is then not the diff the forge
-will show.
+usually a fetch ref even in a clone with a local trunk. The name is the better thing to write: `base:` is a
+line other machines read, and a fetch ref written there reads as a different destination — and says *fetched*
+about a change that has never been pushed. Where the name resolves to nothing, which is a clone holding the
+integration branch only under the fetch root, the qualified ref is recorded instead: a base that does not
+resolve fails every command, and `cannot resolve changeset base` is the worse outcome.
+
+Recording the name and measuring against it are two questions, and the second is where the two copies of the
+branch part company. A bare name resolves under `refs/heads/` first, and in the ordinary clone that branch is
+where trunk stood the day this one was cut: `git fetch` moves `refs/remotes/origin/main` and leaves
+`refs/heads/main` where it is, because updating a branch nobody has checked out is not what fetch does.
+Measured from the local copy, a branch rebased onto the fetched trunk carries every commit the destination
+gained in between, and `git pair diff` hands a reviewer someone else's merged work as this changeset's. So
+when the recorded base names the integration branch and this clone reaches that branch through a fetch ref,
+the diff is measured against the fetched copy — the same ref the landed test already answers with (§13), so
+one changeset has one trunk rather than two. A stack's parent branch is not the integration branch and is not
+switched: that work is being written on a branch of this clone, where it is ahead of anything pushed. Where
+this clone has no fetch ref, the recorded name is the whole answer. `status` prints both halves — `base` is
+the record, `base_ref` and `base_why` the measurement and the rule behind it — and a span is named by what it
+measured against, which is how `origin/main...current` gets onto the screen.
+
+The local copy stays reachable whenever someone needs it. `--default-branch main` states which ref *is* the
+integration branch for that command, so the diff and the landed test move together — which is why there is one
+knob rather than a second one for the base alone; a flag that moved the measurement and left "has this
+landed?" behind would recreate the disagreement this rule exists to end. One span can be pinned to any ref
+without answering the branch question at all: `git pair diff --base-ref=main`. Neither is a setting. git-pair
+reads no git config, and a per-clone preference here would let two clones of one repository disagree about
+what has landed.
+
+Where the local copy of the base and its remote copy are different commits, `init` notes it with the counts,
+and pushes nothing (§26): measured from origin's copy, what only this clone's trunk has reads as part of the
+change until someone pushes it.
 
 The consequence worth knowing: if someone merges your unlanded changeset into their branch and
 lands *that*, your changeset reads as landed on your own branch too, because your directory is
@@ -1587,6 +1609,13 @@ landed on top of the head the declaration covered, because a declaration is abou
 trailer (§10.4) — the other end of the comparison `git pair check` makes when it refuses a rewritten
 branch (§11.3). It is omitted when the marker names no head, which is itself the answer the gate
 refuses on.
+
+`base_ref` and `base_why` are present when the diff was measured against something other than the ref
+`base:` records, and name that ref and the rule that picked it. Two shapes do that: a stacked child whose
+parent's branch has landed or disappeared, measured against the run of history it shares with the
+destination (§21), and a changeset whose recorded base names the integration branch in a clone that reaches
+that branch through a fetch ref (§4), measured against the fetched copy. `base` stays the record either way,
+because it is what the changeset's own file says and what a machine that has fetched nothing still reads.
 
 The three `default_branch` fields are the other half of the resolution. Which changeset a revision is
 working on is a comparison against the integration branch (§4), so a run that reports nothing has

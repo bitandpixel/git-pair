@@ -33,7 +33,8 @@ type Base struct {
 //
 //  1. The parent branch, when it exists and its work has not reached the destination. That branch is where
 //     the work above it is still being written, and an approval measured against it stays comparable while
-//     the parent moves.
+//     the parent moves. When the name it answers with is the integration branch, the answer is the copy of
+//     it this clone has fetched (`fetchedTrunk`) — the same branch, the fresher one.
 //  2. The merge base of the child's head and the destination, once the parent's branch is gone or its work
 //     has landed. This is the case a durable ref got wrong: naming the parent's landing commit as the base
 //     widened the child's diff to everything the destination gained after that commit, while the merge base
@@ -49,7 +50,12 @@ func BaseFor(ctx context.Context, repo *git.Repo, c Changeset, head string, db D
 	out := Base{ParentBranch: c.ParentBranch}
 	if c.BaseChangeset == "" && c.ParentBranch == "" {
 		// Not stacked: the base it recorded is the answer, and inventing a derivation would be second-guessing
-		// a `base:` the author wrote on purpose.
+		// a `base:` the author wrote on purpose. Reading it is the one place the record is not the whole answer,
+		// and `fetchedTrunk` is the correction: the record names trunk, and a name resolves to this clone's own
+		// branch before the fetched one.
+		if b, ok := fetchedTrunk(db, c.Base, out); ok {
+			return b, nil
+		}
 		out.Ref, out.Why = c.Base, "recorded base"
 		if out.Ref == "" {
 			out.Ref, out.Why, out.Derived = db.Ref, "no base recorded, so the integration branch", true
@@ -63,6 +69,9 @@ func BaseFor(ctx context.Context, repo *git.Repo, c Changeset, head string, db D
 	}
 	if c.ParentBranch != "" && !parentLanded {
 		if _, err := repo.RevParse(ctx, c.ParentBranch); err == nil {
+			if b, ok := fetchedTrunk(db, c.ParentBranch, out); ok {
+				return b, nil
+			}
 			out.Ref, out.Why = c.ParentBranch, "the parent branch, which still carries the work below this one"
 			return out, nil
 		}
@@ -98,6 +107,53 @@ func BaseFor(ctx context.Context, repo *git.Repo, c Changeset, head string, db D
 		return out, nil
 	}
 	return Base{}, ErrNoDefaultBranch
+}
+
+// fetchedTrunk is rule 1 where the base names the integration branch: the branch is live, so the answer
+// stays a branch rather than a derivation, and the copy to measure against is the one this clone has
+// fetched.
+//
+// The reason is what a name resolves to. `init` records `base: main` because that is the spelling a file
+// other machines read should carry, and a bare name resolves under `refs/heads/` first — git's own order.
+// In the ordinary clone that branch is where trunk stood the day this one was cut, and `git fetch` moves
+// `refs/remotes/origin/main` and leaves it there. Measure against the local copy after a rebase onto the
+// fetched trunk and the diff carries every commit the destination gained in between: someone else's merged
+// work, in the changeset of the person who rebased. `status` already answered with the fetched ref, because
+// `DefaultBranch` prefers it, so the two answers were one changeset's worth of apart.
+//
+// ok is false in the three cases where the switch would be wrong or worth nothing: the base names a stack
+// parent or a release branch rather than the integration branch; the integration branch is a branch of this
+// clone rather than a fetched ref, where the two spellings are one commit; and no base was recorded at all,
+// which the caller answers from the destination.
+func fetchedTrunk(db DefaultBranchRef, name string, out Base) (Base, bool) {
+	if name == "" || !db.Fetched() || !db.IsBranch(name) {
+		return Base{}, false
+	}
+	out.Ref, out.Why = db.Ref, "the base names the integration branch, so the copy of it this clone has fetched"
+	return out, true
+}
+
+// MeasureBase is the ref a caller that has no use for the rule behind it hands to git: the same answer
+// `BaseFor` gives, reduced to the ref. The surfaces that print a base read `BaseFor` and keep `Why` — this
+// is for the ones that pin a commit and move on, where the honest fallback is the base as recorded rather
+// than a refusal. `BaseFor` is the answer with the rule attached; `MeasureBase` is the same answer for a
+// caller that cannot report the rule anyway.
+//
+// It cannot fail by design. A repository git will not talk to answers with the recorded base, which is what
+// every one of these surfaces did before this helper existed.
+//
+// `head` is the caller's own head, and is only read from the repository when the caller does not already
+// hold one — a span resolver has it, and asking twice for a rev-parse to answer a question the cheap path
+// settles without it is the worse trade.
+func MeasureBase(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranchRef, head string) string {
+	if head == "" {
+		head, _ = repo.Head(ctx)
+	}
+	b, err := BaseFor(ctx, repo, c, head, db)
+	if err != nil {
+		return c.Base
+	}
+	return b.Ref
 }
 
 // shortRef names a ref the way a person reads it, for a sentence rather than for git.

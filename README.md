@@ -1819,14 +1819,25 @@ pass --base <ref>` (exit 2).
 
 `base:` is written as a branch name — `main`, not `refs/remotes/origin/main` — because `git clone` records
 the remote's default branch in `refs/remotes/origin/HEAD` and that is the answer `DefaultBranch` prefers,
-so the ref it reaches is usually a fetch ref even in a clone with a local trunk. The two spellings resolve to
-one branch every time a base is read (local first, then fetched), and the file is read on machines that have
-fetched different things, so the name is what belongs in it. Where the name resolves to nothing — a clone
-holding the integration branch only under the fetch root — the qualified ref is recorded instead, because a
-base that does not resolve fails every command. Where the local copy of that branch and its remote copy are
-different commits, `init` says so and gives the counts, because the diff measured from here is then not the
-diff the forge will show: `note: main is not the same commit here and on origin: 1 here that origin does not
-have, 0 on origin that is not here`. It is a note; pushing trunk is yours.
+so the ref it reaches is usually a fetch ref even in a clone with a local trunk. The file is read on machines
+that have fetched different things, so the name is what belongs in it. Where the name resolves to nothing — a
+clone holding the integration branch only under the fetch root — the qualified ref is recorded instead,
+because a base that does not resolve fails every command.
+
+What a diff is measured against is a second question, and where the base names the integration branch it is
+answered with the fetched copy. A bare name resolves under `refs/heads/` first, and `git fetch` moves
+`refs/remotes/origin/main` without touching the local branch, so the local copy is where trunk stood the day
+the branch was cut — measuring from it puts work the destination already has into this changeset's diff.
+`git pair status` prints the base it measured against (`Base: origin/main — the base names the integration
+branch, so the copy of it this clone has fetched`, with `base_ref` and `base_why` in `--json`); `base` stays
+the recorded name, and a stack's parent branch is left alone. Where this clone has no fetch ref, the recorded
+name is the whole answer. To measure from the local copy instead, name it: `--default-branch main` (or
+`refs/heads/main`) states which ref *is* the integration branch for that command, so the diff and the landed
+test move together — one knob, one answer. A single span can be pinned to any ref without touching either:
+`git pair diff --base-ref=main`. Where the local copy of that branch and its remote copy are different commits,
+`init` says so and gives the counts, because measured from origin's copy what only this clone's trunk has
+reads as part of the change until it is pushed: `note: main is not the same commit here and on origin: 1 here
+that origin does not have, 0 on origin that is not here`. It is a note; pushing trunk is yours.
 
 `cannot tell which branch is the integration branch: ...` (exit 2) — there is nothing to compare
 against, so "has this landed?" has no answer and every changeset directory on the revision would

@@ -45,7 +45,10 @@ type Options struct {
 
 // Header is the session's identity line.
 type Header struct {
-	Title     string
+	Title string
+	// Base is the ref the spans on this screen measure against — the fetched copy of the integration
+	// branch where `base:` names that branch — so the line agrees with the span label beside it rather
+	// than naming a second base.
 	Base      string
 	SpanLabel string
 }
@@ -136,6 +139,12 @@ type Session struct {
 	// last check. It is written on the update path only: the banner reads it, and a check
 	// running off the event loop hands its answer back as a message rather than writing here.
 	drift []span.Drift
+
+	// measure is the ref this session's spans measure against: the recorded `base:` when the changeset
+	// measures against something of its own, and the fetched copy of the integration branch when `base:`
+	// names that branch (`changeset.BaseFor`). Every endpoint resolves through it, so the file list, the
+	// preview and the header are one answer rather than three.
+	measure string
 }
 
 // NewSession resolves the span and scans the changed files.
@@ -143,12 +152,17 @@ func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	s := &Session{
 		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span, trunk: opts.Trunk,
 	}
+	s.measure = changeset.MeasureBase(ctx, opts.Repo, opts.Changeset, opts.Trunk, "")
 	// A review session is open for as long as a reviewer is reading, and a review of frozen state is the
 	// expensive failure: the reviewer's own `git fetch`, or a submission arriving in another clone, has to
 	// be visible. The session already drops its own diff and document caches on a span toggle or a tool
 	// handoff for the same reason (see reviewModel.forgetPatches); this is that rule at the git boundary,
 	// and it is off for the whole session rather than at each boundary because the boundaries are many and
 	// the saving here is not the one worth taking.
+	//
+	// It goes after the measure base is resolved on purpose. That base is settled once here and reused by
+	// every span the session shows, so it is exactly the kind of answer a memo would keep; keeping it is
+	// safe, because it names a ref rather than a commit, and the ref's answer is re-derived each Rescan.
 	opts.Repo.Memoize(false)
 	if err := s.Rescan(ctx); err != nil {
 		return nil, err
@@ -172,7 +186,7 @@ func (s *Session) seedRing() {
 // Rescan recomputes the span and file list, preserving review marks whose file
 // content in the span has not changed.
 func (s *Session) Rescan(ctx context.Context) error {
-	sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, s.sel)
+	sp, err := span.Resolve(ctx, s.repo, s.measure, s.summary, s.sel)
 	if err != nil {
 		return err
 	}
@@ -189,7 +203,7 @@ func (s *Session) Rescan(ctx context.Context) error {
 // Resolution happens before anything is replaced: a span git refuses leaves the session
 // showing what it showed before, rather than caught half-way between two.
 func (s *Session) SetSpan(ctx context.Context, sel span.Selector) error {
-	sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, sel)
+	sp, err := span.Resolve(ctx, s.repo, s.measure, s.summary, sel)
 	if err != nil {
 		return err
 	}
@@ -558,7 +572,7 @@ func (s *Session) Count() (reviewed, total int) {
 
 // Header renders the identity line.
 func (s *Session) Header() Header {
-	return Header{Title: s.cs.Slug, Base: s.cs.Base, SpanLabel: s.current.Label}
+	return Header{Title: s.cs.Slug, Base: s.measure, SpanLabel: s.current.Label}
 }
 
 // AboutPath is the changeset's ABOUT.md, relative to the repository root.
