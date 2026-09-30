@@ -32,6 +32,7 @@ and on stderr.
 | `internal/tui/session.go` | the review session turns the memo off and keeps the fact cache |
 | `internal/cli/change.go` | `change wait` drops the memo before each poll round |
 | `internal/gittest/spawn.go` | `SpawnShim` turns both caches off, so an invocation count is a cold measurement of the algorithm |
+| `scripts/gates/ci-integrate.sh` | `count_calls` sets `GIT_PAIR_NO_CACHE`, for the same reason — it is the second instrument that counts git invocations, and the first pass fixed only the Go one |
 | `internal/cli/root.go` | also: `GIT_PAIR_NO_CACHE`, the environment form of `--no-cache` |
 | `internal/hygiene/hygiene_test.go` | `spawn` joins `run` as a named git call site, and the detector's self-test proves it is caught |
 
@@ -112,6 +113,17 @@ faster cold than they are on `main`.
   almost no cacheable fact and the memo cannot cross two `Execute` calls, so it passed under both settings.
   A test that cannot fail is not a test, and this one is only worth having because deleting the fix makes it
   say so.
+- `scripts/gates/ci-integrate.sh` — the stack-cost bound found this the way a good bound should: by failing
+  on a commit that passed fifteen minutes earlier. The assertion
+  `FOUR - THREE == THREE - TWO` says the chain is read one level at a time, and on the same tree CI reported
+  `16/24/28/32` once, `16/24/29/32` and `16/25/28/31` twice. Locally it reproduced at the same rate: three
+  runs, three different results. `main`'s binary, three runs, reported `25/43/52/61` every time — so the
+  variance came from here, and the reason is that `count_calls` runs the real binary against one shared clone
+  four times, letting a later run answer from the facts an earlier one left on disk. The fix is the same one
+  line `SpawnShim` already had: set `GIT_PAIR_NO_CACHE` for the measurement. With it, three runs on the
+  caching binary all report `25/44/53/62` and all 69 checks pass. The answers were never in question — 30 warm
+  `check --json` runs were byte-identical to `--no-cache` — which is the distinction that mattered, because
+  `scripts/ci/git-pair-integrate.sh` parses that JSON to decide whether to merge.
 - `internal/hygiene` — the invariant test names `internal/git.run` as the shared implementation every git
   command line is built in. `run` is no longer that bottom: it decides whether the memo can answer, and
   delegates to `spawn`. `spawn` is added to `gitCallMethods`, and one `// BAD` case is added to
@@ -133,6 +145,14 @@ faster cold than they are on `main`.
 
 ## Known limitations
 
+- **One duplicated `rev-parse` per stack hop, which the memo absorbs and a cold run pays.** Resolving a
+  destination to a commit before deriving from it is what makes the answer cacheable, and it means the
+  destination ref gets resolved in two places in one process. Measured on a two-level stack with caching off:
+  44 invocations against `main`'s 43, the extra one being a second
+  `rev-parse --verify --quiet refs/remotes/origin/main`. With caching on the memo answers it, so this is a
+  cold-path cost of one process per hop, inside the recorded ceiling. Removing it means giving `LandedChain` an
+  already-resolved commit instead of a ref, which changes an exported signature and its callers — a larger
+  API question than this changeset should settle alongside everything else in it.
 - **`main` moved during review, and integrating it is part of this change.** `fix-fetched-base` landed at
   `70b5c27`, eight commits past this branch's base, and rewrote how a base and span are derived — the same
   ground this changeset works on. `git pair check` said integration-ready throughout, because it validates the
