@@ -3,7 +3,15 @@
 # Usage: bash scripts/gates/e2e-29.sh [/path/to/git-pair]
 #        (default: the name `mise run build` installs from this repository — the shared
 #        ~/.local/bin/git-pair on trunk, a branch-namespaced one anywhere else)
-set -uo pipefail
+# `pipefail` is wrong for this script, and was failing it at random. Almost every assertion below is
+# `printf '%s' "$out" | grep -q PATTERN`, and `grep -q` leaves the moment it matches. The writer is then left
+# holding a closed pipe; a pipeline element runs in a subshell, and a subshell takes the default SIGPIPE
+# disposition back, so the pipeline reports 141 and the check fails on output that contains the pattern - 4
+# times in 2000 on a 511-byte payload taken from one such failure, which is about one spurious failure in four
+# runs of this script. Nothing here asks whether the left half of a pipeline failed: the writers are `printf`s
+# of variables in memory, and the only other pipes are display helpers. The answer that matters is grep's,
+# which is what a plain `set -u` reports.
+set -u
 # What this replay does NOT cover, and why: it lands one unstacked changeset, so the "parent landed" notes
 # (PRD §21) never appear here — they need a child stacked on the branch being landed, and §29's workflow is
 # one changeset from ready to published. Those surfaces are covered by

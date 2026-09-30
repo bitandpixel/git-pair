@@ -11,7 +11,12 @@
 #
 # Prints "PTY: all checks passed" when every scenario painted what it should. It builds its own
 # repository in a temp directory, so it never touches the one you are standing in.
-set -uo pipefail
+# Not `set -o pipefail`: the assertions below are `printf '%s' "$x" | grep -q PATTERN`, `grep -q` exits on the
+# first match, the writer is left on a closed pipe, and the pipeline's subshell dies of SIGPIPE - so the
+# pipeline reports 141 and a check fails on output that contains the pattern. The writers are `printf`s of
+# variables in memory and the only other pipes are display helpers, so nothing here wants the writer's status.
+# See scripts/gates/e2e-29.sh for the measurement.
+set -u
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 # The default comes from this script's own path, not the working directory, and from the same

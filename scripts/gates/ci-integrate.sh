@@ -14,7 +14,12 @@
 # What it does not: it is not a GitHub Actions test. The workflow file is thin on purpose — build, then this
 # script — so the behaviour worth proving lives here, and the file's own claims (permissions, triggers,
 # fetch-depth) are the kind only a runner can check.
-set -uo pipefail
+# Not `set -o pipefail`: the assertions below are `printf '%s' "$x" | grep -q PATTERN`, `grep -q` exits on the
+# first match, the writer is left on a closed pipe, and the pipeline's subshell dies of SIGPIPE - so the
+# pipeline reports 141 and a check fails on output that contains the pattern. The writers are `printf`s of
+# variables in memory and the only other pipes are display helpers, so nothing here wants the writer's status.
+# See scripts/gates/e2e-29.sh for the measurement.
+set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 G=${1:-$HOME/.local/bin/$(sh "$ROOT/scripts/install-name.sh" "$ROOT")}
 if [ ! -x "$G" ]; then
