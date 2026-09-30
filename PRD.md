@@ -1119,17 +1119,24 @@ landed directory holds it (§5).
 
 Flags: `--all-landed` takes the set this branch carries that the integration branch already holds, instead of
 refusing the ones that have not landed; `--dry-run` reports the plan and commits nothing; `--json` emits
-`changesets` (always an array, each entry `id`, `from`, `to`, `action`), `commit`, `dry_run`, `destination`.
+`changesets` (always an array, each entry `id`, `from`, `to`, `action`, and `in_flight_on` when the entry has
+branches to report), `commit`, `dry_run`, `destination`.
 
 Refusals, each with its own reason, and none of them moving part of the list:
 
 1. the ID is not landed on the integration branch — the directory is the record of work still open, and
    hiding it would take a live changeset out of every list;
-2. a changeset still in flight is stacked on it — the child measures itself against its parent's directory,
-   and moving that path out of the active spelling would change the diff a reviewer is looking at;
-3. the working tree is not clean, anywhere — including inside `changesets/`, because the file a tidy must not
+2. the working tree is not clean, anywhere — including inside `changesets/`, because the file a tidy must not
    sweep is a sibling changeset's half-written `ABOUT.md`;
-4. this branch carries no `changesets/<id>/` to move.
+3. this branch carries no `changesets/<id>/` to move.
+
+A landed changeset that an open changeset on another branch still records as its base is not a refusal. The child
+measures its diff against a commit, not a path, and every reader of `changesets/` takes either spelling, so the
+parent moves and the run says who was pointed at it: `note: the changeset on booking-follow-up still records it as
+its base; the move is safe, and the child's diff is measured against a commit`. The same fact is `in_flight_on` on
+the JSON entry. This used to be a refusal, on the belief that moving a parent's directory would move the child's
+review; a child whose own commit edits the parent's record keeps the same span either way, at the path the file now
+lives at.
 
 `change tidy` with neither IDs nor `--all-landed` is a usage error, as is naming IDs beside `--all-landed`:
 two different answers to the same question, and the caller has to pick before anything moves. A second run at
