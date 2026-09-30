@@ -120,10 +120,29 @@ faster cold than they are on `main`.
   `--no-cache` output and to stderr byte for byte, and on a scratch clone where `refs/remotes/origin/main`
   was moved with `update-ref` the way a fetch moves it, and where a branch was rewound beneath a cache that
   held the reviewed answer.
+- The interaction with `fix-fetched-base`, which landed on `main` while this was in review and added
+  `changeset.MeasureBase` to `NewSession` — the same function that now drops the memo. Measured as the slope
+  across repeated rescans so the one-time session open and the fixture setup drop out: dropping the memo costs
+  **5 git subprocesses per `Rescan`**, against 0 with the memo kept. That is not a per-tick cost. `Rescan`
+  runs from `NewSession` and from `Reload`, and `Reload` has one caller — the branch in `tui.go` that fires
+  when an editor or difftool exits, per PRD §15. Five subprocesses once per tool handoff is beneath notice,
+  and it is the price of the correctness the memo removal buys: `Reload` exists so a reviewer sees what the
+  tool changed, and answering it from a memo would defeat it. The expensive derivations are unaffected, since
+  the fact cache stays on for the session.
 - Full suite under `go test ./...`.
 
 ## Known limitations
 
+- **`main` moved during review, and integrating it is part of this change.** `fix-fetched-base` landed at
+  `70b5c27`, eight commits past this branch's base, and rewrote how a base and span are derived — the same
+  ground this changeset works on. `git pair check` said integration-ready throughout, because it validates the
+  tree against what the reviewer saw and not against a destination that has since moved. The merge conflicts
+  once, in `internal/tui/session.go`, on adjacent lines rather than in intent: `fix-fetched-base` added
+  `s.measure = changeset.MeasureBase(...)` and this branch added `opts.Repo.Memoize(false)`, both immediately
+  after the `Session` literal. Both are kept, measure base first, because `Rescan` reads it. The three other
+  overlapping files auto-merged, and each was checked by confirming that every line either side contributed is
+  still present in the result, which is a stronger check than a clean merge. A reviewer reading the approval at
+  `75ffaff` should read the merge commit with it: the two changesets were never built together before it.
 - **The first run after a fetch is still cold, and pays nearly everything.** The cache removes repeated
   work, not the work: cold `queue` is 562 subprocesses against 639 on `main`, so the memo takes off the
   duplicates and nothing else. A cold run is now marginally cheaper than it was, but it is the same shape.
