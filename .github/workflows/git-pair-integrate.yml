@@ -39,9 +39,18 @@ on:
       - 'CI'
     types:
       - completed
-    branches:
-      - 'feat/**'
-      - 'feature/**'
+    # No `branches:` filter, deliberately. An allowlist here decides which changesets can land by the ordinary
+    # route, from a file no test reads for accuracy, and its failure mode is silent: `feat/**` and `feature/**`
+    # left `docs/**` out, so a changeset carrying a plan sat approved, declared and green while this job never
+    # woke for it. The `schedule:` poll below is the supposed safety net and is best-effort on GitHub's side - it
+    # had not run in three hours on the day that was noticed.
+    #
+    # What decides whether to merge is the gate inside the job: a review, a declaration, and a green run on the
+    # exact commit the declaration names. A branch filter here would be a second, weaker copy of that rule, and
+    # the weaker copy is the one that fails closed.
+    #
+    # `workflow_run` also only sees the copy of this file on the default branch, so a change to this trigger
+    # takes effect for the changesets that come after it, not for the one that carried it.
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:

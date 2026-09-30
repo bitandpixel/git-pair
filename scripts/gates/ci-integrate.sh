@@ -8,8 +8,10 @@
 # the remote nothing but branches; a re-run does nothing twice; an undeclared changeset and a drifted
 # declaration are left alone; the queue-driven poll finds a declaration with no event behind it; a head that
 # is not proven green is not merged, whether the probe says "no" or "I cannot tell", and the probe is asked
-# about the declared commit; a dry run writes nothing; a merge that conflicts is aborted and reported red;
-# and the two workflow files still name each other, so a rename fails a build instead of stalling a merge.
+# about the declared commit; a dry run writes nothing; a merge that conflicts is aborted and reported red; a
+# changeset whose branch sits outside feat/ merges like any other, and the trigger is checked for the branch
+# filter that would have stopped it; and the two workflow files still name each other, so a rename fails a
+# build instead of stalling a merge.
 #
 # What it does not: it is not a GitHub Actions test. The workflow file is thin on purpose — build, then this
 # script — so the behaviour worth proving lives here, and the file's own claims (permissions, triggers,
@@ -242,6 +244,27 @@ check "green, and this is the commit CI finished with: merged" 0 $code
 contains "$out" "pushed to main" "the handoff finishes"
 check "the probe was asked about the declared head" "$DECL_CI" "$(tail -1 "$T/probe-calls")"
 
+step "a changeset under a branch name the trigger used to exclude"
+
+# The job has never filtered on a branch name, and the fixture's own branches prove it by accident rather than
+# by assertion. This says the fact out loud, on the name that was left out of the trigger's allowlist and could
+# not land: approved, declared, green, merged.
+declare_changeset docs/notes notes.md 'the plan notes' || { echo "fixture: docs/notes" >&2; exit 1; }
+git -C "$T/work" checkout -q docs/notes && wing change integrate >/dev/null || { echo "fixture: declare docs/notes" >&2; exit 1; }
+git -C "$T/work" push -q origin docs/notes >/dev/null 2>&1
+BEFORE=$(git -C "$T/origin.git" rev-parse main)
+CI6=$(clone ci6) || { echo "cannot clone for ci6" >&2; exit 1; }
+out=$(cigr "$CI6" docs/notes); code=$?
+show "$out"
+check "the run succeeds on a docs/ branch" 0 $code
+contains "$out" "notes: declared by" "it read the declaration on that branch"
+contains "$out" "merged as" "and it merged it"
+if [ "$(git -C "$T/origin.git" rev-parse main)" = "$BEFORE" ]; then
+  fail "a branch outside feat/ was merged without the destination moving"
+else
+  ok "and the destination moved for a branch outside feat/"
+fi
+
 step "the dry run"
 
 declare_changeset flow/dry src/d.ts 'export const d = 5' || { echo "fixture: flow/dry" >&2; exit 1; }
@@ -308,6 +331,16 @@ check "the test workflow declares the name the merge job triggers on" 1 "$(grep 
 check "and the merge job names it back" 1 "$(grep -c "^[[:space:]]*- 'CI'\$" "$ROOT/.github/workflows/git-pair-integrate.yml")"
 check "CI runs on branch pushes, whose checks are the ones on the head the probe reads" 1 "$(grep -c '^    branches:$' "$ROOT/.github/workflows/ci.yml")"
 check "and the merge job has no push trigger that would make it certify its own check run" 0 "$(grep -c '^  push:$' "$ROOT/.github/workflows/git-pair-integrate.yml")"
+
+# The check above and the step before it cover two halves of one rule, and only this one can see the trigger.
+# A branch filter in `workflow_run:` leaves every job green and every fixture passing while it stops a whole
+# family of branches from ever landing, because the trigger is evaluated before anything git-pair says. The
+# block is taken between the trigger and the next one, minus its comments, so the prose can explain the rule
+# without tripping the assertion.
+WRT=$(awk '/^  workflow_run:/{f=1;next} f&&/^  [a-z_]+:/{f=0} f' "$ROOT/.github/workflows/git-pair-integrate.yml" |
+  grep -v '^[[:space:]]*#')
+check "the trigger carries no branch allowlist to exclude a changeset from landing" 0 "$(printf '%s\n' "$WRT" | grep -Ec '^[[:space:]]*branches:')"
+check "and no denylist taking its place" 0 "$(printf '%s\n' "$WRT" | grep -Ec '^[[:space:]]*branches-ignore:')"
 
 step "usage"
 
