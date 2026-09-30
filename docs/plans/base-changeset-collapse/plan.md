@@ -267,6 +267,12 @@ before this milestone an id recorded beside a `base:` was read by nothing.
 
 ### M5 - the set operation is the primary rule
 
+**Status:** offered as `feat-set-operation-primary-rule`. The review decided the one open question: the set
+operation is the *only* subtraction. The older pass also removed whatever a candidate's `base:` looked like it
+named, which decided a stack only when a branch happened to be spelled like its changeset; a file with no recorded
+id now falls through to the ranking instead, which answers - usually the same way - and says so by leaving both
+candidates in the list.
+
 #### Deliverables
 
 - `choose` decides in this order: landedness (already applied in `Resolve`), then `ignores:`, then subtraction of
@@ -278,13 +284,14 @@ before this milestone an id recorded beside a `base:` was read by nothing.
 
 #### Tasks
 
-- [ ] Port `activeBySubtraction` from `probe/setop-selection` into `choose`, and place it after the `ignores:`
-      pass from M2.
-- [ ] Exclude self-edges when collecting the ids to subtract, the way `dropNamed` does.
-- [ ] Keep the existing guard that refuses to empty the list.
-- [ ] Port the probe's fixtures into `internal/changeset/resolve_test.go` under names that say what each one
-      proves, and delete the probe branch once they are in.
-- [ ] State in the comment above `choose`, and in the PRD, that `Candidates` is the set that remains after
+- [x] Port `activeBySubtraction` from `probe/setop-selection` into `choose`, and place it after the `ignores:`
+      pass from M2. It arrives as `subtractRecordedParents`, over the one field the rule reads.
+- [x] Exclude self-edges when collecting the ids to subtract, the way `dropNamed` does.
+- [x] Keep the existing guard that refuses to empty the list.
+- [x] Port the probe's fixtures under names that say what each one proves, and delete the probe branch once they
+      are in. They went into `internal/changeset/set_operation_test.go` rather than `resolve_test.go`, which is
+      already the largest file in the package; the eight shapes are one rule's tests and read better together.
+- [x] State in the comment above `choose`, and in the PRD, that `Candidates` is the set that remains after
       parents are subtracted. `dropNamed` has always shrunk that list; after this milestone it shrinks it for
       every recorded stack, so `check --json` and `status` report fewer ids on a stacked branch, by design.
 

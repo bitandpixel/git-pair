@@ -470,16 +470,20 @@ func candidateFor(id string, md map[string]string) (Candidate, error) {
 	}, nil
 }
 
-// choose orders the candidates and decides whether the answer is one of them.
+// choose decides which of the candidates is the work in hand, in this order: landedness (applied in
+// `Resolve`, where a directory the destination carries is not work in progress at all), then the two
+// record filters of `filterCandidates`, then the ranking, then a refusal that names every candidate
+// still standing.
 //
-// Two filters run before any ordering, and they answer different questions. A stacked changeset
-// names its parent in `base:`, so the parent's directory being present does not make it the work in
-// hand. `ignores:` removes the changesets this one has declared it is only sharing a branch with -
-// the recorded answer to an ambiguity `change use` was asked about.
+// The two filters answer different questions and their order is the rule. `ignores:` is the author
+// saying which changeset this branch is working on, so it is read first. The set operation then
+// subtracts what the remaining candidates record as their base changeset, which is the primary rule
+// for a stack: a stacked changeset says in its own file that another is the work below it, so that
+// directory being present is not evidence that this branch is working on it.
 //
-// The ordering is last, and it is the only part that asks git anything. A revision carrying one
+// The ranking is last, and it is the only part that asks git anything. A revision carrying one
 // candidate has nothing to order, so no history read happens: on the ordinary branch this function
-// answers from the two records and returns.
+// answers from the records and returns.
 func choose(ctx context.Context, repo *git.Repo, rev string, res Resolution) (Resolution, error) {
 	res, contradicted := filterCandidates(res)
 	if contradicted {
@@ -498,19 +502,44 @@ func choose(ctx context.Context, repo *git.Repo, rev string, res Resolution) (Re
 	return decide(res), nil
 }
 
-// filterCandidates removes what the two records say cannot be the work in hand. Two passes, and the
-// order between them is a rule: `ignores:` is the author saying which changeset this branch is
-// working on, so it is read first - a pass that removes the changeset which wrote the declaration
-// leaves the declaration unread, and the candidates that remain get an answer invented for them. The
-// stack link is an inference from a recorded value, and an inference outranks nothing.
+// filterCandidates removes what the two records say cannot be the work in hand, declaration first.
+// `ignores:` is the author saying which changeset this branch is working on, so it is read before the
+// set operation - a pass that removes the changeset which wrote the declaration leaves the declaration
+// unread, and the candidates that remain get an answer invented for them.
+//
+// `Resolution.Candidates` is what survives these two passes, not every directory on the branch. That
+// is what `check --json`, `status` and the queue print, so a stacked branch reports one id and says
+// nothing about the ancestors its own files named. It is a decision the surfaces inherit rather than
+// make, and it belongs to this function.
 func filterCandidates(res Resolution) (Resolution, bool) {
 	var contradicted bool
 	res.Candidates, contradicted = dropNamedKeeping(res.Candidates, func(c Candidate) []string { return c.Ignores })
-	kept, contradictedLink := dropNamedKeeping(res.Candidates, func(c Candidate) []string {
-		return []string{stackParentID(c)}
-	})
+	kept, contradictedParents := subtractRecordedParents(res.Candidates)
 	res.Candidates = kept
-	return res, contradicted || contradictedLink
+	return res, contradicted || contradictedParents
+}
+
+// subtractRecordedParents is the set operation: the candidates minus the changesets other candidates
+// record as their base changeset. One hop is not a transitive closure, and none is needed - every
+// candidate records its own parent, so a chain is subtracted in one pass by the union of what its
+// members name.
+//
+// It reads one field, `BaseChangeset`, and no history. The older formulation also subtracted whatever a
+// candidate's base *looked like* it named, which answered a question about branch names rather than one
+// about the files: it decided a stack only when a branch happened to be spelled like its changeset, and
+// said nothing at all about a file that recorded no id. Both of those are now the ranking's problem, and
+// the ranking says so - a guess it can be seen through, or a refusal naming the candidates.
+//
+// The empty-set guard is the one from `dropNamedKeeping`, and mutual records are the case it is for: two
+// files naming each other subtract each other, and an empty answer would be reported as "no changeset
+// here" for a branch that visibly has two.
+func subtractRecordedParents(candidates []Candidate) ([]Candidate, bool) {
+	return dropNamedKeeping(candidates, func(c Candidate) []string {
+		if c.Changeset.BaseChangeset == "" {
+			return nil
+		}
+		return []string{c.Changeset.BaseChangeset}
+	})
 }
 
 // decide orders what the filters left and answers it. Sorting costs nothing, so it runs here on
@@ -609,21 +638,6 @@ func distanceFromAdd(ctx context.Context, repo *git.Repo, rev, id string) (int, 
 // handed.
 func parentID(base string) string {
 	return strings.TrimPrefix(base, "refs/heads/")
-}
-
-// stackParentID names what a candidate says is below it. The recorded id comes first: it is the value that
-// survives its branch's deletion, and it is the only one the ancestor drop can match against a changeset slug.
-// Before M4 a stack recorded as `base:` returned a branch name from here and the drop never fired for it, which
-// is why the CLI had its own walker over the recorded chain. The branch name follows, for a stack recorded
-// before ids were kept, and the measurement base last, for a base the resolver derived and the file did not name.
-func stackParentID(c Candidate) string {
-	if c.Changeset.BaseChangeset != "" {
-		return c.Changeset.BaseChangeset
-	}
-	if c.Changeset.ParentBranch != "" {
-		return c.Changeset.ParentBranch
-	}
-	return parentID(c.Changeset.Base)
 }
 
 // applyBases sets each stacked candidate's measurement base to the answer `BaseFor` gives, which is the
