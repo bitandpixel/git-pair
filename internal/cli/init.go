@@ -389,10 +389,10 @@ func baseChangesetOn(ctx context.Context, repo *git.Repo, parent string, db chan
 	// B off A, so B's tree holds A's directory as well as its own. Asking "which changeset is this base the
 	// base of?" then gets one answer per level, and the levels below the top are not what the base reveals -
 	// the changeset that names them is. So a candidate another candidate records as its own parent has to go
-	// before anything is chosen - and that drop now happens inside `Resolve`, because a recorded
-	// `base-changeset:` reaches `stackParentID` for every spelling of the key. What is left here is the answer
-	// the resolver gave, and the list the author needs when nothing decided: two siblings sharing a branch stay
-	// a refusal, because nothing orders those and nothing here pretends to.
+	// before anything is chosen - and that subtraction is the set operation inside `Resolve`, which reads the
+	// recorded id from either spelling of the key. What is left here is the answer the resolver gave, and the
+	// list the author needs when nothing decided: two siblings sharing a branch stay a refusal, because nothing
+	// orders those and nothing here pretends to.
 	if res.Selected != nil {
 		if selected := res.Selected.Changeset.Slug; slices.Contains(candidates, selected) {
 			return selected, candidates, ""

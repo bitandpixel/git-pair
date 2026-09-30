@@ -104,8 +104,8 @@ func TestTheRankingReadHappensOnlyWhenCandidatesRemain(t *testing.T) {
 	}
 
 	// A stack is the case that used to pay for a walk it did not need: the revision carried two
-	// directories, the recorded link answered which one was the work, and the ordering still walked
-	// both before the filter removed one.
+	// directories, the set operation answered which one was the work by subtracting the recorded id,
+	// and the ordering still walked both before the filter removed one.
 	stacked := gittest.New(t)
 	stacked.Commit("seed", gittest.WithFile("README.md", "# repo\n"))
 	stacked.CreateBranch("booking")
