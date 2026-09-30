@@ -1765,7 +1765,7 @@ func (m reviewModel) helpText() string {
 	case modePrompt:
 		return "" // the thread prompt is the input line, not help
 	case modeSpan:
-		return helpSpan(m.pick.list != nil, m.pick.nav)
+		return helpSpan(m.pick.list != nil, m.pick.filtering)
 	case modePreview:
 		// The overlay's own keys. `p` is not among them: the diff already has the screen and the keys.
 		// `esc`, `enter` and `q` are the way back to the list, and the keys that move the keys take the

@@ -200,6 +200,52 @@ func TestRecentCommitsAndRefTipsCarryWhatAPickerNeeds(t *testing.T) {
 	}
 }
 
+// The `V` columns interleave a changeset's own commits with its review submissions, and what must
+// not come back is the commits that change nothing: a marker holds no content to review and is
+// already listed by alias, and a merge names no files of its own.
+func TestRecentNonEmptyCommitsSkipWhatChangesNothing(t *testing.T) {
+	f, repo := openFixture(t)
+	base := f.Head()
+	one := f.Commit("first work", gittest.WithFile("b.txt", "2\n"))
+	f.EmptyCommit("review: approve something")
+	two := f.Commit("second work", gittest.WithFile("c.txt", "3\n"))
+	f.CreateBranch("side", one)
+	f.SwitchTo("side")
+	side := f.Commit("side work", gittest.WithFile("d.txt", "4\n"))
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "-m", "merge side", "side")
+
+	tips, err := repo.RecentNonEmptyCommits(context.Background(), 20, base+"..HEAD")
+	if err != nil {
+		t.Fatalf("RecentNonEmptyCommits: %v", err)
+	}
+	present := map[string]string{}
+	for _, tip := range tips {
+		present[tip.SHA] = tip.Subject
+		if tip.Short != tip.SHA[:7] || tip.Subject == "" || tip.When.IsZero() {
+			t.Errorf("entry = %+v, want a short id, a subject and a date beside the sha", tip)
+		}
+	}
+	for _, sha := range []string{one, two, side} {
+		if _, ok := present[sha]; !ok {
+			t.Errorf("%s is missing from %v: a commit that changes files belongs in the list", sha, present)
+		}
+	}
+	if len(present) != 3 {
+		t.Errorf("commits = %v, want the empty marker and the merge left out", present)
+	}
+
+	// The range is what git is asked for, so the commits below the changeset's base stay out, and
+	// the window is the window.
+	oneOnly, err := repo.RecentNonEmptyCommits(context.Background(), 1, base+"..HEAD")
+	if err != nil || len(oneOnly) != 1 {
+		t.Fatalf("limit 1 = %v (%v), want one commit", oneOnly, err)
+	}
+	if oneOnly[0].SHA == base {
+		t.Errorf("limit 1 returned the base commit %s, want one from the range", base)
+	}
+}
+
 // `cat-file --batch` frames many objects into one stream: `<oid> <type> <size>`, content,
 // then the next object. Parsing that by length rather than by scanning for a terminator is
 // the difference between reading a metadata file and reading a metadata file plus whatever

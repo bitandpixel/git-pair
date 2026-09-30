@@ -2410,19 +2410,32 @@ contain, and the preview has no `you` section, because a historical span has no 
 `V` opens the span picker: two columns, BASE and HEAD, holding a pending checkpoint each. `Space`
 sets the end under the cursor, `Enter` applies the pair, and nothing changes before `Enter` — the
 lines under the columns already say what the pair resolves to and whether it would be read-only,
-which is what makes choosing a historical range safe rather than a negotiation with `Esc`. Both
-columns offer the submissions by alias (the newest three as `Review -1`…`Review -3`, older ones by
-index), then `Commit…` and `Ref…`; only the base offers the changeset base, only the head offers the
-working tree, and `HEAD` is offered nowhere: beside `Working Tree` it would present two
-similar-looking current targets when only one of them can be edited. `u` and `f` set the unreviewed
-and full-changeset presets, `Tab` switches columns, `Esc` cancels.
+which is what makes choosing a historical range safe rather than a negotiation with `Esc`. Each
+column is one timeline rather than two lists: the submissions by alias (the newest as `Last Review`,
+then `Review -2` and `Review -3`, older ones by the index you would type) with the changeset's own
+commits written between them where they happened, so `j` walks from a submission into the commits
+that followed it. The commits are the ones the base does not already hold, and only the ones that
+change files — a marker commit holds no content to review and is on the list by alias already.
+Only the base offers the changeset base, only the head offers the working tree, and `HEAD` is
+offered nowhere: beside `Working Tree` it would present two similar-looking current targets when
+only one of them can be edited. `u` and `f` set the unreviewed and full-changeset presets, `Tab`
+switches columns, `c` and `r` open the commit and ref drills for the active column, `Esc` cancels.
 
-The two drills are lists, not a history view. `Commit…` shows subject, short id and age; typing
-filters it; a typed revision is taken directly, because the list is a window and history is not, and
-a typed id git cannot resolve is refused while the list is still on screen. `Ref…` groups local
-branches, remote refs, tags and other refs under headings, shows the name a reviewer would type and
+The drills are keys rather than rows: pointed at a row, `Enter` applied the pair the reviewer had
+come to the screen to change instead of descending into it, and one keystroke should not mean two
+things depending on where the cursor happens to be resting.
+
+The two drills are lists, not a history view. The commit list shows subject, short id and age, and
+takes a typed revision directly, because the list is a window and history is not; a typed id git
+cannot resolve is refused while the list is still on screen. The ref list groups local branches,
+remote refs, tags and other refs under headings, shows the name a reviewer would type and
 keeps the full `refs/...` name in the checkpoint: a branch and a tag called `main` are two different
-choices, and drift has to be watched on the one that was meant.
+choices, and drift has to be watched on the one that was meant. Each drill has two modes and its
+shortcut bar names the keys of the one it is in. The list holds the keys first — `j`/`k`, `gg`/`G`,
+`d`/`u` or `ctrl-d`/`ctrl-u` for half a page, and `f`/`b` or `ctrl-f`/`ctrl-b` for a whole one — with
+`/` putting the keys on the filter, where a fresh one starts and what you type is the filter; `esc`
+hands them back with the
+filter kept, and `esc` again leaves.
 
 A ref endpoint is pinned when chosen, and stays pinned for the session. While a ref-backed endpoint is
 active the session re-resolves it at the cheap points — on a timer, and after an editor or difftool
@@ -3493,7 +3506,7 @@ v        step through the spans this session has been in:
          opened-on, full changeset, unreviewed, then any span chosen with V;
          from a read-only span, back to the last span that was reviewable
 V        span picker: BASE and HEAD columns, space to choose an end, enter to apply;
-         Commit… and Ref… open searchable lists, u and f are the two presets
+         c and r open the commit and ref lists, u and f are the two presets
 r        re-pin drifted ref endpoints, offered by ⚠ <ref> moved <a> → <b>  [r] refresh
 
 s        submit review
