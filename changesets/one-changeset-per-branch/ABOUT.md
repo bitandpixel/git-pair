@@ -13,8 +13,12 @@ states the model, because a rule that lives only in code is a rule each surface 
 top - or none, which is what mutual records leave - is the shape refused. `CheckEdges` adds the two reads the edges
 cannot answer on their own, and only on the path about to refuse:
 
-- **a chain hop through a changeset that landed**, by reading the file it keeps on the destination, because a
-  three-level stack whose middle level landed looks like two unrelated directories otherwise;
+- **a chain hop through a changeset that landed**, by reading the file it keeps on the destination. An ordinary merge
+  of the middle level's branch lands the ancestry along with it, and then nothing is dangling and this read is not
+  reached. What reaches it is the partial landing: the middle changeset's own commit cherry-picked or squashed by
+  itself, which is how a reviewer takes one level of a stack and leaves the work below it unlanded. From the child's
+  branch that is two directories nothing on the branch connects, because the link between them is in the landed
+  parent's file.
 hmm, but a middle level stack landing would carry its parent changeset and changes with it would it not?
 - **a `base:` that names a branch**, resolved by asking which changeset directory that branch carries. This is the
   legacy file with no recorded id, and it is the case that would otherwise refuse `feature/auth` for carrying
@@ -43,6 +47,7 @@ rather than in `stackOf`, which has no branch to compare against.
 | `TestCheckGatesABranchCarryingTwoChangesets` | `ready: false`, a reason naming both ids and "no approval of its own" |
 | `TestChangeReadyAcceptsAChangesetTheDestinationCarriedAfterTheBranchPoint` | offered: the second directory is landed work |
 | `TestChangeReadyAcceptsAChildStackedOnTheChangesetItsBranchCarries` | offered: `base-changeset:` recorded, one stack |
+| `TestChangeReadyAcceptsAChildWhoseLandedParentLandedWithoutItsOwn` | offered: the middle level landed alone, and **fails when the destination read is removed** |
 
 Six tests failed when the rule went in, which is the discrimination check: five built the refused shape as a
 convenience and moved to branches carrying their own work (`init` with a second `--id`, the two base-inference

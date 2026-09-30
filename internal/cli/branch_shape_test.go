@@ -105,6 +105,38 @@ func TestChangeReadyAcceptsAChangesetTheDestinationCarriedAfterTheBranchPoint(t 
 	ready(t, f).mustSucceed(t, "change ready")
 }
 
+// The other case the rule must allow, and the one the destination read buys. A middle level can land on its own -
+// its changeset commit cherry-picked or squashed by itself, which is how a reviewer takes one level of a stack and
+// not the work below it - and then the child records a parent that is landed while the level under that is still
+// unlanded work. From the child's branch that is two directories nothing on the branch connects, because the link
+// is in the landed parent's file. An ordinary merge of the middle branch would have landed the ancestry too and made
+// the read unnecessary, which is why this fixture lands the middle level by itself rather than merging its branch.
+func TestChangeReadyAcceptsAChildWhoseLandedParentLandedWithoutItsOwn(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("auth")
+	f.CommitChangeset("auth", "main")
+	f.Commit("auth work", gittest.WithFile("auth.go", "package main\n"))
+
+	f.CreateBranch("auth-tests", "auth")
+	f.Commit("auth-tests changeset", gittest.WithFiles(map[string]string{
+		"changesets/auth-tests/CHANGESET.yaml": "id: auth-tests\nbase: auth\nbase-changeset: auth\n",
+		"changesets/auth-tests/ABOUT.md":       "# auth-tests\n",
+	}), gittest.WithFile("auth_test.go", "package main\n"))
+	landing := f.Head() // the commit that adds changesets/auth-tests/, and nothing above it
+
+	f.SwitchTo("main")
+	f.MustGit("cherry-pick", landing)
+	f.SwitchTo("auth-tests")
+
+	f.CreateBranch("auth-cases", "auth-tests")
+	f.Commit("cases changeset", gittest.WithFiles(map[string]string{
+		"changesets/auth-cases/CHANGESET.yaml": "id: auth-cases\nbase: auth-tests\nbase-changeset: auth-tests\n",
+		"changesets/auth-cases/ABOUT.md":       "# auth-cases\n",
+	}), gittest.WithFile("case.go", "package main\n"))
+
+	ready(t, f).mustSucceed(t, "change ready")
+}
+
 // The case the rule exists to allow, and the reason `init` judges the shape with the record it is about to write:
 // a child stacked on the changeset its branch carries is one changeset plus its ancestry, not two.
 func TestChangeReadyAcceptsAChildStackedOnTheChangesetItsBranchCarries(t *testing.T) {
