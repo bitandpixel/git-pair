@@ -175,11 +175,11 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		if err := refuseTakenID(ctx, repo, id); err != nil {
 			return err
 		}
-		if res, err := changeset.ResolveCurrent(ctx, repo, a.defaultBranch); err == nil &&
-			res.Selected != nil && res.Selected.Changeset.Slug != id {
-			a.warn("warning: %s already carries changeset %q; this branch will hold two changesets, so commands that act on one accept --changeset <id>\n",
-				branch, res.Selected.Changeset.Slug)
-		}
+		// Until the invariant was written down this was a warning, and a warning was the wrong verb: the
+		// shape it described is the one the CI job merges, and it named only the changeset the resolver had
+		// picked, so a branch whose two directories nothing could order - the clearest case - warned about
+		// nothing. `refuseSecondChangeset` below asks the same question of the whole set, once the stack this
+		// run is about to record is known.
 	}
 	if _, err := repo.RevParse(ctx, base); err != nil {
 		a.warn("warning: base %q does not resolve yet; spans and status will fail until it does\n", base)
@@ -225,6 +225,12 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	} else if own {
 		return &usageError{fmt.Errorf("%w: changeset %q cannot be based on %s, the branch it lives on. The base would move with every commit, so the changeset could never contain anything. Create a branch for the change (`git switch -c <name>`) or pass --base <ancestor-ref>",
 			changeset.ErrBaseIsOwnBranch, cs.Slug, base)}
+	}
+
+	if !cs.Exists {
+		if err := a.refuseSecondChangeset(ctx, repo, branch, cs.Slug, baseChangeset, base); err != nil {
+			return err
+		}
 	}
 
 	about, err := aboutContent(opts)

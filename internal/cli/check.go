@@ -369,6 +369,25 @@ func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback boo
 		return nil, err
 	}
 	g.Reasons = integrationReasons(s.cs.Slug, g.Terminal, reviewed, s.head, allowFeedback, g.Where, lineage, g.Parent.Reason)
+	// The shape question, added last: it is the condition with the fewest ways out, and the fixes change what
+	// the branch carries rather than what was said about it. It gates the merge because the second changeset
+	// arrives in the destination with no approval of its own, and no review of the first one covers it.
+	if s.trunk.Ref != "" {
+		shape, err := branchShape(ctx, s.repo, s.head, s.trunk)
+		if err != nil {
+			return nil, err
+		}
+		if !shape.Offerable() {
+			g.Reasons = append(g.Reasons, shapeReason(s.cs.Slug, shape))
+		}
+	}
+	if s.baseIsOwnBranch {
+		// The base that names its own branch is refused where the file is read, not only where `init` wrote it.
+		// A hand edit afterwards makes the comparison the branch against itself and leaves the reviewer an empty
+		// diff; `status` and `change ready` already said so, and the gate could be walked past them.
+		g.Reasons = append(g.Reasons, fmt.Sprintf("changeset %s: `base` in %s names %s, the branch the changeset is on, so the base moves with every commit and the changeset can never contain anything",
+			s.cs.Slug, s.cs.MetadataPath(), s.cs.Branch))
+	}
 	return g, nil
 }
 

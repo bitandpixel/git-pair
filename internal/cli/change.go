@@ -213,6 +213,12 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 		return fmt.Errorf("cannot mark %s ready: base %q is this branch itself, so the changeset can never contain commits. Set `base` in %s to an ancestor of %s, or move the work to its own branch",
 			s.cs.Slug, s.cs.Base, s.cs.MetadataPath(), s.cs.Branch)
 	}
+	// The invariant, on the way to the queue. This is the half that catches propagation: a branch that
+	// acquired the shape from a merge, a pull, or a parent that already carried two is refused whatever its
+	// history looks like, which is where `init` cannot reach.
+	if err := a.refuseBranchShape(ctx, s); err != nil {
+		return err
+	}
 	if err := a.refuseIfAbandoned(ctx, s); err != nil {
 		return err
 	}
