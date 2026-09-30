@@ -48,6 +48,11 @@ by a test.
   CI passes this: a job that cloned with `init` and one `fetch` has no recorded remote default.
 - `--changeset <slug>` — on `status`, `review history` and `change feedback` only. A marker is a commit,
   and a commit lands wherever `HEAD` is, so nothing that records one takes the flag.
+- `--no-cache` — derive everything from git again, ignoring the local caches git-pair keeps under the
+  repository's git directory. It is not a correctness switch: a cached fact is keyed on the commit ids it was
+  derived from, and a key that no longer matches is a miss rather than a stale answer. Use it to measure a
+  slow command against a fast one, to rule the cache out while debugging, or on a machine that wants nothing
+  written under its git directory.
 
 ## Span flags
 
