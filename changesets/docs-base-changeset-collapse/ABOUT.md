@@ -18,7 +18,10 @@ says what has happened as well as what is planned:
   ancestor walker that only existed because the id was not recorded.
 - M5 makes the set operation - candidates minus the ids other candidates record as their base changeset - the
   primary rule, with ranking demoted to a tie-break.
-will we ever need a tie break once the branch shape invariant is enforced?
+- M5 also answers a question the review asked: whether the tie-break survives the branch shape invariant. It does, for two
+  populations M5 now names - an unlanded file whose link subtraction cannot read, because M4 changes the writer and
+  nothing rewrites a file that is still unlanded; and a branch in the shape M6 refuses, which `status` and `diff` still
+  have to display. The plan states the condition for deleting it as well.
 - M6 makes the branch shape an invariant: one unlanded changeset plus the ones it is stacked on, refused at
   `init`, at `change ready`, and by `check`, so a second changeset cannot ride into the destination unreviewed.
 - M7 gives the exits from that refusal: `change combine`, which folds one changeset into another and archives the

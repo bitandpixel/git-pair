@@ -276,6 +276,24 @@ possible, and for as long as any file still carries the key.
       parents are subtracted. `dropNamed` has always shrunk that list; after this milestone it shrinks it for
       every recorded stack, so `check --json` and `status` report fewer ids on a stacked branch, by design.
 
+#### When the tie-break is still reached
+
+M4 records the id on every file the tool writes, and M6 leaves one legal shape: a chain. Subtraction reduces a legal
+branch to a single candidate, so the ranking does not run. Two populations still reach it, and both are records
+subtraction cannot read rather than rules that disagree:
+
+- An unlanded file whose link is in a spelling subtraction cannot match: `base:` naming a branch, or no link at all.
+  M4 changes the writer, and no milestone rewrites a file that is still unlanded, so every changeset created before
+  M4 keeps that shape until it lands. On such a branch the ranking is the only rule that decides anything.
+- A branch in the shape M6 refuses. `change ready` and `check` refuse it, but `status`, `ls` and `diff` still read
+  it, and a guess from the add order keeps those commands usable while the author decides which exit to take. Where
+  the add commits tie, these branches answer "ambiguous" and name the exits.
+
+So the tie-break outlives the invariant by design, and the condition for deleting it is stated with it: it goes when
+no unlanded file can lack a subtraction-readable id, which means the pre-M4 corpus has landed or a rewrite of
+unlanded files has been added. Deleting it earlier turns those branches from a guess the author can see through into
+a refusal naming two ids. That is the honest end state, and it is one this plan does not prepare the tree for.
+
 #### Verification
 
 - All eight probe shapes as assertions, each with the candidate list checked as well as the selection.
