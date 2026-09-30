@@ -270,7 +270,10 @@ booking-transaction: changesets/booking-transaction -> changesets/.landed/bookin
 active listing holds work in progress and nothing else. It refuses a dirty tree, and it refuses an id the
 destination does not carry — the changeset has to have landed. Run it on a branch whose history still holds
 the reviewed chain if you want that chain to stay readable, and note that after the destination's own
-tidy commit the chain it names is the destination's, so a squash's chain is still gone.
+tidy commit the chain it names is the destination's, so a squash's chain is still gone. Once the move is in
+the destination it also ends the `LANDED UNREVIEWED` report for that changeset (§10.6): the reviewed rename
+commit is the repository acknowledging the record it filed away, and `status --changeset <id>` still answers
+`reviewed: false` for it afterwards.
 
 Deleting the branch now loses what the destination did not carry, and says so rather than pretending:
 
@@ -593,7 +596,7 @@ duplicate it exists to catch.
 | `change stack --base <branch>` | records the stack link between this branch's changeset and the one <branch> carries: writes `base: <branch>` and `base-changeset: <id>` into the child's `CHANGESET.yaml` and nowhere else, prints the old and new value of both keys, and says to offer the branch again; refuses when the two branches share no changeset, when more than one could be the level below, or when this branch carries more than one changeset of its own |
 | `change combine --into <id>` | `--threads` | folds one changeset into another when the two directories are one piece of work: the disappeared one moves whole to `changesets/<id>/.combined/<gone>/` and stays inert there, the survivor keeps its own `base:` and `base-changeset:` and gains one line pointing at the archive, and the command refuses while either changeset is offered or under review. `--threads` copies the disappeared threads, prefixed with its id |
 | `change abandon` | none | records the terminal `Review-State: abandoned` and nothing else; `change ready`, `change unready` and `review submit` refuse against it afterwards; refuses a changeset the integration branch already holds; idempotent |
-| `change tidy [<id>...]` | `--all-landed`, `--dry-run`, `--json` | `git pair change tidy` moves the directory of a changeset the integration branch already holds from `changesets/<id>/` to `changesets/.landed/<id>/`, as one commit of renames on this branch. A changeset like any other: it rides a changeset and a review, the reviewer sees the whole list as renames in one span, and the move reaches trunk through the normal flow. Refuses an id that has not landed, a dirty working tree, and an id this branch does not carry — each with its own reason, and none of them moving part of the list. A landed parent whose child is still open moves, and the run notes the branch whose changeset records it as its base. A second run is a no-op naming the directory it found (§12) |
+| `change tidy [<id>...]` | `--all-landed`, `--dry-run`, `--json` | `git pair change tidy` moves the directory of a changeset the integration branch already holds from `changesets/<id>/` to `changesets/.landed/<id>/`, as one commit of renames on this branch. A changeset like any other: it rides a changeset and a review, the reviewer sees the whole list as renames in one span, and the move reaches trunk through the normal flow. Refuses an id that has not landed, a dirty working tree, and an id this branch does not carry — each with its own reason, and none of them moving part of the list. A landed parent whose child is still open moves, and the run notes the branch whose changeset records it as its base. A second run is a no-op naming the directory it found. Once the move is in the destination it also ends the `LANDED UNREVIEWED` report for that changeset, because the reviewed rename commit is the acknowledgement (§12) |
 | `change feedback` | `--stat`, `--name-only`, `--changeset <slug>` | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission |
 | `change wait` | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>` | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed |
 | `review`, `review open` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref` | TUI; needs a terminal; full changeset unless a span flag says otherwise; a `--head-*` flag opens a historical span, which is read-only; with no subcommand `review` is `review open` and takes the same flags |
@@ -602,7 +605,7 @@ duplicate it exists to catch.
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history |
 | `review history` | `--changeset <slug>` | only review marker commits, indexed from `0`, each naming the commit it reviewed under `REVIEWED` and the reviewer who submitted it under `REVIEWER` |
-| `queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus a `LANDED UNREVIEWED` heading for a landing whose destination holds no approval of what it carries (a finding no command closes); read from the repository, not the checkout. A second list, `AWAITING INTEGRATION` / `awaiting_integration`, holds approved work whose author has asked for the merge (§9.9) with the branch it is asking to land on — never in both lists, because a declaration is a marker and a branch carrying one is not `READY` |
+| `queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus a `LANDED UNREVIEWED` heading for a landing whose destination holds no approval of what it carries (a finding no command closes, and one a `change tidy` that reached the destination does end, because the move is the acknowledgement); read from the repository, not the checkout. A second list, `AWAITING INTEGRATION` / `awaiting_integration`, holds approved work whose author has asked for the merge (§9.9) with the branch it is asking to land on — never in both lists, because a declaration is a marker and a branch carrying one is not `READY` |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug, plus the landing read from the destination's tree: `landed`, `landed_commit`, `landed_branch`, and the chain that arrived with it (`chain_base`, `chain_head`, `reviewed`) |
 | `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition — the review's outcome, whether the commit it approved is still in this history, and whether the content still matches; reports `integrating` beside the verdict, so CI's gate is one command and two fields (`jq -e '.ready and .integrating'`); no `--changeset`, because it is the gate a forge runs *on* a revision |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
@@ -679,7 +682,8 @@ other pair beside it, and the only one that is also a state: `INTEGRATING` while
 integrate` declaration (§9.9) is the newest marker, the commit named so the author can see what they did
 and not only what it produced. The human surface prints no command beside a landing that has happened —
 the finding for work in the destination that the destination holds no approval of is `LANDED UNREVIEWED`,
-which prints a read rather than a command, because nothing closes it with one. Reading a landed changeset by
+which prints a read rather than a command, because nothing closes it with one (a merged `change tidy` ends
+the report, and it is a commit rather than an invocation). Reading a landed changeset by
 id (`status --changeset <id>`, no branch carrying it) reads the same chain, so its `state`, its verdict and
 its thread files come from the destination's history — with the squash case above the honest limit, and the
 fields say so rather than reporting an empty range as a verdict. `stack` walks the chain the child's
@@ -789,7 +793,12 @@ under `AWAITING INTEGRATION`, and prints nothing when there are none — the arr
 destination approving what arrived. Nothing closes it with a command, so the heading prints the read that
 goes and looks, and the `reason` says which of the three it is — no verdict in the chain, a chain that came
 with no verdict-bearing commits at all (the squash, which leaves `chain` empty), or an approval that names a
-commit the destination does not hold (a replayed run, which does not).
+commit the destination does not hold (a replayed run, which does not). A landing the destination carries only
+under `changesets/.landed/` is in neither the heading nor the array: a `change tidy` commit that reached the
+destination moved that record out of the way on purpose, which is the acknowledgement (§12). The finding
+survives the filing — `git pair status --changeset <id>` reads the same chain and answers the same way — and
+a tidy nobody has merged silences nothing, because the destination carries the directory in place until the
+move arrives.
 
 ```text
 LANDED UNREVIEWED
@@ -1090,7 +1099,8 @@ content and destroy the ancestry, so `status` reports `reviewed: false` with an 
 honest answer to a question the destination can no longer ask (PRD §13). Nothing refuses a squash landing;
 what it costs is the review history behind the directory, and `change tidy` is how a squashing repository
 keeps it: move the directory into `changesets/.landed/<id>/` from a branch that still holds the chain,
-before the branch and the chain are gone.
+before the branch and the chain are gone. That merged move is also what ends the `LANDED UNREVIEWED` report
+for the changeset (§10.6), which is why the recommendation and the notification point the same way.
 
 Once the destination carries the directory, `check` refuses the changeset as already landed and the
 commands that write markers refuse it too. A landing on a branch that is not the changeset's destination is
@@ -1755,7 +1765,7 @@ what a Go test cannot:
 
 | Gate | What it proves | Needs |
 | --- | --- | --- |
-| `scripts/gates/e2e-29.sh` | The PRD §29 loop end to end in a scratch repo: review, approve, `check`, a merge into the destination and a merge into a release line, `LANDED UNREVIEWED`, and `change tidy` | `git` |
+| `scripts/gates/e2e-29.sh` | The PRD §29 loop end to end in a scratch repo: review, approve, `check`, a merge into the destination and a merge into a release line, `LANDED UNREVIEWED`, and `change tidy` — including that a filing ends the report only once it reaches the destination | `git` |
 | `scripts/gates/pty-walkthrough.sh` | The review TUI under a real pty: first paint, the file tree, marks, the span walk, the difftool handoff | `git`, `python3` |
 | `scripts/gates/ci-integrate.sh` | The CI merge job against scratch bare remotes: the gate, the merge, the record, the publish, and every refusal in between | `git`, `jq` |
 
@@ -1805,7 +1815,11 @@ or a block, is a merge that went in without an approval. `the approval (<sha>) n
 destination does not carry` is the strict one: the landing replayed the run, so what the destination
 records as approved is not what the destination holds. None of them has a command that closes it — there is
 nothing to write — so read the changeset with `git pair status --changeset <id>` and decide whether the
-review happened somewhere the destination cannot see. `check` refuses to call an unreviewed head integration-ready; a landing it cannot see is a merge it was
+review happened somewhere the destination cannot see. The report does have an end, and it is a commit: once a
+`change tidy` moves the directory into `changesets/.landed/` on the destination, the changeset is out of the
+heading, because somebody reviewed a commit that filed the record away (§12). A tidy on an unmerged branch
+does nothing of the kind — the destination carries the directory in place until the move arrives — and
+`git pair status --changeset <id>` keeps answering `reviewed: false` either way. `check` refuses to call an unreviewed head integration-ready; a landing it cannot see is a merge it was
 never asked about.
 
 `cannot tell which branch is the integration branch` (exit 2) — the destination is what every landing question
@@ -1877,7 +1891,8 @@ sibling merged your unlanded branch and *that* landed. Your directory is in trun
 precisely what the rule tests, so the cure is to land your own branch rather than someone else's
 merge of it. `git ls-tree <integration-branch> changesets/` shows whether the directory is there — and
 when it is, `queue` does not leave you to work out what came with it: it prints the changeset under
-`LANDED UNREVIEWED` unless the chain behind it carries an approval of the commits that arrived.
+`LANDED UNREVIEWED` unless the chain behind it carries an approval of the commits that arrived, or unless the
+destination carries the directory filed away under `changesets/.landed/` (§12).
 
 `ABOUT.md already has content: changesets/<cs>/ABOUT.md is not empty (pass --set-about to
 replace it)` (exit 2) — `init --about` refuses to discard a description that is
@@ -1971,7 +1986,8 @@ on a branch carrying no changeset of its own says the same inside its exit-2 ans
 read (`git pair status --changeset <id>`) rather than a command, because no command closes it: the reasons it
 prints — a chain that carries no verdict, a landing that carried the directory in one commit and kept none of
 the history, and an approval naming a commit the destination does not hold — are all facts about git's
-history, and only the first is a complaint about the review.
+history, and only the first is a complaint about the review. One act ends the report, and it is a commit with
+a reviewer behind it rather than an invocation: `change tidy`, once the destination carries it (§12).
 
 `reviewed` and `check` ask the same question of the same trailer, which is the only reason the two surfaces
 agree. `check` asks whether an approval still licenses the branch in front of it, and refuses a live branch
