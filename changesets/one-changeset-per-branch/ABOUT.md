@@ -15,6 +15,7 @@ cannot answer on their own, and only on the path about to refuse:
 
 - **a chain hop through a changeset that landed**, by reading the file it keeps on the destination, because a
   three-level stack whose middle level landed looks like two unrelated directories otherwise;
+hmm, but a middle level stack landing would carry its parent changeset and changes with it would it not?
 - **a `base:` that names a branch**, resolved by asking which changeset directory that branch carries. This is the
   legacy file with no recorded id, and it is the case that would otherwise refuse `feature/auth` for carrying
   `feature-auth` - an id not spelled like its branch, which git-pair never required anybody to fix.
