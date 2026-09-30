@@ -26,6 +26,10 @@ type tidyItem struct {
 	// "would-move" under --dry-run. A refusal is not an action: it is an error the command exits 1 on,
 	// with the reason on stderr, because a refusal means the caller's list is not the list to move.
 	Action string `json:"action"`
+	// InFlightOn names every branch whose unlanded changeset records this id as its base changeset. It is
+	// information, not a block: the child measures its diff against a commit, and every reader takes either
+	// spelling of the directory, so the move goes ahead and the run says who was pointed at it.
+	InFlightOn []string `json:"in_flight_on,omitempty"`
 }
 
 func newChangeTidyCommand(a *app) *cobra.Command {
@@ -50,8 +54,9 @@ destination walk read both spellings, so nothing about the changeset changes exc
 sits. ` + "`changesets/.landed/`" + ` is git-pair's own name and no changeset may use it.
 
 Name the ids to move, or ask for every landed one with ` + "`--all-landed`" + `. A run that names an id
-which is not landed, or which a changeset still in flight is stacked on, refuses rather than moving part
-of the list: the reason is a fact about the repository, not a warning to read past.`,
+which is not landed refuses rather than moving part of the list: the reason is a fact about the
+repository, not a warning to read past. A landed changeset that another branch still records as its base
+is not such a fact - it moves, and the run names the branches that were pointed at it.`,
 		Example: `  git pair change tidy booking-transaction
   git pair change tidy --all-landed --dry-run
   git pair change tidy --all-landed --json`,
@@ -207,9 +212,7 @@ func classifyTidy(ctx context.Context, repo *git.Repo, db changeset.DefaultBranc
 		return item, fmt.Errorf("changeset %s is not landed on %s, so there is nothing to move: `git pair status --changeset %s` says where it stands",
 			id, displayRef(db.LocalName()), id)
 	}
-	if child := stackedOn(scan, id); child != "" {
-		return item, fmt.Errorf("changeset %s is still in flight on %s, which is stacked on it: tidy it after that changeset lands", child, id)
-	}
+	item.InFlightOn = stackedBy(scan, id)
 	item.Action = "move"
 	return item, nil
 }
@@ -224,18 +227,24 @@ func landedOn(ctx context.Context, repo *git.Repo, db changeset.DefaultBranchRef
 	return present
 }
 
-// stackedOn names one branch whose unlanded changeset is stacked on id, or "" when nothing is. It is the
-// guard that keeps a tidy from moving the directory a child still measures itself against: the child would
-// keep working and its base would come from a path nobody can see.
-func stackedOn(scan changeset.Scan, id string) string {
+// stackedBy names every branch whose unlanded changeset records id as its base changeset. It used to be a
+// guard, on the belief that a child measures itself against its parent's directory. It does not: the base
+// is a commit, and the readers of `changesets/` take either spelling, so a parent that landed can be moved
+// aside while its child is still open without changing what the child resolves to, what its diff is
+// measured against, or what its span holds. The branches are still reported, because "your tidy touches a
+// directory somebody else's open work points at" is worth knowing, and cheap to say.
+func stackedBy(scan changeset.Scan, id string) []string {
+	var branches []string
 	for _, br := range scan.Branches {
 		for _, c := range br.Resolution.Candidates {
 			if c.Changeset.BaseChangeset == id {
-				return br.Branch
+				branches = append(branches, br.Branch)
+				break
 			}
 		}
 	}
-	return ""
+	sort.Strings(branches)
+	return branches
 }
 
 func tidySubject(moving []tidyItem) string {
@@ -298,6 +307,12 @@ func reportTidy(a *app, asJSON, dryRun bool, items []tidyItem, sha string, db ch
 			a.printf("already tidied: %s\n", it.To)
 		default:
 			a.printf("%s: %s -> %s\n", it.ID, it.From, it.To)
+			if len(it.InFlightOn) > 0 {
+				// Not a warning to read past either: it names the work to look at, and says plainly that the
+				// move went ahead because the child is measured against a commit and not a path.
+				a.printf("  note: the changeset on %s still records it as its base; the move is safe, and the "+
+					"child's diff is measured against a commit\n", strings.Join(it.InFlightOn, ", "))
+			}
 		}
 	}
 	if dryRun {

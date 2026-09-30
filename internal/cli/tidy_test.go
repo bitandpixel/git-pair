@@ -91,22 +91,101 @@ func TestChangeTidyRefusesAChangesetThatHasNotLanded(t *testing.T) {
 	}
 }
 
-// The guard that protects a child: a stacked changeset measures itself against its parent's directory.
-// Moving that directory out of the active spelling would leave the child working against a path nothing
-// reads, and its diff would change under the reviewer's feet.
-func TestChangeTidyRefusesAChangesetAChildIsStackedOn(t *testing.T) {
+// The refusal this command used to raise here protected nothing, and the plan's M9-era probes are what said
+// so: the child measures its diff against a commit, and every reader of `changesets/` takes either
+// spelling, so a landed parent can move aside while its child is still open. These two fixtures are the
+// probe written as a test - the child's own answers on both sides of the move, and the child's span when
+// its work reached into the parent's record. The branch that was pointed at the parent is still reported,
+// because it is worth knowing and costs one line.
+func TestChangeTidyMovesAParentWhoseChildIsStillOpen(t *testing.T) {
+	f := newRepo(t)
+	landedOnMain(t, f, "alpha")
+	f.SwitchTo("main")
+	stackedChangeset(t, f, "beta", "alpha", "alpha", "b.go")
+
+	// What the child is told before the move, so "nothing changed" is a comparison and not an opinion.
+	f.SwitchTo("beta")
+	before := runIn(t, f.Dir(), "status", "--json").json(t)
+	beforeCheck := runIn(t, f.Dir(), "check", "--json").json(t)
+	beforeDiff := runIn(t, f.Dir(), "diff", "--stat").stdout
+
+	f.SwitchTo("main")
+	res := runIn(t, f.Dir(), "change", "tidy", "alpha")
+	res.mustSucceed(t, "change tidy on a parent with a live child")
+	mustContain(t, res.stdout, "changesets/alpha -> changesets/.landed/alpha", "the parent moves")
+	mustContain(t, res.stdout, "note: the changeset on beta still records it as its base",
+		"and the run names the branch whose open work points at it - the branch, not a changeset id")
+
+	f.SwitchTo("beta")
+	after := runIn(t, f.Dir(), "status", "--json").json(t)
+	for _, key := range []string{"changeset", "base", "base_ref"} {
+		if before[key] != after[key] {
+			t.Errorf("status.%s went from %v to %v when the parent's directory moved", key, before[key], after[key])
+		}
+	}
+	afterCheck := runIn(t, f.Dir(), "check", "--json").json(t)
+	if beforeCheck["state"] != afterCheck["state"] {
+		t.Errorf("check.state went from %v to %v", beforeCheck["state"], afterCheck["state"])
+	}
+	if diffRes := runIn(t, f.Dir(), "diff", "--stat"); diffRes.stdout != beforeDiff {
+		t.Errorf("the child's diff moved under it:\nbefore:\n%s\nafter:\n%s", beforeDiff, diffRes.stdout)
+	}
+}
+
+// The case the old reason named: the child's own commit reaches into the parent's record, and the parent is
+// tidied while that work is open. The span keeps the same content and reports it at the path the file now
+// lives at, which is the only difference this command can make to a review.
+func TestChangeTidyMovesAParentTheChildEditedWithoutChangingTheSpan(t *testing.T) {
 	f := newRepo(t)
 	landedOnMain(t, f, "alpha")
 	f.SwitchTo("main")
 	stackedChangeset(t, f, "beta", "alpha", "alpha", "b.go")
 	f.SwitchTo("beta")
+	f.Commit("a note the reviewer asked for, in the parent's record",
+		gittest.WithFile("changesets/alpha/ABOUT.md", "# alpha\n\nNote added from the child review.\n"))
 
-	res := runIn(t, f.Dir(), "change", "tidy", "alpha")
-	if res.code != exitRefusal {
-		t.Fatalf("tidying a parent with a live child exited %d, want %d\n%s", res.code, exitRefusal, res.stderr)
+	before := runIn(t, f.Dir(), "diff", "--stat").stdout
+	mustContain(t, before, "changesets/alpha/ABOUT.md", "the span holds the child's edit at the active spelling")
+
+	f.SwitchTo("main")
+	out := runIn(t, f.Dir(), "change", "tidy", "alpha", "--json").json(t)
+	list, ok := out["changesets"].([]any)
+	if !ok || len(list) != 1 {
+		t.Fatalf("changesets = %v, want one entry", out["changesets"])
 	}
-	mustContain(t, res.stderr, "beta", "the refusal names the child that is stacked on it")
-	mustContain(t, res.stderr, "stacked on", "and says why the parent cannot move yet")
+	item, _ := list[0].(map[string]any)
+	note, _ := item["in_flight_on"].([]any)
+	if len(note) != 1 || note[0] != "beta" {
+		t.Errorf("in_flight_on = %v, want the one branch whose changeset records alpha as its base", item["in_flight_on"])
+	}
+
+	// The child catching up with trunk is what brings the move into its own history, which is the case the
+	// dropped refusal claimed to prevent.
+	f.SwitchTo("beta")
+	f.MustGit("merge", "--no-ff", "--no-edit", "-m", "catch up with trunk", "main")
+	after := runIn(t, f.Dir(), "diff", "--stat").stdout
+	mustContain(t, after, "changesets/.landed/alpha/ABOUT.md", "the same edit, reported where the file now lives")
+	// The counts column is the claim: the same edit, the same number of lines, reported at the path the
+	// file now lives at. That is all the move does to a review, and it is the claim the dropped refusal
+	// used to rest on.
+	if beforeCounts, afterCounts := statCounts(before, "changesets/alpha/ABOUT.md"),
+		statCounts(after, "changesets/.landed/alpha/ABOUT.md"); beforeCounts != afterCounts {
+		t.Errorf("the child's edit changed across the move: %q then %q", beforeCounts, afterCounts)
+	}
+}
+
+// statCounts returns the counts column of the `diff --stat` line for one path, so two runs can be compared
+// on what changed and not on how the paths are spelled or the columns padded.
+func statCounts(stat, path string) string {
+	for _, line := range strings.Split(stat, "\n") {
+		if !strings.Contains(line, path) {
+			continue
+		}
+		if i := strings.LastIndex(line, "|"); i >= 0 {
+			return strings.TrimSpace(line[i+1:])
+		}
+	}
+	return ""
 }
 
 // A dry run reports the plan and changes nothing, because the author's next question after `--dry-run` is
