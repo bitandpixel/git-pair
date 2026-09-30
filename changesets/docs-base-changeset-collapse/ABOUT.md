@@ -17,6 +17,15 @@ was edited last. The plan is a document only; the behaviour it describes lands i
   ancestor walker that only existed because the id was not recorded.
 - M5 makes the set operation - candidates minus the ids other candidates record as their base changeset - the
   primary rule, with ranking demoted to a tie-break.
+- M6 makes the branch shape an invariant: one unlanded changeset plus the ones it is stacked on, refused at
+  `init`, at `change ready`, and by `check`, so a second changeset cannot ride into the destination unreviewed.
+- M7 gives the exits from that refusal: `change combine`, which folds one changeset into another and archives the
+  disappeared directory under the survivor's `.combined/` rather than deleting it, and `change stack --base`, which
+  records the stack that branching already created by comparing the changesets on the two branches. Neither rewrites
+  a commit. Splitting a branch is named as the third possibility and left to the author, because a rewrite costs a
+  review round and deciding which half of a mixed commit belongs where is a decision about the work.
+
+- M8 removes the writer for `ignores:`, which that invariant leaves without a case.
 - M6 rewrites the PRD passages that still name `parent:` as the authored link and describe selection by the most
   recently touched directory.
 

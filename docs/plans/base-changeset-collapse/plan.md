@@ -17,6 +17,9 @@ outranks every inference.
   outrank it.
 - The distance measurement is read only when the earlier rules leave two or more candidates. A branch carrying
   one changeset makes no history walk.
+- A branch carries at most one unlanded changeset, plus the directories of the changesets it is stacked on. Two
+  unlanded changesets that do not form a chain cannot be offered, and cannot be merged.
+
 - `CHANGESET.yaml` for stacked work reads `base:` and `base-changeset:`, always both, and the id is never
   re-derived from a branch name at read time.
 - The PRD states the rule in that order, including what happens when nothing decides.
@@ -134,7 +137,9 @@ subtract and the alternative is an ordering guessed from commit history. The sec
 branch it is stacked on - `booking-tests` naming `booking` while both live on `booking-tests` - where subtraction
 does answer, and answers for the stacked one. Always-recorded ids make that second shape more common, because
 `init` records the link whenever the base branch carries exactly one unlanded changeset, so a changeset created on
-a branch that already carries one is subtracted from unless the author says otherwise.
+a branch that already carries one is subtracted from unless the author says otherwise. M6 removes this shape
+altogether, so the precedence rule here is what keeps the tool honest while the cohabitant shape is still
+possible, and for as long as any file still carries the key.
 
 #### Tasks
 
@@ -257,7 +262,147 @@ a branch that already carries one is subtracted from unless the author says othe
 - The full suite green with no fixture changed to accommodate the new order, except where a fixture was asserting
   the defect fixed in M3.
 
-### M6 - the PRD says the rule in this order
+### M6 - a branch carries one unlanded changeset, plus the ones it is stacked on
+
+#### Why the shape arises
+
+There is one cause: work from another branch arrives on this one. A plain merge or a pull of a shared branch brings
+the directory and its history; a squash merge or a rebase-and-squash brings the directory in one ordinary
+single-parent commit; a cherry-pick of the commit that added it brings it alone; a revert of the commit that deleted
+it brings it back. The first is visible in the history and the rest are not.
+
+Three things that look like causes are not. Branching from a branch that carries two only propagates the shape, and
+that branch can only have acquired it from the cause above - propagation is still why enforcement belongs at
+`change ready` and `check` and not only at `init`, but it is not something to solve. A landedness disagreement is
+temporary: a changeset that landed after the branch point reads as active until the clone fetches, and the fetch
+answers it. A directory left behind by landed work is not a second active changeset at all, because a changeset the
+destination carries is landed and the resolver never offers it.
+
+#### Deliverables
+
+- `git pair init` on a branch that already carries an unlanded changeset refuses, naming the id it found and the
+  ways out. The warning at `init.go:175` becomes this refusal.
+- `git pair change ready` refuses a branch whose unlanded directories do not form one chain, naming every id and
+  names every id and prints the fixes: declare them a stack, combine them, take the path back out, or `git fetch`
+  when the second directory may simply have landed since the branch point.
+- `check` reports the same condition as a reason that gates the merge, so the CI job cannot land an implicit stack
+  where a second changeset arrives in the destination with no approval of its own.
+- The self-referential base is refused where the file is read, not only where it is written.
+  `BaseIsOwnBranch` resolves the base through `rev-parse --symbolic-full-name`, so every spelling of the branch
+  counts, and `init` already refuses it: "The base would move with every commit, so the changeset could never
+  contain anything." Nothing checks a file edited afterwards, where the same shape makes the comparison the branch
+  against itself and leaves the reviewer an empty diff.
+
+#### Tasks
+
+- [ ] State the shape once, in the resolver. Let U be the unlanded directories the set operation leaves. The branch
+      is offerable when U has one member, or when one member reaches every other through recorded
+      `base-changeset:` edges.
+      A stack on one branch is not a shape the tool can write: `init` refuses a `base:` naming the branch the
+      changeset lives on. An ancestor therefore either arrived by branching from the branch that carries it, which
+      is a stack, or it came from an edit after the fact, which the read-time guard below answers. The clause is a
+      check on hand-edited files, not the rule that keeps ordinary use honest.
+- [ ] Reuse the chain the set operation already walked, so the rule adds no read. When a file has no recorded id,
+      the add commit from M3 is the fallback evidence.
+- [ ] Key the refusal on the candidate set, not on the selection. The warning at `init.go:173-176` reads
+      `res.Selected`, so when the branch already carries two unrelated changesets the selection is nil, the condition
+      does not fire, and `init` of a third is silent. The case that needs the message most is the one it currently
+      says nothing about.
+
+- [ ] `init`: refuse, and point at the flag that declares the stack, which after M4 writes `base:` together with
+      `base-changeset:`.
+- [ ] Move the `BaseIsOwnBranch` check into the reader, beside `ErrParentWithBase` in `stackOf`, keeping the
+      message `init` gives and adding what a reader needs: the file the value came from.
+
+- [ ] Do not guess where the directory came from. The parent count of the commit that added it distinguishes a plain
+      merge from work made here, but not from a squash merge, a rebase-and-squash, or a cherry-pick, all of which
+      arrive as ordinary single-parent commits. The message states both exits and the way back, and the author knows
+      which one applies.
+- [ ] Name the way back out in the reason text, with the command shape: take the path back to where it was before the
+      work arrived (`git restore --source=<ref> -- changesets/<id>`, then commit). That is the answer when the
+      directory is somebody else's work, and it is cheaper than either combine or stack.
+- [ ] Suggest `git fetch` first when the second directory might have landed since the branch point, because a stale
+      destination ref imitates this shape exactly and a fetch dissolves it.
+
+- [ ] `change stack --base <branch>` compares two sets that the resolver already computes: the unlanded changesets of
+      this branch and of `<branch>`, each read as `ActiveIDs` of the branch minus `LandedIDs` of the destination. Let X
+      be their intersection minus the base branch's recorded ancestors, and Y this branch's set minus the other's. One
+      member each, or a refusal that prints both sets.
+- [ ] Exclude the base branch's recorded ancestors, not this branch's. On a third level of a stack this branch carries
+      the grandparent as well, and it cannot be told to exclude its own ancestors, because naming them is the fact the
+      command is about to write. The base branch already has that chain recorded, so the exclusion is read from there.
+      Where the base branch records no chain the intersection has two members, and the refusal says to settle the level
+      below first.
+- [ ] Refuse, printing both sets, for each shape the two conditions do not accept. Nothing in common means `<branch>`
+      is not this branch's base, and the answer is a `base:` naming the integration branch rather than a stack. Two not
+      in common is the shape `change combine` answers, so name it. `<branch>` naming this branch is refused by
+      `BaseIsOwnBranch`, and it means the child was created on the branch it wants to sit under: create a branch for it
+      and run the command there.
+- [ ] Write the two keys into the child's file and nothing else. The common changeset's own record is not touched - its
+      `base:` belongs to its branch, and this branch holding a copy of its directory is what every stacked branch looks
+      like. Assert that the command's commit changes one path.
+- [ ] Print the old value and the new one for both keys, then say that the branch has to be offered again. A base that
+      changes is the comparison changing, so the reviewer's diff changes with it. The command does not refuse because a
+      ready marker is present; `check` already refuses a merge over a commit that followed the marker, so the drift is
+      caught whichever way the author leaves it.
+
+- [ ] `--threads` copies, it does not move, and it prefixes each copied file with the disappeared id so two changesets
+      that both have a thread called `scope.md` do not collide. Say which copy replies continue in. A thread file is
+      not an implementation change (`lifecycle` excludes it from the comparison a review marker makes), so the copy
+      cannot move what a reviewer is comparing.
+
+#### Verification
+
+- Fixtures per exit: two changesets where one is the other's recorded ancestor, repaired by the stack exit, with a
+  test asserting nothing outside `changesets/` changed; two unrelated changesets combined by `change combine`, where
+  the survivor keeps its `base:`, gains the pointing line, and the disappeared directory is whole under `.combined/`;
+- A negative fixture for the transient case: a second directory the destination already carries is landed, so the
+  resolver never offers it and no refusal fires. The test asserts the absence of the refusal, because a fetch is the
+  author's answer and a message telling them to combine would be wrong.
+- Tests that an archive cannot become live, one per reader: a `CHANGESET.yaml` at `changesets/x/.combined/y/` answers
+  no id to `Resolve`, does not appear in `LandedIDs` or `ActiveIDs`, and is not offered as a thread of `x`. They are
+  three rules that have to stay in agreement, so three assertions.
+- A fixture for nesting: combining a survivor that already holds an archive keeps both archives inert.
+- Fixtures for the conditions: a two-level case, one change in common and one not, recorded in one commit that touches
+  only the child's `CHANGESET.yaml`; a third level, where two directories are in common and the base branch's recorded
+  chain removes the grandparent, so the deepest link is still written; a base branch with no recorded chain, refused
+  with the message naming the level to settle first; nothing in common, refused with the integration branch named; two
+  changesets not in common, refused with `change combine` named; and `--base` naming this branch, refused.
+- A fixture for `--threads`: the survivor lists the copied thread, the archived copy is still in place, and a colliding
+  stem comes out disambiguated by the prefix.
+
+- A fixture for each review-state guard: a ready marker on either changeset makes both exits refuse.
+- The refusal text is asserted, not merely its presence, so the two exits cannot rot back into a bare "two
+  changesets" error.
+
+
+### M8 - `ignores:` loses its remaining case
+
+#### Deliverables
+
+- Nothing writes `ignores:` any more. `git pair change use` is refused, or narrowed to clearing a record written
+  before this milestone.
+- Files that carry the key are still read, so a record someone made keeps explaining the decision behind it. This
+  repository has 29 `CHANGESET.yaml` files and none of them records the key, which is why the writer can go without
+  a migration.
+
+#### Tasks
+
+- [ ] Decide with the reviewer, in this milestone rather than earlier, whether `change use` is deleted or kept to
+      clear old records. The plan does not assume an answer; the invariant in M6 removes the only shape the command
+      could not otherwise decide.
+- [ ] Cut the PRD paragraphs that describe the key as live behaviour in the same commit that removes the writer, so
+      the documentation and the command move together.
+- [ ] Keep the drop pass in `choose` while any file can still carry the key, which keeps M2's precedence rule live
+      for as long as the pass exists.
+
+#### Verification
+
+- `git pair change use` on a clean branch says why it did nothing.
+- A fixture carrying the key still selects the declaring changeset, so reading it is not lost by accident.
+
+
+### M9 - the PRD says the rule in this order
 
 #### Deliverables
 
@@ -265,6 +410,11 @@ a branch that already carries one is subtracted from unless the author says othe
   spellings readable and no longer written.
 - PRD §13.1 states which rules decide the active changeset and in what order, that a tie is reported rather than
   broken, and that an author's declaration outranks an inference.
+
+- PRD states the branch shape rule: one unlanded changeset plus the ancestors it is stacked on, what each refusal
+  says, and why a second changeset on the same branch is an implicit stack rather than a second unit of work.
+- PRD describes the exits in the same terms the refusal prints them, so a person reading the manual and a person
+  reading the error are given the same three ways out.
 - The gate scripts count the git invocations a command makes for a stacked branch, so a future change that adds a
   read has to say why.
 
