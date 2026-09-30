@@ -116,8 +116,12 @@ still answers the legacy and dangling-ancestor shapes the way distance does toda
 
 #### Verification
 
-- `mise run gates` green: the docs contract tests scan documents for command names and ref paths, so a plan is
-  gated like code.
+- `mise run gates` green, for what that covers. `docFiles` in `internal/cli/docs_contract_test.go` reads the PRD,
+  the README, and every skill page, and does not read `docs/plans/`, so a plan is not gated like code and this
+  document's first draft claimed it was. The exclusion is right: `TestCommandsNamedInTheDocsExist` fails a document
+  that names a command the code does not have, and a plan exists to name commands that do not exist yet. What a
+  milestone promises has to reach the PRD and the README when it is implemented, which is M9's job for this stack.
+  What gates this branch is the ordinary thing - the build, the suite, and the scripts - and the reviewer.
 
 ### M2 - `ignores:` outranks every inference
 
@@ -251,7 +255,9 @@ possible, and for as long as any file still carries the key.
 - `git pair check` on a stacked changeset whose `base:` names a branch carrying a different changeset id than the
   recorded one: a recommendation naming both, printed through the `recommend:` surface, never a reason that gates
   the merge.
-- `mise run gates` green, including the docs contract tests.
+- `mise run gates` green. The docs contract tests check command names and ref paths in the PRD, README and skill,
+  not key names, so nothing in them notices a changed spelling of a field. The fixtures that read the old spellings
+  are the check that matters here, and M9 adds the key-name assertion this one cannot have.
 
 ### M5 - the set operation is the primary rule
 
