@@ -99,10 +99,19 @@ unlanded - the child's diff would then include the parent's work. `renderMetadat
 `parent:` and `parent-changeset:` and says out loud that it did, which is also the shape PRD §21 already
 spells. A `check` recommendation covers the files written before the rule existed.
 
+A deep stack broke the first version, and a reviewer found it. A branch created from its parent's branch holds
+the ancestor's changeset directory in its own tree, so a three-level stack presented two unlanded candidates on
+the base and `init` refused to pick. What tells a level of the stack apart from a sibling that shares the
+branch is the chain the lower changeset records, so candidates that another candidate names in its parent chain
+are dropped before anything is chosen. `Candidate.Distance` was considered for this and refused: it orders
+candidates by which directory the branch touched last, which says which work is live and not which is a parent.
+
 #### Verification
 
 - Fixtures for the three shapes: one unlanded changeset on the base (recorded), two (empty plus a warning
   naming both), the base is the integration branch (refused, as today).
+- The same pair of shapes three levels down, where the base's tree carries its own parent's directory: the
+  recorded chain below the base makes it a stack, and with that chain absent the refusal still names both.
 - A test that adding a second active changeset to a base branch after the child was created leaves every
   already-recorded field of the child unchanged - the stability constraint, asserted.
 - Existing `init` and `check` tests green; `mise run gates` green.
