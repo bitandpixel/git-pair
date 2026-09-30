@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"gitpair/internal/changeset"
@@ -22,10 +23,20 @@ import (
 // The detector is the cheapest thing in the design that protects the reviewer: the directory is in the
 // destination, and the run of history behind it carries no approve. It gets its own heading in `queue`
 // rather than a line among the skip notes, because the finding is not "nothing to do here" — it is
-// "what is on the destination branch was never approved", and no command closes it.
+// "what is on the destination branch was never approved", and no command closes it by writing something.
+// One act ends the report, and it is a commit rather than an invocation: `change tidy`, described below.
 //
 // The destination branch is the one the queue can name without guessing, which is also where the gap is
 // silent: a landing on a release branch still shows its branch, its markers, and its own refusals.
+//
+// One state is asked about and not reported: a directory the destination has filed away under
+// `changesets/.landed/`. `change tidy` moves it there in a changeset of renames, and a rename commit that
+// reached the destination went through the same review as any other change, so the move is the repository
+// saying — in a commit, with an author, on the destination's own line — that it is done with the record.
+// `queue` and `status` stop printing the heading for it. The finding itself is not written away, and nothing
+// here pretends otherwise: `git pair status --changeset <id>` answers `reviewed: false` for a filed landing
+// exactly as it did before, and the chain it prints is the same chain. What changes is that the report has
+// an end, and that the way to end it is a commit a reviewer read rather than a flag on the command line.
 
 // unreviewedDisplayCap bounds the printed list. A repository with fifty landed changesets nobody
 // approved has a workflow problem a fifty-line queue will not fix, and the queue is also a notification
@@ -36,7 +47,8 @@ const unreviewedDisplayCap = 10
 // the destination carries. It is the finding that survived deleting the durable refs, and it is a
 // different finding from the one it replaces. `LANDED, UNRECORDED` reported that a command had not been
 // run — a fact about git-pair's own paper trail, closable by running the command it printed. This one
-// reports that the reviewers never approved what is now in trunk, which no command closes.
+// reports that the reviewers never approved what is now in trunk, which no command closes by writing a
+// verdict.
 //
 // The ways to be in this state are worth separating, because they are different questions to ask of the
 // history, and the reason line names which one the reader is looking at rather than leaving them to guess.
@@ -65,7 +77,8 @@ type unreviewedLanding struct {
 // which follows the landings the destination holds rather than the branches this clone has. It is the price of the finding being a fact
 // about the destination — a clone that has fetched nothing but trunk gives the same answer, which is the
 // whole argument for reading the tree. A read that fails is skipped rather than reported: a destination
-// this clone cannot walk is not a finding about the work in it.
+// this clone cannot walk is not a finding about the work in it. On top of that sits one listing of the
+// destination's `changesets/.landed/`, which is what the filing rule below is asked of.
 //
 // The per-changeset work is cached as one record against the destination's tip, which is what keeps this
 // from being the command's whole cost as a repository accumulates landings. Everything the record holds is
@@ -84,7 +97,18 @@ func (a *app) unreviewedLandings(ctx context.Context, repo *git.Repo, trunk chan
 	// other. A destination this clone cannot resolve has no answers either, so the loop below still runs and
 	// simply caches nothing.
 	tip, tipErr := repo.RevParse(ctx, trunk.Ref)
+	// One listing per command, not per id: the destination's `changesets/.landed/` is the whole answer to
+	// "what has been filed away", and the memo serves the two `ls-tree` calls to every later reader.
+	filed, err := changeset.TidiedIDs(ctx, repo, trunk.Ref)
+	if err != nil {
+		// A destination whose filed listing cannot be read reports everything else it can. The listing is
+		// only ever a reason to say less, so a failure in it must not subtract findings.
+		filed = nil
+	}
 	for _, id := range ids {
+		if slices.Contains(filed, id) {
+			continue
+		}
 		key := ""
 		if tipErr == nil {
 			key = factcache.Key("unreviewed", tip, id)

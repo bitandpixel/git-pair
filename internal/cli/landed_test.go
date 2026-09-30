@@ -15,8 +15,10 @@ import (
 // chain behind the directory — and a landing that carried no chain keeps nothing at all.
 //
 // This replaced `LANDED, UNRECORDED`, which reported that `integration record` had not been run. That
-// finding closed the moment the command ran; nothing closes this one, which is why the heading prints a
-// read rather than a command.
+// finding closed the moment the command ran; nothing closes this one by writing a verdict, which is why the
+// heading prints a read rather than a command. One act does end the report: `change tidy`, once the commit
+// it wrote is in the destination. `TestATidiedLandingIsNotReportedUnreviewed` is that rule, and the test
+// beside it is the half that keeps it honest — a tidy nobody has merged silences nothing.
 
 // landMergeReviewing puts a reviewed changeset into `main` the way a merge does it, so the chain behind
 // the directory is the branch that was reviewed.
@@ -358,5 +360,77 @@ func TestQueueNamesALandingOnABranchThatIsNotTheDefault(t *testing.T) {
 	if got := len(doc["landed_unreviewed"].([]any)); got != 0 {
 		t.Errorf("landed_unreviewed = %v: a landing on a branch that is not the integration branch is not that finding",
 			doc["landed_unreviewed"])
+	}
+}
+
+// fileAway tidies `slug` on its own branch and merges that branch into main, which is how a tidy reaches
+// the destination: the move is a changeset of renames and rides the normal flow. Tidying in the checked-out
+// working tree of trunk would be a different state, and a less honest one to test.
+func fileAway(t *testing.T, f *gittest.Fixture, slug string) {
+	t.Helper()
+	f.CreateBranch("file-"+slug+"-away", "main")
+	runIn(t, f.Dir(), "change", "tidy", slug).mustSucceed(t, "change tidy")
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "file "+slug+" away", "file-"+slug+"-away")
+}
+
+// A landed directory the destination has filed away under `changesets/.landed/` is a record somebody moved
+// out of the way in a commit that reached the destination through review. The report stops there, on both
+// surfaces and in both output modes, because a notification with no end is a notification that gets ignored.
+//
+// What does not stop is the answer. The chain is still there and `status --changeset` still reads it, so
+// filing is a way to stop being told, not a way to make the finding untrue — which is the property that makes
+// it safe to have.
+func TestATidiedLandingIsNotReportedUnreviewed(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	landMergeReviewing(t, f, slug, false)
+	f.ForceDeleteBranch(slug)
+	mustContain(t, runIn(t, f.Dir(), "queue").stdout, "LANDED UNREVIEWED", "before the tidy, the finding is there")
+
+	fileAway(t, f, slug)
+
+	out := runIn(t, f.Dir(), "queue")
+	mustNotContain(t, out.stdout, "LANDED UNREVIEWED", "a filing that reached the destination ends the heading")
+	mustNotContain(t, out.stdout, slug, "and does not name the changeset it filed away")
+	if list := runIn(t, f.Dir(), "queue", "--json").json(t)["landed_unreviewed"].([]any); len(list) != 0 {
+		t.Errorf("landed_unreviewed = %#v, want the empty list: the same rule on the machine surface", list)
+	}
+
+	// The destination branch has no changeset of its own, so this is the other surface that printed the
+	// heading. Exit 2 is about work in progress and is not the finding's to change either way.
+	res := runIn(t, f.Dir(), "status")
+	if res.code != 2 {
+		t.Fatalf("status on the destination exited %d, want 2\n%s", res.code, res.stdout+res.stderr)
+	}
+	mustNotContain(t, res.stderr, "LANDED UNREVIEWED", "and status says the same")
+
+	// The finding itself, read by name: the same chain, the same answer, unchanged by the move. This is the
+	// half that makes the rule above defensible.
+	doc := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").mustSucceed(t, "status").json(t)
+	if doc["landed"] != true {
+		t.Fatalf("landed = %v, want true: a filed directory is still landed work", doc["landed"])
+	}
+	if doc["reviewed"] != false {
+		t.Errorf("reviewed = %v, want false: filing a record does not make an approval appear", doc["reviewed"])
+	}
+}
+
+// The rule is about the destination's tree, so a tidy that sits on an open branch changes nothing. This is
+// the difference between a filing and an intention, and the reason the rule cannot be used to silence a
+// finding from an unreviewed commit: the move has to be merged, and merging is where the review happens.
+func TestATidyThatHasNotReachedTheDestinationIsStillAFinding(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	landMergeReviewing(t, f, slug, false)
+	f.ForceDeleteBranch(slug)
+
+	f.CreateBranch("tidy-up", "main")
+	runIn(t, f.Dir(), "change", "tidy", slug).mustSucceed(t, "change tidy")
+	f.SwitchTo("main")
+
+	out := runIn(t, f.Dir(), "queue")
+	mustContain(t, out.stdout, "LANDED UNREVIEWED", "the destination still carries the directory in place")
+	mustContain(t, out.stdout, slug, "and names it")
+	if list := runIn(t, f.Dir(), "queue", "--json").json(t)["landed_unreviewed"].([]any); len(list) != 1 {
+		t.Errorf("landed_unreviewed = %#v, want the finding until the tidy is merged", list)
 	}
 }
