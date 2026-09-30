@@ -106,6 +106,14 @@ branch is the chain the lower changeset records, so candidates that another cand
 are dropped before anything is chosen. `Candidate.Distance` was considered for this and refused: it orders
 candidates by which directory the branch touched last, which says which work is live and not which is a parent.
 
+Review asked whether the `parent:` concept could be removed, leaving `base:` for the ref and
+`parent-changeset:` for the relationship. It cannot. `parent:` is what makes a live parent measurable
+(`BaseFor` rule 1 diffs against the parent's branch tip) and what makes "push here" and "your parent moved"
+sayable; the id is what is still answerable after the branch is deleted. Replacing the pair with an id means
+every consumer resolves id to branch by scanning this clone's branches, which is many-to-one and clone-dependent.
+A file with `base:` and `parent-changeset:` and no `parent:` is the shape that question came close to wanting; it
+parses to a plain base, because `stackOf` has no branch to attach the id to.
+
 #### Verification
 
 - Fixtures for the three shapes: one unlanded changeset on the base (recorded), two (empty plus a warning

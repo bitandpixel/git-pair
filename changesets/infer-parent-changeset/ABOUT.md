@@ -48,6 +48,19 @@ revision carries more than one, orders them by which directory this branch touch
 is live, not which is a parent, and an ordering is not evidence of a relationship.
 is there a distinct reason that base: and parent-changeset: cant be used, and remove the parent: concept?
 
+**The branch is the live half, and an id cannot replace it.** A file with `base:` and `parent-changeset:` and no
+`parent:` is not rejected, and the id in it is read by nothing: `stackOf` takes `parent:` as the base, has no
+branch to attach the id to, and drops the field at parse time - so `check` recommends the pair for that file the
+same way it recommends it for any plain `base:`. The halves answer different questions, and neither one can be
+derived from the other. `parent:` names a ref, which is what makes a live parent measurable (`BaseFor` rule 1
+takes the diff against the parent's branch tip) and what makes "your parent moved since this approval" and "push
+here" sayable at all. `parent-changeset:` names a directory in the destination's tree, which is the half that
+survives the parent's branch being deleted and the half the destination rule reads. Dropping `parent:` means
+every consumer resolves id to branch by scanning this clone's branches for a directory: many-to-one, and a
+different answer in a fresh clone than in one holding stale refs, which is the property this repository deleted
+its durable ref layer to be rid of. Dropping the id is the same loss seen from the other side: once the branch
+is gone there is nothing left to ask the tree about.
+
 **A recommendation, not a reason.** A changeset written before this rule existed must not be held by it, and
 which key a file chose to name its parent with is not a condition a merge should depend on. `check` prints
 advice the reader can refuse.
