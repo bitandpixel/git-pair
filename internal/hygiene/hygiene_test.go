@@ -49,6 +49,11 @@ var gitCallMethods = map[string]bool{
 	"GitInherit":              true,
 	"GitInheritDiscardOutput": true,
 	"run":                     true, // (*git.Repo).run
+	// (*git.Repo).spawn is what run delegates to once the memo has decided the invocation is worth
+	// running. It is listed so a verb passed to it directly is caught the same way one passed to run is:
+	// the detector's model of "where a git command line is built" has to name the real bottom, and after
+	// the memo landed that is spawn rather than run.
+	"spawn": true,
 	// The fixture's own wrappers, so scanning internal/gittest sees what scanning the
 	// product sees.
 	"MustGit": true,
@@ -221,12 +226,14 @@ func TestDetectorCatchesInjectedViolations(t *testing.T) {
 		`func (r *repo) GitInherit(args ...string) error                    { return nil }`,
 		`func (r *repo) GitStdin(stdin string, args ...string) (string, error) { return "", nil }`,
 		`func (r *repo) run(args ...string) (string, error)                  { return "", nil }`,
+		`func (r *repo) spawn(args ...string) (string, error)                { return "", nil }`,
 		``,
 		`// Layer A: forbidden verbs as git arguments.`,
 		`func (r *repo) push()   { r.Git("push", "origin") } // BAD`,
 		`func (r *repo) merge()  { r.Git("merge", "main") } // BAD`,
 		`func (r *repo) rebase() { r.GitInherit("rebase", "main") } // BAD`,
 		`func (r *repo) reset()  { r.run("--hard", "reset") } // BAD: argument order does not matter`,
+		`func (r *repo) sp()     { r.spawn("push", "origin") } // BAD: spawn is where run delegates once the memo decides to run`,
 		`func (r *repo) sw()     { r.Git("switch", "-c", "feature") } // BAD`,
 		`func (r *repo) co()     { r.Git("checkout", "main") } // BAD`,
 		`func (r *repo) mkBr()   { r.Git("branch", "feature") } // BAD`,
