@@ -274,6 +274,14 @@ this clone has no fetch ref, the recorded name is the whole answer. `status` pri
 the record, `base_ref` and `base_why` the measurement and the rule behind it — and a span is named by what it
 measured against, which is how `origin/main...current` gets onto the screen.
 
+The local copy stays reachable whenever someone needs it. `--default-branch main` states which ref *is* the
+integration branch for that command, so the diff and the landed test move together — which is why there is one
+knob rather than a second one for the base alone; a flag that moved the measurement and left "has this
+landed?" behind would recreate the disagreement this rule exists to end. One span can be pinned to any ref
+without answering the branch question at all: `git pair diff --base-ref=main`. Neither is a setting. git-pair
+reads no git config, and a per-clone preference here would let two clones of one repository disagree about
+what has landed.
+
 Where the local copy of the base and its remote copy are different commits, `init` notes it with the counts,
 and pushes nothing (§26): measured from origin's copy, what only this clone's trunk has reads as part of the
 change until someone pushes it.

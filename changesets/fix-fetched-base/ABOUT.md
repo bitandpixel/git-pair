@@ -67,6 +67,13 @@ happened to fetch. The two questions are different, and only the measuring one m
 derived bases and already carried the sentence, so the new case rides the same fields rather than inventing a
 third spelling of the base anywhere.
 
+**`--default-branch` is the escape hatch, and it is deliberately not base-only.** Naming `main` states which
+ref *is* the integration branch for that command, so the diff and the landed test both move back to the local
+copy; `--base-ref=main` pins one span without answering the branch question at all. A flag that moved the
+measurement and left "has this landed?" where it was would put back the two-answer disagreement this rule
+removes, and a config entry would make it a per-clone fact — which PRD §4 already refuses, because two clones
+of one repository must not disagree about what has landed.
+
 ## Validation
 
 The scenario above, run against a scratch clone with a remote before and after (the same repository, two

@@ -1816,7 +1816,10 @@ the branch was cut — measuring from it puts work the destination already has i
 `git pair status` prints the base it measured against (`Base: origin/main — the base names the integration
 branch, so the copy of it this clone has fetched`, with `base_ref` and `base_why` in `--json`); `base` stays
 the recorded name, and a stack's parent branch is left alone. Where this clone has no fetch ref, the recorded
-name is the whole answer. Where the local copy of that branch and its remote copy are different commits,
+name is the whole answer. To measure from the local copy instead, name it: `--default-branch main` (or
+`refs/heads/main`) states which ref *is* the integration branch for that command, so the diff and the landed
+test move together — one knob, one answer. A single span can be pinned to any ref without touching either:
+`git pair diff --base-ref=main`. Where the local copy of that branch and its remote copy are different commits,
 `init` says so and gives the counts, because measured from origin's copy what only this clone's trunk has
 reads as part of the change until it is pushed: `note: main is not the same commit here and on origin: 1 here
 that origin does not have, 0 on origin that is not here`. It is a note; pushing trunk is yours.
