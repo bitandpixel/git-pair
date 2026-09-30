@@ -1683,8 +1683,9 @@ showing `main` and `origin/main` while the checkpoint keeps `refs/heads/main` �
 with the same name are two different choices, and drift has to be watched on the one you meant.
 
 Inside either drill the keys are in one of two modes, and the shortcut bar names the keys of the mode
-you are in. The list has them first — `j`/`k`, `gg`/`G`, `ctrl-d`/`ctrl-u`, and `f`/`b` or
-`ctrl-f`/`ctrl-b` for a page — with `Space` or `Enter` picking and `esc` or `q` stepping back to the
+you are in. The list has them first — `j`/`k`, `gg`/`G`, `d`/`u` or `ctrl-d`/`ctrl-u` for half a page,
+and `f`/`b` or `ctrl-f`/`ctrl-b` for a whole one — with `Space` or `Enter` picking and `esc` or `q`
+stepping back to the
 columns. `/` puts the keys on the filter instead, starting a fresh one as `less` does, because the text
 you are replacing is the reason you typed `/`; there what you type is the filter — a space included,
 since `response 0` is a thing to search for — with `Enter` picking and `esc` handing the keys back with

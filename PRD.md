@@ -2425,8 +2425,9 @@ remote refs, tags and other refs under headings, shows the name a reviewer would
 keeps the full `refs/...` name in the checkpoint: a branch and a tag called `main` are two different
 choices, and drift has to be watched on the one that was meant. Each drill has two modes and its
 shortcut bar names the keys of the one it is in. The list holds the keys first — `j`/`k`, `gg`/`G`,
-`ctrl-d`/`ctrl-u`, and `f`/`b` or `ctrl-f`/`ctrl-b` for a page — with `/` putting the keys on the
-filter, where a fresh one starts and what you type is the filter; `esc` hands them back with the
+`d`/`u` or `ctrl-d`/`ctrl-u` for half a page, and `f`/`b` or `ctrl-f`/`ctrl-b` for a whole one — with
+`/` putting the keys on the filter, where a fresh one starts and what you type is the filter; `esc`
+hands them back with the
 filter kept, and `esc` again leaves.
 
 A ref endpoint is pinned when chosen, and stays pinned for the session. While a ref-backed endpoint is

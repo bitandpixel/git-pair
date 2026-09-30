@@ -26,7 +26,8 @@ default, with `/` asking for the filter.
   modes are navigation-first with `/` for the filter. `nav` is now `filtering`, which says which way the keys
   go.
 - `internal/tui/picker.go`, `internal/tui/tui.go` — the three shortcut bars: the columns name `c` and `r`,
-  the drill names its own mode's keys, and the filter mode's bar ends `esc navigate`.
+  the drill names `d`/`u` and `f`/`b` beside their ctrl pairs, and the filter mode's bar ends
+  `esc navigate`.
 - `internal/tui/picker_internal_test.go` — the picker's fixture commits now carry fixed, increasing dates,
   because the merge the columns do is by when things happened and a fixture whose neighbours land in one
   second cannot say which order that was.
@@ -55,8 +56,11 @@ alone.
 
 **The drill opens on the list, and `/` asks for the filter.** Typing was the default when the list was the
 only way to a commit at all. Now the columns carry the recent history, so what a reviewer does inside a drill
-is mostly move, and `j` should move. `/` is vim's own key for the filter, and it is free of `f`/`b`, which
-are now page down and up beside `ctrl-f`/`ctrl-b`. `esc` hands the keys back with the filter kept — the rows
+is mostly move, and `j` should move. `/` is vim's own key for the filter, and it is free of the paging keys.
+Those take both spellings, `less`'s plain pairs and the ctrl pairs, because the preview overlay already takes
+`d`/`u` that way and a reviewer who has paged a diff all session reaches for them out of habit; `u` is the
+unreviewed preset out in the columns, which is the per-region reading `q` and `z` already have. `esc` hands
+the keys back with the filter kept — the rows
 you filtered to are the rows you wanted — and `esc` again leaves the drill. `Tab` is gone rather than kept as
 an undocumented second way in.
 
@@ -76,7 +80,8 @@ changeset's commits: …`) rather than answered with a shorter list.
 - `go test ./internal/tui/` — the picker's tests. New: `TestColumnsInterleaveTheChangesetsCommitsWithItsReviews`
   (the order, the empty marker absent, the base's own commit absent), `TestEnterAlwaysAppliesThePair`,
   `TestDrillOpensOnTheListAndSlashStartsTheFilter`, `TestChosenCheckpointKeepsItsMark`. Rewritten: the drill
-  mode tests, the bar test, the drill-in helpers (`drill(t, m, "commit")` presses the key).
+  mode tests, the bar test, the drill-in helpers (`drill(t, m, "commit")` presses the key). The paging test
+  asserts the plain `d`/`u` and `f`/`b` against the same distances the ctrl pairs move.
 - `go test ./...` clean, `gofmt` and `go vet` clean.
 - Read the rendered screen back at 96x24 for the columns, both drill modes, and the ref list, to check the
   bars, the caret, and the pinned row.

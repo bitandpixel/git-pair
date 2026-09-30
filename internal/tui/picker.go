@@ -581,9 +581,13 @@ func (m reviewModel) handleListKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		step = 1
 	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
 		step = -1
-	case key.Type == tea.KeyCtrlD:
+	// Half a page, both distances the rest of the screen offers: `less`'s plain `d` and `u`, which the
+	// preview overlay already takes, and the ctrl pairs. Out in the columns `u` is the unreviewed
+	// preset; the keys belong to whichever screen's bar is on screen, and each of the two bars names
+	// only its own.
+	case key.Type == tea.KeyCtrlD, key.Type == tea.KeyRunes && firstRune(key) == 'd':
 		step = rows / 2
-	case key.Type == tea.KeyCtrlU:
+	case key.Type == tea.KeyCtrlU, key.Type == tea.KeyRunes && firstRune(key) == 'u':
 		step = -rows / 2
 	case key.Type == tea.KeyCtrlF, key.Type == tea.KeyRunes && firstRune(key) == 'f':
 		step = rows
@@ -939,7 +943,7 @@ func helpSpan(drilled, filtering bool) string {
 		return "type to filter  \u2191/\u2193 move  backspace delete  enter pick  esc navigate"
 	}
 	if drilled {
-		return "j k line  gg top  G bottom  ctrl-d/u half  f b page  / filter  space/enter pick  esc/q back"
+		return "j k line  gg top  G bottom  d/u ctrl-d/u half  f/b ctrl-f/b page  / filter  space/enter pick  esc/q back"
 	}
 	return "tab column  j/k move  space choose  enter apply  c commits  r refs  u unreviewed  f full  esc cancel"
 }

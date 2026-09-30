@@ -824,6 +824,17 @@ func TestDrillNavigationMovesWithVimKeys(t *testing.T) {
 	if got := m.pick.list.sel; got != 0 {
 		t.Errorf("b moved to %d, want the page back to the top", got)
 	}
+
+	// d and u are the half pages without the modifier, which is what the preview overlay takes them
+	// for, and a reviewer who has paged a diff all session reaches for them out of habit.
+	m = pressKey(t, m, runeKey('d'))
+	if got := m.pick.list.sel; got != rows/2 {
+		t.Errorf("d moved to %d, want half a page (%d) down", got, rows/2)
+	}
+	m = pressKey(t, m, runeKey('u'))
+	if got := m.pick.list.sel; got != 0 {
+		t.Errorf("u moved to %d, want the half page back to the top", got)
+	}
 }
 
 // Backspace deletes a character of the filter and nothing else. On an empty filter it used to close
@@ -876,7 +887,7 @@ func TestDrillBackspaceEditsTheFilterAndNeverLeaves(t *testing.T) {
 // and does not advertise the other mode's.
 func TestDrillBarNamesTheKeysOfTheModeItIsIn(t *testing.T) {
 	nav, filtering := helpSpan(true, false), helpSpan(true, true)
-	for _, want := range []string{"j k", "gg", "G", "ctrl-d/u", "f b", "/ filter", "esc"} {
+	for _, want := range []string{"j k", "gg", "G", "d/u", "ctrl-d/u", "f/b", "/ filter", "esc"} {
 		if !strings.Contains(nav, want) {
 			t.Errorf("the navigation bar omits %q: %q", want, nav)
 		}
