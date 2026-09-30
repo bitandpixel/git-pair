@@ -46,6 +46,7 @@ ancestor and a sibling are the same shape - two directories, neither landed - an
 that names both for the author to pick. `Candidate.Distance`, the nearness the resolver computes when a
 revision carries more than one, orders them by which directory this branch touched last; that says which work
 is live, not which is a parent, and an ordering is not evidence of a relationship.
+is there a distinct reason that base: and parent-changeset: cant be used, and remove the parent: concept?
 
 **A recommendation, not a reason.** A changeset written before this rule existed must not be held by it, and
 which key a file chose to name its parent with is not a condition a merge should depend on. `check` prints
