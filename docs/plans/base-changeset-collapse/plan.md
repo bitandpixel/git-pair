@@ -267,7 +267,7 @@ before this milestone an id recorded beside a `base:` was read by nothing.
 
 ### M5 - the set operation is the primary rule
 
-**Status:** offered as `feat-set-operation-primary-rule`. The review decided the one open question: the set
+**Status:** landed as `3764473` from `feat-set-operation-primary-rule`. The review decided the one open question: the set
 operation is the *only* subtraction. The older pass also removed whatever a candidate's `base:` looked like it
 named, which decided a stack only when a branch happened to be spelled like its changeset; a file with no recorded
 id now falls through to the ranking instead, which answers - usually the same way - and says so by leaving both
@@ -323,7 +323,29 @@ a refusal naming two ids. That is the honest end state, and it is one this plan 
 
 ### M6 - a branch carries one unlanded changeset, plus the ones it is stacked on
 
-**Status:** not started. The invariant. M7 is what the author does when it is violated.
+**Status:** implemented and gating as `feat-one-changeset-per-branch`. The invariant. M7 is what the author does
+when it is violated.
+
+Three readings of this milestone's text changed while it was being written, and each is the shipped behaviour:
+
+- **The rule runs on the set the filters leave, not on the set before them.** `Resolution.Candidates` is what
+  survives `ignores:` and the set operation, and what survives those two is exactly the set of things nothing else
+  claims to be stacked on - the tops. One top is one stack. The ancestors subtraction removed are recovered by
+  reading when the answer needs them, because a chain can pass through a changeset that landed and left the candidate
+  list. A rule written over the pre-filter set would have to redo the subtraction to ask the same question.
+- **A file with no recorded id falls back to a read of the branch its `base:` names**, not to the add commit: the
+  reader asks which changeset directory that branch carries, and calls that the parent. The add commit cannot answer
+  this question - two siblings joined the line in a different order and are still two siblings. The read runs only on
+  the path about to refuse, so a branch whose records say it is one stack touches no extra history, and it is what
+  keeps `feature/auth` carrying `feature-auth` from being refused for an id not spelled like its branch.
+- **The self-referential base is refused where the branch is known**, which is the session the commands read: it is a
+  gate reason in `check` and `integrate` as well as a refusal in `status` and `change ready`. `stackOf` has no branch
+  to compare against, so the same claim written there would need the branch passed down and would answer a question
+  about a revision nobody asked about. `init`'s write-time refusal is unchanged.
+
+The refusal text names only commands that exist in this build, so `change combine` and `change stack` are described
+rather than named: they are M7, and a reader sent to a command that does not answer yet learns nothing. When M7
+lands, the message and this paragraph both change.
 
 #### Why the shape arises
 
@@ -356,31 +378,31 @@ destination carries is landed and the resolver never offers it.
 
 #### Tasks
 
-- [ ] State the shape once, in the resolver. Let U be the unlanded directories the set operation leaves. The branch
+- [x] State the shape once, in the resolver. Let U be the unlanded directories the set operation leaves. The branch
       is offerable when U has one member, or when one member reaches every other through recorded
       `base-changeset:` edges.
       A stack on one branch is not a shape the tool can write: `init` refuses a `base:` naming the branch the
       changeset lives on. An ancestor therefore either arrived by branching from the branch that carries it, which
       is a stack, or it came from an edit after the fact, which the read-time guard below answers. The clause is a
       check on hand-edited files, not the rule that keeps ordinary use honest.
-- [ ] Reuse the chain the set operation already walked, so the rule adds no read. When a file has no recorded id,
+- [x] Reuse the chain the set operation already walked, so the rule adds no read. When a file has no recorded id,
       the add commit from M3 is the fallback evidence.
-- [ ] Key the refusal on the candidate set, not on the selection. The warning at `init.go:173-176` reads
+- [x] Key the refusal on the candidate set, not on the selection. The warning at `init.go:173-176` reads
       `res.Selected`, so when the branch already carries two unrelated changesets the selection is nil, the condition
       does not fire, and `init` of a third is silent. The case that needs the message most is the one it currently
       says nothing about.
-- [ ] `init`: refuse, and point at the flag that declares the stack, which after M4 writes `base:` together with
+- [x] `init`: refuse, and point at the flag that declares the stack, which after M4 writes `base:` together with
       `base-changeset:`.
-- [ ] Move the `BaseIsOwnBranch` check into the reader, beside `ErrParentWithBase` in `stackOf`, keeping the
+- [x] Move the `BaseIsOwnBranch` check into the reader, beside `ErrParentWithBase` in `stackOf`, keeping the
       message `init` gives and adding what a reader needs: the file the value came from.
-- [ ] Do not guess where the directory came from. The parent count of the commit that added it distinguishes a plain
+- [x] Do not guess where the directory came from. The parent count of the commit that added it distinguishes a plain
       merge from work made here, but not from a squash merge, a rebase-and-squash, or a cherry-pick, all of which
       arrive as ordinary single-parent commits. The message states both exits and the way back, and the author knows
       which one applies.
-- [ ] Name the way back out in the reason text, with the command shape: take the path back to where it was before the
+- [x] Name the way back out in the reason text, with the command shape: take the path back to where it was before the
       work arrived (`git restore --source=<ref> -- changesets/<id>`, then commit). That is the answer when the
       directory is somebody else's work, and it is cheaper than either combine or stack.
-- [ ] Suggest `git fetch` first when the second directory might have landed since the branch point, because a stale
+- [x] Suggest `git fetch` first when the second directory might have landed since the branch point, because a stale
       destination ref imitates this shape exactly and a fetch dissolves it.
 
 #### Verification

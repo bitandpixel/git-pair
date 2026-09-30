@@ -49,16 +49,21 @@ func TestInitRefusesToGuessAmongTwoChangesetsOnTheBase(t *testing.T) {
 	f.CommitChangeset("booking-extra", "main")
 	f.CreateBranch("booking-tests", "booking")
 
-	res := runIn(t, f.Dir(), "init", "--base", "booking").mustSucceed(t, "init")
-
-	md := f.Read("changesets/booking-tests/CHANGESET.yaml")
-	if !strings.Contains(md, "base: booking\n") {
-		t.Errorf("the authored base did not stand:\n%s", md)
+	// Nothing is guessed here and nothing is written: this branch carries the pair it inherited, so the
+	// shape rule refuses the third directory before the base inference is even reached, and names both.
+	r := runIn(t, f.Dir(), "init", "--base", "booking")
+	if r.code != exitUsage {
+		t.Fatalf("a third changeset on a branch carrying two exited %d, want %d (you invoked init on the wrong branch)\nstderr: %s", r.code, exitUsage, r.stderr)
 	}
-	if strings.Contains(md, "parent") {
-		t.Errorf("a stack was guessed from two candidates:\n%s", md)
+	for _, want := range []string{"booking", "booking-extra"} {
+		if !strings.Contains(r.stdout+r.stderr, want) {
+			t.Errorf("the refusal does not name the candidate %q:\n%s", want, r.stdout+r.stderr)
+		}
 	}
-	mustContain(t, res.stdout+res.stderr, "booking-extra", "the candidate it declined to pick")
+	if f.HasWorktreeFile("changesets/booking-tests/CHANGESET.yaml") {
+		t.Error("a stack or a base was recorded for a changeset the branch was refused")
+	}
+	mustContain(t, r.stdout+r.stderr, "no stack is recorded", "the base inference still says it declined to pick")
 }
 
 // The common case must not acquire a new reading: a base naming the integration branch is not a stack, and
@@ -195,7 +200,7 @@ func TestCheckIsSilentWhenTheStackIsRecordedOrThereIsNoStack(t *testing.T) {
 		t.Errorf("recommendations = %v for a changeset that recorded its parent", recs)
 	}
 
-	f.CreateBranch("plain")
+	f.CreateBranch("plain", "main")
 	runIn(t, f.Dir(), "init").mustSucceed(t, "init")
 	out = runIn(t, f.Dir(), "check", "--json").json(t)
 	if recs := out["recommendations"].([]any); len(recs) != 0 {
