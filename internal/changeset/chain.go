@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"gitpair/internal/factcache"
 	"gitpair/internal/git"
 )
 
@@ -62,15 +63,33 @@ type Chain struct {
 // tree presence checks. It reads only the destination's own history, so a fresh clone with no refs and no
 // fetch of anything but the destination answers the same question as a clone that has the whole repository.
 //
+// The destination is resolved to a commit before anything is read, and every read below goes through that
+// commit rather than the ref it came in as. That is what makes the answer cacheable: the chain a changeset
+// has behind one commit never changes, and a destination that has moved since is a different commit and so
+// a different cache key. Resolving first also makes the ref name cheap — one `rev-parse` for the whole
+// derivation instead of git resolving it again for each read.
+//
 // The answer is ErrNoChain when the destination does not carry the directory. That is the case the message
 // in `status --changeset` has to explain rather than paper over: a changeset whose branch is gone and whose
 // destination never carried the directory had only its branch as a record, and there is nothing to invent.
 func LandedChain(ctx context.Context, repo *git.Repo, trunkRef, id string) (Chain, error) {
+	tip, err := repo.RevParse(ctx, trunkRef)
+	if err != nil {
+		if git.IsUnknownRevision(err) {
+			return Chain{}, fmt.Errorf("%w for %s: %s is not a revision this clone can read", ErrNoChain, id, trunkRef)
+		}
+		return Chain{}, err
+	}
 	specs := DirPathspecs(id)
+	cacheKey := factcache.Key("chain", tip, id)
+	var cached Chain
+	if repo.Facts().Get(cacheKey, &cached) {
+		return cached, nil
+	}
 	// One `rev-list` over the two pathspecs returns the commits on the first-parent line where either one
 	// changed, newest first. There are few of them per changeset — the commit that added the directory,
 	// and any later move of it — which is what makes the walk below cheap.
-	changing, err := pathChanges(ctx, repo, trunkRef, specs)
+	changing, err := pathChanges(ctx, repo, tip, specs)
 	if err != nil {
 		if git.IsUnknownRevision(err) {
 			return Chain{}, fmt.Errorf("%w for %s: %s is not a revision this clone can read", ErrNoChain, id, trunkRef)
@@ -82,10 +101,6 @@ func LandedChain(ctx context.Context, repo *git.Repo, trunkRef, id string) (Chai
 			ErrNoChain, id, trunkRef, specs[0], specs[1])
 	}
 
-	tip, err := repo.RevParse(ctx, trunkRef)
-	if err != nil {
-		return Chain{}, err
-	}
 	atTip, moved := CarriesDir(ctx, repo, tip, id)
 	if !atTip {
 		// The newest change to either path removed it rather than bringing it in, so the destination does
@@ -127,6 +142,7 @@ func LandedChain(ctx context.Context, repo *git.Repo, trunkRef, id string) (Chai
 			ch.Head = head
 			ch.Merged = true
 			ch.Linear = false
+			repo.Facts().Put(cacheKey, ch)
 			return ch, nil
 		}
 		// A merge that brought the directory in on its first parent — a conflict resolved in the merge
@@ -149,6 +165,7 @@ func LandedChain(ctx context.Context, repo *git.Repo, trunkRef, id string) (Chai
 	if ch.Head == landing {
 		ch.Squash = true
 	}
+	repo.Facts().Put(cacheKey, ch)
 	return ch, nil
 }
 
