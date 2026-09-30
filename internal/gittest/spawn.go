@@ -24,11 +24,13 @@ import (
 // thing being measured rather than a total. Everything created before the shim is called is
 // outside the count by construction.
 //
-// Calling it also clears the repository's derived-fact cache, so a measurement is a cold one. A warm
-// cache answers those questions from disk without spawning git at all, and a counter that reports a
-// handful of invocations for a run that did the work would read as a bound having been met when it was
-// only been hidden. The guarantee lives with the instrument, because a test that forgot it would fail in
-// the wrong direction: it would pass.
+// Calling it also turns both local caches off, so a measurement counts the algorithm rather than the cache.
+// Two separate things do that and both are needed. The derived-fact cache is cleared from the git directory,
+// because it survives a process and would answer these questions from disk without spawning git at all.
+// And `cli.NoCacheEnv` is set for the test process, because the in-process read memo would otherwise
+// collapse duplicate invocations inside the run being counted — which would not merely inflate the number,
+// it would make the bound blind to exactly the duplicate a bound exists to catch. A formulation that asks
+// the same question twice has to show up here as asking it twice.
 func (f *Fixture) SpawnShim(t *testing.T) (count func() int) {
 	t.Helper()
 	count, _ = f.spawnShim(t)
@@ -45,6 +47,9 @@ func (f *Fixture) SpawnShimLines(t *testing.T) (count func() int, lines func() [
 
 func (f *Fixture) spawnShim(t *testing.T) (count func() int, lines func() []string) {
 	f.clearFactCache()
+	// The import cycle this would otherwise need is avoided by naming the variable in one place, and the
+	// value is asserted against cli.NoCacheEnv by TestSpawnShimDisablesTheMemo.
+	t.Setenv("GIT_PAIR_NO_CACHE", "1")
 	real, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatalf("gittest: no git on PATH to count around: %v", err)

@@ -55,6 +55,27 @@ type app struct {
 	defaultBranch string
 }
 
+// NoCacheEnv is the environment form of `--no-cache`.
+//
+// It exists for two callers the flag cannot reach. A CI job runs git-pair from many places, and a switch
+// that has to be threaded through every invocation is a switch that gets missed. The test suite needs it
+// more specifically: `gittest.SpawnShim` counts git subprocesses to bound how much work a formulation does,
+// and a memo that answers a duplicated read would let that bound pass on the very duplicate it exists to
+// catch. So a measurement sets this and counts the algorithm rather than the cache.
+//
+// Anything non-empty counts as set, including "0" and "false" — the rule that cannot be argued about, and
+// the one that keeps `GIT_PAIR_NO_CACHE=false` from being a surprising way to leave caching on.
+const NoCacheEnv = "GIT_PAIR_NO_CACHE"
+
+// cachingOff reports whether this run must use neither cache.
+//
+// The flag and the environment can each turn caching off; neither can turn it back on. That asymmetry is the
+// useful one — a job that set the variable globally still gets "off" from a command that also passes the
+// flag, and there is no spelling which silently re-enables what a caller asked to disable.
+func (a *app) cachingOff() bool {
+	return a.noCache || os.Getenv(NoCacheEnv) != ""
+}
+
 // Execute builds the command tree and runs it, returning the process exit code.
 func Execute(args []string) int {
 	a := &app{stdout: os.Stdout, stderr: os.Stderr}
@@ -505,7 +526,7 @@ func (a *app) loadRepo(ctx context.Context) (*git.Repo, error) {
 	// same commits the uncached derivation reads, and an invalid key is a miss rather than a stale answer —
 	// so it exists to let a slow command be measured against a fast one, and to let a machine that would
 	// rather nothing were written under its git directory say so.
-	if !a.noCache {
+	if !a.cachingOff() {
 		repo.Memoize(true)
 		// The derived-fact cache is on for every handle this hands out, including the long-lived ones: its
 		// answers are keyed on commit ids, and a commit does not change under a session that kept reading it.
