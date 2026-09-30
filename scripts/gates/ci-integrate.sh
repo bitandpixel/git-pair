@@ -342,6 +342,73 @@ WRT=$(awk '/^  workflow_run:/{f=1;next} f&&/^  [a-z_]+:/{f=0} f' "$ROOT/.github/
 check "the trigger carries no branch allowlist to exclude a changeset from landing" 0 "$(printf '%s\n' "$WRT" | grep -Ec '^[[:space:]]*branches:')"
 check "and no denylist taking its place" 0 "$(printf '%s\n' "$WRT" | grep -Ec '^[[:space:]]*branches-ignore:')"
 
+step "cost: what a stacked branch costs the gate"
+
+# `check --json` is the gate the CI job runs, and a stacked branch is where its reads multiply: each level below
+# this one has to be read to know what the work sits on and whether any of it has landed. The two assertions are
+# the shape of that cost, not a performance claim. The first says one hop costs what was measured; the second
+# says an extra hop costs the same as the one before it, which is the property worth defending - a change that
+# re-reads the whole chain per level is quadratic and shows up here rather than in a slow CI job nobody
+# investigates.
+#
+# The first hop costs more than the ones after it, and that is the honest shape rather than an accident to fix:
+# below one level there is nothing to look for, while at two the code has a parent to find, so the reads that
+# locate a changeset on another branch (the destination probe, its .landed tombstone, the branch probe) run for
+# the first time. Recorded 2026-08 with `check --json`: 25 invocations at one level, 43 at two, 52 at three, 61
+# at four. Each hop past the second costs nine - one tree read of that level, two landedness probes, a branch
+# probe, and the log that reads the level's markers.
+#
+# The count comes from a shim placed ahead of git on PATH, because the number that matters is what the binary
+# asked for, not what the code appears to do. A change that moves either number has to say why in this paragraph.
+
+ST=$T/stack
+git init -q -b main --bare "$ST.git"
+git clone -q "$ST.git" "$ST" >/dev/null 2>&1 || { fail "cost fixture: cannot clone"; }
+git -C "$ST" config user.email cost@example.com
+git -C "$ST" config user.name Cost
+echo '# cost fixture' > "$ST/README.md"
+git -C "$ST" add -A && git -C "$ST" commit -qm initial >/dev/null 2>&1
+git -C "$ST" push -q -u origin main >/dev/null 2>&1
+for level in one two three four; do
+  case $level in
+    one) from=main ;;
+    two) from=stack-one ;;
+    three) from=stack-two ;;
+    four) from=stack-three ;;
+  esac
+  git -C "$ST" checkout -q -b "stack-$level" "$from" || fail "cost fixture: branch stack-$level"
+  ( cd "$ST" && "$G" init --base "$from" --set-base >/dev/null 2>&1 )
+  printf '%s work\n' "$level" > "$ST/$level.txt"
+  git -C "$ST" add -A && git -C "$ST" commit -qm "$level work" >/dev/null 2>&1
+  ( cd "$ST" && "$G" change ready >/dev/null 2>&1 )
+done
+git -C "$ST" push -q origin stack-one stack-two stack-three stack-four >/dev/null 2>&1
+
+SHIM=$T/git-shim
+mkdir -p "$SHIM"
+{ printf '#!/usr/bin/env bash\n'
+  printf 'printf "%%s\\n" "$*" >> "${GIT_CALL_LOG:-/dev/null}"\n'
+  printf 'exec "%s" "$@"\n' "$(command -v git)"; } > "$SHIM/git"
+chmod +x "$SHIM/git"
+
+count_calls() { # count_calls <branch> - the git invocations `check --json` makes on it
+  local log=$T/calls-$1
+  git -C "$ST" checkout -q "$1" || return 1
+  : > "$log"
+  ( cd "$ST" && GIT_CALL_LOG=$log PATH="$SHIM:$PATH" "$G" check --json >/dev/null 2>&1 )
+  wc -l < "$log" | tr -d ' '
+}
+ONE=$(count_calls stack-one)
+TWO=$(count_calls stack-two)
+THREE=$(count_calls stack-three)
+FOUR=$(count_calls stack-four)
+ok "measured: $ONE invocations at one level, $TWO at two, $THREE at three, $FOUR at four"
+STACK_CEILING=50 # the recorded cost of a two-level stack, plus five invocations of slack
+check "a child on a parent stays inside the recorded cost of the stack ($TWO measured, $STACK_CEILING allowed)" 0 \
+  "$([ "$TWO" -le "$STACK_CEILING" ] && echo 0 || echo 1)"
+check "each hop past the second costs what the hop before it cost, so the chain is read level by level" 0 \
+  "$([ "$((FOUR - THREE))" -eq "$((THREE - TWO))" ] && echo 0 || echo 1)"
+
 step "usage"
 
 out=$(cd "$T" && "$CI" --help 2>&1); check "--help works" 0 $?

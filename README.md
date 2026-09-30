@@ -25,8 +25,9 @@ The MVP deliberately does not:
 - treat per-file review checkmarks as review state — they persist locally under the git directory
   so a review can be resumed, and no command reports them
 - model multi-reviewer permissions, multi-author semantics, or complex stacked-branch graphs;
-  a stack is a `parent:` value in `CHANGESET.yaml` plus one rule (§Stacked): any parent movement
-  ends the child's approval, and the reason says what kind of movement it was
+  a stack is a `base:` naming the branch it sits on beside a `base-changeset:` naming the changeset
+  there, plus one rule (§Stacked): any parent movement ends the child's approval, and the reason says
+  what kind of movement it was
 - distinguish a human's code edit from a human's comment
 - send notifications
 
@@ -315,10 +316,12 @@ own with `git pair init --id booking-transaction-v2`; an ID is never rewritten t
 never suffixed to dodge a collision, and never changed once the changeset has refs.
 
 `CHANGESET.yaml` records `id` and where the changeset sits, and nothing else. `base` is what the
-diff is measured against. A stacked changeset spells that as `parent:` — the branch it sits on,
-which *is* its base — beside `parent-changeset:`, the changeset living there; the two spellings are
-never both written. The parent changeset is what still names the relationship after the parent
-lands and its branch is deleted, which is when a child needs it most. There is no branch field: the
+diff is measured against. A stacked changeset spells that as the branch it sits on, which *is* its
+base, beside `base-changeset:`, the changeset living there. The changeset named there is what still
+names the relationship after the parent lands and its branch is deleted, which is when a child needs
+it most. `parent:` and `parent-changeset:` are the same pair under older key names: they are read
+from files written before this pair existed and nothing writes them, and a file that sets both an
+old and a new spelling of the branch is an error to correct rather than a conflict to resolve. There is no branch field: the
 directory does not belong to a branch, so renaming a branch strands nothing, and two clones of the
 same commits cannot disagree about what the directory is.
 
