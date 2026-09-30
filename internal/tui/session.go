@@ -153,6 +153,17 @@ func NewSession(ctx context.Context, opts Options) (*Session, error) {
 		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span, trunk: opts.Trunk,
 	}
 	s.measure = changeset.MeasureBase(ctx, opts.Repo, opts.Changeset, opts.Trunk, "")
+	// A review session is open for as long as a reviewer is reading, and a review of frozen state is the
+	// expensive failure: the reviewer's own `git fetch`, or a submission arriving in another clone, has to
+	// be visible. The session already drops its own diff and document caches on a span toggle or a tool
+	// handoff for the same reason (see reviewModel.forgetPatches); this is that rule at the git boundary,
+	// and it is off for the whole session rather than at each boundary because the boundaries are many and
+	// the saving here is not the one worth taking.
+	//
+	// It goes after the measure base is resolved on purpose. That base is settled once here and reused by
+	// every span the session shows, so it is exactly the kind of answer a memo would keep; keeping it is
+	// safe, because it names a ref rather than a commit, and the ref's answer is re-derived each Rescan.
+	opts.Repo.Memoize(false)
 	if err := s.Rescan(ctx); err != nil {
 		return nil, err
 	}

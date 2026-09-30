@@ -569,6 +569,21 @@ because the answer belongs to the checkout in front of the command: a CI job tha
 branch has no remote HEAD, and two clones of one repository must not disagree about what has
 landed.
 
+Every command also accepts `--no-cache`, which ignores the two local caches and derives everything
+from git again. Read-only commands ask git the same questions on every run — which changesets have landed,
+what chain each one left behind, what markers sit on a branch — and the answers to those questions follow
+from commit ids, which do not change. So they are kept, in one case in memory for the length of the run and
+in the other under the repository's git directory (the same place review marks live, where `git status`
+cannot see them and `git add` cannot stage them; deleting the directory loses nothing but time). Neither is
+a store of state: state is still derived from history, and a key that no longer matches the repository is a
+miss rather than an answer. `--no-cache` is therefore not a way to fix a wrong answer — it is how you
+establish that an answer was not wrong, and how a machine that wants nothing written under its git directory
+says so. `GIT_PAIR_NO_CACHE`, set to anything non-empty, does the same for every invocation in a process
+environment, which is the form a CI job reaches without threading the flag through each call. The test suite
+uses it for a sharper reason: the bounds that count git subprocesses to say how much work a formulation does
+must count the formulation, and a memo that answers a duplicated read would let such a bound pass on the
+duplicate it exists to catch.
+
 | Command | Flags | Notes |
 | --- | --- | --- |
 | `init` | `--id <id>`, `--base <ref>`, `--set-base`, `--parent <branch>`, `--set-parent`, `--about <text>`, `--set-about`, `--no-commit` | creates directory, `CHANGESET.yaml`, `ABOUT.md`, then commits them; never overwrites existing content; `--about` also reads a pipe; default base is the integration branch, recorded as its branch name where that name resolves and as the fetch ref this clone has to reach it through where it does not; refuses on that branch, where a changeset could never contain anything; `--parent` stacks the changeset instead of naming a base, recording the parent's changeset ID beside it, and `--set-parent` restacks it — never done implicitly, because a parent that moved, landed or died is the author's decision; `--id` names the changeset instead of the branch-derived default, and a collision with a committed directory or ref refuses rather than suffixing |

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"gitpair/internal/factcache"
 	"gitpair/internal/git"
 	"gitpair/internal/model"
 )
@@ -161,14 +162,28 @@ func Summarize(ctx context.Context, repo *git.Repo, slug, base, headRef string) 
 	if base == "" {
 		return Summary{}, fmt.Errorf("changeset %s has no base configured", slug)
 	}
-	if _, err := repo.RevParse(ctx, base); err != nil {
+	baseSHA, err := repo.RevParse(ctx, base)
+	if err != nil {
 		return Summary{}, fmt.Errorf("cannot resolve changeset base %q: %w", base, err)
 	}
-	if _, err := repo.RevParse(ctx, headRef); err != nil {
+	headSHA, err := repo.RevParse(ctx, headRef)
+	if err != nil {
 		return Summary{}, fmt.Errorf("cannot resolve %q: %w", headRef, err)
 	}
+	// The two resolutions above are what make this answer cacheable. The range is asked as commits rather
+	// than as the refs it came in with, so it names the same pair of commits to git and to the cache key,
+	// and a branch that has since moved is a different commit and so a different key. What is derived from
+	// two commits cannot go stale, because a commit cannot change.
+	//
+	// The key carries the slug, which is not a commit: it is part of the question. Two changesets sharing a
+	// range read different markers out of it, and a key without the slug would let one answer the other.
+	key := factcache.Key("summary", baseSHA, headSHA, slug)
+	var cached Summary
+	if repo.Facts().Get(key, &cached) {
+		return cached, nil
+	}
 	fields := []string{"%H", "%h", "%ct", "%an", "%s", "%(trailers:only,unfold)"}
-	records, err := repo.LogFields(ctx, RangeForHead(base, headRef), fields...)
+	records, err := repo.LogFields(ctx, RangeForHead(baseSHA, headSHA), fields...)
 	if err != nil {
 		return Summary{}, err
 	}
@@ -182,7 +197,12 @@ func Summarize(ctx context.Context, repo *git.Repo, slug, base, headRef string) 
 	// derive reads markers, and markers are written by commands. Whether the commits
 	// after a marker matter is a question about the tree, asked only by the one
 	// caller that needs it; see SummarizeAgainstTree.
-	return derive(events), nil
+	out := derive(events)
+	// Only the derivation is kept. `Stale` and `Drifted` come from the working tree and the index, and
+	// ReconcileStaleness fills them in on top of this answer — which is why the cache sits here rather than
+	// in SummarizeAgainstTree, where a kept answer would carry an observation about somebody's checkout.
+	repo.Facts().Put(key, out)
+	return out, nil
 }
 
 // SummarizeHEAD derives state for the checked-out branch.

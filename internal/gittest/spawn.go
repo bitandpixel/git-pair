@@ -23,6 +23,14 @@ import (
 // test's own fixture calls go through the shim too, so a measurement is a delta taken around the
 // thing being measured rather than a total. Everything created before the shim is called is
 // outside the count by construction.
+//
+// Calling it also turns both local caches off, so a measurement counts the algorithm rather than the cache.
+// Two separate things do that and both are needed. The derived-fact cache is cleared from the git directory,
+// because it survives a process and would answer these questions from disk without spawning git at all.
+// And `cli.NoCacheEnv` is set for the test process, because the in-process read memo would otherwise
+// collapse duplicate invocations inside the run being counted — which would not merely inflate the number,
+// it would make the bound blind to exactly the duplicate a bound exists to catch. A formulation that asks
+// the same question twice has to show up here as asking it twice.
 func (f *Fixture) SpawnShim(t *testing.T) (count func() int) {
 	t.Helper()
 	count, _ = f.spawnShim(t)
@@ -38,6 +46,10 @@ func (f *Fixture) SpawnShimLines(t *testing.T) (count func() int, lines func() [
 }
 
 func (f *Fixture) spawnShim(t *testing.T) (count func() int, lines func() []string) {
+	f.clearFactCache()
+	// The import cycle this would otherwise need is avoided by naming the variable in one place, and the
+	// value is asserted against cli.NoCacheEnv by TestSpawnShimDisablesTheMemo.
+	t.Setenv("GIT_PAIR_NO_CACHE", "1")
 	real, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatalf("gittest: no git on PATH to count around: %v", err)
@@ -94,4 +106,23 @@ func (f *Fixture) spawnShim(t *testing.T) (count func() int, lines func() []stri
 func (f *Fixture) SpawnRepo(t *testing.T) (*git.Repo, func() int) {
 	t.Helper()
 	return &git.Repo{Dir: f.Dir(), Env: f.Env()}, f.SpawnShim(t)
+}
+
+// clearFactCache removes the derived-fact cache from this repository's git directory.
+//
+// It is best-effort by design: a fixture with no git directory, or no cache yet, has nothing to clear,
+// and a test that measures cost should not fail because the thing it is clearing was never written.
+func (f *Fixture) clearFactCache() {
+	f.t.Helper()
+	out, err := f.Git("rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return
+	}
+	gitDir := strings.TrimSpace(out)
+	if gitDir == "" {
+		return
+	}
+	if err := os.RemoveAll(filepath.Join(gitDir, "git-pair", "cache")); err != nil {
+		f.t.Fatalf("gittest: clear fact cache: %v", err)
+	}
 }

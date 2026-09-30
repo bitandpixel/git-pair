@@ -669,6 +669,10 @@ func runChangeWait(ctx context.Context, a *app, opts *waitOptions) error {
 
 	fetches := 0
 	seen, found, err := pollUntil(ctx, interval, timeout, func() (waitInput, bool, error) {
+		// Each round is a fresh observation, which is the whole point of the loop: a review submitted in
+		// another clone has to end the wait. The memo's "one run" contract does not stretch across a poll,
+		// so it is dropped before the round rather than held for the minutes the author is waiting.
+		s.repo.ResetMemo()
 		if opts.fetch {
 			for _, remote := range remotes {
 				if err := s.repo.Fetch(ctx, remote); err != nil {

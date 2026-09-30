@@ -17,7 +17,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"gitpair/internal/factcache"
 )
 
 // Errors callers branch on.
@@ -43,7 +46,26 @@ type Repo struct {
 	// Env, when non-empty, fully replaces the environment for git subprocesses.
 	// Tests use it to ignore the user's global git config.
 	Env []string
+
+	// mu guards cache, which holds the memo of pure reads. See memo.go.
+	mu    sync.Mutex
+	cache *state
+
+	// factsMu guards facts, the derived-fact cache. It is apart from mu because naming the git directory
+	// is itself a git call, and that call goes through the memo — which holds mu. One mutex would deadlock.
+	factsMu sync.Mutex
+	facts   *factcache.Store
 }
+
+// ResetMemo drops every kept answer.
+//
+// It is for a caller that is about to observe the repository again after something outside this package may
+// have changed it. `change wait` uses it before each poll round, which is the case that matters: the whole
+// point of the loop is that a review submitted in another clone ends the wait, and a memo that survived the
+// sleep would never notice. A caller that changed the repository through this package needs it less — a
+// write clears the memo by itself — but a caller that ran an editor, a gate script, or plain git by hand
+// cannot rely on that.
+func (r *Repo) ResetMemo() { r.st().memo.clear() }
 
 // Open resolves the repository containing dir.
 func Open(dir string) (*Repo, error) {
@@ -78,10 +100,34 @@ func (r *Repo) GitInherit(ctx context.Context, args ...string) error {
 	return err
 }
 
+// run is the one place every git subprocess is spawned, and the one place the memo is consulted.
+//
+// The memo covers captured invocations only. An invocation attached to the terminal belongs to the reader
+// — a diff, a difftool, an editor — and its output never comes back through here to be kept.
 func (r *Repo) run(ctx context.Context, stdin string, capture bool, args ...string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if !capture {
+		return r.spawn(ctx, stdin, false, args...)
+	}
+	class := classify(args)
+	key := memoKey(args, stdin)
+	if e, served := r.answer(key, class); served {
+		if e.failed {
+			return e.stdout, &Error{ExitCode: e.code, Stderr: e.stderr, Stdout: e.stdout}
+		}
+		return e.stdout, nil
+	}
+	stdout, err := r.spawn(ctx, stdin, true, args...)
+	if e, keep := kept(stdout, err); keep && r.Memoizing() {
+		r.st().memo.put(key, e)
+	}
+	return stdout, err
+}
+
+// spawn runs git once, with no memo in the way.
+func (r *Repo) spawn(ctx context.Context, stdin string, capture bool, args ...string) (string, error) {
 	full := append([]string{"-c", "core.quotePath=false"}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Dir = r.Dir
@@ -106,6 +152,22 @@ func (r *Repo) run(ctx context.Context, stdin string, capture bool, args ...stri
 		return stdout.String(), wrapExit(err, stdout.String(), stderr.String())
 	}
 	return stdout.String(), nil
+}
+
+// kept decides whether an invocation's answer belongs in the memo.
+//
+// A git subprocess that ran and exited non-zero answered the question: `rev-parse --verify --quiet` exits
+// 1 to report that a path is absent from a tree, and that absence is what `CarriesDir` came for. An error
+// that is not an `*Error` is different — git could not be started, the context was cancelled — and says
+// something about the machine rather than the repository, so it is not kept and the next caller tries again.
+func kept(stdout string, err error) (memoEntry, bool) {
+	if err == nil {
+		return memoEntry{stdout: stdout}, true
+	}
+	if e, ok := err.(*Error); ok {
+		return memoEntry{stdout: e.Stdout, stderr: e.Stderr, code: e.ExitCode, failed: true}, true
+	}
+	return memoEntry{}, false
 }
 
 func wrapExit(err error, stdout, stderr string) error {

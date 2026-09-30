@@ -392,10 +392,17 @@ mkdir -p "$SHIM"
 chmod +x "$SHIM/git"
 
 count_calls() { # count_calls <branch> - the git invocations `check --json` makes on it
+  # GIT_PAIR_NO_CACHE is what makes the numbers below mean something. The four measurements share one clone,
+  # so a run on stack-two can answer from the derived facts stack-one's run left on disk, and the count stops
+  # being a property of the formulation. It showed up as this assertion flipping between runs on the same
+  # commit — 16/24/28/32 once, 16/24/29/32 and 16/25/28/31 others — while the same measurement without the
+  # caches reproduced 25/43/52/61 every time. A bound on how a chain is walked cannot depend on whether
+  # somebody walked it a minute ago. The rest of this suite runs the binary with caching on, as CI does; this
+  # one measurement is the exception, for the same reason `gittest.SpawnShim` sets the same variable.
   local log=$T/calls-$1
   git -C "$ST" checkout -q "$1" || return 1
   : > "$log"
-  ( cd "$ST" && GIT_CALL_LOG=$log PATH="$SHIM:$PATH" "$G" check --json >/dev/null 2>&1 )
+  ( cd "$ST" && GIT_PAIR_NO_CACHE=1 GIT_CALL_LOG=$log PATH="$SHIM:$PATH" "$G" check --json >/dev/null 2>&1 )
   wc -l < "$log" | tr -d ' '
 }
 ONE=$(count_calls stack-one)
@@ -408,6 +415,15 @@ check "a child on a parent stays inside the recorded cost of the stack ($TWO mea
   "$([ "$TWO" -le "$STACK_CEILING" ] && echo 0 || echo 1)"
 check "each hop past the second costs what the hop before it cost, so the chain is read level by level" 0 \
   "$([ "$((FOUR - THREE))" -eq "$((THREE - TWO))" ] && echo 0 || echo 1)"
+
+# And the guard that keeps the paragraph above honest, rather than a comment someone deletes under pressure.
+# Measuring the same branch a second time has to cost the same. If the caches were allowed to answer, the
+# repeat run would come back cheaper — cheaper by a dependent bound, and cheaper in a way that depends on what
+# somebody ran a minute ago. That is the whole failure this assertion is here to prevent, arrived at by
+# accident: it showed up as the bound above flipping between CI runs on one commit.
+TWO_AGAIN=$(count_calls stack-two)
+check "the measurement is a property of the formulation, not of what ran before it ($TWO then $TWO_AGAIN)" 0 \
+  "$([ "$TWO_AGAIN" -eq "$TWO" ] && echo 0 || echo 1)"
 
 step "usage"
 
