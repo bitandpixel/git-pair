@@ -124,6 +124,8 @@ names the branch in `base:` and the changeset that branch carries in `base-chang
 The command compares what the two branches carry and refuses rather than guess which of two directories is the level
 below.
 
+The other answer is `git pair change combine --into <id>`: when the two directories are one piece of work rather than a stack, the disappearing one moves whole under `changesets/<into>/.combined/<id>/` and the survivor keeps its own base. An archive there is inert - it answers no id, it is neither landed nor active, and it is not offered as a thread.
+
 ## Author
 
 The party producing the change.

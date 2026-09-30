@@ -50,7 +50,7 @@ func TestChangeReadyRefusesABranchCarryingTwoChangesets(t *testing.T) {
 			t.Errorf("the refusal does not name %q:\n%s", want, out)
 		}
 	}
-	for _, want := range []string{"git restore --source=", "--set-base", "git fetch"} {
+	for _, want := range []string{"git pair change stack --base", "git pair change combine --into", "git restore --source=", "git fetch"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the refusal gives no way out containing %q:\n%s", want, out)
 		}

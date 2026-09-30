@@ -35,20 +35,23 @@ func shapeFinding(label string, shape changeset.BranchShape) string {
 		label, len(shape.Members), strings.Join(shape.Members, ", "))
 }
 
-// shapeWaysOut is what a reader can do about it. Every command named here exists in this build. The two that would
-// name the shape directly - `change combine`, for one piece of work spread over two directories, and `change stack`,
-// for two directories that are one stack - are the changeset after this one, and printing a command that does not
-// answer yet is worse than printing the fix that does.
+// shapeWaysOut is what a reader can do about it, and the two commands that answer the shape directly are named:
+// `change stack` when the second directory is the one this work is stacked on, `change combine` when the two are one
+// piece of work. A command the reader cannot run is worse than no command at all, which is why this list was written
+// in two changesets - see the plan's M6 and M7 notes.
 func shapeWaysOut(strays []string) string {
-	return "They arrive when work from another branch comes onto this one: a merge or a pull of a shared branch, a\n" +
+	return "A branch carries one changeset, plus the changesets it is stacked on.\n" +
+		"They arrive when work from another branch comes onto this one: a merge or a pull of a shared branch, a\n" +
 		"cherry-pick, a squash merge, or a branch cut from a branch that already carried both. Make one of these\n" +
 		"true:\n" +
-		"  - this branch carries one changeset and the others belong elsewhere, so take them out of it,\n" +
-		"    where <ref> is the branch or commit this one was cut from:\n" +
+		"  - the changesets are a stack, so record the link between them:\n" +
+		"      git pair change stack --base <parent-branch>\n" +
+		"  - the two are one piece of work, so fold them together - the disappeared one is archived inside the\n" +
+		"    survivor, and nothing is deleted:\n" +
+		"      git pair change combine --into <survivor>\n" +
+		"  - the others belong elsewhere, so take them out of this branch, where <ref> is the branch or commit\n" +
+		"    this one was cut from:\n" +
 		"      git restore --source=<ref> -- " + changeset.Root + "/" + strays[0] + "\n" +
-		"  - the changesets are a stack, so record it on each child, which is what `init` records when the base\n" +
-		"    names the branch that carries the parent:\n" +
-		"      git pair init --base <parent-branch> --set-base\n" +
 		"  - the other may have landed since this branch was cut, which makes it not a second changeset at\n" +
 		"    all, so fetch and ask again:\n" +
 		"      git fetch\n"
