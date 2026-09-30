@@ -323,7 +323,7 @@ a refusal naming two ids. That is the honest end state, and it is one this plan 
 
 ### M6 - a branch carries one unlanded changeset, plus the ones it is stacked on
 
-**Status:** implemented and gating as `feat-one-changeset-per-branch`. The invariant. M7 is what the author does
+**Status:** landed as `020d7dc` from `feat-one-changeset-per-branch`. The invariant. M7 is what the author does
 when it is violated.
 
 Three readings of this milestone's text changed while it was being written, and each is the shipped behaviour:
@@ -343,9 +343,10 @@ Three readings of this milestone's text changed while it was being written, and 
   to compare against, so the same claim written there would need the branch passed down and would answer a question
   about a revision nobody asked about. `init`'s write-time refusal is unchanged.
 
-The refusal text names only commands that exist in this build, so `change combine` and `change stack` are described
-rather than named: they are M7, and a reader sent to a command that does not answer yet learns nothing. When M7
-lands, the message and this paragraph both change.
+The refusal text named only commands that existed at the time, so `change combine` and `change stack` were described
+rather than named: a reader sent to a command that does not answer yet learns nothing. M7 landed both, and the
+message names them now. The list was written in two changesets for that reason, and the fixtures assert the names -
+a refusal that names no command is the failure this milestone exists to prevent.
 
 #### Why the shape arises
 
@@ -416,7 +417,23 @@ destination carries is landed and the resolver never offers it.
 
 ### M7 - the two exits: `change combine` and `change stack`
 
-**Status:** not started. This is where the M6 refusal stops being a dead end.
+**Status:** offered as `feat-two-exits`. This is where the M6 refusal stops being a dead end.
+
+Four readings of this milestone's text, each the shipped behaviour:
+
+- **`combine` names the survivor and the pair is the branch.** `--into <id>` picks which changeset survives; the
+  disappearing one is the other unlanded directory on the branch. There is no `--from`, because a branch that carries
+  the invariant's shape has exactly two candidates and naming one of them fixes the other. A branch carrying three is
+  refused with the list and the instruction to fold a pair first.
+- **The review-state guard is any marker, read where `check` reads it.** `combine` refuses while either changeset has
+  a lifecycle marker or a review, from the same `lifecycle` summary the gate reads, so the two cannot disagree about
+  whether a changeset is in review. It also refuses when the two changeset directories are dirty, because the command
+  commits them; work elsewhere on the branch is not its business.
+- **`stack` does not need a resolved changeset.** It computes both sides itself, because the shape it repairs is one
+  the resolver may refuse: a branch carrying two unconnected directories has no selection to load a session from.
+- **A thread copy is named by the disappeared id.** `Threads` answers from the repository root, so the copy takes the
+  base name prefixed with that id, and the report says replies continue in the copy while the archived original stays
+  where the archive holds it.
 
 #### Why two exits
 
@@ -443,30 +460,30 @@ must not read as one.
 
 #### Tasks
 
-- [ ] `combine`: move the disappearing directory whole, and keep the survivor's own two keys. The survivor's
+- [x] `combine`: move the disappearing directory whole, and keep the survivor's own two keys. The survivor's
       comparison is its own base, and folding a changeset in is not a licence to move the base underneath a review.
-- [ ] `--threads` copies, it does not move, and it prefixes each copied file with the disappeared id so two
+- [x] `--threads` copies, it does not move, and it prefixes each copied file with the disappeared id so two
       changesets that both have a thread called `scope.md` do not collide. Say which copy replies continue in. A
       thread file is not an implementation change (`lifecycle` excludes it from the comparison a review marker
       makes), so the copy cannot move what a reviewer is comparing.
-- [ ] `change stack --base <branch>` compares two sets that the resolver already computes: the unlanded changesets of
+- [x] `change stack --base <branch>` compares two sets that the resolver already computes: the unlanded changesets of
       this branch and of `<branch>`, each read as `ActiveIDs` of the branch minus `LandedIDs` of the destination. Let X
       be their intersection minus the base branch's recorded ancestors, and Y this branch's set minus the other's. One
       member each, or a refusal that prints both sets.
-- [ ] Exclude the base branch's recorded ancestors, not this branch's. On a third level of a stack this branch carries
+- [x] Exclude the base branch's recorded ancestors, not this branch's. On a third level of a stack this branch carries
       the grandparent as well, and it cannot be told to exclude its own ancestors, because naming them is the fact the
       command is about to write. The base branch already has that chain recorded, so the exclusion is read from there.
       Where the base branch records no chain the intersection has two members, and the refusal says to settle the level
       below first.
-- [ ] Refuse, printing both sets, for each shape the two conditions do not accept. Nothing in common means `<branch>`
+- [x] Refuse, printing both sets, for each shape the two conditions do not accept. Nothing in common means `<branch>`
       is not this branch's base, and the answer is a `base:` naming the integration branch rather than a stack. Two not
       in common is the shape `change combine` answers, so name it. `<branch>` naming this branch is refused by
       `BaseIsOwnBranch`, and it means the child was created on the branch it wants to sit under: create a branch for it
       and run the command there.
-- [ ] Write the two keys into the child's file and nothing else. The common changeset's own record is not touched - its
+- [x] Write the two keys into the child's file and nothing else. The common changeset's own record is not touched - its
       `base:` belongs to its branch, and this branch holding a copy of its directory is what every stacked branch looks
       like. Assert that the command's commit changes one path.
-- [ ] Print the old value and the new one for both keys, then say that the branch has to be offered again. A base that
+- [x] Print the old value and the new one for both keys, then say that the branch has to be offered again. A base that
       changes is the comparison changing, so the reviewer's diff changes with it. The command does not refuse because a
       ready marker is present; `check` already refuses a merge over a commit that followed the marker, so the drift is
       caught whichever way the author leaves it.

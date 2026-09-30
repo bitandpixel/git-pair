@@ -150,7 +150,7 @@ func TestChangeInitRefusesASecondChangesetThatTiesToNothing(t *testing.T) {
 	}
 	// Every command in the message has to exist in this build: the exits that are their own commands are the
 	// changeset after this one, and a reader sent to a command that does not answer learns nothing.
-	for _, want := range []string{"git restore --source=", "--set-base", "git fetch"} {
+	for _, want := range []string{"git pair change stack --base", "git pair change combine --into", "git restore --source=", "git fetch"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the refusal gives no way out containing %q:\n%s", want, out)
 		}

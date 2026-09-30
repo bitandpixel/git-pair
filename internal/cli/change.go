@@ -31,6 +31,7 @@ func newChangeCommand(a *app) *cobra.Command {
 	}
 	cmd.AddCommand(newChangeUseCommand(a), newChangeReadyCommand(a), newChangeUnreadyCommand(a),
 		newChangeAbandonCommand(a), newChangeFeedbackCommand(a), newChangeWaitCommand(a),
+		newChangeStackCommand(a), newChangeCombineCommand(a),
 		newChangeIntegrateCommand(a), newChangeTidyCommand(a))
 	return cmd
 }
