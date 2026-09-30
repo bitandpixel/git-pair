@@ -111,6 +111,19 @@ For the MVP:
 
 Stacked branches each have their own changeset.
 
+The first half of that equation is enforced rather than assumed: a branch carries one unlanded changeset, plus the
+directories of the changesets it is stacked on. Two directories that no record ties together arrive when work from
+another branch comes onto this one - a merge or a pull of a shared branch, a cherry-pick, a squash merge - and the
+second would reach the destination with no approval of its own. So `git pair init` refuses to create the second one,
+`git pair change ready` refuses to offer the branch, and `git pair check` reports it as a reason the merge is gated.
+Two things do not count against a branch: a directory the destination already carries, which is landed work, and the
+ancestors a child records above itself, which are one stack rather than several changesets (§9.8).
+
+The link is a record, and `git pair change stack --base <branch>` writes it for changesets that already exist: it
+names the branch in `base:` and the changeset that branch carries in `base-changeset:`, in the child's file alone.
+The command compares what the two branches carry and refuses rather than guess which of two directories is the level
+below.
+
 ## Author
 
 The party producing the change.
