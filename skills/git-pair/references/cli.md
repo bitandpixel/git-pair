@@ -114,7 +114,11 @@ state values: the state stays `WORKING` after `change abandon`. `landed`, `lande
 `landed_branch` are the destination's answer — the branch carrying `changesets/<id>/` is what makes a
 changeset landed — and `chain_base`, `chain_head` and `reviewed` say what history came with it, which a
 squash landing leaves empty and false. `integrating` and `integrate_commit` are the exception that is a
-state: `INTEGRATING` while a declaration is the newest marker.
+state: `INTEGRATING` while a declaration is the newest marker. `base` is what `CHANGESET.yaml` records;
+`base_ref` and `base_why` appear when the diff was measured against something else — a parent whose work has
+landed, or a trunk this clone reaches through a fetch ref while the record says `main`. The second is the
+ordinary clone: `git fetch` moves `refs/remotes/origin/main` and leaves the local branch where the changeset
+was cut, and `span` is named by the measurement, not by the record.
 
 `git pair check --json` carries the verdict in `ready` and exits 0 either way, so a gate asks `jq`
 rather than `$?`. `reasons` names every failed condition, empty when it passed; `policy` is

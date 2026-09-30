@@ -355,9 +355,22 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 		NextAction:  nextAction(s.summary, s.cs.Base),
 	}
 	// A derived base is reported beside the recorded one rather than over it: `base` is what the changeset
-	// says its stack is, and `base_ref` is what every diff in this document was measured against.
+	// says its stack is, and `base_ref` is what every diff in this document was measured against. A stacked
+	// changeset arrives here with that derivation already applied to `Base` (`applyBases`), so the recorded
+	// value is the measurement and only the sentence needs carrying.
+	//
+	// The second case where the two come apart is read from the same rule: the record names the integration
+	// branch, and this clone reaches that branch through a fetch ref. `base: main` resolves to the local
+	// branch first, which is where trunk stood the day the branch was cut, and the span below has to be
+	// measured from the same copy the `Base:` line names — one read, one answer.
+	measure := s.cs.Base
 	if s.cs.BaseWhy != "" {
 		view.json.BaseRef, view.json.BaseWhy = s.cs.Base, s.cs.BaseWhy
+	} else if b, err := changeset.BaseFor(ctx, s.repo, s.cs, s.head, s.trunk); err == nil {
+		measure = b.Ref
+		if b.Ref != s.cs.Base {
+			view.json.BaseRef, view.json.BaseWhy = b.Ref, b.Why
+		}
 	}
 	for _, e := range s.summary.Unrecognised {
 		view.json.Unrecognised = append(view.json.Unrecognised, e.Short+" "+e.Subject)
@@ -427,7 +440,7 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 	// means nothing for a changeset read from another branch. Saying nothing beats
 	// printing a span that points somewhere else.
 	if s.onCurrentBranch {
-		if sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, span.Full()); err == nil {
+		if sp, err := span.Resolve(ctx, s.repo, measure, s.summary, span.Full()); err == nil {
 			view.json.Span = sp.Label
 			view.span = sp
 		}
@@ -466,6 +479,17 @@ func uncommitted(s *session) *bool {
 	return &v
 }
 
+// baseLine is the `Base:` value when the measurement base is not the recorded one: a commit is
+// abbreviated the way every other commit on this screen is, and a ref is trimmed to the name a reader
+// would type, because `refs/remotes/origin/main` and `origin/main` are the same answer and only one of
+// them reads as a sentence.
+func baseLine(j statusJSON) string {
+	if strings.HasPrefix(j.BaseRef, "refs/") {
+		return displayRef(j.BaseRef)
+	}
+	return short(j.BaseRef)
+}
+
 func printStatus(a *app, v *statusView) {
 	j := v.json
 	a.printf("Changeset: %s\n", j.Changeset)
@@ -477,7 +501,7 @@ func printStatus(a *app, v *statusView) {
 		a.printf("Branch: none (read from the landed chain)\n")
 	}
 	if j.BaseWhy != "" {
-		a.printf("Base: %s — %s\n", short(j.Base), j.BaseWhy)
+		a.printf("Base: %s — %s\n", baseLine(j), j.BaseWhy)
 	} else {
 		a.printf("Base: %s\n", j.Base)
 	}

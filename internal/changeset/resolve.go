@@ -90,8 +90,9 @@ func (d DefaultBranchRef) LocalName() string {
 // and `DefaultBranch` reaches it first whenever there is no local `main` to find — which is the ordinary
 // state of a clone that has fetched and not branched off trunk. A changeset file is read by other machines
 // and printed in `status`; a base spelled as a fetch ref reads as a different destination there, and says
-// "fetched" about a change that has never been pushed. Read-time resolution is unchanged: a name is tried
-// under `refs/heads/` first and then under `refs/remotes/`, so the two spellings resolve to one branch.
+// "fetched" about a change that has never been pushed. What is recorded and what is measured against are
+// two questions: `BaseFor` measures a changeset whose base names this branch against the fetched copy
+// (`Fetched`), and nothing else about the name changes.
 func (d DefaultBranchRef) BaseName() string {
 	if rest, ok := strings.CutPrefix(d.Ref, "refs/remotes/"); ok {
 		if _, tail, ok := strings.Cut(rest, "/"); ok {
@@ -99,6 +100,14 @@ func (d DefaultBranchRef) BaseName() string {
 		}
 	}
 	return d.LocalName()
+}
+
+// Fetched says this clone reaches the integration branch through a remote-tracking root —
+// `refs/remotes/origin/main` — rather than through a branch of its own. The two answer differently over
+// time: a fetch ref moves with `git fetch`, and a local branch moves only when someone updates it, which
+// for trunk most people never do. `BaseFor` reads this to decide which copy a diff is measured against.
+func (d DefaultBranchRef) Fetched() bool {
+	return strings.HasPrefix(d.Ref, "refs/remotes/")
 }
 
 // IsBranch reports whether a name means the integration branch, whichever root this clone happens to

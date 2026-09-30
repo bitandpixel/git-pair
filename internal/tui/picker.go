@@ -105,7 +105,11 @@ func (m reviewModel) endpointsFor(base bool) []pickerItem {
 	}
 	if base {
 		items = append(items, pickerItem{
-			label: "Changeset Base", detail: "base " + m.sess.Header().Base, ckpt: span.ChangesetBase(),
+			label: "Changeset Base",
+			// The session's base is the ref its spans measure against, which for a changeset measured
+			// against the integration branch is the fetched copy (`changeset.BaseFor`). The picker lists
+			// endpoints by the name a reviewer would type, and `refs/remotes/origin/main` is not that.
+			detail: "base " + span.ShortRef(m.sess.Header().Base), ckpt: span.ChangesetBase(),
 		})
 	}
 	items = append(items,

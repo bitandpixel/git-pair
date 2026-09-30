@@ -292,3 +292,26 @@ func TestSpanLabelsReadBackAsEntered(t *testing.T) {
 		t.Errorf("both spellings rendered as %q; the one the reviewer typed should survive", fromEnd.Label)
 	}
 }
+
+// The changeset base is named by the ref it measures against, and `BaseFor` names the integration branch
+// through its fetch ref. The label a reviewer reads has to say the same thing without spelling out the ref
+// path, and the checkpoint has to keep the path, because that is what re-resolves exactly.
+func TestChangesetBaseLabelNamesTheFetchedRef(t *testing.T) {
+	s := newScenario(t, false)
+	s.f.MustGit("update-ref", "refs/remotes/origin/main", s.f.RevParse("main"))
+	s.base = "refs/remotes/origin/main"
+
+	got, err := s.resolve(t, span.Full())
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got.Label != "origin/main...current" {
+		t.Errorf("Label = %q, want origin/main...current: the fetch root is not part of the name a reviewer reads", got.Label)
+	}
+	if got.Base.Name != "refs/remotes/origin/main" {
+		t.Errorf("base name = %q, want the qualified ref it resolved through", got.Base.Name)
+	}
+	if got.From != s.f.MergeBase("main", "HEAD") {
+		t.Errorf("From = %s, want the same merge base the branch name gives", got.From)
+	}
+}

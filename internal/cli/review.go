@@ -504,7 +504,7 @@ func runReviewReopen(ctx context.Context, a *app) error {
 	// something you are not allowed to mark, edit, or submit. What the reviewer has
 	// typed but not committed still shows up, in the preview's `you` section.
 	sel := span.SinceReview(-1)
-	sp, err := span.Resolve(ctx, s.repo, s.cs.Base, s.summary, sel)
+	sp, err := span.Resolve(ctx, s.repo, s.measureBase(ctx), s.summary, sel)
 	if err != nil {
 		if errors.Is(err, span.ErrNoReviews) {
 			return &usageError{fmt.Errorf("%w; run `git pair review open` for the whole changeset", err)}
