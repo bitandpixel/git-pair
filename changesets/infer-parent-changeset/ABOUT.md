@@ -15,6 +15,14 @@ file predates the rule. This is M1 of `docs/plans/derive-destination-from-tree/p
     `parentChangesetOn` now takes the resolved integration branch and returns the candidates it looked at,
     which is also what lets the existing `--parent` warning name them instead of saying only that it could
     not pick.
+will we be able to support multiple
+levels of parents? for example,
+grandparent A with changeset G, parent B
+with changeset P, child C with changeset
+C. if B is the base for C, it will see
+both G and P as unlanded changesets. we
+should filter out the parents unlanded
+ancestors when applicable.
 -   `internal/cli/check.go`: `recommendations` in `--json` — an array in both verdicts, for the reason
     `reasons` is one — and `recommend:` lines on the human surface. Computed after the gate, never inside it.
 -   PRD §21: the rule, and why a base naming a branch is not the same fact as a parent naming one.
@@ -27,6 +35,8 @@ measurement base rather than improve it. `BaseFor` rule 1 keeps measuring agains
 while the parent is still unlanded is the point the whole stack forked from trunk — the child's diff would
 then contain the parent's work. `renderMetadata` dropping `parent-changeset:` when `parent:` is absent is the
 same rule from the writer's side.
+can you explain why we would have both
+parent: and base: ?
 
 **A recommendation, not a reason.** A changeset written before this rule existed must not be held by it, and
 which key a file chose to name its parent with is not a condition a merge should depend on. `check` prints
