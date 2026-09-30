@@ -554,7 +554,7 @@ Two consequences the deliverables did not spell out:
 
 ### M9 - the PRD says the rule in this order
 
-**Status:** offered as `feat/prd-says-the-rule-in-order`.
+**Status:** landed as `0a4e1ed` from `feat/prd-says-the-rule-in-order`. This closes the plan: every milestone M1-M9 is now recorded as landed.
 
 Two references in the deliverables were stale and were read as what they meant rather than obeyed literally:
 
