@@ -1662,26 +1662,41 @@ the pair — with the lines under the columns saying what that pair resolves to,
 header and the band use (`main...current`, not a second spelling of the same span), and whether
 the screen would go read-only, before you commit to it. When git cannot resolve the pair there is no
 span to name, and the line shows what you chose instead (`changeset base → nonsense`). `u` and `f` are the unreviewed and full-changeset
-presets; `Esc` leaves the span exactly as it was. Each column lists the review submissions — the newest
-as `Last Review`, then `Review -2` and `Review -3`, older ones by the index you would type — then
-`Commit…` and `Ref…`; only the base offers the changeset base, and only the head offers `Current`
+presets; `Esc` leaves the span exactly as it was. Each column is one timeline rather than two lists:
+the review submissions — the newest as `Last Review`, then `Review -2` and `Review -3`, older ones by
+the index you would type — with the changeset's own commits written between them where they happened,
+so walking `j` from `Last Review` reaches the commits that followed it. That is usually the question
+this screen is opened to answer, and it reads better as one line than as two lists you have to
+transpose in your head. The commits are the ones the base does not already hold, and only the ones
+that change files: a marker commit holds no content to review, and it is on the list by alias already.
+Only the base offers the changeset base, and only the head offers `Current`
 (the live end, labelled `latest + edits`). `HEAD` appears nowhere in either list: beside `Current` it
-would be two similar-looking live targets when only one of them can be edited. `Commit…` is a searchable list of subjects and short ids that also takes a typed
-revision, so history past the window is one keystroke away, and refuses an id git does not know while
-the list is still on screen. `Ref…` groups branches, remote refs, tags and other refs under headings,
+would be two similar-looking live targets when only one of them can be edited. Wider history is `c`
+and `r`, which open a commit and a ref drill for whichever column is active. They are keys rather
+than rows because pointed at a row, `Enter` — the key you press on the thing you are pointing at —
+applied the pair you had come to the screen to change instead of descending into the drill.
+
+The commit drill is a searchable list of subjects and short ids that also takes a typed
+revision, so history past the window the columns read is one keystroke away, and it refuses an id git does not know while
+the list is still on screen. The ref drill groups branches, remote refs, tags and other refs under headings,
 showing `main` and `origin/main` while the checkpoint keeps `refs/heads/main` — a branch and a tag
 with the same name are two different choices, and drift has to be watched on the one you meant.
 
 Inside either drill the keys are in one of two modes, and the shortcut bar names the keys of the mode
-you are in. Typing is the default, and what you type is the filter — a space included, since `response
-0` is a thing to search for — with `Enter` picking and `Esc` stepping back to the columns. `Tab` hands
-the keys to the list: `j`/`k`, `gg`/`G`, `ctrl-d`/`ctrl-u` and `ctrl-f`/`ctrl-b`, `Space` or `Enter` to
-pick, `Tab` to give the keys back to the filter. The block after the filter is the caret, so it is
+you are in. The list has them first — `j`/`k`, `gg`/`G`, `ctrl-d`/`ctrl-u`, and `f`/`b` or
+`ctrl-f`/`ctrl-b` for a page — with `Space` or `Enter` picking and `esc` or `q` stepping back to the
+columns. `/` puts the keys on the filter instead, starting a fresh one as `less` does, because the text
+you are replacing is the reason you typed `/`; there what you type is the filter — a space included,
+since `response 0` is a thing to search for — with `Enter` picking and `esc` handing the keys back with
+the filter kept, so the rows you filtered to are still the rows you can walk. The block after the
+filter is the caret, so it is
 where your typing goes; navigation mode drops it. `Backspace` deletes a character and nothing else —
 with an empty filter it does nothing, because it used to throw the whole drill away. A drill also says
 which end it is choosing for (`for BASE`), since the columns that would otherwise say it are off screen.
-A checkpoint chosen from a drill has no row of its own, so the asterisk goes on the `Commit…` or `Ref…`
-row it came from, and `V` reopens with the cursor there. A short terminal shrinks the candidate lists
+A checkpoint the timeline has no row for — a ref, or a commit older than the window the columns read —
+gets a row of its own at the bottom of the column, wearing the asterisk, and `V` reopens with the
+cursor there: with the drills as keys rather than rows, that row is the only thing left that can say
+which end holds the pick. A short terminal shrinks the candidate lists
 rather than the frame: the shortcut bar wraps into rows first and the band is counted at the height it
 always takes, because a frame taller than the terminal repaints by scrolling and what scrolls off the
 bottom is the bar that says how to leave.

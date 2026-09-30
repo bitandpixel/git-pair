@@ -627,6 +627,65 @@ func (r *Repo) RecentCommits(ctx context.Context, limit int, revs ...string) ([]
 	return tips, nil
 }
 
+// RecentNonEmptyCommits lists the commits in revs that change at least one file, newest first, at
+// most limit of them.
+//
+// Leaving the empty ones out is the whole point. A git-pair changeset carries commits that hold
+// nothing but a marker — `review: approve`, `git-pair: ready` — and those are lifecycle events,
+// not work: a reviewer who wants the last submission picks it by alias, not by sha. Merges go the
+// same way, since git prints no files for one by default and a span wants a place with content in
+// it. The picker that uses this also takes a typed id, so a commit this window skips is reachable.
+func (r *Repo) RecentNonEmptyCommits(ctx context.Context, limit int, revs ...string) ([]CommitTip, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	// RecordSep opens each record rather than closing it, which keeps a commit's `--raw` file
+	// lines inside its own record instead of stranding them at the head of the next one.
+	format := RecordSep + "%H" + FieldSep + "%h" + FieldSep + "%at" + FieldSep + "%s"
+	args := []string{"log", "--no-merges", "--raw", "--max-count=" + strconv.Itoa(limit), "--format=" + format}
+	args = append(args, revs...)
+	out, err := r.Git(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	var tips []CommitTip
+	for _, record := range strings.Split(out, RecordSep) {
+		record = strings.TrimPrefix(record, "\n")
+		if record == "" {
+			continue
+		}
+		lines := strings.SplitN(record, "\n", 2)
+		parts := strings.SplitN(lines[0], FieldSep, 4)
+		if len(parts) < 4 {
+			continue
+		}
+		if len(lines) < 2 || !changesFiles(lines[1]) {
+			continue
+		}
+		when, err := strconv.ParseInt(parts[2], 10, 64)
+		if err != nil {
+			continue
+		}
+		tips = append(tips, CommitTip{
+			SHA: parts[0], Short: parts[1], Subject: parts[3],
+			When: time.Unix(when, 0),
+		})
+	}
+	return tips, nil
+}
+
+// changesFiles reports whether a commit's `--raw` block named a file. One `:`-prefixed line per
+// file follows the record, with a blank line in between, so the block is scanned rather than read
+// at its first line.
+func changesFiles(raw string) bool {
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.HasPrefix(line, ":") {
+			return true
+		}
+	}
+	return false
+}
+
 // FirstParentLine lists the commits on ref's first-parent line, newest first, at most limit of
 // them (200 when limit is unset).
 //
