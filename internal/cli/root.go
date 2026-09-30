@@ -45,6 +45,10 @@ type app struct {
 	stdout io.Writer
 	stderr io.Writer
 	json   bool
+	// noCache turns off both local caches for one run. The answers are the same either way — a cached
+	// fact is derived from the same commits the uncached derivation reads — so this is for measuring, for
+	// debugging a suspected bad answer, and for a machine where writing to the git directory is unwanted.
+	noCache bool
 	// defaultBranch is the `--default-branch` override. Every command that asks "has this
 	// landed?" needs the integration branch to answer, and CI passes this because a checkout
 	// built with `init` and one `fetch` has no recorded remote default to read.
@@ -165,6 +169,8 @@ Gate:              git pair check, then merge into the destination with ordinary
 		},
 	}
 	root.PersistentFlags().Bool("json", false, "machine-readable output where supported")
+	root.PersistentFlags().BoolVar(&a.noCache, "no-cache", false,
+		"derive everything from git again, ignoring the local caches under the git directory")
 	root.PersistentFlags().StringVar(&a.defaultBranch, "default-branch", "",
 		"ref of the integration branch; otherwise git-pair reads git's own answer (origin/HEAD, then a sole main/master)")
 	root.AddCommand(
@@ -491,6 +497,20 @@ func (a *app) loadRepo(ctx context.Context) (*git.Repo, error) {
 		return nil, err
 	}
 	a.repo = repo
+	// A command run is one observation of a repository the command itself does not move, so repeated
+	// git reads within it have one answer. The two surfaces that outlive a run — the review session and
+	// `change wait` — turn this back off where they start, because across them refs really do move.
+	//
+	// `--no-cache` turns both off. It is not a correctness escape hatch — a cached fact is derived from the
+	// same commits the uncached derivation reads, and an invalid key is a miss rather than a stale answer —
+	// so it exists to let a slow command be measured against a fast one, and to let a machine that would
+	// rather nothing were written under its git directory say so.
+	if !a.noCache {
+		repo.Memoize(true)
+		// The derived-fact cache is on for every handle this hands out, including the long-lived ones: its
+		// answers are keyed on commit ids, and a commit does not change under a session that kept reading it.
+		repo.FactCache(true)
+	}
 	return repo, nil
 }
 

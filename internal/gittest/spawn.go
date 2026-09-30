@@ -23,6 +23,12 @@ import (
 // test's own fixture calls go through the shim too, so a measurement is a delta taken around the
 // thing being measured rather than a total. Everything created before the shim is called is
 // outside the count by construction.
+//
+// Calling it also clears the repository's derived-fact cache, so a measurement is a cold one. A warm
+// cache answers those questions from disk without spawning git at all, and a counter that reports a
+// handful of invocations for a run that did the work would read as a bound having been met when it was
+// only been hidden. The guarantee lives with the instrument, because a test that forgot it would fail in
+// the wrong direction: it would pass.
 func (f *Fixture) SpawnShim(t *testing.T) (count func() int) {
 	t.Helper()
 	count, _ = f.spawnShim(t)
@@ -38,6 +44,7 @@ func (f *Fixture) SpawnShimLines(t *testing.T) (count func() int, lines func() [
 }
 
 func (f *Fixture) spawnShim(t *testing.T) (count func() int, lines func() []string) {
+	f.clearFactCache()
 	real, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatalf("gittest: no git on PATH to count around: %v", err)
@@ -94,4 +101,23 @@ func (f *Fixture) spawnShim(t *testing.T) (count func() int, lines func() []stri
 func (f *Fixture) SpawnRepo(t *testing.T) (*git.Repo, func() int) {
 	t.Helper()
 	return &git.Repo{Dir: f.Dir(), Env: f.Env()}, f.SpawnShim(t)
+}
+
+// clearFactCache removes the derived-fact cache from this repository's git directory.
+//
+// It is best-effort by design: a fixture with no git directory, or no cache yet, has nothing to clear,
+// and a test that measures cost should not fail because the thing it is clearing was never written.
+func (f *Fixture) clearFactCache() {
+	f.t.Helper()
+	out, err := f.Git("rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return
+	}
+	gitDir := strings.TrimSpace(out)
+	if gitDir == "" {
+		return
+	}
+	if err := os.RemoveAll(filepath.Join(gitDir, "git-pair", "cache")); err != nil {
+		f.t.Fatalf("gittest: clear fact cache: %v", err)
+	}
 }

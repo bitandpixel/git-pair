@@ -143,6 +143,13 @@ func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	s := &Session{
 		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span, trunk: opts.Trunk,
 	}
+	// A review session is open for as long as a reviewer is reading, and a review of frozen state is the
+	// expensive failure: the reviewer's own `git fetch`, or a submission arriving in another clone, has to
+	// be visible. The session already drops its own diff and document caches on a span toggle or a tool
+	// handoff for the same reason (see reviewModel.forgetPatches); this is that rule at the git boundary,
+	// and it is off for the whole session rather than at each boundary because the boundaries are many and
+	// the saving here is not the one worth taking.
+	opts.Repo.Memoize(false)
 	if err := s.Rescan(ctx); err != nil {
 		return nil, err
 	}

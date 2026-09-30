@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"gitpair/internal/changeset"
+	"gitpair/internal/factcache"
 	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
@@ -65,33 +66,97 @@ type unreviewedLanding struct {
 // about the destination — a clone that has fetched nothing but trunk gives the same answer, which is the
 // whole argument for reading the tree. A read that fails is skipped rather than reported: a destination
 // this clone cannot walk is not a finding about the work in it.
+//
+// The per-changeset work is cached as one record against the destination's tip, which is what keeps this
+// from being the command's whole cost as a repository accumulates landings. Everything the record holds is
+// derived from that one commit and from the chain behind it, so it cannot go stale: a destination that has
+// moved since is a different commit, which is a different key, which asks git again. The record is the
+// answer to this one question rather than the intermediate reads, because asking it as one question is what
+// turns ten git invocations into none.
 func (a *app) unreviewedLandings(ctx context.Context, repo *git.Repo, trunk changeset.DefaultBranchRef,
 	ids []string) []unreviewedLanding {
 	found := []unreviewedLanding{}
 	if trunk.Ref == "" {
 		return found
 	}
+	// The key is the commit the destination points at, not the ref it was named by: `refs/remotes/origin/main`
+	// and `refs/heads/main` are the same branch read twice, and an answer about one is an answer about the
+	// other. A destination this clone cannot resolve has no answers either, so the loop below still runs and
+	// simply caches nothing.
+	tip, tipErr := repo.RevParse(ctx, trunk.Ref)
 	for _, id := range ids {
-		chain, err := changeset.LandedChain(ctx, repo, trunk.Ref, id)
-		if err != nil {
+		key := ""
+		if tipErr == nil {
+			key = factcache.Key("unreviewed", tip, id)
+			var hit unreviewedRecord
+			if repo.Facts().Get(key, &hit) {
+				if !hit.Licensed {
+					found = append(found, hit.landing(id))
+				}
+				continue
+			}
+		}
+		record, ok := a.unreviewedRecord(ctx, repo, trunk, id)
+		if !ok {
 			continue
 		}
-		summary, err := lifecycle.Summarize(ctx, repo, id, chain.Base, chain.Head)
-		if err != nil {
+		// Only a record that was actually derived is written. An unreadable destination is not an answer
+		// about the work in it — it is this clone failing to walk its own history — and keeping it would pin
+		// a transient read failure against this commit for as long as the cache lives. It costs almost nothing
+		// to re-derive: every id in `ids` is a directory the destination carries, so the unreadable case is
+		// the rare one, and it is the one where the derivation was cheap anyway.
+		if key != "" {
+			repo.Facts().Put(key, record)
+		}
+		if record.Licensed {
 			continue
 		}
-		licensed, reason := a.landingLicence(ctx, repo, trunk.Ref, chain, integrationVerdict(summary))
-		if licensed {
-			continue
-		}
-		found = append(found, unreviewedLanding{
-			Changeset: id,
-			Commit:    short(chain.Landing),
-			Chain:     chainRange(chain),
-			Reason:    reason,
-		})
+		found = append(found, record.landing(id))
 	}
 	return found
+}
+
+// unreviewedRecord is one changeset's answer, in the form this detector wants, kept against the destination
+// commit it was derived from. Only the rendered fields are stored, because that is all the caller produces
+// from them: an entry written by a build that renders the sentence differently is an entry the `format`
+// check in factcache turns into a miss.
+type unreviewedRecord struct {
+	// Licensed says the destination holds an approval of what it holds, so there is nothing to report.
+	// It is the field that makes the cache pay: a repository whose landings were all reviewed is the
+	// repository with the most landed directories, and each of them used to cost a full derivation to say
+	// nothing.
+	Licensed bool   `json:"licensed"`
+	Commit   string `json:"commit"`
+	Chain    string `json:"chain"`
+	Reason   string `json:"reason"`
+}
+
+// landing renders the record as the row the two surfaces print. The changeset id is not in the record: it
+// is part of the cache key, and storing it would let a file written under one id report itself under
+// another.
+func (r unreviewedRecord) landing(id string) unreviewedLanding {
+	return unreviewedLanding{Changeset: id, Commit: r.Commit, Chain: r.Chain, Reason: r.Reason}
+}
+
+// unreviewedRecord derives one changeset's answer. ok is false when the destination carries no readable
+// record for it — the case the caller prints nothing for, and the case that is never cached.
+func (a *app) unreviewedRecord(ctx context.Context, repo *git.Repo, trunk changeset.DefaultBranchRef,
+	id string) (unreviewedRecord, bool) {
+	chain, err := changeset.LandedChain(ctx, repo, trunk.Ref, id)
+	if err != nil {
+		return unreviewedRecord{}, false
+	}
+	summary, err := lifecycle.Summarize(ctx, repo, id, chain.Base, chain.Head)
+	if err != nil {
+		return unreviewedRecord{}, false
+	}
+	licensed, reason := a.landingLicence(ctx, repo, trunk.Ref, chain, integrationVerdict(summary))
+	return unreviewedRecord{
+		Licensed: licensed,
+		Commit:   short(chain.Landing),
+		Chain:    chainRange(chain),
+		Reason:   reason,
+	}, true
 }
 
 // chainRange names the range the verdict was looked for in, so a reader can go and look. An unreadable
