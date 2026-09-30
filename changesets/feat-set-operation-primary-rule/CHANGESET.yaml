@@ -1,0 +1,3 @@
+id: feat-set-operation-primary-rule
+base: feat/base-changeset-always-recorded
+base-changeset: feat-base-changeset-always-recorded
