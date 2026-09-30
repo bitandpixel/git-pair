@@ -2908,6 +2908,15 @@ booking-transaction-ui:
   parent-changeset: booking-transaction-tests
 ```
 
+A base named at `init` is read by the same rule. When `--base` names a branch carrying exactly one unlanded
+changeset, the work is stacked on that branch, and `init` records the pair above in place of a plain `base:`.
+The two are not interchangeable: a `base:` keeps naming the branch after the work on it lands, which is the
+state in which every command that reads it names finished work as the destination, while `parent:` is read
+against the destination and answers the same question once the parent's branch is gone. Two or more unlanded
+changesets on that branch is not a guess `init` makes — one may be the parent and another a sibling sharing
+the branch — so the base stands as written and every candidate is named for the author to pick. `check`
+recommends the same declaration for a changeset whose file predates this; it recommends, and never refuses.
+
 Each branch has:
 
 -   its own `ABOUT.md`,

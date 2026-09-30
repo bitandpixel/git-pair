@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -61,6 +62,10 @@ The parent's own changeset is recorded beside it as parent-changeset:, which is 
 the relationship after the parent lands and its branch is gone. Restacking an existing changeset
 takes --set-parent, the same way changing a base takes --set-base; git-pair never restacks a changeset
 by itself, because a parent that moved or died is a decision for the author, not a default.
+
+A base named with --base is read the same way: when that branch carries exactly one unlanded changeset, the
+work is stacked on it, and the pair above is recorded in place of a plain base. Two or more changesets on
+that branch is not a guess to make, so the base stands as written and every candidate is named.
 
 The commit covers the changeset directory only, so whatever else is staged on
 your index stays there. Use --no-commit to leave the scaffolding in the working
@@ -184,15 +189,34 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	// not demanded — a parent that carries none, or carries two, is recorded with just its branch
 	// name, because guessing an ID here would write a claim nobody checked into the file that is
 	// read after the parent is gone.
+	db, dbErr := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
 	parentChangeset := ""
+	// stackBase is the branch the stack is recorded on: `--parent` when one was named, and the base when the
+	// base turned out to name a branch carrying somebody else's unlanded work.
+	stackBase := opts.parent
 	if opts.parent != "" {
-		if db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch); err == nil && db.IsBranch(opts.parent) {
+		if dbErr == nil && db.IsBranch(opts.parent) {
 			return &usageError{fmt.Errorf("--parent %s is the integration branch, which is not a stack: a changeset measured against it is not stacked. --base %s is the flag for that", opts.parent, opts.parent)}
 		}
-		pcs, why := parentChangesetOn(ctx, repo, opts.parent, a.defaultBranch)
+		pcs, candidates, why := parentChangesetOn(ctx, repo, opts.parent, db)
 		parentChangeset = pcs
 		if pcs == "" {
-			a.warn("warning: parent %s has no changeset of its own (%s), so parent-changeset: is left empty. The stack is recorded by branch name only\n", opts.parent, why)
+			a.warn("warning: parent %s has no changeset of its own (%s), so parent-changeset: is left empty. The stack is recorded by branch name only%s\n", opts.parent, why, candidateNote(candidates))
+		}
+	} else if dbErr == nil && base != "" && !db.IsBranch(base) {
+		// A base naming a branch that carries exactly one unlanded changeset is a stack, however it was
+		// spelled. The pair is recorded rather than the id alone, and the difference is not cosmetic: a
+		// `base:` keeps naming that branch after the work on it lands, which is the state where `check` names
+		// finished work as the destination, while `parent:` is read against the destination and answers the
+		// same question once the parent's branch is gone (PRD 21). Two or more unlanded changesets on that
+		// branch is a different situation - nothing here can tell which one this work is stacked on - so the
+		// base stands as authored and every candidate is named for the author to pick.
+		if pcs, candidates, _ := parentChangesetOn(ctx, repo, base, db); pcs != "" && len(candidates) == 1 {
+			stackBase, parentChangeset = base, pcs
+			a.warn("parent: %s (the base carries changeset %s, so this work is stacked on it: `parent:` and `parent-changeset:` are recorded in place of a plain `base:`)\n", base, pcs)
+		} else if len(candidates) >= 2 {
+			a.warn("warning: base %s carries %d unlanded changesets (%s), so no stack is recorded. Pass --parent %s if this work is stacked on one of them\n",
+				base, len(candidates), strings.Join(candidates, ", "), base)
 		}
 	}
 
@@ -214,10 +238,12 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		About:    about,
 		SetAbout: opts.setAbout,
 	}
-	if opts.parent != "" {
+	if stackBase != "" {
 		writeOpts.Base = ""
-		writeOpts.Parent = opts.parent
+		writeOpts.Parent = stackBase
 		writeOpts.ParentChangeset = parentChangeset
+		// --set-parent stays the author's flag. The inference records a stack that was always there; it does
+		// not restack a changeset that had recorded a different one.
 		writeOpts.SetParent = opts.setParent
 	}
 	written, err := changeset.Write(repo, cs, writeOpts)
@@ -347,19 +373,76 @@ func printInitNext(a *app, cs changeset.Changeset, described bool) {
 
 // defaultBase picks the repository's trunk without guessing wildly.
 // parentChangesetOn finds the changeset that lives on a parent branch, and says why it could not.
-func parentChangesetOn(ctx context.Context, repo *git.Repo, parent, defaultBranch string) (string, string) {
-	db, err := changeset.DefaultBranch(ctx, repo, defaultBranch)
-	if err != nil {
-		return "", "the integration branch is not resolved, so the parent's changeset cannot be told from its inherited ones"
+func parentChangesetOn(ctx context.Context, repo *git.Repo, parent string, db changeset.DefaultBranchRef) (string, []string, string) {
+	if db.Ref == "" {
+		return "", nil, "the integration branch is not resolved, so the parent's changeset cannot be told from its inherited ones"
 	}
 	res, err := changeset.Resolve(ctx, repo, "refs/heads/"+parent, db)
 	if err != nil {
-		return "", err.Error()
+		return "", nil, err.Error()
 	}
-	if res.Selected == nil {
-		return "", "no single unlanded changeset on it"
+	candidates := make([]string, 0, len(res.Candidates))
+	for _, c := range res.Candidates {
+		candidates = append(candidates, c.Changeset.Slug)
 	}
-	return res.Selected.Changeset.Slug, ""
+	// A branch created from its parent's branch carries the whole unlanded ancestry in its tree: A off trunk,
+	// B off A, so B's tree holds A's directory as well as its own. Asking "which changeset is this base the
+	// base of?" then gets one answer per level, and the levels below the top are not what the base reveals -
+	// the changeset that names them is. So a candidate another candidate records as its own parent is dropped
+	// before anything is chosen. It reads the recorded chain and nothing else, which is what keeps two
+	// siblings sharing a branch a refusal: nothing orders those, and nothing here pretends to.
+	candidates = withoutRecordedAncestors(ctx, repo, "refs/heads/"+parent, candidates)
+	if res.Selected != nil {
+		if selected := res.Selected.Changeset.Slug; slices.Contains(candidates, selected) {
+			return selected, candidates, ""
+		}
+	}
+	if len(candidates) == 1 {
+		return candidates[0], candidates, ""
+	}
+	return "", candidates, "no single unlanded changeset on it"
+}
+
+// withoutRecordedAncestors drops the candidates that another candidate names somewhere in its own parent
+// chain, which leaves the top of the stack the base reveals. It costs nothing when there is one candidate to
+// choose between, and returns the list untouched when nothing would survive: an empty answer is
+// not an inference either. The reads are one CHANGESET.yaml per hop, and only on the path that today refuses.
+func withoutRecordedAncestors(ctx context.Context, repo *git.Repo, rev string, candidates []string) []string {
+	if len(candidates) < 2 {
+		return candidates
+	}
+	ancestor := map[string]bool{}
+	for _, id := range candidates {
+		at, seen := id, map[string]bool{id: true}
+		for depth := 0; depth < stackDepthCap; depth++ {
+			st, err := changeset.StackAt(ctx, repo, rev, at)
+			if err != nil || st.ParentChangeset == "" || seen[st.ParentChangeset] {
+				break
+			}
+			at = st.ParentChangeset
+			seen[at] = true
+			ancestor[at] = true
+		}
+	}
+	kept := make([]string, 0, len(candidates))
+	for _, id := range candidates {
+		if !ancestor[id] {
+			kept = append(kept, id)
+		}
+	}
+	if len(kept) == 0 {
+		return candidates
+	}
+	return kept
+}
+
+// candidateNote is the half of the warning that names what was found. `Resolve` orders candidates by
+// nearness and declines to pick when nothing orders them; the author can pick, and needs the ids to do it.
+func candidateNote(candidates []string) string {
+	if len(candidates) < 2 {
+		return ""
+	}
+	return fmt.Sprintf(" (it carries %d: %s)", len(candidates), strings.Join(candidates, ", "))
 }
 
 // defaultBase is the base `init` records when the author does not name one. It is the
