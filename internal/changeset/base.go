@@ -47,7 +47,7 @@ type Base struct {
 // derivation per branch rather than paying for it five times.
 func BaseFor(ctx context.Context, repo *git.Repo, c Changeset, head string, db DefaultBranchRef) (Base, error) {
 	out := Base{ParentBranch: c.ParentBranch}
-	if c.ParentChangeset == "" && c.ParentBranch == "" {
+	if c.BaseChangeset == "" && c.ParentBranch == "" {
 		// Not stacked: the base it recorded is the answer, and inventing a derivation would be second-guessing
 		// a `base:` the author wrote on purpose.
 		out.Ref, out.Why = c.Base, "recorded base"
@@ -58,8 +58,8 @@ func BaseFor(ctx context.Context, repo *git.Repo, c Changeset, head string, db D
 	}
 
 	parentLanded := false
-	if db.Ref != "" && c.ParentChangeset != "" {
-		parentLanded, _ = CarriesDir(ctx, repo, db.Ref, c.ParentChangeset)
+	if db.Ref != "" && c.BaseChangeset != "" {
+		parentLanded, _ = CarriesDir(ctx, repo, db.Ref, c.BaseChangeset)
 	}
 	if c.ParentBranch != "" && !parentLanded {
 		if _, err := repo.RevParse(ctx, c.ParentBranch); err == nil {
@@ -80,7 +80,7 @@ func BaseFor(ctx context.Context, repo *git.Repo, c Changeset, head string, db D
 			switch {
 			case parentLanded && c.ParentBranch != "":
 				out.Why = fmt.Sprintf("the parent %s landed, so the run this branch shares with %s",
-					c.ParentChangeset, shortRef(db.Ref))
+					c.BaseChangeset, shortRef(db.Ref))
 			case parentLanded:
 				out.Why = fmt.Sprintf("the parent landed, so the run this branch shares with %s", shortRef(db.Ref))
 			case c.ParentBranch != "":

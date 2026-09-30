@@ -458,12 +458,12 @@ func candidateFor(id string, md map[string]string) (Candidate, error) {
 	}
 	return Candidate{
 		Changeset: Changeset{
-			Slug:            id,
-			Base:            stack.Base,
-			ParentBranch:    stack.Parent,
-			ParentChangeset: stack.ParentChangeset,
-			Dir:             filepath.Join(Root, id),
-			Exists:          true,
+			Slug:          id,
+			Base:          stack.Base,
+			ParentBranch:  stack.Parent,
+			BaseChangeset: stack.BaseChangeset,
+			Dir:           filepath.Join(Root, id),
+			Exists:        true,
 		},
 		Distance: -1,
 		Ignores:  strings.Fields(md[IgnoresKey]),
@@ -611,9 +611,15 @@ func parentID(base string) string {
 	return strings.TrimPrefix(base, "refs/heads/")
 }
 
-// stackParentID names the branch a candidate is stacked on, whether the stack recorded it as a
-// branch or the resolver redirected the measurement base to the parent's landing commit.
+// stackParentID names what a candidate says is below it. The recorded id comes first: it is the value that
+// survives its branch's deletion, and it is the only one the ancestor drop can match against a changeset slug.
+// Before M4 a stack recorded as `base:` returned a branch name from here and the drop never fired for it, which
+// is why the CLI had its own walker over the recorded chain. The branch name follows, for a stack recorded
+// before ids were kept, and the measurement base last, for a base the resolver derived and the file did not name.
 func stackParentID(c Candidate) string {
+	if c.Changeset.BaseChangeset != "" {
+		return c.Changeset.BaseChangeset
+	}
 	if c.Changeset.ParentBranch != "" {
 		return c.Changeset.ParentBranch
 	}
@@ -637,7 +643,7 @@ func stackParentID(c Candidate) string {
 // head to compare against and this resolver does not.
 func applyBases(ctx context.Context, repo *git.Repo, candidates []Candidate, db DefaultBranchRef, head string) error {
 	for i, c := range candidates {
-		if c.Changeset.ParentBranch == "" && c.Changeset.ParentChangeset == "" {
+		if c.Changeset.ParentBranch == "" && c.Changeset.BaseChangeset == "" {
 			continue
 		}
 		b, err := BaseFor(ctx, repo, c.Changeset, head, db)

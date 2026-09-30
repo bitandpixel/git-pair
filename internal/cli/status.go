@@ -286,7 +286,7 @@ func (a *app) stackChain(ctx context.Context, s *session) ([]stackStep, string) 
 		return steps, fmt.Sprintf("this clone could not list its branches (%s), so it cannot say which parent branches still exist", err)
 	}
 	seen := map[string]bool{s.cs.Slug: true}
-	id, branch := s.cs.ParentChangeset, s.cs.ParentBranch
+	id, branch := s.cs.BaseChangeset, s.cs.ParentBranch
 	for depth := 0; id != ""; depth++ {
 		if seen[id] {
 			return steps, fmt.Sprintf("changeset %s is named twice in this chain, so the walk stops there", id)
@@ -320,7 +320,7 @@ func (a *app) stackChain(ctx context.Context, s *session) ([]stackStep, string) 
 		if err != nil {
 			return steps, fmt.Sprintf("changesets/%s/ cannot be read at %s, so the chain above it is unread here", id, short(at))
 		}
-		id, branch = stack.ParentChangeset, stack.Parent
+		id, branch = stack.BaseChangeset, stack.Parent
 	}
 	return steps, ""
 }

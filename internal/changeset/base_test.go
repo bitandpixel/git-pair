@@ -50,7 +50,7 @@ func stacked(t *testing.T, f *gittest.Fixture) (changeset.Changeset, changeset.C
 	f.Commit("beta: the work", gittest.WithFile("beta.txt", "1\n"))
 	parent := changeset.Changeset{Slug: "alpha", Branch: "alpha", Base: "main"}
 	child := changeset.Changeset{Slug: "beta", Branch: "beta", Base: "alpha",
-		ParentBranch: "alpha", ParentChangeset: "alpha"}
+		ParentBranch: "alpha", BaseChangeset: "alpha"}
 	return parent, child, f.RevParse("beta")
 }
 

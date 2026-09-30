@@ -373,10 +373,10 @@ func (a *app) behindParent(ctx context.Context, repo *git.Repo, cs changeset.Cha
 // name.
 func (a *app) landedParentNote(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
 	db changeset.DefaultBranchRef, head string) (string, error) {
-	if cs.ParentChangeset == "" || db.Ref == "" {
+	if cs.BaseChangeset == "" || db.Ref == "" {
 		return "", nil
 	}
-	chain, err := changeset.LandedChain(ctx, repo, db.Ref, cs.ParentChangeset)
+	chain, err := changeset.LandedChain(ctx, repo, db.Ref, cs.BaseChangeset)
 	if err != nil {
 		// No chain means the destination does not carry the parent, which is the same answer as the old
 		// "no record" — and one read of the destination's history is what replaces the index.
@@ -389,14 +389,14 @@ func (a *app) landedParentNote(ctx context.Context, repo *git.Repo, cs changeset
 	}
 	branch := cs.ParentBranch
 	if branch == "" {
-		branch = cs.ParentChangeset
+		branch = cs.BaseChangeset
 	}
 	// The step is spelled by the same helper `status` and `check` print, with one thing left out: the
 	// worktree lookup. The queue is a reviewer's surface and its cost is per row, so it names the command
 	// and leaves the blocker to the command the author runs before deleting anything.
 	st := parentStatus{Branch: branch, Landed: short(sha), StaleBranch: on}
 	return fmt.Sprintf("%s: parent %s landed as %s — %s",
-		cs.Slug, cs.ParentChangeset, short(sha), landedParentStep(cs, st)), nil
+		cs.Slug, cs.BaseChangeset, short(sha), landedParentStep(cs, st)), nil
 }
 
 // branchQueueEntries is what one branch contributes to the two queue lists, from one read of its history.

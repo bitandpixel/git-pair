@@ -24,15 +24,17 @@ func TestInitRecordsTheStackTheBaseReveals(t *testing.T) {
 	res := runIn(t, f.Dir(), "init", "--base", "booking").mustSucceed(t, "init")
 
 	md := f.Read("changesets/booking-tests/CHANGESET.yaml")
-	for _, want := range []string{"parent: booking\n", "parent-changeset: booking\n"} {
+	for _, want := range []string{"base: booking\n", "base-changeset: booking\n"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("CHANGESET.yaml is missing %q:\n%s", want, md)
 		}
 	}
-	if strings.Contains(md, "base:") {
-		t.Errorf("`parent:` is the base, so no `base:` belongs beside it:\n%s", md)
+	// The older spelling is read and never written. A file that arrived with `parent:` keeps answering, but a
+	// file written from here on records the stack as a base plus the changeset recorded on it.
+	if strings.Contains(md, "parent:") {
+		t.Errorf("no `parent:` belongs in a file written now:\n%s", md)
 	}
-	// The inference is said out loud. An author who typed `--base` and got `parent:` needs to learn that at
+	// The inference is said out loud. An author who typed `--base` and got a stack needs to learn that at
 	// the command, not in a review round on a file they believe they already wrote.
 	mustContain(t, res.stdout+res.stderr, "stacked on it", "the notice naming the inference")
 }
@@ -142,6 +144,45 @@ func TestCheckRecommendsTheStackLinkInitWouldHaveRecorded(t *testing.T) {
 	}
 }
 
+// The recorded id is what the ancestor drop and the base derivation both read, so a file whose id and whose base
+// name different changesets is read two ways at once: the branch says one changeset is below this one, the id says
+// another. Which is stale is the author's fact - the parent may have been renamed, or the file may have been
+// restacked by hand - so this arrives as advice, and a reviewer cannot settle it from the diff any better.
+func TestCheckRecommendsWhenTheRecordedIdAndItsBaseDisagree(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("feature/booking")
+	f.CommitChangeset("booking", "main")
+	f.Commit("impl", gittest.WithFile("service.go", "package main\n"))
+	f.CreateBranch("feature/booking-tests", "feature/booking")
+	f.WriteChangesetFile("booking-tests", "CHANGESET.yaml",
+		"id: booking-tests\nbase: feature/booking\nbase-changeset: booking-renamed\n")
+	f.Commit("tests work", gittest.WithFile("tests.go", "package main\n"))
+
+	out := runIn(t, f.Dir(), "check", "--json").json(t)
+	recs, ok := out["recommendations"].([]any)
+	if !ok || len(recs) != 1 {
+		t.Fatalf("recommendations = %v, want the one disagreement:\n%s", out["recommendations"], out["reasons"])
+	}
+	for _, want := range []string{"carries changeset booking,", "records booking-renamed", "--set-parent"} {
+		if !strings.Contains(recs[0].(string), want) {
+			t.Errorf("the advice omits %q:\n%s", want, recs[0])
+		}
+	}
+	for _, r := range out["reasons"].([]any) {
+		if strings.Contains(r.(string), "stale") {
+			t.Errorf("the disagreement was written as a reason, which would gate the merge:\n%s", r)
+		}
+	}
+
+	human := runIn(t, f.Dir(), "check")
+	mustContain(t, human.stdout,
+		"recommend: base feature/booking carries changeset booking, while this file records booking-renamed",
+		"the prefix that separates advice from a reason")
+	if strings.Contains(human.stdout, "- base feature/booking carries") {
+		t.Errorf("the advice printed with the reason bullets on the human surface:\n%s", human.stdout)
+	}
+}
+
 // The other half of the same claim: a changeset whose parent is recorded needs no advice, and a changeset
 // measured against trunk needs none either. Silence is the ordinary case.
 func TestCheckIsSilentWhenTheStackIsRecordedOrThereIsNoStack(t *testing.T) {
@@ -181,13 +222,15 @@ func TestInitLooksPastTheAncestorsAStackedBaseCarries(t *testing.T) {
 	res := runIn(t, f.Dir(), "init", "--base", "feature/auth-tests").mustSucceed(t, "init")
 
 	md := f.Read("changesets/feature-auth-cases/CHANGESET.yaml")
-	for _, want := range []string{"parent: feature/auth-tests\n", "parent-changeset: feature-auth-tests\n"} {
+	// The level below is still written the older way in this fixture on purpose: a legacy file under a new one
+	// is the state trunk is in, and the drop that finds the top of the chain has to read both spellings.
+	for _, want := range []string{"base: feature/auth-tests\n", "base-changeset: feature-auth-tests\n"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("CHANGESET.yaml is missing %q:\n%s", want, md)
 		}
 	}
-	if strings.Contains(md, "base:") {
-		t.Errorf("`parent:` is the base, so no `base:` belongs beside it:\n%s", md)
+	if strings.Contains(md, "parent:") {
+		t.Errorf("no `parent:` belongs in a file written now:\n%s", md)
 	}
 	mustContain(t, res.stdout+res.stderr, "stacked on it", "the notice naming the inference")
 }

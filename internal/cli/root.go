@@ -342,10 +342,10 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 		// Derived, so that nothing downstream mistakes it for a place work can land: a commit the run sits
 		// on is a measurement point, and the question "where does this go" has to be answered one level up.
 		baseDerived := true
-		if stack.Parent != "" && stack.ParentChangeset != "" {
+		if stack.Parent != "" && stack.BaseChangeset != "" {
 			if _, err := repo.RevParse(ctx, "refs/heads/"+stack.Parent); errors.Is(err, git.ErrUnknownRevision) {
 				b, berr := changeset.BaseFor(ctx, repo, changeset.Changeset{Slug: slug, Base: base,
-					ParentBranch: stack.Parent, ParentChangeset: stack.ParentChangeset}, chain.Head, db)
+					ParentBranch: stack.Parent, BaseChangeset: stack.BaseChangeset}, chain.Head, db)
 				if berr != nil && !errors.Is(berr, changeset.ErrNoDefaultBranch) {
 					return changeset.Changeset{}, lifecycle.Summary{}, "", berr
 				}
@@ -355,14 +355,14 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 			}
 		}
 		cs := changeset.Changeset{
-			Slug:            slug,
-			Dir:             filepath.Join(changeset.Root, slug),
-			Base:            base,
-			BaseWhy:         baseWhy,
-			BaseDerived:     baseDerived,
-			ParentBranch:    stack.Parent,
-			ParentChangeset: stack.ParentChangeset,
-			Exists:          true,
+			Slug:          slug,
+			Dir:           filepath.Join(changeset.Root, slug),
+			Base:          base,
+			BaseWhy:       baseWhy,
+			BaseDerived:   baseDerived,
+			ParentBranch:  stack.Parent,
+			BaseChangeset: stack.BaseChangeset,
+			Exists:        true,
 		}
 		summary, err := lifecycle.Summarize(ctx, repo, slug, base, anchor)
 		if err != nil {
@@ -463,8 +463,8 @@ func (a *app) explainBrokenStack(ctx context.Context, repo *git.Repo, cs changes
 	if _, e := repo.RevParse(ctx, "refs/heads/"+cs.ParentBranch); e == nil {
 		return err
 	}
-	if cs.ParentChangeset != "" && db.Ref != "" {
-		if landed, _ := changeset.CarriesDir(ctx, repo, db.Ref, cs.ParentChangeset); landed {
+	if cs.BaseChangeset != "" && db.Ref != "" {
+		if landed, _ := changeset.CarriesDir(ctx, repo, db.Ref, cs.BaseChangeset); landed {
 			return err
 		}
 	}

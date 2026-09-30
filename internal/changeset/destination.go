@@ -59,7 +59,7 @@ const destinationWalkLimit = 16
 // destination" is a fact a caller has to be able to tell apart from a guess.
 func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranchRef) (Destination, error) {
 	out := Destination{}
-	base, parentChangeset := c.Base, c.ParentChangeset
+	base, baseChangeset := c.Base, c.BaseChangeset
 	if c.BaseDerived {
 		// A derived base is where the child's own work starts, not where the work is going. Ask the parent.
 		base = ""
@@ -93,7 +93,7 @@ func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db Default
 				// The loop guard belongs to the walk below, which marks the id before it reads the record. Marking
 				// it here would make the walk refuse the very hop this rule just decided to take.
 				if slices.Contains(ids, base) && !seen[base] {
-					base, parentChangeset = "", base
+					base, baseChangeset = "", base
 					continue
 				}
 			}
@@ -102,14 +102,14 @@ func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db Default
 		}
 		// Nothing usable to answer with. The parent's own record, read from the integration branch, is
 		// the next place the destination is written down.
-		if parentChangeset == "" || db.Ref == "" || seen[parentChangeset] {
+		if baseChangeset == "" || db.Ref == "" || seen[baseChangeset] {
 			break
 		}
-		seen[parentChangeset] = true
-		out.Via = append(out.Via, parentChangeset)
+		seen[baseChangeset] = true
+		out.Via = append(out.Via, baseChangeset)
 		// The whole of the parent's stack, not just its base: the answer above it depends on whether the
 		// parent was itself stacked on something that has since landed.
-		stack, err := StackAt(ctx, repo, db.Ref, parentChangeset)
+		stack, err := StackAt(ctx, repo, db.Ref, baseChangeset)
 		if errors.Is(err, git.ErrUnknownPath) {
 			// The destination carries no directory for that id, so there is no base to read: the parent
 			// landed as content alone, or the id names nothing.
@@ -118,7 +118,7 @@ func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db Default
 		if err != nil {
 			return out, err
 		}
-		base, parentChangeset = stack.Base, stack.ParentChangeset
+		base, baseChangeset = stack.Base, stack.BaseChangeset
 	}
 	if db.Ref != "" {
 		out.Ref, out.Why = db.Ref, "default"

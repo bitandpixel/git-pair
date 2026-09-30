@@ -169,7 +169,8 @@ possible, and for as long as any file still carries the key.
 
 ### M3 - rank by the commit that added the directory, and only when ranking is needed
 
-**Status:** offered as `feat-rank-by-add-commit`.
+**Status:** landed in main at `b4b5c6f`, as `feat-rank-by-add-commit`. The two ranking fixtures fail under the
+last-edit measurement and pass under the add-commit one, with and without the recorded id in the child's file.
 
 #### Deliverables
 
@@ -221,6 +222,10 @@ possible, and for as long as any file still carries the key.
 
 ### M4 - `base:` with an always-recorded `base-changeset:`
 
+**Status:** offered as `feat-base-changeset-always-recorded`. One thing beyond the tasks below: `check` now also
+recommends when the recorded id and the `base:` name different changesets, which is the case the id makes possible -
+before this milestone an id recorded beside a `base:` was read by nothing.
+
 #### Deliverables
 
 - A stacked changeset's `CHANGESET.yaml` records `base:` and `base-changeset:` together, always, written by
@@ -234,17 +239,18 @@ possible, and for as long as any file still carries the key.
 
 #### Tasks
 
-- [ ] Add `BaseChangesetKey = "base-changeset"` beside `ParentChangesetKey`, and read either spelling into
+- [x] Add `BaseChangesetKey = "base-changeset"` beside `ParentChangesetKey`, and read either spelling into
       `Stack.ParentChangeset`. Rename that struct field to say what it now holds, and rename its accessor to match.
-- [ ] `renderMetadata` (`internal/changeset/changeset.go`) writes the id whenever it writes a `base:` that names
+- [x] `renderMetadata` (`internal/changeset/changeset.go`) writes the id whenever it writes a `base:` that names
       stacked work, and never writes `parent:`.
-- [ ] `init` records both from the base it can see, reusing `parentChangesetOn`. Keep the refusal to guess when
+- [x] `init` records both from the base it can see, reusing the helper that was `parentChangesetOn` and is now
+      `baseChangesetOn`. Keep the refusal to guess when
       the base carries two or more active changesets, and keep the warning that names every candidate.
-- [ ] `applyBases`: a candidate with `base:` and a recorded id is stacked, so it gets the derived measurement
+- [x] `applyBases`: a candidate with `base:` and a recorded id is stacked, so it gets the derived measurement
       base. Check the tests that assert a recorded stack does not move when the parent branch gains a changeset;
       that behaviour is now reached by `base:` plus an id rather than by `parent:`, so the fixtures change shape
       and the assertion must stay.
-- [ ] Leave every landed file on trunk untouched. Add a fixture, not a migration: a landed `parent:` file must
+- [x] Leave every landed file on trunk untouched. Add a fixture, not a migration: a landed `parent:` file must
       still resolve.
 
 #### Verification

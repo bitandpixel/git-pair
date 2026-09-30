@@ -70,15 +70,16 @@ type Changeset struct {
 	// work can land: a caller that asks "where does this go" has to be able to tell a commit the child
 	// shares with the integration branch apart from a branch it was measured against.
 	BaseDerived bool
-	// ParentBranch is the branch named by `parent:`, empty for a changeset measured straight
-	// against the integration branch. It stays the branch name even when the measurement base has
-	// been derived from the destination, so the stack and the diff base can be
-	// reported separately (§21).
+	// ParentBranch is the branch this changeset sits on: the `parent:` value, or the `base:` value
+	// when a base changeset is recorded with it, because then the recorded base names where the work
+	// below this one lives. It stays the branch name even when the measurement base has been derived
+	// from the destination, so the stack and the diff base can be reported separately (§21).
 	ParentBranch string
-	// ParentChangeset is the changeset this one is stacked on, from `parent-changeset:`. It is
-	// empty for a changeset measured against the integration branch, and empty for a stack whose
-	// parent changeset was not known when the stack was recorded.
-	ParentChangeset string
+	// BaseChangeset is the changeset this one is stacked on, from `base-changeset:` or the older
+	// `parent-changeset:`. It is empty for a changeset measured against the integration branch, and
+	// empty for a stack whose parent changeset was not known when the stack was recorded — the case
+	// `base-changeset:` being always recorded retires.
+	BaseChangeset string
 	// Dir is the changeset directory relative to the repository root.
 	Dir string
 	// Exists is false when the directory has not been created yet. Only Current can
@@ -564,30 +565,38 @@ func noChangesetHere(ctx context.Context, repo *git.Repo, db DefaultBranchRef, c
 	return fmt.Errorf("%w: %s (run `git pair init --base <ref>`)", ErrNoChangeset, c.Dir)
 }
 
-// The two stack keys. `parent:` names the branch this changeset is stacked on and *is* its base:
-// a file that sets both `parent:` and `base:` is refused the way an inconsistent `id:` is, because
-// the two spellings are two answers to "what does this diff against?" and they will not stay in
-// agreement. `parent-changeset:` records the changeset living on that branch — the durable half of
-// the relationship, which is what still means something after the parent branch is deleted and its
-// work has become a landing commit.
+// The stack keys. `base:` is the ref the changeset is measured against and `base-changeset:` is the
+// changeset living on it — the durable half of the relationship, which is what still means something
+// after the branch is deleted and its work has become a landing commit. A writer that records one
+// without the other leaves the id to be re-derived from a branch name at read time, and that derivation
+// stops being available the moment the branch is gone. So both are written, always together, whenever a
+// changeset is stacked.
+//
+// `parent:` and `parent-changeset:` are the older spelling of the same two facts. They are read, and
+// never written: a file on trunk keeps answering, and a file rewritten by a command comes out in the new
+// spelling. A file that sets `parent:` and `base:` together is refused the way an inconsistent `id:` is,
+// because the two spellings are two answers to "what does this diff against?" and they will not stay in
+// agreement.
 const (
 	ParentKey          = "parent"
 	ParentChangesetKey = "parent-changeset"
+	BaseChangesetKey   = "base-changeset"
 )
 
-// Stack is what a CHANGESET.yaml says about where a changeset sits: the branch it is measured
-// against, and — when it is stacked — the parent branch and the parent's changeset.
+// Stack is what a CHANGESET.yaml says about where a changeset sits: the ref it is measured against,
+// and — when it is stacked — the branch the work below it lives on and that work's changeset id.
 type Stack struct {
 	// Base is the ref the changeset's diff is measured against. It is `parent:` when there is
 	// one, and `base:` otherwise, which is why everything that measures a changeset reads this
 	// field rather than either key.
 	Base string
-	// Parent is the branch named by `parent:`, empty for a changeset measured straight against
-	// the integration branch.
+	// Parent is the branch the stack sits on: the `parent:` value, or the `base:` value when it is
+	// recorded together with a changeset id. Empty for a changeset measured straight against the
+	// integration branch.
 	Parent string
-	// ParentChangeset is the changeset recorded on the parent branch, empty when nobody could
-	// say which one it was at the time the stack was recorded.
-	ParentChangeset string
+	// BaseChangeset is the changeset recorded on that branch, read from either key, empty when nobody
+	// could say which one it was at the time the stack was recorded.
+	BaseChangeset string
 }
 
 // stackOf reads the stack out of already-parsed metadata. It is the one place that decides which
@@ -599,10 +608,26 @@ func stackOf(md map[string]string) (Stack, error) {
 		return Stack{}, fmt.Errorf("%w: %s: %q and %s: %q; `parent:` is the base, so keep one of them",
 			ErrParentWithBase, ParentKey, parent, "base", base)
 	}
-	if parent != "" {
-		return Stack{Base: parent, Parent: parent, ParentChangeset: strings.TrimSpace(md[ParentChangesetKey])}, nil
+	// Either spelling of the id is read. Which key a file happens to use is a fact about when it was
+	// written, not about what it means: a reader that knew only the newer one would report a landed
+	// parent as a plain base and start the child's diff in the wrong place.
+	id := strings.TrimSpace(md[BaseChangesetKey])
+	if id == "" {
+		id = strings.TrimSpace(md[ParentChangesetKey])
 	}
-	return Stack{Base: base}, nil
+	if parent != "" {
+		return Stack{Base: parent, Parent: parent, BaseChangeset: id}, nil
+	}
+	st := Stack{Base: base, BaseChangeset: id}
+	if id != "" {
+		// A `base:` recorded together with a changeset id claims the same relationship `parent:` used to make
+		// on its own, so it is read as the branch the stack sits on. That is what lets the stack answer the
+		// way the author meant: the branch while it still carries the work below, and the run shared with the
+		// destination once that work has landed. Without it the recorded id reaches nothing, because the
+		// branch a landing replaced is exactly the branch that is no longer there to name.
+		st.Parent = base
+	}
+	return st, nil
 }
 
 // IgnoresKey is the CHANGESET.yaml key naming the other changesets this one is merely sharing a
@@ -701,10 +726,11 @@ type WriteOptions struct {
 	// SetBase replaces an existing base value instead of reporting a conflict.
 	SetBase bool
 	// Parent names the branch this changeset is stacked on. It *is* the base (PRD §21), so it is
-	// written as `parent:` and no `base:` is written; passing Base and Parent together is refused.
+	// written as `base:` together with the changeset on it; passing Base and Parent together is refused.
 	Parent string
-	// ParentChangeset records which changeset lives on the parent branch. Written only with Parent.
-	ParentChangeset string
+	// BaseChangeset records which changeset lives on the base. Written whenever there is a stack to
+	// record it for, which is what makes the id available after the branch it came from is gone.
+	BaseChangeset string
 	// SetParent replaces an existing stack — a different parent, or a parent replacing a plain
 	// base — instead of reporting a conflict.
 	SetParent bool
@@ -824,19 +850,23 @@ func Write(repo *git.Repo, c Changeset, opts WriteOptions) (written []string, er
 // either one. Keys are sorted because a rewrite that reordered them would show up in a diff as a
 // change nobody made.
 func renderMetadata(md map[string]string, id string, opts WriteOptions) string {
-	out := "id: " + id + "\n"
+	// One spelling is written: the base and, when there is a stack, the changeset recorded on it. `Parent` is
+	// how a caller says "stacked on that branch", and it lands in the file as the base — the two are the same
+	// claim, and the file no longer needs a key of its own for the second half of it. A file that arrived with
+	// `parent:` comes out of a rewrite in this spelling, which is why both older keys are in the drop list
+	// below rather than the pass-through: leaving them would write two answers to one question.
+	base := opts.Base
 	if opts.Parent != "" {
-		out += ParentKey + ": " + opts.Parent + "\n"
-		if opts.ParentChangeset != "" {
-			out += ParentChangesetKey + ": " + opts.ParentChangeset + "\n"
-		}
-	} else {
-		out += "base: " + opts.Base + "\n"
+		base = opts.Parent
+	}
+	out := "id: " + id + "\n" + "base: " + base + "\n"
+	if opts.BaseChangeset != "" {
+		out += BaseChangesetKey + ": " + opts.BaseChangeset + "\n"
 	}
 	rest := make([]string, 0, len(md))
 	for k := range md {
 		switch k {
-		case "id", "base", ParentKey, ParentChangesetKey:
+		case "id", "base", ParentKey, ParentChangesetKey, BaseChangesetKey:
 		default:
 			rest = append(rest, k)
 		}
