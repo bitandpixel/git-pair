@@ -52,7 +52,9 @@ by a test.
   repository's git directory. It is not a correctness switch: a cached fact is keyed on the commit ids it was
   derived from, and a key that no longer matches is a miss rather than a stale answer. Use it to measure a
   slow command against a fast one, to rule the cache out while debugging, or on a machine that wants nothing
-  written under its git directory.
+  written under its git directory. `GIT_PAIR_NO_CACHE` set to anything non-empty is the same thing for every
+  invocation in a process environment, which is the form a CI job can reach without threading the flag
+  through each call.
 
 ## Span flags
 

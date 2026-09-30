@@ -578,7 +578,11 @@ cannot see them and `git add` cannot stage them; deleting the directory loses no
 a store of state: state is still derived from history, and a key that no longer matches the repository is a
 miss rather than an answer. `--no-cache` is therefore not a way to fix a wrong answer — it is how you
 establish that an answer was not wrong, and how a machine that wants nothing written under its git directory
-says so.
+says so. `GIT_PAIR_NO_CACHE`, set to anything non-empty, does the same for every invocation in a process
+environment, which is the form a CI job reaches without threading the flag through each call. The test suite
+uses it for a sharper reason: the bounds that count git subprocesses to say how much work a formulation does
+must count the formulation, and a memo that answers a duplicated read would let such a bound pass on the
+duplicate it exists to catch.
 
 | Command | Flags | Notes |
 | --- | --- | --- |

@@ -31,7 +31,8 @@ and on stderr.
 | `internal/cli/root.go` | `loadRepo` turns both caches on for a command run; `--no-cache` turns both off |
 | `internal/tui/session.go` | the review session turns the memo off and keeps the fact cache |
 | `internal/cli/change.go` | `change wait` drops the memo before each poll round |
-| `internal/gittest/spawn.go` | `SpawnShim` clears the cache, so an invocation count is a cold measurement |
+| `internal/gittest/spawn.go` | `SpawnShim` turns both caches off, so an invocation count is a cold measurement of the algorithm |
+| `internal/cli/root.go` | also: `GIT_PAIR_NO_CACHE`, the environment form of `--no-cache` |
 | `internal/hygiene/hygiene_test.go` | `spawn` joins `run` as a named git call site, and the detector's self-test proves it is caught |
 
 Git subprocesses spawned, and what each layer took off them:
@@ -96,9 +97,21 @@ faster cold than they are on `main`.
   one asserts a cached absence does not render as a row. A comparison of two runs passes whether or not
   anything moved, so without those guards these tests would be green forever — the failure mode a cache is
   uniquely good at hiding.
-- `internal/gittest/spawn.go` — `SpawnShim` clears the cache first. This was not cosmetic:
-  `TestStatusStackChainCostsABoundedReadPerStep` measured 0 invocations for the walk it bounds, and its own
-  guard fired. A cost test that reads from a warm cache asserts nothing, and would pass.
+- `internal/gittest/spawn.go` — `SpawnShim` turns both caches off before counting. This was not cosmetic,
+  and it took a second pass to get right. First it only cleared the disk cache, and
+  `TestStatusStackChainCostsABoundedReadPerStep` measured 0 invocations for the walk it bounds, its own guard
+  firing. Then the environment variable landed and the memo was still on inside the measured run, so the
+  `Cost*` tests counted 6,372 subprocesses where `main` counts 10,444 — the memo had quietly absorbed 39% of
+  the work the bounds exist to see. With both caches off they count 10,349, which is the same measurement
+  `main` makes.
+- `internal/cli/cost_instrument_test.go` — guards that guard. Each was checked by deleting the line it
+  protects: with `SpawnShim` no longer disabling the caches, the sensitivity test reports the second
+  identical run costing 24 invocations against the first's 37; with `cli` no longer reading the variable, the
+  file-writing test reports cache files written anyway. Both fail, and both pass once restored. The first
+  draft of this file did neither — it measured a repository with nothing landed, where a queue derives
+  almost no cacheable fact and the memo cannot cross two `Execute` calls, so it passed under both settings.
+  A test that cannot fail is not a test, and this one is only worth having because deleting the fix makes it
+  say so.
 - `internal/hygiene` — the invariant test names `internal/git.run` as the shared implementation every git
   command line is built in. `run` is no longer that bottom: it decides whether the memo can answer, and
   delegates to `spawn`. `spawn` is added to `gitCallMethods`, and one `// BAD` case is added to
@@ -114,6 +127,14 @@ faster cold than they are on `main`.
 - **The first run after a fetch is still cold, and pays nearly everything.** The cache removes repeated
   work, not the work: cold `queue` is 562 subprocesses against 639 on `main`, so the memo takes off the
   duplicates and nothing else. A cold run is now marginally cheaper than it was, but it is the same shape.
+- **The test suite gets no faster in wall-clock terms, and the reason is worth knowing.** Measured over
+  `internal/cli`, `internal/tui`, `internal/changeset` and `internal/lifecycle`: 24% pass-to-pass variance on
+  identical `main` code, so wall time here cannot resolve an effect this size. The deterministic instrument —
+  total git subprocesses during `go test ./internal/cli/`, counted from outside — says 39,236 on `main`
+  against 30,048 here with the new tests excluded: 23% fewer spawns. It does not become faster in
+  proportion, because each test fixture is its own temporary git directory, so the disk cache cannot cross
+  fixture boundaries, and the memo is per-process while most tests make one CLI call. The gain is confined to
+  tests that call the CLI several times against one fixture.
 - **`resolver.at` is not cached**, so `queue` and every `--changeset` still resolve each of the N local
   branches on a warm run — 12 branches is roughly 40 subprocesses here. It is keyed on `(branch tip,
   destination tip)` in principle and is the obvious next increment.
@@ -136,7 +157,10 @@ faster cold than they are on `main`.
 - Should the cache be shared across worktrees of one repository, as it is now, or per worktree? Sharing
   means a fetch in one worktree warms the others, which is the common case for a bare-plus-worktrees
   layout, and it means one directory to clean up.
-- Is `--no-cache` the right spelling, or should `GIT_PAIR_NO_CACHE` exist too for CI, where the flag has to
-  reach every invocation a job makes?
 - `Keep = 4000` entries is a guess. Each entry is a few hundred bytes, so the bound is roughly a megabyte
   per repository. A repository that lands continuously would want it measured against real use.
+- Separate to this changeset, and untouched by it: `README.md:1266` says CI names the integration branch
+  with `GIT_PAIR_DEFAULT_BRANCH` or `--default-branch`. git-pair never reads that variable — the integrate
+  workflow uses it as a shell variable and passes the flag — so the sentence promises a feature that does
+  not exist. Found while following the `GIT_PAIR_*` naming for `GIT_PAIR_NO_CACHE`. It wants its own
+  changeset, either to implement the variable or to correct the sentence.
