@@ -161,3 +161,60 @@ func TestCheckIsSilentWhenTheStackIsRecordedOrThereIsNoStack(t *testing.T) {
 		t.Errorf("recommendations = %v for a changeset measured against trunk", recs)
 	}
 }
+
+// Three levels, each branch created from the branch under it, which is how a stack gets written and how this
+// rule was found not to work: B off A leaves A's changeset directory in B's tree, so the base carried two
+// unlanded changesets and `init` refused to pick. The one that names the other is the parent, and the answer
+// is read from the chain the parent records - the same evidence `--parent` already uses.
+func TestInitLooksPastTheAncestorsAStackedBaseCarries(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("feature/auth")
+	f.CommitChangeset("feature-auth", "main")
+	f.Commit("auth work", gittest.WithFile("auth.go", "package main\n"))
+	f.CreateBranch("feature/auth-tests")
+	f.Commit("auth-tests changeset", gittest.WithFiles(map[string]string{
+		"changesets/feature-auth-tests/CHANGESET.yaml": "id: feature-auth-tests\nparent: feature/auth\nparent-changeset: feature-auth\n",
+		"changesets/feature-auth-tests/ABOUT.md":       "# feature-auth-tests\n",
+	}), gittest.WithFile("auth_test.go", "package main\n"))
+	f.CreateBranch("feature/auth-cases", "feature/auth-tests")
+
+	res := runIn(t, f.Dir(), "init", "--base", "feature/auth-tests").mustSucceed(t, "init")
+
+	md := f.Read("changesets/feature-auth-cases/CHANGESET.yaml")
+	for _, want := range []string{"parent: feature/auth-tests\n", "parent-changeset: feature-auth-tests\n"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("CHANGESET.yaml is missing %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "base:") {
+		t.Errorf("`parent:` is the base, so no `base:` belongs beside it:\n%s", md)
+	}
+	mustContain(t, res.stdout+res.stderr, "stacked on it", "the notice naming the inference")
+}
+
+// The limit of that filter, and it is a real one: with nothing recorded below the base, an ancestor and a
+// sibling are the same shape - two directories, neither landed - and nothing in the repository orders them.
+// The base stands as authored and both are named, so the author picks.
+func TestInitStillRefusesWhenTheLevelBelowRecordsNoChain(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("feature/auth")
+	f.CommitChangeset("feature-auth", "main")
+	f.Commit("auth work", gittest.WithFile("auth.go", "package main\n"))
+	f.CreateBranch("feature/auth-tests")
+	f.Commit("auth-tests changeset", gittest.WithFiles(map[string]string{
+		"changesets/feature-auth-tests/CHANGESET.yaml": "id: feature-auth-tests\nbase: feature/auth\n",
+		"changesets/feature-auth-tests/ABOUT.md":       "# feature-auth-tests\n",
+	}), gittest.WithFile("auth_test.go", "package main\n"))
+	f.CreateBranch("feature/auth-cases", "feature/auth-tests")
+
+	res := runIn(t, f.Dir(), "init", "--base", "feature/auth-tests").mustSucceed(t, "init")
+
+	md := f.Read("changesets/feature-auth-cases/CHANGESET.yaml")
+	if !strings.Contains(md, "base: feature/auth-tests\n") {
+		t.Errorf("the authored base did not stand:\n%s", md)
+	}
+	if strings.Contains(md, "parent") {
+		t.Errorf("a stack was guessed from an unrecorded chain:\n%s", md)
+	}
+	mustContain(t, res.stdout+res.stderr, "feature-auth", "the candidate it declined to pick")
+}

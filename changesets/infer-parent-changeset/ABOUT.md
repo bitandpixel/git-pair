@@ -15,14 +15,12 @@ file predates the rule. This is M1 of `docs/plans/derive-destination-from-tree/p
     `parentChangesetOn` now takes the resolved integration branch and returns the candidates it looked at,
     which is also what lets the existing `--parent` warning name them instead of saying only that it could
     not pick.
-will we be able to support multiple
-levels of parents? for example,
-grandparent A with changeset G, parent B
-with changeset P, child C with changeset
-C. if B is the base for C, it will see
-both G and P as unlanded changesets. we
-should filter out the parents unlanded
-ancestors when applicable.
+-   A base three levels down still reads as a stack, which it did not. A branch created from its parent's
+    branch carries the whole unlanded ancestry in its tree, so the base carried a changeset per level and
+    `init` refused to pick one. A candidate another candidate records as its own parent is a level of the
+    stack rather than a second thing living on the branch, so it is dropped before anything is chosen. The
+    drop reads the recorded chain and nothing else, which is what keeps two siblings sharing a branch a
+    refusal.
 -   `internal/cli/check.go`: `recommendations` in `--json` — an array in both verdicts, for the reason
     `reasons` is one — and `recommend:` lines on the human surface. Computed after the gate, never inside it.
 -   PRD §21: the rule, and why a base naming a branch is not the same fact as a parent naming one.
@@ -35,8 +33,19 @@ measurement base rather than improve it. `BaseFor` rule 1 keeps measuring agains
 while the parent is still unlanded is the point the whole stack forked from trunk — the child's diff would
 then contain the parent's work. `renderMetadata` dropping `parent-changeset:` when `parent:` is absent is the
 same rule from the writer's side.
-can you explain why we would have both
-parent: and base: ?
+**`parent:` and `base:` are not both recorded, and cannot be.** A CHANGESET.yaml carries one or the other:
+`parent:` *is* the base (PRD §21), and `stackOf` refuses a file naming both. The pair this changeset records is
+`parent:` with `parent-changeset:`, and the second half is what lets the first be read after the parent is
+gone - a branch name cannot be checked once its branch is deleted, while a changeset id is answered from the
+destination's tree. The other spelling, a plain `base:` naming the parent branch, is not a weaker version of
+the same statement: it is a measurement base, so it keeps naming finished work after the parent lands, which
+is the state where `check` names a merged branch as the destination.
+
+**The filter reads the chain, so it stops where the record stops.** With nothing recorded below the base, an
+ancestor and a sibling are the same shape - two directories, neither landed - and the answer stays the warning
+that names both for the author to pick. `Candidate.Distance`, the nearness the resolver computes when a
+revision carries more than one, orders them by which directory this branch touched last; that says which work
+is live, not which is a parent, and an ordering is not evidence of a relationship.
 
 **A recommendation, not a reason.** A changeset written before this rule existed must not be held by it, and
 which key a file chose to name its parent with is not a condition a merge should depend on. `check` prints
@@ -50,6 +59,10 @@ restack a changeset that had recorded a different parent, which remains an expli
 
 ## Validation
 
+-   `TestInitLooksPastTheAncestorsAStackedBaseCarries` builds the three-level stack the review described, each
+    branch created from the branch under it, and asserts the pair is recorded for the top of it.
+    `TestInitStillRefusesWhenTheLevelBelowRecordsNoChain` takes the recorded chain away and asserts the authored
+    base stands, both candidates are named, and no stack is guessed.
 -   `go test ./...` green on this tree. The six new tests: the pair recorded from a one-candidate base, no
     guess and both candidates named at two, trunk still a plain base, the recorded file and the measured base
     unmoved when the parent later gains a second changeset, `check` recommending the declaration in both

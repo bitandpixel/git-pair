@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -384,10 +385,55 @@ func parentChangesetOn(ctx context.Context, repo *git.Repo, parent string, db ch
 	for _, c := range res.Candidates {
 		candidates = append(candidates, c.Changeset.Slug)
 	}
-	if res.Selected == nil {
-		return "", candidates, "no single unlanded changeset on it"
+	// A branch created from its parent's branch carries the whole unlanded ancestry in its tree: A off trunk,
+	// B off A, so B's tree holds A's directory as well as its own. Asking "which changeset is this base the
+	// base of?" then gets one answer per level, and the levels below the top are not what the base reveals -
+	// the changeset that names them is. So a candidate another candidate records as its own parent is dropped
+	// before anything is chosen. It reads the recorded chain and nothing else, which is what keeps two
+	// siblings sharing a branch a refusal: nothing orders those, and nothing here pretends to.
+	candidates = withoutRecordedAncestors(ctx, repo, "refs/heads/"+parent, candidates)
+	if res.Selected != nil {
+		if selected := res.Selected.Changeset.Slug; slices.Contains(candidates, selected) {
+			return selected, candidates, ""
+		}
 	}
-	return res.Selected.Changeset.Slug, candidates, ""
+	if len(candidates) == 1 {
+		return candidates[0], candidates, ""
+	}
+	return "", candidates, "no single unlanded changeset on it"
+}
+
+// withoutRecordedAncestors drops the candidates that another candidate names somewhere in its own parent
+// chain, which leaves the top of the stack the base reveals. It costs nothing when there is one candidate to
+// choose between, and returns the list untouched when nothing would survive: an empty answer is
+// not an inference either. The reads are one CHANGESET.yaml per hop, and only on the path that today refuses.
+func withoutRecordedAncestors(ctx context.Context, repo *git.Repo, rev string, candidates []string) []string {
+	if len(candidates) < 2 {
+		return candidates
+	}
+	ancestor := map[string]bool{}
+	for _, id := range candidates {
+		at, seen := id, map[string]bool{id: true}
+		for depth := 0; depth < stackDepthCap; depth++ {
+			st, err := changeset.StackAt(ctx, repo, rev, at)
+			if err != nil || st.ParentChangeset == "" || seen[st.ParentChangeset] {
+				break
+			}
+			at = st.ParentChangeset
+			seen[at] = true
+			ancestor[at] = true
+		}
+	}
+	kept := make([]string, 0, len(candidates))
+	for _, id := range candidates {
+		if !ancestor[id] {
+			kept = append(kept, id)
+		}
+	}
+	if len(kept) == 0 {
+		return candidates
+	}
+	return kept
 }
 
 // candidateNote is the half of the warning that names what was found. `Resolve` orders candidates by
