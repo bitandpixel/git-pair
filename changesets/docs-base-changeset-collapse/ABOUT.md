@@ -8,7 +8,8 @@ was edited last. The plan is a document only; the behaviour it describes lands i
 
 ## What this changes
 
-`docs/plans/base-changeset-collapse/plan.md`, in six milestones:
+`docs/plans/base-changeset-collapse/plan.md`, in nine milestones. Each carries a status line, so the document
+says what has happened as well as what is planned:
 
 - M2 moves the author's `ignores:` declaration ahead of every candidate-ranking rule.
 - M3 ranks candidates by the commit that added a changeset directory instead of the commit that last edited one,
@@ -26,8 +27,19 @@ was edited last. The plan is a document only; the behaviour it describes lands i
   review round and deciding which half of a mixed commit belongs where is a decision about the work.
 
 - M8 removes the writer for `ignores:`, which that invariant leaves without a case.
-- M6 rewrites the PRD passages that still name `parent:` as the authored link and describe selection by the most
+- M9 rewrites the PRD passages that still name `parent:` as the authored link and describe selection by the most
   recently touched directory.
+
+Two have happened while this document sat unoffered: M2 landed in main at `71c55bc`, and M3 is offered as
+`feat-rank-by-add-commit`. Their sections record what shipped, including one rule that was not in the plan when it
+was written. A drop that would remove every candidate means the records contradict each other, and that now answers
+"no selection, here are the candidates" instead of being settled by the ordering - which is what the tie-break would
+have done once M3 changed the measurement. `TestResolveMutualIgnoresKeepsBothCandidates` had asserted ambiguity only
+because both directories happened to be edited by the same commit.
+
+One milestone boundary moved while the document was unoffered. The exits from the branch-shape refusal were written
+inside M6, which left M6 holding an invariant and two commands, and the file numbered M1-M6, M8, M9. They are now
+M6 (the invariant) and M7 (the two exits), which is what the numbering already implied.
 
 ## Evidence
 

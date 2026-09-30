@@ -107,9 +107,11 @@ still answers the legacy and dangling-ancestor shapes the way distance does toda
 
 - This document, on a branch, reviewable on its own.
 
+**Status:** done. This branch carries the document and nothing else.
+
 #### Tasks
 
-- [ ] Nothing beyond the document. Every later milestone is its own changeset, and this stack's order is the
+- [x] Nothing beyond the document. Every later milestone is its own changeset, and this stack's order is the
       order above.
 
 #### Verification
@@ -118,6 +120,9 @@ still answers the legacy and dangling-ancestor shapes the way distance does toda
   gated like code.
 
 ### M2 - `ignores:` outranks every inference
+
+**Status:** landed in main at `71c55bc`, as `feat-ignores-before-inference`. The order is asserted by
+`internal/changeset/ignores_precedence_test.go`, whose first fixture fails with the passes in their old order.
 
 #### Deliverables
 
@@ -143,12 +148,13 @@ possible, and for as long as any file still carries the key.
 
 #### Tasks
 
-- [ ] In `choose` (`internal/changeset/resolve.go`), move the `dropNamed` pass over `Candidate.Ignores` ahead of
+- [x] In `choose` (`internal/changeset/resolve.go`), move the `dropNamed` pass over `Candidate.Ignores` ahead of
       everything else that reorders or removes candidates.
-- [ ] Keep the mutual-declaration behaviour: two files declaring each other must not empty the list. The guard
+- [x] Keep the mutual-declaration behaviour: two files declaring each other must not empty the list. The guard
       inside `dropNamed` that returns the original list when the drop would empty it stays.
-- [ ] Note in the comment above `choose` that the order is declaration, then subtraction, then ranking, and that
-      each tier is allowed to decide only what the tier above left open.
+- [x] Note in the comment above `choose` that the order is declaration, then subtraction, then ranking, and that
+      each tier is allowed to decide only what the tier above left open. The comment names declaration before the
+      stack link today; subtraction joins the sentence in M5.
 
 #### Verification
 
@@ -159,6 +165,8 @@ possible, and for as long as any file still carries the key.
 
 ### M3 - rank by the commit that added the directory, and only when ranking is needed
 
+**Status:** offered as `feat-rank-by-add-commit`.
+
 #### Deliverables
 
 - Candidate order follows the commit that added each changeset directory, not the commit that last edited one, so
@@ -166,6 +174,11 @@ possible, and for as long as any file still carries the key.
 - No history walk happens unless more than one candidate is still standing.
 - Two directories added by the same commit are a tie, and the tie is reported instead of being broken by whoever
   edited something afterwards.
+- Where the records contradict each other the answer is no selection and the candidate list, not whichever directory
+  the ordering happens to like. This is new behaviour, found by a test that used to pass by accident:
+  `TestResolveMutualIgnoresKeepsBothCandidates` asserted ambiguity because both directories happened to be last
+  edited by one commit. Under the add-commit measurement that tie disappears and the ordering would have answered a
+  contradiction the author wrote. Creation order is not what they meant.
 
 #### Tasks
 
@@ -179,8 +192,12 @@ possible, and for as long as any file still carries the key.
 - [ ] Update the prose that describes the measurement. The comment above `nearness`, the PRD sentence about the
       commit that last touched a directory, and any test name that says "nearest" all describe an edit fact that
       is going away.
-- [ ] Cache the add commit per id for the life of one command, in the same place `changeset.Reads` caches tree
-      reads, so a command that asks twice does not walk twice.
+- [ ] Deferred, and recorded here rather than dropped: cache the add commit per id for the life of one command, in
+      the same place `changeset.Reads` caches tree reads. Two things make it not this milestone's work.
+      `changeset.Reads` is on `feat/destination-from-tree` and not on main, so a cache written now lands in a second
+      place and moves when that branch merges. And no command walks the same revision twice today: `init` resolves
+      the parent branch, which is a different revision, and `Resolution.WithIgnores` is a simulation that ranks
+      nothing. The cache has no consumer until a caller asks about one revision through two paths.
 
 #### Verification
 
@@ -188,8 +205,13 @@ possible, and for as long as any file still carries the key.
   child is selected with the recorded id present, and also with `base-changeset:` removed from the file, which is
   the case where distance is the only evidence left.
 - A fixture where one commit adds two changeset directories: the result is ambiguous, both ids named.
-- A cost assertion: a revision carrying one unlanded changeset performs zero `git log` calls for candidate
-  ranking.
+- A cost assertion: a revision carrying one unlanded changeset performs no candidate ranking read at all. The
+  assertion counts both shapes the read takes - the commit that added the directory, and the walk from it to the
+  revision - because a lazy path makes neither, and counting one of the two would let a stray read through.
+- The same assertion for a stack whose recorded link decides the branch. This is the case that used to pay: the
+  walk ran over both directories before the filter reduced them to one.
+- `internal/gittest/spawn.go` gains `SpawnShimLines`, which returns the invocations in order as well as the count.
+  Counting cannot tell a command that skipped a read from one that made a read and did not need it.
 - Measured cost recorded in the commit message: 2 to 3 ms per directory at 484 commits, one walk per surviving
   candidate.
 
@@ -264,6 +286,8 @@ possible, and for as long as any file still carries the key.
 
 ### M6 - a branch carries one unlanded changeset, plus the ones it is stacked on
 
+**Status:** not started. The invariant. M7 is what the author does when it is violated.
+
 #### Why the shape arises
 
 There is one cause: work from another branch arrives on this one. A plain merge or a pull of a shared branch brings
@@ -283,8 +307,8 @@ destination carries is landed and the resolver never offers it.
 - `git pair init` on a branch that already carries an unlanded changeset refuses, naming the id it found and the
   ways out. The warning at `init.go:175` becomes this refusal.
 - `git pair change ready` refuses a branch whose unlanded directories do not form one chain, naming every id and
-  names every id and prints the fixes: declare them a stack, combine them, take the path back out, or `git fetch`
-  when the second directory may simply have landed since the branch point.
+  printing the fixes: declare them a stack (M7), combine them (M7), take the path back out, or `git fetch` when the
+  second directory may simply have landed since the branch point.
 - `check` reports the same condition as a reason that gates the merge, so the CI job cannot land an implicit stack
   where a second changeset arrives in the destination with no approval of its own.
 - The self-referential base is refused where the file is read, not only where it is written.
@@ -308,12 +332,10 @@ destination carries is landed and the resolver never offers it.
       `res.Selected`, so when the branch already carries two unrelated changesets the selection is nil, the condition
       does not fire, and `init` of a third is silent. The case that needs the message most is the one it currently
       says nothing about.
-
 - [ ] `init`: refuse, and point at the flag that declares the stack, which after M4 writes `base:` together with
       `base-changeset:`.
 - [ ] Move the `BaseIsOwnBranch` check into the reader, beside `ErrParentWithBase` in `stackOf`, keeping the
       message `init` gives and adding what a reader needs: the file the value came from.
-
 - [ ] Do not guess where the directory came from. The parent count of the commit that added it distinguishes a plain
       merge from work made here, but not from a squash merge, a rebase-and-squash, or a cherry-pick, all of which
       arrive as ordinary single-parent commits. The message states both exits and the way back, and the author knows
@@ -324,6 +346,50 @@ destination carries is landed and the resolver never offers it.
 - [ ] Suggest `git fetch` first when the second directory might have landed since the branch point, because a stale
       destination ref imitates this shape exactly and a fetch dissolves it.
 
+#### Verification
+
+- A negative fixture for the transient case: a second directory the destination already carries is landed, so the
+  resolver never offers it and no refusal fires. The test asserts the absence of the refusal, because a fetch is the
+  author's answer and a message telling them to combine would be wrong.
+- The refusal text is asserted, not merely its presence, so it cannot rot back into a bare "two changesets" error.
+  It has to name both exits by command name, since an author who is not told the two answers cannot pick one.
+
+
+### M7 - the two exits: `change combine` and `change stack`
+
+**Status:** not started. This is where the M6 refusal stops being a dead end.
+
+#### Why two exits
+
+The M6 refusal describes a shape and cannot say which answer fits: the second directory is either this branch's own
+work sitting on top of another changeset, or separate work that arrived and belongs somewhere else. Provenance is
+not recoverable from history (M6), so the tool states both and lets the author choose. The command is `combine` and
+not `merge`, because landing already uses merge language for bringing commits into the destination and the two acts
+must not read as one.
+
+#### Deliverables
+
+- `git pair change combine --into <id> [--threads]` folds one changeset into another. The disappearing directory
+  moves whole into `changesets/<into>/.combined/<id>/` - nothing is deleted. The survivor keeps its own `base:` and
+  `base-changeset:` and prints which of the target's links it kept and which it dropped. Its `ABOUT.md` gains one
+  line pointing at the archive rather than a copy of the target's prose. It refuses while either changeset is
+  offered or under review, because a reviewer's diff must not change underneath them.
+- `git pair change stack --base <branch>` records the stack link between the changeset this branch carries and the
+  one `<branch>` carries, writing `base:` and `base-changeset:` into the child's file and nowhere else.
+- An archive under `.combined/` is inert to every reader: it answers no id, is neither landed nor active, and is not
+  offered as a thread. The current tree already behaves this way and M7 keeps it that way - `changesetDir` accepts
+  metadata only at exactly `changesets/<id>/CHANGESET.yaml` and rejects any further slash; `dirsUnder` lists
+  immediate children only; `Threads` reads a directory non-recursively and skips directories; landing and tidy move
+  whole directories.
+
+#### Tasks
+
+- [ ] `combine`: move the disappearing directory whole, and keep the survivor's own two keys. The survivor's
+      comparison is its own base, and folding a changeset in is not a licence to move the base underneath a review.
+- [ ] `--threads` copies, it does not move, and it prefixes each copied file with the disappeared id so two
+      changesets that both have a thread called `scope.md` do not collide. Say which copy replies continue in. A
+      thread file is not an implementation change (`lifecycle` excludes it from the comparison a review marker
+      makes), so the copy cannot move what a reviewer is comparing.
 - [ ] `change stack --base <branch>` compares two sets that the resolver already computes: the unlanded changesets of
       this branch and of `<branch>`, each read as `ActiveIDs` of the branch minus `LandedIDs` of the destination. Let X
       be their intersection minus the base branch's recorded ancestors, and Y this branch's set minus the other's. One
@@ -346,19 +412,12 @@ destination carries is landed and the resolver never offers it.
       ready marker is present; `check` already refuses a merge over a commit that followed the marker, so the drift is
       caught whichever way the author leaves it.
 
-- [ ] `--threads` copies, it does not move, and it prefixes each copied file with the disappeared id so two changesets
-      that both have a thread called `scope.md` do not collide. Say which copy replies continue in. A thread file is
-      not an implementation change (`lifecycle` excludes it from the comparison a review marker makes), so the copy
-      cannot move what a reviewer is comparing.
-
 #### Verification
 
-- Fixtures per exit: two changesets where one is the other's recorded ancestor, repaired by the stack exit, with a
-  test asserting nothing outside `changesets/` changed; two unrelated changesets combined by `change combine`, where
-  the survivor keeps its `base:`, gains the pointing line, and the disappeared directory is whole under `.combined/`;
-- A negative fixture for the transient case: a second directory the destination already carries is landed, so the
-  resolver never offers it and no refusal fires. The test asserts the absence of the refusal, because a fetch is the
-  author's answer and a message telling them to combine would be wrong.
+- Two fixtures, one per exit: two changesets where one is the other's recorded ancestor, repaired by the stack exit,
+  with a test asserting nothing outside `changesets/` changed; two unrelated changesets combined by `change combine`,
+  where the survivor keeps its `base:`, gains the pointing line, and the disappeared directory is whole under
+  `.combined/`.
 - Tests that an archive cannot become live, one per reader: a `CHANGESET.yaml` at `changesets/x/.combined/y/` answers
   no id to `Resolve`, does not appear in `LandedIDs` or `ActiveIDs`, and is not offered as a thread of `x`. They are
   three rules that have to stay in agreement, so three assertions.
@@ -370,10 +429,8 @@ destination carries is landed and the resolver never offers it.
   changesets not in common, refused with `change combine` named; and `--base` naming this branch, refused.
 - A fixture for `--threads`: the survivor lists the copied thread, the archived copy is still in place, and a colliding
   stem comes out disambiguated by the prefix.
-
 - A fixture for each review-state guard: a ready marker on either changeset makes both exits refuse.
-- The refusal text is asserted, not merely its presence, so the two exits cannot rot back into a bare "two
-  changesets" error.
+- Each refusal's text is asserted, so neither exit can rot into a message that names no command.
 
 
 ### M8 - `ignores:` loses its remaining case
