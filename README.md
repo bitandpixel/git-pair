@@ -1757,7 +1757,7 @@ what a Go test cannot:
 | --- | --- | --- |
 | `scripts/gates/e2e-29.sh` | The PRD §29 loop end to end in a scratch repo: review, approve, `check`, a merge into the destination and a merge into a release line, `LANDED UNREVIEWED`, and `change tidy` | `git` |
 | `scripts/gates/pty-walkthrough.sh` | The review TUI under a real pty: first paint, the file tree, marks, the span walk, the difftool handoff | `git`, `python3` |
-| `scripts/gates/ci-integrate.sh` | The CI merge job against scratch bare remotes: the gate, the merge, the record, the publish, and every refusal in between | `git`, `jq` |
+| `scripts/gates/ci-integrate.sh` | The CI merge job against scratch bare remotes: the gate, the merge, the push, and every refusal in between | `git`, `jq` |
 
 `mise run gates` builds the binary, then runs all three. Each script also takes a binary path as its first
 argument. A pipeline that installs the build elsewhere passes its own path.

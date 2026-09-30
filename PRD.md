@@ -546,22 +546,25 @@ git pair change ...    the author's commands over a changeset in progress
 git pair review ...    the reviewer's commands over a branch
 ```
 
-Four commands are top-level because they are not "a change to a changeset" or "a reviewer action":
-`init` starts the author's loop, and an agent's first invocation should say what it does without a group
-name in the way; `queue` is read by authors, reviewers and CI alike, so it belongs to neither side; and
-`status`, `diff` and `check` read state. Each has one spelling — a
-renamed command with an alias behind it is two commands, and the second one stops being documented.
+Six commands sit outside the two groups. `init` starts the author's loop, and an agent's first invocation should
+say what it does without a group name in the way; `queue` is read by authors, reviewers and CI alike, so it belongs
+to neither side; `status`, `diff` and `check` read state; and `skill` installs the agent skill that ships inside the
+binary, which is neither authoring nor reviewing. Each has one spelling - a renamed command with an alias behind it
+is two commands, and the second one stops being documented.
 
 ```text
 git-pair
 ├── init
 ├── change
-│   ├── use
 │   ├── ready
+│   ├── integrate
 │   ├── unready
 │   ├── abandon
+│   ├── wait
 │   ├── feedback
-│   └── wait
+│   ├── stack
+│   ├── combine
+│   └── tidy
 │
 ├── review
 │   ├── open
@@ -575,10 +578,11 @@ git-pair
 ├── status
 ├── diff
 ├── check
-│
-└── integration
-    ├── record
-    └── publish
+└── skill
+    ├── install
+    ├── list
+    ├── show
+    └── agents-md
 ```
 
 ---

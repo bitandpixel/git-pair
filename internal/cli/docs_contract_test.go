@@ -277,3 +277,84 @@ func fencedBlocks(t *testing.T, file, text string) []string {
 	}
 	return blocks
 }
+
+// TestTheCommandTreeIsTheCommandSet checks the tree the reference documents draw against the tree the code
+// builds. The checks above read prose, where a command arrives spelled `git pair change ready`; §8's tree writes
+// bare names behind box-drawing characters, which no prose pattern sees. That is how it carried an `integration`
+// group and `change use` long after both were deleted, and never gained `change integrate`, `change tidy`,
+// `change stack`, `change combine` or `skill`. Both directions are checked, because a tree missing a command
+// misleads exactly as well as one showing a command that is gone - and a tree is the document a person reads to
+// learn what the tool can do.
+func TestTheCommandTreeIsTheCommandSet(t *testing.T) {
+	paths := commandPaths(newRootCommand(&app{}))
+	checked := 0
+	for _, file := range completeDocs(t) {
+		block := commandTreeBlock(t, file, readDoc(t, file))
+		if block == "" {
+			continue
+		}
+		checked++
+		listed := parseCommandTree(block)
+		if len(listed) == 0 {
+			t.Errorf("%s has a block that starts like a command tree and draws no entries", filepath.Base(file))
+			continue
+		}
+		for p := range listed {
+			if !paths[p] {
+				t.Errorf("%s's command tree lists `%s`, which the CLI does not have", filepath.Base(file), p)
+			}
+		}
+		for p := range paths {
+			if p == "" || listed[p] {
+				continue
+			}
+			t.Errorf("%s's command tree omits `%s`", filepath.Base(file), p)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no command tree in the reference documents: the tree is a checked surface, and a document set that " +
+			"lost it would stop being checked without saying so")
+	}
+}
+
+// commandTreeBlock returns the fenced block that draws the command tree, identified by its body starting with
+// the program's own name, or "" for a document that draws no tree.
+func commandTreeBlock(t *testing.T, file, text string) string {
+	t.Helper()
+	for _, block := range fencedBlocks(t, file, text) {
+		lines := strings.Split(block, "\n")
+		if len(lines) > 1 && strings.TrimSpace(lines[1]) == "git-pair" {
+			return block
+		}
+	}
+	return ""
+}
+
+// parseCommandTree turns drawn entries into command paths: "change tidy" for the line "│   ├── tidy". Depth
+// comes from the column the branch marker sits at, four characters per level, which is how the tree is written
+// and how `git-pair`'s own help groups commands.
+func parseCommandTree(block string) map[string]bool {
+	out := map[string]bool{}
+	var stack []string
+	for _, line := range strings.Split(block, "\n") {
+		i := strings.Index(line, "├── ")
+		if i < 0 {
+			i = strings.Index(line, "└── ")
+		}
+		if i < 0 {
+			continue
+		}
+		name := strings.TrimSpace(line[i+len("├── "):])
+		if name == "" {
+			continue
+		}
+		depth := i/4 + 1
+		for len(stack) < depth {
+			stack = append(stack, "")
+		}
+		stack[depth-1] = name
+		stack = stack[:depth]
+		out[strings.Join(stack, " ")] = true
+	}
+	return out
+}
