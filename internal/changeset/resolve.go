@@ -198,13 +198,15 @@ func DefaultBranch(ctx context.Context, repo *git.Repo, override string) (Defaul
 // Candidate is one changeset directory this revision carries.
 type Candidate struct {
 	Changeset Changeset
-	// Distance is the number of commits between the newest commit that touched this
-	// changeset's own directory and the resolved revision: 0 when the revision itself is such
-	// a commit. -1 means no commit on this line has touched the directory, which sorts after
-	// every real distance rather than competing with it.
+	// Distance is the number of commits between the commit that added this changeset's own
+	// directory to this line and the resolved revision: 0 when the revision itself is that
+	// commit. -1 means this line never added the directory, which sorts after every real
+	// distance rather than competing with it.
 	//
-	// It is the branch's own evidence of which work is live, and it is filled in only when a
-	// revision carries more than one candidate — with one candidate there is nothing to order.
+	// It is the tie-break for candidates that the records did not separate, and it is read only
+	// when more than one candidate is still standing. Creation is used rather than the last edit
+	// because a directory this branch is not working on gets edited too: a commit to a parent's
+	// ABOUT.md on a child branch is not a statement about which work is live.
 	Distance int
 	// Ignores lists the ids this changeset declares it is merely sharing a branch with.
 	Ignores []string
@@ -214,7 +216,7 @@ type Candidate struct {
 type Resolution struct {
 	DefaultBranch DefaultBranchRef
 	// Candidates is every changeset directory the revision carries that the integration
-	// branch does not have, ordered by nearness to the revision.
+	// branch does not have, ordered with the most recently added first.
 	Candidates []Candidate
 	// Selected is the candidate this revision is working on: nil when there is none, and
 	// only meaningfully different from Candidates[0] when callers want the answer without
@@ -323,10 +325,7 @@ func (r *resolver) at(ctx context.Context, repo *git.Repo, rev string) (Resoluti
 		return res, err
 	}
 	res.Candidates = candidates
-	if err := nearness(ctx, repo, revSHA, res.Candidates); err != nil {
-		return res, err
-	}
-	return choose(res), nil
+	return choose(ctx, repo, revSHA, res)
 }
 
 // ResolveCurrent resolves the checked-out revision.
@@ -396,10 +395,7 @@ func ResolveCurrentOn(ctx context.Context, repo *git.Repo, db DefaultBranchRef) 
 		added = append(added, c)
 	}
 	res.Candidates = added
-	if err := nearness(ctx, repo, head, res.Candidates); err != nil {
-		return res, err
-	}
-	return choose(res), nil
+	return choose(ctx, repo, head, res)
 }
 
 // BranchResolution is one local branch and what the rule says about it. A branch that fails to
@@ -476,29 +472,61 @@ func candidateFor(id string, md map[string]string) (Candidate, error) {
 
 // choose orders the candidates and decides whether the answer is one of them.
 //
-// Two filters run before the ordering, and they answer different questions. A stacked changeset
-// names its parent in `base:`, so the parent's directory being present does not make it the work
-// in hand. `ignores:` then removes the changesets this one has declared it is only sharing a
-// branch with — the recorded answer to an ambiguity `change use` was asked about.
-func choose(res Resolution) Resolution {
-	// Two passes remove candidates, and their order is the rule. `ignores:` is the author saying which changeset
-	// this branch is working on, so it is read first: a pass that removes the changeset which wrote the declaration
-	// leaves the declaration unread, and the remaining candidates get an answer invented for them. The stack link is
-	// an inference from a recorded value, and an inference outranks nothing.
-	res.Candidates = dropNamed(res.Candidates, func(c Candidate) []string { return c.Ignores })
-	res.Candidates = dropNamed(res.Candidates, func(c Candidate) []string {
+// Two filters run before any ordering, and they answer different questions. A stacked changeset
+// names its parent in `base:`, so the parent's directory being present does not make it the work in
+// hand. `ignores:` removes the changesets this one has declared it is only sharing a branch with -
+// the recorded answer to an ambiguity `change use` was asked about.
+//
+// The ordering is last, and it is the only part that asks git anything. A revision carrying one
+// candidate has nothing to order, so no history read happens: on the ordinary branch this function
+// answers from the two records and returns.
+func choose(ctx context.Context, repo *git.Repo, rev string, res Resolution) (Resolution, error) {
+	res, contradicted := filterCandidates(res)
+	if contradicted {
+		// The declarations contradict each other, and every one of them is kept rather than dropped.
+		// Which one the author meant is not in the files, and the age of a directory is not the
+		// author's intent, so this is the point to refuse rather than to order.
+		res.Selected = nil
+		res.Ambiguous = true
+		return res, nil
+	}
+	if len(res.Candidates) > 1 {
+		if err := rankByCreation(ctx, repo, rev, res.Candidates); err != nil {
+			return res, err
+		}
+	}
+	return decide(res), nil
+}
+
+// filterCandidates removes what the two records say cannot be the work in hand. Two passes, and the
+// order between them is a rule: `ignores:` is the author saying which changeset this branch is
+// working on, so it is read first - a pass that removes the changeset which wrote the declaration
+// leaves the declaration unread, and the candidates that remain get an answer invented for them. The
+// stack link is an inference from a recorded value, and an inference outranks nothing.
+func filterCandidates(res Resolution) (Resolution, bool) {
+	var contradicted bool
+	res.Candidates, contradicted = dropNamedKeeping(res.Candidates, func(c Candidate) []string { return c.Ignores })
+	kept, contradictedLink := dropNamedKeeping(res.Candidates, func(c Candidate) []string {
 		return []string{stackParentID(c)}
 	})
+	res.Candidates = kept
+	return res, contradicted || contradictedLink
+}
 
+// decide orders what the filters left and answers it. Sorting costs nothing, so it runs here on
+// whatever Distance holds: filled in by rankByCreation when the caller had several candidates to
+// order, and still -1 each when the filters left one, where the order changes nothing.
+func decide(res Resolution) Resolution {
 	sortCandidates(res.Candidates)
 	res.Selected = nil
 	res.Ambiguous = false
-	if len(res.Candidates) > 0 {
-		res.Selected = &res.Candidates[0]
-		if len(res.Candidates) > 1 && equalDistance(res.Candidates[0], res.Candidates[1]) {
-			res.Ambiguous = true
-			res.Selected = nil
-		}
+	if len(res.Candidates) == 0 {
+		return res
+	}
+	res.Selected = &res.Candidates[0]
+	if len(res.Candidates) > 1 && equalDistance(res.Candidates[0], res.Candidates[1]) {
+		res.Ambiguous = true
+		res.Selected = nil
 	}
 	return res
 }
@@ -519,17 +547,21 @@ func (r Resolution) WithIgnores(id string, ignores []string) Resolution {
 			res.Candidates[i].Ignores = append([]string(nil), ignores...)
 		}
 	}
-	return choose(res)
+	res, contradicted := filterCandidates(res)
+	if contradicted {
+		res.Selected = nil
+		res.Ambiguous = true
+		return res
+	}
+	return decide(res)
 }
 
-// nearness fills in the ordering candidates need to be sorted by. It asks git nothing at all when
-// one candidate is the whole answer, which is the case on almost every branch.
-func nearness(ctx context.Context, repo *git.Repo, rev string, candidates []Candidate) error {
-	if len(candidates) < 2 {
-		return nil
-	}
+// rankByCreation fills in the tie-break for candidates that the records did not separate. The
+// caller asks only when more than one candidate survived the filters, so the walk back to each add
+// commit happens on the branches where something has to be ordered and nowhere else.
+func rankByCreation(ctx context.Context, repo *git.Repo, rev string, candidates []Candidate) error {
 	for i := range candidates {
-		d, err := distanceFromTouch(ctx, repo, rev, candidates[i].Changeset.Slug)
+		d, err := distanceFromAdd(ctx, repo, rev, candidates[i].Changeset.Slug)
 		if err != nil {
 			return err
 		}
@@ -538,32 +570,35 @@ func nearness(ctx context.Context, repo *git.Repo, rev string, candidates []Cand
 	return nil
 }
 
-// distanceFromTouch counts the commits between the newest commit that touched this changeset's own
-// directory and the revision, and answers whether such a commit exists on this line at all.
+// distanceFromAdd counts the commits between the commit that added this changeset's directory to
+// this line and the revision, and answers whether this line added it at all.
 //
-// The directory is the changeset's own content — CHANGESET.yaml, ABOUT.md, the thread files — so the
-// newest commit touching it is what this branch last did about this changeset. That is the branch's
-// reading of "which work is live here", and it is a reading that survives a fresh clone, where the
-// old formulation had nothing to read because nothing had been anchored.
-func distanceFromTouch(ctx context.Context, repo *git.Repo, rev, id string) (int, error) {
-	touched, err := repo.Git(ctx, "log", "-1", "--format=%H", rev, "--", filepath.Join(Root, id))
+// Creation is asked about rather than the last edit because the last edit is not evidence about
+// which work is live: a child branch carries its ancestors' directories, and a commit to a parent's
+// ABOUT.md from there is housekeeping, not a decision to work on the parent. The add commit is also
+// stable - it does not move as the branch is worked on - and it is history, so a fresh clone that
+// holds the branch measures the same thing. What git is asked for is the newest commit adding
+// something under the directory, which is the right answer after a rebase or a cherry-pick moved the
+// original, and after a directory was deleted and created again.
+func distanceFromAdd(ctx context.Context, repo *git.Repo, rev, id string) (int, error) {
+	added, err := repo.Git(ctx, "log", "-1", "--format=%H", "--diff-filter=A", rev, "--", filepath.Join(Root, id))
 	if err != nil {
 		return -1, err
 	}
-	touched = strings.TrimSpace(touched)
-	if touched == "" {
+	added = strings.TrimSpace(added)
+	if added == "" {
 		// The directory is in the revision's tree, so some commit created it; an empty answer
 		// means this line reaches it only through a graft or a shallow boundary. Absence is the
 		// honest answer, and it ties with other absences rather than inventing an order.
 		return -1, nil
 	}
-	out, err := repo.Git(ctx, "rev-list", "--count", touched+".."+rev)
+	out, err := repo.Git(ctx, "rev-list", "--count", added+".."+rev)
 	if err != nil {
 		return -1, err
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(out))
 	if err != nil {
-		return -1, fmt.Errorf("counting commits from %s to %s: %w", touched, rev, err)
+		return -1, fmt.Errorf("counting commits from %s to %s: %w", added, rev, err)
 	}
 	return n, nil
 }
@@ -627,7 +662,11 @@ func applyBases(ctx context.Context, repo *git.Repo, candidates []Candidate, db 
 // The second half matters: `ignores:` is a decision one changeset records about another, and
 // if the two point at each other — which a hand-edited file can easily do — an unguarded
 // filter would report "no changeset here" for a branch that visibly has two.
-func dropNamed(candidates []Candidate, named func(Candidate) []string) []Candidate {
+// dropNamedKeeping removes the candidates another candidate names, and reports when the removal
+// would have emptied the set. An empty answer would mean "this branch carries nothing", which is
+// false: what happened is that the records contradict each other, and the candidates stay for the
+// author to read.
+func dropNamedKeeping(candidates []Candidate, named func(Candidate) []string) ([]Candidate, bool) {
 	drop := map[string]bool{}
 	for _, c := range candidates {
 		for _, id := range named(c) {
@@ -637,7 +676,7 @@ func dropNamed(candidates []Candidate, named func(Candidate) []string) []Candida
 		}
 	}
 	if len(drop) == 0 {
-		return candidates
+		return candidates, false
 	}
 	kept := make([]Candidate, 0, len(candidates))
 	for _, c := range candidates {
@@ -646,9 +685,9 @@ func dropNamed(candidates []Candidate, named func(Candidate) []string) []Candida
 		}
 	}
 	if len(kept) == 0 {
-		return candidates
+		return candidates, true
 	}
-	return kept
+	return kept, false
 }
 
 func sortCandidates(candidates []Candidate) {

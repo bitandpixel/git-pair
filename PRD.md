@@ -212,9 +212,11 @@ integration branch's tree does not have.
   has ever had.
 
 Where more than one directory survives, they are ordered by the branch's own history and not by
-guesswork: the changeset whose directory this revision touched most recently comes first; a directory
-named as another's `base:` is the parent of a stack, so it is not what the revision is working on. When
-nothing orders them, the answer is **ambiguous**, and the command refuses, names every
+guesswork: the changeset whose directory joined this line most recently comes first - the commit that
+added it, not the commit that last edited one, because a child branch edits its parent's directory
+without starting work on the parent. A directory named as another's `base:` is the parent of a stack,
+so it is not what the revision is working on. When nothing orders them - where one commit added two
+directories, for instance - the answer is **ambiguous**, and the command refuses, names every
 candidate, and gives two ways out: `--changeset <id>` answers for one command, and
 `git pair change use <id>` (§9.8) settles it for the branch. Two unrelated changesets on one
 branch is a state only the author can settle, and picking one silently would read the wrong diff
@@ -911,9 +913,8 @@ Records which changeset a branch is working on, so that the branch stops being a
 
 A branch normally carries one unlanded changeset. It carries more when a sibling's branch is merged
 into it, and when a branch created off a sibling starts its own work without `--base` naming that
-stack. The rule (§4) orders what it can — the changeset whose directory this revision touched most recently
-wins, a `base:` names
-the parent of a stack — and refuses between the rest, because choosing one silently means reading
+stack. The rule (§4) orders what it can — the changeset whose directory joined this line most recently wins,
+a `base:` names the parent of a stack — and refuses between the rest, because choosing one silently means reading
 the wrong diff base.
 
 ```bash
