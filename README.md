@@ -1272,9 +1272,12 @@ Merge made by the 'ort' strategy.
 What the runner has to provide: `contents: write` for the merge commit, `checks: read` and
 `statuses: read` for the probe (a token that cannot read them answers "cannot tell", and the job merges
 nothing on that answer, so a missing scope stalls it rather than failing it), `fetch-depth: 0` (the gate
-reads the approval out of history, and a shallow checkout cannot see it), and the integration branch
-named — `GIT_PAIR_DEFAULT_BRANCH` or `--default-branch` on each call, because a checkout that fetched one
-branch has nothing to compare against. And the destination branch has to accept the push: `GITHUB_TOKEN`
+reads the approval out of history, and a shallow checkout cannot see it), and the integration branch named on
+every call: `--default-branch <ref>`, because a checkout that fetched one branch has no recorded remote
+default to compare against. `GIT_PAIR_DEFAULT_BRANCH` is not a git-pair interface — the command never reads
+it. It belongs to the shipped merge job, which sets it from the `GIT_PAIR_BASE` repository variable (default
+`main`) and passes the flag on each `git pair` call it makes; a `git pair` command run outside that script
+needs the flag. And the destination branch has to accept the push: `GITHUB_TOKEN`
 cannot be a branch-protection bypass actor, so an unprotected trunk works as-is and a protected one needs a
 Ruleset bypass actor of its own (a GitHub App or a deploy key) with its token on the push remote.
 
