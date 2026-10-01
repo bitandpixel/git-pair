@@ -493,9 +493,10 @@ out=$($G status --changeset unreviewed-merge --json)
 printf '%s' "$out" | grep -q '"landed": true' \
   && echo "  ok: and a landed changeset read by name says landed, from the tree" \
   || { echo "  FAIL: status --changeset did not report the landing"; FAILED=1; }
-# Nothing closes this heading by writing something. No command makes a squash landing carry the review it
-# lost, and the finding stays where the destination is until somebody reviews the work or tidies the
-# directory out of the way — so the read is re-run, and says the same thing the second time.
+# Nothing closes this heading by writing a verdict. No command makes a squash landing carry the review it
+# lost, and the finding stays where the destination is until somebody reviews the work or files the record
+# out of the way - so the read is re-run, and says the same thing the second time. The step below is the
+# second of those two, and it is a commit with a reviewer behind it rather than an invocation.
 queued=$($G queue 2>&1)
 if ! printf '%s' "$queued" | grep -q "LANDED UNREVIEWED"; then
   echo "  FAIL: the report went quiet on its own, so it was never about the work"; FAILED=1
@@ -510,7 +511,9 @@ step "tidy: a landing's directory moves aside, and every answer about it holds"
 # Landing keeps the directory, which is right the moment it lands and scenery a release later.
 # `change tidy` moves it out of the way as one commit of renames, and the point of the step is the
 # second half: every question the tool answers about that changeset has to be answered the same way
-# on both sides of the move, because nothing about the work changed.
+# on both sides of the move, because nothing about the work changed. One answer is allowed to change, and
+# the step ends by asserting which one: the `LANDED UNREVIEWED` report, once the destination itself
+# carries the filed spelling, stops naming that changeset.
 git switch -q main
 git checkout -qb tidied-landing
 mkdir -p changesets/tidied-landing
@@ -596,6 +599,36 @@ else
 fi
 git switch -q tidy-up
 git switch -q main
+# The finding is a fact about the destination's tree, so a tidy that sits on an open branch files nothing:
+# main still carries `changesets/tidied-landing/`, and the report says so. This is the half that keeps the
+# rule below from being a way to shout down a finding with an unmerged commit.
+out=$($G queue --json 2>&1)
+if printf '%s' "$out" | grep -q '"changeset": *"tidied-landing"'; then
+  echo "  ok: a tidy nobody has merged silences nothing"
+else
+  echo "  FAIL: the finding went quiet while the tidy sat on a branch: $out"; FAILED=1
+fi
+# The move reaches the destination the way any other changeset does, and the report ends for the directory
+# it filed away - while the landings nobody filed stay in it, which is what makes this a per-changeset
+# acknowledgement rather than a switch. Nothing about the finding itself changed: the read still says the
+# destination holds no approval of what it carries.
+git merge -q --no-ff -m "tidy-up: file the landing away" tidy-up
+out=$($G queue --json 2>&1)
+if printf '%s' "$out" | grep -q '"changeset": *"tidied-landing"'; then
+  echo "  FAIL: a filed landing is still reported unreviewed: $out"; FAILED=1
+else
+  echo "  ok: a landing the destination carries filed away is out of the report"
+fi
+printf '%s' "$out" | grep -q '"changeset": *"unreviewed-merge"' \
+  && echo "  ok: and the landings nobody filed are still in it" \
+  || { echo "  FAIL: filing one landing silenced the others: $out"; FAILED=1; }
+out=$($G status --changeset tidied-landing --json 2>&1); code=$?
+if [ "$code" = 0 ] && printf '%s' "$out" | grep -q '"landed": *true' \
+   && printf '%s' "$out" | grep -q '"reviewed": *false'; then
+  echo "  ok: filing the record leaves the finding readable, and as untrue as it was"
+else
+  echo "  FAIL: status after the filing exited $code: $out"; FAILED=1
+fi
 git branch -q -D tidy-up tidied-landing
 
 step "queue is empty again"

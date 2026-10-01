@@ -62,6 +62,40 @@ func LandedDirPath(id string) string {
 	return filepath.Join(Root, LandedDir, id)
 }
 
+// TidiedIDs lists the changesets a revision has filed away: the directories it carries under
+// `changesets/.landed/` and *not* under `changesets/`. The second half is the definition — a revision that
+// carries both spellings of one id has the directory still in place, and "filed away" is false for it.
+//
+// `LandedIDs` answers the wider question ("has this reached the destination") and must keep answering it
+// for a filed directory, because filing moves a record and changes nothing about the work. Ask this one when
+// the question is what somebody has deliberately put out of sight, which is a different fact from landed and
+// one the reporting surfaces want on its own terms.
+//
+// The cost is two listings of one tree, so a caller asks it once for a revision rather than per id. The
+// order is the listing's, and filtering it keeps that order.
+func TidiedIDs(ctx context.Context, repo *git.Repo, rev string) ([]string, error) {
+	filed, err := dirsUnder(ctx, repo, rev, ActiveDirPath(LandedDir))
+	if err != nil {
+		return nil, err
+	}
+	inPlace, err := ActiveIDs(ctx, repo, rev)
+	if err != nil {
+		return nil, err
+	}
+	here := make(map[string]bool, len(inPlace))
+	for _, id := range inPlace {
+		here[id] = true
+	}
+	out := make([]string, 0, len(filed))
+	for _, id := range withoutReserved(filed) {
+		if here[id] {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
 // DirAt reports the path one changeset's directory has in a revision's tree, and whether it is there at
 // all: `changesets/<id>/`, or `changesets/.landed/<id>/` once it has been tidied. Every reader that takes
 // a slug and a revision asks this before it reads a file, because a reader that hard-codes the active

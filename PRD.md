@@ -330,12 +330,12 @@ answer that already tells you the branch holds no work in progress. Both read it
 history, from the reads the command was already making, so the report costs nothing per changeset and grows
 nothing as a repository ages.
 
-Two properties the wording has to hold:
+Three properties the wording has to hold:
 
-- **It is a finding, not a queue entry.** No command closes it, because there is nothing to write: the
-  verdict either happened somewhere the destination cannot see or it did not happen. The report prints a
-  read (`git pair status --changeset <id>`), never an invocation, and never changes the exit code of the
-  command that found it.
+- **It is a finding, not a queue entry.** No command closes it by writing something, because there is
+  nothing to write: the verdict either happened somewhere the destination cannot see or it did not happen.
+  The report prints a read (`git pair status --changeset <id>`), never an invocation, and never changes the
+  exit code of the command that found it.
 - **The reason says which reading applies.** `the chain carries no review verdict` means the chain came
   along and holds no marker to read. `the newest verdict is feedback (<sha>), which does not license a
   merge` and `the newest verdict is a block (<sha>)` name the verdict that was newest. A record that came
@@ -350,6 +350,16 @@ Two properties the wording has to hold:
   author made under an approval; `the approval (<sha>) names no commit, so the destination cannot be
   checked against it` is a marker whose `Review-Head` trailer was lost. Both say one thing about a
   destination that cannot show its approval: the record arrived, and what it licensed did not.
+
+- **A directory the destination has filed away is asked about and not reported.** `git pair change tidy`
+  (§13.5) moves a landed directory to `changesets/.landed/<id>/` in a changeset of renames, which reaches the
+  destination through review like any other change. A destination that carries only that spelling stops
+  naming the changeset in `queue` and `status`. Two facts make that safe to read as an acknowledgement: the
+  statement costs a reviewed commit rather than a flag, and the finding survives it — `git pair status
+  --changeset <id>` reads the same chain and answers `reviewed: false` for a filed landing exactly as it did
+  before. A tidy that has not been merged silences nothing, because the destination still carries the
+  directory in place. The rule is also what keeps §13.3's advice from contradicting this heading: a
+  repository that squashes sees it on every landing, and tidying is what §13.5 tells that repository to do.
 
 The verdict stays strict where it cannot be checked, rather than passing for want of a counter-example. Two
 changesets in this repository's own trunk are in that shape, and a rule that read an unchecked approval as
@@ -1119,7 +1129,9 @@ through the same flow as any other change. Nothing is pushed, and no ref is writ
 Because the directory's new path is still a directory the integration branch carries, `LandedIDs`,
 `ActiveIDs`, `status`, `queue`, `check` and the destination walk answer every question about the changeset the
 same way on both sides of the move. What changes is the path, and the name: the ID stays taken while the
-landed directory holds it (§5).
+landed directory holds it (§5). One answer does change: a landing the destination carries only under
+`changesets/.landed/` is no longer reported as `LANDED UNREVIEWED` (§4), because the merged rename commit is
+the repository acknowledging the record it filed away.
 
 Flags: `--all-landed` takes the set this branch carries that the integration branch already holds, instead of
 refusing the ones that have not landed; `--dry-run` reports the plan and commits nothing; `--json` emits
@@ -1383,7 +1395,9 @@ Work that reached the destination with **no approval the destination can show** 
 is where it is reported: its own `LANDED UNREVIEWED` heading, naming each changeset and printing the
 read that goes and looks (§4's *Landed, unreviewed*). It is not a skip note, because "nothing to do" is
 the wrong reading of a merge whose review never reached the destination, and it names no command, because
-no command closes it.
+no command closes it. A landing the destination carries filed away under `changesets/.landed/` is not in it:
+the tidy commit that moved it there is the acknowledgement, and it is a fact about the destination's tree
+(§13.5).
 
 A branch the rule cannot resolve is named there too, with its candidates and both ways out (§9.8).
 A branch that is quietly missing from the queue is indistinguishable from a branch with nothing to
@@ -1644,7 +1658,8 @@ usage refusal. When that branch is the integration branch the refusal also names
 that hold no approval of what they carry, as the `LANDED UNREVIEWED` finding (§4's *Landed, unreviewed*):
 "this branch holds no work in progress" and "work landed here with no review behind it" are two halves of
 one situation, and a reader told only the first goes looking for a branch they forgot rather than at the
-merge in front of them. It names no command, because none closes it. The exit code is
+merge in front of them. It names no command, because none closes it, and it names no landing the destination
+has filed away (§13.5). The exit code is
 unchanged — the branch really does not carry work in progress, which is what that code means, and there is
 nothing to write about the landings — and with `--json` the answer is a document rather than only an error:
 `reason` and `landed_unreviewed`, where `git pair queue --json` (§10.6) carries the same list.
@@ -2118,7 +2133,8 @@ This is the honest limit of the model, stated rather than papered over:
 
 `LANDED UNREVIEWED` (§4) is that limit made visible at the surface that reviews work, and `change tidy`
 (§13.5) is the mitigation for a repository that squashes: move the directory while the chain is still
-reachable, in a commit that rides the normal review flow.
+reachable, in a commit that rides the normal review flow. Once that commit is in the destination it is also
+what ends the report (§4), which is why the recommendation and the notification do not fight each other.
 
 ## 13.4 git-pair writes no refs
 
@@ -2153,12 +2169,17 @@ git pair change tidy booking-transaction --dry-run
 git pair change tidy --all-landed
 ```
 
-It refuses, with one reason each and moving nothing: an id that has not landed, an id a changeset still in
-flight is stacked on (the child's diff is measured against that directory), a dirty working tree, and an id
-this branch does not carry (the move is a commit here, so the directory has to be here). A second run is a
+It refuses, with one reason each and moving nothing: an id that has not landed, a dirty working tree, and an
+id this branch does not carry (the move is a commit here, so the directory has to be here). A second run is a
 no-op naming the directory it found. Tidying is itself a changeset — the reviewer sees the whole list as
 renames in one span — and it reaches the destination through the normal flow, which is what keeps §4's
 pruning rule from ever being exercised by hand.
+
+A landing this branch carries only under `changesets/.landed/` has been filed by a commit the destination
+accepted, and `queue` and `status` stop reporting it as `LANDED UNREVIEWED` (§4). That is the whole of what
+filing changes about the answers. The directory is still landed work to every other rule, `status --changeset
+<id>` still reads its chain and still says `reviewed: false`, and a tidy sitting on an unmerged branch ends
+nothing — the destination carries the directory in place until the move arrives.
 
 # 14. Interactive Review TUI
 
@@ -3249,7 +3270,9 @@ a landing that replayed the run and so carried the approval without the commits 
 `LANDED UNREVIEWED`, and `git pair status` says the same on a branch
 carrying no work of its own (§4's *Landed, unreviewed*). A supervisor agent that runs the queue between
 steps sees a landing whose review did not reach the destination instead of a changeset that quietly
-disappeared, which is what makes the sequence above a contract rather than an expectation.
+disappeared, which is what makes the sequence above a contract rather than an expectation. A filed landing is
+not in that list: a `change tidy` commit that reached the destination is the one act that ends the report,
+and it leaves a rename commit behind to read (§13.5).
 ---
 
 # 23. Review Outcomes

@@ -56,7 +56,14 @@ sits. ` + "`changesets/.landed/`" + ` is git-pair's own name and no changeset ma
 Name the ids to move, or ask for every landed one with ` + "`--all-landed`" + `. A run that names an id
 which is not landed refuses rather than moving part of the list: the reason is a fact about the
 repository, not a warning to read past. A landed changeset that another branch still records as its base
-is not such a fact - it moves, and the run names the branches that were pointed at it.`,
+is not such a fact - it moves, and the run names the branches that were pointed at it.
+
+One answer does change, and only once the move is in the integration branch: ` + "`queue`" + ` and ` + "`status`" + `
+stop reporting that changeset under ` + "`LANDED UNREVIEWED`" + `. The destination then carries the record filed
+away, which is the repository saying in a reviewed commit that it is done with it. The finding itself is
+untouched - ` + "`git pair status --changeset <id>`" + ` reads the same chain and still says the destination holds
+no approval of what it carries - and a tidy nobody has merged ends nothing, because the integration branch
+still carries the directory in place.`,
 		Example: `  git pair change tidy booking-transaction
   git pair change tidy --all-landed --dry-run
   git pair change tidy --all-landed --json`,

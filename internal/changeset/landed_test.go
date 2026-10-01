@@ -33,6 +33,59 @@ func landedIDsAt(t *testing.T, f *gittest.Fixture, rev string) []string {
 	return got
 }
 
+func tidiedIDsAt(t *testing.T, f *gittest.Fixture, rev string) []string {
+	t.Helper()
+	got, err := changeset.TidiedIDs(context.Background(), repo(f), rev)
+	if err != nil {
+		t.Fatalf("TidiedIDs(%s): %v", rev, err)
+	}
+	return got
+}
+
+// `LandedIDs` is the union of the two listings, and a revision that carries one id in both spellings is the
+// case that decides how they are defined. A directory in place is not filed away, so the filed listing must
+// leave it out — which is what makes the union need no dedupe, and what keeps `TidiedIDs` from answering a
+// half-moved tree as though the move were finished.
+func TestTidiedIDsNamesOnlyWhatHasBeenFiledAway(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	for _, id := range []string{"filed", "inplace", "both"} {
+		f.CreateBranch(id)
+		f.CommitChangeset(id, "main")
+		f.Commit(id+" work", gittest.WithFile(id+".txt", "1\n"))
+	}
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land three", "filed", "inplace", "both")
+	f.Write(filepath.Join("changesets", ".landed", ".keep"), "the namespace, tracked\n")
+	f.MustGit("mv", "changesets/filed", filepath.Join("changesets", ".landed", "filed"))
+	// The half-finished tidy: the filed spelling of `both` beside the directory still in place. One file is
+	// a directory to git, which is all either listing asks.
+	f.Write(filepath.Join("changesets", ".landed", "both", "CHANGESET.yaml"), "id: both\nbase: main\n")
+	// The sharpest form: a directory under the namespace whose *own* name is the namespace. No tidy can
+	// make that, because `ValidateID` refuses the name; a hand-made one must not become an id either.
+	f.Write(filepath.Join("changesets", ".landed", ".landed", "x", "CHANGESET.yaml"), "id: .landed\nbase: main\n")
+	f.Commit("file one away, copy a second, nest the namespace")
+
+	if got := tidiedIDsAt(t, f, "main"); !reflect.DeepEqual(got, []string{"filed"}) {
+		t.Errorf("TidiedIDs = %v, want only filed: `inplace` was never moved, `both` is still in place, and "+
+			"the nested namespace is not a changeset", got)
+	}
+	if got := landedIDsAt(t, f, "main"); !reflect.DeepEqual(got, []string{"both", "filed", "inplace"}) {
+		t.Errorf("LandedIDs = %v, want all three named once each", got)
+	}
+}
+
+// A revision with no `changesets/` at all has filed nothing, which is an empty answer rather than a
+// failure — the same tolerance `ActiveIDs` and `LandedIDs` commit to for a branch cut before changesets
+// were invented.
+func TestTidiedIDsOfARevisionWithNothing(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	if got := tidiedIDsAt(t, f, "HEAD"); len(got) != 0 {
+		t.Errorf("TidiedIDs with no changesets/ = %v, want none", got)
+	}
+}
+
 // A destination holding one landed changeset, tidied, and a branch carrying one still in progress.
 // The stray `CHANGESET.yaml` written directly under the namespace is the sharpest form of the trap: its
 // directory name is `changesets/.landed`, it parses, and its `id:` matches, so a reader that names a

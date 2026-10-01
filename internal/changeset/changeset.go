@@ -428,24 +428,22 @@ func ActiveIDs(ctx context.Context, repo *git.Repo, rev string) ([]string, error
 // way the work landed, and a reader that asks only one of the two questions reports a landed
 // changeset as work in progress — the directory is simply not where it looked. Both halves come from
 // the destination's own tree, so there is nothing to keep in sync and nothing to fetch.
+//
+// The two halves are disjoint: `TidiedIDs` names only the directories that are *not* also in place, so the
+// union needs no dedupe and the two listings answer two questions instead of restating one. The repeat of
+// the active listing inside `TidiedIDs` costs nothing in one run — `ls-tree` is a memoized read.
 func LandedIDs(ctx context.Context, repo *git.Repo, trunkRef string) ([]string, error) {
 	active, err := ActiveIDs(ctx, repo, trunkRef)
 	if err != nil {
 		return nil, err
 	}
-	moved, err := dirsUnder(ctx, repo, trunkRef, ActiveDirPath(LandedDir))
+	filed, err := TidiedIDs(ctx, repo, trunkRef)
 	if err != nil {
 		return nil, err
 	}
-	seen := map[string]bool{}
-	out := make([]string, 0, len(active)+len(moved))
-	for _, id := range append(active, moved...) {
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		out = append(out, id)
-	}
+	out := make([]string, 0, len(active)+len(filed))
+	out = append(out, active...)
+	out = append(out, filed...)
 	sort.Strings(out)
 	return out, nil
 }

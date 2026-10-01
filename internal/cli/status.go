@@ -222,8 +222,9 @@ func runStatus(ctx context.Context, a *app, slug string) error {
 // work in progress and this branch holds none. But when the branch is the destination, the same
 // repository may also be holding directories whose chains carry no permitting verdict, and a reader told
 // only the first half goes looking for a branch they forgot instead of the review that never happened.
-// The finding is printed where a reader on that branch will see it. No command closes it: the answer is a
-// review, not an invocation.
+// The finding is printed where a reader on that branch will see it. No command closes it by writing a
+// verdict; `change tidy`, once it reaches the destination, is the one act that ends the report (see
+// `unreviewedLandings`).
 //
 // Every step of the detection is best-effort: this path already has an answer, and a report about
 // landings is never a reason to fail in a new way.
@@ -239,7 +240,11 @@ func (a *app) landingsOnNoChangeset(ctx context.Context, slug string, err error)
 	if derr != nil {
 		return err
 	}
-	dirs, derr := changeset.ActiveIDs(ctx, repo, db.Ref)
+	// The same listing `queue` hands the detector, so the two surfaces ask about the same set of directories
+	// and the filing rule is applied in one place. Asking instead for the directories in place would put the
+	// rule in the enumeration, where the next reader of `queue` would not find it and would quietly disagree
+	// with this one.
+	dirs, derr := changeset.LandedIDs(ctx, repo, db.Ref)
 	if derr != nil {
 		return err
 	}

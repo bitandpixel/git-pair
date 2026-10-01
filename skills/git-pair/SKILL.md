@@ -211,7 +211,11 @@ up — that trailer is the reviewer's statement about what they looked at, not y
 not your change's state: `LANDED UNREVIEWED`, a changeset whose directory is in the destination while the
 destination holds no approval of what it carries: no approval at all, a squash that brought no markers, or an
 approval naming commits the landing left behind. Read it with `git pair status --changeset <id>`. No
-command closes it — there is nothing to write — so report it and leave it.
+command closes it — there is nothing to write — so report it and leave it. One thing ends the report, and it is
+a commit rather than a command: once a `git pair change tidy` reaches the destination, the directory sits under
+`changesets/.landed/` and the changeset is out of the heading, because a reviewed commit has filed the record
+away. The finding is not thereby false — `status --changeset <id>` still reads the chain and still says
+`reviewed: false` — and a tidy nobody has merged silences nothing.
 
 ## Mistakes that cost a review cycle
 

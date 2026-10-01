@@ -88,6 +88,13 @@ Report it; do not try to close it. No command closes this one — the answer is 
 something is not one. The old finding this replaced (`LANDED, UNRECORDED`) reported a step that had not
 been run and printed the command that ran it; there is no step left to run.
 
+What does end the report is a commit: a `git pair change tidy` that reaches the destination moves the
+directory to `changesets/.landed/<id>/`, and a destination carrying only that spelling leaves the changeset
+out of the heading and out of `landed_unreviewed`. Treat that as somebody having filed the record away on
+purpose, not as the review having happened — `status --changeset <id>` still answers `reviewed: false`, so
+read it before you say the finding is settled. A tidy on an unmerged branch changes nothing, and neither
+does your saying so: filing is the destination's fact, not an opinion you can assert from a branch.
+
 ## Reading a changeset that is no longer on a branch
 
 `git pair status --changeset <id>` resolves a slug from whichever branch carries it, including the
