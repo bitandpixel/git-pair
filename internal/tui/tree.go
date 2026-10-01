@@ -38,6 +38,11 @@ type treeRow struct {
 	// are on screen: a folded directory still has to say what it stands in for, and that is
 	// the number `Space` is about to set.
 	total, marked int
+	// dirty says this row's subject has an uncommitted change in the working tree: the file itself for
+	// a file row, and something under the directory for a directory row — but only while the directory
+	// is folded. Unfolded, the rows it would stand in for are on screen saying it themselves, and a mark
+	// repeated down a subtree is one more thing to look past to find the row that means it.
+	dirty bool
 }
 
 // branch is a directory while the tree is being built: its subdirectories by name, and the
@@ -90,10 +95,12 @@ func (b *branch) walkChildren(prefix string, depth int, files []File, folded map
 	slices.Sort(names)
 	for _, name := range names {
 		sub, subPrefix, label := fold(b.subs[name], prefix+name+dirSep, name+dirSep)
-		total, marked := sub.count(files)
+		total, marked, dirty := sub.count(files)
 		*out = append(*out, treeRow{
 			path: subPrefix, name: label, depth: depth, dir: true, file: -1,
 			total: total, marked: marked,
+			// Only a folded directory wears this. Open, its own children are the answer.
+			dirty: folded[subPrefix] && dirty > 0,
 		})
 		if folded[subPrefix] {
 			continue
@@ -110,7 +117,7 @@ func (b *branch) walkChildren(prefix string, depth int, files []File, folded map
 	for _, idx := range sorted {
 		*out = append(*out, treeRow{
 			path: files[idx].Path, name: baseName(files[idx].Path),
-			depth: depth, file: idx,
+			depth: depth, file: idx, dirty: files[idx].Dirty,
 		})
 	}
 }
@@ -132,21 +139,26 @@ func fold(b *branch, prefix, label string) (*branch, string, string) {
 	return b, prefix, label
 }
 
-// count is how many files sit under b and how many of them are reviewed, counting every file in
-// the subtree whether or not any of it is on screen.
-func (b *branch) count(files []File) (total, marked int) {
+// count is how many files sit under b, how many of them are reviewed, and how many carry an
+// uncommitted change — counting every file in the subtree whether or not any of it is on screen. The
+// third number is what lets a folded directory say that something inside it has been written to.
+func (b *branch) count(files []File) (total, marked, dirty int) {
 	for _, idx := range b.files {
 		total++
 		if files[idx].Reviewed {
 			marked++
 		}
+		if files[idx].Dirty {
+			dirty++
+		}
 	}
 	for _, sub := range b.subs {
-		t, m := sub.count(files)
+		t, m, d := sub.count(files)
 		total += t
 		marked += m
+		dirty += d
 	}
-	return total, marked
+	return total, marked, dirty
 }
 
 // treeDirs is every directory the files sit under, each named with its trailing separator, sorted
