@@ -42,10 +42,11 @@ const unreviewedDisplayCap = 10
 // history, and the reason line names which one the reader is looking at rather than leaving them to guess.
 //
 // A chain that carries no verdict means the work reached the branch without a review, or the verdict was
-// rewritten away. A landing that carried no ancestry — a squash, a cherry-pick — means the review may have
-// happened and nothing in the destination kept it. And a chain that carries an approval whose commit the
-// destination does not hold means the approval was about commits that did not arrive: the run was replayed
-// between the approval and the landing, so what main holds is not what was approved. The last of the three
+// rewritten away. A landing that carried no ancestry — a squash, a cherry-pick, or a run whose record came
+// over in one commit while its markers stayed behind — means the review may have happened and nothing in the
+// destination kept it. And a chain that carries an approval whose commit the destination does not hold means
+// the approval was about commits that did not arrive: the run was replayed between the approval and the
+// landing, so what main holds is not what was approved. The last of the three
 // is what keeps `reviewed` from meaning "somebody approved this at some point", and it is the same test
 // `check` runs against the branch, which is why the two surfaces cannot disagree.
 type unreviewedLanding struct {
@@ -150,19 +151,36 @@ func (a *app) unreviewedRecord(ctx context.Context, repo *git.Repo, trunk change
 	if err != nil {
 		return unreviewedRecord{}, false
 	}
-	licensed, reason := a.landingLicence(ctx, repo, trunk.Ref, chain, integrationVerdict(summary))
+	licensed, reason := a.landingLicence(ctx, repo, trunk.Ref, chain, summary)
 	return unreviewedRecord{
 		Licensed: licensed,
 		Commit:   short(chain.Landing),
-		Chain:    chainRange(chain),
+		Chain:    chainRange(chain, summary),
 		Reason:   reason,
 	}, true
 }
 
-// chainRange names the range the verdict was looked for in, so a reader can go and look. An unreadable
-// chain prints nothing, which is the difference between "we looked here" and "there was nowhere to look".
-func chainRange(c changeset.Chain) string {
-	if c.Base == "" || c.Head == "" || c.Squash {
+// carriedNoReviewRecord is the reading for a record that came over alone: the directory arrived in one
+// commit that is not a merge, and the chain holds no marker for the changeset anywhere in it.
+//
+// Neither half carries this on its own, which is the whole reason the predicate exists. The shape says the
+// arrival was a single commit; it does not say whether a review happened, because a fast-forward run whose
+// record was committed once arrives exactly the same way and may have carried its verdict across in commits
+// that touched no file. Ask the shape alone and a reviewed landing is reported as unreviewed — which is what
+// `TestAReplayedLandingIsUnreviewedBecauseTheApprovedCommitsDidNotArrive` would have caught, loudly. Ask the
+// markers alone and every changeset that was simply never reviewed gets the squash sentence, which blames a
+// merge shape for a review nobody ran. Together they say one true thing about both: nothing in the
+// destination records a review of this, and the record came by itself.
+func carriedNoReviewRecord(c changeset.Chain, summary lifecycle.Summary) bool {
+	return c.ArrivedInOneCommit && summary.Marker == nil
+}
+
+// chainRange names the range the verdict was looked for in, so a reader can go and look. Nothing is printed
+// where there was nothing to look at: a record that arrived alone and carries no markers has no run behind it
+// in this destination, and naming trunk's tip as the end of one would send a reader through commits that
+// belong to other people's work.
+func chainRange(c changeset.Chain, summary lifecycle.Summary) string {
+	if c.Base == "" || c.Head == "" || carriedNoReviewRecord(c, summary) {
 		return ""
 	}
 	return short(c.Base) + ".." + short(c.Head)
@@ -171,10 +189,11 @@ func chainRange(c changeset.Chain) string {
 // unreviewedReason is the half of the decision that needs no git: what the chain itself said, in the
 // reader's terms. Empty means the chain carries an approval, which is not yet the whole answer — see
 // landingLicence, which then asks whether the destination holds the commit that approval names.
-func unreviewedReason(c changeset.Chain, verdict *lifecycle.Event) string {
-	if c.Squash {
-		return "the landing carried the directory in one commit, so no review markers came with it"
+func unreviewedReason(c changeset.Chain, summary lifecycle.Summary) string {
+	if carriedNoReviewRecord(c, summary) {
+		return "the landing carried the directory in one commit, and the chain carries no review markers"
 	}
+	verdict := integrationVerdict(summary)
 	if verdict != nil && verdict.Outcome == model.OutcomeApprove {
 		return ""
 	}
@@ -211,10 +230,11 @@ func unreviewedReason(c changeset.Chain, verdict *lifecycle.Event) string {
 // false: a destination that does not have the commit does not license it, whatever the reason the commit is
 // missing.
 func (a *app) landingLicence(ctx context.Context, repo *git.Repo, dest string, chain changeset.Chain,
-	verdict *lifecycle.Event) (bool, string) {
-	if reason := unreviewedReason(chain, verdict); reason != "" {
+	summary lifecycle.Summary) (bool, string) {
+	if reason := unreviewedReason(chain, summary); reason != "" {
 		return false, reason
 	}
+	verdict := integrationVerdict(summary)
 	head := verdict.ReviewedHead
 	if head == "" {
 		return false, fmt.Sprintf("the approval (%s) names no commit, so the destination cannot be checked against it",
@@ -243,9 +263,11 @@ func (a *app) landingLicence(ctx context.Context, repo *git.Repo, dest string, c
 // was ever approved. It is false when no approval came with the run — a squash or a cherry-pick brings the
 // tree and leaves the history behind — and false when an approval came but names a commit the destination
 // does not have, which is what a replayed run looks like. `chain_base` and `chain_head` are empty in the
-// first case and not in the second, so the three fields together say which of them you are looking at.
-// `state` keeps its own meaning throughout: it is what the markers in the run recorded, so a replayed
-// landing can read APPROVED while `reviewed` says the approval does not cover what landed.
+// first case and not in the second, so the three fields together say which of them you are looking at: an
+// empty chain says nothing came with the record and nothing in it records a review, and a chain says the
+// run is there to be read even when what it licenses did not arrive. `state` keeps its own meaning
+// throughout: it is what the markers in the run recorded, so a replayed landing can read APPROVED while
+// `reviewed` says the approval does not cover what landed.
 type landingView struct {
 	Landed bool `json:"landed"`
 	// Commit is the commit that put the directory on the integration branch, and Branch is that branch's
@@ -253,7 +275,8 @@ type landingView struct {
 	Commit string `json:"landed_commit,omitempty"`
 	Branch string `json:"landed_branch,omitempty"`
 	// ChainBase and ChainHead bound the run behind the directory: the span a reviewer read, and where
-	// their markers are. Empty when the landing carried no chain to bound.
+	// their markers are. Empty when the record came alone and the chain holds no markers, which is the one
+	// case where there is no run to name.
 	ChainBase string `json:"chain_base,omitempty"`
 	ChainHead string `json:"chain_head,omitempty"`
 	// Reviewed says the chain carries a permitting verdict. See the type comment for what it does not say.
@@ -278,14 +301,18 @@ func (a *app) landingView(ctx context.Context, repo *git.Repo, trunk changeset.D
 		return out, err
 	}
 	out.Commit = short(chain.Landing)
-	if !chain.Squash {
-		out.ChainBase, out.ChainHead = short(chain.Base), short(chain.Head)
-	}
 	summary, err := lifecycle.Summarize(ctx, repo, id, chain.Base, chain.Head)
 	if err != nil {
 		return out, err
 	}
-	licensed, _ := a.landingLicence(ctx, repo, trunk.Ref, chain, integrationVerdict(summary))
+	// The range is printed when there is a run to read. A record that came over alone and carries no
+	// markers has no run here — the chain's own endpoint is the destination's tip, which is where the
+	// destination's own work starts — so printing it would name other people's commits as this changeset's
+	// history.
+	if !carriedNoReviewRecord(chain, summary) {
+		out.ChainBase, out.ChainHead = short(chain.Base), short(chain.Head)
+	}
+	licensed, _ := a.landingLicence(ctx, repo, trunk.Ref, chain, summary)
 	out.Reviewed = licensed
 	return out, nil
 }

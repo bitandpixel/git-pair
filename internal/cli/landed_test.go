@@ -96,6 +96,87 @@ func TestASquashLandingSaysTheDestinationKeptNoHistory(t *testing.T) {
 	}
 }
 
+// The reason a squash landing gets must not depend on where the destination's tip happens to be. The old
+// derivation asked whether the landing was trunk's newest commit, so the sentence that says the record came
+// alone expired the first time an unrelated commit landed, and the changeset was reported with the sentence
+// reserved for a chain that arrived and carried nothing. Both readings are the same finding; only one of
+// them is true here.
+func TestASquashLandingKeepsItsReasonAfterTheDestinationMovesOn(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	ready(t, f)
+	submit(t, f, "approve")
+	landSquash(t, f, slug)
+	f.ForceDeleteBranch(slug)
+
+	mustContain(t, runIn(t, f.Dir(), "queue").stdout, "one commit",
+		"the one-commit reading while the landing is trunk's newest commit")
+
+	// Two ordinary commits on the destination. Neither touches this changeset's directory.
+	f.Commit("trunk moves", gittest.WithFile("trunk.md", "1\n"))
+	f.Commit("trunk moves again", gittest.WithFile("trunk.md", "2\n"))
+
+	out := runIn(t, f.Dir(), "queue")
+	mustContain(t, out.stdout, "LANDED UNREVIEWED", "the finding is still there")
+	mustContain(t, out.stdout, "one commit",
+		"and it still names the shape of the landing rather than blaming a reviewer for a chain that never came")
+
+	doc := runIn(t, f.Dir(), "queue", "--json").json(t)
+	item := doc["landed_unreviewed"].([]any)[0].(map[string]any)
+	if item["chain"] != "" {
+		t.Errorf("chain = %v, want the empty string: nothing came with the record, so there is no run to name, "+
+			"and the destination's tip is not this changeset's history", item["chain"])
+	}
+	if !strings.Contains(item["reason"].(string), "one commit") {
+		t.Errorf("reason = %v, want the one-commit reading", item["reason"])
+	}
+
+	// The same answer on the surface that prints fields rather than sentences.
+	view := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").mustSucceed(t, "status").json(t)
+	if view["chain_base"] != "" || view["chain_head"] != "" {
+		t.Errorf("chain_base/chain_head = %v/%v, want both empty for a record that arrived alone",
+			view["chain_base"], view["chain_head"])
+	}
+	if view["reviewed"] != false {
+		t.Errorf("reviewed = %v, want false: the review stayed on the branch that was squashed", view["reviewed"])
+	}
+}
+
+// The counterweight that keeps this fix from becoming "narrow the chain to the landing commit". A
+// fast-forward landing's record arrives in one commit too, and its ready marker and review submissions come
+// after that commit as empty commits — invisible to a path listing, and the reason the chain still runs to
+// the destination's tip. Here the markers are found, the approval licenses the landing, and nothing is
+// reported. The arrival shape alone would have called this a squash and reported it.
+func TestAFastForwardLandingThatCarriedItsReviewIsNotAOneCommitRecord(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	ready(t, f)
+	submit(t, f, "approve")
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--ff-only", slug)
+	f.ForceDeleteBranch(slug)
+	f.Commit("trunk moves", gittest.WithFile("trunk.md", "1\n"))
+
+	out := runIn(t, f.Dir(), "queue")
+	mustNotContain(t, out.stdout, "LANDED UNREVIEWED",
+		"the run came across the fast-forward with its approval, so there is no finding")
+	if list := runIn(t, f.Dir(), "queue", "--json").json(t)["landed_unreviewed"].([]any); len(list) != 0 {
+		t.Errorf("landed_unreviewed = %#v, want none", list)
+	}
+
+	view := runIn(t, f.Dir(), "status", "--changeset", slug, "--json").mustSucceed(t, "status").json(t)
+	if view["reviewed"] != true {
+		t.Errorf("reviewed = %v, want true: the chain holds the approval and the commit it names",
+			view["reviewed"])
+	}
+	if view["chain_base"] == "" || view["chain_head"] == "" {
+		t.Errorf("chain_base/chain_head = %v/%v, want the run the markers sit in: arriving in one commit is not "+
+			"the same fact as arriving with nothing",
+			view["chain_base"], view["chain_head"])
+	}
+	if view["state"] != "APPROVED" {
+		t.Errorf("state = %v, want APPROVED: the markers are in the chain and were read", view["state"])
+	}
+}
+
 // printedFindings mirrors unreviewedDisplayCap in landed.go: the cap is part of the printed contract, so
 // a test that counts the counted tail has to know it, and a change there should fail here.
 const printedFindings = 10

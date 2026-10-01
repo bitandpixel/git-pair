@@ -57,8 +57,10 @@ func TestLandedChainOfAMergeLanding(t *testing.T) {
 	if ch.Landing == ch.Head || ch.Landing == "" {
 		t.Errorf("Landing = %s, want the landing commit itself", short(ch.Landing))
 	}
-	if ch.Squash || ch.Moved {
-		t.Errorf("chain = %+v, want neither Squash nor Moved", ch)
+	// The arrival is a merge commit, so the record did not arrive in one commit of the destination's own
+	// line — it arrived with a second parent holding the run.
+	if ch.ArrivedInOneCommit || ch.Moved {
+		t.Errorf("chain = %+v, want neither the one-commit arrival nor Moved", ch)
 	}
 	// The chain range holds the work and the review, and nothing of trunk's later commit.
 	if !inRange(t, f, ch.Base, ch.Head, work) || !inRange(t, f, ch.Base, ch.Head, review) {
@@ -91,6 +93,21 @@ func TestLandedChainOfAFastForwardLanding(t *testing.T) {
 	}
 	if ch.Landing != added {
 		t.Errorf("Landing = %s, want %s: the commit that added the directory", short(ch.Landing), short(added))
+	}
+	// The arrival shape and the run are different questions. This record arrived in one commit and never
+	// moved, so `ArrivedInOneCommit` is true here exactly as it is for a squash — the difference between the
+	// two is that this run continued past the landing and may have carried its markers, which is what the
+	// marker walk reports and not the chain. A shape fact must not change when the destination moves, so
+	// this assertion is the fix rather than an exception to it.
+	if !ch.ArrivedInOneCommit {
+		t.Errorf("chain = %+v, want the one-commit arrival", ch)
+	}
+	// And `Head` stays at the destination's tip, where the branch's own commits are. Pulling it back to
+	// `Landing` is the tempting fix for the squash wording and it is wrong: the ready marker and the review
+	// submissions come after the commit that added the directory, and most of them change no file at all, so
+	// a range ending at the landing would report a reviewed fast-forward landing as a changeset nobody read.
+	if ch.Head == ch.Landing {
+		t.Error("Head = Landing: the run stops before the branch's own commits")
 	}
 	if !inRange(t, f, ch.Base, ch.Head, tip) {
 		t.Error("chain range is missing the work commit")
@@ -145,8 +162,9 @@ func TestLandedChainOfASquashLanding(t *testing.T) {
 	squash := f.Commit("Merge squashed (squashed)", gittest.WithNoStage())
 
 	ch := chainFor(t, f, "main", "squashed")
-	if !ch.Squash {
-		t.Errorf("chain = %+v, want Squash: the run is the one commit that carried the directory", ch)
+	if !ch.ArrivedInOneCommit {
+		t.Errorf("chain = %+v, want the one-commit arrival: the directory came in the landing and nothing "+
+			"else came with it", ch)
 	}
 	if ch.Merged || !ch.Linear {
 		t.Errorf("chain = %+v, want the linear shape", ch)
@@ -188,6 +206,44 @@ func TestLandedChainOfATidiedChangeset(t *testing.T) {
 	}
 	if ch.Head != review {
 		t.Errorf("Head = %s, want %s: tidying does not change where the chain ended", short(ch.Head), short(review))
+	}
+}
+
+// The arrival's shape must not depend on where the destination's tip has since moved to. This is the defect:
+// the old test was `Head == Landing`, which was true only while the landing was trunk's newest commit, so a
+// squash landing's reading — and the sentence naming the shape — expired the first time an unrelated commit
+// landed. The two assertions below are the same changeset read before and after trunk moves on.
+func TestAOneCommitArrivalSurvivesTheDestinationMovingOn(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("squashed")
+	f.CommitChangeset("squashed", "main")
+	f.Commit("squashed work", gittest.WithFile("s.txt", "1\n"))
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--squash", "squashed")
+	f.Commit("Merge squashed (squashed)", gittest.WithNoStage())
+
+	before := chainFor(t, f, "main", "squashed")
+	if !before.ArrivedInOneCommit {
+		t.Fatalf("chain = %+v, want the one-commit arrival before trunk moves", before)
+	}
+	landing := before.Landing
+
+	f.Commit("unrelated trunk work", gittest.WithFile("other.txt", "1\n"))
+	f.Commit("and more of it", gittest.WithFile("third.txt", "1\n"))
+
+	after := chainFor(t, f, "main", "squashed")
+	if !after.ArrivedInOneCommit {
+		t.Errorf("chain = %+v, want the arrival still reported after two trunk commits", after)
+	}
+	// What does move is `Head`, and it moves honestly: the endpoint of a linear run is the destination's
+	// tip, which is why the surfaces decide the reading from the arrival plus the markers rather than from
+	// the range.
+	if after.Head == before.Head {
+		t.Error("Head did not follow the destination, so the cache and the walk are not keyed on one commit")
+	}
+	if after.Landing != landing {
+		t.Errorf("Landing = %s, want %s: the arrival is the same commit", short(after.Landing), short(landing))
 	}
 }
 
