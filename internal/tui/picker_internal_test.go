@@ -185,6 +185,89 @@ func TestColumnsInterleaveTheChangesetsCommitsWithItsReviews(t *testing.T) {
 	}
 }
 
+// A submission is rarely the last word: the author answers it and keeps working, and the span a
+// reviewer wants next is that work -- `last review..current` -- which no one can build from a row the
+// columns do not offer. So the top of a column is the newest commit, not the submission the timeline
+// was built around.
+func TestCommitsAfterTheLatestReviewAreRowsOfBothColumns(t *testing.T) {
+	m, f := pickerFixture(t, 2)
+	// Deliberately undated: what is committed now falls after the fixture's stamped history, which is
+	// the case being asked about rather than one pinned into the middle of it.
+	f.Commit("answering the block", gittest.WithFile("later.go", "package main\n\nfunc Later() {}\n"))
+	f.Commit("and then this", gittest.WithFile("later.go", "package main\n\nfunc Later() { now() }\n"))
+	m = open(t, m)
+
+	want := []string{"and then this", "answering the block", "Last Review"}
+	for _, col := range []struct {
+		name string
+		base bool
+	}{{"BASE", true}, {"HEAD", false}} {
+		got := columnLabels(m.endpointsFor(col.base))
+		if !orderedBefore(got, want) {
+			t.Errorf("the %s column reads %v, want the commits made after the newest submission, newest "+
+				"first, above it", col.name, got)
+			continue
+		}
+		// The row has to be the commit, not an alias for the end of the branch: two commits after the
+		// submission are two spans, and the reviewer names the one they mean by its subject.
+		row := rowIndex(t, m, col.base, "and then this")
+		if it := m.endpointsFor(col.base)[row]; it.ckpt.Kind != span.KindCommit || it.ckpt.Name == "HEAD" {
+			t.Errorf("the top commit row is %s, want the commit itself", it.ckpt)
+		}
+	}
+}
+
+// Catching the changeset up with the integration branch puts commits the reviewer never wrote in the
+// middle of `last review..current`, and a list with no row for the merge has nothing to set as the
+// boundary. The merge is on the changeset's own line, so it is a row -- and the commits that arrived
+// with it are not, because the base holds them.
+func TestAMergeIntoTheChangesetIsARowOfTheColumn(t *testing.T) {
+	m, f := pickerFixture(t, 1)
+	f.SwitchTo("main")
+	f.Commit("work someone else landed", gittest.WithFile("upstream.go", "package main\n\nfunc Up() {}\n"))
+	f.SwitchTo(readonlySlug)
+	f.MustGit("merge", "--no-ff", "-m", "Merge main into the changeset", "main")
+	m = open(t, m)
+
+	got := columnLabels(m.endpointsFor(true))
+	if !orderedBefore(got, []string{"Merge main into the changeset", "Last Review"}) {
+		t.Errorf("the BASE column reads %v, want the merge that caught the changeset up with main, above "+
+			"the submission it came after", got)
+	}
+	if slices.Contains(got, "work someone else landed") {
+		t.Errorf("the BASE column reads %v: the commits that arrived with the merge belong to the base, "+
+			"not to this changeset", got)
+	}
+	row := rowIndex(t, m, true, "Merge main into the changeset")
+	if it := m.endpointsFor(true)[row]; it.ckpt.Kind != span.KindCommit {
+		t.Errorf("the merge row is %s, want the merge commit itself, which is the boundary a reviewer "+
+			"sets", it.ckpt)
+	}
+}
+
+// A squash brings the base's tree across without its history, so the one commit it makes is the only
+// trace of the catch-up. That commit is an ordinary commit, which is why it needed nothing the merge
+// needed; this says so, because squashing the base in is the other way a branch stays current.
+func TestASquashOfTheBaseIsARowOfTheColumn(t *testing.T) {
+	m, f := pickerFixture(t, 1)
+	f.SwitchTo("main")
+	f.Commit("work someone else landed", gittest.WithFile("upstream.go", "package main\n\nfunc Up() {}\n"))
+	f.SwitchTo(readonlySlug)
+	f.MustGit("merge", "--squash", "main")
+	f.MustGit("commit", "-m", "squashed main in")
+	m = open(t, m)
+
+	got := columnLabels(m.endpointsFor(true))
+	if !orderedBefore(got, []string{"squashed main in", "Last Review"}) {
+		t.Errorf("the BASE column reads %v, want the squash that caught the changeset up with main above "+
+			"the submission it came after", got)
+	}
+	if slices.Contains(got, "work someone else landed") {
+		t.Errorf("the BASE column reads %v: a squash leaves the history behind, and the commits it "+
+			"squashed are not this changeset's", got)
+	}
+}
+
 // orderedBefore reports whether want appears in got in that order, with anything allowed between.
 func orderedBefore(got, want []string) bool {
 	at := 0

@@ -162,7 +162,9 @@ func pinnedRow(items []pickerItem, pending span.Checkpoint) (pickerItem, bool) {
 
 // inlineCommits are the changeset's own commits -- everything the base does not already hold --
 // newest first, for the columns. A submission that changed files is a commit too, and it keeps one
-// row: the alias, not the sha.
+// row: the alias, not the sha. A merge the author made to catch up with the base keeps its own row
+// as well: it is where the history that arrived stops being this changeset's, and a reviewer who
+// wants the span either side of it has to be able to point at it.
 func (m reviewModel) inlineCommits(reviews []lifecycle.Event) ([]pickerItem, string) {
 	base := m.sess.Header().Base
 	if base == "" {

@@ -2430,7 +2430,11 @@ column is one timeline rather than two lists: the submissions by alias (the newe
 then `Review -2` and `Review -3`, older ones by the index you would type) with the changeset's own
 commits written between them where they happened, so `j` walks from a submission into the commits
 that followed it. The commits are the ones the base does not already hold, and only the ones that
-change files — a marker commit holds no content to review and is on the list by alias already.
+change files — a marker commit holds no content to review and is on the list by alias already. A
+merge the author made to catch the changeset up with the base is among them: asked for against its
+first parent it reports the files it brought in, and it is the boundary a reviewer sets to keep what
+arrived outside the span. The commits that arrived with the merge stay out — the base holds them —
+so the list still says "this changeset's own history".
 Only the base offers the changeset base, only the head offers the working tree, and `HEAD` is
 offered nowhere: beside `Working Tree` it would present two similar-looking current targets when
 only one of them can be edited. `u` and `f` set the unreviewed and full-changeset presets, `Tab`
