@@ -8,25 +8,31 @@ import (
 )
 
 // Base is the ref a changeset's diff is measured against, plus the rule that produced it. The rule travels
-// with the answer because a reader shown only `base: 4f2b8c1` cannot tell a branch from a landing from a
-// fallback, and the three mean different things about a stack: one is a live branch somebody will move
-// again, one is where landed work joined the destination, and one is git-pair admitting it could not tell.
+// with the answer because a base that names the integration branch means three different things about a
+// stack — a live parent branch, a parent whose work has landed, and git-pair admitting it could not tell —
+// and only the first is obvious from the name.
 //
 // The type exists so the five surfaces that print a base — `status`, `check`, `change integrate`, the queue's
 // parent note, and the diff itself — cannot drift into printing three different rules. `docs/plans/`
 // `lineage-in-the-surface/` records the failure mode this prevents: two surfaces agreeing only because they
 // print the same literal.
 type Base struct {
-	// Ref is what to measure against: a branch name while the parent branch is the answer, and a commit
-	// otherwise. Every caller can pass it straight to git.
+	// Ref is what to measure against: a branch name, whether it is the parent branch, the destination, or
+	// the recorded `base:`. Every caller can pass it straight to git.
 	Ref string
 	// Why names the rule, in the reader's terms. It is printed beside the base, not instead of it.
 	Why string
-	// Derived says Ref is a commit derived from the destination rather than a branch this repository has.
+	// Derived says Ref was derived from the destination rather than recorded by the changeset. It is what
+	// tells a caller that the name it holds is a measurement point and not a place work can land.
 	Derived bool
 	// ParentBranch is the stack relationship, kept separate from the measurement: `parent:` still names
-	// the branch the child was built on even when the base has moved to a landing (§21).
+	// the branch the child was built on even when the base has moved to the destination (§21).
 	ParentBranch string
+	// ParentLanded says the destination's tree carries the directory of the changeset this one is stacked
+	// on. It is the fact that rule 2 read to decide it was answering at all, kept so a surface can say "the
+	// parent landed" beside a base that no longer names the parent's branch. It is false for a changeset
+	// that is not stacked, and for a stack whose parent has not reached the destination.
+	ParentLanded bool
 }
 
 // BaseFor answers what a changeset is measured against, in this order:
@@ -35,13 +41,21 @@ type Base struct {
 //     the work above it is still being written, and an approval measured against it stays comparable while
 //     the parent moves. When the name it answers with is the integration branch, the answer is the copy of
 //     it this clone has fetched (`fetchedTrunk`) — the same branch, the fresher one.
-//  2. The merge base of the child's head and the destination, once the parent's branch is gone or its work
-//     has landed. This is the case a durable ref got wrong: naming the parent's landing commit as the base
-//     widened the child's diff to everything the destination gained after that commit, while the merge base
-//     is where the child's own work starts — including after a rebase, where the parent's commits arrive
-//     under the child and the child's diff stays its own.
+//  2. The destination, once the parent's branch is gone or its work has landed. Where the diff starts is
+//     still the merge base of the child's head and that destination, and every caller takes it there:
+//     `span` re-derives it for the two tree ends, and `base..head` reads identically for the destination and
+//     for its own merge base, because any commit reachable from both is an ancestor of it. Naming the
+//     destination rather than the commit it resolves to is what the answer is *for* — see below.
 //  3. The destination itself, when neither resolves, with `Why` saying so. A base that names nothing is not
 //     usable by any caller, so the fallback is a real answer rather than an empty string.
+//
+// Rule 2 used to answer with the merge-base commit itself, and a surface printing that told a reader nothing.
+// The object id overflows the review screen's base row, and what it names is not the landing a reader would
+// recognise: after `git rebase --onto <destination>` it is the destination's newest commit, which is usually
+// somebody else's work. `docs/plans/` `lineage-in-the-surface/` records the older failure this replaced —
+// naming the landing commit as a fixed base, which widened a rebased child's diff to everything the
+// destination gained after it. That is what the merge base is for, and it stays the measurement; only the
+// name changed.
 //
 // Cost is one containment read, one revision read, and one `merge-base`, and only for a changeset that is
 // stacked at all. `Scan` caches it beside the destination's own directory list so the surfaces share one
@@ -84,8 +98,12 @@ func BaseFor(ctx context.Context, repo *git.Repo, c Changeset, head string, db D
 			return out, fmt.Errorf("merge base of %s and %s: %w", shortRef(head), shortRef(db.Ref), err)
 		}
 		if mb != "" {
+			// The destination answers, and `mb` is the reason it may: it proves this branch and that destination
+			// share a run, which is what makes the destination a base rather than an unrelated branch. It is not
+			// printed, because a commit the reader cannot name is not an explanation — see rule 2 above.
 			out.Derived = true
-			out.Ref = mb
+			out.Ref = db.Ref
+			out.ParentLanded = parentLanded
 			switch {
 			case parentLanded && c.ParentBranch != "":
 				out.Why = fmt.Sprintf("the parent %s landed, so the run this branch shares with %s",
@@ -133,6 +151,23 @@ func fetchedTrunk(db DefaultBranchRef, name string, out Base) (Base, bool) {
 	return out, true
 }
 
+// Measure is `BaseFor` for a caller that has to print the rule as well as the ref, cannot fail, and may not
+// already hold a head: it fills the head it is not given, and a repository git will not talk to answers with
+// the recorded base rather than with an error. `MeasureBase` is the ref it picks; the review screen reads
+// the whole answer, because it says "the parent landed" beside the base and only the rule knows that.
+//
+// The error path keeps no `Why`: there is no rule to name, only the value the file carries.
+func Measure(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranchRef, head string) Base {
+	if head == "" {
+		head, _ = repo.Head(ctx)
+	}
+	b, err := BaseFor(ctx, repo, c, head, db)
+	if err != nil {
+		return Base{Ref: c.Base, ParentBranch: c.ParentBranch}
+	}
+	return b
+}
+
 // MeasureBase is the ref a caller that has no use for the rule behind it hands to git: the same answer
 // `BaseFor` gives, reduced to the ref. The surfaces that print a base read `BaseFor` and keep `Why` — this
 // is for the ones that pin a commit and move on, where the honest fallback is the base as recorded rather
@@ -146,14 +181,7 @@ func fetchedTrunk(db DefaultBranchRef, name string, out Base) (Base, bool) {
 // hold one — a span resolver has it, and asking twice for a rev-parse to answer a question the cheap path
 // settles without it is the worse trade.
 func MeasureBase(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranchRef, head string) string {
-	if head == "" {
-		head, _ = repo.Head(ctx)
-	}
-	b, err := BaseFor(ctx, repo, c, head, db)
-	if err != nil {
-		return c.Base
-	}
-	return b.Ref
+	return Measure(ctx, repo, c, db, head).Ref
 }
 
 // shortRef names a ref the way a person reads it, for a sentence rather than for git.

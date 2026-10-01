@@ -29,6 +29,20 @@ func changedBetween(t *testing.T, f *gittest.Fixture, base, head string) string 
 	return strings.TrimSpace(out)
 }
 
+// changedFromSpan names the files the way every caller measures them. No surface hands `Base.Ref` to
+// `git diff` on its own: `span.Resolve` takes the merge base of the base and the head first
+// (`internal/span/span.go`), which is what lets rule 2 name the destination and still measure only the
+// child's own work. The tests follow the callers rather than the shorter path, so a base the child sits
+// *behind* cannot pass by being diffed against the head as though it were in front of it.
+func changedFromSpan(t *testing.T, f *gittest.Fixture, base, head string) string {
+	t.Helper()
+	mb := strings.TrimSpace(f.MustGit("merge-base", base, head))
+	if mb == "" {
+		t.Fatalf("no merge base between %s and %s", short(base), short(head))
+	}
+	return changedBetween(t, f, mb, head)
+}
+
 func baseOf(t *testing.T, f *gittest.Fixture, cs changeset.Changeset, head string) changeset.Base {
 	t.Helper()
 	b, err := changeset.BaseFor(context.Background(), repo(f), cs, head, db())
@@ -74,39 +88,43 @@ func TestBaseOfAStackOnALiveParentBranch(t *testing.T) {
 }
 
 // Rule 2, the merge landing. The parent's branch is still there and its work is in the destination, so the
-// branch is no longer where the child is measured: the merge base is.
+// branch is no longer where the child is measured. The destination is named, because that is the answer a
+// reader can use, and the measurement still starts at the merge base — which is what the diff below proves
+// rather than what the ref asserts.
 func TestBaseOfAStackWhoseParentLanded(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
 	_, child, head := stacked(t, f)
 	f.SwitchTo("main")
 	f.MustGit("merge", "--no-ff", "-m", "alpha: merge the branch", "alpha")
-	later := f.Commit("main: unrelated work after the landing", gittest.WithFile("other.txt", "1\n"))
+	f.Commit("main: unrelated work after the landing", gittest.WithFile("other.txt", "1\n"))
 
 	b := baseOf(t, f, child, head)
-	if want := f.RevParse("alpha"); b.Ref != want {
-		t.Errorf("base = %s, want the parent's tip %s (where the child's own work starts)", short(b.Ref), short(want))
+	if want := db().Ref; b.Ref != want {
+		t.Errorf("base = %s, want the destination %s: a commit the reader cannot name is not an explanation", short(b.Ref), want)
 	}
 	if !b.Derived {
 		t.Error("derived = false for a base derived from the destination")
+	}
+	if !b.ParentLanded {
+		t.Error("parent landed = false, and the destination carries changeset alpha's directory: the base's name no longer says it, so the fact has to travel")
 	}
 	if !strings.Contains(b.Why, "landed") {
 		t.Errorf("why = %q, want the rule that says the parent landed", b.Why)
 	}
 	// The point of the rule: trunk's later work is not the child's diff.
-	changed := changedBetween(t, f, b.Ref, head)
+	changed := changedFromSpan(t, f, b.Ref, head)
 	if strings.Contains(changed, "other.txt") {
 		t.Errorf("the child's diff against its base includes the destination's later work: %s", changed)
 	}
 	if !strings.Contains(changed, "beta.txt") {
 		t.Errorf("the child's diff does not include its own work: %s", changed)
 	}
-	_ = later
 }
 
-// Rule 2, the linear landing and the gone branch: the same rule answers, and the sentence says which half
-// is missing, because "the parent is gone" and "the parent landed" are different things for a reader to act
-// on.
+// Rule 2, the gone branch: the same rule answers, and the sentence says which half is missing, because "the
+// parent is gone" and "the parent landed" are different things for a reader to act on. The base is the same
+// name in both cases, so `Why` and `ParentLanded` are what tell them apart.
 func TestBaseOfAStackWhoseParentBranchIsGone(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
@@ -116,19 +134,27 @@ func TestBaseOfAStackWhoseParentBranchIsGone(t *testing.T) {
 
 	b := baseOf(t, f, child, head)
 	if !b.Derived {
-		t.Fatalf("base = %q derived=%v, want a derived commit once the branch is gone", b.Ref, b.Derived)
+		t.Fatalf("base = %q derived=%v, want a base derived from the destination once the branch is gone", b.Ref, b.Derived)
+	}
+	if b.Ref != db().Ref {
+		t.Errorf("base = %s, want the destination (%s)", short(b.Ref), db().Ref)
 	}
 	if !strings.Contains(b.Why, "gone") {
 		t.Errorf("why = %q, want the sentence that names the missing branch", b.Why)
 	}
-	if b.Ref != f.RevParse("main") {
-		t.Errorf("base = %s, want the shared run with the destination (%s)", short(b.Ref), short(f.RevParse("main")))
+	if b.ParentLanded {
+		t.Error("parent landed = true, and this parent never reached the destination: the branch being gone is not the work having landed")
+	}
+	// The measurement starts at the fork, which is where the child's own work — and the parent's, which
+	// never landed — begins. Naming the destination does not move it.
+	if changed := changedFromSpan(t, f, b.Ref, head); !strings.Contains(changed, "alpha.txt") {
+		t.Errorf("the child's diff lost the unlanded parent's work, which is still the child's to review: %s", changed)
 	}
 }
 
 // The case a durable ref got wrong. The parent landed, the child was rebased onto the destination, and the
-// destination moved again afterwards. Naming the parent's landing commit as the base would widen the child's
-// diff to everything trunk gained since; the merge base is where the child's own work starts.
+// destination moved again afterwards. Naming a fixed commit as the base would widen the child's diff to
+// everything trunk gained since; the measurement starts at the fork, wherever the base's name points.
 func TestBaseOfARebasedStackIsItsForkFromTheDestination(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
@@ -143,7 +169,7 @@ func TestBaseOfARebasedStackIsItsForkFromTheDestination(t *testing.T) {
 	f.Commit("main: work the child must not own", gittest.WithFile("trunk-only.txt", "1\n"))
 
 	b := baseOf(t, f, child, head)
-	changed := changedBetween(t, f, b.Ref, head)
+	changed := changedFromSpan(t, f, b.Ref, head)
 	if strings.Contains(changed, "trunk-only.txt") {
 		t.Errorf("a rebased child's diff carries trunk's later work (base %s): %s", short(b.Ref), changed)
 	}
@@ -171,6 +197,9 @@ func TestBaseFallsBackToTheIntegrationBranch(t *testing.T) {
 	b := baseOf(t, f, child, "")
 	if b.Ref != "refs/heads/main" || !b.Derived {
 		t.Errorf("base = %q derived=%v, want the integration branch as the fallback", b.Ref, b.Derived)
+	}
+	if b.ParentLanded {
+		t.Error("parent landed = true for a stack this clone could not resolve at all")
 	}
 	if !strings.Contains(b.Why, "integration branch") {
 		t.Errorf("why = %q, want the fallback named rather than the value printed bare", b.Why)
@@ -300,6 +329,30 @@ func TestBaseOfAStackKeepsItsParentBranchWhenTrunkIsFetched(t *testing.T) {
 	}
 	if !strings.Contains(b.Why, "parent branch") {
 		t.Errorf("why = %q, want the rule that named the branch", b.Why)
+	}
+}
+
+// Measure is the answer for a surface that prints the rule beside the base and has no error path to put a
+// failure in: the review screen's box. It fills the head it is not given, which rule 2 needs, and it keeps
+// the fact the base's name no longer carries once the parent has landed.
+func TestMeasureCarriesTheRuleAndCannotFail(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	_, child, head := stacked(t, f)
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "-m", "alpha: merge the branch", "alpha")
+	f.SwitchTo("beta")
+
+	// No head passed: `Measure` reads the checkout's, which is the child's, and answers what BaseFor answers
+	// for it.
+	if got, want := changeset.Measure(context.Background(), repo(f), child, db(), ""), baseOf(t, f, child, head); got.Ref != want.Ref ||
+		!got.ParentLanded || !got.Derived {
+		t.Errorf("Measure = %+v, want BaseFor's answer %+v with the head read for the caller", got, want)
+	}
+	// No destination to derive from: the recorded base is what this clone can answer with, and the screen
+	// shows that rather than refusing to draw.
+	if got := changeset.Measure(context.Background(), repo(f), child, changeset.DefaultBranchRef{}, head); got.Ref != "alpha" {
+		t.Errorf("Measure without a destination = %q, want the recorded base", got.Ref)
 	}
 }
 

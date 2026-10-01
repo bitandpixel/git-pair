@@ -32,12 +32,18 @@ func TestADerivedBaseReplacesTheParentBranchWhileTheBranchIsHere(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "status")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "Base: "+shortOf(landing)+" — the parent alpha landed",
-		"the base is the run the child shares with the destination, and the rule is printed with it")
+	mustContain(t, res.stdout, "Base: main — the parent alpha landed",
+		"the base names the destination the child is now measured against, and the rule is printed with it")
 	mustContain(t, res.stdout, "landed as "+shortOf(landing),
-		"and the stack line names the commit the parent became")
-	mustContain(t, res.stdout, "Span: "+landing+"...current",
-		"and the span starts there rather than at a branch tip that no longer carries the work")
+		"and the stack line names the commit the parent became, which is where a reader reads the commit")
+	mustContain(t, res.stdout, "Span: main...current",
+		"and the span is drawn from that base rather than from a branch tip that no longer carries the work")
+	// The label is the destination; the measurement is still the child's own run. Naming a branch the child
+	// sits behind would put the parent's landed work into its diff, so the diff is what settles it.
+	diff := runIn(t, f.Dir(), "diff", "--stat")
+	diff.mustSucceed(t, "diff", "--stat")
+	mustContain(t, diff.stdout, "b.go", "the span carries the child's own work")
+	mustNotContain(t, diff.stdout, "a.go", "and not the parent's, which the landing already carried across")
 	if _, err := f.Git("rev-parse", "--verify", "refs/heads/alpha"); err != nil {
 		t.Fatalf("the fixture deleted the parent branch, which is the easy case")
 	}
@@ -67,8 +73,9 @@ func TestRelinkAfterARebaseOntoTrunkShowsOnlyTheChildsOwnWork(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "status")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "Span: "+landing+"...current",
-		"the span starts at the landing the child was rebased onto, so the trunk commits it inherited are not the child's")
+	mustContain(t, res.stdout, "Span: main...current",
+		"the span is drawn from the destination, so the trunk commits the child inherited are not the child's")
+	mustNotContain(t, res.stdout, landing, "and no commit id stands in for that sentence in the header")
 	own := f.SubjectsAbove(landing, f.Head())
 	if len(own) == 0 || !strings.Contains(strings.Join(own, "\n"), "changeset beta") {
 		t.Errorf("above the landing the child carries %v, want its own commits only", own)
@@ -160,8 +167,8 @@ func TestADerivedBaseNeedsNoRecordInThisClone(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "status", "--changeset", "beta")
 	res.mustSucceed(t, "status")
-	mustContain(t, res.stdout, "Base: "+shortOf(landing)+" — the parent alpha landed",
-		"the same base the record used to name, derived rather than read")
+	mustContain(t, res.stdout, "Base: main — the parent alpha landed",
+		"the same base the record used to name, derived rather than read, and named by the destination rather than by a commit")
 	mustContain(t, res.stdout, "landed as "+shortOf(landing),
 		"and the parent is reported landed from the destination, with no ref left in the repository")
 	mustNotContain(t, res.stdout, "git pair integration record",

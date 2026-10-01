@@ -69,7 +69,7 @@ func TestStatusCallsALandedParentStaleWhileItsBranchIsPresent(t *testing.T) {
 		"and the branch is what is left of a landed parent")
 	mustContain(t, res.stdout, "git branch -D alpha",
 		"printed as the command, because an author translating \"delete it\" into arguments gets the order wrong")
-	mustContain(t, res.stdout, "Base: "+shortOf(landing)+" — the parent alpha landed",
+	mustContain(t, res.stdout, "Base: main — the parent alpha landed",
 		"and the base follows the destination: the branch is only where the measurement used to start")
 	mustNotContain(t, res.stdout, "stale:  ",
 		"a note is not a refusal: this child has nothing the reviewer has to look at again")
