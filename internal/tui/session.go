@@ -72,6 +72,12 @@ type File struct {
 	// `~`; the pane names where the file came from, because "moved" without a where-from is half an
 	// answer.
 	MovedFrom string
+	// Dirty says the working tree holds an uncommitted change at this path — staged, unstaged, or
+	// untracked — on a live span, and is always false on a historical one. It is a different thing from
+	// `Change`, which is what the span did: the span's ends are both commits, so nothing inside a span
+	// is uncommitted. Dirty is about the reviewer's own hand on the file after the span ended, which is
+	// what the tree marks magenta and what a reviewer comes back for.
+	Dirty bool
 }
 
 // Change is what a review span did to one file, read from git's own `--name-status`.
@@ -273,6 +279,7 @@ func (s *Session) scan(ctx context.Context, sp span.Span) error {
 
 	files := make([]File, 0, len(names))
 	read := 0
+	dirty := s.dirtyPaths(ctx, sp)
 	for _, name := range names {
 		key := keys[name]
 		marked := false
@@ -286,7 +293,7 @@ func (s *Session) scan(ctx context.Context, sp span.Span) error {
 			marked, read = true, read+1
 		}
 		files = append(files, File{Path: name, Key: key, Reviewed: marked,
-			Change: statuses[name].Change, MovedFrom: statuses[name].From})
+			Change: statuses[name].Change, MovedFrom: statuses[name].From, Dirty: dirty[name]})
 	}
 	s.files = files
 	s.marksRead = read
@@ -327,6 +334,29 @@ func (s *Session) changeStatuses(ctx context.Context, sp span.Span) map[string]c
 		statuses[fields[len(fields)-1]] = c
 	}
 	return statuses
+}
+
+// dirtyPaths is the set of paths with an uncommitted change in the working tree, or nil when the
+// question has no answer to give.
+//
+// A historical span has none. Its ends are both commits, so the working tree is not part of what is on
+// screen: an uncommitted change belongs to whatever the reviewer is doing now, and hanging it on a span
+// three submissions back would report it as work inside a span that cannot contain it. The pane leaves
+// its own working section out over history for the same reason.
+//
+// A failure asks for nothing. It is `changeStatuses`'s rule: the marker is an annotation on a list git
+// already answered for, and a reviewer who could not be told the signs is not being told a worse thing
+// here. The cost is that a failed read reads as "no edits anywhere", which is why the read is one `git
+// status` over the whole tree rather than one per file.
+func (s *Session) dirtyPaths(ctx context.Context, sp span.Span) map[string]bool {
+	if sp.Historical() {
+		return nil
+	}
+	dirty, err := s.repo.DirtyPaths(ctx)
+	if err != nil {
+		return nil
+	}
+	return dirty
 }
 
 // changeOf reads git's status letter. An unknown letter is a modification: a sign has to be earned, and
@@ -487,6 +517,11 @@ func (s *Session) CheckDrift(ctx context.Context) []span.Drift {
 // setDrift stores the answer from a check.
 func (s *Session) setDrift(moved []span.Drift) { s.drift = moved }
 
+// ErrNothingMoved is `r` on a span whose refs are all where the reviewer chose them. It is a sentinel
+// rather than a bare error because the caller has two different jobs with the same answer: reporting it,
+// and still re-reading the half of the screen that is not a ref — the working tree.
+var ErrNothingMoved = errors.New("nothing has moved")
+
 // RefreshDrift moves every drifted ref endpoint to where its ref points now and recomputes
 // the span. It is `r`, and it is the only way an endpoint moves without the reviewer choosing
 // a different span (requirements §14). It reports what moved and how many reviewed marks
@@ -498,7 +533,7 @@ func (s *Session) setDrift(moved []span.Drift) { s.drift = moved }
 // `main at abc123`, and `main` is what they should step back onto.
 func (s *Session) RefreshDrift(ctx context.Context) (moved []span.Drift, reset int, err error) {
 	if len(s.drift) == 0 {
-		return nil, 0, fmt.Errorf("nothing has moved since this span was chosen")
+		return nil, 0, fmt.Errorf("%w since this span was chosen", ErrNothingMoved)
 	}
 	next := s.current
 	for _, d := range s.drift {

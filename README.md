@@ -1355,8 +1355,8 @@ and the reviewed counter under those:
 ╰──────────────────────────────────────╯
 ═══════════════════════════════════════
 ▾ ○ src/
-    ▾ ○ ui/
-        ○ picker.ts
+  ▾ ○ ui/
+        ✱ picker.ts
     ○ a.ts +
 ═══════════════════════════════════════
 0 / 2 reviewed
@@ -1411,10 +1411,11 @@ than a key that quietly does nothing.
 Each file sits under its directory, and a row prints only the name the rows above it have not said.
 A directory that holds nothing but one directory is folded into that row. `src/` above holds `a.ts` and `ui/`,
 so it gets a row of its own. A chain of single-child directories becomes one row printed `docs/plans/active/`.
-Each level is indented four cells, so a child's name starts two cells right of the directory it is under.
-That is what the four cells are for: a directory row spends two on its fold arrow and two on its mark
-gutter before its name, and a file row only the gutter, so an indent of two a level puts every child's
-name in exactly the column its parent's name started in — which is a flat list with arrows in it.
+Each level is indented four cells. A row spends two cells on its mark gutter before its name, and a
+directory two more on its fold arrow — but those two come out of the indent rather than sitting after it,
+so at any depth below the top a directory and the files beside it name themselves in one column, which is
+what a flat list with arrows in it is supposed to look like. A child's name sits four cells right of the row
+holding it, and two under a top-level directory, which has no indent to spend its arrow on.
 `h` and `l` fold and unfold the directory under the cursor — arrows do the same, and `Enter` does
 both, the way it does for the thread heading — and `c` folds the whole tree and opens it again,
 which is how a changeset of a hundred files gets read for shape before it gets read for detail.
@@ -1433,6 +1434,20 @@ name of a deleted file goes faint with its red sign, because that is the one row
 read. A terminal with no colour to give gets the character alone, which is what every terminal got before.
 The move is git's rename detection, so a repository with `diff.renames` off gets `-` and `+` for the pair git
 called two files.
+
+A row also says when the working tree holds a change the commit under review does not: a file written into
+since the span ended, or a folded directory hiding one. No span can say it, because both of its ends are
+commits, and the pane already prints those bytes under a caption naming who wrote them. The name of such a
+row goes magenta — the colour this screen already spends on what you wrote — and bold with it, so a terminal
+with no colour to give still sees the difference, and the gutter wears `✱` wherever the row is not reviewed
+all the way through. A file you have both marked read and written into keeps its tick: the tick is what the
+reviewed counter counts, and the name is what says the change is yours. Only a *folded* directory wears it;
+open, its own children say it, and the `2/7` count beside its name goes on saying what has been read. Git
+answers the question — `status --porcelain -z --untracked-files=all`, so staged, unstaged and untracked all
+count and a name with a space in it still prints as itself — and a historical span shows none of it, because
+the working tree is not inside a span that ended at a commit. The list is re-read when the span changes, when
+an editor or difftool hands the terminal back, and when you press `r`.
+
 A directory's mark is its subtree's: `✓` when every file under it is reviewed, `○` when none is,
 and between the two the count of what is left (`▸ ◐ src/ 2/7`) — a tick there would be a claim about
 files nobody opened. `Enter` does whatever the row under the cursor is for: the difftool for a
@@ -1765,8 +1780,10 @@ reads `probe@bb0f343` and the band says:
 
 Nothing follows the branch by itself. `r` re-pins the endpoint to where the ref points now, recomputes
 the span and reports what that cost: marks are keyed on each file's diff within the span, so the ones
-whose diff changed stop applying, and the count in the report says how many. Ignoring the banner is a
-legitimate answer too — the span does not move until asked. The warning is derived from the span rather
+whose diff changed stop applying, and the count in the report says how many. It re-reads the working tree
+whether or not anything moved, because the tree is the other half of what the screen compares and an edit
+you make in another window sends this one no message. Ignoring the banner is a legitimate answer too — the
+span does not move until asked. The warning is derived from the span rather
 than written by the last keystroke, so nothing you type erases it: a note may borrow the band for its few
 seconds, and then the warning is back. A ref that has gone away is not drift: there is nothing to refresh
 to, and the pin still resolves to the commit it was chosen for.

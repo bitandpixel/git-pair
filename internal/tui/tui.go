@@ -138,6 +138,11 @@ type row struct {
 	// tree's sign and the row's own Enter cannot disagree about what happened to the file. Only a file
 	// row has one: every other kind leaves it at the modification, whose sign is nothing at all.
 	change Change
+	// dirty is the row's own copy of what the session knows about the working tree: an uncommitted
+	// change at this path, or -- for a directory -- under it, which the tree only says while the
+	// directory is folded. It is carried rather than looked up for the same reason `change` is: the row
+	// that colours its name and the row that says it is reviewed are one row.
+	dirty bool
 }
 
 // inFileBlock is which rows belong to the file tree rather than to the changeset box. Directory rows
@@ -761,15 +766,29 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// it changes what the screen compares, like `v` does, and a historical span is exactly
 		// where a moved ref is worth catching up with.
 		moved, reset, err := m.sess.RefreshDrift(m.ctx)
-		if err != nil {
+		if err != nil && !errors.Is(err, ErrNothingMoved) {
 			m.setStatus(err.Error(), true)
-			break
+			return m, nil
 		}
-		// The span now compares different commits, so every cached patch is about the pair it
-		// used to be.
+		if err == nil {
+			// The span now compares different commits, so every cached patch is about the pair it
+			// used to be.
+			m.forgetPatches()
+			m.refresh()
+			m.setStatus(refreshNote(moved, reset), false)
+			return m, nil
+		}
+		// Nothing has moved at the refs. They are still only one half of what the screen compares: the
+		// other half is the working tree, and a reviewer can write into that from another window without
+		// this one being handed a message. `r` is the key that asks the question again, so it asks it of
+		// the working tree too and then says the same thing it always said about the refs.
+		if rerr := m.sess.Rescan(m.ctx); rerr != nil {
+			m.setStatus(rerr.Error(), true)
+			return m, nil
+		}
 		m.forgetPatches()
 		m.refresh()
-		m.setStatus(refreshNote(moved, reset), false)
+		m.setStatus(err.Error(), true)
 	case key.Type == tea.KeyRunes && firstRune(key) == 's':
 		if !m.sess.CanToggleSpan() {
 			// Still allowed: submitting a first review is legitimate.
@@ -1377,6 +1396,16 @@ var (
 	// styleWarn is the drift banner: a warning about the ground moving, not an error about
 	// something the reviewer just did.
 	styleWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	// The tree's mark on a file or a folded directory the reviewer has written in and not committed.
+	// Magenta is already this screen's "written by you" -- it is the colour of a line the reviewer
+	// deleted in the pane beside the tree -- and the tree spends no other magenta, so the colour arrives
+	// with one meaning and keeps it. Bold goes with it because a colour is the one thing a terminal is
+	// not obliged to render: with no colour to give, the weight is still a difference between this name
+	// and its neighbours, which is what the gutter's ✱ cannot do for a file that is also reviewed.
+	styleDirtyName = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Bold(true)
+	// styleDirtyMark is the same fact in the gutter, where the glyph carries it on its own and only the
+	// colour is added, so the mark reads as part of the column of marks rather than as a loud word.
+	styleDirtyMark = lipgloss.NewStyle().Foreground(lipgloss.Color("13"))
 )
 
 func (m reviewModel) View() string {
@@ -2081,11 +2110,11 @@ func (m *reviewModel) buildRows() {
 	for _, e := range flattenTree(files, m.folded) {
 		if e.dir {
 			rows = append(rows, row{kind: rowDir, path: e.path, name: e.name, depth: e.depth,
-				file: -1, total: e.total, marked: e.marked})
+				file: -1, total: e.total, marked: e.marked, dirty: e.dirty})
 			continue
 		}
 		rows = append(rows, row{kind: rowFile, path: e.path, name: e.name, depth: e.depth, file: e.file,
-			change: files[e.file].Change})
+			change: files[e.file].Change, dirty: e.dirty})
 	}
 	// The split between the two regions: from here down are the rows the changeset box draws. One index
 	// into one list rather than two lists, because a thread the reviewer creates has to appear in the
@@ -2127,12 +2156,32 @@ func (m *reviewModel) buildRows() {
 // coming back lands on the row the reviewer left, and each keeps its own focus light -- the box's double
 // border, the tree's double rule -- which is how one column with two halves still says where the keys are.
 
-// What one level of the file tree costs. Four cells, because a directory spends two on its fold arrow
-// and two on its mark gutter before its name, and a file only the gutter: indent two per level and every
-// child's name lands in exactly the column its parent's name started in -- which is what makes a tree
-// read as a flat list with arrows in it. Four per level puts a child's name two cells right of the
-// directory it is under, which is the thing a reviewer is actually comparing.
+// What one level of the file tree costs: four cells. A row spends two on its mark gutter before its
+// name, and a directory spends two more on its fold arrow -- but the arrow rides inside the indent rather
+// than after it (see treeLead), so it costs the row nothing and every row at a depth starts its name in
+// one column. Four cells a level then puts a child's name four cells right of the row holding it, and two
+// under a top-level directory, which has no indent to spend its arrow on.
 const treeIndent = "    "
+
+// treeLead is the cells a row spends before its gutter: the indent, and, for a directory, the two cells
+// of its fold arrow taken out of that indent rather than added to it. A nested directory's arrow therefore
+// starts two cells left of the gutter of the file beside it, which is what keeps the two names in one
+// column. At the top of the tree there is no indent to spend, so a top-level directory's arrow sits where a
+// file's gutter would sit and its name starts two cells right of the files beside it -- that row has no row
+// above it to line up with.
+func treeLead(depth int, dir bool) string {
+	if !dir {
+		return strings.Repeat(treeIndent, depth)
+	}
+	// arrowCells is what "▸ " and "▾ " cost: a glyph and a space. The indent gives up exactly that many
+	// cells to hold them, and the top of the tree, which has no indent, gives up nothing.
+	const arrowCells = 2
+	lead := depth*len(treeIndent) - arrowCells
+	if lead < 0 {
+		lead = 0
+	}
+	return strings.Repeat(" ", lead)
+}
 
 // rowText renders one row. Only the file tree carries a reviewed mark: the artifacts below the
 // counter are read rather than diffed.
@@ -2143,30 +2192,24 @@ func (m reviewModel) rowText(r row) string {
 		if !m.folded[r.path] {
 			arrow = "▾ "
 		}
-		text := strings.Repeat(treeIndent, r.depth) + styleDim.Render(arrow)
+		text := treeLead(r.depth, true) + styleDim.Render(arrow)
 		if m.sess.Span().CanMark() {
 			text += m.dirGutter(r)
 		}
+		name := nameStyle(r).Render(r.name)
 		if r.marked > 0 && r.marked < r.total {
 			// The count is what a reviewer folds a directory to look for, so it is the one state
 			// that says how many are left instead of wearing a mark true of only some of what the
 			// row stands for.
-			return text + r.name + styleDim.Render(fmt.Sprintf("  %d/%d", r.marked, r.total))
+			return text + name + styleDim.Render(fmt.Sprintf("  %d/%d", r.marked, r.total))
 		}
-		return text + r.name
+		return text + name
 	case rowFile:
-		text := strings.Repeat(treeIndent, r.depth)
+		text := treeLead(r.depth, false)
 		if m.sess.Span().CanMark() {
 			text += m.fileGutter(r)
 		}
-		name := r.name
-		if r.change == ChangeDeleted {
-			// A deleted file is the one row whose subject is not there to read, so the name goes faint
-			// along with the red sign: the row says the file is gone before the reviewer presses Enter
-			// to find out. No other change earns this; a faint name on a file that is still in the tree
-			// would be a claim about the review rather than about the span.
-			name = styleDim.Render(name)
-		}
+		name := nameStyle(r).Render(r.name)
 		text += name
 		if sign := r.change.Sign(); sign != "" {
 			// After the name, the way a directory's count sits after its name: the sign is a fact about
@@ -2204,12 +2247,43 @@ func (m reviewModel) rowText(r row) string {
 	return r.name
 }
 
+// nameStyle is which style a file row's name wears, and it is a function for the same reason `signStyle`
+// is one: the choice is the thing worth reading and worth testing, and a unit test cannot see a colour a
+// terminal has not been given to render.
+//
+// Magenta is the reviewer's own colour on this screen, so a name in it says that what changed here is
+// theirs and is not committed yet. It outranks the faint name of a deleted file: a row git says is gone
+// *and* holds an uncommitted change is a row whose deletion is the news, and what the span did to it is
+// still on the row, in the sign after the name.
+func nameStyle(r row) lipgloss.Style {
+	switch {
+	case r.dirty:
+		return styleDirtyName
+	case r.change == ChangeDeleted:
+		// A deleted file is the one row whose subject is not there to read, so the name goes faint along
+		// with the red sign: the row says the file is gone before the reviewer presses Enter to find out.
+		// No other change earns this; a faint name on a file still in the tree would be a claim about the
+		// review rather than about the span.
+		return styleDim
+	}
+	return lipgloss.NewStyle()
+}
+
 // fileGutter is a file's reviewed mark. Over history there is none: a tick there would mean "this
 // reviewer has read it", and marks left on that commit by an earlier review are not this
 // reviewer's.
+//
+// An unreviewed file with an uncommitted change wears ✱ rather than ○. The two are not different kinds
+// of state: the gutter answers "has this been read", and ✱ is that same no with "and something has been
+// written here" on top of it. A file that is reviewed *and* changed keeps its tick, because the tick is
+// the answer the counter is made of, and the magenta name says who changed it.
 func (m reviewModel) fileGutter(r row) string {
-	if f := m.sess.Files(); r.file >= 0 && r.file < len(f) && f[r.file].Reviewed {
+	f := m.sess.Files()
+	if r.file >= 0 && r.file < len(f) && f[r.file].Reviewed {
 		return styleMark.Render("✓ ")
+	}
+	if r.dirty {
+		return styleDirtyMark.Render("✱ ")
 	}
 	return "○ "
 }
@@ -2233,10 +2307,17 @@ func signStyle(c Change) lipgloss.Style {
 // dirGutter is a subtree's mark, and a directory wears one only when every file under it agrees.
 // Between the two a tick would be a claim about files nobody has opened, so the mixed row counts
 // what is left in rowText and puts the half-mark here.
+//
+// ✱ stands in for both ○ and ◐ when the directory is folded over a file with an uncommitted change:
+// the mark is what a folded row can wear, and the `n/m` count after a partial directory's name is
+// unchanged, so nothing about what has been read is lost -- only which of the two empty marks it was.
+// A subtree that is reviewed all the way down keeps its tick and says who wrote in it by name.
 func (m reviewModel) dirGutter(r row) string {
 	switch {
 	case r.total > 0 && r.marked == r.total:
 		return styleMark.Render("✓ ")
+	case r.dirty:
+		return styleDirtyMark.Render("✱ ")
 	case r.marked == 0:
 		return "○ "
 	}

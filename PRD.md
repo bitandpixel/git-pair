@@ -2206,7 +2206,7 @@ Example:
   ▾ ✓ concurrency/
       ✓ lock_test.ts +
   ✓ fixtures.ts
-  ○ main.ts
+  ✱ main.ts
 
 2 / 3 reviewed
 ────────────────────────────────
@@ -2285,10 +2285,11 @@ diff did, the box is the shortcut to read what was said about it.
 
 The files are a tree rather than a list of paths. Each sits under its directory, a directory that
 holds nothing but one directory is folded into that row (`src/booking/` above is one row, not two),
-and a row prints only the name the rows above it have not already said. Each level is indented four cells,
-which puts a child's name two cells right of the directory above it: a directory spends four cells before
-its name — the fold arrow and the mark gutter — and a file only the gutter, so two cells a level lands
-every child's name in exactly the column its parent's name started in. `h` and `l` fold and unfold
+and a row prints only the name the rows above it have not already said. Each level is indented four cells.
+A row spends two cells on its mark gutter before its name, and a directory spends two more on its fold
+arrow — but those two come out of the indent rather than sitting after it, so at any depth below the top a
+directory and the files beside it name themselves in one column. A child's name sits four cells right of the
+row holding it, and two under a top-level directory, which has no indent to spend its arrow on. `h` and `l` fold and unfold
 the directory under the cursor — the left and right arrows do the same, and `Enter` does both, the
 way it does for the thread heading — while `c` folds the whole tree and opens it again, which is how
 a changeset of a hundred files is read for its shape before it is read for its detail. Folding moves
@@ -2328,6 +2329,38 @@ the same answers it always was. `d` on a directory is git's own answer to *diff 
 pathspec expands into every file the span changed under it, and the preview pane shows that subtree
 with the subtree's counts. The tree is a view, so it folds over a read-only span like anything else
 a reviewer reads, and shows no marks there.
+
+A row also says when the working tree holds a change at its subject that the commit under review does not:
+a file someone has written in since the span ended, or a folded directory hiding one. No span can say
+this, because both of its ends are commits and nothing inside a span is uncommitted; the pane already
+prints those bytes under a caption naming who they belong to, and the tree now says the same thing at a
+glance. The answer is git's — `git status --porcelain -z --untracked-files=all`, read once per scan — and
+it covers staged, unstaged and untracked alike, because each is a change the working tree has that HEAD
+does not. `-z` is what keeps the paths relative to the repository, so a path out of `status` is the same
+string as the path out of `diff --name-status`, and it is what stops git quoting a name the tree would
+then print escaped.
+
+Two cells of the row carry it. The name of a row whose subject has an uncommitted change is drawn in the
+colour this screen already spends on what the reviewer wrote — magenta, with weight, so a terminal with no
+colour to give still sees the difference. The gutter wears `✱` in place of `○` or `◐` where the row is not
+reviewed all the way through. A file that is reviewed *and* written into keeps its tick: the tick is what
+the reviewed counter is made of, and the name is what says whose change it is. `✱` is not a third kind of
+state — marks stay marks, keyed as they always were — it is the empty mark with "and something has been
+written here" on top of it. Where a file's own name could go faint (a file the span deleted) *and* carries
+an uncommitted change, the change wins the name, and what the span did is still on the row in the sign
+after it.
+
+Only a folded directory wears it. Unfolded, the rows it would stand in for are on screen saying it
+themselves, and a mark repeated down a subtree is one more thing to look past to find the row that means
+it. The `n/m` count after a partial directory's name is untouched, so folding loses nothing: the gutter
+says something was written under there and the count says how much of it has been read. Over a historical
+span there is no such mark at all, for the reason the pane gives for dropping its working section: the
+working tree is not one of that span's ends, so a change sitting in it is not work inside the span on
+screen.
+
+Neither mark moves by itself: the list is re-read when the span changes, when an external editor or
+difftool hands the terminal back, and when `r` is pressed — which re-reads the working tree even when no
+ref has moved, since an edit made in another window sends this screen no message.
 
 The shortcut bar holds the bottom band, and the band is as tall as the tallest shortcut bar the screen
 can show: the bar changes when the keys move between the file tree, the changeset box and the diff, and
@@ -2829,7 +2862,9 @@ Refs keep their identity. The name the reviewer chose stays on screen, the span 
 commit it pointed at when chosen, and later movement is reported rather than followed — following a
 branch mid-review would silently change what the already-reviewed files meant. Advancing a pinned
 checkpoint takes an explicit refresh, which recomputes the span; reviewed marks are keyed on
-commits, so a mark that no longer applies simply does not come back.
+commits, so a mark that no longer applies simply does not come back. That refresh re-reads the working
+tree as well, whether or not a ref moved: the tree is the other half of what the screen compares, and an
+edit made in another window sends this one no message.
 
 `git pair diff` and `git pair review open` accept both ends of a span: `--base-review`, `--base-commit` and
 `--base-ref` name the start, `--head-review`, `--head-commit` and `--head-ref` the end. `review open`
@@ -3593,7 +3628,8 @@ v        step through the spans this session has been in:
          from a read-only span, back to the last span that was reviewable
 V        span picker: BASE and HEAD columns, space to choose an end, enter to apply;
          c and r open the commit and ref lists, u and f are the two presets
-r        re-pin drifted ref endpoints, offered by ⚠ <ref> moved <a> → <b>  [r] refresh
+r        re-pin drifted ref endpoints, offered by ⚠ <ref> moved <a> → <b>  [r] refresh; and re-read the
+         working tree either way, so an edit made in another window reaches the tree
 
 s        submit review
 q        quit
