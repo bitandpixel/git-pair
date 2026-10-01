@@ -653,6 +653,128 @@ for why in fails:
 sys.exit(0 if not fails else 1)
 PY
 
+# --- the reviewer's own uncommitted change, in colour -----------------------
+# A file the working tree has changed since the commit under review wears a mark of its own, and a folded
+# directory wears the mark for the rows it hides. The Go test says which glyph and which colour were chosen;
+# that they arrive at a real terminal -- and that a file nobody wrote in arrives at none of it -- is this
+# window's claim. Its own repository again, because the state this needs is one uncommitted edit and
+# nothing else: the tree must not be able to borrow the mark from a span that added or moved a file.
+step "a file you wrote in reaches the terminal marked, and in colour"
+WR="$T/written"
+mkdir -p "$WR/src"
+git init -q -b main "$WR"
+git -C "$WR" config user.email writer@example.com
+git -C "$WR" config user.name Writer
+git -C "$WR" config commit.gpgsign false
+printf 'package main\n\nfunc Keep() {}\n' > "$WR/src/keep.go"
+printf 'package main\n\nfunc Written() {}\n' > "$WR/src/written.go"
+git -C "$WR" add -A && git -C "$WR" commit -qm "seed"
+git -C "$WR" switch -qc written
+(cd "$WR" && "$G" init --base main >/dev/null) || { echo "written fixture: init failed"; exit 1; }
+printf '# written\n\n## Summary\n\nOne file the reviewer wrote in and left uncommitted.\n' > "$WR/changesets/written/ABOUT.md"
+git -C "$WR" add -A && git -C "$WR" commit -qm "describe the change"
+# The branch's own change, so the span has files to mark at all: one the reviewer then wrote in, and one
+# they left alone -- the clean row is what shows the mark is not on everything.
+printf 'package main\n\nfunc Keep() {\n\treturn kept\n}\n' > "$WR/src/keep.go"
+printf 'package main\n\nfunc Written() {\n\treturn the new way\n}\n' > "$WR/src/written.go"
+git -C "$WR" add -A && git -C "$WR" commit -qm "rewrite both"
+# The reviewer's own edit, uncommitted: the file is in the span, its diff inside the span is unchanged, and
+# the only new thing about it is that somebody has been writing in it.
+printf 'package main\n\nfunc Written() {\n\treturn the new way\n}\n\n// what covers this?\n' > "$WR/src/written.go"
+R=$WR
+# A taller window than the rest of the walkthrough, because this one has to show five tree rows and a
+# three-row list window would put the two files under the fold: scrolled to them, the marked row would only
+# ever paint under the cursor's reverse video, and the claim below is about the colours on the row itself.
+( COLS=100 ROWS=40; session written q )
+( COLS=100 ROWS=40; session writtenfold c,q )
+expectall "the file with the uncommitted change wears the mark" "$T/written.raw" $'\u2731 written.go'
+expectall "the file nobody wrote in wears no mark" "$T/written.raw" $'\u25cb keep.go'
+expectall "and a folded directory wears the mark for what it hides" "$T/writtenfold.raw" $'\u25b8 \u2731 src/'
+# Which codes carry it is lipgloss's and the terminal's business, so the claim is the shape of it: the mark
+# arrives in some foreground colour, the name arrives in a colour *and* with weight -- the weight is what a
+# terminal with no colour to give still shows -- and the clean row's name arrives at neither.
+python3 - "$T/written.raw" <<'PY' \
+  || fail "the reviewer's own change does not reach the terminal in colour"
+import re, sys
+
+raw = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+SGR = re.compile(r"\x1b\[([0-9;]*)m")
+OTHER = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07")
+
+
+def scan(raw):
+    """The capture without its escapes, with what the terminal was told at each character.
+
+    The same scan the change-sign check runs, with bold in place of faint: here the claim about the name is
+    that it carries weight as well as colour, because weight is the half a colourless terminal keeps.
+    """
+    plain, states, fg, bold, i = [], [], set(), False, 0
+    while i < len(raw):
+        if raw[i] == "\x1b":
+            if m := SGR.match(raw, i):
+                parts = [int(p) for p in m.group(1).split(";") if p != ""] or [0]
+                if parts == [0]:
+                    fg, bold = set(), False
+                if 1 in parts:
+                    bold = True
+                if 38 in parts or any(30 <= p <= 37 or 90 <= p <= 97 for p in parts):
+                    fg.add(m.group(1))
+                i = m.end()
+                continue
+            if m := OTHER.match(raw, i):
+                i = m.end()
+                continue
+            i += 1
+            continue
+        if raw[i] != "\r":
+            plain.append(raw[i])
+            states.append((frozenset(fg), bold))
+        i += 1
+    return "".join(plain), states
+
+
+plain, states = scan(raw)
+
+
+def every(row, offset):
+    """What the terminal was told at `offset` characters into each frame that painted `row`."""
+    out, at = [], plain.find(row)
+    while at != -1:
+        out.append(states[at + offset])
+        at = plain.find(row, at + 1)
+    return out
+
+
+MARK = "\u2731 written.go"
+CLEAN = "\u25cb keep.go"
+fails = []
+mark = every(MARK, 0)
+if not mark:
+    fails.append("the marked row never painted")
+elif not any(codes for codes, _ in mark):
+    fails.append("the mark painted with no foreground colour in any frame")
+
+name = every(MARK, 2)
+if not name:
+    fails.append("the marked row's name never painted")
+else:
+    if not any(codes for codes, _ in name):
+        fails.append("the name of the written-in file painted with no foreground colour")
+    if not any(bold for _, bold in name):
+        fails.append("the name of the written-in file never arrived bold, so a colourless terminal loses it")
+
+clean = every(CLEAN, 2)
+if not clean:
+    fails.append("the clean row never painted")
+elif any(codes or bold for codes, bold in clean):
+    fails.append("the clean row's name is drawn in %s, want the terminal's own colour" % clean)
+
+for why in fails:
+    print("    mark check: %s" % why)
+    break
+sys.exit(0 if not fails else 1)
+PY
+
 # --- verdict ---------------------------------------------------------------
 printf '\n'
 if [ "$FAILED" = 0 ]; then echo "PTY: all checks passed"; else echo "PTY: FAILURES PRESENT"; fi

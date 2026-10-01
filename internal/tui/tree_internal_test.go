@@ -314,16 +314,16 @@ func TestTheListAsItRenders(t *testing.T) {
 		"    ○ ABOUT.md +",
 		"    ○ CHANGESET.yaml +",
 		"▾ ○ docs/",
-		"    ▾ ○ plans/active/",
+		"  ▾ ○ plans/active/",
 		"        ○ x.md",
 		"    ○ notes.md",
 		"▾ ○ internal/",
-		"    ▾ ○ git/",
+		"  ▾ ○ git/",
 		"        ○ git.go",
-		"    ▾ ○ tui/",
+		"  ▾ ○ tui/",
 		"        ○ session.go",
 		"        ○ tui.go",
-		"    ▾ ○ tuition/",
+		"  ▾ ○ tuition/",
 		"        ○ why.go",
 		"○ main.go",
 		"span  main...current ▸",
@@ -698,10 +698,11 @@ func TestDiffsAndEditorsKnowWhatADirectoryIs(t *testing.T) {
 	}
 }
 
-// What a reviewer compares is where the names start. A directory row spends four cells before its name
-// -- the fold arrow and the mark gutter -- and a file row two, so an indent that only counts levels puts
-// every child's name in exactly the column its parent's name started in, and the tree reads as a flat
-// list with arrows in it.
+// What a reviewer compares is where the names start. A directory row spends two cells on its fold arrow
+// and two on its mark gutter before its name, and a file row only the gutter -- but the arrow comes out
+// of the indent rather than sitting after it (see treeLead), so a directory's name starts in the column
+// its depth says, the same one the files beside it start in, and every child is further right than the
+// row holding it.
 func TestAChildNamesItsFileRightOfTheDirectoryAboveIt(t *testing.T) {
 	m, _ := treeModel(t)
 	files, _ := m.window()

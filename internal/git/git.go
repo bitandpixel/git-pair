@@ -289,6 +289,60 @@ func (r *Repo) StatusPorcelain(ctx context.Context) (string, error) {
 	return r.Git(ctx, "status", "--porcelain", "--untracked-files=all")
 }
 
+// DirtyPaths answers "is there an uncommitted change at this path" for every path at once, keyed by
+// the path git leaves it at. It covers the three ways a path can be uncommitted — staged, unstaged,
+// and untracked — because each of them is a change sitting in the working tree that HEAD does not
+// have yet, and a caller asking "has anything happened to this file" does not care which of the
+// three it was.
+//
+// Paths are repository-relative, which is what `-z` guarantees: the plain format prints them relative
+// to the process directory when `status.relativePaths` is on, and a caller comparing them against
+// paths out of `diff --name-status` would then be comparing two different things. `-z` also means a
+// path is never quoted or escaped, so a name with a space, a quote, or a non-ASCII letter in it
+// arrives as the same string the rest of the repository calls it by.
+//
+// A rename or a copy answers for two paths, and both are reported: the destination because the bytes
+// now live there, and the origin because whatever stood there is not there any more. A caller holding
+// either path gets the same answer about the change.
+func (r *Repo) DirtyPaths(ctx context.Context) (map[string]bool, error) {
+	out, err := r.Git(ctx, "status", "--porcelain", "--untracked-files=all", "-z")
+	if err != nil {
+		return nil, err
+	}
+	return parseStatusZ(out), nil
+}
+
+// parseStatusZ reads the NUL-separated records of `git status --porcelain -z`: two status codes, a
+// space, and a path, with one wrinkle — a rename or a copy record is followed by a second record that
+// is the path it came from rather than a path with a status of its own. Reading the origin as its own
+// record would give it no status and lose it, so the record after a rename is taken as that rename's
+// second path.
+func parseStatusZ(out string) map[string]bool {
+	dirty := map[string]bool{}
+	records := strings.Split(out, "\x00")
+	for i := 0; i < len(records); i++ {
+		// "XY path": two codes, the separator git writes, and at least one character of name.
+		rec := records[i]
+		if len(rec) < 4 || rec[2] != ' ' {
+			continue
+		}
+		if path := rec[3:]; path != "" {
+			dirty[path] = true
+		}
+		if renamed(rec[0]) || renamed(rec[1]) {
+			if i+1 < len(records) && records[i+1] != "" {
+				dirty[records[i+1]] = true
+			}
+			i++
+		}
+	}
+	return dirty
+}
+
+// renamed is one half of git's rename answer: `R` in either of the two status columns, or `C` for a
+// copy. Either way the record is followed by the path the file came from.
+func renamed(code byte) bool { return code == 'R' || code == 'C' }
+
 // MergeBase resolves the best common ancestor of two revs.
 func (r *Repo) MergeBase(ctx context.Context, a, b string) (string, error) {
 	out, err := r.Git(ctx, "merge-base", a, b)
