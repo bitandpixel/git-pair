@@ -424,7 +424,9 @@ step "work that reached trunk with no approving verdict is reported rather than 
 # (PRD §22) is enforceable with no refs to consult.
 #
 # Two shapes reach the heading and the report separates them: a chain that carries no verdict, and a landing
-# that carried the directory in one commit so no markers came with it.
+# that carried the directory in one commit so no markers came with it. Which shape a changeset is does not
+# depend on where the destination's tip has since moved to, so the pair is read again further down, after
+# more commits have landed.
 git switch -q main
 git checkout -qb unreviewed-merge
 mkdir -p changesets/unreviewed-merge
@@ -461,6 +463,21 @@ printf '%s' "$out" | grep -q "unrecorded-landing" \
 printf '%s' "$out" | grep -q "status --changeset" \
   && echo "  ok: and prints the read that goes and looks, not a command that writes" \
   || { echo "  FAIL: the heading offered a command instead of a read: $out"; FAILED=1; }
+# The sentence about the landing's shape has to outlive the landing. It used to be read off the destination's
+# tip — "the landing is trunk's newest commit" — so the first unrelated merge turned the one-commit reading
+# into the no-verdict reading for a changeset whose history was never in this repository to read. Two
+# ordinary commits on main, then the same read: each finding keeps the sentence that is true for it.
+printf 'note\n' > gate-notes.md && git add gate-notes.md && git commit -qm "an unrelated commit lands on main"
+printf 'note\n' > gate-notes-2.md && git add gate-notes-2.md && git commit -qm "and another"
+out=$($G queue 2>&1)
+printf '%s' "$out" | grep -q "unrecorded-landing" \
+  && printf '%s' "$out" | grep -q "one commit" \
+  && echo "  ok: the landing that carried no history still says so after the destination moved on" \
+  || { echo "  FAIL: the sentence about the landing's shape expired when main moved: $out"; FAILED=1; }
+printf '%s' "$out" | grep -q "unreviewed-merge" \
+  && printf '%s' "$out" | grep -q "no review verdict" \
+  && echo "  ok: and the chain that carries no verdict keeps that reading too" \
+  || { echo "  FAIL: the no-verdict reading changed when main moved: $out"; FAILED=1; }
 out=$($G queue --json)
 printf '%s' "$out" | grep -q '"landed_unreviewed"' \
   && echo "  ok: the machine surface carries the same finding" \

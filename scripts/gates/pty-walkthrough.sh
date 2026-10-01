@@ -161,31 +161,46 @@ step "picker: V opens it, and it offers spans rather than a DAG"
 session picker V,esc,q
 expect "the picker lists the live end as an endpoint" 0 "$T/picker.raw" "Current"
 expect "the picker names the newest review" 0 "$T/picker.raw" "Last Review"
-expect "the picker offers the typed-commit drill" 0 "$T/picker.raw" "Commit"
+# One timeline, not two lists: the changeset's own commit is a row of the same column, written
+# between the submissions at the moment it happened -- here, after the submission it answered.
+expect "and the changeset's own commit is a row of that column" 0 "$T/picker.raw" "serialise per business"
+expect "the columns name the keys that open the drills" 0 "$T/picker.raw" "c commits"
 expect "esc returns to the list" 1 "$T/picker.raw" "reviewed"
+# The submission is a commit too, and an empty one. It is on the column by alias; a second row for
+# it by sha would be one event wearing two names. Captured on its own, because the file list this
+# session paints after `esc` has its own reasons to say the word "review".
+session markers V,ctrl-c
+refuse "the empty marker is no row beside the alias it already has" 0 "$T/markers.raw" "review: block"
 
-# --- 3b. typing into a drill (the drill's two modes) -----------------------
-step "drill: typing filters, Tab moves, space is a character, backspace cannot leave"
-# The picker opens on Changeset Base, so one j lands on Commit… and space opens the drill. The
-# filter is then typed one letter at a time -- the space in it is a filter character here and a
-# command in the list -- then Tab hands the keys to the list, one backspace deletes a character,
-# Tab hands them back, and twenty more backspaces run out of filter. Twenty is the point: the last
-# several press against an empty filter, and the drill has to survive them, so the session ends
-# there with ctrl-c rather than with a key that would have closed it honestly.
+# --- 3b. the drill's two modes ---------------------------------------------
+step "drill: c opens it, the list has the keys, / asks for the filter, backspace cannot leave"
+# `c` opens the commit drill for the active column -- a key rather than a row, so that `enter` means
+# apply wherever the picker's cursor is resting. The list keeps the keys first: what a reviewer does
+# in a drill is mostly move. `/` then puts what is typed into the filter -- the space in the middle is
+# a filter character there and a command in the list -- `esc` hands the keys back with the filter kept,
+# and `/` starts a fresh one. Then twenty backspaces run out of filter: the last several press against
+# an empty one, and the drill has to survive them, so the session ends there with ctrl-c rather than
+# with a key that would have closed it honestly.
 # Each ~0.3 gives the terminal time to paint the frame that key produced: two keys sent inside one
 # frame interval arrive as one update, and the frame in between is never written.
 BACKS=$(python3 -c "print(','.join(['backspace']*20))")
-session drill "V,j,space,~0.3,s,e,r,i,a,l,i,s,e,space,p,e,r,~0.3,tab,~0.3,backspace,~0.3,tab,~0.3,$BACKS,~0.3,x,~0.3,ctrl-c"
+session drill "V,~0.3,c,~0.3,/,s,e,r,i,a,l,i,s,e,space,p,e,r,~0.3,backspace,~0.3,esc,~0.3,/,x,~0.3,$BACKS,~0.3,x,~0.3,ctrl-c"
 expect "the drill opens over the list" 2 "$T/drill.raw" "Pick Commit"
 expect "the drill says which end the pick lands on" 2 "$T/drill.raw" "for BASE"
-expect "the typing bar names the key that navigates" 2 "$T/drill.raw" "tab navigate"
-expect "what is typed becomes the filter, space included" 16 "$T/drill.raw" "filter: serialise per"
-expect "Tab hands the keys to the list" 18 "$T/drill.raw" "tab filter"
-expect "backspace deletes one character" 20 "$T/drill.raw" "filter: serialise pe"
+expect "the list's bar names the key that asks for the filter" 2 "$T/drill.raw" "/ filter"
+expect "and names the paging keys without the modifier too" 2 "$T/drill.raw" "d/u ctrl-d/u half"
+# Each window starts at the keystroke whose effect it wants to see, not at the wait after it: the
+# frame a key paints belongs to that key, and the frames after it show the *next* state -- the filter
+# one character shorter, the bar of the mode the reviewer has already left.
+expect "what is typed becomes the filter, space included" 17 "$T/drill.raw" "filter: serialise per"
+expect "backspace deletes one character" 19 "$T/drill.raw" "filter: serialise pe"
+expect "esc hands the keys back to the list" 21 "$T/drill.raw" "esc/q back"
+expect "with the filter it was given still on screen" 21 "$T/drill.raw" "filter: serialise pe"
+expect "and / starts a fresh filter over the one kept" 24 "$T/drill.raw" "filter: x"
 # An inert key paints nothing, so "still in the drill" has to be shown by a key that changes the
 # screen without leaving it: one more letter, which the filter takes.
 expect "twenty backspaces leave the drill open" 45 "$T/drill.raw" "Pick Commit"
-expect "and the filter still takes what is typed" 45 "$T/drill.raw" "filter: x"
+expect "and the filter still takes what is typed" 47 "$T/drill.raw" "filter: x"
 
 # --- 4. v walks the spans this session has been in (span plan M3b) ---------
 step "span ring: v steps to the next span the session knows"

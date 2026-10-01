@@ -319,7 +319,7 @@ the state is detected and reported, by name, with the read that goes and looks:
 LANDED UNREVIEWED
 
   booking-transaction
-    on main at 4f2b8c1: the landing carried the directory in one commit, so no review markers came with it
+    on main at 4f2b8c1: the landing carried the directory in one commit, and the chain carries no review markers
 
   read one with `git pair status --changeset <id>`
 ```
@@ -338,9 +338,13 @@ Three properties the wording has to hold:
   exit code of the command that found it.
 - **The reason says which reading applies.** `the chain carries no review verdict` means the chain came
   along and holds no marker to read. `the newest verdict is feedback (<sha>), which does not license a
-  merge` and `the newest verdict is a block (<sha>)` name the verdict that was newest. A squash or a
-  cherry-pick — `the landing carried the directory in one commit, so no review markers came with it` —
-  brought the content and left the history on a branch that may already be gone (§13). Then the strict
+  merge` and `the newest verdict is a block (<sha>)` name the verdict that was newest. A record that came
+  alone — `the landing carried the directory in one commit, and the chain carries no review markers` —
+  brought the content and left the history on a branch that may already be gone, which is what a squash or a
+  cherry-pick leaves (§13). The two halves belong together and neither stands alone: the shape is a fact about
+  the landing commit, so it holds however far the destination has moved since, and it is also true of a linear
+  landing whose record happened to be committed once — what tells that one from a squash is the markers in the
+  chain, which is the other half of the sentence. Then the strict
   half, in its own words: `the approval (<sha>) names <commit>, which the destination does not carry: the
   landing replayed the run, so what was approved is not what landed` is a rebase merge, or an amend the
   author made under an approval; `the approval (<sha>) names no commit, so the destination cannot be
@@ -1421,14 +1425,15 @@ note: skipped booking-transaction (landed on main at 5556bc5)
 LANDED UNREVIEWED
 
   waitlist-rebooking
-    on main at 4f2b8c1: the landing carried the directory in one commit, so no review markers came with it
+    on main at 4f2b8c1: the landing carried the directory in one commit, and the chain carries no review markers
 
   read one with `git pair status --changeset <id>`
 ```
 
 The heading is the merge somebody made without review reaching the destination (§22). The `reason` says
 which of the two readings applies: a chain that arrived and carries no approval, or a landing that carried
-the directory in one commit and kept none of the history (§13).
+the directory in one commit and kept none of the history (§13). Which of them a changeset is does not change
+when the destination moves on, because both halves are read from the landing and the chain it brought.
 `--json` reports the same finding as `landed_unreviewed`, an array of
 `{"changeset", "commit", "chain", "reason"}` — always an array, since it answers a question, and a consumer
 should not have to tell "none" apart from "this build predates the question". Every array `--json` prints
@@ -1560,9 +1565,11 @@ Landed:
 Next: integrated at 4f2c81a: nothing further to do for a changeset that has landed
 ```
 
-The chain is what the merge carried. A squash, a rebase-merge or a cherry-pick brings the directory and
-leaves the history behind, and the same block then reads `chain: none — the landing carried the directory
-in one commit` with `reviewed: false` in `--json` (§13). Nothing in this block tells the reader to run a
+The chain is what the merge carried. A squash or a cherry-pick brings the directory and leaves the history
+behind, and the same block then reads `chain: none — the landing carried the directory in one commit` with
+`reviewed: false` in `--json` (§13). A linear landing prints its range even when its record came in a single
+commit, provided the chain carries markers: there is a run there to read, and where the range ends is the
+destination's tip — the endpoint of a linear run, not a claim that everything in it is this changeset's. Nothing in this block tells the reader to run a
 command: the block prints because the destination already holds the directory, and a landing whose chain
 carries no verdict is the different finding `LANDED UNREVIEWED` reports (§4).
 
@@ -2103,7 +2110,15 @@ A landing keeps what the merge carried:
 | --- | --- | --- |
 | merge (`--no-ff`) | the reviewed chain, inside the merge commit | what the chain says |
 | fast-forward | the destination's own line carries it | what the chain says |
-| squash, rebase-merge, cherry-pick | none: `chain_base` and `chain_head` are `""` | `false` |
+| rebase-merge | the destination's own line carries it, to the destination's tip | `false` where the run it replayed is not in the destination |
+| squash, cherry-pick | none: `chain_base` and `chain_head` are `""` | `false` |
+
+The empty chain is the report's way of saying the record came alone: the directory arrived in one commit that
+is not a merge, and the chain holds no marker for the changeset. Both halves are needed, and the pair is read
+once, from the landing and the chain it brought — not from where the destination's tip happens to be, which
+changes every time anything else lands. A linear landing whose record was committed once is the same shape,
+and it is not this case when its markers came across: then the range is printed, the verdict is read, and the
+finding (if any) is about what that verdict licenses.
 
 A squash brings the content and destroys the ancestry, so the approval, the intermediate review diffs and
 the fix commits are gone from the destination — and they are gone from the destination's history, not from
@@ -2431,19 +2446,32 @@ contain, and the preview has no `you` section, because a historical span has no 
 `V` opens the span picker: two columns, BASE and HEAD, holding a pending checkpoint each. `Space`
 sets the end under the cursor, `Enter` applies the pair, and nothing changes before `Enter` — the
 lines under the columns already say what the pair resolves to and whether it would be read-only,
-which is what makes choosing a historical range safe rather than a negotiation with `Esc`. Both
-columns offer the submissions by alias (the newest three as `Review -1`…`Review -3`, older ones by
-index), then `Commit…` and `Ref…`; only the base offers the changeset base, only the head offers the
-working tree, and `HEAD` is offered nowhere: beside `Working Tree` it would present two
-similar-looking current targets when only one of them can be edited. `u` and `f` set the unreviewed
-and full-changeset presets, `Tab` switches columns, `Esc` cancels.
+which is what makes choosing a historical range safe rather than a negotiation with `Esc`. Each
+column is one timeline rather than two lists: the submissions by alias (the newest as `Last Review`,
+then `Review -2` and `Review -3`, older ones by the index you would type) with the changeset's own
+commits written between them where they happened, so `j` walks from a submission into the commits
+that followed it. The commits are the ones the base does not already hold, and only the ones that
+change files — a marker commit holds no content to review and is on the list by alias already.
+Only the base offers the changeset base, only the head offers the working tree, and `HEAD` is
+offered nowhere: beside `Working Tree` it would present two similar-looking current targets when
+only one of them can be edited. `u` and `f` set the unreviewed and full-changeset presets, `Tab`
+switches columns, `c` and `r` open the commit and ref drills for the active column, `Esc` cancels.
 
-The two drills are lists, not a history view. `Commit…` shows subject, short id and age; typing
-filters it; a typed revision is taken directly, because the list is a window and history is not, and
-a typed id git cannot resolve is refused while the list is still on screen. `Ref…` groups local
-branches, remote refs, tags and other refs under headings, shows the name a reviewer would type and
+The drills are keys rather than rows: pointed at a row, `Enter` applied the pair the reviewer had
+come to the screen to change instead of descending into it, and one keystroke should not mean two
+things depending on where the cursor happens to be resting.
+
+The two drills are lists, not a history view. The commit list shows subject, short id and age, and
+takes a typed revision directly, because the list is a window and history is not; a typed id git
+cannot resolve is refused while the list is still on screen. The ref list groups local branches,
+remote refs, tags and other refs under headings, shows the name a reviewer would type and
 keeps the full `refs/...` name in the checkpoint: a branch and a tag called `main` are two different
-choices, and drift has to be watched on the one that was meant.
+choices, and drift has to be watched on the one that was meant. Each drill has two modes and its
+shortcut bar names the keys of the one it is in. The list holds the keys first — `j`/`k`, `gg`/`G`,
+`d`/`u` or `ctrl-d`/`ctrl-u` for half a page, and `f`/`b` or `ctrl-f`/`ctrl-b` for a whole one — with
+`/` putting the keys on the filter, where a fresh one starts and what you type is the filter; `esc`
+hands them back with the
+filter kept, and `esc` again leaves.
 
 A ref endpoint is pinned when chosen, and stays pinned for the session. While a ref-backed endpoint is
 active the session re-resolves it at the cheap points — on a timer, and after an editor or difftool
@@ -3516,7 +3544,7 @@ v        step through the spans this session has been in:
          opened-on, full changeset, unreviewed, then any span chosen with V;
          from a read-only span, back to the last span that was reviewable
 V        span picker: BASE and HEAD columns, space to choose an end, enter to apply;
-         Commit… and Ref… open searchable lists, u and f are the two presets
+         c and r open the commit and ref lists, u and f are the two presets
 r        re-pin drifted ref endpoints, offered by ⚠ <ref> moved <a> → <b>  [r] refresh
 
 s        submit review

@@ -39,8 +39,11 @@ import (
 )
 
 // format identifies the shape of a cached entry. A derivation whose answer changes shape bumps it, so an
-// old build's entries are misses rather than values read through the wrong struct.
-const format = "1"
+// old build's entries are misses rather than values read through the wrong struct. The same argument covers
+// an answer whose *wording* changed: an entry holding a sentence the current build no longer prints is read
+// through the right struct and still says the wrong thing, so the landing report's reason wording bumping
+// this from "1" to "2" is the intended use, not an accident of the field's name.
+const format = "2"
 
 // Keep is how many entries the directory holds before the oldest go. Entries are small and one landed
 // changeset contributes a handful per destination commit, so this bounds a directory that would otherwise

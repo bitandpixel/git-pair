@@ -18,19 +18,23 @@ import (
 //
 // Two rules shape all of it. Pending is not applied — `Space` sets one end, `Enter`
 // applies the pair — so a reviewer can look at "Review -3 → Review -1" and decide. And
-// the columns list review submissions, commits and refs, never `HEAD`: beside "Working
-// Tree" it would put two similar-looking current targets on screen when only one of them
-// can be edited (§4).
+// the columns list checkpoints, never `HEAD`: beside "Current" it would put two
+// similar-looking current targets on screen when only one of them can be edited (§4).
 //
-// The Commit… and Ref… rows are drills into git itself. They are searchable because a
-// list of a reviewer's own history is only useful if they can find their way through it,
-// and both take typed text as a checkpoint directly, so history older than the window is
-// one keystroke from being reachable.
+// Each column is one timeline rather than two lists. The changeset's own commits sit between its
+// review submissions in the order they happened, because the question a reviewer asks is "what is
+// between these two", and answering it should be a matter of pressing `j`. Wider history is the `c`
+// and `r` drills: keys rather than rows, so `Enter` means one thing wherever the cursor happens to
+// be resting.
 
 const (
-	// pickerCommitLimit is how far back the commit list reaches. A scrollback rather
+	// pickerCommitLimit is how far back the commit drill reaches. A scrollback rather
 	// than a rule: the same list takes a typed id.
 	pickerCommitLimit = 200
+	// pickerCommits is how many of the changeset's own commits the columns interleave with the
+	// review rows. Recent is the point: the commits between two reviews are what a reviewer wants
+	// to span to, and `c` reaches anything older.
+	pickerCommits = 50
 	// pickerDetailWidth is the right-hand column of a row: a short sha and an age.
 	pickerDetailWidth = 16
 	// pickerGap separates the two columns, and matches the divider joinColumns draws.
@@ -45,15 +49,20 @@ type spanPicker struct {
 	base   span.Checkpoint
 	head   span.Checkpoint
 	cursor [2]int
-	// list is the Commit…/Ref… drill-in, nil while the columns are showing.
+	// commits are the changeset's own non-empty commits, newest first, read once when `V` opens.
+	// The columns redraw on every keystroke, so this is the picker's only git call for them.
+	commits []pickerItem
+	// list is the `c`/`r` drill-in, nil while the columns are showing.
 	list *checkpointList
-	// err is a refusal the reviewer is being shown: a pair git would not resolve. The
-	// picker stays open with it, because they are mid-choice.
+	// err is what the picker refuses to leave unsaid: a pair git would not resolve, or a read of
+	// the changeset's history that failed. It stays on screen because the reviewer is mid-choice.
 	err string
-	// nav is the drill-in's own mode: false means what you type goes to the filter, true
-	// means the keys navigate the list. Tab toggles it, and each mode's shortcut bar names
-	// the keys it reads -- the same bargain the diff overlay makes.
-	nav bool
+	// filtering is the drill-in's own mode: false leaves the keys on the list, true sends what you
+	// type to the filter. `/` starts a filter and `esc` hands the keys back, and each mode's
+	// shortcut bar names the keys it reads -- the same bargain the diff overlay makes. Navigation
+	// is the default because a reviewer scanning commits mostly moves; the filter is for looking
+	// for one thing.
+	filtering bool
 	// gPrefix waits for the second g of `gg`, as the preview overlay's does.
 	gPrefix bool
 }
@@ -78,19 +87,20 @@ type checkpointList struct {
 // pickerItem is one selectable row. Group is set for refs so the renderer can put a
 // heading over each family; it is not a row the cursor can rest on.
 type pickerItem struct {
-	label   string
-	detail  string
-	group   string
-	ckpt    span.Checkpoint
-	drill   listKind
-	isDrill bool
+	label  string
+	detail string
+	group  string
+	// when is what the columns merge the submissions and the commits by. It is zero for the rows
+	// that are not events: Current, and the changeset base.
+	when time.Time
+	ckpt span.Checkpoint
 }
 
 // --- the two columns --------------------------------------------------------
 
-// endpointsFor are the rows one column offers. Both list the submissions by alias and
-// both end with the drills; only the base offers the changeset base, and only the head
-// offers the working tree.
+// endpointsFor are the rows one column offers: the live end for the head, then the changeset's own
+// history in the order it happened -- submissions and commits in one line -- then, for the base,
+// the changeset base, and last a row for a checkpoint that line does not reach.
 func (m reviewModel) endpointsFor(base bool) []pickerItem {
 	reviews := m.sess.Summary().Reviews
 	var items []pickerItem
@@ -100,9 +110,7 @@ func (m reviewModel) endpointsFor(base bool) []pickerItem {
 		// because "Working Tree" named only the uncommitted half of it.
 		items = append(items, pickerItem{label: "Current", detail: "latest + edits", ckpt: span.WorkingTree()})
 	}
-	for i := len(reviews) - 1; i >= 0; i-- {
-		items = append(items, reviewItem(reviews[i], i, len(reviews)))
-	}
+	items = append(items, timeline(reviews, m.pick.commits)...)
 	if base {
 		items = append(items, pickerItem{
 			label: "Changeset Base",
@@ -112,10 +120,84 @@ func (m reviewModel) endpointsFor(base bool) []pickerItem {
 			detail: "base " + span.ShortRef(m.sess.Header().Base), ckpt: span.ChangesetBase(),
 		})
 	}
-	items = append(items,
-		pickerItem{label: "Commit…", detail: "a fixed point", isDrill: true, drill: listCommits},
-		pickerItem{label: "Ref…", detail: "branch, tag, ref", isDrill: true, drill: listRefs})
+	pending := m.pick.head
+	if base {
+		pending = m.pick.base
+	}
+	if it, ok := pinnedRow(items, pending); ok {
+		items = append(items, it)
+	}
 	return items
+}
+
+// timeline merges the review submissions with the changeset's own commits into one newest-first
+// list, so `j` walks from a review into the commits that followed it rather than hopping to a
+// second list. Equal timestamps keep the submission first: it is the event a reviewer names, and it
+// is committed after the work it approves.
+func timeline(reviews []lifecycle.Event, commits []pickerItem) []pickerItem {
+	rows := make([]pickerItem, 0, len(reviews)+len(commits))
+	for i, e := range reviews {
+		rows = append(rows, reviewItem(e, i, len(reviews)))
+	}
+	rows = append(rows, commits...)
+	slices.SortStableFunc(rows, func(a, b pickerItem) int { return b.when.Compare(a.when) })
+	return rows
+}
+
+// pinnedRow is the row a pending checkpoint gets when the timeline has none for it: a ref, or a
+// commit older than the window the columns read, has no place among the changeset's own history --
+// and a column with no mark on it would not say which end the pick went to. It sits at the bottom,
+// where the drills that produced it used to be.
+func pinnedRow(items []pickerItem, pending span.Checkpoint) (pickerItem, bool) {
+	if pending.Kind != span.KindCommit && pending.Kind != span.KindRef {
+		return pickerItem{}, false
+	}
+	for _, it := range items {
+		if sameCheckpoint(it.ckpt, pending) {
+			return pickerItem{}, false
+		}
+	}
+	return pickerItem{label: pending.String(), detail: "from history", ckpt: pending}, true
+}
+
+// inlineCommits are the changeset's own commits -- everything the base does not already hold --
+// newest first, for the columns. A submission that changed files is a commit too, and it keeps one
+// row: the alias, not the sha.
+func (m reviewModel) inlineCommits(reviews []lifecycle.Event) ([]pickerItem, string) {
+	base := m.sess.Header().Base
+	if base == "" {
+		return nil, ""
+	}
+	tips, err := m.sess.Repo().RecentNonEmptyCommits(m.ctx, pickerCommits, base+"..HEAD")
+	if err != nil {
+		// Nothing else on this screen says the history is short, so the picker says it here rather
+		// than quietly showing fewer rows than the changeset has.
+		return nil, "cannot read this changeset's commits: " + err.Error()
+	}
+	submitted := make(map[string]bool, len(reviews))
+	for _, e := range reviews {
+		submitted[e.SHA] = true
+	}
+	var items []pickerItem
+	for _, t := range tips {
+		if submitted[t.SHA] {
+			continue
+		}
+		items = append(items, pickerItem{
+			label: t.Subject, detail: t.Short + " " + ago(t.When), when: t.When, ckpt: span.Commit(t.SHA),
+		})
+	}
+	return items, ""
+}
+
+// newSpanPicker seeds the pending pair from the span on screen and puts each column's
+// cursor on it, so `V` opens on the present rather than at the top of a list.
+func (m reviewModel) newSpanPicker() spanPicker {
+	sel := m.sess.Selector()
+	p := spanPicker{base: sel.Base, head: sel.Head}
+	p.commits, p.err = m.inlineCommits(m.sess.Summary().Reviews)
+	m.recentrePicker(&p)
+	return p
 }
 
 // reviewItem names a submission the way a reviewer does: the last few by their alias from
@@ -133,57 +215,32 @@ func reviewItem(e lifecycle.Event, i, total int) pickerItem {
 		index = i
 		label = fmt.Sprintf("Review %d", i)
 	}
-	return pickerItem{label: label, detail: e.Short + " " + ago(e.When), ckpt: span.Review(index)}
+	return pickerItem{label: label, detail: e.Short + " " + ago(e.When), when: e.When,
+		ckpt: span.Review(index)}
 }
 
-// newSpanPicker seeds the pending pair from the span on screen and puts each column's
-// cursor on it, so `V` opens on the present rather than at the top of a list.
-func (m reviewModel) newSpanPicker() spanPicker {
-	sel := m.sess.Selector()
-	p := spanPicker{base: sel.Base, head: sel.Head}
-	m.recentrePicker(&p)
-	return p
-}
-
-// recentrePicker moves each column's cursor onto its pending checkpoint.
-func (m reviewModel) recentrePicker(p *spanPicker) {
+// recentrePicker moves each column's cursor onto its pending checkpoint. The columns are drawn from
+// the picker's own state, so that state has to be in place before the rows are counted: a cursor
+// computed against the list the picker has not taken yet lands on the wrong row. The closing
+// assignment leaves m.pick and p agreeing, so no caller has to remember to copy.
+func (m *reviewModel) recentrePicker(p *spanPicker) {
+	m.pick = *p
 	for col, want := range [2]span.Checkpoint{p.base, p.head} {
 		p.cursor[col] = endpointIndex(m.endpointsFor(col == 0), want)
 	}
+	m.pick = *p
 }
 
-// endpointIndex is where a column's cursor sits for a pending checkpoint: on its row, or on
-// the drill that holds it. A commit or ref chosen from history has no row of its own, and the
-// asterisk for it goes on the drill row -- so the cursor goes there too, rather than leaving
-// the mark on a row the picker is not standing on.
+// endpointIndex is where a column's cursor sits for a pending checkpoint: on its row, or on the
+// pinned row a checkpoint outside the timeline gets. Without it the cursor would open on the top
+// row while the mark sat somewhere else in the list.
 func endpointIndex(items []pickerItem, want span.Checkpoint) int {
 	for i, it := range items {
-		if it.isDrill {
-			continue
-		}
 		if sameCheckpoint(it.ckpt, want) {
 			return i
 		}
 	}
-	for i, it := range items {
-		if it.isDrill && drillHolds(it.drill, want) {
-			return i
-		}
-	}
 	return 0
-}
-
-// drillHolds says whether the end of a column came out of that drill. It is what keeps the
-// asterisk on screen: without it, a base chosen from the commit list leaves the BASE column
-// with no mark at all, and the reviewer cannot see which end the pick went to.
-func drillHolds(kind listKind, ckpt span.Checkpoint) bool {
-	switch {
-	case ckpt.Kind == span.KindCommit && kind == listCommits:
-		return true
-	case ckpt.Kind == span.KindRef && kind == listRefs:
-		return true
-	}
-	return false
 }
 
 // sameCheckpoint compares what a reviewer chose rather than what git resolved: two refs
@@ -231,10 +288,15 @@ func (m reviewModel) handleSpanKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		p.cursor[p.col]--
 
 	case key.Type == tea.KeySpace:
-		return m.chooseEndpoint(items[p.cursor[p.col]])
+		return m.setEndpoint(items[p.cursor[p.col]])
 
 	case key.Type == tea.KeyEnter:
 		return m.applySpan(p.base, p.head)
+
+	case key.Type == tea.KeyRunes && firstRune(key) == 'c':
+		return m.startDrill(listCommits)
+	case key.Type == tea.KeyRunes && firstRune(key) == 'r':
+		return m.startDrill(listRefs)
 
 	case key.Type == tea.KeyRunes && firstRune(key) == 'u':
 		if len(m.sess.Summary().Reviews) == 0 {
@@ -252,22 +314,28 @@ func (m reviewModel) handleSpanKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// chooseEndpoint sets one pending end, or opens the drill-in the row stands for.
-func (m reviewModel) chooseEndpoint(it pickerItem) (tea.Model, tea.Cmd) {
+// setEndpoint sets one pending end. Nothing else happens: the pair stays pending until Enter.
+func (m reviewModel) setEndpoint(it pickerItem) (tea.Model, tea.Cmd) {
 	p := m.pick
-	if it.isDrill {
-		p.err = ""
-		p.list = m.openList(it.drill)
-		p.nav, p.gPrefix = false, false
-		m.pick = p
-		return m, nil
-	}
 	if p.col == 0 {
 		p.base = it.ckpt
 	} else {
 		p.head = it.ckpt
 	}
 	p.err = ""
+	m.pick = p
+	return m, nil
+}
+
+// startDrill opens the commit or ref drill for the column the reviewer is standing in. These are
+// keys rather than rows in the list: with `Commit…` and `Ref…` as rows, `Enter` -- the key a
+// reviewer presses on the row they are pointing at -- applied the pair instead of descending, and
+// the pair it applied was the one they had already come to the screen to change.
+func (m reviewModel) startDrill(kind listKind) (tea.Model, tea.Cmd) {
+	p := m.pick
+	p.err = ""
+	p.list = m.openList(kind)
+	p.filtering, p.gPrefix = false, false
 	m.pick = p
 	return m, nil
 }
@@ -432,23 +500,23 @@ func refInFamily(name, prefix string) bool {
 	return strings.HasPrefix(name, prefix)
 }
 
-// handleListKey drives the drill-in, which has two modes because it takes typed text. Typing
-// mode is the default, and what you type is the filter -- a space included, since commit subjects
-// and ref names both contain them. Tab puts the keys on the list instead: j/k, gg/G, half and full
-// page, the navigation the rest of the screen uses. Each mode's shortcut bar names the keys that
-// mode reads, so nothing carries over by guesswork -- the bargain the diff overlay makes.
+// handleListKey drives the drill-in, which has two modes because it takes typed text. Navigation is
+// the default -- j/k, gg/G, half and full page, the keys the rest of the screen uses -- and `/`
+// sends what you type to the filter, a space included, since commit subjects and ref names both
+// contain them. `esc` hands the keys back with the filter kept, and `esc` again leaves the drill.
+// Each mode's shortcut bar names the keys that mode reads, so nothing carries over by guesswork --
+// the bargain the diff overlay makes.
 func (m reviewModel) handleListKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	p := m.pick
 	list := p.list
 	visible := list.visible()
 
-	if !p.nav {
+	if p.filtering {
 		switch {
 		case key.Type == tea.KeyEsc:
-			return m.closeList(p)
-
-		case key.Type == tea.KeyTab, key.Type == tea.KeyShiftTab:
-			p.nav = true
+			// Back to the keys, filter and all: the rows you filtered down to are the rows you want
+			// to move through, and the second esc leaves the drill with them still on screen.
+			p.filtering = false
 
 		case key.Type == tea.KeyEnter:
 			return m.pickFromList(list, visible)
@@ -463,8 +531,7 @@ func (m reviewModel) handleListKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case key.Type == tea.KeyBackspace:
 			// Backspace edits the filter and nothing else. An empty filter makes it inert: this
 			// key used to throw the whole drill away, so clearing one mistyped character from an
-			// empty filter dumped the reviewer back onto the columns they had just left. `esc`
-			// leaves, and it is the only key that does.
+			// empty filter dumped the reviewer back onto the columns they had just left.
 			if list.filter != "" {
 				runes := []rune(list.filter)
 				list.filter = string(runes[:max(0, len(runes)-1)])
@@ -486,6 +553,7 @@ func (m reviewModel) handleListKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			list.sel = 0
 		}
+		list.sel = clampIndex(list.sel, 0, max(0, len(visible)-1))
 		m.pick = p
 		return m, nil
 	}
@@ -502,32 +570,33 @@ func (m reviewModel) handleListKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.listRows()
 	step := 0
 	switch {
-	case key.Type == tea.KeyEsc:
+	case key.Type == tea.KeyEsc, key.Type == tea.KeyRunes && firstRune(key) == 'q':
 		return m.closeList(p)
-	case key.Type == tea.KeyTab, key.Type == tea.KeyShiftTab:
-		p.nav = false
+	case key.Type == tea.KeyRunes && firstRune(key) == '/':
+		// A fresh filter, as in less: the text you are replacing is the reason you typed `/`.
+		p.filtering, list.filter, list.sel = true, "", 0
 	case key.Type == tea.KeyEnter, key.Type == tea.KeySpace:
 		return m.pickFromList(list, visible)
 	case key.Type == tea.KeyDown, key.Type == tea.KeyRunes && firstRune(key) == 'j':
 		step = 1
 	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
 		step = -1
-	case key.Type == tea.KeyCtrlD:
+	// Half a page, both distances the rest of the screen offers: `less`'s plain `d` and `u`, which the
+	// preview overlay already takes, and the ctrl pairs. Out in the columns `u` is the unreviewed
+	// preset; the keys belong to whichever screen's bar is on screen, and each of the two bars names
+	// only its own.
+	case key.Type == tea.KeyCtrlD, key.Type == tea.KeyRunes && firstRune(key) == 'd':
 		step = rows / 2
-	case key.Type == tea.KeyCtrlU:
+	case key.Type == tea.KeyCtrlU, key.Type == tea.KeyRunes && firstRune(key) == 'u':
 		step = -rows / 2
-	case key.Type == tea.KeyCtrlF:
+	case key.Type == tea.KeyCtrlF, key.Type == tea.KeyRunes && firstRune(key) == 'f':
 		step = rows
-	case key.Type == tea.KeyCtrlB:
+	case key.Type == tea.KeyCtrlB, key.Type == tea.KeyRunes && firstRune(key) == 'b':
 		step = -rows
 	case pressedG && key.Type == tea.KeyRunes && firstRune(key) == 'g':
 		list.sel = 0
 	case key.Type == tea.KeyRunes && firstRune(key) == 'G':
 		list.sel = max(0, len(visible)-1)
-	case key.Type == tea.KeyBackspace && list.filter != "":
-		runes := []rune(list.filter)
-		list.filter = string(runes[:max(0, len(runes)-1)])
-		list.sel = 0
 	}
 	list.sel += step
 	list.sel = clampIndex(list.sel, 0, max(0, len(visible)-1))
@@ -538,7 +607,7 @@ func (m reviewModel) handleListKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 // closeList backs out of the drill-in. The columns and the pending pair are as they were -- a
 // drill that was opened and left should not have changed anything.
 func (m reviewModel) closeList(p spanPicker) (tea.Model, tea.Cmd) {
-	p.list, p.nav, p.gPrefix = nil, false, false
+	p.list, p.filtering, p.gPrefix = nil, false, false
 	m.pick = p
 	return m, nil
 }
@@ -563,21 +632,23 @@ func (m reviewModel) listRows() int {
 func (m reviewModel) pickFromList(list *checkpointList, visible []int) (tea.Model, tea.Cmd) {
 	p := m.pick
 	if len(visible) > 0 {
-		return m.setPending(p, list.items[visible[list.sel]].ckpt)
+		return m.setPending(p, list.items[visible[list.sel]])
 	}
 	if list.filter == "" {
 		return m, nil
 	}
+	// Typed rather than picked, so the row it earns in the column is the text itself.
 	if list.kind == listRefs {
-		return m.setPending(p, span.Ref(list.filter))
+		return m.setPending(p, pickerItem{
+			label: span.ShortRef(list.filter), detail: "typed", ckpt: span.Ref(list.filter)})
 	}
-	return m.setPending(p, span.Commit(list.filter))
+	return m.setPending(p, pickerItem{label: list.filter, detail: "typed", ckpt: span.Commit(list.filter)})
 }
 
-func (m reviewModel) setPending(p spanPicker, ckpt span.Checkpoint) (tea.Model, tea.Cmd) {
-	base, head := p.base, ckpt
+func (m reviewModel) setPending(p spanPicker, it pickerItem) (tea.Model, tea.Cmd) {
+	base, head := p.base, it.ckpt
 	if p.col == 0 {
-		base, head = ckpt, p.head
+		base, head = it.ckpt, p.head
 	}
 	if _, err := m.resolveSelector(span.Selector{Base: base, Head: head}); err != nil {
 		p.list.err = err.Error()
@@ -585,9 +656,9 @@ func (m reviewModel) setPending(p spanPicker, ckpt span.Checkpoint) (tea.Model, 
 		return m, nil
 	}
 	if p.col == 0 {
-		p.base = ckpt
+		p.base = it.ckpt
 	} else {
-		p.head = ckpt
+		p.head = it.ckpt
 	}
 	p.list = nil
 	p.err = ""
@@ -680,18 +751,10 @@ func (m reviewModel) columnText(base bool, width int) string {
 		if m.pick.col == col && m.pick.cursor[col] == i {
 			cursor = ">"
 		}
-		if !it.isDrill && sameCheckpoint(it.ckpt, pending) {
+		if sameCheckpoint(it.ckpt, pending) {
 			chosen = "*"
 		}
-		if it.isDrill && drillHolds(it.drill, pending) {
-			// No row of its own, so the drill it came from wears the mark.
-			chosen = "*"
-		}
-		label := it.label
-		if it.isDrill {
-			label = styleDim.Render(label)
-		}
-		b.WriteString(clip(m.rowWithDetail(cursor+chosen+" "+label, it.detail, width), width) + "\n")
+		b.WriteString(clip(m.rowWithDetail(cursor+chosen+" "+it.label, it.detail, width), width) + "\n")
 	}
 	return b.String()
 }
@@ -782,12 +845,15 @@ func (m reviewModel) pickerListBlock() string {
 		named = "BASE"
 	}
 	caret := ""
-	if !m.pick.nav {
+	label := "filter: " + list.filter
+	if m.pick.filtering {
 		// The block is the caret: it sits where your typing goes, so navigation mode drops it.
 		caret = "\u2588"
+	} else if list.filter == "" {
+		label = "no filter"
 	}
 	b.WriteString(clip(styleSpan.Render(title)+"  "+styleDim.Render("for "+named)+
-		"  "+styleDim.Render("filter: "+list.filter+caret), m.width) + "\n")
+		"  "+styleDim.Render(label+caret), m.width) + "\n")
 	b.WriteString("\n")
 	if list.err != "" {
 		b.WriteString(clip(styleErr.Render(list.err), m.width) + "\n")
@@ -872,14 +938,14 @@ func (m reviewModel) resolveSelector(sel span.Selector) (span.Span, error) {
 // helpSpan is the picker's own shortcut bar, and it says what the keys mean where they are being
 // pressed. The drill-in has two modes because it takes typed text, and a mode whose bar does not
 // name its keys is a mode with undocumented keys.
-func helpSpan(drilled, nav bool) string {
-	if drilled && nav {
-		return "j k line  gg top  G bottom  ctrl-d/u half  ctrl-f/b page  space/enter pick  tab filter  esc back"
+func helpSpan(drilled, filtering bool) string {
+	if drilled && filtering {
+		return "type to filter  \u2191/\u2193 move  backspace delete  enter pick  esc navigate"
 	}
 	if drilled {
-		return "type to filter  \u2191/\u2193 move  backspace delete  enter pick  tab navigate  esc back"
+		return "j k line  gg top  G bottom  d/u ctrl-d/u half  f/b ctrl-f/b page  / filter  space/enter pick  esc/q back"
 	}
-	return "tab column  j/k move  space choose  enter apply  u unreviewed  f full  esc cancel"
+	return "tab column  j/k move  space choose  enter apply  c commits  r refs  u unreviewed  f full  esc cancel"
 }
 
 // ago is how long ago a commit was, short enough for a detail column.

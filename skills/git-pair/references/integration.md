@@ -68,7 +68,10 @@ reports them.
 
 A squash, cherry-pick, or forge button keeps only the content. The directory arrives, so the changeset is
 landed, and the chain behind it is gone: `status` reports `reviewed: false` with an empty `chain_base` and
-`chain_head`, because nothing in the destination says the work was approved. PRD §13 states this limit.
+`chain_head`, because nothing in the destination says the work was approved. That empty pair is read from the
+landing — one commit that is not a merge, carrying no markers — not from where the destination's tip has since
+moved to, so it does not quietly become "the chain carries no review verdict" when unrelated work lands.
+PRD §13 states this limit.
 Where the review has to survive a squash, the repository merges with `--no-ff` instead, or tidies the
 changeset (`git pair change tidy <id>`, which moves the directory to `changesets/.landed/<id>/` on a branch
 whose history still holds the chain) before it deletes the branch.

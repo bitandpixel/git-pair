@@ -3,8 +3,10 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -23,19 +25,27 @@ import (
 func pickerFixture(t *testing.T, reviews int) (reviewModel, *gittest.Fixture) {
 	t.Helper()
 	ctx := context.Background()
+	// Fixed, increasing dates. The columns merge a changeset's commits with its submissions by when
+	// they happened, and a fixture whose neighbours land in the same second cannot say which order
+	// that was. An hour apart keeps every age the picker prints inside the "Nd" range it expects.
+	clock := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	stamp := func() gittest.CommitOpt {
+		clock = clock.Add(time.Hour)
+		return gittest.WithDate(clock)
+	}
 	f := gittest.New(t)
-	f.Commit("seed", gittest.WithFile("main.go", "package main\n\nfunc main() {}\n"))
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n\nfunc main() {}\n"), stamp())
 	f.CreateBranch(readonlySlug)
-	f.CommitChangeset(readonlySlug, "main")
+	f.CommitChangeset(readonlySlug, "main", stamp())
 	f.Commit("implement", gittest.WithFiles(map[string]string{
 		"service.go": "package main\n\nfunc Lock() {}\n",
 		"handler.go": "package main\n\nfunc Serve() {}\n",
-	}))
+	}), stamp())
 	for i := range reviews {
 		f.CommitReviewMarker(readonlySlug, "feedback",
-			gittest.WithFile(fmt.Sprintf("notes-%d.md", i), "note\n"))
+			gittest.WithFile(fmt.Sprintf("notes-%d.md", i), "note\n"), stamp())
 		f.Commit(fmt.Sprintf("response %d", i),
-			gittest.WithFile("service.go", fmt.Sprintf("package main\n\nfunc Lock() { tx%d() }\n", i)))
+			gittest.WithFile("service.go", fmt.Sprintf("package main\n\nfunc Lock() { tx%d() }\n", i)), stamp())
 	}
 
 	repo := &git.Repo{Dir: f.Dir()}
@@ -132,6 +142,77 @@ func columnLabels(items []pickerItem) []string {
 	return out
 }
 
+// moveTo walks the active column's cursor to a row by label with the keys a reviewer uses, so a test
+// that cares where the cursor landed does not depend on how many commits the history happens to
+// hold.
+func moveTo(t *testing.T, m reviewModel, label string) reviewModel {
+	t.Helper()
+	items := m.endpointsFor(m.pick.col == 0)
+	for i := 0; i <= len(items); i++ {
+		if m.pick.cursor[m.pick.col] < len(items) && items[m.pick.cursor[m.pick.col]].label == label {
+			return m
+		}
+		m = pressKey(t, m, runeKey('j'))
+	}
+	t.Fatalf("j never reached %q", label)
+	return m
+}
+
+// The columns are one timeline, not two lists: the question a reviewer asks is what happened between
+// two submissions, and the commits that answer it sit where they happened. The changeset's own
+// history is what is merged in -- everything below the base is the base's -- and the marker commits
+// are not there twice: they are on the list by alias.
+func TestColumnsInterleaveTheChangesetsCommitsWithItsReviews(t *testing.T) {
+	m, f := pickerFixture(t, 2)
+	// Dates the merge can be pinned by: an early commit belongs at the bottom of the history, and a
+	// commit newer than everything is still no row at all if it holds nothing.
+	f.Commit("before any review", gittest.WithFile("early.go", "package main\n"),
+		gittest.WithDate(time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)))
+	f.EmptyCommit("git-pair: ready never", gittest.WithDate(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)))
+	m = open(t, m)
+
+	got := columnLabels(m.endpointsFor(true))
+	want := []string{"response 1", "Last Review", "response 0", "Review -2", "before any review"}
+	if !orderedBefore(got, want) {
+		t.Errorf("the BASE column reads %v, want the commits among the reviews in the order they "+
+			"happened", got)
+	}
+	for _, absent := range []string{"git-pair: ready never", "seed"} {
+		if slices.Contains(got, absent) {
+			t.Errorf("the BASE column lists %q: the first is an empty marker and the second is below "+
+				"the changeset's base", absent)
+		}
+	}
+}
+
+// orderedBefore reports whether want appears in got in that order, with anything allowed between.
+func orderedBefore(got, want []string) bool {
+	at := 0
+	for _, g := range got {
+		if at < len(want) && g == want[at] {
+			at++
+		}
+	}
+	return at == len(want)
+}
+
+// Enter means apply, wherever the cursor is resting. It used to mean that only on the rows that were
+// not drills: pointed at `Commit…`, Enter applied the pair the reviewer had come to the screen to
+// change and closed the picker on it. The drills are keys now, so one keystroke cannot mean two
+// things depending on where the cursor happens to be.
+func TestEnterAlwaysAppliesThePair(t *testing.T) {
+	m, _ := pickerFixture(t, 1)
+	m = open(t, m)
+	m = moveTo(t, m, "Changeset Base")
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.mode != modeFiles {
+		t.Errorf("mode = %v, want Enter to apply from the last row of the list", m.mode)
+	}
+	if m.pick.list != nil {
+		t.Error("Enter opened a drill")
+	}
+}
+
 // §5: recent submissions by alias from the end, older ones by index from the start, and
 // the stored index is the one shown.
 func TestPickerNamesReviewsByAliasThenIndex(t *testing.T) {
@@ -171,10 +252,9 @@ func TestSpaceIsPendingAndEnterApplies(t *testing.T) {
 
 	// Move to the HEAD column and choose the newest review.
 	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyTab})
-	m = pressKey(t, m, runeKey('j')) // Current -> Last Review
-	if got := m.endpointsFor(false)[m.pick.cursor[1]].label; got != "Last Review" {
-		t.Fatalf("cursor is on %q, want Last Review", got)
-	}
+	// The rows between Current and Last Review are the changeset's own commits, so the test walks
+	// there rather than counting them.
+	m = moveTo(t, m, "Last Review")
 	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
 
 	if m.sess.Span().Historical() {
@@ -258,29 +338,21 @@ func TestCommitDrillFiltersAndPicks(t *testing.T) {
 	m, f := pickerFixture(t, 1)
 	m = open(t, m)
 
-	// The drill belongs to the active column; choose it with Space.
-	at := rowIndex(t, m, true, "Commit…")
-	m.pick.cursor[0] = at
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
-	if m.pick.list == nil {
-		t.Fatal("Commit… did not open a list")
-	}
+	m = drill(t, m, "commit")
 	if len(m.pick.list.items) == 0 {
 		t.Fatal("the commit list is empty")
 	}
 	view := m.View()
-	if !strings.Contains(view, "Pick Commit") || !strings.Contains(view, "filter:") {
+	if !strings.Contains(view, "Pick Commit") || !strings.Contains(view, "no filter") {
 		t.Errorf("the drill does not look like a searchable list:\n%s", view)
 	}
 	if !strings.Contains(view, f.Short(f.Head())) {
 		t.Error("the commit list does not show the short sha, which is how a reviewer finds a commit")
 	}
 
-	// Typing filters. The response commits are the only ones with "response" in the
-	// subject, and there are two of them.
-	for _, r := range "response" {
-		m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-	}
+	// `/` first, then the text: the keys belong to the list until the filter is asked for. The
+	// response commits are the only ones with "response" in the subject.
+	m = filterTo(t, m, "response")
 	visible := m.pick.list.visible()
 	if len(visible) == 0 {
 		t.Fatal("the filter matched nothing")
@@ -310,13 +382,8 @@ func TestCommitDrillTakesATypedRevision(t *testing.T) {
 	m, f := pickerFixture(t, 0)
 	head := f.Head()
 	m = open(t, m)
-	at := rowIndex(t, m, true, "Commit…")
-	m.pick.cursor[0] = at
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
-
-	for _, r := range "HEAD^" {
-		m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-	}
+	m = drill(t, m, "commit")
+	m = filterTo(t, m, "HEAD^")
 	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
 	if m.pick.base.Kind != span.KindCommit || m.pick.base.Name != "HEAD^" {
@@ -335,13 +402,8 @@ func TestCommitDrillTakesATypedRevision(t *testing.T) {
 func TestCommitDrillReportsAnIdGitDoesNotKnow(t *testing.T) {
 	m, _ := pickerFixture(t, 0)
 	m = open(t, m)
-	at := rowIndex(t, m, true, "Commit…")
-	m.pick.cursor[0] = at
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
-
-	for _, r := range "nonsense" {
-		m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-	}
+	m = drill(t, m, "commit")
+	m = filterTo(t, m, "nonsense")
 	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
 	if m.pick.list == nil {
@@ -363,9 +425,7 @@ func TestRefDrillGroupsRefsAndKeepsTheirIdentity(t *testing.T) {
 	f.MustGit("tag", "v0.1.0", f.Head())
 
 	m = open(t, m)
-	at := rowIndex(t, m, true, "Ref…")
-	m.pick.cursor[0] = at
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	m = drill(t, m, "ref")
 	if m.pick.list == nil {
 		t.Fatal("Ref… did not open a list")
 	}
@@ -391,12 +451,11 @@ func TestRefDrillGroupsRefsAndKeepsTheirIdentity(t *testing.T) {
 		t.Errorf("the checkpoint must keep the full ref name for unambiguous resolution; got %v", names)
 	}
 
-	// Filter to one branch and take it: the pending base is that ref, by its full name.
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEsc})   // back to the columns, nothing chosen
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace}) // reopen the drill
-	for _, r := range "feature/two" {
-		m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-	}
+	// Filter to one branch and take it: the pending base is that ref, by its full name. esc leaves
+	// the drill with nothing chosen, and `r` brings it back.
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = drill(t, m, "ref")
+	m = filterTo(t, m, "feature/two")
 	visible := m.pick.list.visible()
 	if len(visible) != 1 {
 		t.Fatalf("filtering to one branch left %d rows", len(visible))
@@ -425,12 +484,8 @@ func TestPickerAppliesARefBaseAndPinsIt(t *testing.T) {
 	}
 
 	m = open(t, m)
-	at := rowIndex(t, m, true, "Ref…")
-	m.pick.cursor[0] = at
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
-	for _, r := range "main" {
-		m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-	}
+	m = drill(t, m, "ref")
+	m = filterTo(t, m, "main")
 	// "main" matches both the branch and the changeset branch's name; take the first
 	// match, which the grouping puts in LOCAL BRANCHES.
 	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -461,17 +516,22 @@ func TestPickerHelpBarChangesWithTheDrill(t *testing.T) {
 		t.Errorf("the columns mode advertises %q", help)
 	}
 
-	at := rowIndex(t, m, true, "Commit…")
-	m.pick.cursor[0] = at
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	m = drill(t, m, "commit")
 	help := m.helpText()
-	if !strings.Contains(help, "type to filter") {
-		t.Errorf("the drill advertises %q", help)
+	if !strings.Contains(help, "j k line") || !strings.Contains(help, "/ filter") {
+		t.Errorf("the drill advertises %q, want the keys of the mode it is in", help)
 	}
-	// Inside a list, j and k type: a searchable list that spends them on navigation is
-	// a list you cannot search.
-	if strings.Contains(help, "j/k move") {
-		t.Errorf("the drill still advertises j/k as navigation: %q", help)
+	// The columns' keys are not on this screen, so promising them here would advertise keys the
+	// drill ignores.
+	for _, absent := range []string{"space choose", "enter apply"} {
+		if strings.Contains(help, absent) {
+			t.Errorf("the drill advertises %q, which it does not read: %q", absent, help)
+		}
+	}
+
+	m = pressKey(t, m, runeKey('/'))
+	if help := m.helpText(); !strings.Contains(help, "type to filter") {
+		t.Errorf("the filter mode advertises %q", help)
 	}
 }
 
@@ -493,9 +553,7 @@ func TestThePickerFillsTheWindow(t *testing.T) {
 	}
 
 	// And in the drill too, where the content is a list rather than two columns.
-	at := rowIndex(t, m, true, "Commit…")
-	m.pick.cursor[0] = at
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	m = drill(t, m, "commit")
 	rows = strings.Split(strings.TrimSuffix(m.View(), "\n"), "\n")
 	if len(rows) != m.height {
 		t.Errorf("the drill is %d rows in a %d row window", len(rows), m.height)
@@ -584,12 +642,31 @@ func headerOf(m reviewModel) string {
 
 // --- the drill-in's two modes -------------------------------------------------
 
-// openDrill opens a Commit…/Ref… drill from whichever column is active.
-func openDrill(t *testing.T, m reviewModel, label string) reviewModel {
+// drill opens the commit or ref drill of whichever column is active. They answer the `c` and `r`
+// keys rather than sitting in the list as rows: on a row, `Enter` -- the key a reviewer presses on
+// the thing they are pointing at -- applied the pair instead of descending.
+func drill(t *testing.T, m reviewModel, kind string) reviewModel {
 	t.Helper()
-	m = open(t, m)
-	m.pick.cursor[m.pick.col] = rowIndex(t, m, m.pick.col == 0, label)
-	return pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
+	if m.mode != modeSpan {
+		m = open(t, m)
+	}
+	key := 'c'
+	if kind == "ref" {
+		key = 'r'
+	}
+	m = pressKey(t, m, runeKey(key))
+	if m.pick.list == nil {
+		t.Fatalf("%c did not open the %s drill", key, kind)
+	}
+	return m
+}
+
+// filterTo starts a filter with `/` and types at it: the way a reviewer reaches the filter now that
+// the keys belong to the list by default.
+func filterTo(t *testing.T, m reviewModel, s string) reviewModel {
+	t.Helper()
+	m = pressKey(t, m, runeKey('/'))
+	return typeText(t, m, s)
 }
 
 func typeText(t *testing.T, m reviewModel, s string) reviewModel {
@@ -608,47 +685,55 @@ func tabKey() tea.KeyMsg  { return tea.KeyMsg{Type: tea.KeyTab} }
 func escKey() tea.KeyMsg  { return tea.KeyMsg{Type: tea.KeyEsc} }
 func backKey() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyBackspace} }
 
-// The drill belongs to the reviewer who is searching, so what you type is the filter and the
-// keys only become navigation when you ask for them. `j` has to type `j`.
-func TestDrillDefaultsToTypingAndTabHandsTheKeysToTheList(t *testing.T) {
+// The drill opens on the list: a reviewer scanning commits mostly moves, and the keys for that are
+// the ones the rest of the screen already uses. `/` is what asks for the filter -- a key of its own
+// so it does not collide with the navigation it replaces.
+func TestDrillOpensOnTheListAndSlashStartsTheFilter(t *testing.T) {
 	m, _ := pickerFixture(t, 1)
-	m = openDrill(t, m, "Commit…")
-	if m.pick.nav {
-		t.Fatal("the drill opened in navigation mode; typing must reach the filter first")
+	m = drill(t, m, "commit")
+	if m.pick.filtering {
+		t.Fatal("the drill opened with the keys on the filter; they belong to the list until /")
+	}
+	m = pressKey(t, m, runeKey('j'))
+	if m.pick.list.sel != 1 {
+		t.Errorf("j moved to %d, want one row down", m.pick.list.sel)
+	}
+	if m.pick.list.filter != "" {
+		t.Errorf("j changed the filter to %q, want it left alone", m.pick.list.filter)
+	}
+
+	m = pressKey(t, m, runeKey('/'))
+	if !m.pick.filtering {
+		t.Fatal("/ did not start a filter")
 	}
 	m = typeText(t, m, "j")
 	if m.pick.list.filter != "j" {
 		t.Fatalf("filter = %q, want the letter typed at it", m.pick.list.filter)
 	}
 	if m.pick.list.sel != 0 {
-		t.Errorf("typing moved the cursor to %d; navigation is Tab's", m.pick.list.sel)
+		t.Errorf("typing left the cursor at %d, want it back at the top of what matches", m.pick.list.sel)
 	}
-	// `j` matches nothing here, so empty the filter before asking the list to move.
-	m = pressKey(t, m, backKey())
 
-	m = pressKey(t, m, tabKey())
-	if !m.pick.nav {
-		t.Fatal("Tab did not put the keys on the list")
+	// esc hands the keys back and keeps the text: the rows you filtered down to are the rows you
+	// wanted to move through.
+	m = pressKey(t, m, escKey())
+	if m.pick.filtering {
+		t.Error("esc did not hand the keys back to the list")
 	}
-	m = pressKey(t, m, runeKey('j'))
-	if m.pick.list.sel != 1 {
-		t.Errorf("j in navigation mode moved to %d, want one row down", m.pick.list.sel)
+	if m.pick.list.filter != "j" {
+		t.Errorf("esc threw the filter %q away", m.pick.list.filter)
 	}
-	if m.pick.list.filter != "" {
-		t.Errorf("j in navigation mode changed the filter to %q, want it left alone", m.pick.list.filter)
-	}
-	m = pressKey(t, m, tabKey())
-	if m.pick.nav {
-		t.Error("Tab again did not hand the keys back to the filter")
+	if m.pick.list == nil {
+		t.Fatal("esc left the drill as well as the filter")
 	}
 }
 
-// Space is a filter character while you are typing -- "response 0" is a thing to search for --
-// and picks when the keys are on the list.
+// Space is a filter character while you are typing -- "response 0" is a thing to search for -- and
+// picks when the keys are on the list.
 func TestDrillSpaceTypesWhileTypingAndPicksWhenNavigating(t *testing.T) {
 	m, _ := pickerFixture(t, 1)
-	m = openDrill(t, m, "Commit…")
-	m = typeText(t, m, "response 0")
+	m = drill(t, m, "commit")
+	m = filterTo(t, m, "response 0")
 	if got := m.pick.list.filter; got != "response 0" {
 		t.Fatalf("filter = %q, want the space kept: subjects contain them", got)
 	}
@@ -664,7 +749,7 @@ func TestDrillSpaceTypesWhileTypingAndPicksWhenNavigating(t *testing.T) {
 		t.Error("space while typing picked an entry")
 	}
 
-	m = pressKey(t, m, tabKey())
+	m = pressKey(t, m, escKey())
 	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
 	if m.pick.list != nil {
 		t.Fatalf("space in navigation mode did not pick: %v", m.pick.list)
@@ -682,8 +767,7 @@ func TestDrillNavigationMovesWithVimKeys(t *testing.T) {
 		f.Commit(fmt.Sprintf("work %d", i), gittest.WithFile(fmt.Sprintf("w%d.go", i), "package main\n"))
 	}
 	m.height = 12
-	m = openDrill(t, m, "Commit…")
-	m = pressKey(t, m, tabKey())
+	m = drill(t, m, "commit")
 	total := len(m.pick.list.visible())
 	if total < 10 {
 		t.Fatalf("the list has %d rows, want enough to page through", total)
@@ -727,17 +811,46 @@ func TestDrillNavigationMovesWithVimKeys(t *testing.T) {
 	if got := m.pick.list.sel; got != before-rows/2 {
 		t.Errorf("ctrl-u moved %d rows from %d, want half a page back", got-before, before)
 	}
+
+	// f and b are the same pages without the modifier, which is what a reviewer reaching for the
+	// vim keys presses.
+	m = pressKey(t, m, runeKey('g'))
+	m = pressKey(t, m, runeKey('g'))
+	m = pressKey(t, m, runeKey('f'))
+	if got := m.pick.list.sel; got != rows {
+		t.Errorf("f moved to %d, want a page (%d) down", got, rows)
+	}
+	m = pressKey(t, m, runeKey('b'))
+	if got := m.pick.list.sel; got != 0 {
+		t.Errorf("b moved to %d, want the page back to the top", got)
+	}
+
+	// d and u are the half pages without the modifier, which is what the preview overlay takes them
+	// for, and a reviewer who has paged a diff all session reaches for them out of habit.
+	m = pressKey(t, m, runeKey('d'))
+	if got := m.pick.list.sel; got != rows/2 {
+		t.Errorf("d moved to %d, want half a page (%d) down", got, rows/2)
+	}
+	m = pressKey(t, m, runeKey('u'))
+	if got := m.pick.list.sel; got != 0 {
+		t.Errorf("u moved to %d, want the half page back to the top", got)
+	}
 }
 
-// Backspace deletes a character. On an empty filter it used to close the drill, so clearing one
-// mistyped keystroke dumped the reviewer out of the list they were choosing from. `esc` leaves.
+// Backspace deletes a character of the filter and nothing else. On an empty filter it used to close
+// the drill, so clearing one mistyped keystroke dumped the reviewer out of the list they were
+// choosing from.
 func TestDrillBackspaceEditsTheFilterAndNeverLeaves(t *testing.T) {
 	m, _ := pickerFixture(t, 1)
-	m = openDrill(t, m, "Commit…")
+	m = drill(t, m, "commit")
+	m = pressKey(t, m, runeKey('/'))
 
 	m = pressKey(t, m, backKey())
 	if m.pick.list == nil {
 		t.Fatal("backspace on an empty filter closed the drill")
+	}
+	if !m.pick.filtering {
+		t.Error("backspace left filter mode as well as editing nothing")
 	}
 	m = typeText(t, m, "x")
 	m = pressKey(t, m, backKey())
@@ -748,14 +861,15 @@ func TestDrillBackspaceEditsTheFilterAndNeverLeaves(t *testing.T) {
 		t.Errorf("filter = %q, want the character deleted", m.pick.list.filter)
 	}
 
-	// Same answer with the keys on the list.
-	m = pressKey(t, m, tabKey())
+	// With the keys on the list it does nothing at all: the filter is edited behind `/`.
+	m = pressKey(t, m, escKey())
 	m = pressKey(t, m, backKey())
-	if m.pick.list == nil || !m.pick.nav {
-		t.Errorf("backspace in navigation mode left the drill or its mode: list=%v nav=%v", m.pick.list, m.pick.nav)
+	if m.pick.list == nil || m.pick.filtering {
+		t.Errorf("backspace in navigation mode left the drill or its mode: list=%v filtering=%v",
+			m.pick.list, m.pick.filtering)
 	}
 
-	// And esc does what backspace used to: first out of the drill, then out of the picker.
+	// esc is the leaving key: first out of the filter, then out of the drill, then out of the picker.
 	m = pressKey(t, m, escKey())
 	if m.pick.list != nil {
 		t.Fatal("esc did not back out of the drill")
@@ -772,21 +886,27 @@ func TestDrillBackspaceEditsTheFilterAndNeverLeaves(t *testing.T) {
 // The bar is the only place a mode documents its keys, so it names the keys that mode reads --
 // and does not advertise the other mode's.
 func TestDrillBarNamesTheKeysOfTheModeItIsIn(t *testing.T) {
-	typing, nav := helpSpan(true, false), helpSpan(true, true)
-	for _, want := range []string{"type to filter", "backspace delete", "enter pick", "tab navigate", "esc back"} {
-		if !strings.Contains(typing, want) {
-			t.Errorf("the typing bar omits %q: %q", want, typing)
-		}
-	}
-	// j and k type letters while typing, so promising them as movement there would be a lie.
-	for _, absent := range []string{"j k", "gg", "ctrl-d"} {
-		if strings.Contains(typing, absent) {
-			t.Errorf("the typing bar advertises %q, which it does not read: %q", absent, typing)
-		}
-	}
-	for _, want := range []string{"j k", "gg", "G", "ctrl-d/u", "ctrl-f/b", "tab filter", "esc"} {
+	nav, filtering := helpSpan(true, false), helpSpan(true, true)
+	for _, want := range []string{"j k", "gg", "G", "d/u", "ctrl-d/u", "f/b", "/ filter", "esc"} {
 		if !strings.Contains(nav, want) {
 			t.Errorf("the navigation bar omits %q: %q", want, nav)
+		}
+	}
+	// The filter's keys are not what navigation mode reads, and promising them would be a lie.
+	for _, absent := range []string{"type to filter", "backspace"} {
+		if strings.Contains(nav, absent) {
+			t.Errorf("the navigation bar advertises %q, which it does not read: %q", absent, nav)
+		}
+	}
+	for _, want := range []string{"type to filter", "backspace delete", "enter pick", "esc navigate"} {
+		if !strings.Contains(filtering, want) {
+			t.Errorf("the filter bar omits %q: %q", want, filtering)
+		}
+	}
+	// j and k type letters while filtering, so promising them as movement there would be a lie.
+	for _, absent := range []string{"j k", "gg", "ctrl-d"} {
+		if strings.Contains(filtering, absent) {
+			t.Errorf("the filter bar advertises %q, which it does not read: %q", absent, filtering)
 		}
 	}
 }
@@ -795,22 +915,16 @@ func TestDrillBarNamesTheKeysOfTheModeItIsIn(t *testing.T) {
 // end the pick will land on.
 func TestDrillSaysWhichEndItIsChoosing(t *testing.T) {
 	m, _ := pickerFixture(t, 1)
-	m = openDrill(t, m, "Commit…")
+	m = drill(t, m, "commit")
 	if view := m.View(); !strings.Contains(view, "for BASE") {
 		t.Errorf("the commit drill does not say it is choosing the base:\n%s", view)
 	}
 	m = pressKey(t, m, escKey())
 	m = pressKey(t, m, tabKey())
-	m = openDrillAt(t, m, "Ref…")
+	m = drill(t, m, "ref")
 	if view := m.View(); !strings.Contains(view, "for HEAD") {
 		t.Errorf("the ref drill does not say it is choosing the head:\n%s", view)
 	}
-}
-
-func openDrillAt(t *testing.T, m reviewModel, label string) reviewModel {
-	t.Helper()
-	m.pick.cursor[m.pick.col] = rowIndex(t, m, m.pick.col == 0, label)
-	return pressKey(t, m, tea.KeyMsg{Type: tea.KeySpace})
 }
 
 // markedLine is the row of a column wearing the asterisk, or "" when none is.
@@ -823,45 +937,45 @@ func markedLine(col string) string {
 	return ""
 }
 
-// A checkpoint chosen from a drill has no row of its own in the column. The mark goes on the
-// drill it came from, so the column still says which end holds it -- and the cursor opens on
-// that row, since it is the one wearing the mark.
-func TestDrillChosenEndpointKeepsItsMark(t *testing.T) {
+// A commit inside the changeset is a row of the timeline, and that row takes the asterisk. A ref --
+// or a commit older than the window the columns read -- has no row among the changeset's own
+// history, so it earns one of its own: without it the column carries no mark, and the reviewer
+// cannot see which end the pick went to now that the drills are keys rather than rows.
+func TestChosenCheckpointKeepsItsMark(t *testing.T) {
 	m, _ := pickerFixture(t, 1)
-	m = openDrill(t, m, "Commit…")
+	m = drill(t, m, "commit")
+	m = filterTo(t, m, "response 0")
 	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.pick.base.Kind != span.KindCommit {
 		t.Fatalf("pending base = %s, want the commit picked", m.pick.base.Kind)
 	}
 	line := markedLine(m.columnText(true, 60))
-	if !strings.Contains(line, "Commit…") {
-		t.Errorf("the BASE column marks %q, want the mark on Commit… \u2014 a base picked from history "+
-			"otherwise leaves the column with no mark at all", line)
+	if !strings.Contains(line, "response 0") {
+		t.Errorf("the BASE column marks %q, want the mark on the commit's own row", line)
 	}
 	if other := markedLine(m.columnText(false, 60)); !strings.Contains(other, "Current") {
 		t.Errorf("the HEAD column marks %q, want its own pending end (Current) and nothing from BASE", other)
 	}
-	if want := rowIndex(t, m, true, "Commit…"); m.pick.cursor[0] != want {
-		t.Errorf("the BASE cursor sits on %d, want the marked row %d", m.pick.cursor[0], want)
-	}
 
-	// A ref in the head column marks Ref…, not Commit….
 	m2, f := pickerFixture(t, 1)
 	f.MustGit("branch", "feature/marked", f.Head())
 	m2 = open(t, m2)
 	m2 = pressKey(t, m2, tabKey())
-	m2 = openDrillAt(t, m2, "Ref…")
-	m2 = typeText(t, m2, "feature/marked")
+	m2 = drill(t, m2, "ref")
+	m2 = filterTo(t, m2, "feature/marked")
 	m2 = pressKey(t, m2, tea.KeyMsg{Type: tea.KeyEnter})
 	if m2.pick.head.Kind != span.KindRef {
 		t.Fatalf("pending head = %s, want the ref picked", m2.pick.head.Kind)
 	}
 	line = markedLine(m2.columnText(false, 60))
-	if !strings.Contains(line, "Ref…") {
-		t.Errorf("the HEAD column marks %q, want the mark on Ref…", line)
+	if !strings.Contains(line, "feature/marked") {
+		t.Errorf("the HEAD column marks %q, want a row naming the ref it holds", line)
 	}
-	if head := m2.columnText(false, 60); strings.Contains(head, "* Commit…") {
-		t.Errorf("a ref choice marked Commit… instead:\n%s", head)
+	if base := m2.columnText(true, 60); strings.Contains(base, "* feature/marked") {
+		t.Errorf("a head choice marked the BASE column:\n%s", base)
+	}
+	if want := rowIndex(t, m2, false, "feature/marked"); m2.pick.cursor[1] != want {
+		t.Errorf("the HEAD cursor sits on %d, want the marked row %d", m2.pick.cursor[1], want)
 	}
 }
 
@@ -876,11 +990,11 @@ func TestDrillFramesFitTheTerminal(t *testing.T) {
 			m.width, m.height = width, height
 			// The columns first: their content is fixed, so only chrome can push them over.
 			assertFrameFits(t, open(t, m))
-			m = openDrill(t, m, "Commit…")
+			m = drill(t, m, "commit")
 
 			assertFrameFits(t, m)
-			for _, nav := range []bool{false, true} {
-				m.pick.nav = nav
+			for _, filtering := range []bool{false, true} {
+				m.pick.filtering = filtering
 				assertFrameFits(t, m)
 			}
 			// With a refusal on screen, and with a status line long enough to wrap.
@@ -904,11 +1018,12 @@ func TestShortTerminalWindowsTheCandidateColumns(t *testing.T) {
 	assertFrameFits(t, m)
 
 	m.pick.cursor[0] = total - 1
+	last := m.endpointsFor(true)[total-1].label
 	block := strings.Split(strings.TrimSuffix(m.pickerBlock(), "\n"), "\n")
 	// Three heading rows -- "Span picker", the blank, the BASE/HEAD titles -- then the window.
 	window := block[3 : 3+rows]
-	if !strings.Contains(strings.Join(window, "\n"), "Ref…") {
-		t.Errorf("the window did not follow the cursor to the last candidate:\n%s", strings.Join(window, "\n"))
+	if !strings.Contains(strings.Join(window, "\n"), last) {
+		t.Errorf("the window did not follow the cursor to %q:\n%s", last, strings.Join(window, "\n"))
 	}
 	for _, line := range window {
 		if !strings.Contains(line, "\u2502") {
@@ -925,8 +1040,8 @@ func TestCtrlCLeavesThePickerFromAnywhere(t *testing.T) {
 	if !m.quitting {
 		t.Error("ctrl-c from the picker's columns did not leave")
 	}
-	drill := pressKey(t, openDrill(t, mustPicker(t), "Commit…"), tea.KeyMsg{Type: tea.KeyCtrlC})
-	if !drill.quitting {
+	drilled := pressKey(t, drill(t, mustPicker(t), "commit"), tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !drilled.quitting {
 		t.Error("ctrl-c from inside a drill did not leave")
 	}
 }

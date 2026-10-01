@@ -673,7 +673,11 @@ taken from — the pair is the answer, because a bare `true` would not say which
 read from the destination rather than from a ref, so a clone that has fetched nothing but the integration
 branch answers it the same way. `chain_base` and `chain_head` bound the run of work the destination carries
 behind the directory — the span a reviewer read, and where the markers they left sit — and are `""` exactly
-when the landing carried no chain: a squash or a cherry-pick brings the tree and leaves the history behind.
+when the record came alone: the directory arrived in one commit that is not a merge, and the chain holds no
+marker for the changeset, which is what a squash or a cherry-pick leaves. A linear landing prints its range
+even when its record came in a single commit, as long as the chain carries markers — there is a run there to
+read, and the range reaching the destination's tip is the shape of a linear run, not a claim that everything
+in it belongs to this changeset.
 `reviewed` says the destination holds a permitting verdict **and** the commit that verdict names, so it is
 `false` for a chain with no approval, for an approval whose commit the destination does not carry, and for an
 approval that names no commit. `state` is untouched by all of it: landing
@@ -767,7 +771,7 @@ reached the destination, and it is reported by name.
       "changeset": "waitlist-rebooking",
       "commit": "4f2b8c1",
       "chain": "",
-      "reason": "the landing carried the directory in one commit, so no review markers came with it"
+      "reason": "the landing carried the directory in one commit, and the chain carries no review markers"
     },
     {
       "changeset": "offer-expiry",
@@ -804,7 +808,7 @@ move arrives.
 LANDED UNREVIEWED
 
   waitlist-rebooking
-    on main at 4f2b8c1: the landing carried the directory in one commit, so no review markers came with it
+    on main at 4f2b8c1: the landing carried the directory in one commit, and the chain carries no review markers
   offer-expiry
     on main at 9d1c07e, chain 3b6a2f1..d40c81a: the approval (d40c81a) names 41e7b19, which the destination
     does not carry: the landing replayed the run, so what was approved is not what landed
@@ -1094,13 +1098,16 @@ git pair status --changeset booking-transaction   # landed at <merge commit>, ch
 ```
 
 What a landing keeps is what the merge carried. A merge keeps the reviewed chain inside itself, so `status`
-names the approval, the chain base and the chain head; a squash, a rebase-merge and a cherry-pick keep the
-content and destroy the ancestry, so `status` reports `reviewed: false` with an empty `chain_base` — the
-honest answer to a question the destination can no longer ask (PRD §13). Nothing refuses a squash landing;
-what it costs is the review history behind the directory, and `change tidy` is how a squashing repository
-keeps it: move the directory into `changesets/.landed/<id>/` from a branch that still holds the chain,
-before the branch and the chain are gone. That merged move is also what ends the `LANDED UNREVIEWED` report
-for the changeset (§10.6), which is why the recommendation and the notification point the same way.
+names the approval, the chain base and the chain head; a squash and a cherry-pick keep the content and
+destroy the ancestry, so `status` reports `reviewed: false` with an empty `chain_base` — the honest answer to
+a question the destination can no longer ask (PRD §13). A rebase-merge keeps a chain of a kind: the
+destination's own line carries the record to its tip, so the range is printed and the verdict in it is read —
+and `reviewed` is `false` when the commits that verdict names are the ones the replay left behind. Nothing
+refuses a squash landing; what it costs is the review history behind the directory, and `change tidy` is how
+a squashing repository keeps it: move the directory into `changesets/.landed/<id>/` from a branch that still
+holds the chain, before the branch and the chain are gone. That merged move is also what ends the
+`LANDED UNREVIEWED` report for the changeset (§10.6), which is why the recommendation and the notification
+point the same way.
 
 Once the destination carries the directory, `check` refuses the changeset as already landed and the
 commands that write markers refuse it too. A landing on a branch that is not the changeset's destination is
@@ -1687,26 +1694,42 @@ the pair — with the lines under the columns saying what that pair resolves to,
 header and the band use (`main...current`, not a second spelling of the same span), and whether
 the screen would go read-only, before you commit to it. When git cannot resolve the pair there is no
 span to name, and the line shows what you chose instead (`changeset base → nonsense`). `u` and `f` are the unreviewed and full-changeset
-presets; `Esc` leaves the span exactly as it was. Each column lists the review submissions — the newest
-as `Last Review`, then `Review -2` and `Review -3`, older ones by the index you would type — then
-`Commit…` and `Ref…`; only the base offers the changeset base, and only the head offers `Current`
+presets; `Esc` leaves the span exactly as it was. Each column is one timeline rather than two lists:
+the review submissions — the newest as `Last Review`, then `Review -2` and `Review -3`, older ones by
+the index you would type — with the changeset's own commits written between them where they happened,
+so walking `j` from `Last Review` reaches the commits that followed it. That is usually the question
+this screen is opened to answer, and it reads better as one line than as two lists you have to
+transpose in your head. The commits are the ones the base does not already hold, and only the ones
+that change files: a marker commit holds no content to review, and it is on the list by alias already.
+Only the base offers the changeset base, and only the head offers `Current`
 (the live end, labelled `latest + edits`). `HEAD` appears nowhere in either list: beside `Current` it
-would be two similar-looking live targets when only one of them can be edited. `Commit…` is a searchable list of subjects and short ids that also takes a typed
-revision, so history past the window is one keystroke away, and refuses an id git does not know while
-the list is still on screen. `Ref…` groups branches, remote refs, tags and other refs under headings,
+would be two similar-looking live targets when only one of them can be edited. Wider history is `c`
+and `r`, which open a commit and a ref drill for whichever column is active. They are keys rather
+than rows because pointed at a row, `Enter` — the key you press on the thing you are pointing at —
+applied the pair you had come to the screen to change instead of descending into the drill.
+
+The commit drill is a searchable list of subjects and short ids that also takes a typed
+revision, so history past the window the columns read is one keystroke away, and it refuses an id git does not know while
+the list is still on screen. The ref drill groups branches, remote refs, tags and other refs under headings,
 showing `main` and `origin/main` while the checkpoint keeps `refs/heads/main` — a branch and a tag
 with the same name are two different choices, and drift has to be watched on the one you meant.
 
 Inside either drill the keys are in one of two modes, and the shortcut bar names the keys of the mode
-you are in. Typing is the default, and what you type is the filter — a space included, since `response
-0` is a thing to search for — with `Enter` picking and `Esc` stepping back to the columns. `Tab` hands
-the keys to the list: `j`/`k`, `gg`/`G`, `ctrl-d`/`ctrl-u` and `ctrl-f`/`ctrl-b`, `Space` or `Enter` to
-pick, `Tab` to give the keys back to the filter. The block after the filter is the caret, so it is
+you are in. The list has them first — `j`/`k`, `gg`/`G`, `d`/`u` or `ctrl-d`/`ctrl-u` for half a page,
+and `f`/`b` or `ctrl-f`/`ctrl-b` for a whole one — with `Space` or `Enter` picking and `esc` or `q`
+stepping back to the
+columns. `/` puts the keys on the filter instead, starting a fresh one as `less` does, because the text
+you are replacing is the reason you typed `/`; there what you type is the filter — a space included,
+since `response 0` is a thing to search for — with `Enter` picking and `esc` handing the keys back with
+the filter kept, so the rows you filtered to are still the rows you can walk. The block after the
+filter is the caret, so it is
 where your typing goes; navigation mode drops it. `Backspace` deletes a character and nothing else —
 with an empty filter it does nothing, because it used to throw the whole drill away. A drill also says
 which end it is choosing for (`for BASE`), since the columns that would otherwise say it are off screen.
-A checkpoint chosen from a drill has no row of its own, so the asterisk goes on the `Commit…` or `Ref…`
-row it came from, and `V` reopens with the cursor there. A short terminal shrinks the candidate lists
+A checkpoint the timeline has no row for — a ref, or a commit older than the window the columns read —
+gets a row of its own at the bottom of the column, wearing the asterisk, and `V` reopens with the
+cursor there: with the drills as keys rather than rows, that row is the only thing left that can say
+which end holds the pick. A short terminal shrinks the candidate lists
 rather than the frame: the shortcut bar wraps into rows first and the band is counted at the height it
 always takes, because a frame taller than the terminal repaints by scrolling and what scrolls off the
 bottom is the bar that says how to leave.
@@ -1808,9 +1831,11 @@ rename commit must contain renames and nothing else.
 
 `LANDED UNREVIEWED` in `queue`, or the same heading in `status` on a branch with no changeset of its own
 (exit 2) — a directory is in the destination, and the destination holds no approval of what it carries. The
-`reason` says which of three readings applies. `the landing carried the directory in one commit, so no
-review markers came with it` is a squash or a cherry-pick: the content arrived and the history stayed on a
-branch this clone can no longer reach. `the chain carries no review verdict`, or a newest verdict of feedback
+`reason` says which of three readings applies. `the landing carried the directory in one commit, and the chain
+carries no review markers` is a squash or a cherry-pick: the content arrived and the history stayed on a
+branch this clone can no longer reach. That sentence is a pair, and both halves come from the landing rather
+than from where the destination's tip has since moved to, so it does not turn into the next one when an
+unrelated commit lands. `the chain carries no review verdict`, or a newest verdict of feedback
 or a block, is a merge that went in without an approval. `the approval (<sha>) names <commit>, which the
 destination does not carry` is the strict one: the landing replayed the run, so what the destination
 records as approved is not what the destination holds. None of them has a command that closes it — there is
@@ -1986,8 +2011,9 @@ on a branch carrying no changeset of its own says the same inside its exit-2 ans
 read (`git pair status --changeset <id>`) rather than a command, because no command closes it: the reasons it
 prints — a chain that carries no verdict, a landing that carried the directory in one commit and kept none of
 the history, and an approval naming a commit the destination does not hold — are all facts about git's
-history, and only the first is a complaint about the review. One act ends the report, and it is a commit with
-a reviewer behind it rather than an invocation: `change tidy`, once the destination carries it (§12).
+history, read from the landing and the chain it brought rather than from where the destination's tip happens
+to be, and only the first is a complaint about the review. One act ends the report, and it is a commit with a
+reviewer behind it rather than an invocation: `change tidy`, once the destination carries it (§12).
 
 `reviewed` and `check` ask the same question of the same trailer, which is the only reason the two surfaces
 agree. `check` asks whether an approval still licenses the branch in front of it, and refuses a live branch
