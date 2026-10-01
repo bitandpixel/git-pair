@@ -74,3 +74,5 @@ reverse to a whole row.
 
 Nothing open. If the shared green turns out to read as the reviewed mark once a screen is full of marks, the
 one-line change is `styleSignAdded`'s colour; nothing else depends on which green it is.
+
+Would a terminal theme change these colors at all, or are they purely determined by git diff? or are they just hardcoded to match git diff?
