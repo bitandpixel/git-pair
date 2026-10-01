@@ -1690,6 +1690,10 @@ so walking `j` from `Last Review` reaches the commits that followed it. That is 
 this screen is opened to answer, and it reads better as one line than as two lists you have to
 transpose in your head. The commits are the ones the base does not already hold, and only the ones
 that change files: a marker commit holds no content to review, and it is on the list by alias already.
+A merge you made to catch the branch up with the base is one of them too — read against its first
+parent, it names the files it brought in — because that merge is where history you did not write
+enters `last review..current`, and the row is what you set as the boundary to keep it out. The commits
+that arrived with it are not rows: the base holds them.
 Only the base offers the changeset base, and only the head offers `Current`
 (the live end, labelled `latest + edits`). `HEAD` appears nowhere in either list: beside `Current` it
 would be two similar-looking live targets when only one of them can be edited. Wider history is `c`

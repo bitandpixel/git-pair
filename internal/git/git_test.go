@@ -202,7 +202,9 @@ func TestRecentCommitsAndRefTipsCarryWhatAPickerNeeds(t *testing.T) {
 
 // The `V` columns interleave a changeset's own commits with its review submissions, and what must
 // not come back is the commits that change nothing: a marker holds no content to review and is
-// already listed by alias, and a merge names no files of its own.
+// already listed by alias. A merge is kept, because the first-parent diff reports the files it
+// brought in -- that merge is where the changeset caught up with something, and a reviewer needs the
+// row to put what arrived outside the span.
 func TestRecentNonEmptyCommitsSkipWhatChangesNothing(t *testing.T) {
 	f, repo := openFixture(t)
 	base := f.Head()
@@ -214,6 +216,7 @@ func TestRecentNonEmptyCommitsSkipWhatChangesNothing(t *testing.T) {
 	side := f.Commit("side work", gittest.WithFile("d.txt", "4\n"))
 	f.SwitchTo("main")
 	f.MustGit("merge", "--no-ff", "-m", "merge side", "side")
+	merge := f.Head()
 
 	tips, err := repo.RecentNonEmptyCommits(context.Background(), 20, base+"..HEAD")
 	if err != nil {
@@ -226,13 +229,14 @@ func TestRecentNonEmptyCommitsSkipWhatChangesNothing(t *testing.T) {
 			t.Errorf("entry = %+v, want a short id, a subject and a date beside the sha", tip)
 		}
 	}
-	for _, sha := range []string{one, two, side} {
+	for _, sha := range []string{one, two, side, merge} {
 		if _, ok := present[sha]; !ok {
-			t.Errorf("%s is missing from %v: a commit that changes files belongs in the list", sha, present)
+			t.Errorf("%s is missing from %v: a commit that changes files belongs in the list, and so "+
+				"does the merge that brought the side branch in", sha, present)
 		}
 	}
-	if len(present) != 3 {
-		t.Errorf("commits = %v, want the empty marker and the merge left out", present)
+	if len(present) != 4 {
+		t.Errorf("commits = %v, want the empty marker left out and nothing else", present)
 	}
 
 	// The range is what git is asked for, so the commits below the changeset's base stay out, and

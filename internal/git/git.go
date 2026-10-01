@@ -694,9 +694,15 @@ func (r *Repo) RecentCommits(ctx context.Context, limit int, revs ...string) ([]
 //
 // Leaving the empty ones out is the whole point. A git-pair changeset carries commits that hold
 // nothing but a marker — `review: approve`, `git-pair: ready` — and those are lifecycle events,
-// not work: a reviewer who wants the last submission picks it by alias, not by sha. Merges go the
-// same way, since git prints no files for one by default and a span wants a place with content in
-// it. The picker that uses this also takes a typed id, so a commit this window skips is reachable.
+// not work: a reviewer who wants the last submission picks it by alias, not by sha.
+//
+// A merge is asked for against its first parent (`--diff-merges=first-parent`) rather than left
+// nameless. A merge is where a changeset catches up with the integration branch, and a reviewer has
+// to be able to put what arrived outside the span: with no row for it, the span from the last
+// submission to the working tree carries all of that history and the list offers nothing to set as
+// the boundary. The first-parent diff is also what makes a merge non-empty -- it reports the files
+// the merge brought in -- so a merge that brought nothing stays out with the markers. The picker
+// that uses this also takes a typed id, so a commit this window skips is reachable.
 func (r *Repo) RecentNonEmptyCommits(ctx context.Context, limit int, revs ...string) ([]CommitTip, error) {
 	if limit <= 0 {
 		limit = 100
@@ -704,7 +710,8 @@ func (r *Repo) RecentNonEmptyCommits(ctx context.Context, limit int, revs ...str
 	// RecordSep opens each record rather than closing it, which keeps a commit's `--raw` file
 	// lines inside its own record instead of stranding them at the head of the next one.
 	format := RecordSep + "%H" + FieldSep + "%h" + FieldSep + "%at" + FieldSep + "%s"
-	args := []string{"log", "--no-merges", "--raw", "--max-count=" + strconv.Itoa(limit), "--format=" + format}
+	args := []string{"log", "--raw", "--diff-merges=first-parent",
+		"--max-count=" + strconv.Itoa(limit), "--format=" + format}
 	args = append(args, revs...)
 	out, err := r.Git(ctx, args...)
 	if err != nil {
@@ -738,7 +745,8 @@ func (r *Repo) RecentNonEmptyCommits(ctx context.Context, limit int, revs ...str
 
 // changesFiles reports whether a commit's `--raw` block named a file. One `:`-prefixed line per
 // file follows the record, with a blank line in between, so the block is scanned rather than read
-// at its first line.
+// at its first line. For a merge the block is what it brought in, because of the first-parent diff
+// the caller asked for.
 func changesFiles(raw string) bool {
 	for _, line := range strings.Split(raw, "\n") {
 		if strings.HasPrefix(line, ":") {
