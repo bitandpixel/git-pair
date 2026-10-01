@@ -17,6 +17,10 @@ merge changes and what the filter was already looking for. The filter itself is 
 Two tests pin the property the report was about — the columns carry everything the author did after the
 newest submission — one for ordinary commits, one for the merge.
 
+Catching up by squash needs no change and is pinned anyway. `git merge --squash` leaves an ordinary
+commit, which the filter already reads as non-empty, and the commits it squashed are not in the
+branch's ancestry at all, so they cannot be mistaken for this changeset's work.
+
 ## What changed
 
 - `internal/git/git.go` — `RecentNonEmptyCommits` asks for `--diff-merges=first-parent` instead of
@@ -25,8 +29,9 @@ newest submission — one for ordinary commits, one for the merge.
 - `internal/tui/picker.go` — `inlineCommits`' comment names the merge as a row and what it is for.
 - `internal/git/git_test.go` — `TestRecentNonEmptyCommitsSkipWhatChangesNothing` now expects the
   `--no-ff` merge in the result and still expects the empty marker out.
-- `internal/tui/picker_internal_test.go` — `TestCommitsAfterTheLatestReviewAreRowsOfBothColumns` and
-  `TestAMergeIntoTheChangesetIsARowOfTheColumn`.
+- `internal/tui/picker_internal_test.go` — `TestCommitsAfterTheLatestReviewAreRowsOfBothColumns`,
+  `TestAMergeIntoTheChangesetIsARowOfTheColumn`, and `TestASquashOfTheBaseIsARowOfTheColumn` (the last
+  passes on the code before this change, and says so).
 - `PRD.md` §14 and the README's review section — the timeline's commit rule, stated with the merge in it.
 
 ## Design decisions
@@ -59,8 +64,8 @@ is involved.
 
 - `go test ./internal/git/ -run TestRecentNonEmptyCommits` — the merge in, the empty marker out, the
   range respected, the window honoured.
-- `go test ./internal/tui/ -run 'TestAMergeIntoTheChangeset|TestCommitsAfterTheLatestReview|TestColumnsInterleave'`
-  — the two new tests and the interleave test the change could have disturbed.
+- `go test ./internal/tui/ -run 'TestAMergeIntoTheChangeset|TestASquashOfTheBase|TestCommitsAfterTheLatestReview|TestColumnsInterleave'`
+  — the new tests and the interleave test the change could have disturbed.
 - Checked against a scratch repository that `--diff-merges=first-parent` prints the incoming file for a
   `--no-ff` merge and nothing for an `--allow-empty` commit, and that `main..HEAD` does not list the
   commits that arrived with the merge.
@@ -71,6 +76,8 @@ is involved.
 - A merge that changed nothing against its first parent reports no files and stays out, as an empty
   commit does. It brings nothing, so there is nothing for the row to say; typing its sha in the `c` drill
   still picks it.
+- A squash whose tree was already there produces an empty commit, and an empty commit is left out with
+  the markers. Typing its sha in the `c` drill picks it, as it does any commit the window does not hold.
 - The columns read 50 commits (`pickerCommits`), and merges now take places in that window alongside the
   rest. A branch that merges the base daily spends rows on merges; `c` is where the rest of the history
   is, and it is unfiltered.

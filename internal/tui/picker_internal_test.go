@@ -245,6 +245,29 @@ func TestAMergeIntoTheChangesetIsARowOfTheColumn(t *testing.T) {
 	}
 }
 
+// A squash brings the base's tree across without its history, so the one commit it makes is the only
+// trace of the catch-up. That commit is an ordinary commit, which is why it needed nothing the merge
+// needed; this says so, because squashing the base in is the other way a branch stays current.
+func TestASquashOfTheBaseIsARowOfTheColumn(t *testing.T) {
+	m, f := pickerFixture(t, 1)
+	f.SwitchTo("main")
+	f.Commit("work someone else landed", gittest.WithFile("upstream.go", "package main\n\nfunc Up() {}\n"))
+	f.SwitchTo(readonlySlug)
+	f.MustGit("merge", "--squash", "main")
+	f.MustGit("commit", "-m", "squashed main in")
+	m = open(t, m)
+
+	got := columnLabels(m.endpointsFor(true))
+	if !orderedBefore(got, []string{"squashed main in", "Last Review"}) {
+		t.Errorf("the BASE column reads %v, want the squash that caught the changeset up with main above "+
+			"the submission it came after", got)
+	}
+	if slices.Contains(got, "work someone else landed") {
+		t.Errorf("the BASE column reads %v: a squash leaves the history behind, and the commits it "+
+			"squashed are not this changeset's", got)
+	}
+}
+
 // orderedBefore reports whether want appears in got in that order, with anything allowed between.
 func orderedBefore(got, want []string) bool {
 	at := 0
