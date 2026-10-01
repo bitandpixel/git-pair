@@ -1359,6 +1359,11 @@ var (
 	// refusal -- and both collisions are safe because of where they sit: a mark is the first cells of
 	// a row and a sign the last, and a refusal is a line of the band rather than a character after a
 	// name.
+	//
+	// The numbers are palette slots rather than hues: the terminal's theme paints them, the way it paints
+	// the `32` and `36` git sends for its own diff, so a theme moves the tree and the pane together. git's
+	// green is index 2 and this is the bright slot, 10, because 10 and 9 are already this screen's green and
+	// red -- the agreement with git is by hue family, and the agreement inside the app is exact.
 	styleSignAdded   = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	styleSignDeleted = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	styleSignMoved   = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))

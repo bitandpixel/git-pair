@@ -76,3 +76,32 @@ Nothing open. If the shared green turns out to read as the reviewed mark once a 
 one-line change is `styleSignAdded`'s colour; nothing else depends on which green it is.
 
 Would a terminal theme change these colors at all, or are they purely determined by git diff? or are they just hardcoded to match git diff?
+
+## Answered feedback
+
+**The three colours are hardcoded, and they are indices rather than hues, so the theme still paints them.**
+`tui.go` names palette slots — 10, 9, 12 — and nothing reads a colour out of git at runtime.
+
+What reaches the terminal in this fixture's capture is `92`, `91` and `94`: the ANSI-16 codes for those three
+slots. git's own diff, in the column beside them, sends `32`, `36` and `1`. Both are indices into the same
+table, so a theme that paints green olive paints the diff body and the sign together and the two cannot drift
+apart. `COLORTERM=truecolor` was run against the same fixture to check the other half of the question: lipgloss
+still writes `92`, not `38;2;r;g;b`, so a wide-gamut terminal does not pin our colour to a hue of its own.
+
+Where that alignment with git is exact and where it is not:
+
+- **Hue family: the same.** Green for created, red for deleted, blue for moved, which is what git's defaults
+  say for the same three facts.
+- **Index: not the same.** git's added green is index 2 (`32`); ours is the bright slot, index 10 (`92`). The
+  reason is inside the app rather than in git: index 10 is already this screen's green, the reviewed `✓`, and
+  index 9 its red, the refusal. A row with one green in the gutter and a different green for its sign would
+  have been the worse answer. On a theme that tells the two greens apart, the sign and the diff body are two
+  greens.
+- **git's palette is configurable and ours is not.** `color.diff.new = blue` moves the pane and leaves the tree
+  in git's default hue family. Deriving from `git config` was not taken up: that syntax carries `bold`, `ul`,
+  8-, 16-, 256- and RGB-colours and the `auto` decision with them, and PRD §3's refusal to read git's colour
+  machinery into the pane points the other way.
+
+**The remaining theme is the one with no colours.** `NO_COLOR`, `TERM=dumb`, or a terminal that advertises
+nothing hands termenv an Ascii profile, the escapes never reach the terminal, and the character is the whole
+answer — which is what every terminal got before this change.
