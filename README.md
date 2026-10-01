@@ -1417,9 +1417,14 @@ One character goes after a file's name for what the span did to that file. git's
 for a file the span created, `-` for one it deleted, `~` for one it moved. No sign means the span only changed
 the file. That is what a span usually does, so a sign marks the exception a reviewer came to find.
 
-The character is dim, and it sits after the name the way a directory's count sits after its name. It is a fact
-about the file rather than part of its name. The move is git's rename detection, so a repository with
-`diff.renames` off gets `-` and `+` for the pair git called two files.
+The character is coloured, and it sits after the name the way a directory's count sits after its name. It is
+a fact about the file rather than part of its name, and colour carries that where faint used to. Each sign
+wears the colour git's own diff wears for the same fact — green for a file the span created, red for one it
+deleted, blue for one it moved — so the tree and the diff column beside it say one thing in one colour. The
+name of a deleted file goes faint with its red sign, because that is the one row whose subject is not there to
+read. A terminal with no colour to give gets the character alone, which is what every terminal got before.
+The move is git's rename detection, so a repository with `diff.renames` off gets `-` and `+` for the pair git
+called two files.
 A directory's mark is its subtree's: `✓` when every file under it is reviewed, `○` when none is,
 and between the two the count of what is left (`▸ ◐ src/ 2/7`) — a tick there would be a claim about
 files nobody opened. `Enter` does whatever the row under the cursor is for: the difftool for a

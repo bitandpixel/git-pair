@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"gitpair/internal/changeset"
@@ -220,6 +221,38 @@ func TestTheRowPutsTheSignAfterTheName(t *testing.T) {
 		if !strings.HasSuffix(text, want.ends) {
 			t.Errorf("the row for %s is %q, want it to end with %q", want.path, text, want.ends)
 		}
+	}
+}
+
+// The colour belongs to the sign and to nothing else on the row, and each change wears the colour
+// git's own diff wears for the same fact -- the tree and the pane beside it say one thing in one
+// colour. Green is the reviewed mark's colour, red is a refusal's and blue is what the pane gives a
+// line you typed yourself; the palette in tui.go says why none of those readings collide with a sign.
+// What a unit test can check is the choice, since lipgloss draws no colour for a terminal it does not
+// believe in -- that the codes reach a real one is the pty walkthrough's claim.
+func TestEachChangeWearsItsOwnColour(t *testing.T) {
+	for _, want := range []struct {
+		name   string
+		change Change
+		fg     lipgloss.Color
+	}{
+		{"a file the span created", ChangeAdded, lipgloss.Color("10")},
+		{"a file the span deleted", ChangeDeleted, lipgloss.Color("9")},
+		{"a file the span moved", ChangeMoved, lipgloss.Color("12")},
+		{"a move with the bytes unchanged", ChangeMovedWhole, lipgloss.Color("12")},
+	} {
+		got := signStyle(want.change).GetForeground()
+		if got != want.fg {
+			t.Errorf("%s: the sign is drawn in %v, want %v", want.name, got, want.fg)
+		}
+		if signStyle(want.change).GetFaint() {
+			t.Errorf("%s: the sign is faint as well as coloured", want.name)
+		}
+	}
+	// The modification has no sign, so there is no character here to colour.
+	if st := signStyle(ChangeChanged); st.GetForeground() != (lipgloss.NoColor{}) || st.GetFaint() {
+		t.Errorf("a modification's sign is drawn in %v, faint %v, want nothing at all",
+			st.GetForeground(), st.GetFaint())
 	}
 }
 

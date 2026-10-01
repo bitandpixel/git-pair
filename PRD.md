@@ -2276,9 +2276,20 @@ A file row carries one character after its name for what the span did to that fi
 it: `+` for a file the span created, `-` for one it deleted, `~` for one it moved. No sign means the span only
 changed the file. That is what a span usually does, so a sign marks the exception a reviewer came to find.
 
-The character is dim, and it sits after the name the way a directory's count sits after its name. It is a fact
-about the file rather than part of its name. The move is git's rename detection, so a repository with
-`diff.renames` off gets `-` and `+` for the pair git called two files.
+The character is coloured, and it sits after the name the way a directory's count sits after its name. It is
+a fact about the file rather than part of its name, and colour carries that where faint used to: a coloured
+character among plain ones already reads as an annotation, and it is the part a reviewer scans a list for.
+Each sign wears the colour git's own diff wears for the same fact — green for a file the span created, red for
+one it deleted, blue for one it moved — so the character in the tree and the body in the diff column beside it
+are one answer rather than two. Green and red are both spoken for on this screen: green is a reviewed mark and
+red a refusal. The readings cannot be confused, because of where they sit — a mark is the first cells of a row
+and a sign the last, and a refusal is a line of the band rather than a character after a name. The name of a
+deleted file goes faint with its red sign, because that is the one row whose subject is not there to read, and
+no other change takes the name's colour, since a faint name on a file still in the tree would be a claim about
+the review rather than about the span. A terminal with no colour to give gets the character alone, which is
+what every terminal got before; that the codes reach a real one is a pty walkthrough check rather than a Go
+one, because a unit test is a terminal lipgloss will not colour for. The move is git's rename detection, so a
+repository with `diff.renames` off gets `-` and `+` for the pair git called two files.
 
 A directory's mark is its subtree's: `✓` when every file under it is reviewed, `○` when none is, and
 between the two the count of what is left (`◐ 2/3`), because a tick there would be a claim about
