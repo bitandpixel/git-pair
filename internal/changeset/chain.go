@@ -30,7 +30,11 @@ var ErrNoChain = errors.New("no landed chain")
 //     simply moves to the branch tip, and nothing in the tree records where the branch stopped and trunk's
 //     own history began. The run therefore extends to the newest commit that still carries the directory.
 //     Markers are scoped by changeset id, so the reading stays correct; what is imprecise is the endpoint,
-//     and `Linear` says so rather than letting a printed range look exact.
+//     and `Linear` says so rather than letting a printed range look exact. It is also why `Head` cannot be
+//     pulled back to `Landing`: the branch's own commits — its work, its ready marker, its review
+//     submissions, most of which change no file and so leave no trace in a path listing — sit *after* the
+//     commit that brought the directory, and a range that stopped at the landing would report a reviewed
+//     fast-forward landing as a changeset nobody looked at.
 type Chain struct {
 	// Landing is the commit that brought the directory onto the destination's first-parent line: the
 	// newest commit where either pathspec changed, which is the merge for a merge landing and the commit
@@ -48,10 +52,19 @@ type Chain struct {
 	// merge, or a squash leaves. It is not a claim that the run is imprecise — right after the landing the
 	// endpoint is exact — it is the permission to ask why a later commit is in the range.
 	Linear bool
-	// Squash says the run is one commit that is not a merge: the shape a squash leaves, where the whole
-	// implementation collapsed into the landing. A single commit landed on its own reads the same way,
-	// because nothing in the tree separates them, and both answer "no markers here".
-	Squash bool
+	// ArrivedInOneCommit says the record reached the destination in one commit that is not a merge, which
+	// is the shape a squash leaves: the directory came, and none of the run's history came with it.
+	//
+	// It is a statement about the arrival, and about nothing else. It stays true as the destination moves on,
+	// which is what the surfaces that report a landing need: a fact about the shape of the landing must not
+	// expire because somebody else committed to trunk. It is also true of a fast-forward landing whose
+	// record happened to be committed once, whose run then continued in commits that touched other files —
+	// and nothing in the destination's tree separates those two arrivals, because the difference is which
+	// commits after the landing belonged to the branch. So this field never stands alone: a reporting
+	// surface pairs it with whether the chain carries any markers for the changeset, which is the half that
+	// tells a squashed review from a run that was never reviewed. See `carriedNoReviewRecord` in
+	// `internal/cli/landed.go`, which is where the two are joined.
+	ArrivedInOneCommit bool
 	// Moved says the directory reached the destination at `changesets/.landed/<id>/` rather than
 	// `changesets/<id>/`, which is what a tidied changeset looks like.
 	Moved bool
@@ -162,9 +175,14 @@ func LandedChain(ctx context.Context, repo *git.Repo, trunkRef, id string) (Chai
 		base = git.EmptyTree
 	}
 	ch.Base = base
-	if ch.Head == landing {
-		ch.Squash = true
-	}
+	// The arrival's shape is a property of the landing commit, not of where the destination's tip happens
+	// to be. Asking `Head == landing` instead was the old test, and it was the same fact with an expiry
+	// date: it held only while the landing was trunk's newest commit, so a squash landing's reading — and
+	// with it the sentence that says the review did not come with the record — quietly became "the chain
+	// carries no review verdict" the first time an unrelated commit landed. A merge commit is not a one-commit
+	// arrival either, which covers the first-parent merge above: the directory came with a second parent, even
+	// though the run below is read off this line.
+	ch.ArrivedInOneCommit = parents == 1
 	repo.Facts().Put(cacheKey, ch)
 	return ch, nil
 }

@@ -670,7 +670,11 @@ taken from — the pair is the answer, because a bare `true` would not say which
 read from the destination rather than from a ref, so a clone that has fetched nothing but the integration
 branch answers it the same way. `chain_base` and `chain_head` bound the run of work the destination carries
 behind the directory — the span a reviewer read, and where the markers they left sit — and are `""` exactly
-when the landing carried no chain: a squash or a cherry-pick brings the tree and leaves the history behind.
+when the record came alone: the directory arrived in one commit that is not a merge, and the chain holds no
+marker for the changeset, which is what a squash or a cherry-pick leaves. A linear landing prints its range
+even when its record came in a single commit, as long as the chain carries markers — there is a run there to
+read, and the range reaching the destination's tip is the shape of a linear run, not a claim that everything
+in it belongs to this changeset.
 `reviewed` says the destination holds a permitting verdict **and** the commit that verdict names, so it is
 `false` for a chain with no approval, for an approval whose commit the destination does not carry, and for an
 approval that names no commit. `state` is untouched by all of it: landing
@@ -763,7 +767,7 @@ reached the destination, and it is reported by name.
       "changeset": "waitlist-rebooking",
       "commit": "4f2b8c1",
       "chain": "",
-      "reason": "the landing carried the directory in one commit, so no review markers came with it"
+      "reason": "the landing carried the directory in one commit, and the chain carries no review markers"
     },
     {
       "changeset": "offer-expiry",
@@ -795,7 +799,7 @@ commit the destination does not hold (a replayed run, which does not).
 LANDED UNREVIEWED
 
   waitlist-rebooking
-    on main at 4f2b8c1: the landing carried the directory in one commit, so no review markers came with it
+    on main at 4f2b8c1: the landing carried the directory in one commit, and the chain carries no review markers
   offer-expiry
     on main at 9d1c07e, chain 3b6a2f1..d40c81a: the approval (d40c81a) names 41e7b19, which the destination
     does not carry: the landing replayed the run, so what was approved is not what landed
@@ -1085,12 +1089,14 @@ git pair status --changeset booking-transaction   # landed at <merge commit>, ch
 ```
 
 What a landing keeps is what the merge carried. A merge keeps the reviewed chain inside itself, so `status`
-names the approval, the chain base and the chain head; a squash, a rebase-merge and a cherry-pick keep the
-content and destroy the ancestry, so `status` reports `reviewed: false` with an empty `chain_base` — the
-honest answer to a question the destination can no longer ask (PRD §13). Nothing refuses a squash landing;
-what it costs is the review history behind the directory, and `change tidy` is how a squashing repository
-keeps it: move the directory into `changesets/.landed/<id>/` from a branch that still holds the chain,
-before the branch and the chain are gone.
+names the approval, the chain base and the chain head; a squash and a cherry-pick keep the content and
+destroy the ancestry, so `status` reports `reviewed: false` with an empty `chain_base` — the honest answer to
+a question the destination can no longer ask (PRD §13). A rebase-merge keeps a chain of a kind: the
+destination's own line carries the record to its tip, so the range is printed and the verdict in it is read —
+and `reviewed` is `false` when the commits that verdict names are the ones the replay left behind. Nothing
+refuses a squash landing; what it costs is the review history behind the directory, and `change tidy` is how
+a squashing repository keeps it: move the directory into `changesets/.landed/<id>/` from a branch that still
+holds the chain, before the branch and the chain are gone.
 
 Once the destination carries the directory, `check` refuses the changeset as already landed and the
 commands that write markers refuse it too. A landing on a branch that is not the changeset's destination is
@@ -1814,9 +1820,11 @@ rename commit must contain renames and nothing else.
 
 `LANDED UNREVIEWED` in `queue`, or the same heading in `status` on a branch with no changeset of its own
 (exit 2) — a directory is in the destination, and the destination holds no approval of what it carries. The
-`reason` says which of three readings applies. `the landing carried the directory in one commit, so no
-review markers came with it` is a squash or a cherry-pick: the content arrived and the history stayed on a
-branch this clone can no longer reach. `the chain carries no review verdict`, or a newest verdict of feedback
+`reason` says which of three readings applies. `the landing carried the directory in one commit, and the chain
+carries no review markers` is a squash or a cherry-pick: the content arrived and the history stayed on a
+branch this clone can no longer reach. That sentence is a pair, and both halves come from the landing rather
+than from where the destination's tip has since moved to, so it does not turn into the next one when an
+unrelated commit lands. `the chain carries no review verdict`, or a newest verdict of feedback
 or a block, is a merge that went in without an approval. `the approval (<sha>) names <commit>, which the
 destination does not carry` is the strict one: the landing replayed the run, so what the destination
 records as approved is not what the destination holds. None of them has a command that closes it — there is
@@ -1987,7 +1995,8 @@ on a branch carrying no changeset of its own says the same inside its exit-2 ans
 read (`git pair status --changeset <id>`) rather than a command, because no command closes it: the reasons it
 prints — a chain that carries no verdict, a landing that carried the directory in one commit and kept none of
 the history, and an approval naming a commit the destination does not hold — are all facts about git's
-history, and only the first is a complaint about the review.
+history, read from the landing and the chain it brought rather than from where the destination's tip happens
+to be, and only the first is a complaint about the review.
 
 `reviewed` and `check` ask the same question of the same trailer, which is the only reason the two surfaces
 agree. `check` asks whether an approval still licenses the branch in front of it, and refuses a live branch
