@@ -326,7 +326,7 @@ func TestTheListAsItRenders(t *testing.T) {
 		"    ▾ ○ tuition/",
 		"        ○ why.go",
 		"○ main.go",
-		"span  main...current ▸",
+		"span   main...current ▸",
 		"ABOUT.md",
 		"▾ Threads",
 		"    + new thread…",

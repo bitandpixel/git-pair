@@ -128,8 +128,8 @@ ok "fixture built at $R"
 step "first paint: a real terminal, a real keystroke"
 session paint q
 expect "the reviewed counter is on screen" -1 "$T/paint.raw" "reviewed"
-expect "the changeset box names the base over the tree" -1 "$T/paint.raw" "base  main"
-expect "the span is a row of the box, not a caption" -1 "$T/paint.raw" "span  main...current"
+expect "the changeset box names the base over the tree" -1 "$T/paint.raw" "base   main"
+expect "the span is a row of the box, not a caption" -1 "$T/paint.raw" "span   main...current"
 expect "the file tree is below it" -1 "$T/paint.raw" "changesets/booking-transaction/"
 # The character after a name is git's status. The changeset's own two files are new, so both carry `+`.
 # src/service.ts was there before the span, so its row carries nothing.
@@ -652,6 +652,49 @@ for why in fails:
     break
 sys.exit(0 if not fails else 1)
 PY
+
+# --- the base row of a child whose parent landed ----------------------------
+# The one screen a Go fixture cannot settle: the box has a fixed column, and a derived base used to put a
+# forty-character object id in it. What has to reach the terminal is the destination's name and the parent's
+# id, and what must not is the commit — which is the thing a reader cannot read.
+step "a child whose parent landed names the destination and says the parent landed"
+LR="$T/landed"
+mkdir -p "$LR/src"
+git init -q -b main "$LR"
+git -C "$LR" config user.email author@example.com
+git -C "$LR" config user.name Author
+git -C "$LR" config commit.gpgsign false
+git -C "$LR" config core.pager cat
+printf 'package main\n' > "$LR/src/base.go"
+git -C "$LR" add -A && git -C "$LR" commit -qm "seed"
+git -C "$LR" switch -qc alpha
+(cd "$LR" && "$G" init --base main >/dev/null) || { echo "landed fixture: init failed"; exit 1; }
+printf '# alpha\n\n## Summary\n\nThe work below.\n' > "$LR/changesets/alpha/ABOUT.md"
+printf 'package main\n\nfunc Below() {}\n' > "$LR/src/alpha.go"
+git -C "$LR" add -A && git -C "$LR" commit -qm "alpha work"
+git -C "$LR" switch -qc beta
+(cd "$LR" && "$G" init --parent alpha >/dev/null) || { echo "landed fixture: parent init failed"; exit 1; }
+printf '# beta\n\n## Summary\n\nThe work above.\n' > "$LR/changesets/beta/ABOUT.md"
+printf 'package main\n\nfunc Above() {}\n' > "$LR/src/beta.go"
+git -C "$LR" add -A && git -C "$LR" commit -qm "beta work"
+# The landing, then trunk moving on with work the child does not own: the two together are what made the
+# old base row meaningless, because the id it printed was whichever of these two commits the child shared
+# most recently with the destination.
+git -C "$LR" switch -q main
+git -C "$LR" merge --no-ff -q -m "alpha: the landing" alpha
+LANDING=$(git -C "$LR" rev-parse HEAD)
+printf 'package main\n\nfunc SomeoneElse() {}\n' > "$LR/src/other.go"
+git -C "$LR" add -A && git -C "$LR" commit -qm "main: work the child does not own"
+git -C "$LR" switch -q beta
+R=$LR
+session landed q
+expect "the base row names the destination over the tree" -1 "$T/landed.raw" "base   main"
+expect "and the line under it says which parent landed" -1 "$T/landed.raw" "parent alpha landed"
+expect "the span row is drawn from the same name" -1 "$T/landed.raw" "span   main...current"
+refuse "no object id stands in for that sentence" -1 "$T/landed.raw" "$LANDING"
+expect "the child's own file is in the tree" -1 "$T/landed.raw" "beta.go"
+refuse "the landed parent's file is not" -1 "$T/landed.raw" "alpha.go"
+refuse "and neither is the trunk commit the child does not own" -1 "$T/landed.raw" "other.go"
 
 # --- verdict ---------------------------------------------------------------
 printf '\n'

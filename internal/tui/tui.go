@@ -1421,18 +1421,32 @@ func padRows(rows []string, height, width int) []string {
 	return rows
 }
 
-// boxLabel is the left column inside the changeset box: "base" and "span" are the same width, so the
-// two values under it line up, and the words are the only explanation of which end is which.
+// boxLabel is the left column inside the changeset box: "base", "span" and "parent" are the same width, so
+// the values under them line up, and the words are the only explanation of which row is which. Seven cells
+// is what "parent" costs, and it is the word a reader of a landed child is looking for.
 func boxLabel(word string) string {
-	return styleDim.Render(word + "    "[:6-len(word)])
+	return styleDim.Render(word + "      "[:7-len(word)])
 }
 
-// baseLine is the box's one row that is not a choice: what the span is measured against. The span
+// baseLine is the box's first row that is not a choice: what the span is measured against. The span
 // beside it is a row, because that is the one a reviewer changes. Both are shortened the same way, so the
 // pair reads as one answer — `origin/main` and `origin/main...current` — rather than as two bases that
 // happen to agree.
 func (m reviewModel) baseLine() string {
 	return boxLabel("base") + span.ShortRef(m.sess.Header().Base)
+}
+
+// parentLine is the base row's footnote, and the reason rule 2 could stop printing a commit: once a landed
+// parent moves the measurement onto the destination, the base row names a branch and stops saying why. This
+// says the one word the destination cannot — `landed` — beside the parent's changeset id, which is the name
+// `status`, the queue and the `Stack:` section all use. A line rather than a row, because it is not a choice,
+// and empty for every changeset not in this shape, so the ordinary box loses no height.
+func (m reviewModel) parentLine() string {
+	p := m.sess.Header().ParentLanded
+	if p == "" {
+		return ""
+	}
+	return boxLabel("parent") + p + " " + styleDim.Render("landed")
 }
 
 // boxInner is how wide a row inside the box may be: the list column less the border characters and the
@@ -1460,6 +1474,9 @@ func (m reviewModel) boxLines(section []renderedRow) []string {
 	out := []string{frame(boxEdge(f.cornerTopLeft, f.cornerTopRight, f.edge,
 		clip(m.sess.Header().Title, m.boxInner()), up, width))}
 	out = append(out, m.boxLine(f, m.baseLine(), false))
+	if p := m.parentLine(); p != "" {
+		out = append(out, m.boxLine(f, p, false))
+	}
 	for _, r := range section {
 		out = append(out, m.boxLine(f, m.rowText(r.row), m.metaCursor == r.index))
 	}
@@ -2755,6 +2772,9 @@ func (m reviewModel) listContentWidth() int {
 	}
 	wide(m.sess.Header().Title, 4)
 	wide(m.baseLine(), 4)
+	if p := m.parentLine(); p != "" {
+		wide(p, 4)
+	}
 	for _, r := range m.metaRows() {
 		wide(m.rowText(r), 4)
 	}

@@ -2193,8 +2193,8 @@ Example:
 
 ```text
 ╭ booking-transaction-tests ───╮
-│ base  booking-transaction    │
-│ span  unreviewed ▸           │
+│ base   booking-transaction   │
+│ span   unreviewed ▸          │
 │ ABOUT.md                     │
 │ ▾ Threads                    │
 │     concurrency-tests.md     │
@@ -2211,6 +2211,25 @@ Example:
 2 / 3 reviewed
 ────────────────────────────────
 ```
+
+The box's left column is one width for its three labels, so the values under them line up. The base row
+names what the span is measured against, and it names a ref rather than a commit — including for the child of
+a parent that has landed, where the measurement starts at the run the child shares with the destination and
+the destination is the name a reader can use. What that name cannot carry goes on the line under it:
+
+```text
+╭ reporting-tests ─────────────╮
+│ base   main                  │
+│ parent reporting landed      │
+│ span   main...current ▸      │
+│ ABOUT.md                     │
+│ ▾ Threads                    │
+╰──────────────────────────────╯
+```
+
+That line is a line of the frame rather than a row — it goes nowhere — and it is drawn only for the changesets
+in this shape, so no other box pays a row for it. A parent that landed and a parent whose branch simply
+vanished read the same in the base row; this line is where the two are told apart.
 
 Two regions share the row area and the keyboard: the changeset box above, and the file tree below it,
 with the reviewed counter under the tree. The box holds what the review is made of — the span it is
@@ -3106,10 +3125,13 @@ destination. That is the case the tip comparison cannot see: `Recorded == Tip` r
 in the one moment where the work finished. The record is the fact, and the branch is where the record used
 to live, so:
 
--   the child's measurement base becomes the parent's landing commit while the parent's branch is still
-    present, not only after it is deleted: the destination carries `changesets/<parent>/`, and reading the
-    commit that brought it in answers the same question the parent's ref used to. A destination this clone
-    cannot read keeps the branch base and says which half is missing,
+-   the child's measurement base becomes the destination while the parent's branch is still present, not
+    only after it is deleted: the destination carries `changesets/<parent>/`, and naming it answers the same
+    question the parent's ref used to. Where the diff starts has not moved — every caller takes the base to
+    its merge base with the head before diffing (`span.Resolve`), and `base..head` names the same commits for
+    the destination as for that merge base — so naming the destination rather than the commit it resolves to
+    changes what a reader is shown, not what is measured. A destination this clone cannot read keeps the
+    branch base and says which half is missing,
     rather than failing with `unknown revision` on a base another clone wrote down.
     approval yet. Without an approval it is a note and never a reason: a changeset that has not been
     offered has nothing for a parent to invalidate. `status --json` carries `parent.landed`,
@@ -3136,9 +3158,12 @@ a separate branch.
 
 ### Where a child is measured is not where it lands
 
-Relinking answers "what is this diff measured against", and the answer for a stacked child is a commit:
-the parent's landing in the destination. That answer is right for the diff and wrong for a destination — a
-commit names no branch anything can merge into.
+Relinking answers "what is this diff measured against", and the answer for a stacked child is the
+destination — named, while the measurement underneath it stays the commit the child's own run starts at. The
+name and the commit answer two different questions, and only one of them is about a place work can go: a
+measurement point names no branch anything can merge into. That is what `BaseDerived` is for — it says the
+base is derived from the destination rather than recorded by the changeset, so nothing downstream reads it as
+a destination — and it is why the destination is read from the tree instead.
 
 So the destination is read from the tree instead. The landing commit carries the parent's
 own `CHANGESET.yaml`, and the base written there is the branch the parent's work was measured against — the
@@ -3192,10 +3217,10 @@ walk with a note rather than a hang, which is also why the note exists at all. `
 walk as `stack` (never null) and `stack_note`.
 
 Reading a changeset by id from the destination's chain relinks the same way the branch path does: the
-parent's landing commit in the destination becomes the base — the same boundary the branch was — whether or
-not the branch is still in this clone. The branch name stays recorded in the changeset, so the cases stay
-tellable apart: a parent that landed, a parent whose branch this clone has never seen, and a parent that
-moved are three different sentences.
+destination becomes the base, measured from the run the child shares with it — the same boundary the branch
+was — whether or not the branch is still in this clone. The branch name stays recorded in the changeset, so
+the cases stay tellable apart: a parent that landed, a parent whose branch this clone has never seen, and a
+parent that moved are three different sentences.
 
 `queue` lists READY branches, which by definition have no approval to invalidate, so it notes instead the
 rows sitting on a parent that has moved ahead — the diff a reviewer is about to read is measured against a
