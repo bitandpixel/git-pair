@@ -87,8 +87,13 @@ commit`, which the gate and three tests grep for.
 - `gofmt -l internal cmd` clean, `go vet ./...` clean.
 - `go test ./internal/changeset/ ./internal/cli/ ./internal/factcache/` — all pass, including the four new
   tests and the two that reject the literal fix.
-- `mise run check`, `mise run gates` (e2e, PTY walkthrough, CI integration contract) — recorded below once
-  run on the final commit.
+- `mise run gates` — exit 0: `E2E: all checks passed`, `PTY: all checks passed`,
+  `CI-INTEGRATE: all checks passed (70 checks)`. The e2e run prints the new assertion:
+
+  ```text
+  ok: the landing that carried no history still says so after the destination moved on
+        on main at b8d8ddc: the landing carried the directory in one commit, and the chain carries no review markers
+  ```
 - Scratch repository, the scenario from the report: a reviewed changeset squashed onto `main`, then two
   unrelated commits. `queue` before and after prints the same `one commit` reading, `chain` stays empty, and
   `status --changeset alpha` says `chain: none — the landing carried the directory in one commit` with
