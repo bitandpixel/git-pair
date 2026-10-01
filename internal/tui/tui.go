@@ -1352,6 +1352,21 @@ var (
 	// one untouched, and this is the part way through, where the row counts what is left instead of
 	// claiming the mark.
 	stylePartial = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	// The tree's change signs wear the colours of the diff beside them: green for a file the span
+	// created, red for one it deleted, blue for one it moved. Those are git's own colours for the same
+	// three facts, so the character in the tree and the body in the pane read as one answer rather
+	// than two. Green and red are both spoken for on this screen -- green is a reviewed mark, red is a
+	// refusal -- and both collisions are safe because of where they sit: a mark is the first cells of
+	// a row and a sign the last, and a refusal is a line of the band rather than a character after a
+	// name.
+	//
+	// The numbers are palette slots rather than hues: the terminal's theme paints them, the way it paints
+	// the `32` and `36` git sends for its own diff, so a theme moves the tree and the pane together. git's
+	// green is index 2 and this is the bright slot, 10, because 10 and 9 are already this screen's green and
+	// red -- the agreement with git is by hue family, and the agreement inside the app is exact.
+	styleSignAdded   = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	styleSignDeleted = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	styleSignMoved   = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
 	// The reviewer's own rows in the preview, told apart by colour where the pane shows one file and the
 	// header has already named it: blue is a line they added, purple a line the span added that they then
 	// deleted, amber a line the span never touched that they deleted. Three colours git's diff has no word
@@ -2127,11 +2142,21 @@ func (m reviewModel) rowText(r row) string {
 		if m.sess.Span().CanMark() {
 			text += m.fileGutter(r)
 		}
-		text += r.name
+		name := r.name
+		if r.change == ChangeDeleted {
+			// A deleted file is the one row whose subject is not there to read, so the name goes faint
+			// along with the red sign: the row says the file is gone before the reviewer presses Enter
+			// to find out. No other change earns this; a faint name on a file that is still in the tree
+			// would be a claim about the review rather than about the span.
+			name = styleDim.Render(name)
+		}
+		text += name
 		if sign := r.change.Sign(); sign != "" {
 			// After the name, the way a directory's count sits after its name: the sign is a fact about
-			// the file, not part of its name, and dim says so.
-			text += styleDim.Render(" " + sign)
+			// the file, not part of its name. Colour carries that where faint used to: a coloured
+			// character among plain ones already reads as an annotation, and it is the part a reviewer
+			// scans for.
+			text += " " + signStyle(r.change).Render(sign)
 		}
 		return text
 	case rowAbout:
@@ -2170,6 +2195,22 @@ func (m reviewModel) fileGutter(r row) string {
 		return styleMark.Render("✓ ")
 	}
 	return "○ "
+}
+
+// signStyle is the colour a file's change sign wears -- git's own colour for that change, so the
+// tree and the diff column beside it say the same thing the same way. Who gets a sign at all is
+// `Change.Sign`'s answer, and a modification has none, so it has no colour either: this only says
+// what an earned sign looks like.
+func signStyle(c Change) lipgloss.Style {
+	switch c {
+	case ChangeAdded:
+		return styleSignAdded
+	case ChangeDeleted:
+		return styleSignDeleted
+	case ChangeMoved, ChangeMovedWhole:
+		return styleSignMoved
+	}
+	return lipgloss.NewStyle()
 }
 
 // dirGutter is a subtree's mark, and a directory wears one only when every file under it agrees.

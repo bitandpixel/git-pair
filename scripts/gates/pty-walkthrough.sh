@@ -522,6 +522,137 @@ printf '%s' "$out" | grep -qF -- "already tidied" \
   && ok "through a pipe it reports there is nothing left to move" \
   || fail "the piped run did not report idempotence: $out"
 
+# --- the tree's change signs, in colour ------------------------------------
+# The character after a file's name says what the span did to it, and the colour is what makes it findable
+# in a screenful of paths. The Go test can only say which colour each change was given: lipgloss draws no
+# colour for a terminal it does not believe in, and `go test` is one of those. That the codes survive to a
+# real one is this window's claim. The fixture is its own repository, because a span that adds, deletes,
+# moves and changes one file each is the only thing it is for.
+step "each change reaches the terminal in its own colour"
+SR="$T/signs"
+mkdir -p "$SR/src"
+git init -q -b main "$SR"
+git -C "$SR" config user.email painter@example.com
+git -C "$SR" config user.name Painter
+git -C "$SR" config commit.gpgsign false
+printf 'package main\n' > "$SR/src/keep.go"
+printf 'package main\n\nfunc Gone() {\n\treturn the old way\n}\n' > "$SR/src/gone.go"
+printf 'package main\n\nfunc Pure() {}\n' > "$SR/src/pure.go"
+git -C "$SR" add -A && git -C "$SR" commit -qm "seed"
+git -C "$SR" switch -qc signs
+(cd "$SR" && "$G" init --base main >/dev/null) || { echo "signs fixture: init failed"; exit 1; }
+printf '# signs\n\n## Summary\n\nOne file each way git can change one.\n' > "$SR/changesets/signs/ABOUT.md"
+mkdir -p "$SR/src/moved"
+git -C "$SR" mv src/pure.go src/moved/pure.go
+git -C "$SR" rm -q src/gone.go
+printf 'package main\n\n// worth a read\n' > "$SR/src/keep.go"
+# Nothing here may look like the file that went away: git pairs a deletion with an addition when they
+# read alike, and the pair it makes is one `~` row where this fixture wants a `+` and a `-`.
+printf 'package signs\n\nimport "fmt"\n\nfunc Fresh() {\n\tfmt.Println("a different file entirely")\n}\n' > "$SR/src/fresh.go"
+git -C "$SR" add -A && git -C "$SR" commit -qm "four changes"
+R=$SR
+session signs q
+# The glyphs first, in the plain text the driver reads back: the colour check below is about the codes
+# around them, and an absent sign would otherwise read as an absent colour.
+expectall "the file the span created carries +" "$T/signs.raw" $'\u25cb fresh.go +'
+expectall "the file it deleted carries -" "$T/signs.raw" $'\u25cb gone.go -'
+expectall "the file it moved carries ~" "$T/signs.raw" $'\u25cb pure.go ~'
+expectall "and the file it only changed carries nothing" "$T/signs.raw" $'\u25cb keep.go'
+#
+# Which codes carry them is lipgloss's and the terminal's business: this run advertises xterm-256color and
+# gets `92` for ANSI 10, with `91` and `94` beside it, and another terminal would be spelled differently.
+# So the claim is the shape of it: each sign is painted in some foreground colour, no two of the three share
+# one, the deleted file's name is faint, and the file that only changed is drawn in none of it.
+python3 - "$T/signs.raw" <<'PY' \
+  || fail "the change signs do not reach the terminal as three colours and a faint name"
+import re, sys
+
+raw = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+SGR = re.compile(r"\x1b\[([0-9;]*)m")
+OTHER = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07")
+
+
+def scan(raw):
+    """The capture without its escapes, with what the terminal was told at each character.
+
+    The forty-byte window the reviewer-row check reads cannot answer a question about a character the
+    program painted inside its own escapes: the tree writes a name with a reset on each side of it, so
+    the codes in front of the name belong to the gutter that came before it.
+    """
+    plain, states, fg, faint, i = [], [], set(), False, 0
+    while i < len(raw):
+        if raw[i] == "\x1b":
+            if m := SGR.match(raw, i):
+                parts = [int(p) for p in m.group(1).split(";") if p != ""] or [0]
+                if parts == [0]:
+                    fg, faint = set(), False
+                if 2 in parts:
+                    faint = True
+                if 38 in parts or any(30 <= p <= 37 or 90 <= p <= 97 for p in parts):
+                    fg.add(m.group(1))
+                i = m.end()
+                continue
+            if m := OTHER.match(raw, i):
+                i = m.end()
+                continue
+            i += 1
+            continue
+        if raw[i] != "\r":
+            plain.append(raw[i])
+            states.append((frozenset(fg), faint))
+        i += 1
+    return "".join(plain), states
+
+
+plain, states = scan(raw)
+
+
+def every(row, offset):
+    """What the terminal was told at `offset` characters into each frame that painted `row`."""
+    out, at = [], plain.find(row)
+    while at != -1:
+        out.append(states[at + offset])
+        at = plain.find(row, at + 1)
+    return out
+
+
+fails = []
+# The last character of the row is its sign: the codes in force there are the sign's colour.
+signs = {}
+for kind, row in (("added", "\u25cb fresh.go +"), ("deleted", "\u25cb gone.go -"),
+                  ("moved", "\u25cb pure.go ~")):
+    at = every(row, len(row) - 1)
+    if not at:
+        fails.append("%s: the row %r never painted" % (kind, row))
+        continue
+    colours = {code for codes, _ in at for code in codes}
+    if not colours:
+        fails.append("%s: the sign painted with no foreground colour in any frame" % kind)
+    if any(faint for _, faint in at):
+        fails.append("%s: the sign is faint as well as coloured" % kind)
+    signs[kind] = colours
+for kind in signs:
+    for other in signs:
+        if kind < other and signs[kind] & signs[other]:
+            fails.append("%s and %s share the colour %s" %
+                         (kind, other, sorted(signs[kind] & signs[other])))
+
+# The name of the file that is gone goes faint with the red sign; the name of one the span only changed
+# stays in the terminal's own colour, because a faint name elsewhere would be a claim about the review.
+name = every("\u25cb gone.go", 2)
+if not name or not any(faint for _, faint in name):
+    fails.append("deleted: the name is not drawn faint")
+plain_row = every("\u25cb keep.go", 2)
+if any(codes or faint for codes, faint in plain_row):
+    fails.append("changed: the row is drawn in %s, want the terminal's own colour" % plain_row)
+
+for why in fails:
+    print("    colour check: %s" % why)
+    print("    signs: %s" % {k: sorted(v) for k, v in signs.items()})
+    break
+sys.exit(0 if not fails else 1)
+PY
+
 # --- verdict ---------------------------------------------------------------
 printf '\n'
 if [ "$FAILED" = 0 ]; then echo "PTY: all checks passed"; else echo "PTY: FAILURES PRESENT"; fi
