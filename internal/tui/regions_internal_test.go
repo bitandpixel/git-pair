@@ -275,6 +275,38 @@ func TestTheSpanRowIsARowAndTheBaseLineIsNot(t *testing.T) {
 	}
 }
 
+// The base row names what the span is measured against. Once a landed parent moves that onto the
+// destination, the base row stops saying why, and the line under it does. These pin the line's own shape:
+// it is a line of the frame like the base rather than a row a reviewer presses, it costs a row to no other
+// changeset, and its value starts in the column the box already aligns on.
+func TestTheParentLineSaysWhatTheBaseRowCannot(t *testing.T) {
+	m := navModel(t)
+	plain := func(s string) string { return ansiCodes.ReplaceAllString(s, "") }
+
+	if got := plain(m.parentLine()); got != "" {
+		t.Errorf("a changeset with no parent draws %q, want the line to cost nothing", got)
+	}
+	_, section := m.window()
+	before := len(m.boxLines(section))
+
+	m.sess.parentLanded = "alpha"
+	got := plain(m.parentLine())
+	if !strings.HasPrefix(got, "parent ") || !strings.Contains(got, "alpha") || !strings.Contains(got, "landed") {
+		t.Errorf("parent line = %q, want the label, the parent's id and the fact", got)
+	}
+	if strings.Contains(got, "\u25b8") {
+		t.Errorf("the parent line offers an action it does not have: %q", got)
+	}
+	if after := len(m.boxLines(section)); after != before+1 {
+		t.Errorf("the box drew %d lines where a parent landed and %d where none did: the line is the shape's own cost",
+			after, before)
+	}
+	// The label column is what makes the box read as one answer rather than as notes.
+	if base := plain(m.baseLine()); strings.Index(got, "alpha") != strings.Index(base, "main") {
+		t.Errorf("the parent value and the base value do not start in one column: %q / %q", base, got)
+	}
+}
+
 // The ring does not end at the diff: a reviewer who arrived with `tab` leaves with it, and `f` names the
 // tree from inside the pane. Over the overlay the same keys take the diff screen down on their way, which
 // is what keeps the ring walkable where there is no pane (TestTabWalksTheDiffWhereThereIsNoPane).

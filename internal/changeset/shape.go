@@ -75,9 +75,10 @@ func EdgesOf(res Resolution) []StackEdge {
 			continue
 		}
 		if !c.Changeset.BaseDerived {
-			// applyBases rewrote the base of a stacked changeset to a commit, and a commit names no
-			// branch. Only an untouched `base:` can be read as a branch name at all, and a branch name
-			// becomes an edge here only when it is also another member's id - the case that needs no read.
+			// applyBases rewrote the base of a stacked changeset to an answer derived from the destination, and
+			// that answer is a measurement point rather than a branch of this repository to read a stack from.
+			// Only an untouched `base:` can be read as a branch name at all, and a branch name becomes an edge
+			// here only when it is also another member's id - the case that needs no read.
 			// `CheckEdges` resolves the rest, which is where the id that is not spelled like its branch is
 			// turned into one: refusing a stack because `feature/auth` carries `feature-auth` would be
 			// refusing the author for a naming convention git-pair never required.

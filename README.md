@@ -1346,8 +1346,8 @@ and the reviewed counter under those:
 
 ```text
 ╭ tuishow ─────────────────────────────╮
-│ base  main                           │
-│ span  unreviewed ▸                   │
+│ base   main                          │
+│ span   unreviewed ▸                  │
 │ ABOUT.md                             │
 │ ▾ Threads                            │
 │     does-the-lock-cover-the-map.md   │
@@ -1365,6 +1365,14 @@ j/k move  gg/G ends  ctrl-d/u half page  ctrl-f/b page  h/l fold  c fold all  en
 space reviewed  e edit  a about  t threads  T new thread  v spans  V picker  s submit  p preview
 z full  f files  tab preview  q quit
 ```
+
+The box's left column is one width for its three labels, so the values under them line up. The base row
+names what the span is measured against, and it names a ref rather than a commit — including for the child of
+a parent that has landed, where the measurement starts at the run the child shares with the destination and
+the destination is the name you can read. The line under it says what that name cannot: `parent reporting
+landed`. It is a line of the frame rather than a row you press, and it appears only for a changeset in that
+shape, so no other box pays a row for it — and it is how a parent that landed is told apart from a parent
+whose branch simply vanished, which read the same in the base row.
 
 The screen has two regions where the keys can be: the changeset box at the top, and the file tree under
 it. The tree is bounded by a rule of its own above and below, and those two rules are its focus light —

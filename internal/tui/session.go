@@ -47,10 +47,15 @@ type Options struct {
 type Header struct {
 	Title string
 	// Base is the ref the spans on this screen measure against — the fetched copy of the integration
-	// branch where `base:` names that branch — so the line agrees with the span label beside it rather
-	// than naming a second base.
-	Base      string
-	SpanLabel string
+	// branch where `base:` names that branch or where the parent's work has landed — so the line agrees
+	// with the span label beside it rather than naming a second base.
+	Base string
+	// ParentLanded names the changeset this one is stacked on when the destination already carries its
+	// directory, and is empty when there is nothing to say. It is the fact the base's name no longer
+	// carries: a child measured against the integration branch looks, in the base row alone, like a
+	// changeset that never stacked on anything.
+	ParentLanded string
+	SpanLabel    string
 }
 
 // File is one changed file with its local review state.
@@ -148,9 +153,12 @@ type Session struct {
 
 	// measure is the ref this session's spans measure against: the recorded `base:` when the changeset
 	// measures against something of its own, and the fetched copy of the integration branch when `base:`
-	// names that branch (`changeset.BaseFor`). Every endpoint resolves through it, so the file list, the
-	// preview and the header are one answer rather than three.
+	// names that branch or when the parent's work has landed (`changeset.BaseFor`). Every endpoint resolves
+	// through it, so the file list, the preview and the header are one answer rather than three.
 	measure string
+	// parentLanded is the base's rule that the ref alone cannot carry: the id of the parent whose work the
+	// destination already holds. Empty for a changeset the rule did not land.
+	parentLanded string
 }
 
 // NewSession resolves the span and scans the changed files.
@@ -158,7 +166,14 @@ func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	s := &Session{
 		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span, trunk: opts.Trunk,
 	}
-	s.measure = changeset.MeasureBase(ctx, opts.Repo, opts.Changeset, opts.Trunk, "")
+	// The rule is read rather than just the ref, because the box says "the parent landed" beside the base,
+	// and only the rule knows it. `Measure` is the answer that cannot fail: a repository git will not talk to
+	// is measured against the base the record names, which is what this screen did before.
+	b := changeset.Measure(ctx, opts.Repo, opts.Changeset, opts.Trunk, "")
+	s.measure = b.Ref
+	if b.ParentLanded {
+		s.parentLanded = opts.Changeset.BaseChangeset
+	}
 	// A review session is open for as long as a reviewer is reading, and a review of frozen state is the
 	// expensive failure: the reviewer's own `git fetch`, or a submission arriving in another clone, has to
 	// be visible. The session already drops its own diff and document caches on a span toggle or a tool
@@ -607,7 +622,8 @@ func (s *Session) Count() (reviewed, total int) {
 
 // Header renders the identity line.
 func (s *Session) Header() Header {
-	return Header{Title: s.cs.Slug, Base: s.measure, SpanLabel: s.current.Label}
+	return Header{Title: s.cs.Slug, Base: s.measure, ParentLanded: s.parentLanded,
+		SpanLabel: s.current.Label}
 }
 
 // AboutPath is the changeset's ABOUT.md, relative to the repository root.
