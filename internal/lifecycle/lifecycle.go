@@ -85,6 +85,13 @@ type Event struct {
 	// the changeset was not stacked, or it was approved before the trailer existed. Neither is
 	// evidence that the parent moved, so an empty value is not a refusal.
 	ReviewedParentHead string
+	// ReviewedBase is the commit the submitted diff was measured against, from its `Review-Base-Head`
+	// trailer. `Review-Head` names what was reviewed and `Review-Parent-Head` names the parent's branch
+	// tip; this names where the diff started, which is the third thing an approval is a claim about, and
+	// the one the branch cannot keep telling anyone after the parent lands and its branch is deleted
+	// (PRD §21). Empty means the submission predates the trailer or was hand-edited: not evidence that
+	// the content moved, so not a refusal.
+	ReviewedBase string
 	// UnrecognisedMarker is true when the commit carries Review-* trailers but
 	// not a complete, valid marker for this changeset. Such a commit is
 	// treated as an implementation commit — the conservative reading, since it
@@ -345,6 +352,7 @@ func parseEvent(slug string, rec []string) Event {
 			e.Kind, e.Outcome = KindReview, o
 			e.ReviewedHead = reviewedHead(trailers[model.TrailerHead])
 			e.ReviewedParentHead = reviewedHead(trailers[model.TrailerParentHead])
+			e.ReviewedBase = reviewedHead(trailers[model.TrailerBaseHead])
 		} else {
 			e.UnrecognisedMarker = true
 		}

@@ -118,6 +118,11 @@ type checkJSON struct {
 	ParentLanded       bool   `json:"parent_landed"`
 	ParentLandedCommit string `json:"parent_landed_commit,omitempty"`
 	ParentStaleBranch  bool   `json:"parent_stale_branch"`
+	// ParentHeadCarriesLanding says this changeset's own head already carries the parent's landing commit.
+	// `parent_stale_branch` is the same reading where the parent's branch is still in this clone, and false
+	// where it has been deleted; this one answers in both cases, and a gate that advises a rebase should
+	// read it before it does.
+	ParentHeadCarriesLanding bool `json:"parent_head_carries_landing"`
 	// NextAction is the step a passing verdict licenses — the merge someone else performs, then the
 	// record — spelled the same way `status` spells it. It appears only when the gate passed: when it
 	// did not, `reasons` is the next step, and a consumer should never have to decide which of two
@@ -168,7 +173,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	out.Ready = len(out.Reasons) == 0
 	if out.Ready {
 		out.NextAction = landingNextAction(s.cs.Base)
-		if g.Parent.Landed != "" {
+		if g.Parent.Landed != "" && g.Parent.owesLandingStep() {
 			// Spelled beside the landing contract rather than inside it: `landingNextAction` is one string
 			// shared by `status`, `check`, `change ready` and `review`, it takes only a base, and teaching it
 			// about parents would make the same sentence mean two things in four commands.
@@ -179,6 +184,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	out.ParentLanded = g.Parent.Landed != ""
 	out.ParentLandedCommit = g.Parent.Landed
 	out.ParentStaleBranch = g.Parent.StaleBranch
+	out.ParentHeadCarriesLanding = g.Parent.LandingUnderHead
 	if out.Reasons == nil {
 		// `reasons` is an array in both verdicts. `null` would make every consumer
 		// handle two shapes for the same fact, and the fact it is checking — whether the

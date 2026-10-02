@@ -97,6 +97,13 @@ const (
 	// nothing else: the parent branch moves under a child for reasons the child's own history
 	// cannot show (PRD §21).
 	TrailerParentHead = "Review-Parent-Head"
+	// TrailerBaseHead is the commit the submitted diff was measured against, written beside
+	// `Review-Head` by every submission. `Review-Parent-Head` names the parent's *branch* tip, which is
+	// the measurement only while that branch is the base; once the parent has landed the base is a
+	// commit derived from the destination, and the branch that named it may be deleted. This trailer is
+	// what keeps the content question — is the diff under test the diff that was approved? — askable
+	// after the branch is gone (PRD §21).
+	TrailerBaseHead = "Review-Base-Head"
 
 	StateValueReady = "ready"
 	// StateValueWorking is written by `change unready`. It is not a new state: WORKING

@@ -78,6 +78,9 @@ func TestStatusCallsALandedParentStaleWhileItsBranchIsPresent(t *testing.T) {
 	if p["landed"] != true {
 		t.Errorf("parent.landed is %v, want true for a parent with an integration record", p["landed"])
 	}
+	if p["head_carries_landing"] != true {
+		t.Error("head_carries_landing is false while this head sits on the landing commit: it is the reading stale_branch is built from")
+	}
 	if p["landed_commit"] != shortOf(landing) {
 		t.Errorf("parent.landed_commit is %v, want %s", p["landed_commit"], shortOf(landing))
 	}

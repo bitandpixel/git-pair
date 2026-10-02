@@ -89,8 +89,14 @@ type parentJSON struct {
 	// StaleBranch says this changeset's own head already carries the landing, so the parent's branch is
 	// dead weight: the record holds the chain it was holding, and deleting the branch loses nothing
 	// git-pair can still read. False for a child that has not rebased onto the landing yet, where that
-	// branch is still the base the diff is measured on.
+	// branch is still the base the diff is measured on, and false when the branch is gone — which is where
+	// `head_carries_landing` takes over, because a deleted branch is not a stale one.
 	StaleBranch bool `json:"stale_branch"`
+	// HeadCarriesLanding says this changeset's own head already carries the parent's landing commit, so
+	// the diff under test is this branch's work above landed ground and no rebase is owed. It is the
+	// reading behind `stale_branch` where the parent's branch is still here, and the only place the fact
+	// appears when that branch has been deleted.
+	HeadCarriesLanding bool `json:"head_carries_landing"`
 }
 
 // stackStep is one changeset the reported one was stacked on. The step reports what the destination and the
@@ -426,6 +432,7 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 			LandedInDefaultBranch: ps.LandedInDefaultBranch,
 			LandedReach:           ps.LandedReach,
 			StaleBranch:           ps.StaleBranch,
+			HeadCarriesLanding:    ps.LandingUnderHead,
 		}
 	}
 	// Landed-ness and the chain behind it are read from the destination, which is what makes them facts
