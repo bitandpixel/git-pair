@@ -3128,12 +3128,12 @@ to live, so:
     approval yet. Without an approval it is a note and never a reason: a changeset that has not been
     offered has nothing for a parent to invalidate. `status --json` carries `parent.landed`,
     `parent.landed_commit`, `parent.landed_in_default_branch`, `parent.stale_branch` and
-    `parent.head_carries_landing`; `check --json`
-    carries `parent_landed`, `parent_landed_commit`, `parent_stale_branch` and
-    `parent_head_carries_landing`. The last two of those are one reading reported twice, because they are
-    statements about two different things: `stale_branch` is about the parent's branch still being here to
-    delete, and `head_carries_landing` is about this head sitting on the landing commit, which is the half
-    that survives the branch being deleted and the half that decides whether any rebase is owed.
+    `parent.head_carries_landing`; `check --json` carries `parent_landed`, `parent_landed_commit`,
+    `parent_stale_branch` and `parent_head_carries_landing`. The last two of those are one reading reported
+    twice, because they are statements about two different things: `stale_branch` is about the parent's
+    branch still being here to delete, and `head_carries_landing` is about this head sitting on the landing
+    commit, which is the half that survives the branch being deleted and the half that decides whether any
+    rebase is owed.
 -   the step is printed as the command, because "rebase onto it" is a sentence the author has to translate
     into three arguments and gets wrong: `git rebase --onto <landing> <parent-branch> <child-branch>` while
     the child's head does not carry the landing, and `git branch -D <parent-branch>` once it does — with the

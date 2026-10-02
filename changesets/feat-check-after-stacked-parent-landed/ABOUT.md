@@ -105,12 +105,22 @@ present.
 ## Validation
 
 - `gofmt -l internal cmd`: nothing to format. `go vet ./...`: clean.
-- `go test ./...`: the whole suite passes, including the five new CLI scenarios and the new internal ones.
+- `go test ./...`: the whole suite passes, including the six new CLI scenarios and the new internal ones.
+- One earlier `-count=1` run of `./internal/cli` failed once in
+  `TestReviewQueueOrdersABranchCarryingTwoChangesetsByItsOwnHistory`, a queue-listing test, while the machine
+  was running two other full suites at the same time. Two later `-count=1` runs, one `-count=2` run, and 200
+  standalone repeats of that test — the last set under the load of a concurrent `mise run gates` — were
+  clean. Reported rather than hidden: nothing under this change reads the code that test exercises, and the
+  failure did not reproduce.
 - The reported case, replayed in a scratch clone of the repository it came from (a real stack, a real merge
   landing, the parent's branch deleted): `git pair check` printed `NOT READY` with the parent-landed reason
   before the change and `OK` after, on the same head. `git pair check --json` gains
   `parent_head_carries_landing: true` and keeps `parent_stale_branch: false`.
-- `scripts/gates/pty-walkthrough.sh` and `mise run gates`: recorded under Validation after the run.
+- `mise run gates`, run on the working tree at `0c980b2` with these documentation edits applied: exits 0 —
+  320 `ok:` checks across the three scripts, ending `E2E: all checks passed`, `PTY: all checks passed`,
+  `CI-INTEGRATE: all checks passed (70 checks)`. The gate depends on `check` (gofmt, `go vet`, the sharded
+  suite), so this covers the docs contract tests against the final `PRD.md` and `README.md` as well as the
+  code.
 
 ## Known limitations
 
