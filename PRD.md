@@ -1321,6 +1321,12 @@ survives still names the head that is gone from the branch, and §11.3's ancestr
 Deriving the value from the graph instead would defeat the rule: after a rewrite the first parent is
 itself rewritten, so the derived head would always be in the line.
 
+`Review-Base-Head` is the commit the submitted diff was measured from: the merge base of the changeset's
+base and the head the submission names. It is written for every submission, stacked or not, because the
+question it answers — is the diff under test the diff that was approved? (§21) — is not a question only a
+stack can ask. The value is a commit rather than a ref on purpose: a ref names a branch, and the branch a
+child is measured against is often deleted before the next clone arrives to read the answer.
+
 A submission that names no head — written before this trailer existed, or by hand — is refused by the
 gate rather than assumed, and the reason says the approval covers an unknown commit (§11.3).
 
@@ -3088,12 +3094,20 @@ beside `Review-Head`. That is what makes the question askable afterwards, and it
 for a changeset that is stacked. `status`, `queue` and `check` compare the recorded tip with the
 branch's current one.
 
+Every submission also records the commit it measured its diff from, in `Review-Base-Head` (§10.4). The
+two trailers answer two different questions and should not be collapsed into one: the parent tip is what
+the movement rule compares a live branch against, and the measured base is what the content rule compares
+today's base against. While the parent's branch is the base they name the same commit; the moment the
+parent lands they do not, and the branch that named the first is often deleted.
+
 **The reason names the kind of movement** — implementation commit, review commit, approval,
 rebase, or merge — because a rule that reports only "the parent moved" reads as arbitrary, and an
 author who thinks the gate is being pedantic stops trusting it.
 
 A submission whose approval recorded no parent tip is not refused: the absence says the trailer
-was not written, which is not evidence that the parent moved. `status` says what is missing.
+was not written, which is not evidence that the parent moved. `status` says what is missing. The same
+answer is given when neither parent tip nor measured base was written — the content question cannot be
+asked of an approval that named no starting point, and "cannot ask" is reported rather than refused.
 
 The rule is about a parent **branch** moving. A parent that *lands* is a different event, and it is
 judged on content rather than on movement — see "When the parent lands" below.
@@ -3113,8 +3127,13 @@ to live, so:
     rather than failing with `unknown revision` on a base another clone wrote down.
     approval yet. Without an approval it is a note and never a reason: a changeset that has not been
     offered has nothing for a parent to invalidate. `status --json` carries `parent.landed`,
-    `parent.landed_commit`, `parent.landed_in_default_branch` and `parent.stale_branch`; `check --json`
-    carries `parent_landed`, `parent_landed_commit` and `parent_stale_branch`.
+    `parent.landed_commit`, `parent.landed_in_default_branch`, `parent.stale_branch` and
+    `parent.head_carries_landing`; `check --json`
+    carries `parent_landed`, `parent_landed_commit`, `parent_stale_branch` and
+    `parent_head_carries_landing`. The last two of those are one reading reported twice, because they are
+    statements about two different things: `stale_branch` is about the parent's branch still being here to
+    delete, and `head_carries_landing` is about this head sitting on the landing commit, which is the half
+    that survives the branch being deleted and the half that decides whether any rebase is owed.
 -   the step is printed as the command, because "rebase onto it" is a sentence the author has to translate
     into three arguments and gets wrong: `git rebase --onto <landing> <parent-branch> <child-branch>` while
     the child's head does not carry the landing, and `git branch -D <parent-branch>` once it does — with the
@@ -3129,6 +3148,14 @@ nothing the reviewer looked at has changed. Different, and it does not: a squash
 cherry-pick moved the content the review saw into commits the child never had, and `check` refuses with the
 reason naming that. A comparison the clone cannot make answers "different", which is the direction that asks
 a human to look again rather than the one that lets an unreviewed diff through the gate.
+
+The older of the two readings is the base the approval recorded measuring from — `Review-Base-Head`, or
+`Review-Parent-Head` for an approval written before it existed (§10.4) — and not the parent's branch tip,
+which is the same commit only while that branch is the base. Asking the branch tip instead asks the wrong
+question in the one case this rule exists for: a child rebased onto its parent's landing measures from the
+landing, and its approval measured from the landing, while the branch it was branched from stands where it
+always stood. An approval that recorded neither is a note and not a refusal, and the note carries the two
+facts this path can still establish: the commit the parent became, and whether this head is already on it.
 
 A child landed without rebasing carries a chain that includes the parent's commits. That is expected: the
 chain is the history of the branch that was merged, and the parent's own landing is a separate fact about

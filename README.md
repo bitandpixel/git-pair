@@ -300,9 +300,19 @@ landing a parent: `git pair status`, `git pair check` and `git pair queue` name 
 command that settles the child. While the child's head is not on the landing it is
 `git rebase --onto <landing> <parent-branch> <child-branch>`; once it is, the parent's branch is stale and the
 command is `git branch -D <parent-branch>` — with the worktree named when another worktree has that branch
-checked out, because the delete fails there and removing a worktree is not git-pair's to do. Nothing in
+checked out, because the delete fails there and removing a worktree is not git-pair's to do. Once the parent's
+branch is deleted as well and this head is already on the landing, the step is nothing, and the command says
+that instead of printing a rebase onto a branch that no longer exists. Nothing in
 git-pair runs either one: the rebase and the delete are ordinary git, performed by whoever owns the branches
 (PRD §26).
+
+A landing does not by itself end the child's approval. `check` compares the diff under test with the diff the
+approval measured, which it can do because the submission recorded the commit it measured from
+(`Review-Base-Head`, PRD §10.4). A plain merge landing that brought nothing new leaves that diff alone, and the
+approval stands; a squash, a rebase-merge or a cherry-pick moved the reviewed content into commits the child
+never had, and `check` refuses with the reason saying which of the two it found. An approval old enough to
+have recorded neither the parent tip nor the measured base is a note rather than a refusal, because the
+absence says the trailer was not written and nothing more (PRD §21).
 
 Two facts, read from the destination, and never stored: the directory that says the work landed, and the
 commit that brought it. A changeset is discovered from the trees a revision carries, so a pipeline needs
@@ -375,7 +385,7 @@ supplies authorship and order. Both are plain Markdown with no schema.
 | Marker | Subject | Trailers |
 | --- | --- | --- |
 | ready | `git-pair: ready <slug>` | `Review-State: ready`, `Review-Changeset: <slug>` |
-| review | `review: <outcome> <slug>` | `Review-Outcome: <outcome>`, `Review-Changeset: <slug>`, `Review-Head: <sha>` |
+| review | `review: <outcome> <slug>` | `Review-Outcome: <outcome>`, `Review-Changeset: <slug>`, `Review-Head: <sha>`, `Review-Base-Head: <sha>`, and `Review-Parent-Head: <sha>` for a stacked changeset |
 | unready | `git-pair: unready <slug>` | `Review-State: working`, `Review-Changeset: <slug>` |
 | abandon | `git-pair: abandon <slug>` | `Review-State: abandoned`, `Review-Changeset: <slug>` |
 
@@ -388,6 +398,15 @@ transition, and it is recorded rather than derived because the value it holds is
 changes: the rewritten review commit keeps its message, so the marker that survives still names the head
 this branch no longer has. Deriving it from the graph instead would read the rewritten parent as the
 reviewed one, which is the case the field exists to catch.
+
+The other two fields name where the reviewed diff started rather than what it ended at.
+`Review-Base-Head` is the commit the submission measured its diff from, and `Review-Parent-Head` (a
+stacked changeset only) is the tip of the branch it is stacked on. `check` compares the first with the
+base under test today, which is how it answers whether the diff it would land is the diff that was
+approved, and the second with the parent branch's current tip, which is how it answers whether the parent
+moved (§11.3). While a parent's branch is the base the two fields name the same commit; once that parent
+has landed they differ, and the branch the second one names is often deleted — which is why the first one
+is a commit.
 
 **Readiness is withdrawn with a command.** `git pair change unready` commits `Review-State: working`
 and takes the changeset out of the queue. Readiness is an offer made with `git pair change ready`, so
@@ -603,7 +622,7 @@ duplicate it exists to catch.
 | `review reopen` | none | TUI on `<last review>..current`, the work that has landed since you reviewed; needs a terminal; refuses if no review exists |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
-| `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history |
+| `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history, and where it measured with `Review-Base-Head`, which is what lets `check` tell whether the diff under test is the diff it looked at (§11.3) |
 | `review history` | `--changeset <slug>` | only review marker commits, indexed from `0`, each naming the commit it reviewed under `REVIEWED` and the reviewer who submitted it under `REVIEWER` |
 | `queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus a `LANDED UNREVIEWED` heading for a landing whose destination holds no approval of what it carries (a finding no command closes, and one a `change tidy` that reached the destination does end, because the move is the acknowledgement); read from the repository, not the checkout. A second list, `AWAITING INTEGRATION` / `awaiting_integration`, holds approved work whose author has asked for the merge (§9.9) with the branch it is asking to land on — never in both lists, because a declaration is a marker and a branch carrying one is not `READY` |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug, plus the landing read from the destination's tree: `landed`, `landed_commit`, `landed_branch`, and the chain that arrived with it (`chain_base`, `chain_head`, `reviewed`) |
@@ -872,7 +891,12 @@ handling two shapes), and `policy` records which rule produced the verdict — `
 comparing the verdict built one of them and the other is the end of the lineage comparison.
 `reviewed_head` is the commit the newest permitting review named; it is reported whichever way the
 verdict went and omitted only when that marker names no head. `landed` reports a changeset the
-destination already holds (PRD §11.3), read from that branch's tree.
+destination already holds (PRD §11.3), read from that branch's tree. Four more fields are the stack
+beside the verdict (PRD §21): `parent_landed` and `parent_landed_commit` say the branch this child was
+measured against is finished work and name the commit it became, `parent_stale_branch` says the
+parent's branch is still here holding nothing the destination lacks, and `parent_head_carries_landing`
+says this head is already on the landing — which is the half that stays answerable after that branch is
+deleted, and the half that decides whether any rebase is owed.
 
 This form carries the verdict in `ready` rather than in the exit code: a not-ready run prints its
 JSON and exits 0, so a job piping it into `jq` keeps git-pair's answer separate from the pipeline's.
