@@ -156,6 +156,39 @@ func MeasureBase(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBra
 	return b.Ref
 }
 
+// MeasuredBase is the commit `MeasureBase` measures from, rather than the name it prints it under.
+//
+// The two differ whenever the base is a branch, and the difference is the reason both exist. A ref is the
+// right answer for a reader and for git: `origin/main` says what the child is measured against, and it
+// stays the fresh copy. A commit is the right answer for anything that has to mean the same thing later —
+// a review marker, whose base may be a branch that is deleted before the next clone arrives — and the
+// commit a `base...head` diff starts at is the merge base of the two, which is also what a derived base
+// already names.
+//
+// It answers "" when git cannot name the commit, which is the caller's cue to record nothing. An absent
+// record reads as "this was not said"; a wrong one reads as a comparison (PRD §21).
+func MeasuredBase(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranchRef, head string) string {
+	ref := MeasureBase(ctx, repo, c, db, head)
+	if ref == "" {
+		return ""
+	}
+	if head == "" {
+		head, _ = repo.Head(ctx)
+	}
+	if head == "" {
+		return ""
+	}
+	if mb, err := repo.MergeBase(ctx, ref, head); err == nil && mb != "" {
+		return mb
+	}
+	// No merge base to take: an unrelated or unresolvable base. The ref may still name a commit — a
+	// derived base does — and a commit is a truthful answer where a branch name would not be.
+	if commit, err := repo.RevParse(ctx, ref+"^{commit}"); err == nil {
+		return commit
+	}
+	return ""
+}
+
 // shortRef names a ref the way a person reads it, for a sentence rather than for git.
 func shortRef(ref string) string {
 	for _, prefix := range []string{"refs/remotes/", "refs/heads/", "refs/"} {

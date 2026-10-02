@@ -126,7 +126,14 @@ func UnreadyMessage(slug string) Message {
 // review commit while preserving its message: the rewritten marker still names the head that is gone
 // from this line, which is what lets `check` refuse to read an approval as approval of rewritten history
 // (PRD §10.4, §11.3).
-func ReviewMessage(slug string, outcome model.Outcome, head, parentHead, body string) Message {
+//
+// parentHead and baseHead are the other two ends of the same statement, and each answers a different
+// question. `Review-Parent-Head` names the parent branch's tip, which is what the movement rule compares
+// a live branch against. `Review-Base-Head` names the commit the diff was actually measured from, which
+// is the value the content rule needs once the base has been relinked onto a landed parent — a commit,
+// named by no branch, that may already have been deleted when the next reader arrives. Empty means the
+// caller could not name one, and no trailer is written for it.
+func ReviewMessage(slug string, outcome model.Outcome, head, parentHead, baseHead, body string) Message {
 	trailers := []string{
 		"Review-Outcome=" + string(outcome),
 		"Review-Changeset=" + slug,
@@ -142,6 +149,9 @@ func ReviewMessage(slug string, outcome model.Outcome, head, parentHead, body st
 	// `Review-Parent-Head=` with no value would claim a parent with no name.
 	if parentHead != "" {
 		trailers = append(trailers, "Review-Parent-Head="+parentHead)
+	}
+	if baseHead != "" {
+		trailers = append(trailers, "Review-Base-Head="+baseHead)
 	}
 	return Message{
 		Subject:  fmt.Sprintf("review: %s %s", outcome, slug),

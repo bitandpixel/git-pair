@@ -291,7 +291,11 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 	if err != nil {
 		return err
 	}
-	result, err := reviewops.Submit(ctx, s.repo, s.cs, outcome, opts.message, !opts.noStage, parent.Tip, s.trunk)
+	// The same argument, for the other end of the diff. The parent's tip answers the movement
+	// question; this answers the content question, and it is the one that survives the parent's
+	// branch being deleted (PRD §21).
+	result, err := reviewops.Submit(ctx, s.repo, s.cs, outcome, opts.message, !opts.noStage,
+		parent.Tip, changeset.MeasuredBase(ctx, s.repo, s.cs, s.trunk, s.head), s.trunk)
 	if err != nil {
 		return err
 	}
