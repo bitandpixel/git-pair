@@ -119,6 +119,26 @@ func TestAnApprovalThatRecordedNoBaseIsANoteAndNotARefusal(t *testing.T) {
 	}
 }
 
+// The child that has not been offered yet has nothing for a landing to invalidate, and its note says where
+// the parent went without reaching for an approval it does not have: the newest marker is the author's own
+// `change ready`, and a sentence about an approval that recorded nothing would be about a marker further
+// back in the history than the one being read.
+func TestAReadyChildOfADeletedLandedParentIsToldWhereTheWorkWent(t *testing.T) {
+	f, landing, _ := landedParentWithADeletedBranch(t)
+	ready(t, f)
+
+	p := parentJSONOf(t, f, "beta")
+	if p["landed"] != true || p["landed_commit"] != shortOf(landing) {
+		t.Errorf("parent is %v, want landed at %s", p, shortOf(landing))
+	}
+	if p["head_carries_landing"] != true {
+		t.Error("head_carries_landing is false with this head on the landing commit")
+	}
+	note, _ := p["note"].(string)
+	mustContain(t, note, "alpha landed as "+shortOf(landing), "the parent's absence still names where the work went")
+	mustNotContain(t, note, "the approval recorded", "there is no approval in front of this reader")
+}
+
 // The two trailers answer two questions, and while the parent's branch is the base they agree by accident
 // of history rather than by design. Once the parent has landed they name different commits: the branch tip
 // is where the branch stands, and the base is the run the child shares with the destination. A submission

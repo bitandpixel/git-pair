@@ -416,7 +416,10 @@ func (a *app) parentGone(ctx context.Context, repo *git.Repo, c changeset.Change
 		// content moved, and refusing on either would refuse every child approved before the records
 		// existed (PRD §21). What this path can still say is where the parent went and where the head is.
 		st.Note = fmt.Sprintf("%s landed as %s%s", st.parentName(), st.Landed, st.LandedReach)
-		if approved != nil {
+		if approved != nil && approved.Kind == lifecycle.KindReview && approved.Outcome == model.OutcomeApprove {
+			// The clause is about an approval, so it is said only where one is the newest marker: a READY
+			// child has an approval somewhere behind it and a note that reads "the approval recorded nothing"
+			// would describe a marker that is not the one being relied on.
 			st.Note += ", and the approval recorded no parent tip and no measured base, so git-pair cannot compare the diff it measured with the one under test"
 		}
 		if st.LandingUnderHead {
