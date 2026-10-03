@@ -283,19 +283,16 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 	if err := a.refuseIfAbandoned(ctx, s); err != nil {
 		return err
 	}
-	// A stacked changeset's submission records the parent branch's tip alongside the head it
-	// reviewed. The parent moves for reasons the child's history cannot show — its own rebases,
-	// its landing, its abandonment — and the only way to ask later whether the approval still
-	// covers the work is to have written the answer down while it was still known (PRD §21).
-	parent, err := changeset.ParentOf(ctx, s.repo, s.cs, s.trunk)
-	if err != nil {
-		return err
-	}
-	// The same argument, for the other end of the diff. The parent's tip answers the movement
-	// question; this answers the content question, and it is the one that survives the parent's
-	// branch being deleted (PRD §21).
+	// A submission records all three ends of the diff it reviewed: the parent branch's tip, the commit the
+	// diff was measured from, and that diff's identity. The parent moves for reasons the child's history
+	// cannot show — its own rebases, its landing, its abandonment — the base stops being nameable when the
+	// parent's branch is deleted, and the content is the thing the gate ultimately has to compare. One call
+	// measures them, here and in the review screen, so the two surfaces cannot disagree (PRD §21). It
+	// records what it could measure and nothing for what it could not, which is why no error comes back
+	// from here: a missing measurement is an absence a later reader can see, not a reason to lose the
+	// reviewer's verdict.
 	result, err := reviewops.Submit(ctx, s.repo, s.cs, outcome, opts.message, !opts.noStage,
-		parent.Tip, changeset.MeasuredBase(ctx, s.repo, s.cs, s.trunk, s.head), s.trunk)
+		changeset.MeasureSubmission(ctx, s.repo, s.cs, s.trunk, s.head), s.trunk)
 	if err != nil {
 		return err
 	}

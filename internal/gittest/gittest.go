@@ -243,6 +243,16 @@ func (f *Fixture) Remove(relPath string) {
 	}
 }
 
+// Chmod sets the mode of a working-tree file. The mode is part of what a diff changes, so a test that
+// wants one has to change the file on disk: staging a mode with `update-index --chmod` alone does not
+// survive the next `add -A`, which re-reads it from the working tree.
+func (f *Fixture) Chmod(relPath string, mode os.FileMode) {
+	f.t.Helper()
+	if err := os.Chmod(filepath.Join(f.dir, relPath), mode); err != nil {
+		f.t.Fatalf("gittest: chmod %s: %v", relPath, err)
+	}
+}
+
 // Rename moves a working-tree file. The move is recorded by the next commit.
 func (f *Fixture) Rename(from, to string) {
 	f.t.Helper()
@@ -390,6 +400,19 @@ func IntegrateMessage(slug, head string) string {
 // existed has. parentHead is the tip of the branch this changeset is stacked on, or "" for an
 // unstacked one.
 func ReviewMessage(slug, outcome, head, parentHead string) string {
+	return ReviewMessageRecorded(slug, outcome, head, parentHead, "", "")
+}
+
+// ReviewMessageRecorded is a review submission that records each of the ends of the diff it reviewed, as
+// `review submit` does: the parent's tip, the commit the diff was measured from, and that diff's identity
+// in the `<version>:<hex>` form `model.FormatDiffID` renders.
+//
+// Each trailer is written only when its value is non-empty, which is how a fixture produces the shapes the
+// product produces: an unstacked changeset records no parent, a submission that could not measure a base
+// records neither base nor digest, and a marker from before a trailer existed records none of them. Pass
+// a digest with an unknown version to produce the reading those markers get — "no digest recorded", not a
+// content difference.
+func ReviewMessageRecorded(slug, outcome, head, parentHead, baseHead, diffID string) string {
 	message := "review: " + outcome + " " + slug + "\n\nReview-Outcome: " + outcome +
 		"\nReview-Changeset: " + slug
 	if head != "" {
@@ -397,6 +420,12 @@ func ReviewMessage(slug, outcome, head, parentHead string) string {
 	}
 	if parentHead != "" {
 		message += "\nReview-Parent-Head: " + parentHead
+	}
+	if baseHead != "" {
+		message += "\nReview-Base-Head: " + baseHead
+	}
+	if diffID != "" {
+		message += "\nReview-Diff-Id: " + diffID
 	}
 	return message + "\n"
 }
@@ -421,6 +450,15 @@ func (f *Fixture) CommitReviewMarker(slug, outcome string, opts ...CommitOpt) st
 func (f *Fixture) CommitReviewMarkerOnParent(slug, outcome, parentHead string, opts ...CommitOpt) string {
 	f.t.Helper()
 	return f.CommitMessage(ReviewMessage(slug, outcome, f.reviewedHead(), parentHead), append([]CommitOpt{WithEmpty()}, opts...)...)
+}
+
+// CommitReviewMarkerRecorded commits a review submission that records all three ends of the diff it
+// reviewed — the parent's tip, the measured base, and the diff's identity — as `review submit` does.
+// Pass "" for the ends this fixture means to leave unrecorded.
+func (f *Fixture) CommitReviewMarkerRecorded(slug, outcome, parentHead, baseHead, diffID string, opts ...CommitOpt) string {
+	f.t.Helper()
+	return f.CommitMessage(ReviewMessageRecorded(slug, outcome, f.reviewedHead(), parentHead, baseHead, diffID),
+		append([]CommitOpt{WithEmpty()}, opts...)...)
 }
 
 // CommitIntegrateMarker commits a declaration for slug naming the current head, as `change

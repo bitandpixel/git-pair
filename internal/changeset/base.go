@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"gitpair/internal/git"
+	"gitpair/internal/model"
 )
 
 // Base is the ref a changeset's diff is measured against, plus the rule that produced it. The rule travels
@@ -215,6 +216,59 @@ func MeasuredBase(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBr
 		return commit
 	}
 	return ""
+}
+
+// Measurement is what a review submission records about the diff it reviewed, written beside
+// `Review-Head`. It is three ends of one measurement, and one call measures all three so that the two
+// surfaces that submit a review — `review submit` and the review screen — cannot record different things
+// about the same head:
+//
+//   - ParentHead answers the movement question: has the branch this changeset is stacked on moved since
+//     the approval? It is the parent's *branch* tip, which is what a reader of `status` is shown, and it
+//     stops being readable the moment that branch is deleted.
+//   - BaseHead answers the attribution question: which side moved, and so what the author should be told
+//     to do about it. It is the commit the diff started at, which the deleted branch cannot name.
+//   - DiffID answers the content question: is the diff under test the diff that was approved? One
+//     comparison, rather than an inference from how far the world has moved since (PRD §21).
+//
+// Each field is written only when it could be measured, and an unmeasured one reads as "this was not
+// said" rather than as a difference — the direction that does not refuse an approval nobody moved.
+type Measurement struct {
+	ParentHead string
+	BaseHead   string
+	DiffID     string
+}
+
+// MeasureSubmission measures what a review of `c` at `head` should record. Pass head as "" to have it
+// read from the repository, which is what the review screen does and what a caller that already holds a
+// head should not pay for twice.
+//
+// It does not fail. A submission is a reviewer's verdict, and a digest this clone could not compute is
+// not a reason to refuse to record that verdict: the marker simply carries no `Review-Diff-Id`, which is
+// the same readable absence as an approval written before the trailer existed. Every reading of the
+// value then falls back to the comparison it can still make.
+func MeasureSubmission(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranchRef, head string) Measurement {
+	var m Measurement
+	if head == "" {
+		head, _ = repo.Head(ctx)
+	}
+	// An unreadable parent is recorded as no parent, which is what a submission on a branch whose parent
+	// is gone already looks like: the absence is honest, and the reader can see it.
+	if parent, err := ParentOf(ctx, repo, c, db); err == nil {
+		m.ParentHead = parent.Tip
+	}
+	m.BaseHead = MeasuredBase(ctx, repo, c, db, head)
+	if m.BaseHead == "" || head == "" {
+		return m
+	}
+	// The changeset's own directory is excluded: the review record lives in it, so a reply to a review
+	// thread would otherwise change the digest of the approval it is written into.
+	digest, err := repo.DiffRawDigest(ctx, m.BaseHead, head, ActiveDirPath(c.Slug), LandedDirPath(c.Slug))
+	if err != nil || digest == "" {
+		return m
+	}
+	m.DiffID = model.FormatDiffID(digest)
+	return m
 }
 
 // shortRef names a ref the way a person reads it, for a sentence rather than for git.

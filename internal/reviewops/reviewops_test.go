@@ -61,7 +61,10 @@ func (e *env) trunk(t *testing.T) changeset.DefaultBranchRef {
 
 func (e *env) submit(t *testing.T, outcome model.Outcome, body string, stageAll bool) reviewops.Result {
 	t.Helper()
-	result, err := reviewops.Submit(context.Background(), e.repo, e.cs, outcome, body, stageAll, "", "", e.trunk(t))
+	// Measured the way the product measures it, so a test of what a marker records is a test of the
+	// measurement and not of a fixture's guess.
+	result, err := reviewops.Submit(context.Background(), e.repo, e.cs, outcome, body, stageAll,
+		changeset.MeasureSubmission(context.Background(), e.repo, e.cs, e.trunk(t), ""), e.trunk(t))
 	if err != nil {
 		t.Fatalf("Submit(%s): %v", outcome, err)
 	}
@@ -178,7 +181,7 @@ func TestSubmitRejectsInvalidOutcome(t *testing.T) {
 	e := newEnv(t)
 
 	if _, err := reviewops.Submit(context.Background(), e.repo, e.cs,
-		model.Outcome("approve-self"), "", true, "", "", changeset.DefaultBranchRef{}); err == nil {
+		model.Outcome("approve-self"), "", true, changeset.Measurement{}, changeset.DefaultBranchRef{}); err == nil {
 		t.Error("Submit accepted an outcome that is not block/feedback/approve")
 	}
 }
@@ -225,7 +228,7 @@ func TestSubmitRequiresCommits(t *testing.T) {
 	// No commits at all: there is nothing to review, and a marker commit would be
 	// the repository's root commit with no base to compare against.
 	if _, err := reviewops.Submit(context.Background(), repo, cs,
-		model.OutcomeApprove, "", true, "", "", changeset.DefaultBranchRef{}); err == nil {
+		model.OutcomeApprove, "", true, changeset.Measurement{}, changeset.DefaultBranchRef{}); err == nil {
 		t.Error("Submit succeeded with no commits in the repository")
 	}
 }
@@ -246,4 +249,101 @@ func TestSubmitKeepsEarlierReviewsReachable(t *testing.T) {
 	if refs := e.f.RefNames("refs/git-pair"); refs != nil {
 		t.Errorf("two submissions wrote %v; the chain is the branch, until it is the record", refs)
 	}
+}
+
+// --- the recorded diff identity ---------------------------------------------------------------
+
+// A submission records the identity of the diff it reviewed, so the gate can ask the content question as
+// one comparison rather than an inference from how far the world has moved since (PRD §21). It is read
+// back here the way a reader reads it: recomputed with git from the base the same marker recorded, and
+// compared against what the marker claims. A value nobody can reproduce from the marker that carries it
+// is worse than no value, because it reads as a comparison that was made.
+func TestSubmitRecordsTheIdentityOfTheDiffItReviewed(t *testing.T) {
+	e := newEnv(t)
+	head := e.headSHA(t)
+
+	res := e.submit(t, model.OutcomeApprove, "the content is right", true)
+	message := e.f.MustGit("log", "-1", "--format=%B", res.Commit)
+
+	version, digest, ok := model.ParseDiffID(trailerValue(t, message, "Review-Diff-Id"))
+	if !ok || version != model.DiffIDVersion {
+		t.Fatalf("Review-Diff-Id = %q, want %q:<hex>", trailerValue(t, message, "Review-Diff-Id"), model.DiffIDVersion)
+	}
+	base := trailerValue(t, message, "Review-Base-Head")
+	if base == "" {
+		t.Fatal("the marker recorded no base: the digest would name a diff nobody can reproduce")
+	}
+
+	want, err := e.repo.DiffRawDigest(context.Background(), base, head,
+		"changesets/"+slug, "changesets/.landed/"+slug)
+	if err != nil {
+		t.Fatalf("DiffRawDigest(%s, %s): %v", base, head, err)
+	}
+	if digest != want {
+		t.Errorf("recorded digest %s, want %s: the value a marker names must be reproducible from the base it names",
+			digest, want)
+	}
+}
+
+// Each submission records the diff it spoke about, and an earlier marker keeps the identity it made: the
+// newest marker describes the newest head, and a reader asking what an older review looked at asks it.
+func TestEachSubmissionRecordsItsOwnDiff(t *testing.T) {
+	e := newEnv(t)
+
+	first := e.submit(t, model.OutcomeApprove, "", true)
+	e.f.Commit("author response", gittest.WithFile("service.go", "package main\n\nfunc Lock() { transaction() }\n"))
+	second := e.submit(t, model.OutcomeFeedback, "", true)
+
+	a := trailerValue(t, e.f.MustGit("log", "-1", "--format=%B", first.Commit), "Review-Diff-Id")
+	b := trailerValue(t, e.f.MustGit("log", "-1", "--format=%B", second.Commit), "Review-Diff-Id")
+	if a == "" || b == "" {
+		t.Fatalf("a submission recorded no diff identity (%q, %q)", a, b)
+	}
+	if a == b {
+		t.Error("two submissions over different content recorded the same diff identity")
+	}
+}
+
+// The changeset's own directory is outside the digest, because that is where the review record lives.
+// Without the exclusion, replying to a review thread would change the identity of the approval the reply
+// is written into and invalidate it — the reader's own words turning against the review they were part of.
+func TestAReplyToTheReviewThreadLeavesTheRecordedDiffAlone(t *testing.T) {
+	e := newEnv(t)
+
+	first := e.submit(t, model.OutcomeFeedback, "needs one change", true)
+	e.f.Append("changesets/"+slug+"/ABOUT.md", "\n### comment (author)\n\nfixed\n")
+	e.f.Commit("reply to the review thread")
+	second := e.submit(t, model.OutcomeApprove, "", true)
+
+	a := trailerValue(t, e.f.MustGit("log", "-1", "--format=%B", first.Commit), "Review-Diff-Id")
+	b := trailerValue(t, e.f.MustGit("log", "-1", "--format=%B", second.Commit), "Review-Diff-Id")
+	if a == "" || b == "" {
+		t.Fatalf("a submission recorded no diff identity (%q, %q)", a, b)
+	}
+	if a != b {
+		t.Errorf("the recorded identity moved from %s to %s across a reply to the review thread: the changeset's own directory must not be part of it", a, b)
+	}
+}
+
+func (e *env) headSHA(t *testing.T) string {
+	t.Helper()
+	head, err := e.repo.Head(context.Background())
+	if err != nil {
+		t.Fatalf("Head: %v", err)
+	}
+	return head
+}
+
+// trailerValue is one trailer of a commit message, and "" when the message does not carry it — the
+// absence a reader has to be able to tell from a value, because an absent record means "this was not
+// said" and never means a difference.
+func trailerValue(t *testing.T, message, key string) string {
+	t.Helper()
+	prefix := key + ": "
+	for _, line := range strings.Split(message, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	return ""
 }

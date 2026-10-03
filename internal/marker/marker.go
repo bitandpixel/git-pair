@@ -127,13 +127,16 @@ func UnreadyMessage(slug string) Message {
 // from this line, which is what lets `check` refuse to read an approval as approval of rewritten history
 // (PRD §10.4, §11.3).
 //
-// parentHead and baseHead are the other two ends of the same statement, and each answers a different
-// question. `Review-Parent-Head` names the parent branch's tip, which is what the movement rule compares
-// a live branch against. `Review-Base-Head` names the commit the diff was actually measured from, which
-// is the value the content rule needs once the base has been relinked onto a landed parent — a commit,
-// named by no branch, that may already have been deleted when the next reader arrives. Empty means the
-// caller could not name one, and no trailer is written for it.
-func ReviewMessage(slug string, outcome model.Outcome, head, parentHead, baseHead, body string) Message {
+// parentHead, baseHead and diffID — the other three ends of the same statement, each answering a
+// different question — come in as one `changeset.Measurement` so that the surfaces which submit a review
+// cannot record different things about the same head. `Review-Parent-Head` names the parent branch's tip,
+// which is what the movement note compares a live branch against. `Review-Base-Head` names the commit the
+// diff was actually measured from, which is the value the attribution rule needs once the base has been
+// relinked onto a landed parent — a commit, named by no branch, that may already have been deleted when
+// the next reader arrives. `Review-Diff-Id` names the content, which is the one thing the gate compares
+// when it asks whether the diff under test is the diff that was approved. Each is written only when the
+// caller could measure it, and an absent one reads as "this was not said" (PRD §21).
+func ReviewMessage(slug string, outcome model.Outcome, head string, m changeset.Measurement, body string) Message {
 	trailers := []string{
 		"Review-Outcome=" + string(outcome),
 		"Review-Changeset=" + slug,
@@ -147,11 +150,16 @@ func ReviewMessage(slug string, outcome model.Outcome, head, parentHead, baseHea
 	}
 	// The same for a stacked changeset's parent: an unstacked changeset writes nothing, because
 	// `Review-Parent-Head=` with no value would claim a parent with no name.
-	if parentHead != "" {
-		trailers = append(trailers, "Review-Parent-Head="+parentHead)
+	if m.ParentHead != "" {
+		trailers = append(trailers, "Review-Parent-Head="+m.ParentHead)
 	}
-	if baseHead != "" {
-		trailers = append(trailers, "Review-Base-Head="+baseHead)
+	if m.BaseHead != "" {
+		trailers = append(trailers, "Review-Base-Head="+m.BaseHead)
+	}
+	// And the same for the diff's identity: a submission that could not measure one writes nothing,
+	// which is the absence the gate reads as "this was not said" rather than as a content difference.
+	if m.DiffID != "" {
+		trailers = append(trailers, "Review-Diff-Id="+m.DiffID)
 	}
 	return Message{
 		Subject:  fmt.Sprintf("review: %s %s", outcome, slug),
