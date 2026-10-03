@@ -73,6 +73,16 @@ type parentJSON struct {
 	Reason    string `json:"reason,omitempty"`
 	Next      string `json:"next,omitempty"`
 	Note      string `json:"note,omitempty"`
+	// MeasuredBase is the commit the approval recorded measuring its diff from, in the same short form as
+	// `tip`: the left side of the diff the reviewer read. Empty when the approval recorded none, which is
+	// every approval written before the trailer existed.
+	MeasuredBase string `json:"measured_base,omitempty"`
+	// Comparison names the reading that answered the landed-parent question: "contribution" when this
+	// branch's contribution, measured from the ground it now sits on, was compared with the diff identity
+	// the approval recorded, and "merge-base" when the older comparison of the two bases decided it. Empty
+	// means neither was asked — a parent that is still a branch and only moved is a note, not a verdict.
+	// A reader of a refusal is entitled to know which comparison was made, not only that one failed.
+	Comparison string `json:"comparison,omitempty"`
 	// Landed says the parent's work is in a destination: the directory it carried is in a branch's
 	// history, and the branch named above is what is left of it. The destination is the only thing that
 	// can say this. A
@@ -427,6 +437,8 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 			Reason:                ps.Reason,
 			Next:                  ps.Next,
 			Note:                  ps.Note,
+			MeasuredBase:          short(ps.Measured),
+			Comparison:            ps.Comparison,
 			Landed:                ps.Landed != "",
 			LandedCommit:          ps.Landed,
 			LandedInDefaultBranch: ps.LandedInDefaultBranch,

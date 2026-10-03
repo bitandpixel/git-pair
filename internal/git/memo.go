@@ -62,6 +62,11 @@ func classify(args []string) readClass {
 			return liveRead
 		}
 		return pureRead
+	case "merge-tree":
+		// `merge-tree --write-tree` writes objects and no ref: two commits and an object database give one
+		// answer, so the same invocation never needs asking twice. It is here rather than under `diff`
+		// because it is a different question — what a merge would produce, not what two commits differ by.
+		return pureRead
 	case "symbolic-ref":
 		// `symbolic-ref --quiet --short HEAD` reads HEAD; `symbolic-ref <ref> <sha>` writes one.
 		if hasFlag(args, "--short") || hasFlag(args, "--quiet") {

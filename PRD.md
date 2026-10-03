@@ -1329,12 +1329,13 @@ child is measured against is often deleted before the next clone arrives to read
 
 `Review-Diff-Id` is the identity of that measured diff, as `<version>:<hex>`. The value hashes the raw
 name-status description of the diff between the recorded base and the recorded head — modes, pre- and
-post-image blob OIDs, statuses and paths — with the changeset's own directory excluded, because the review
-record lives in it and a reply to a review thread must not change the identity of the approval that reply
-is written into. The two trailers are written together and mean different things: the base names where the
-diff started, which is what lets a refusal say *which* side moved and what to do about it, and the identity
-names the content, which is the one comparison the gate makes when it asks whether the diff under test is
-the diff that was approved (§21).
+post-image blob OIDs, statuses and paths — with the review record excluded: this changeset's directory and
+every ancestor's, in both of their homes, because the record lives there and a reply to a review thread must
+not change the identity of the approval that reply is written into, and because a landing is a move of that
+record before it is a change of code (§21.1). The two trailers are written together and mean different
+things: the base names where the diff started, which is what lets a refusal say *which* side moved and what
+to do about it, and the identity names the content, which is the one comparison the gate makes when it asks
+whether the diff under test is the diff that was approved (§21, §21.1).
 
 The value is versioned because it is defined by the rules that produced it — the pinned diff flags, and the
 exclusion above — so changing one of them is a new version rather than a silent edit that mismatches every
@@ -3150,35 +3151,46 @@ There is no shared review content between stacked branches in MVP.
 
 A parent branch moves while its child is being read, and none of it is visible in the child's
 history: the child's commits are unchanged, so the drift test and the rebase test both pass. The
-rule is therefore:
+question this answers is not "did the parent move". It is "is the content under test still the
+content that was reviewed", and the two come apart in both directions, which is why they are now
+separate rules:
 
-> Any change to the parent branch after a child is approved invalidates the child's approval.
+> A parent's own movement is a note. A change to the content this branch contributes is a reason.
 
-This includes parent implementation commits, parent review commits, parent approval commits,
-rebases of the parent, and merges into the parent. It is intentionally conservative: git-pair does
-not attempt to tell a metadata-only parent commit from an implementation change.
+The movement rule used to be: any change to the parent branch after a child is approved invalidates
+the child's approval. It was intentionally conservative — git-pair did not attempt to tell a
+metadata-only parent commit from an implementation change — and it was wrong in the direction that
+costs review capacity: the parent taking its own approval marker is a commit, so one round of parent
+review cost a re-review of every child stacked on it, of content nobody had changed. What an approval
+is a claim about is a diff, and a parent moving does not change which files this branch changes or
+what they become. Content decides, and content is asked about directly (§21.1).
+
+The note still **names the kind of movement** — implementation commit, review commit, approval,
+rebase, or merge — because a rule that reports only "the parent moved" reads as arbitrary, and an
+author who thinks the gate is being pedantic stops trusting it. It also says whether the parent's new
+commits reach any file this branch changes, which is the difference between a sentence an author
+learns to skip and the fact that decides whether to look before merging: a merge that will be
+resolved by hand is the work the note is warning about, and the gate cannot see it from an unchanged
+contribution.
 
 A review submission for a stacked changeset records the parent's tip in `Review-Parent-Head`,
 beside `Review-Head`. That is what makes the question askable afterwards, and it is written only
 for a changeset that is stacked. `status`, `queue` and `check` compare the recorded tip with the
-branch's current one.
+branch's current one and report the difference as a note.
 
 Every submission also records the commit it measured its diff from, in `Review-Base-Head` (§10.4). The
 two trailers answer two different questions and should not be collapsed into one: the parent tip is what
-the movement rule compares a live branch against, and the measured base is what the content rule compares
-today's base against. While the parent's branch is the base they name the same commit; the moment the
-parent lands they do not, and the branch that named the first is often deleted.
+the movement note compares a live branch against, and the measured base is one of the commits the
+content comparison measures from. While the parent's branch is the base they name the same commit; the
+moment the parent lands they do not, and the branch that named the first is often deleted.
 
 A submission records the identity of that diff beside them, in `Review-Diff-Id` (§10.4) — one value the
 content question is asked with directly, instead of inferred from how far the parent and the destination
 have moved since the approval. The measured base stays because an answer of "different" has to be
 explained, and an explanation names which side moved and what to do about it. Where a marker carries no
 identity — written before the trailer, hand-edited, or written under a version this build does not compute
-— the absence is read the same way as an absent base: as something not said, never as a difference (§21).
-
-**The reason names the kind of movement** — implementation commit, review commit, approval,
-rebase, or merge — because a rule that reports only "the parent moved" reads as arbitrary, and an
-author who thinks the gate is being pedantic stops trusting it.
+— the absence is read the same way as an absent base: as something not said, never as a difference (§21),
+and the comparison of bases below decides instead.
 
 A submission whose approval recorded no parent tip is not refused: the absence says the trailer
 was not written, which is not evidence that the parent moved. `status` says what is missing. The same
@@ -3187,6 +3199,81 @@ asked of an approval that named no starting point, and "cannot ask" is reported 
 
 The rule is about a parent **branch** moving. A parent that *lands* is a different event, and it is
 judged on content rather than on movement — see "When the parent lands" below.
+
+## 21.1 What the content comparison measures
+
+An approval is a claim about content, so the gate compares content: it measures what the branch
+contributes now and compares that with the identity the approval recorded. Equal, the approval still
+measures this work. Different, the branch carries content nobody read, and it is refused — the refusal
+only ever goes that way, and no reading of history grants an approval that the trailers did not
+record (§2).
+
+The hard half is which commit the contribution is measured from, and the answer is not one commit.
+The contribution is what this branch adds **above the ground its work sits on**, and the ground is the
+newest of these candidates that is still an ancestor of the head:
+
+-   the commit the approval recorded measuring from (`Review-Base-Head`), which is the ground the
+    reviewer read across, and the only candidate that survives a parent squashed into the destination;
+-   the merge base of the recorded base with the head, which is the fork point while the parent is still
+    a branch — the parent taking commits of its own does not move where the child's work starts;
+-   the merge base of the parent's landing with the head, which is the parent's own tip after a merge
+    landing and the landing itself after a rebase onto it;
+-   the merge base of the destination with the head, which is the newest of the four once the child has
+    taken the destination in.
+
+Every candidate enters through a merge base with the head rather than as an endpoint of the diff, so a
+commit outside the head's history can never be chosen. Each of the four is right for one shape of the
+world and wrong for the others: measured from the parent's landing alone, a squashed parent's work has no
+ancestry in the destination to cancel it and appears in the child's patch a second time; measured from
+the destination's tip, everything trunk gained since reads as the child's reverse changes, and an approval
+dies on somebody else's merge in an unrelated file. When no candidate contains all the others — a branch
+that merged two grounds, so the candidates are incomparable — there is no single ground to measure above,
+the answer is "not measured", and the older comparison of the two bases a landing puts in front of the
+child decides (`parent.comparison` says which reading answered, in `status --json` and `check --json`).
+
+The identity is the digest of the raw name-status diff, with the review record left out: this changeset's
+directory and every ancestor's, in both of their homes (`changesets/<id>/` and
+`changesets/.landed/<id>/`). The record is not the thing reviewed, and two readings depend on that. A
+reply in ABOUT.md is a reply to a review, and counting it would let an author's answer invalidate the
+approval it answers. And a landing is a change to the record before it is a change to the code — `change
+integrate` moves the directory — so a child measured from a base that carries its parent's record, against
+a head that predates it, would otherwise report the parent's review as the child deleting it.
+
+### What the value cannot see
+
+The identity is of file content, and about that it is exact: a line changed inside a file already in the diff
+rewrites its post-image blob and moves the value, and a mode, a rename, a path, an empty file, and a symlink
+target are each hashed fields — nothing a reviewer reads can leave the digest alone. Three questions it does
+not answer, each answered elsewhere:
+
+-   **Whether two changes conflict.** A digest of committed content between two commits says nothing about
+    whether they merge. The section below is the answer, not a cleverer digest.
+-   **Whose line is whose.** The value hashes whole-file blob OIDs, so a change that arrives from another
+    branch inside a file this branch also changes is inside the child's post-image even when it is a line
+    nowhere near the child's, and the identity moves: a far away trunk line in a shared file costs a re-read
+    of that file. `TestContributionIsUnmovedByTakingTheDestinationIn` and
+    `TestContributionCountsATrunkEditToAFileTheChildAlsoChanges` are the two sides. Nor can the value be read
+    as evidence about one line: `git pair change ready --allow-single-line` asks whether a line is
+    load-bearing, which is a judgement about meaning the digest cannot make (§24).
+-   **How far the world has moved.** A reading of that kind is offered nowhere in the gate. It would expire
+    an approval on a commit that touched neither end of the comparison, which is the mistake §21 used to make
+    about the parent branch.
+
+### The merge the gate can see coming
+
+A branch can carry exactly the content an approval measured and still not merge, because something else
+landed underneath it on the same lines. Discovering that in the merge job — after the gate said ready and
+CI said green — is the worst place to discover it, because the resolution is then written by whoever
+happens to be merging, over content no reviewer saw. So where the gate keeps an approval on a landed
+parent it also asks whether the branch still merges into the destination, and refuses with the conflicting
+paths and the merge to run when it would not.
+
+This is `git merge-tree --write-tree`, which writes objects and nothing else: no ref moves, the index is
+untouched, the working tree is untouched, and no commit exists at the end of it. It is not a merge in the
+sense §26 forbids; it is a read of what a merge would produce, which is why it is cached as a pure read.
+An answer git will not give — a git too old for the command, a destination this clone cannot name — adds
+no refusal. §2's conservative direction is about the question that *grants* an approval, and this is a
+condition that only ever adds one: refusing without evidence would block merges that are perfectly good.
 
 ## When the parent lands
 
@@ -3206,9 +3293,10 @@ to live, so:
     rather than failing with `unknown revision` on a base another clone wrote down.
     approval yet. Without an approval it is a note and never a reason: a changeset that has not been
     offered has nothing for a parent to invalidate. `status --json` carries `parent.landed`,
-    `parent.landed_commit`, `parent.landed_in_default_branch`, `parent.stale_branch` and
-    `parent.head_carries_landing`; `check --json` carries `parent_landed`, `parent_landed_commit`,
-    `parent_stale_branch` and `parent_head_carries_landing`. The last two of those are one reading reported
+    `parent.landed_commit`, `parent.landed_in_default_branch`, `parent.stale_branch`,
+    `parent.head_carries_landing`, `parent.measured_base` and `parent.comparison`; `check --json`
+    carries `parent_landed`, `parent_landed_commit`, `parent_stale_branch`,
+    `parent_head_carries_landing`, `parent_measured_base` and `parent_comparison`. The last two of those are one reading reported
     twice, because they are statements about two different things: `stale_branch` is about the parent's
     branch still being here to delete, and `head_carries_landing` is about this head sitting on the landing
     commit, which is the half that survives the branch being deleted and the half that decides whether any
@@ -3574,15 +3662,16 @@ Explicitly given up while the durable-ref layer was being taken out, each with w
     merges become the problem that justifies it, `change tidy` (§13.5) answers it with commits.
 -   **Patch-equivalent carry-forward of approvals.** Letting a child's approval survive its parent
     landing when the child's diff against the new base is provably the diff that was reviewed
-    (§21). Partly taken: the landed-parent rule compares the two bases a landing puts in front of the
-    child and lets the approval stand when they carry the same tree, which with the head fixed is the
-    same statement as "the same patch" — reached without a patch comparison, and with a comparison the
-    clone cannot make answering "different" so that absence refuses rather than grants. What is still
-    deferred is the rest of it: a squash landing, and a child that has taken the destination in, both
-    leave the two bases unequal while the child's own contribution is unchanged. Comparing those needs
-    the recorded diff identity (§10.4) measured from the parent's landing commit — a commit whose tree
-    already holds the parent's content, which no merge base can be — plus the guard that a branch which
-    would not merge cleanly has no patch to compare at all.
+    (§21). Taken for the gate: the landed-parent rule asks the question directly, against the identity
+    the approval recorded (§10.4), from whichever commit is the ground the child's work now sits on, and
+    guards the pass with a check that the branch still merges into the destination (§21.1). The two cases
+    the older two-base comparison could not answer — a squash landing, and a child that has taken the
+    destination in — are answered, and the parent's own movement is a note rather than a reason. What is
+    still deferred is the sibling rule: a branch that merges the destination in is refused today by the
+    rule that counts content the review never saw, which reads the branch's own history and cannot yet
+    tell the destination's arrivals from the author's. `TestMergingTheDestinationInIsStillUnreviewedWork`
+    pins that boundary; teaching that rule about the destination is the remaining half, and it belongs to
+    §16's unreviewed-content reading rather than to the stack.
 -   **Reviewer identity and thread resolution state.** Per-reviewer permissions, "who is this
     comment from" as data, and resolved/unresolved threads. Cost: identity is not in git's commit
     model in any way git-pair can enforce, and thread state is state — it wants a ref, a file, or a

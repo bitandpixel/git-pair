@@ -7,13 +7,13 @@ import (
 	"gitpair/internal/gittest"
 )
 
-// The stacked rule, from PRD §21 and the requirements' "Initial conservative stacked-approval rule":
-// any change to the parent branch after a child is approved invalidates the child's approval. The
-// child cannot see any of it in its own history — its commits are untouched, so the drift test passes
-// and the rebase test passes — which is why the approval records the parent's tip beside its own head
-// and why `check` compares the two.
+// The stacked rules, from PRD §21: a parent's own movement is a note, and the content this branch
+// contributes is what refuses. The child cannot see any of the parent's activity in its own history — its
+// commits are untouched, so the drift test passes and the rebase test passes — which is why the approval
+// records the parent's tip, the commit it measured from, and the identity of that diff, and why the gate
+// compares all three.
 //
-// The reason names the *kind* of movement on purpose (plan risk R3). A rule that reports "the parent
+// The note names the *kind* of movement on purpose (plan risk R3). A note that reports "the parent
 // moved" for every shape of parent activity reads as arbitrary, and an author who thinks the gate is
 // being pedantic starts passing --allow-feedback or ignoring the gate.
 
@@ -40,8 +40,14 @@ func stackedPair(t *testing.T) (*gittest.Fixture, string, string) {
 }
 
 // parentMoves is the set of things that can happen to a parent branch between the child's approval
-// and the gate. Each one ends the child's approval, and each one has to be named differently.
-func TestAnyParentMovementEndsTheChildsApproval(t *testing.T) {
+// and the gate. None of them ends the child's approval any more, and each one still has to be named
+// differently — because the note is what tells an author whether to look at the parent before merging.
+//
+// The rule changed from "any parent movement refuses" to "the content this branch contributes refuses".
+// The old rule made one round of parent review cost a re-review of every child stacked on it: the parent
+// taking its own approval marker is a commit, and a commit was enough. What the approval is a claim about
+// is the diff, and a parent moving does not change which files this branch changes or what they become.
+func TestParentMovementIsANoteAndNotAReason(t *testing.T) {
 	tests := []struct {
 		name string
 		on   func(t *testing.T, f *gittest.Fixture)
@@ -104,14 +110,33 @@ func TestAnyParentMovementEndsTheChildsApproval(t *testing.T) {
 			f.SwitchTo("booking-tests")
 
 			res := runIn(t, f.Dir(), "check")
-			if res.code != 1 {
-				t.Fatalf("check exited %d, want 1\n%s%s", res.code, res.stdout, res.stderr)
+			if res.code != 0 {
+				t.Fatalf("check exited %d, want 0: the parent's own movement is not this branch's problem\n%s%s",
+					res.code, res.stdout, res.stderr)
 			}
-			mustContain(t, res.stdout, "the parent branch booking moved", "the stack reason")
-			mustContain(t, res.stdout, tc.want, "the kind of movement")
-			mustContain(t, res.stdout, "rebase onto booking and have the result reviewed again", "the way forward")
+			mustContain(t, res.stdout, "the parent branch booking moved", "the note says the parent moved")
+			mustContain(t, res.stdout, tc.want, "and the kind of movement")
+			mustContain(t, res.stdout, "none of them touch files this branch changes",
+				"and whether that movement reaches this branch's files")
 		})
 	}
+}
+
+// The other half of the note: a parent that commits to a file this child also changes is not the same
+// sentence. Nothing about the verdict changes — the child's contribution is still the contribution — but a
+// reader who is about to merge wants to know that two branches have been moving on the same file.
+func TestParentMovementOnASharedFileNamesTheFile(t *testing.T) {
+	f, _, _ := stackedPair(t)
+	f.SwitchTo("booking")
+	f.Commit("the parent edits the test too", gittest.WithFile("booking_test.go",
+		"package main\n\nfunc TestBooking() { t := 1 }\n"))
+	f.SwitchTo("booking-tests")
+
+	res := runIn(t, f.Dir(), "check").mustSucceed(t, "check")
+	mustContain(t, res.stdout, "the parent branch booking moved", "the note")
+	mustContain(t, res.stdout, "touch files this branch also changes", "that it reaches this branch")
+	mustContain(t, res.stdout, "booking_test.go", "and which file")
+	mustNotContain(t, res.stdout, "none of them touch", "and that it did not say the opposite")
 }
 
 // An unchanged parent must not cost the child anything. Without this the table above proves nothing:
@@ -133,6 +158,13 @@ func TestUnchangedParentLeavesTheChildApproved(t *testing.T) {
 // parent's work became — and `check` says where the parent went rather than failing to resolve a
 // branch that no longer exists. This landing is a squash, the shape that keeps no ancestry at all: the
 // answer comes from the directory the destination carries, not from a walk of the branch.
+//
+// It passes the gate now, and that is the point of measuring the contribution. The child's own work is
+// unchanged; what changed is that its parent's work reached the destination by a route with no ancestry in
+// it. Measuring the child's diff from a merge base with that landing, the parent's content arrives in the
+// child's patch a second time and the approval dies on a shape the child has no part in choosing. What is
+// left for the child is the rebase the landing always left it — and the merge probe below is what keeps
+// that pass honest: a branch that would conflict has no clean content to compare.
 func TestChildOfALandedParentIsToldWhereTheWorkWent(t *testing.T) {
 	f, _, _ := stackedPair(t)
 
@@ -143,13 +175,10 @@ func TestChildOfALandedParentIsToldWhereTheWorkWent(t *testing.T) {
 	f.ForceDeleteBranch("booking")
 
 	f.SwitchTo("booking-tests")
-	res := runIn(t, f.Dir(), "check")
-	if res.code != 1 {
-		t.Fatalf("check exited %d, want 1\n%s%s", res.code, res.stdout, res.stderr)
-	}
-	mustContain(t, res.stdout, "the parent booking landed as "+shortOf(landing),
+	res := runIn(t, f.Dir(), "check").mustSucceed(t, "check")
+	mustContain(t, res.stdout, "booking landed as "+shortOf(landing),
 		"the landing named")
-	mustContain(t, res.stdout, "rebase onto main", "the destination named")
+	mustContain(t, res.stdout, "rebase onto it", "the step the landing leaves")
 
 	// The stack is reported even though the branch is gone: the child has to be told the parent
 	// left, not left to wonder why nothing answers.

@@ -118,6 +118,14 @@ type checkJSON struct {
 	ParentLanded       bool   `json:"parent_landed"`
 	ParentLandedCommit string `json:"parent_landed_commit,omitempty"`
 	ParentStaleBranch  bool   `json:"parent_stale_branch"`
+	// ParentMeasuredBase is the commit the approval recorded measuring its diff from, and
+	// ParentComparison names the reading that answered the landed-parent question — "contribution" when
+	// this branch's contribution was compared with the diff identity the approval recorded, "merge-base"
+	// when the older base comparison decided it, empty when neither was asked. They are the two facts
+	// behind a parent verdict, and a reader who disagrees with the verdict needs them to say which side
+	// moved.
+	ParentMeasuredBase string `json:"parent_measured_base,omitempty"`
+	ParentComparison   string `json:"parent_comparison,omitempty"`
 	// ParentHeadCarriesLanding says this changeset's own head already carries the parent's landing commit.
 	// `parent_stale_branch` is the same reading where the parent's branch is still in this clone, and false
 	// where it has been deleted; this one answers in both cases, and a gate that advises a rebase should
@@ -184,6 +192,8 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	out.ParentLanded = g.Parent.Landed != ""
 	out.ParentLandedCommit = g.Parent.Landed
 	out.ParentStaleBranch = g.Parent.StaleBranch
+	out.ParentMeasuredBase = short(g.Parent.Measured)
+	out.ParentComparison = g.Parent.Comparison
 	out.ParentHeadCarriesLanding = g.Parent.LandingUnderHead
 	if out.Reasons == nil {
 		// `reasons` is an array in both verdicts. `null` would make every consumer
@@ -224,6 +234,11 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		// underneath is finished work with a step attached to it.
 		a.printf("parent: %s landed as %s — %s\n", g.Parent.parentName(), g.Parent.Landed,
 			landedParentStep(s.cs, g.Parent))
+	} else if g.Parent.Note != "" {
+		// The stack observation the verdict did not act on: the parent moved, or its record says too little
+		// to compare. Printing it on the passing verdict is the point — the gate is where an author reads
+		// before merging, and a note that only appears in `status` is read after the merge.
+		a.printf("parent: %s\n", g.Parent.Note)
 	}
 	a.printRecommendations(out.Recommendations)
 	a.printf("next:  %s\n", out.NextAction)
