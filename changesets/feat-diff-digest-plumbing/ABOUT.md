@@ -28,6 +28,7 @@ decide what an approval recorded, and changing it would silently invalidate ever
 `--raw` reads the object database instead: modes, pre- and post-image blob OIDs, statuses, paths. Measured
 unchanged across `-U3`, `-U10`, `-U1`, `--ignore-all-space` and `--diff-algorithm=patience`, and still
 sensitive to a trailing-whitespace change and to a mode change, which is what a reviewer read.
+> wait so changing a line in a file that was already reviewed would appear as a non-change?
 
 **The load-bearing invariants, and where each lives.**
 
