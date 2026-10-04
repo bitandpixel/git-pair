@@ -28,7 +28,14 @@ decide what an approval recorded, and changing it would silently invalidate ever
 `--raw` reads the object database instead: modes, pre- and post-image blob OIDs, statuses, paths. Measured
 unchanged across `-U3`, `-U10`, `-U1`, `--ignore-all-space` and `--diff-algorithm=patience`, and still
 sensitive to a trailing-whitespace change and to a mode change, which is what a reviewer read.
-> wait so changing a line in a file that was already reviewed would appear as a non-change?
+
+The two claims are about different things, and the split is the whole design: what is insensitive is how git
+*renders* a diff, and what is hashed is the *content*. `--raw` prints no hunk text, so an entry for a file
+that was already in the diff looks the same when one line inside it changes — same modes, same status, same
+path — and what differs is the post-image blob OID, which is one of the hashed fields. A change to content
+is therefore never a non-change, including in a file the reviewer had already read; the digest does not say
+which line moved, and it does not need to, because the only verdict it carries is "not the diff that was
+reviewed". The single deliberate blindness is the review record, which is excluded by name.
 
 **The load-bearing invariants, and where each lives.**
 
@@ -38,8 +45,10 @@ sensitive to a trailing-whitespace change and to a mode change, which is what a 
   `core.quotePath=false` comes from `spawn` for every invocation. Enforced by
   `TestDiffRawDigestIsNotMovedByDiffConfiguration`, which sets `diff.context`, `diff.algorithm`,
   `diff.renames` and `diff.noprefix` in the repository config and asks again.
-- *Content cannot hide from it.* Enforced by `TestDiffRawDigestSeesEveryChangeAReviewerRead` (whitespace and
-  mode, the two cases a patch digest is known to wave through) and by the digest being over blob OIDs.
+- *Content cannot hide from it.* Enforced by `TestDiffRawDigestSeesEveryChangeAReviewerRead` (whitespace,
+  mode, two different contents, and a line changed inside a file already in the diff — the last of those
+  asserting that the raw entry's shape is *unchanged* once its blob OIDs are hidden, so the digest moved on
+  content and not on shape) and by the digest being over blob OIDs.
 - *The changeset's own directory is outside the identity.* The review record — ABOUT.md, and the threads
   inside it — lives in it, so without the exclusion a reply to a review thread would change the identity of
   the approval that reply is written into. Enforced by the caller
@@ -111,3 +120,22 @@ surface a reviewer uses).
   decision about when an approval may stand.
 - The digest is of committed content between two named commits. It says nothing about whether that content
   merges cleanly into a destination, and no claim is made that it does.
+
+## Addressed feedback
+
+> wait so changing a line in a file that was already reviewed would appear as a non-change?
+
+No. That reading comes from the sentence above it, which lists what the digest is measured *unchanged*
+across, and the answer is the distinction now written into that paragraph: `--raw` is insensitive to how git
+renders a diff (`-U`, whitespace-normalising options, the diff algorithm, rename detection) and hashes
+content — modes, pre- and post-image blob OIDs, statuses, paths. Editing a line inside a file already in the
+diff rewrites that file's post-image blob, and the OID is a hashed field, so the digest changes.
+
+What `--raw` genuinely cannot tell you is *which* line moved: the entry for that file has the same modes,
+status and path before and after the edit. That is enough for this value, because the only verdict it carries
+is "this is not the diff that was reviewed" — and the refusal that explains itself is the `Review-Head` and
+`Review-Base-Head` pair beside it, which name the commit and say which side moved.
+
+Pinned now by the "a line changed in a file already in the diff is a change" case of
+`TestDiffRawDigestSeesEveryChangeAReviewerRead`, which asserts both halves: the digest differs, and the raw
+entry is byte-identical once its blob OIDs are hidden — so the change it detected is content and not shape.

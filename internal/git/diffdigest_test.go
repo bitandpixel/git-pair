@@ -2,12 +2,17 @@ package git_test
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 
 	"gitpair/internal/git"
 	"gitpair/internal/gittest"
 )
+
+// blobOIDs matches the object names `--raw` prints, so a test can hide them and ask what is left of the
+// entry: modes, status and path, which is the part of the line that is about the shape of the change.
+var blobOIDs = regexp.MustCompile(`[0-9a-f]{7,64}`)
 
 // DiffRawDigest is the identity a recorded approval compares against, so its two properties have to be
 // provable rather than assumed: configuration cannot move the answer, and content cannot hide from it.
@@ -106,6 +111,33 @@ func TestDiffRawDigestSeesEveryChangeAReviewerRead(t *testing.T) {
 		_, repo2, base2, head2 := changedFixture(t, map[string]string{"a.txt": "one\nother\n"})
 		if digestOf(t, repo1, base1, head1) == digestOf(t, repo2, base2, head2) {
 			t.Error("two different contents recorded the same identity")
+		}
+	})
+
+	// The case a `--raw` digest is suspected of missing, because `--raw` prints no hunk text: the file was
+	// already in the diff, the reviewer had looked at it, and now one line inside it changes. The entry's
+	// shape — its modes, its status, its path — really is identical between the two; the post-image blob OID
+	// is not, and it is one of the hashed fields. So a change to content is never a non-change, and the
+	// insensitivity this digest buys is confined to how git renders a diff.
+	t.Run("a line changed in a file already in the diff is a change", func(t *testing.T) {
+		f, repo, base, first := changedFixture(t, map[string]string{"a.txt": "one\nchanged\n"})
+		f.Write("a.txt", "one\nchanged\nand one more line\n")
+		f.Commit("one line more in the same file")
+		second := headOf(t, f)
+
+		if digestOf(t, repo, base, first) == digestOf(t, repo, base, second) {
+			t.Error("a line changed inside a file already in the diff hashed the same as before it")
+		}
+		rawOf := func(to string) string {
+			out, err := repo.Git(context.Background(), "diff", "--raw", "-z", "--no-renames", base, to, "--", ".")
+			if err != nil {
+				t.Fatalf("git diff --raw %s %s: %v", base, to, err)
+			}
+			return blobOIDs.ReplaceAllString(out, "<oid>")
+		}
+		if a, b := rawOf(first), rawOf(second); a != b {
+			t.Errorf("the raw entries differ once their blob OIDs are hidden:\n%s\n%s\n— the digest moved for a shape difference, not a content one",
+				a, b)
 		}
 	})
 }
