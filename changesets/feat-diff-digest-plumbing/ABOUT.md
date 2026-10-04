@@ -139,3 +139,5 @@ is "this is not the diff that was reviewed" — and the refusal that explains it
 Pinned now by the "a line changed in a file already in the diff is a change" case of
 `TestDiffRawDigestSeesEveryChangeAReviewerRead`, which asserts both halves: the digest differs, and the raw
 entry is byte-identical once its blob OIDs are hidden — so the change it detected is content and not shape.
+
+> if the file was changed at all in the destination branch, will that digest change? let's say on a far away unrelated line?
