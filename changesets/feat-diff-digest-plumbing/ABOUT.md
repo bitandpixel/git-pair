@@ -171,3 +171,6 @@ value — a digest of committed content between two commits says nothing about w
 Pinned by `TestDiffRawDigestIsNotMovedByWorkOnAnotherBranch`, which commits to the same file on another
 branch and asserts both halves again: the digest between the two named commits is unmoved, and the digest
 to the branch that gained content is not — so the value is pinned to its commits rather than inert.
+
+> So what if between the base commit and the reviewed child commit, an async change happened in trunk to that file
+not directly to the lines of code being touched by the child. Will this require re-approval?
