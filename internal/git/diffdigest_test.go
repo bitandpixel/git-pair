@@ -142,6 +142,33 @@ func TestDiffRawDigestSeesEveryChangeAReviewerRead(t *testing.T) {
 	})
 }
 
+// The other direction of the same property, and the one a reviewer has to be able to rely on: a recorded
+// value is a fact about two named commits, so work that lands somewhere else cannot move it — not a commit
+// to another file, and not a commit to the same file on a line far from the one this branch changed. That
+// is the difference between a digest of a diff and a reading of "how far has the world moved since": the
+// second expires on somebody else's merge in an unrelated file, and the first does not. What *can* move a
+// comparison is naming a different pair of commits, which is the second assertion below: the value is not
+// inert, it is pinned to the two it was taken between.
+func TestDiffRawDigestIsNotMovedByWorkOnAnotherBranch(t *testing.T) {
+	f, repo, base, head := changedFixture(t, map[string]string{"a.txt": "one\nchanged\n"})
+	want := digestOf(t, repo, base, head)
+
+	f.CreateBranch("destination", base)
+	f.SwitchTo("destination")
+	f.Commit("somebody else edits the same file, far away",
+		gittest.WithFile("a.txt", "one\nchanged\n\n\n// added well below the reviewed line\n"))
+	onDestination := headOf(t, f)
+	f.SwitchTo("main")
+
+	if got := digestOf(t, repo, base, head); got != want {
+		t.Errorf("a commit on another branch moved the digest of the same two commits: %s, want %s", got, want)
+	}
+	if digestOf(t, repo, base, onDestination) == want {
+		t.Error("the digest between the base and the branch that gained content matched the one before it: " +
+			"the value is not pinned to the commits it names, it simply never changes")
+	}
+}
+
 // The changeset's own directory is excluded by the caller because the review record lives there: a reply
 // to a review thread must not change the identity of the approval it is written into.
 func TestDiffRawDigestExcludesWhatTheCallerNames(t *testing.T) {

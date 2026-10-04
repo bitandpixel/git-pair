@@ -45,6 +45,11 @@ reviewed". The single deliberate blindness is the review record, which is exclud
   `core.quotePath=false` comes from `spawn` for every invocation. Enforced by
   `TestDiffRawDigestIsNotMovedByDiffConfiguration`, which sets `diff.context`, `diff.algorithm`,
   `diff.renames` and `diff.noprefix` in the repository config and asks again.
+- *A recorded value is a fact about two named commits.* Neither end moves, so nothing that happens
+  elsewhere — another branch, another file, or another line of the same file — can move the answer. This is
+  what separates the digest from a reading of how far the world has moved, which would expire on somebody
+  else's merge. Enforced by `TestDiffRawDigestIsNotMovedByWorkOnAnotherBranch`, which also measures against
+  the branch that gained the content to prove the value is pinned rather than inert.
 - *Content cannot hide from it.* Enforced by `TestDiffRawDigestSeesEveryChangeAReviewerRead` (whitespace,
   mode, two different contents, and a line changed inside a file already in the diff — the last of those
   asserting that the raw entry's shape is *unchanged* once its blob OIDs are hidden, so the digest moved on
@@ -123,13 +128,15 @@ surface a reviewer uses).
 
 ## Addressed feedback
 
-> wait so changing a line in a file that was already reviewed would appear as a non-change?
+### A line changed inside a file the reviewer had already read
 
-No. That reading comes from the sentence above it, which lists what the digest is measured *unchanged*
-across, and the answer is the distinction now written into that paragraph: `--raw` is insensitive to how git
-renders a diff (`-U`, whitespace-normalising options, the diff algorithm, rename detection) and hashes
-content — modes, pre- and post-image blob OIDs, statuses, paths. Editing a line inside a file already in the
-diff rewrites that file's post-image blob, and the OID is a hashed field, so the digest changes.
+The review asked whether one line changed inside a file that was already in the diff would read as a
+non-change. It would not. That reading comes from the sentence above it, which lists what the digest is
+measured *unchanged* across, and the answer is the distinction now written into that paragraph: `--raw` is
+insensitive to how git renders a diff (`-U`, whitespace-normalising options, the diff algorithm, rename
+detection) and hashes content — modes, pre- and post-image blob OIDs, statuses, paths. Editing a line inside
+a file already in the diff rewrites that file's post-image blob, and the OID is a hashed field, so the digest
+changes.
 
 What `--raw` genuinely cannot tell you is *which* line moved: the entry for that file has the same modes,
 status and path before and after the edit. That is enough for this value, because the only verdict it carries
@@ -140,4 +147,27 @@ Pinned now by the "a line changed in a file already in the diff is a change" cas
 `TestDiffRawDigestSeesEveryChangeAReviewerRead`, which asserts both halves: the digest differs, and the raw
 entry is byte-identical once its blob OIDs are hidden — so the change it detected is content and not shape.
 
-> if the file was changed at all in the destination branch, will that digest change? let's say on a far away unrelated line?
+### Work that lands elsewhere, including in the same file
+
+The review then asked whether a change to that file on the destination branch — a far away, unrelated line —
+would change the digest. It does not change the value an approval carries, and the reason is what the value
+is: a digest of the diff between **two named commits**, both of them recorded in the marker. Another branch
+committing to the same file on a line nowhere near the one this branch changed touches neither of those
+commits, so the answer is the same bytes forever. That is the difference between this and a reading of "how
+far has the world moved since the approval", which expires on somebody else's merge in an unrelated file.
+
+What can move a comparison is naming a different pair of commits, and that is the trap the next changeset
+avoids by construction: the gate that reads this value measures the branch from the ground its work sits on,
+not from the destination's tip. Measured against the tip, everything trunk gained since the branch forked
+arrives inside the child's diff as reverse changes, and the case asked about here is exactly the one that
+then bites — an approval dying on a far away line nobody reviewed. Its measurements are in that changeset's
+`ABOUT.md` case table rather than repeated here.
+
+The case trunk movement *does* legitimately create is not visible in any digest: the two changes needing
+each other. That is a conflict, and the answer to it is the merge probe in the changeset that reads this
+value — a digest of committed content between two commits says nothing about whether they merge cleanly, and
+`Known limitations` above says so rather than leaving it to be inferred.
+
+Pinned by `TestDiffRawDigestIsNotMovedByWorkOnAnotherBranch`, which commits to the same file on another
+branch and asserts both halves again: the digest between the two named commits is unmoved, and the digest
+to the branch that gained content is not — so the value is pinned to its commits rather than inert.
