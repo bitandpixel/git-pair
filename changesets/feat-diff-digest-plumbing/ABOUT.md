@@ -172,5 +172,30 @@ Pinned by `TestDiffRawDigestIsNotMovedByWorkOnAnotherBranch`, which commits to t
 branch and asserts both halves again: the digest between the two named commits is unmoved, and the digest
 to the branch that gained content is not — so the value is pinned to its commits rather than inert.
 
-> So what if between the base commit and the reviewed child commit, an async change happened in trunk to that file
-not directly to the lines of code being touched by the child. Will this require re-approval?
+### A trunk change to the same file, on lines the child does not touch
+
+The review asked whether a change that landed in trunk — same file the child changed, lines nothing in the
+child touches — forces a re-approval. Two cases, and the digest asks for one in neither.
+
+-   **The trunk commit is not in the child's history**, which is the ordinary case: a branch does not absorb
+    trunk by osmosis, and "between" in time is not "between" in ancestry. Such a commit cannot appear in a
+    two-dot diff between the recorded base and the recorded head, because neither of those commits contains
+    it. That is the case the test above pins.
+-   **The child merged trunk in**, so the commit is an ancestor of the head. The answer then depends on
+    whether the two edits are in the same file. If trunk's change is in a file this branch does not touch,
+    the ground the gate measures from is that trunk commit — it already carries the change, and the identity
+    is unchanged. If it is the *same* file, the identity moves even when the line is nowhere near the child's,
+    because the value hashes post-image blob OIDs and a blob is a whole file: the child's post-image now
+    contains trunk's line as well. A far away trunk line in a shared file costs a re-read of that file.
+
+For the second case this is not a new cost, because a different rule refuses first: the one that counts
+content the review never saw refuses on any content arriving from another branch, near or far. Its boundary
+is `TestMergingTheDestinationInIsStillUnreviewedWork`, and PRD §27 names teaching it about the destination as
+the remaining half — which this identity cannot do on its own, since it tells you what a file contains and
+not whose line is whose. The limit is stated in `Known limitations` above, and pinned by
+`TestContributionCountsATrunkEditToAFileTheChildAlsoChanges` in the changeset that reads this value.
+
+And the case where the two changes need each other is not a content question at all. Same file, lines that
+depend on each other, is a conflict: what would land is a resolution somebody writes later, over content no
+reviewer saw, and the answer to that is the merge probe in the changeset that reads this value — not a
+digest, which can only ever say what two commits contain.
