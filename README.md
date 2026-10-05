@@ -33,6 +33,30 @@ The MVP deliberately does not:
 
 ## Install
 
+### The published binary
+
+Prebuilt binaries for macOS and Linux, on amd64 and arm64, are published with every tag:
+
+```bash
+curl -fsSL https://github.com/bitandpixel/git-pair/releases/latest/download/install.sh | sh
+```
+
+The installer names the archive from `uname`, checks its SHA-256 against `checksums.txt` from the same
+release, and writes `~/.local/bin/git-pair`. It takes `--version v0.1.0` to install a specific release,
+`--install-dir DIR` to write somewhere else, and `--force` to replace a file at that path which is not a
+working git-pair binary; `--help` lists them, and
+[`packaging/install.sh`](packaging/install.sh) is short enough to read before piping it. It never uses
+sudo, and it prints the `PATH` line you need when the install directory is not already on `PATH`.
+
+What the checksum proves is a complete download and the right archive, not the publisher: both files
+come over TLS from the same place. To verify a release by hand, pin the version, read the release notes,
+and compare the hash yourself.
+
+The binary must be named `git-pair` for git to find it as a subcommand, so `git pair review open` and
+`git-pair review open` are the same program; the docs use the `git pair` form throughout.
+
+### From source
+
 Requires Go 1.27 and `git` on `PATH` (developed against git 2.43.0). The repository pins the
 toolchain in `.mise.toml`:
 
@@ -41,9 +65,11 @@ mise exec -- go build -o ~/bin/git-pair ./cmd/git-pair
 mise exec -- go install ./cmd/git-pair          # into $(go env GOPATH)/bin
 ```
 
-Without mise, any Go 1.27 toolchain works. Build it with the name `git-pair` and git picks it up as
-a subcommand, so `git pair review open` and `git-pair review open` are the same program; the docs use
-the `git pair` form throughout. `git-pair --version` prints `git-pair version 0.1.0`.
+Without mise, any Go 1.27 toolchain works. A build from source prints `git-pair version 0.1.0` — the
+number in `internal/cli/root.go:Version` — where a release build prints its tag, stamped by goreleaser
+through `-ldflags -X gitpair/internal/cli.Version=…`. Cutting a release is `git tag v0.2.0 && git push
+origin v0.2.0`; everything before that tag is checked locally by `mise run release:check`,
+`release:snapshot` and `release:gate`, and `.github/workflows/release.yml` says what the runner does.
 
 ## Quickstart
 
@@ -1885,17 +1911,35 @@ what a Go test cannot:
 | `scripts/gates/e2e-29.sh` | The PRD §29 loop end to end in a scratch repo: review, approve, `check`, a merge into the destination and a merge into a release line, `LANDED UNREVIEWED`, and `change tidy` — including that a filing ends the report only once it reaches the destination | `git` |
 | `scripts/gates/pty-walkthrough.sh` | The review TUI under a real pty: first paint, the file tree, marks, the span walk, the difftool handoff | `git`, `python3` |
 | `scripts/gates/ci-integrate.sh` | The CI merge job against scratch bare remotes: the gate, the merge, the push, and every refusal in between | `git`, `jq` |
+| `scripts/gates/install-sh.sh` | The release is installable: `packaging/install.sh` against a `dist/` directory served over http — the newest release, a pinned version, a release that is not there, a tampered archive, an archive missing from `checksums.txt`, a file in the way, a directory in the way, an unwritable directory, and a machine nothing is published for | `git`, `python3`, `curl` |
 
-`mise run gates` builds the binary, then runs all three. Each script also takes a binary path as its first
+`mise run gates` builds the binary, then runs the first three. Each also takes a binary path as its first
 argument. A pipeline that installs the build elsewhere passes its own path.
 
-Both scripts resolve the default binary by the rule `mise run build` uses. A branch installs and tests
+Those three resolve the default binary by the rule `mise run build` uses. A branch installs and tests
 its own namespaced name, rather than a build another worktree left behind. See
-`scripts/install-name.sh`.
+`scripts/install-name.sh`. `scripts/gates/install-sh.sh` takes a `dist/` directory instead, and defaults to
+the one `mise run release:snapshot` writes.
 
 `.github/workflows/ci.yml` runs `mise run gates` on every push and pull request — one line, because the
 task is the definition. `.github/workflows/git-pair-integrate.yml` then triggers on that workflow finishing
 and performs the landing of a declared changeset (§Landing a declared change from CI).
+
+The installer replay is not in `gates`. That ladder is what every change pays for, and the replay needs
+goreleaser, a cross-compile of four targets, and a listening socket — none of which matters until a tag is
+cut. `.github/workflows/release.yml` runs it between the build and the publish, which is the point where it
+pays: a release already published is a release people can install.
+
+Cutting a release is a tag: `git tag v0.2.0 && git push origin v0.2.0`. That workflow builds the four
+published targets, replays the installer against them, and publishes only if the replay passed — which is
+why it builds twice. Everything short of the tag has a task, so a release fails on a laptop rather than
+four minutes later on a runner with a version already spent:
+
+| Task | What it checks |
+| --- | --- |
+| `mise run release:check` | `.goreleaser.yaml` against the pinned goreleaser; `sh -n` on the installer; the `release.extra_files` globs resolving, which snapshot mode does not check; the release URL agreeing across `packaging/install.sh`, README and the release header; `packaging/THIRD-PARTY-NOTICES.md` matching the linked dependencies |
+| `mise run release:snapshot` | the four archives and `checksums.txt` into `dist/`, with nothing published |
+| `mise run release:gate` | the installer replay above, against whatever is in `dist/` |
 
 Work here is planned in `docs/plans/<name>/plan.md`, and a finished plan moves to
 `docs/plans/completed/`. Each change carries its own directory under `changesets/`. The tool reviews
@@ -2131,3 +2175,11 @@ A changeset the integration branch holds is refused by the commands that would m
 `change ready`, `change unready`, `change abandon` and `review submit` all say
 `changeset <id> is landed on <branch> at changesets/<id>, so git-pair records nothing further for it`
 (exit 1) and write nothing.
+
+## License
+
+MIT — see [LICENSE](LICENSE). The published binary is a statically linked Go binary, so each release also
+carries `THIRD-PARTY-NOTICES.md`: every dependency linked into it, with the licence text each is
+distributed under. It is generated by `scripts/gen-third-party-notices.sh` from the module cache, and
+`mise run release:check` regenerates it and fails if the committed copy no longer matches the dependency
+graph.
