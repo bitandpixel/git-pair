@@ -45,7 +45,7 @@ usage() {
   cat <<'USAGE'
 usage: install.sh [--version v0.1.0] [--install-dir DIR] [--force] [--quiet] [--help]
 
-  --version v0.1.0   install a specific release instead of the newest one
+  --version v0.1.0   install a specific release; the leading v is optional
   --install-dir DIR  where to write git-pair (default ~/.local/bin)
   --force            replace the existing file at that path whatever it is
   --quiet            no progress output, only errors
@@ -95,19 +95,24 @@ case "$arch" in
   *) die "no git-pair release for architecture \"$arch\" (amd64 and arm64 are published)" ;;
 esac
 
-# `latest` is a redirect to the newest release, not a version in a filename: the archive there is named
-# with the version it actually is. So for `latest` the checksums file is fetched first and read for the
-# name, which both resolves the version and gives the hash to check it against, without asking the GitHub
-# API and its rate limits. A pinned version needs no resolution — its name is known, and checksums.txt is
-# then only the thing the hash is looked up in.
-asset=""
+# Two names are involved in one download and they are not the same string. GitHub serves a release at
+# `releases/download/<tag>/`, and goreleaser names the archive from `{{ .Version }}` — the tag with its
+# leading `v` removed. One variable for both is how every pinned install 404s: `v0.1.0` gets the right
+# directory and a file that does not exist, `0.1.0` the right file in a directory that does not. So the
+# input is normalized to a tag for the path, and the file is never constructed at all — it is read out of
+# that release's checksums.txt, the same way `latest` has to read it because `latest` is a redirect to the
+# newest release rather than a version in a filename. One resolution path, and it is the release's own
+# index that names what it published, which is the only authority on the question.
+#
+# The tag is the input with a `v` on the front whether or not the caller put one there, because this
+# project tags `v*` — that is what the release workflow triggers on.
 if [ "$version" = latest ]; then
   download_base="$base_url/latest/download"
   label="the newest release"
 else
-  download_base="$base_url/download/$version"
-  label="release $version"
-  asset="$project"_"$version"_"$os"_"$arch".tar.gz
+  tag="v${version#v}"
+  download_base="$base_url/download/$tag"
+  label="release $tag"
 fi
 
 if command -v curl >/dev/null 2>&1; then
@@ -146,19 +151,19 @@ say "fetching checksums for $label"
 fetch "$download_base/checksums.txt" "$tmp/checksums.txt" ||
   die "could not download $download_base/checksums.txt"
 
-if [ -z "${asset:-}" ]; then
-  # Exactly one entry for this machine, or the newest release is ambiguous and this installer will not
-  # guess. Two entries would mean someone published a second build of the same version for the same
-  # platform, and which one `latest` should hand out is not this script's call.
-  asset=$(awk -v p="$project" -v suf="_$os"_"$arch".tar.gz '
-    substr($2, 1, length(p)) == p &&
-    substr($2, length($2) - length(suf) + 1) == suf &&
-    length($2) > length(p) + length(suf) { name = $2; n++ }
-    END { if (n != 1) exit 1; print name }' "$tmp/checksums.txt") ||
-    die "checksums.txt lists no $os/$arch archive for $label"
-  version=${asset#"$project"_}
-  version=${version%"_$os"_"$arch".tar.gz}
-fi
+# Exactly one archive for this machine, or this release is ambiguous and the installer will not guess.
+# Two entries would mean someone published a second build of the same version for the same platform, and
+# which one to hand out is not this script's call. Note it is matched by prefix and suffix, never
+# constructed: `git-pair_0.1.0_linux_amd64.tar.gz.sig` beside it is not a candidate, and neither is a
+# build named for a tag this release was not cut from.
+asset=$(awk -v p="$project" -v suf="_$os"_"$arch".tar.gz '
+  substr($2, 1, length(p)) == p &&
+  substr($2, length($2) - length(suf) + 1) == suf &&
+  length($2) > length(p) + length(suf) { name = $2; n++ }
+  END { if (n != 1) exit 1; print name }' "$tmp/checksums.txt") ||
+  die "checksums.txt for $label lists no $os/$arch archive"
+version=${asset#"$project"_}
+version=${version%"_$os"_"$arch".tar.gz}
 
 say "downloading $asset"
 fetch "$download_base/$asset" "$tmp/$asset" ||
@@ -167,7 +172,7 @@ fetch "$download_base/$asset" "$tmp/$asset" ||
 # Match on the filename field, not the line, so a release that happens to carry git-pair_0.1.0_… and
 # git-pair_0.1.0_linux_amd64.tar.gz.sig side by side cannot have one line's hash read against the other.
 expected=$(awk -v name="$asset" '$2 == name { print $1; exit }' "$tmp/checksums.txt")
-[ -n "$expected" ] || die "checksums.txt lists no $asset for $label"
+[ -n "$expected" ] || die "checksums.txt for $label lists no $asset"
 actual=$(checksum_of "$tmp/$asset")
 [ "$expected" = "$actual" ] ||
   die "checksum mismatch for $asset

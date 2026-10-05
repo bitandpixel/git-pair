@@ -9,7 +9,9 @@
 # serves a directory shaped like GitHub's release URLs over http on localhost and drives the installer
 # through the cases that decide whether an install works:
 #
-#   the newest release installs and the binary it writes runs; a named version installs; the archive is
+#   the newest release installs and the binary it writes runs; a pinned version installs spelled with and
+#   without its leading `v`, in both the flag and the environment variable, and a release whose archive is
+#   named for something other than its tag installs too; the archive is
 #   checked against checksums.txt and a tampered one is refused; an archive missing from checksums.txt is
 #   refused; a file this installer did not write is not overwritten without --force; an unwritable
 #   directory is reported rather than escalated through sudo; an unsupported machine says so in the words
@@ -82,6 +84,11 @@ if [ -z "$asset" ]; then
 fi
 version=${asset#git-pair_}
 version=${version%_"$os"_"$arch".tar.gz}
+# The served layout has to carry the asymmetry the installer is exposed to in production, or it proves
+# nothing about it: GitHub keys the download directory by *tag* (`v0.1.0`) while goreleaser names the
+# archive from `{{ .Version }}` (`0.1.0`). A fixture where the two are the same string lets an installer
+# that confuses them pass every check — which is what happened to the first version of this replay.
+tag="v$version"
 if [ ! -f "$DIST/$asset" ]; then
   printf 'dist/%s is named in checksums.txt but is not there\n' "$asset" >&2
   exit 1
@@ -89,13 +96,22 @@ fi
 
 # One release directory, in each of the shapes the installer has to cope with. Built as separate trees
 # instead of mutating one, so a case cannot leak its damage into the next case.
-mk_release() { # mk_release <dir> <ok|corrupt|nochecksum>
-  local dir=$1 mode=$2
-  mkdir -p "$dir/releases/latest/download" "$dir/releases/download/$version"
+#
+# `tag` and `asset_name` default to the honest pair (`v$version` over `$asset`); a case that wants to prove
+# the installer does not derive one from the other passes both, deliberately unmatched.
+mk_release() { # mk_release <dir> <ok|corrupt|nochecksum> [tag] [asset-name]
+  local dir=$1 mode=$2 tag="${3:-v$version}" asset_name="${4:-$asset}"
+  mkdir -p "$dir/releases/latest/download" "$dir/releases/download/$tag"
   cp "$DIST/$asset" "$dir/releases/latest/download/$asset"
-  cp "$DIST/$asset" "$dir/releases/download/$version/$asset"
+  cp "$DIST/$asset" "$dir/releases/download/$tag/$asset_name"
   cp "$DIST/checksums.txt" "$dir/releases/latest/download/checksums.txt"
-  cp "$DIST/checksums.txt" "$dir/releases/download/$version/checksums.txt"
+  if [ "$asset_name" = "$asset" ]; then
+    cp "$DIST/checksums.txt" "$dir/releases/download/$tag/checksums.txt"
+  else
+    # The index names what it publishes, so the renamed archive is the only one listed.
+    awk -v n="$asset" -v m="$asset_name" '$2 == n { $2 = m } { print }' "$DIST/checksums.txt" \
+      >"$dir/releases/download/$tag/checksums.txt"
+  fi
   case $mode in
     corrupt)
       python3 -c 'import sys
@@ -113,6 +129,8 @@ with open(p, "r+b") as fh:
 mk_release "$T/good" ok
 mk_release "$T/bad" corrupt
 mk_release "$T/nochecksum" nochecksum
+# Tag and archive name deliberately unrelated: the only thing that can find the file is the index beside it.
+mk_release "$T/odd" ok v9.9.9-mismatch "git-pair_9.9.9-actual_${os}_${arch}.tar.gz"
 
 PORT=$(python3 -c 'import socket
 s = socket.socket()
@@ -159,15 +177,38 @@ check "the installed binary answers --version" 0 "$?"
 contains "$reported" "git-pair version" "names itself as git-pair"
 contains "$reported" "$version" "reports the version it was built as ($version)"
 
-step "a named version installs"
-run good --install-dir "$T/bin-pinned" --version "$version" --quiet
-check "installer exits 0" 0 "$RC"
-contains "$("$T/bin-pinned/git-pair" --version 2>&1)" "git-pair version" "the pinned install runs"
+step "a pinned version installs, spelled every way a person will spell it"
+# The bug this row exists for: `releases/download/<tag>/` and `git-pair_<version>_…` are two strings, and
+# one variable for both 404s in both directions — `v0.1.0` asks for a file that is not there, `0.1.0` asks
+# for a directory that is not there. Every spelling has to land on the same bytes.
+for want in "$version" "v$version"; do
+  run good --install-dir "$T/bin-pin-$want" --version "$want" --quiet
+  check "--version $want installs" 0 "$RC"
+  contains "$("$T/bin-pin-$want/git-pair" --version 2>&1)" "git-pair version $version" \
+    "--version $want wrote the binary that names itself $version"
+done
+GIT_PAIR_VERSION="v$version" GIT_PAIR_BASE_URL="http://127.0.0.1:$PORT/good/releases" \
+  sh "$INSTALLER" --install-dir "$T/bin-pin-env" --quiet >"$OUT" 2>&1
+RC=$?
+check "GIT_PAIR_VERSION=v$version installs" 0 "$RC"
+contains "$("$T/bin-pin-env/git-pair" --version 2>&1)" "git-pair version $version" \
+  "the environment form wrote the same binary"
+
+step "the archive name comes from checksums.txt, not from the tag"
+run odd --install-dir "$T/bin-odd" --version v9.9.9-mismatch --quiet
+check "a release whose archive is named for something other than its tag installs" 0 "$RC"
+contains "$("$T/bin-odd/git-pair" --version 2>&1)" "git-pair version" "what it wrote runs"
+if [ -e "$T/bin-odd/git-pair" ]; then
+  ok "the oddly named archive was found through its index entry"
+else
+  fail "the oddly named archive was not found — the name is being constructed, not read"
+fi
 
 step "a version that was never published is refused"
 run good --install-dir "$T/bin-missing" --version v9.9.9-not-published --quiet
 check "asking for a release that is not there stops" 1 "$RC"
 contains "$(cat "$OUT")" "could not download" "names the thing it could not fetch"
+contains "$(cat "$OUT")" "download/v9.9.9-not-published/" "asked for the tag, not for a de-prefixed directory"
 if [ -e "$T/bin-missing/git-pair" ]; then
   fail "something was written for a release that does not exist"
 else
@@ -185,7 +226,7 @@ else
 fi
 run nochecksum --install-dir "$T/bin-nochecksum" --quiet
 check "an archive missing from checksums.txt is refused" 1 "$RC"
-contains "$(cat "$OUT")" "checksums.txt lists no" "says the checksums file is where it looked"
+contains "$(cat "$OUT")" "lists no" "says the checksums file is where it looked"
 contains "$(cat "$OUT")" "$os/$arch" "names the platform it could not find"
 
 step "a file this installer did not write is left alone"

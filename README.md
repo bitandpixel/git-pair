@@ -41,10 +41,12 @@ Prebuilt binaries for macOS and Linux, on amd64 and arm64, are published with ev
 curl -fsSL https://github.com/bitandpixel/git-pair/releases/latest/download/install.sh | sh
 ```
 
-The installer names the archive from `uname`, checks its SHA-256 against `checksums.txt` from the same
-release, and writes `~/.local/bin/git-pair`. It takes `--version v0.1.0` to install a specific release,
-`--install-dir DIR` to write somewhere else, and `--force` to replace a file at that path which is not a
-working git-pair binary; `--help` lists them, and
+The installer takes the platform from `uname` and the archive name from that release's `checksums.txt`
+rather than constructing it — the download directory is keyed by tag (`v0.1.0`) and the archive is named
+by version (`0.1.0`), so only the index knows both — then checks the SHA-256 and writes
+`~/.local/bin/git-pair`. It takes `--version v0.1.0` to install a specific release, with or without the
+leading `v`, `--install-dir DIR` to write somewhere else, and `--force` to replace a file at that path
+which is not a working git-pair binary; `--help` lists them, and
 [`packaging/install.sh`](packaging/install.sh) is short enough to read before piping it. It never uses
 sudo, and it prints the `PATH` line you need when the install directory is not already on `PATH`.
 
