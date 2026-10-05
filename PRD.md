@@ -1327,21 +1327,38 @@ question it answers — is the diff under test the diff that was approved? (§21
 stack can ask. The value is a commit rather than a ref on purpose: a ref names a branch, and the branch a
 child is measured against is often deleted before the next clone arrives to read the answer.
 
-`Review-Diff-Id` is the identity of that measured diff, as `<version>:<hex>`. The value hashes the raw
-name-status description of the diff between the recorded base and the recorded head — modes, pre- and
-post-image blob OIDs, statuses and paths — with the review record excluded: this changeset's directory and
-every ancestor's, in both of their homes, because the record lives there and a reply to a review thread must
-not change the identity of the approval that reply is written into, and because a landing is a move of that
-record before it is a change of code (§21.1). The two trailers are written together and mean different
+`Review-Diff-Id` is the identity of that measured diff, as `<version>:<raw>` or `<version>:<raw>+<patch>`.
+The first half hashes the raw name-status description of the diff between the recorded base and the recorded
+head — modes, pre- and post-image blob OIDs, statuses and paths — with the review record excluded: this
+changeset's directory and every ancestor's, in both of their homes, because the record lives there and a
+reply to a review thread must not change the identity of the approval that reply is written into, and because
+a landing is a move of that record before it is a change of code (§21.1). The second half, where it exists,
+is the identity of the same diff *as rendered*: `git patch-id --verbatim` over the `-U3` patch that the same
+`git diff` prints beside those records, which is what changed and where.
+
+One invocation produces both halves, so they cannot disagree about the ground, the exclusions or the moment
+they were taken, and they travel in one trailer for the same reason: two lines describing one measurement are
+two chances to be read as two measurements. The two halves answer different questions and neither covers the
+other — the first is the identity of the content, the second of the hunks — and §21.1 says which is asked
+when.
+
+The two trailers are written together and mean different
 things: the base names where the diff started, which is what lets a refusal say *which* side moved and what
 to do about it, and the identity names the content, which is the one comparison the gate makes when it asks
 whether the diff under test is the diff that was approved (§21, §21.1).
 
-The value is versioned because it is defined by the rules that produced it — the pinned diff flags, and the
-exclusion above — so changing one of them is a new version rather than a silent edit that mismatches every
+The value is versioned because it is defined by the rules that produced it — the pinned diff flags, the
+pinned `-U3` and `--default-prefix` on the rendered half, `patch-id --verbatim`, and the exclusion above — so
+changing one of them is a new version rather than a silent edit that mismatches every
 approval written before it. A marker carrying a version this build does not compute reads as no identity
 recorded, which is an absence and not a content difference: the reader falls back to the comparison still
-available rather than being refused on a mismatch nobody can explain.
+available rather than being refused on a mismatch nobody can explain. A version the reader does know and does
+not write — `1:`, which carried the first half alone — is compared on that half, so an approval written
+before the second half existed keeps meaning what it meant when it was written.
+
+The rendered half is absent where it could not be computed, which is a git old enough to lack
+`patch-id --verbatim` or a diff with no patch in it. Absence costs the relaxation and not the approval: the
+gate keeps asking the content question, and refuses where that is what it must (§21.1).
 
 A submission that names no head — written before this trailer existed, or by hand — is refused by the
 gate rather than assumed, and the reason says the approval covers an unknown commit (§11.3).
@@ -1779,6 +1796,17 @@ NOT READY:
 The name of the rewritten head is in that sentence because it is the other half of the comparison — a
 reader who sees only "history moved" cannot tell a rebase from a fetch gap.
 
+The content condition **credits the destination**. A branch that took the integration branch in has changed
+files since its marker, and none of that content is the author's: the reviewer had no reason to read trunk,
+and the destination vouches for what it carries. So a path is not drift where head carries the destination's
+content there, and a whole merge is not drift where head is what `git merge-tree` would make of the reviewed
+commit and the destination. That last reading is why a resolution written by hand after a conflict *is* drift:
+the merge git would have produced does not contain it. Content from an ancestor that has not landed belongs
+to the author until the destination carries it, and is refused (§21, and
+`TestAnAncestorsFileIsCreditedOnlyWhenTheDestinationCarriesIt`). `check --json` reports the paths it credited
+as `drift_credited`, so the trust a verdict rests on is visible to a reader who does not believe it, while the
+paths it refused stay in `reasons`.
+
 The passing verdict names the commit it cleared, not only the changeset: a log that says "ready" without
 saying what it looked at cannot be re-read after the branch has moved. `next` is the rest of the handoff
 (§9.5), printed by the commands that know where the work stands.
@@ -1804,7 +1832,8 @@ flag is on the command that runs the gate, which is the one place the policy is 
 
 `--json` prints `changeset`, `ready`, `state`, `head`, `reasons`, `policy` (`approve-only` or
 `approve-or-feedback`, so a verdict in a log carries the policy that produced it), `reviewed_head`,
-`integrated`, `integrated_commit`, `integrating`, `integrate_commit` and `next_action`. `head` and `reviewed_head` are full SHAs rather than the short
+`drift_credited`, `integrated`, `integrated_commit`, `integrating`, `integrate_commit` and `next_action`.
+`head` and `reviewed_head` are full SHAs rather than the short
 forms the human output prints, because the consumer compares them against the revision it built —
 `integrated_commit` and `integrate_commit` are short in `status` and full here, matching the other
 commit fields of this command. `reviewed_head` is the commit the newest permitting
@@ -3184,13 +3213,15 @@ the movement note compares a live branch against, and the measured base is one o
 content comparison measures from. While the parent's branch is the base they name the same commit; the
 moment the parent lands they do not, and the branch that named the first is often deleted.
 
-A submission records the identity of that diff beside them, in `Review-Diff-Id` (§10.4) — one value the
-content question is asked with directly, instead of inferred from how far the parent and the destination
+A submission records the identity of that diff beside them, in `Review-Diff-Id` (§10.4) — one trailer
+carrying two identities of one measurement, the content and the rendered hunks — so the content question is
+asked with the values directly, instead of inferred from how far the parent and the destination
 have moved since the approval. The measured base stays because an answer of "different" has to be
 explained, and an explanation names which side moved and what to do about it. Where a marker carries no
 identity — written before the trailer, hand-edited, or written under a version this build does not compute
 — the absence is read the same way as an absent base: as something not said, never as a difference (§21),
-and the comparison of bases below decides instead.
+and the comparison of bases below decides instead. Where it carries one half and not the other, the half
+present is asked, and the stricter answer wins (§21.1).
 
 A submission whose approval recorded no parent tip is not refused: the absence says the trailer
 was not written, which is not evidence that the parent moved. `status` says what is missing. The same
@@ -3239,6 +3270,31 @@ approval it answers. And a landing is a change to the record before it is a chan
 integrate` moves the directory — so a child measured from a base that carries its parent's record, against
 a head that predates it, would otherwise report the parent's review as the child deleting it.
 
+### The two halves of the value
+
+One trailer carries two identities of the same diff, because one `git diff` produces both and they answer
+different questions. The **content half** is the digest described above — modes, blob OIDs, statuses, paths.
+The **rendered half** is `git patch-id --verbatim` over the patch the same invocation prints beside those
+records, with the context pinned at `-U3` and the `a/`/`b/` prefixes pinned by `--default-prefix`, so a
+reader's `diff.context`, `diff.noprefix` and `diff.algorithm` cannot move what an approval recorded
+(`TestDiffIdentityIsNotMovedByDiffConfiguration`).
+
+The content half is the primary claim, and the comparison the gate makes. Where it disagrees, the gate asks
+the rendered half one question, on the landed path only: are the hunks themselves still what the reviewer
+read? An approval is kept on that answer when the branch also still merges into the destination cleanly —
+`parent_comparison` then reads `contribution-patch` rather than `contribution`. A merge with a conflict in it
+produces no answer at all, which is the point: what would land is a resolution somebody wrote later, over
+content no reviewer saw. Where there is no rendered half to compare — a `1:` value, or a git too old for
+`patch-id --verbatim` — the content half decides alone, and the verdict is the older, stricter one.
+
+`--verbatim` rather than `--stable` because of one measured pair: a recipe line indented with a tab and the
+same line indented with spaces scored identically under `--stable` and `--unstable`, and `make` reads them as
+two different things. `--verbatim` keeps whitespace significant while still ignoring the `@@` line numbers,
+which is the insensitivity the half exists for — the file below this branch's hunk grew three lines and the
+hunk is the same text. Because the flag is newer than the command, an absence is a normal reading and not an
+error, and the fallback is a refusal rather than a guess (`TestDiffIdentitySeesAWhitespaceSignificantLine`,
+`TestDiffIdentityKeepsTheReviewedHunksApartFromTheRestOfTheFile`).
+
 ### What the value cannot see
 
 The identity is of file content, and about that it is exact: a line changed inside a file already in the diff
@@ -3250,11 +3306,15 @@ not answer, each answered elsewhere:
     whether they merge. The section below is the answer, not a cleverer digest.
 -   **Whose line is whose.** The value hashes whole-file blob OIDs, so a change that arrives from another
     branch inside a file this branch also changes is inside the child's post-image even when it is a line
-    nowhere near the child's, and the identity moves: a far away trunk line in a shared file costs a re-read
-    of that file. `TestContributionIsUnmovedByTakingTheDestinationIn` and
-    `TestContributionCountsATrunkEditToAFileTheChildAlsoChanges` are the two sides. Nor can the value be read
-    as evidence about one line: `git pair change ready --allow-single-line` asks whether a line is
-    load-bearing, which is a judgement about meaning the digest cannot make (§24).
+    nowhere near the child's, and the identity moves. The rendered half above is what answers that case, and
+    does it only where the hunks themselves did not move: a trunk line inside the three lines of context the
+    reviewer read moves the rendered value too, and the approval goes back for review
+    (`TestContributionIsUnmovedByTakingTheDestinationIn`,
+    `TestContributionCountsATrunkEditToAFileTheChildAlsoChanges`, and at the gate
+    `TestTrunkEditingTheSameFileKeepsTheApprovalOnTheRenderedHalf` and
+    `TestTrunkEditingAReviewedContextLineRefusesTheChild`). Nor can either value be read as evidence about one
+    line: `git pair change ready --allow-single-line` asks whether a line is
+    load-bearing, which is a judgement about meaning a digest cannot make (§24).
 -   **How far the world has moved.** A reading of that kind is offered nowhere in the gate. It would expire
     an approval on a commit that touched neither end of the comparison, which is the mistake §21 used to make
     about the parent branch.
@@ -3666,12 +3726,16 @@ Explicitly given up while the durable-ref layer was being taken out, each with w
     the approval recorded (§10.4), from whichever commit is the ground the child's work now sits on, and
     guards the pass with a check that the branch still merges into the destination (§21.1). The two cases
     the older two-base comparison could not answer — a squash landing, and a child that has taken the
-    destination in — are answered, and the parent's own movement is a note rather than a reason. What is
-    still deferred is the sibling rule: a branch that merges the destination in is refused today by the
-    rule that counts content the review never saw, which reads the branch's own history and cannot yet
-    tell the destination's arrivals from the author's. `TestMergingTheDestinationInIsStillUnreviewedWork`
-    pins that boundary; teaching that rule about the destination is the remaining half, and it belongs to
-    §16's unreviewed-content reading rather than to the stack.
+    destination in — are answered, and the parent's own movement is a note rather than a reason. What
+    was still deferred beside it is taken now too: the rule that counts content the review never saw
+    credits the destination, so a branch that merged the integration branch in keeps its approval where
+    the content it took is the destination's own (§11.3), and the rendered half of `Review-Diff-Id` keeps
+    the landed-parent approval where a destination edit sits in the same file but nowhere near the
+    reviewed hunks (§21.1). What those two readings still refuse is content the destination does not
+    carry — an ancestor that has not landed, somebody else's branch, a conflict resolution written by
+    hand — which is the boundary
+    `TestMergingInWorkThatIsNotTheDestinationsIsRefused` and
+    `TestAHandResolvedConflictIsContentTheReviewNeverSaw` pin.
 -   **Reviewer identity and thread resolution state.** Per-reviewer permissions, "who is this
     comment from" as data, and resolved/unresolved threads. Cost: identity is not in git's commit
     model in any way git-pair can enforce, and thread state is state — it wants a ref, a file, or a

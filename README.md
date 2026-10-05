@@ -385,7 +385,7 @@ supplies authorship and order. Both are plain Markdown with no schema.
 | Marker | Subject | Trailers |
 | --- | --- | --- |
 | ready | `git-pair: ready <slug>` | `Review-State: ready`, `Review-Changeset: <slug>` |
-| review | `review: <outcome> <slug>` | `Review-Outcome: <outcome>`, `Review-Changeset: <slug>`, `Review-Head: <sha>`, `Review-Base-Head: <sha>`, `Review-Diff-Id: <version>:<hex>`, and `Review-Parent-Head: <sha>` for a stacked changeset |
+| review | `review: <outcome> <slug>` | `Review-Outcome: <outcome>`, `Review-Changeset: <slug>`, `Review-Head: <sha>`, `Review-Base-Head: <sha>`, `Review-Diff-Id: <version>:<hex>[+<hex>]`, and `Review-Parent-Head: <sha>` for a stacked changeset |
 | unready | `git-pair: unready <slug>` | `Review-State: working`, `Review-Changeset: <slug>` |
 | abandon | `git-pair: abandon <slug>` | `Review-State: abandoned`, `Review-Changeset: <slug>` |
 
@@ -410,13 +410,21 @@ the same commit; once that parent has landed they differ, and the branch the sec
 deleted — which is why the first one is a commit.
 
 `Review-Diff-Id` is the third of the three, and the only one that names the content: the identity of the
-recorded diff between that base and that head, hashed from what the diff changes — modes, blob OIDs,
-statuses, paths — with the review record left out: this changeset's directory and every ancestor's, in both
-of their homes, so replying to a review thread cannot change the identity of the approval the reply is
-written into, and a parent's landing cannot read as the child deleting the parent's review. It carries a
+recorded diff between that base and that head, in two halves separated by `+`. The first hashes what the diff
+changes — modes, blob OIDs, statuses, paths — with the review record left out: this changeset's directory and
+every ancestor's, in both of their homes, so replying to a review thread cannot change the identity of the
+approval the reply is written into, and a parent's landing cannot read as the child deleting the parent's
+review. The second is `git patch-id --verbatim` over the patch the same `git diff` prints, which is what
+changed and where: it is what lets an approval stand when the destination edited a file this branch also
+edits, on a line nowhere near this branch's, and what refuses when that edit is inside the context the
+reviewer read (PRD §21.1). Both halves come from one invocation, so they cannot disagree about the ground or
+the exclusions, and they travel in one trailer for the same reason. A git that cannot compute the second half
+leaves it off, and the gate asks the stricter question.
+
+It carries a
 version because the value is defined by the rules that produced it. A marker whose version this build does
 not know reads as no identity recorded, which is an absence rather than a difference, and the reader gets
-the comparison still available.
+the comparison still available; `1:` carried the first half alone, and is compared on it.
 
 **Readiness is withdrawn with a command.** `git pair change unready` commits `Review-State: working`
 and takes the changeset out of the queue. Readiness is an offer made with `git pair change ready`, so
@@ -632,7 +640,7 @@ duplicate it exists to catch.
 | `review reopen` | none | TUI on `<last review>..current`, the work that has landed since you reviewed; needs a terminal; refuses if no review exists |
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
-| `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history, and where it measured with `Review-Base-Head`, which is what lets `check` tell which side moved, and what it measured with `Review-Diff-Id`, the identity of that diff (§11.3) |
+| `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history, and where it measured with `Review-Base-Head`, which is what lets `check` tell which side moved, and what it measured with `Review-Diff-Id`, the identity of that diff in two halves — the content, and the rendered hunks (`<version>:<raw>+<patch>`) (§11.3) |
 | `review history` | `--changeset <slug>` | only review marker commits, indexed from `0`, each naming the commit it reviewed under `REVIEWED` and the reviewer who submitted it under `REVIEWER` |
 | `queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus a `LANDED UNREVIEWED` heading for a landing whose destination holds no approval of what it carries (a finding no command closes, and one a `change tidy` that reached the destination does end, because the move is the acknowledgement); read from the repository, not the checkout. A second list, `AWAITING INTEGRATION` / `awaiting_integration`, holds approved work whose author has asked for the merge (§9.9) with the branch it is asking to land on — never in both lists, because a declaration is a marker and a branch carrying one is not `READY` |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug, plus the landing read from the destination's tree: `landed`, `landed_commit`, `landed_branch`, and the chain that arrived with it (`chain_base`, `chain_head`, `reviewed`) |
@@ -908,8 +916,16 @@ parent's branch is still here holding nothing the destination lacks, `parent_hea
 says this head is already on the landing — which is the half that stays answerable after that branch is
 deleted, and the half that decides whether any rebase is owed — and `parent_measured_base` and
 `parent_comparison` are the two facts behind a parent verdict: the commit the approval recorded measuring
-from, and which reading answered it, `contribution` when the recorded diff identity was compared with what
-this branch contributes today and `merge-base` when the older comparison of the two bases decided.
+from, and which reading answered it — `contribution` when the recorded content identity was compared with what
+this branch contributes today, `contribution-patch` when the content moved and the recorded identity of the
+rendered hunks did not (a file this branch edits also changed in the destination, and the branch still merges
+cleanly), and `merge-base` when the older comparison of the two bases decided.
+
+A branch that merged the integration branch in also carries `drift_credited`: the paths that differ from the
+reviewed commit and were not counted as drift because the destination carries that content (PRD §11.3). It is
+what the verdict rests on, reported rather than assumed, so a reader who does not believe a passing gate can
+see what was taken on trust. Content the destination does not carry — an ancestor still sitting on its own
+branch, somebody else's branch, a conflict resolved by hand — is in `reasons`, not here.
 
 This form carries the verdict in `ready` rather than in the exit code: a not-ready run prints its
 JSON and exits 0, so a job piping it into `jq` keeps git-pair's answer separate from the pipeline's.

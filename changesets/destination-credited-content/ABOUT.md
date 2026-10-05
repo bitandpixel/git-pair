@@ -66,6 +66,32 @@ git's, its documentation says it may change, and the table above shows behaviour
 file happens to produce a hunk. A value this build cannot interpret reads as absence, never as a difference —
 the same rule as an absent trailer.
 
+Two things had to be true for the second half to cost nothing to the approvals already written, and both are
+tested rather than argued:
+
+-   Adding `-U3` and `--default-prefix` does not move the raw half. git puts one further NUL between the last
+    name-status record and the patch, the raw section is everything before it, and hashing exactly those
+    bytes reproduces the value the previous version wrote — `TestDiffIdentityRawHalfIsTheShippedDigest` holds
+    the two implementations against each other, so a `2:` marker can be compared with a `1:` one.
+-   The version accepts both spellings. This build writes `2:`; a `1:` value is read as a content identity
+    with no rendered half, so an approval written before this change is compared on what it recorded rather
+    than treated as unreadable (`TestAnIdentityFromTheFirstVersionComparesOnItsHalf`, and at the gate
+    `TestAnApprovalFromTheFirstVersionDoesNotRelaxOnTheRenderedHalf`, which is the conservative side of the
+    same fact: no rendered half, no relaxation).
+
+## What the surface gains
+
+Two values, both readings of a verdict rather than new verdicts:
+
+-   `parent_comparison` gains `contribution-patch`: the content half moved, the rendered half did not, and the
+    branch still merges into the destination cleanly. A reader who does not believe the pass can see which of
+    the two halves answered (PRD §21.1).
+-   `check --json` gains `drift_credited`, the paths the destination was credited for when the unreviewed-content
+    rule let a merge through. What it refused stays in `reasons` (PRD §11.3).
+
+The PRD carries the rules in §10.4 (the compound value and its versions), §11.3 (the credit, and the field),
+§21.1 (what each half covers, and why `--verbatim`), and §27 (the sibling rule this takes).
+
 ## Crediting the destination
 
 `ReconcileStaleness` compared the reviewed tree with head and called every difference the author's. Now:
@@ -95,9 +121,17 @@ absent`, refused.
 
 ## Cost
 
-No extra git read for the identity: both halves come out of the invocation the previous changeset already
-made. The drift rule gains one `merge-tree` per read where it previously had none, and the memo treats
-`merge-tree` as a pure read, so a `status`/`check` pair on the same head pays it once.
+The two halves come out of the one `git diff` the previous changeset already ran, so the identity costs one
+extra `git patch-id` per measurement taken — a read of a pipe, classified `pureRead` beside `merge-tree` so
+the memo holds its answer rather than clearing itself. Without that classification the default (`mutation`)would clear the memo on every identity, which is the kind of cost that shows up as a slow command rather than
+as a bug.
+
+The drift rule gains one `merge-tree`, one `rev-parse` and one `diff` where it previously asked nothing, and
+only where a path moved outside the changeset directory.
+
+Measured with the suite's spawn shim, the bound `TestStatusStackChainCostsABoundedReadPerStep` pins is
+unmoved by this changeset: `status --changeset` on the five-deep landed stack costs 7 invocations per extra
+ancestor here and before it (budget 10).
 
 ## Risks named
 
