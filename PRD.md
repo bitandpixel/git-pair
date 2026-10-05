@@ -2109,7 +2109,16 @@ rather than guessed once for the repository:
 
 1. the branch the changeset's own `base:` names, when it names one;
 2. for a stacked child, where its landed parent went — a stack lands as a line, so the child's destination
-   is the branch that carries the parent, and the walk names the parents it followed;
+   is the branch that carries the parent, and the walk names the parents it followed. The two halves of a
+   parent's record answer that question differently, and the walk asks them in that order: `base-changeset:`
+   names the changeset, which is what the destination files under `changesets/<id>/`, while `base:` keeps
+   naming the branch, which is the state in which a reader that trusted it names finished work as the
+   destination. The branch is asked beside the id, and its slug with it, for records written before that pair
+   existed (`parent:`, `parent-changeset:`) which can name a branch and no changeset. The **id** is what
+   carries forward, because that is the name the next record is read by. A walk that compared only the branch
+   name matched nothing on a repository whose branches are prefixed, stopped at the branch, and offered as a
+   destination a branch carrying nothing the destination lacks — which the queue prints, and the automatic
+   merge acts on;
 3. otherwise the repository's integration branch (§4): `--default-branch <ref>`, then
    `refs/remotes/origin/HEAD`, then a sole `origin/main` or `origin/master`, then a local `main` or
    `master`.

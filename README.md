@@ -232,8 +232,12 @@ Integrating: booking-transaction
 
 That is the whole command: one empty marker, no ref, no push, no merge. It runs the gate above before it
 writes, so nothing `check` would refuse can be declared, and `git pair change unready` takes the request
-back. What moved is who waits for whom — the merge is still ordinary git run by whoever owns the branch, and
-CI's gate is both answers of that one command:
+back. `merge into:` is the destination the walk of PRD §13.1 arrives at — for a child of landed parents, the
+branch those ancestors reached, found by each ancestor's `base-changeset:` id rather than the branch its
+`base:` still names (`feat/auth`, where the destination's record is `changesets/feat-auth/`) — and
+`queue --json` prints the same value, which is what a pipeline merges into. What moved is who waits for
+whom — the merge is still ordinary git run by whoever owns the branch, and CI's gate is both answers of that
+one command:
 
 ```bash
 git pair check --json | jq -e '.ready and .integrating'

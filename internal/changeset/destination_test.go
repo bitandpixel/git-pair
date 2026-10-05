@@ -176,3 +176,137 @@ func TestDestinationIsTheLiveParentBranchWhenTheParentReachedOnlyAReleaseLine(t 
 }
 
 // A base under `refs/git-pair/` that is not an integration ref — an archive ref, a stray, a retired
+
+// stackedOn writes a child's directory naming the work below it the way the current manifest does: `base:`
+// holds the branch the parent was measured on, and `base-changeset:` holds the changeset that branch carries.
+// An empty parentID leaves the id out, which is what a file written before that pair existed can look like —
+// and the case the walk has to survive on the branch name alone.
+func stackedOn(t *testing.T, f *gittest.Fixture, slug, parentBranch, parentID string) {
+	t.Helper()
+	yaml := "id: " + slug + "\nbase: " + parentBranch + "\n"
+	if parentID != "" {
+		yaml += "base-changeset: " + parentID + "\n"
+	}
+	f.StageChangeset(slug, parentBranch)
+	f.Write(f.ChangesetPath(slug, "CHANGESET.yaml"), yaml)
+}
+
+// stackedOnOldKeys is `stackedOn` with `parent:` and `parent-changeset:` instead, the spellings read from
+// files written before `base:`/`base-changeset:` existed. Nothing writes them, and the destination is free to
+// carry them for as long as the landings that wrote them stand, so the walk answers for both.
+func stackedOnOldKeys(t *testing.T, f *gittest.Fixture, slug, parentBranch, parentID string) {
+	t.Helper()
+	yaml := "id: " + slug + "\nparent: " + parentBranch + "\nparent-changeset: " + parentID + "\n"
+	f.StageChangeset(slug, parentBranch)
+	f.Write(f.ChangesetPath(slug, "CHANGESET.yaml"), yaml)
+}
+
+// landTwo rungs of a stack onto trunk: the deeper one first, so both records end up in the destination's
+// tree — which is the only thing that makes them landed, and the only place the walk can read them from.
+func landOnTrunk(t *testing.T, f *gittest.Fixture, branches ...string) {
+	t.Helper()
+	f.SwitchTo("main")
+	for _, b := range branches {
+		f.MustGit("merge", "--quiet", "--no-ff", "-m", "land "+b, b)
+	}
+}
+
+// The same walk as TestDestinationWalksAParentChain, with the names this repository actually uses. Every
+// fixture above names a branch exactly what its changeset is called, and for that shape the two readings of
+// "is the work below this one landed?" agree: the branch a parent recorded (`alpha`) is the same string as
+// the id the destination files the record under (`alpha`). A branch called `feat/alpha` breaks the
+// coincidence, and a walk that asks the destination about the branch — rather than about the `base-changeset:`
+// id sitting beside it — matches nothing, stops at the branch, and offers as a destination a branch carrying
+// nothing the destination lacks.
+//
+// Three deep is what makes it bite: with one landed ancestor the walk reads that ancestor's own record, which
+// names `main`, and the answer is right whatever the comparison does. It is the second ancestor's record that
+// has to be recognised as landed before the walk can climb over it.
+func TestDestinationWalksAParentChainWhoseBranchNamesDifferFromTheirIds(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("feat/alpha")
+	f.CommitChangeset("feat-alpha", "main")
+	f.Commit("alpha work", gittest.WithFile("alpha.txt", "1\n"))
+	f.CreateBranch("feat/beta")
+	stackedOn(t, f, "feat-beta", "feat/alpha", "feat-alpha")
+	f.Commit("beta work", gittest.WithFile("beta.txt", "1\n"))
+	f.CreateBranch("feat/gamma")
+	stackedOn(t, f, "feat-gamma", "feat/beta", "feat-beta")
+	f.Commit("gamma work", gittest.WithFile("gamma.txt", "1\n"))
+
+	landOnTrunk(t, f, "feat/beta", "feat/alpha")
+
+	f.SwitchTo("feat/gamma")
+	got := destinationOf(t, f, "feat-gamma")
+	if got.Ref != "main" || got.Why != "parent" {
+		t.Errorf("destination = %s, want main (parent): both ancestors landed, so the only branch under this "+
+			"work is the integration branch — naming a parent branch instead asks for a merge into a branch "+
+			"that already holds nothing of the child's", got)
+	}
+	if len(got.Via) != 2 || got.Via[0] != "feat-beta" || got.Via[1] != "feat-alpha" {
+		t.Errorf("via = %v, want [feat-beta feat-alpha]: the report names the records it crossed by the names "+
+			"they are filed under, not the branches that carried them", got.Via)
+	}
+	if got.Unreachable != "" {
+		t.Errorf("unreachable = %q, want empty", got.Unreachable)
+	}
+}
+
+// The same stack written with the keys nothing writes any more. The destination keeps whatever spelling the
+// landing brought with it, so the walk reads `parent:`/`parent-changeset:` beside the current pair, and the
+// branch in the older file is exactly as stale as the one in a newer one.
+func TestDestinationWalksAParentRecordedWithTheOldParentKeys(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("feat/alpha")
+	f.CommitChangeset("feat-alpha", "main")
+	f.Commit("alpha work", gittest.WithFile("alpha.txt", "1\n"))
+	f.CreateBranch("feat/beta")
+	stackedOnOldKeys(t, f, "feat-beta", "feat/alpha", "feat-alpha")
+	f.Commit("beta work", gittest.WithFile("beta.txt", "1\n"))
+	f.CreateBranch("feat/gamma")
+	stackedOnOldKeys(t, f, "feat-gamma", "feat/beta", "feat-beta")
+	f.Commit("gamma work", gittest.WithFile("gamma.txt", "1\n"))
+
+	landOnTrunk(t, f, "feat/beta", "feat/alpha")
+
+	f.SwitchTo("feat/gamma")
+	got := destinationOf(t, f, "feat-gamma")
+	if got.Ref != "main" || got.Why != "parent" {
+		t.Errorf("destination = %s, want main (parent)", got)
+	}
+	if len(got.Via) != 2 || got.Via[0] != "feat-beta" || got.Via[1] != "feat-alpha" {
+		t.Errorf("via = %v, want [feat-beta feat-alpha]", got.Via)
+	}
+}
+
+// A middle rung that recorded the branch and no changeset is the reason the branch is asked at all, and its
+// slug beside it: `base: feat/alpha` names a directory the destination holds as `feat-alpha`, and a walk that
+// matched only the exact string would stop there. The id is still what the walk reports crossing, because that
+// is the name the destination's records — and the next hop's read — use.
+func TestDestinationWalksAParentThatRecordedOnlyItsBranch(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("feat/alpha")
+	f.CommitChangeset("feat-alpha", "main")
+	f.Commit("alpha work", gittest.WithFile("alpha.txt", "1\n"))
+	f.CreateBranch("feat/beta")
+	stackedOn(t, f, "feat-beta", "feat/alpha", "")
+	f.Commit("beta work", gittest.WithFile("beta.txt", "1\n"))
+	f.CreateBranch("feat/gamma")
+	stackedOn(t, f, "feat-gamma", "feat/beta", "feat-beta")
+	f.Commit("gamma work", gittest.WithFile("gamma.txt", "1\n"))
+
+	landOnTrunk(t, f, "feat/beta", "feat/alpha")
+
+	f.SwitchTo("feat/gamma")
+	got := destinationOf(t, f, "feat-gamma")
+	if got.Ref != "main" || got.Why != "parent" {
+		t.Errorf("destination = %s, want main (parent): the middle rung names feat/alpha and no changeset, "+
+			"which is still the landed work filed under feat-alpha", got)
+	}
+	if len(got.Via) != 2 || got.Via[0] != "feat-beta" || got.Via[1] != "feat-alpha" {
+		t.Errorf("via = %v, want [feat-beta feat-alpha]", got.Via)
+	}
+}
