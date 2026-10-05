@@ -116,7 +116,7 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	// a changeset is measured against that branch, so one started on it is inert — every
 	// directory it carries is already landed. Saying so where the mistake is made beats a
 	// status line that never shows the changeset.
-	if db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch); err == nil && db.IsBranch(branch) {
+	if db, err := a.resolveDefaultBranch(ctx, repo); err == nil && db.IsBranch(branch) {
 		return &usageError{fmt.Errorf("%s is the integration branch, so a changeset started on it can never contain anything: `git switch -c <branch>` first", branch)}
 	}
 	if opts.parent != "" && opts.base != "" {
@@ -130,7 +130,7 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		// Resolved before the changeset itself. When there is no trunk to infer a base from,
 		// the advice the caller needs is `--base <ref>`, and that has to be the error they
 		// see rather than the generic "which branch is the integration branch" refusal.
-		if base, err = defaultBase(ctx, repo, a.defaultBranch); err != nil {
+		if base, err = a.defaultBase(ctx, repo); err != nil {
 			return &usageError{err}
 		}
 		a.warn("base: %s (pass --base to choose a different ref)\n", base)
@@ -164,7 +164,7 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		return &usageError{fmt.Errorf("changesets/%s/ is deleted in your working tree but the deletion is not committed; commit the deletion before starting a changeset with that name again", id)}
 	}
 	cs.Exists = dir.Worktree
-	if db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch); err == nil {
+	if db, err := a.resolveDefaultBranch(ctx, repo); err == nil {
 		// A landed changeset is closed, and arriving at one by id is the same mistake `change ready` refuses.
 		// The answer comes from the destination's tree, so it does not depend on which command noticed.
 		if err := marker.RefuseIntegrated(ctx, repo, id, db); err != nil {
@@ -189,7 +189,7 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	// not demanded — a parent that carries none, or carries two, is recorded with just its branch
 	// name, because guessing an ID here would write a claim nobody checked into the file that is
 	// read after the parent is gone.
-	db, dbErr := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
+	db, dbErr := a.resolveDefaultBranch(ctx, repo)
 	baseChangeset := ""
 	// stackBase is the branch the stack is recorded on: `--parent` when one was named, and the base when the
 	// base turned out to name a branch carrying somebody else's unlanded work.
@@ -423,8 +423,8 @@ func candidateNote(candidates []string) string {
 // integration branch — the same ref the landed test compares trees against — so a changeset
 // cannot be measured against one branch while being judged landed by another. The spelling is
 // the short branch name, because that is what a person reads in CHANGESET.yaml.
-func defaultBase(ctx context.Context, repo *git.Repo, override string) (string, error) {
-	db, err := changeset.DefaultBranch(ctx, repo, override)
+func (a *app) defaultBase(ctx context.Context, repo *git.Repo) (string, error) {
+	db, err := a.resolveDefaultBranch(ctx, repo)
 	if err != nil {
 		return "", fmt.Errorf("cannot infer a base: %v; pass --base <ref>", err)
 	}

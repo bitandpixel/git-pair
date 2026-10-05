@@ -63,10 +63,17 @@ func AmbiguityError(res Resolution) error {
 // Where the integration branch came from. Reported in `status --json`, because a run that
 // misreports what has landed is the expensive failure mode of this rule, and the output
 // should be explainable on its own rather than from what the machine happened to fetch.
+//
+// `env` is apart from the other three because the caller learned the ref from a process
+// environment rather than from a command line, and the two can be told apart only by the
+// caller. `DefaultBranch` reports every caller-supplied ref as `flag`; the CLI rewrites it to
+// `env` for the value it read from `GIT_PAIR_DEFAULT_BRANCH`, which is the reason the field is
+// settable by a caller at all.
 const (
 	DefaultBranchFlag          = "flag"
 	DefaultBranchRemoteHead    = "origin-head"
 	DefaultBranchSoleCandidate = "sole-candidate"
+	DefaultBranchEnvironment   = "env"
 )
 
 // DefaultBranchRef is the integration branch and how this process learned it.
@@ -135,6 +142,9 @@ func (d DefaultBranchRef) IsBranch(name string) bool {
 //
 // A caller-supplied ref wins outright; it is what CI passes, and it matches how
 // the caller names the destination it merged into rather than git-pair storing where a landing went.
+// The CLI supplies it from `--default-branch` or from `GIT_PAIR_DEFAULT_BRANCH`, which this package
+// cannot tell apart — it reads no environment — so it labels both `flag` and the CLI relabels the
+// value it read from the environment.
 // Otherwise git's own answer is used: `git clone` records the remote's default branch in
 // `refs/remotes/origin/HEAD`, so a human clone needs no configuration at all. A CI job
 // built with `init`, `remote add` and a fetch of one branch does not have it, which is why
@@ -186,7 +196,7 @@ func DefaultBranch(ctx context.Context, repo *git.Repo, override string) (Defaul
 		return DefaultBranchRef{Ref: remote[0], Source: DefaultBranchSoleCandidate}, nil
 	case 0:
 	default:
-		return DefaultBranchRef{}, fmt.Errorf("%w: %s and %s both exist and nothing says which is the integration branch; pass --default-branch <ref>",
+		return DefaultBranchRef{}, fmt.Errorf("%w: %s and %s both exist and nothing says which is the integration branch; pass --default-branch <ref> or set GIT_PAIR_DEFAULT_BRANCH",
 			ErrNoDefaultBranch, remote[0], remote[1])
 	}
 
@@ -200,7 +210,7 @@ func DefaultBranch(ctx context.Context, repo *git.Repo, override string) (Defaul
 	// problem: a job that fetched one branch has no integration branch to compare against, which says
 	// nothing about the changeset it was asked about. Naming the fetch is what sends the reader to the
 	// step that can fix it, rather than to someone's `change ready`.
-	return DefaultBranchRef{}, fmt.Errorf("%w: no main or master branch found. A job that fetched one branch has nothing to compare against — fetch the default branch too (`git fetch origin '<branch>:refs/remotes/origin/<branch>'`), pass --default-branch <ref>, or run `git remote set-head origin --auto` to record the remote's default",
+	return DefaultBranchRef{}, fmt.Errorf("%w: no main or master branch found. A job that fetched one branch has nothing to compare against — fetch the default branch too (`git fetch origin '<branch>:refs/remotes/origin/<branch>'`), pass --default-branch <ref> or set GIT_PAIR_DEFAULT_BRANCH, or run `git remote set-head origin --auto` to record the remote's default",
 		ErrNoDefaultBranch)
 }
 

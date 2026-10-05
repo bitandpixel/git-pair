@@ -252,7 +252,7 @@ func (a *app) landingsOnNoChangeset(ctx context.Context, slug string, err error)
 	if rerr != nil {
 		return err
 	}
-	db, derr := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
+	db, derr := a.resolveDefaultBranch(ctx, repo)
 	if derr != nil {
 		return err
 	}

@@ -46,6 +46,10 @@ by a test.
   Without it git-pair reads git's own answer (`refs/remotes/origin/HEAD`, then a sole `origin/main` or
   `origin/master`, then a local `main` or `master`) and refuses if there is nothing to compare against.
   CI passes this: a job that cloned with `init` and one `fetch` has no recorded remote default.
+  `GIT_PAIR_DEFAULT_BRANCH` set to a ref is the same value for every invocation in a process environment,
+  which is the form a job reaches without threading the flag through each call. The flag wins where both
+  are given, and a destination that came from the variable is reported rather than quietly used: once on
+  stderr, and as `default_branch_source: "env"` in `status --json`.
 - `--changeset <slug>` — on `status`, `review history` and `change feedback` only. A marker is a commit,
   and a commit lands wherever `HEAD` is, so nothing that records one takes the flag.
 - `--no-cache` — derive everything from git again, ignoring the local caches git-pair keeps under the
@@ -121,7 +125,10 @@ state values: the state stays `WORKING` after `change abandon`. `landed`, `lande
 `landed_branch` are the destination's answer — the branch carrying `changesets/<id>/` is what makes a
 changeset landed — and `chain_base`, `chain_head` and `reviewed` say what history came with it, which a
 squash landing leaves empty and false. `integrating` and `integrate_commit` are the exception that is a
-state: `INTEGRATING` while a declaration is the newest marker. `base` is what `CHANGESET.yaml` records;
+state: `INTEGRATING` while a declaration is the newest marker. `default_branch`, `default_branch_commit`
+and `default_branch_source` are the other side of the landed test: the branch it was measured against, the
+commit it pointed at, and how the run learned it — `flag`, `env` (from `GIT_PAIR_DEFAULT_BRANCH`),
+`origin-head` or `sole-candidate`. `base` is what `CHANGESET.yaml` records;
 `base_ref` and `base_why` appear when the diff was measured against something else — a parent whose work has
 landed, or a trunk this clone reaches through a fetch ref while the record says `main`. The second is the
 ordinary clone: `git fetch` moves `refs/remotes/origin/main` and leaves the local branch where the changeset

@@ -57,6 +57,10 @@ type app struct {
 	// landed?" needs the integration branch to answer, and CI passes this because a checkout
 	// built with `init` and one `fetch` has no recorded remote default to read.
 	defaultBranch string
+	// defaultBranchEnvNoted records that this run has already said on stderr that the environment
+	// named the integration branch. Resolving the destination is not one call — a single command
+	// resolves it several times — and a note repeated for each would be noise rather than visibility.
+	defaultBranchEnvNoted bool
 }
 
 // NoCacheEnv is the environment form of `--no-cache`.
@@ -78,6 +82,74 @@ const NoCacheEnv = "GIT_PAIR_NO_CACHE"
 // flag, and there is no spelling which silently re-enables what a caller asked to disable.
 func (a *app) cachingOff() bool {
 	return a.noCache || os.Getenv(NoCacheEnv) != ""
+}
+
+// DefaultBranchEnv is the environment form of `--default-branch`.
+//
+// It exists for the same caller `GIT_PAIR_NO_CACHE` exists for: a CI job runs git-pair from many
+// places, and a value that has to be threaded through every invocation is a value that gets missed
+// in one of them. The shipped merge job sets it once from the repository's `GIT_PAIR_BASE`
+// variable (`scripts/ci/git-pair-integrate.sh`) and a person whose trunk is not `main` can export
+// it for a shell instead of typing the flag at every command.
+//
+// What it moves is the destination rather than the amount of work, which is the difference from
+// `GIT_PAIR_NO_CACHE` and the reason using it is made visible: the run says on stderr that the
+// environment named the branch, and `status --json` reports `default_branch_source: "env"` rather
+// than the `flag` an identical command line would report. Nothing about the value is guessed at —
+// it is a revision expression, and one that does not resolve is the same refusal as the flag's.
+const DefaultBranchEnv = "GIT_PAIR_DEFAULT_BRANCH"
+
+// defaultBranchOverride is the ref the caller supplied as the integration branch, and whether it
+// came from the environment rather than from the command line.
+//
+// The flag wins outright. It is the statement about this invocation, and a value inherited from the
+// shell must not be able to contradict it — the case that matters is the CI job that exports the
+// variable for its merge script and then runs one `git pair` command against another destination.
+// An empty value is not set, so `GIT_PAIR_DEFAULT_BRANCH=` falls back to git's own answer instead
+// of resolving an empty ref.
+func (a *app) defaultBranchOverride() (string, bool) {
+	if a.defaultBranch != "" {
+		return a.defaultBranch, false
+	}
+	if ref := os.Getenv(DefaultBranchEnv); ref != "" {
+		return ref, true
+	}
+	return "", false
+}
+
+// resolveDefaultBranch answers the integration-branch question for this run: the flag, then the
+// environment, then git's own answer. Every command that needs the destination reaches it through
+// here, so the environment form cannot be honoured by some commands and missed by others, and the
+// provenance of the answer travels with it.
+func (a *app) resolveDefaultBranch(ctx context.Context, repo *git.Repo) (changeset.DefaultBranchRef, error) {
+	override, fromEnv := a.defaultBranchOverride()
+	db, err := changeset.DefaultBranch(ctx, repo, override)
+	if err != nil {
+		if fromEnv {
+			// The refusal is about a value nobody typed, so it names where it came from before it is
+			// returned; a reader sent to fix a command line that was never wrong learns nothing from it.
+			a.noteDefaultBranchEnv(override)
+		}
+		return changeset.DefaultBranchRef{}, err
+	}
+	if fromEnv {
+		// `DefaultBranch` labels any caller-supplied ref `flag`, which is true of the flag and misleading
+		// about this one: the destination a run measured against came from the environment it inherited.
+		db.Source = changeset.DefaultBranchEnvironment
+		a.noteDefaultBranchEnv(db.Ref)
+	}
+	return db, nil
+}
+
+// noteDefaultBranchEnv says once per run that the environment named the destination, and what it
+// named. A destination chosen by a variable nobody typed is the failure this run has to make visible
+// in its own output rather than leave to whoever wonders why `queue` looked empty.
+func (a *app) noteDefaultBranchEnv(ref string) {
+	if a.defaultBranchEnvNoted {
+		return
+	}
+	a.defaultBranchEnvNoted = true
+	a.warn("git-pair: integration branch %s comes from $%s\n", displayRef(ref), DefaultBranchEnv)
 }
 
 // Execute builds the command tree and runs it, returning the process exit code.
@@ -197,7 +269,7 @@ Gate:              git pair check, then merge into the destination with ordinary
 	root.PersistentFlags().BoolVar(&a.noCache, "no-cache", false,
 		"derive everything from git again, ignoring the local caches under the git directory")
 	root.PersistentFlags().StringVar(&a.defaultBranch, "default-branch", "",
-		"ref of the integration branch; otherwise git-pair reads git's own answer (origin/HEAD, then a sole main/master)")
+		"ref of the integration branch; otherwise git-pair reads git's own answer (origin/HEAD, then a sole main/master). $"+DefaultBranchEnv+" is the same value for a whole process")
 	root.AddCommand(
 		newInitCommand(a),
 		newChangeCommand(a),
@@ -254,7 +326,7 @@ type session struct {
 // reads as "cannot tell, so do not refuse" — the failure mode a caller wants: a clone that has not worked
 // out which branch is main keeps answering about the work instead of blaming it for the clone.
 func (a *app) destination(ctx context.Context, repo *git.Repo) changeset.DefaultBranchRef {
-	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
+	db, err := a.resolveDefaultBranch(ctx, repo)
 	if err != nil {
 		return changeset.DefaultBranchRef{}
 	}
@@ -290,7 +362,7 @@ func (a *app) loadNamed(ctx context.Context, slug string) (*session, error) {
 	if err != nil {
 		return nil, err
 	}
-	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
+	db, err := a.resolveDefaultBranch(ctx, repo)
 	if err != nil {
 		return nil, usageWrap(err)
 	}
@@ -476,7 +548,7 @@ func (a *app) load(ctx context.Context) (*session, error) {
 	if err != nil {
 		return nil, err
 	}
-	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
+	db, err := a.resolveDefaultBranch(ctx, repo)
 	if err != nil {
 		return nil, usageWrap(err)
 	}
