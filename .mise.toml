@@ -1,5 +1,11 @@
 [tools]
 go = "1.27.1"
+# The release packager, pinned beside Go so `mise run release:*` and the Release workflow agree on one
+# goreleaser. `.goreleaser.yaml` says `version: 2`, which an older binary would reject, and a workflow
+# that installed its own would be a second definition of the release — the same rule `ci.yml` states for
+# the gate. It costs every checkout a download; the alternative, ad-hoc `mise x` in each task, hides the
+# version from anyone reading this file.
+goreleaser = "2.18.2"
 
 # Tasks run with the mise toolchain active and from this file's directory, so
 # `go` is already 1.27.1 and each task works from any subdirectory of the repo.
@@ -100,3 +106,81 @@ go vet ./...
 bash scripts/test-sharded.sh
 """
 description = "gofmt + vet + tests (sharded; test:serial runs them in one process)"
+
+# The release path, in the order it runs. Publishing itself is not a task: cut a tag
+# (`git tag v0.2.0 && git push origin v0.2.0`) and `.github/workflows/release.yml` does the rest.
+# What the tasks below give you is everything up to that — the checks a tag would otherwise discover
+# on a runner, four minutes later, with the version already spent.
+
+# Three cheap things, none of which needs a build:
+#
+#   - `goreleaser check` reads .goreleaser.yaml, including the `version: 2` schema marker and the
+#     `-X gitpair/internal/cli.Version=` path, which a module rename would silently invalidate.
+#   - `sh -n` on the installer. It is /bin/sh, it is run by people who pipe curl into it, and a syntax
+#     error there is a broken install for everyone, found by whoever ran the release.
+#   - the `release.extra_files` globs resolve. goreleaser reads them only in the publish pipe, and
+#     `--snapshot` ignores publish errors — a typo there is a green local run and a red release, which is
+#     the worst place to learn it. The paths are read out of .goreleaser.yaml rather than repeated here,
+#     so the check cannot drift from the thing it checks.
+#   - the notices file against the dependency graph. `go mod edit -require` changing a licence should
+#     fail a build, not turn the shipped notices into a document that describes someone else's build.
+#   - the three places that name the release repository agree. `slug=` in the installer decides where
+#     people download from; README and `.goreleaser.yaml`'s release header tell them that URL. A release
+#     page pointing somewhere the installer does not go is invisible until someone installs the wrong
+#     thing, and it is one grep to rule out.
+[tasks."release:check"]
+run = """
+set -eu
+goreleaser check
+sh -n packaging/install.sh
+sed -n '/^release:/,/^$/p' .goreleaser.yaml | grep -oE 'glob: +[.]/[^ ]+' | sed 's/glob: *//' |
+  while read -r glob; do
+    if [ ! -f "$glob" ]; then
+      echo ".goreleaser.yaml names release.extra_files $glob, and nothing is there"
+      exit 1
+    fi
+  done
+slug=$(awk -F= '/^slug=/{print $2; exit}' packaging/install.sh)
+if [ -z "$slug" ]; then
+  echo 'packaging/install.sh no longer names the release repository in its slug= line'
+  exit 1
+fi
+for f in README.md .goreleaser.yaml; do
+  if ! grep -q "github.com/$slug" "$f"; then
+    echo "$f never names github.com/$slug, which is where packaging/install.sh downloads from"
+    exit 1
+  fi
+done
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+bash scripts/gen-third-party-notices.sh "$tmp" >/dev/null
+if ! cmp -s "$tmp" packaging/THIRD-PARTY-NOTICES.md; then
+  echo "packaging/THIRD-PARTY-NOTICES.md is not what these dependencies produce:"
+  diff -u packaging/THIRD-PARTY-NOTICES.md "$tmp" | sed -n '1,40p'
+  echo "regenerate it: bash scripts/gen-third-party-notices.sh"
+  exit 1
+fi
+"""
+description = "goreleaser config, installer syntax, and notices matching the dependency graph"
+
+# Every published artefact, locally, with nothing published: the four archives and checksums.txt land in
+# dist/. `--skip=publish` is what keeps a local run local — goreleaser publishes into this repository, so
+# without it a rehearsal would create a real release carrying a snapshot version.
+[tasks."release:snapshot"]
+run = """
+set -eu
+goreleaser release --snapshot --skip=publish --clean
+ls -1 dist/git-pair_*.tar.gz dist/checksums.txt
+"""
+description = "Cross-compile every published target into dist/ without publishing"
+
+# The replay that has to happen between the build and the publish: it drives packaging/install.sh against
+# dist/ over a local HTTP server, so the release proves it is installable before anyone can install it.
+# Deliberately outside `gates`, which every change pays for and which does not need goreleaser or a socket.
+[tasks."release:gate"]
+run = """
+set -eu
+bash scripts/gates/install-sh.sh
+"""
+depends = ["release:snapshot"]
+description = "Replay packaging/install.sh against dist/ (needs python3)"

@@ -1,0 +1,95 @@
+# Release packaging for the `git-pair` binary.
+#
+# The source and the releases live in this one public repository, so goreleaser publishes to `origin`
+# with the runner's own token and nothing below names a repository or a credential. The whole grant is
+# `permissions: contents: write` in `.github/workflows/release.yml`. Splitting the releases into a
+# second repository — the shape this file had before the source was made public — needed a fine-grained
+# token with write access over there, because the runner's `GITHUB_TOKEN` is scoped to the repository
+# that runs the workflow. One repository buys that complexity out.
+#
+# The changelog pipe is disabled. goreleaser would build notes out of this repository's commit subjects,
+# which are lifecycle markers — `git-pair: integrate <slug>`, `review: approve <slug>` — while what a
+# change is made of lives in `changesets/<id>/ABOUT.md`. `release.header` below is what every release
+# body starts with instead, and whoever cuts the release writes over it in the release page afterwards:
+# goreleaser leaves an existing release body alone (`mode: keep-existing` is the default).
+#
+# `before.hooks` deliberately does not run `go mod tidy`. A release should build the tree the gates
+# tested, not a tree a hook reshaped on the way to the artefacts.
+#
+# Pinned in `.mise.toml` alongside Go, so `mise run release:check` and the workflow agree on one
+# goreleaser. `version: 2` below is what that agreement is written in; an older binary rejects it.
+version: 2
+
+project_name: git-pair
+
+builds:
+  - id: git-pair
+    main: ./cmd/git-pair
+    binary: git-pair
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    # `Version` lives in internal/cli rather than main, so goreleaser's default `-X main.version=…`
+    # would stamp a variable that nothing reads. The path is the module path from go.mod plus the package.
+    # See the comment at internal/cli/root.go:Version for the dev-build side of this.
+    ldflags:
+      - -s -w -X gitpair/internal/cli.Version={{.Version}}
+
+archives:
+  - id: git-pair
+    # `git-pair_0.1.0_darwin_arm64.tar.gz`. install.sh rebuilds this name from uname output, so a change
+    # here is a change there; `mise run release:snapshot` prints the names it produced, and
+    # scripts/gates/install-sh.sh replays the installer against them.
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # A list in v2; the singular `format` is deprecated and `goreleaser check` fails on it. goreleaser
+    # also carries README.md and LICENSE into each archive by default — the licence travels with the
+    # binary rather than sitting only on the release page. install.sh extracts the archive and takes
+    # `git-pair` out of it, and leaves the rest alone.
+    formats:
+      - tar.gz
+
+# Singular, and it is the file install.sh verifies against: the name is what the installer downloads
+# alongside the archive, so changing it here means changing it there.
+checksum:
+  name_template: checksums.txt
+
+release:
+  # A `v1.0.0-rc1` tag is a prerelease, a `v1.0.0` tag is not. Decided from the tag rather than from
+  # someone remembering to tick a box.
+  prerelease: auto
+  # Ask whether this token may publish, and whether this tag is already published as an immutable
+  # release, before spending a build finding out. Since goreleaser 2.18, which is what `.mise.toml`
+  # pins; a runner with an older binary would fail here rather than publish half a release.
+  preflight:
+    fail_on_error: true
+  # The body every release starts with. The one-liner is the whole point of a release page: the URL
+  # people copy, served by the same release that carries the archives. It names the same repository as
+  # `slug=` in packaging/install.sh and the Install section of README, and `mise run release:check`
+  # greps all three for one agreement.
+  header: |
+    ## git-pair {{ .Version }}
+
+    ```bash
+    curl -fsSL https://github.com/bitandpixel/git-pair/releases/latest/download/install.sh | sh
+    ```
+
+    macOS and Linux, amd64 and arm64. The installer checks the archive against `checksums.txt` from this
+    release and writes `~/.local/bin/git-pair`; `--help` lists its options, and
+    `THIRD-PARTY-NOTICES.md` beside it names the dependencies linked into the binary.
+  # The installer and the notices file ride along as release assets, which is what makes
+  # `releases/latest/download/install.sh` a stable URL to tell people to curl — the file people are told
+  # to pipe into sh is served by the same release that carries the binaries, so it cannot describe a
+  # different version of them.
+  extra_files:
+    - glob: ./packaging/install.sh
+    - glob: ./packaging/THIRD-PARTY-NOTICES.md
+
+changelog:
+  disable: true

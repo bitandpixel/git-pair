@@ -1,0 +1,68 @@
+# Cut a release: build the four published binaries, prove the installer works against them, then publish
+# them to this repository.
+#
+# Source and releases live together, which is what keeps this workflow short: goreleaser publishes to
+# `origin` with the runner's own token, and `permissions: contents: write` below is the whole grant. No
+# repository secret is involved, and the token a runner can mint cannot reach anything outside this
+# repository — the worst it can do is a bad release of this project, which is why `release:check`,
+# `release:snapshot` and the installer replay run first.
+#
+# The build runs twice — once as a snapshot with publishing skipped, once for real. That is deliberate and
+# it is the extra minute this workflow spends. `scripts/gates/install-sh.sh` replays
+# `packaging/install.sh` against the artefacts, and a release that has already gone out is a release
+# people can install: proving the installer afterwards tells you the damage is done. Proving it first
+# means a broken installer fails a build instead of shipping.
+#
+# Tags are the trigger, and the tag pushed here is the tag the release carries, so `git tag v0.2.0 &&
+# git push origin v0.2.0` is the whole of cutting one.
+name: Release
+
+on:
+  push:
+    tags:
+      # Only `v*`. goreleaser reads the version off the tag, and a tag in any other shape would produce
+      # a release nobody can name — or, with `--snapshot` never reached, fail.
+      - 'v*'
+  # Rehearsal. Runs the snapshot build and the installer replay and publishes nothing, which is how the
+  # pipeline gets checked between releases without a version being spent on it.
+  workflow_dispatch:
+
+permissions:
+  # The only job that needs it, and it needs it to publish here. Everything else in the repository runs
+  # read-only: `ci.yml` reads, and this workflow's build-and-prove steps read.
+  contents: write
+
+# Two pushes of the same tag — a re-tag, a re-run — must not race each other into a half-published
+# release, and a run that is publishing must not be cancelled halfway through leaving assets behind.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # The cold cache is the slow part: the Go toolchain, goreleaser, and four cross-compiled builds.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # goreleaser wants the tags and the history: it reads the previous tag to decide what is new,
+          # and it refuses to release a tag it cannot find. The runner's shallow default checkout would
+          # give it neither.
+          fetch-depth: 0
+
+      - uses: jdx/mise-action@v3
+
+      # Same goreleaser as `mise run release:snapshot`, because it is the same pinned tool in
+      # `.mise.toml` and CI installing its own version would be a second definition of the release.
+      - name: Build the release artefacts
+        run: goreleaser release --snapshot --skip=publish --clean
+
+      - name: Replay the installer against them
+        run: bash scripts/gates/install-sh.sh
+
+      - name: Publish
+        if: github.event_name == 'push'
+        run: goreleaser release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

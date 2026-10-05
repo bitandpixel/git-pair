@@ -27,8 +27,12 @@ import (
 	"gitpair/internal/lifecycle"
 )
 
-// Version is stamped by the build.
-const Version = "0.1.0"
+// Version is what `git-pair --version` prints. A var, not a const: a release build overwrites it with
+// the tag through `-ldflags -X gitpair/internal/cli.Version=…`, which `.goreleaser.yaml` sets. A const
+// cannot be overwritten, so the stamped value would be refused at link time and every release would
+// report the number below. That number is therefore the dev-build answer — what `mise run build` gives
+// you — and it is only true of a release while the tag and this line agree.
+var Version = "0.1.0"
 
 // Exit codes.
 const (
