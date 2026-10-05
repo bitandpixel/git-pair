@@ -51,6 +51,28 @@ the flag's own answer is reported.
   destination several times (`status` does it in `load` and again for its trunk fields), so a latch is what
   keeps visibility from becoming noise. On the refusal path the value is exactly what the refusal is about,
   and a reader sent to fix a command line that was never wrong learns nothing from the visit.
+- **`init` records `base:` from the environment, and the trade is consistency over a
+  provenance-sensitive write.** Three options: let `init` follow the variable the way every other command
+  does, make `init` ignore it, or let it measure with the value and refuse to record it. The second and the
+  third both split the run in two. `base:` and the landed test come from one resolution
+  (`defaultBase` → `resolveDefaultBranch`), which is what makes the record and the diff agree; an `init`
+  that ignored the variable would scaffold `base: main` inside a job that had exported
+  `GIT_PAIR_DEFAULT_BRANCH=refs/heads/master`, and every span of that changeset would then be measured
+  against `master`. That disagreement is written at creation, read after the branch is gone, and carries no
+  provenance field to explain it — a worse failure than the one it avoids.
+- **What that option risks, and what bounds it.** The risk is a durable claim written by an inherited
+  value: a stale export, and `CHANGESET.yaml` records the wrong destination. Three things keep it from being
+  quiet. The run says it at the moment it happens — `integration branch master comes from
+  $GIT_PAIR_DEFAULT_BRANCH` is printed before `base: master (pass --base to choose a different ref)`. Then
+  `status` prints both sides, the recorded `base` and the `default_branch` it measured against with
+  `default_branch_source: "env"`, so a wrong record contradicts its own output. And the correction already
+  exists: `git pair init --base <ref> --set-base`, with `change stack` for a stack. The option that removes
+  the risk outright — require `--base` whenever the destination came from the environment — refuses a caller
+  who did supply the value, on a reason about how it arrived rather than about any ambiguity, and makes the
+  common case (a repository whose trunk is not `main`, which is whom the variable is for) retype the value it
+  just set. The residual is the state where `main` and `master` both exist: without the variable that is a
+  refusal, and with it the variable is the caller's own answer, so I gave it the authority the flag already
+  has rather than a second rule about its provenance.
 - **`scripts/ci/git-pair-integrate.sh` is unchanged.** It takes `BASE` from the variable for its own git
   merge as well as for git-pair, and it passes `--default-branch` explicitly on each call. That is the
   explicit form and still the better one inside a script that has the value in hand; the variable now helps
@@ -74,8 +96,8 @@ the flag's own answer is reported.
 - Manual `init` in a repository holding `main` and `master` on a fresh branch: with
   `GIT_PAIR_DEFAULT_BRANCH=refs/heads/master` the run prints the note first, then `base: master (pass --base
   to choose a different ref)`, and `CHANGESET.yaml` records `base: master`; `status --json` on that
-  changeset reports `default_branch: "master"` with `default_branch_source: "env"`. This is what the open
-  question below describes, observed rather than assumed.
+  changeset reports `default_branch: "master"` with `default_branch_source: "env"`. That is the state the
+  two design decisions above weigh, observed rather than assumed.
 - `mise run check` (gofmt, `go vet ./...`, the sharded suite): passed.
 - `mise run gates`: passed — `E2E: all checks passed` (PRD §29 replay), `PTY: all checks passed`
   (the TUI walkthrough), and `CI-INTEGRATE: all checks passed` (70 checks, the merge job this variable
@@ -100,9 +122,7 @@ the flag's own answer is reported.
 
 - `GIT_PAIR_BASE`, the repository variable that feeds the merge job's `GIT_PAIR_DEFAULT_BRANCH`, still has
   no entry of its own in Configuration. It is named only where it is used, in the CI section.
-- Should `init` accept the environment for the base it records into `CHANGESET.yaml`? It does now, because
-  the destination is one answer per run, and the base a run records comes from the same resolution as the
-  base it measures against. A repository whose trunk is not `main` therefore gets a `base:` from whoever's
-  shell ran `init`, which the note makes visible at the moment it happens and which
-  `git pair init --base <ref> --set-base` corrects afterwards.
-> can you explain your view of the tradeoffs here?
+- Whether a stale export is worth a guard beyond the note and the two sides `status` prints. The candidates
+  all cost more than the mistake they prevent: `init` prompting when the destination came from the
+  environment puts a question in a command agents run non-interactively, and refusing the environment there
+  is the option the design decisions above reject.
