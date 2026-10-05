@@ -6,6 +6,7 @@
 string. A parent records a **branch** in `parent:` (`feat/auth`); the destination files its records under
 changeset **ids** (`changesets/feat-auth/`). The walk compared the branch name against the list of landed ids,
 matched none, stopped at that branch, and reported it as where the child's work should land.
+> I thought we had switched to `base` instead of `parent` in the manifest? and something similar for making the changeset id explicit 
 
 ## Why
 
