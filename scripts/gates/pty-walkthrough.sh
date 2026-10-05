@@ -30,18 +30,32 @@ T=$(mktemp -d /tmp/git-pair-pty.XXXXXX)
 # A failed scenario is worth more kept than re-run: the transcripts are the only record of what the
 # terminal actually received, and a check that fails once in twenty does not reproduce on demand.
 trap 'if [ "${FAILED:-0}" = 1 ]; then echo "PTY: transcripts kept for inspection in $T"; else rm -rf "$T"; fi' EXIT
+# One trap, and it is the only place $T is removed. An earlier revision carried a second
+# `trap 'rm -rf "$T"' EXIT` a few lines below, and bash replaces an EXIT trap rather than appending to it:
+# the promise above was never kept, and a check that fails once in twenty left nothing behind to read —
+# which is exactly what happened when one did.
 # The replayed commands get stdin from /dev/null. `git pair init` reads a pipe as piped `--about` content,
 # so a harness that leaves stdin open would leave a fixture `init` blocked forever. The pty drivers build
 # their own terminal for the program they run, so this does not touch what the TUI reads.
 exec < /dev/null
-trap 'rm -rf "$T"' EXIT
 FAILED=0
+# Twelve scenarios run inside `( COLS=… ROWS=…; session … )`, because the terminal they have to be shown
+# in is not the one this script runs in. A subshell gets a copy of FAILED, so a failure raised there never
+# reached the verdict and the run exited 0 with the FAIL line still on the screen. A file is the one
+# channel a subshell has back to the parent, so `fail` writes one and the verdict reads it.
+GATE_FAILMARK="$T/failure"
 COLS=100
 ROWS=30
 
 step()  { printf '\n\033[1m### %s\033[0m\n' "$1"; }
 ok()    { printf '  ok: %s\n' "$1"; }
-fail()  { printf '  FAIL: %s\n' "$1"; FAILED=1; }
+# The `if`, not `[ -n … ] && : >…`: the last command's status is the function's status, and a `fail` that
+# returns 1 makes every caller's continuation a question about `set -e`.
+fail() {
+  printf '  FAIL: %s\n' "$1"
+  FAILED=1
+  if [ -n "${GATE_FAILMARK:-}" ]; then : >"$GATE_FAILMARK"; fi
+}
 
 # What painted is captured first and matched in bash, with a substring test. Neither half of that is
 # stylistic. Piping the replay into `grep -q` under `pipefail` makes an assertion fail when it succeeds:
@@ -96,6 +110,24 @@ session() {
 }
 
 # --- the repository under review -------------------------------------------
+# The harness checks its own plumbing before it checks the product. This is the check that would have
+# caught the lost failures: a failure raised the way twelve scenarios raise one has to reach the verdict,
+# and the probe that proves it must not contaminate the run it is proving.
+step "the harness reports a failure raised inside a subshell"
+probe="$T/subshell-probe"
+( GATE_FAILMARK="$probe"; fail "a deliberate failure raised in a subshell" >/dev/null )
+if [ -e "$probe" ]; then
+  ok "the subshell recorded its failure where the verdict can read it"
+else
+  fail "the subshell's failure was lost - a scenario inside ( ... ) cannot fail this run"
+fi
+if [ "$FAILED" = 0 ]; then
+  ok "and the probe stayed out of the verdict it was proving"
+else
+  fail "the probe marked the run: the self-test is not isolated, so a green here would prove nothing"
+fi
+rm -f "$probe"
+
 step "fixture: a changeset with a review in it and work after it"
 R=$T/repo
 mkdir -p "$R/src"
@@ -819,6 +851,8 @@ sys.exit(0 if not fails else 1)
 PY
 
 # --- verdict ---------------------------------------------------------------
+# Read the channel the subshells could reach, not the variable they could not.
+if [ -e "${GATE_FAILMARK:-/nonexistent}" ]; then FAILED=1; fi
 printf '\n'
 if [ "$FAILED" = 0 ]; then echo "PTY: all checks passed"; else echo "PTY: FAILURES PRESENT"; fi
 exit "$FAILED"
