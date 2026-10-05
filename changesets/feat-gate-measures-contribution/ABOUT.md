@@ -65,7 +65,7 @@ choose one of two incomparable candidates would be deciding the question by whic
 ## What the digest leaves out
 
 `changesets/<id>/` and `changesets/.landed/<id>/` for this changeset **and for every ancestor**. The
-ancestor half is what the first version missed. `change integrate` moves the parent's record into
+ancestor half is what the first version missed. `change tidy` moves the parent's record into
 `changesets/.landed/<parent>/`, so a child measured from a base that carries that directory, against a head
 that predates it, reports the parent's review as the child deleting it.
 
