@@ -87,11 +87,15 @@ type Event struct {
 	ReviewedParentHead string
 	// ReviewedBase is the commit the submitted diff was measured against, from its `Review-Base-Head`
 	// trailer. `Review-Head` names what was reviewed and `Review-Parent-Head` names the parent's branch
-	// tip; this names where the diff started, which is the third thing an approval is a claim about, and
-	// the one the branch cannot keep telling anyone after the parent lands and its branch is deleted
-	// (PRD §21). Empty means the submission predates the trailer or was hand-edited: not evidence that
-	// the content moved, so not a refusal.
+	// tip; this names where the diff started, which is what makes the reviewer's diff reproducible and
+	// the reading that survives the parent landing and its branch being deleted (PRD §21). Empty means
+	// the submission predates the trailer or was hand-edited: not evidence that the content moved, so
+	// not a refusal.
 	ReviewedBase string
+	// ReviewedDiffID is the identity of the submitted diff, from its `Review-Diff-Id` trailer, kept
+	// exactly as written so a reader can see a version this build does not compute. Use DiffID to ask
+	// the content question with it.
+	ReviewedDiffID string
 	// UnrecognisedMarker is true when the commit carries Review-* trailers but
 	// not a complete, valid marker for this changeset. Such a commit is
 	// treated as an implementation commit — the conservative reading, since it
@@ -101,6 +105,22 @@ type Event struct {
 
 // Marker is true when the commit establishes a lifecycle state.
 func (e Event) Marker() bool { return e.Kind != KindImplementation }
+
+// DiffID is the recorded diff identity split into its version and its digest, with ok=false when the
+// marker carried none, carried one computed under a definition this build does not know, or carried
+// something that is not a diff identity at all.
+//
+// The version check lives here rather than at each call site because every reader of the value has to
+// ask the same question before comparing: is this digest one I may compare at all. A `2:` value from a
+// future rule change reads as "no digest recorded", which sends the caller to the comparison it can
+// still make rather than refusing on a mismatch nobody can explain.
+func (e Event) DiffID() (version, digest string, ok bool) {
+	version, digest, ok = model.ParseDiffID(e.ReviewedDiffID)
+	if !ok || version != model.DiffIDVersion {
+		return "", "", false
+	}
+	return version, digest, true
+}
 
 // Summary is the derived view of a changeset's history.
 type Summary struct {
@@ -353,6 +373,10 @@ func parseEvent(slug string, rec []string) Event {
 			e.ReviewedHead = reviewedHead(trailers[model.TrailerHead])
 			e.ReviewedParentHead = reviewedHead(trailers[model.TrailerParentHead])
 			e.ReviewedBase = reviewedHead(trailers[model.TrailerBaseHead])
+			// Kept verbatim rather than validated here: an unreadable or future-versioned value is the
+			// caller's "no digest recorded", and lifecycle has no opinion about which comparison a caller
+			// is making with it.
+			e.ReviewedDiffID = strings.TrimSpace(trailers[model.TrailerDiffId])
 		} else {
 			e.UnrecognisedMarker = true
 		}

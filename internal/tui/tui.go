@@ -1045,17 +1045,13 @@ func (m reviewModel) handleSubmitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.mode = modeFiles
-	// Both ends of the diff are recorded, here and in `review submit`, for the same reason: a review is a
-	// claim about a parent tip and about a measurement point, and the branch that named either one can be
-	// deleted before anyone asks (PRD §21).
-	parent, err := changeset.ParentOf(m.ctx, m.sess.Repo(), m.sess.Changeset(), m.sess.Trunk())
-	if err != nil {
-		m.setStatus(err.Error(), true)
-		return m, nil
-	}
+	// All three ends of the diff are recorded, here and in `review submit`, from one measurement: a review
+	// is a claim about a parent tip, about a measurement point, and about the content between them, and the
+	// branch that named the first two can be deleted before anyone asks (PRD §21).
 	result, err := reviewops.Submit(m.ctx, m.sess.Repo(), m.sess.Changeset(),
-		outcome, "", true, parent.Tip,
-		changeset.MeasuredBase(m.ctx, m.sess.Repo(), m.sess.Changeset(), m.sess.Trunk(), ""), m.sess.Trunk())
+		outcome, "", true,
+		changeset.MeasureSubmission(m.ctx, m.sess.Repo(), m.sess.Changeset(), m.sess.Trunk(), ""),
+		m.sess.Trunk())
 	if err != nil {
 		m.setStatus(err.Error(), true)
 		return m, nil

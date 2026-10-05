@@ -104,6 +104,15 @@ const (
 	// what keeps the content question — is the diff under test the diff that was approved? — askable
 	// after the branch is gone (PRD §21).
 	TrailerBaseHead = "Review-Base-Head"
+	// TrailerDiffId is the identity of the diff a review submission measured, written beside
+	// `Review-Head` by every submission. `Review-Base-Head` names the commit the diff started at, which
+	// is what makes the reviewer's diff reproducible and what lets a refusal say *which* side moved;
+	// this names the content itself, so the question the gate asks — is this the diff that was
+	// approved? — is one comparison rather than an inference from how far the world has moved since
+	// (PRD §21). The value is `<version>:<hex>`, because the identity is defined by the digest's own
+	// rules (which flags, which paths excluded) and changing one of them has to be a version bump
+	// rather than a silent edit that mismatches every approval ever written.
+	TrailerDiffId = "Review-Diff-Id"
 
 	StateValueReady = "ready"
 	// StateValueWorking is written by `change unready`. It is not a new state: WORKING
@@ -123,3 +132,42 @@ const (
 	// directory in the destination's history, written by the merge itself.
 	StateValueIntegrating = "integrating"
 )
+
+// DiffIDVersion is the definition the value in `Review-Diff-Id` was computed under: the raw-diff flags
+// `git.Repo.DiffRawDigest` pins, and the exclusion of the changeset's own directory.
+//
+// It is a constant rather than a setting because the definition is not the user's to choose — but it is
+// not permanent either, and a reader who finds `2:` in a marker written before a rule change should be
+// told the value predates the rule rather than be refused for a mismatch nobody can explain.
+const DiffIDVersion = "1"
+
+// FormatDiffID renders a digest as the value of a `Review-Diff-Id` trailer.
+func FormatDiffID(digest string) string { return DiffIDVersion + ":" + digest }
+
+// ParseDiffID splits a `Review-Diff-Id` value into its version and its digest.
+//
+// It reports ok=false for anything that does not read as `<version>:<hex>`, which is how a marker
+// written by a hand-edited commit or a future version is recognised as unreadable rather than being
+// compared as if it meant something. Callers treat that as "no digest recorded", which is a fact
+// missing rather than a content difference — the direction that does not refuse an approval nobody
+// moved (PRD §21).
+func ParseDiffID(value string) (version, digest string, ok bool) {
+	for i := 0; i < len(value); i++ {
+		if value[i] != ':' {
+			continue
+		}
+		version, digest = value[:i], value[i+1:]
+		if version == "" || digest == "" {
+			return "", "", false
+		}
+		for j := 0; j < len(digest); j++ {
+			c := digest[j]
+			if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') {
+				continue
+			}
+			return "", "", false
+		}
+		return version, digest, true
+	}
+	return "", "", false
+}

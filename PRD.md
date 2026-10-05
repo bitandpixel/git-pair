@@ -1327,6 +1327,21 @@ question it answers — is the diff under test the diff that was approved? (§21
 stack can ask. The value is a commit rather than a ref on purpose: a ref names a branch, and the branch a
 child is measured against is often deleted before the next clone arrives to read the answer.
 
+`Review-Diff-Id` is the identity of that measured diff, as `<version>:<hex>`. The value hashes the raw
+name-status description of the diff between the recorded base and the recorded head — modes, pre- and
+post-image blob OIDs, statuses and paths — with the changeset's own directory excluded, because the review
+record lives in it and a reply to a review thread must not change the identity of the approval that reply
+is written into. The two trailers are written together and mean different things: the base names where the
+diff started, which is what lets a refusal say *which* side moved and what to do about it, and the identity
+names the content, which is the one comparison the gate makes when it asks whether the diff under test is
+the diff that was approved (§21).
+
+The value is versioned because it is defined by the rules that produced it — the pinned diff flags, and the
+exclusion above — so changing one of them is a new version rather than a silent edit that mismatches every
+approval written before it. A marker carrying a version this build does not compute reads as no identity
+recorded, which is an absence and not a content difference: the reader falls back to the comparison still
+available rather than being refused on a mismatch nobody can explain.
+
 A submission that names no head — written before this trailer existed, or by hand — is refused by the
 gate rather than assumed, and the reason says the approval covers an unknown commit (§11.3).
 
@@ -3154,6 +3169,13 @@ the movement rule compares a live branch against, and the measured base is what 
 today's base against. While the parent's branch is the base they name the same commit; the moment the
 parent lands they do not, and the branch that named the first is often deleted.
 
+A submission records the identity of that diff beside them, in `Review-Diff-Id` (§10.4) — one value the
+content question is asked with directly, instead of inferred from how far the parent and the destination
+have moved since the approval. The measured base stays because an answer of "different" has to be
+explained, and an explanation names which side moved and what to do about it. Where a marker carries no
+identity — written before the trailer, hand-edited, or written under a version this build does not compute
+— the absence is read the same way as an absent base: as something not said, never as a difference (§21).
+
 **The reason names the kind of movement** — implementation commit, review commit, approval,
 rebase, or merge — because a rule that reports only "the parent moved" reads as arbitrary, and an
 author who thinks the gate is being pedantic stops trusting it.
@@ -3552,8 +3574,15 @@ Explicitly given up while the durable-ref layer was being taken out, each with w
     merges become the problem that justifies it, `change tidy` (§13.5) answers it with commits.
 -   **Patch-equivalent carry-forward of approvals.** Letting a child's approval survive its parent
     landing when the child's diff against the new base is provably the diff that was reviewed
-    (§21). Cost: a patch-id equivalence rule that has to be right, because every case where it is
-    wrong approves code nobody read. The conservative rule is kept instead.
+    (§21). Partly taken: the landed-parent rule compares the two bases a landing puts in front of the
+    child and lets the approval stand when they carry the same tree, which with the head fixed is the
+    same statement as "the same patch" — reached without a patch comparison, and with a comparison the
+    clone cannot make answering "different" so that absence refuses rather than grants. What is still
+    deferred is the rest of it: a squash landing, and a child that has taken the destination in, both
+    leave the two bases unequal while the child's own contribution is unchanged. Comparing those needs
+    the recorded diff identity (§10.4) measured from the parent's landing commit — a commit whose tree
+    already holds the parent's content, which no merge base can be — plus the guard that a branch which
+    would not merge cleanly has no patch to compare at all.
 -   **Reviewer identity and thread resolution state.** Per-reviewer permissions, "who is this
     comment from" as data, and resolved/unresolved threads. Cost: identity is not in git's commit
     model in any way git-pair can enforce, and thread state is state — it wants a ref, a file, or a

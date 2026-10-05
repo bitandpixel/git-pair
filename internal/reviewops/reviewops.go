@@ -36,14 +36,14 @@ func (r Result) Empty() bool { return len(r.Files) == 0 }
 // stageAll controls whether the working tree is swept in first. It defaults to
 // true because a review submission normally *is* everything the reviewer just
 // did; the CLI's --no-stage exists for reviewers who stage deliberately.
-// parentHead is the tip of the branch this changeset is stacked on, recorded so the approval can
-// later be asked whether the parent has moved. Empty means "no parent", which is what an unstacked
-// changeset and a parent branch that is not present both look like; the caller decides.
-// baseHead is the commit the diff was measured against, recorded so the approval can later be asked
-// whether the content it covered has moved. The two are the same commit while the parent's branch is
-// the base, and stop being the same commit the moment the parent lands (PRD §21).
+//
+// `m` is what the submission records about the diff it reviewed — the parent's tip, the commit the diff
+// was measured from, and that diff's identity. It arrives measured rather than as three strings because
+// the two surfaces that submit a review must not be able to record different things about the same head;
+// `changeset.MeasureSubmission` is the one place that measurement is written, and `changeset.Measurement`
+// is where each field's question is explained.
 func Submit(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
-	outcome model.Outcome, body string, stageAll bool, parentHead, baseHead string, db changeset.DefaultBranchRef) (Result, error) {
+	outcome model.Outcome, body string, stageAll bool, m changeset.Measurement, db changeset.DefaultBranchRef) (Result, error) {
 
 	if !outcome.Valid() {
 		return Result{}, fmt.Errorf("invalid review outcome %q", outcome)
@@ -63,7 +63,7 @@ func Submit(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
 	// The submission names the commit it was made against. `before` is that commit and the
 	// new commit's first parent, so the trailer records the value a rebase changes — which is
 	// the whole point of writing it down rather than leaving it to be read off the graph.
-	sha, err := marker.Commit(ctx, repo, marker.ReviewMessage(cs.Slug, outcome, before, parentHead, baseHead, body), db)
+	sha, err := marker.Commit(ctx, repo, marker.ReviewMessage(cs.Slug, outcome, before, m, body), db)
 	if err != nil {
 		return Result{}, err
 	}
