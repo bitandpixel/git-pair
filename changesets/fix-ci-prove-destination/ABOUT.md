@@ -59,7 +59,7 @@ The checks were then proved able to fail: deleting the `request_ci` call, the `a
 helper's executable bit produced 11 failures and a red run (exit 1). That proof is the point of the scenario —
 a fixture that only ever passes proves nothing, which is the lesson this repository has now taken twice.
 
-`mise run gates`: see the run referenced in the review thread.
+`mise run gates`: all gates green (`LADDER exit=0`), run from the same tree and binary as the review head.
 
 ## Known limitations
 
