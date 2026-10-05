@@ -95,6 +95,11 @@ type checkJSON struct {
 	// whether or not the verdict is ready: when the gate refuses for lineage, the log has to
 	// name both ends of the comparison (PRD §11.3).
 	ReviewedHead string `json:"reviewed_head,omitempty"`
+	// DriftCredited names the paths that differ from the reviewed commit and were not counted as drift
+	// because the destination carries the same content: what the gate took on trust when a branch that
+	// merged the integration branch in kept its approval. It is a fact about the reading, not a second
+	// verdict — the paths the gate did refuse are in `reasons` (PRD §10.4).
+	DriftCredited []string `json:"drift_credited,omitempty"`
 	// Landed says the destination's tree carries this changeset's directory, and LandedCommit names the
 	// commit that brought it there. Like status's landing fields, they sit beside the verdict rather than
 	// changing what `ready` means: a changeset that has landed is not integration-ready again. They are
@@ -120,10 +125,11 @@ type checkJSON struct {
 	ParentStaleBranch  bool   `json:"parent_stale_branch"`
 	// ParentMeasuredBase is the commit the approval recorded measuring its diff from, and
 	// ParentComparison names the reading that answered the landed-parent question — "contribution" when
-	// this branch's contribution was compared with the diff identity the approval recorded, "merge-base"
-	// when the older base comparison decided it, empty when neither was asked. They are the two facts
-	// behind a parent verdict, and a reader who disagrees with the verdict needs them to say which side
-	// moved.
+	// this branch's contribution was compared with the diff identity the approval recorded, "contribution-patch"
+	// when the content half moved and the rendered half of the same recorded value did not (a file this
+	// branch edits also changed in the destination), "merge-base" when the older base comparison decided
+	// it, empty when neither was asked. They are the two facts behind a parent verdict, and a reader who
+	// disagrees with the verdict needs them to say which side moved.
 	ParentMeasuredBase string `json:"parent_measured_base,omitempty"`
 	ParentComparison   string `json:"parent_comparison,omitempty"`
 	// ParentHeadCarriesLanding says this changeset's own head already carries the parent's landing commit.
@@ -177,6 +183,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		// command and join two verdicts that were computed from two different reads of the repository.
 		Integrating:     g.Declared() != nil,
 		IntegrateCommit: eventSHA(g.Declared()),
+		DriftCredited:   g.Summary.DriftCredited,
 	}
 	out.Ready = len(out.Reasons) == 0
 	if out.Ready {
@@ -344,7 +351,7 @@ func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback boo
 	// The tree question — is the reviewed content still what HEAD carries? — is the one `status` asks
 	// observationally and the gate has to answer as a verdict. Asking it through the same derivation is
 	// what keeps the two from disagreeing about what drift is.
-	reviewed, err := lifecycle.SummarizeAgainstTreeHEAD(ctx, s.repo, s.cs.Slug, s.cs.Base)
+	reviewed, err := lifecycle.SummarizeAgainstTreeHEAD(ctx, s.repo, s.cs.Slug, s.cs.Base, s.trunk.Ref)
 	if err != nil {
 		return nil, err
 	}

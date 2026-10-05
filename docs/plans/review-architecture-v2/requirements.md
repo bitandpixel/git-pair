@@ -602,6 +602,14 @@ In particular, an active custom ref namespace should not exist solely to enable 
 
 ## Deferred Capabilities
 
+> Two of these have since been taken, and the line between them is worth stating. *Approval preservation
+> across parent integration* is the landed-parent comparison, which asks the content question against the
+> identity the approval recorded (PRD §21.1). The case beside it that list left open — a child that has merged
+> the destination in — is settled by crediting the destination in the rule that counts content the review
+> never saw (PRD §11.3), with the rendered half of `Review-Diff-Id` covering the file both the child and
+> trunk edited. *Patch-equivalent carry-forward after rebases* stays deferred: a rewritten history is refused
+> on `Review-Head` lineage whatever the trees say (§12). Recorded 2026-10-05.
+
 The following are intentionally deferred rather than rejected:
 
 * cryptographically signed review commits;

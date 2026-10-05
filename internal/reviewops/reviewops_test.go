@@ -265,23 +265,26 @@ func TestSubmitRecordsTheIdentityOfTheDiffItReviewed(t *testing.T) {
 	res := e.submit(t, model.OutcomeApprove, "the content is right", true)
 	message := e.f.MustGit("log", "-1", "--format=%B", res.Commit)
 
-	version, digest, ok := model.ParseDiffID(trailerValue(t, message, "Review-Diff-Id"))
+	version, id, ok := model.ParseDiffID(trailerValue(t, message, "Review-Diff-Id"))
 	if !ok || version != model.DiffIDVersion {
-		t.Fatalf("Review-Diff-Id = %q, want %q:<hex>", trailerValue(t, message, "Review-Diff-Id"), model.DiffIDVersion)
+		t.Fatalf("Review-Diff-Id = %q, want %q:<hex>[+<hex>]", trailerValue(t, message, "Review-Diff-Id"), model.DiffIDVersion)
 	}
 	base := trailerValue(t, message, "Review-Base-Head")
 	if base == "" {
 		t.Fatal("the marker recorded no base: the digest would name a diff nobody can reproduce")
 	}
 
-	want, err := e.repo.DiffRawDigest(context.Background(), base, head,
+	want, err := e.repo.DiffIdentity(context.Background(), base, head,
 		"changesets/"+slug, "changesets/.landed/"+slug)
 	if err != nil {
-		t.Fatalf("DiffRawDigest(%s, %s): %v", base, head, err)
+		t.Fatalf("DiffIdentity(%s, %s): %v", base, head, err)
 	}
-	if digest != want {
+	if id.Raw != want.Raw {
 		t.Errorf("recorded digest %s, want %s: the value a marker names must be reproducible from the base it names",
-			digest, want)
+			id.Raw, want.Raw)
+	}
+	if id.Patch == "" || want.Patch == "" || id.Patch != want.Patch {
+		t.Errorf("recorded rendered half %q, want %q", id.Patch, want.Patch)
 	}
 }
 

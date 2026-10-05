@@ -26,7 +26,16 @@ func summarize(t *testing.T, f *gittest.Fixture, slug, base, headRef string) lif
 // verdict, then the question of whether the content it spoke about is still at headRef.
 func summarizeAgainstTree(t *testing.T, f *gittest.Fixture, slug, base, headRef string) lifecycle.Summary {
 	t.Helper()
-	summary, err := lifecycle.SummarizeAgainstTree(context.Background(), repo(f), slug, base, headRef)
+	return summarizeAgainstTreeCrediting(t, f, slug, base, headRef, "")
+}
+
+// summarizeAgainstTreeCrediting is the same reading with the destination named, which is what lets the
+// drift rule credit content the branch took in rather than content it added (§10.4). An empty destination
+// is the reading for a clone that cannot name one.
+func summarizeAgainstTreeCrediting(t *testing.T, f *gittest.Fixture, slug, base, headRef,
+	destination string) lifecycle.Summary {
+	t.Helper()
+	summary, err := lifecycle.SummarizeAgainstTree(context.Background(), repo(f), slug, base, headRef, destination)
 	if err != nil {
 		t.Fatalf("SummarizeAgainstTree(%s, base %s, head %s): %v", slug, base, headRef, err)
 	}

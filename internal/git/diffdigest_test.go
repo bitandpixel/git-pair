@@ -206,3 +206,153 @@ func TestDiffRawDigestOfAnEmptyDiffIsStable(t *testing.T) {
 		t.Errorf("empty diff digests are %q and %q, want the same non-empty value", first, second)
 	}
 }
+
+// identityOf measures both halves of the pair a review records.
+func identityOf(t *testing.T, repo *git.Repo, from, to string, exclude ...string) git.DiffIdentity {
+	t.Helper()
+	id, err := repo.DiffIdentity(context.Background(), from, to, exclude...)
+	if err != nil {
+		t.Fatalf("DiffIdentity(%s, %s): %v", from, to, err)
+	}
+	return id
+}
+
+// The two halves must come out of one invocation without the raw half drifting away from the value the
+// previous version recorded: approvals written before this change carry that value alone, and a half that
+// stopped matching would read every one of them as a content difference.
+func TestDiffIdentityRawHalfIsTheShippedDigest(t *testing.T) {
+	_, repo, base, head := changedFixture(t, map[string]string{"a.txt": "one\nchanged\n", "new.txt": "fresh\n"})
+	id := identityOf(t, repo, base, head)
+	if want := digestOf(t, repo, base, head); id.Raw != want {
+		t.Errorf("raw half = %s, want the digest the same span gives without -U3 (%s)", id.Raw, want)
+	}
+	if id.Patch == "" {
+		t.Error("patch half is absent for a diff with content in it")
+	}
+}
+
+// groundFixture builds the shape the patch half exists for. The parent and the child edit one file at
+// opposite ends; the parent lands, trunk gains one more line, and the child merges that in. Measuring the
+// child's contribution from the new ground changes the raw half — a blob OID is the identity of the whole
+// file, and trunk's line is now inside it — and must not change the patch half, because the child's hunks
+// read exactly as they did when the approval was written.
+func groundFixture(t *testing.T, trunkEdit func(lines []string) []string) (f *gittest.Fixture, repo *git.Repo, parentTip, childTip, trunkTip, mergedTip string) {
+	t.Helper()
+	body := []string{"header"}
+	for i := 1; i <= 12; i++ {
+		body = append(body, "line "+string(rune('a'+i-1)))
+	}
+	body = append(body, "the end")
+	write := func(lines []string) string { return strings.Join(lines, "\n") + "\n" }
+
+	f = gittest.New(t)
+	f.Commit("base", gittest.WithFile("shared.txt", write(body)))
+	f.CreateBranch("parent")
+	parent := append(append([]string{}, body...), "parent note")
+	f.Commit("parent writes the bottom", gittest.WithFile("shared.txt", write(parent)))
+	parentTip = f.RevParse("parent")
+
+	f.CreateBranch("trunk")
+	f.Commit("trunk edits", gittest.WithFile("shared.txt", write(trunkEdit(parent))))
+	trunkTip = f.RevParse("trunk")
+
+	f.SwitchTo("parent")
+	f.CreateBranch("child")
+	child := append([]string{"the child's line"}, parent...)
+	f.Commit("child writes the top", gittest.WithFile("shared.txt", write(child)))
+	childTip = f.RevParse("child")
+
+	f.SwitchTo("child")
+	f.MustGit("merge", "--no-edit", "trunk")
+	mergedTip = f.RevParse("child")
+
+	repo, err := git.Open(f.Dir())
+	if err != nil {
+		t.Fatalf("git.Open: %v", err)
+	}
+	repo.Env = f.Env()
+	return
+}
+
+// The patch half is the position-sensitive half: it must stay equal when the trunk's edit is nowhere near
+// what was reviewed, and move when the trunk's edit lands inside the lines the reviewer read as context.
+// The raw half moves in both, which is why the pair is recorded rather than one of them.
+func TestDiffIdentityKeepsTheReviewedHunksApartFromTheRestOfTheFile(t *testing.T) {
+	t.Run("a far away trunk line leaves the reviewed hunks alone", func(t *testing.T) {
+		_, repo, parentTip, childTip, trunkTip, merged := groundFixture(t, func(lines []string) []string {
+			return append(append([]string{}, lines...), "a trunk note far below the child's line")
+		})
+		rec, now := identityOf(t, repo, parentTip, childTip), identityOf(t, repo, trunkTip, merged)
+		if rec.Patch == "" {
+			t.Fatal("no patch half recorded")
+		}
+		if rec.Raw == now.Raw {
+			t.Error("the raw half did not move: the fixture measured the same pair twice")
+		}
+		if rec.Patch != now.Patch {
+			t.Errorf("a trunk edit 14 lines away moved the identity of the reviewed hunks: %s then %s", rec.Patch, now.Patch)
+		}
+		if identityOf(t, repo, parentTip, merged).Patch == rec.Patch {
+			t.Error("measuring the merged head from the old base kept the value: the patch half is inert, not position-sensitive")
+		}
+	})
+
+	t.Run("a trunk line inside the reviewed context moves it", func(t *testing.T) {
+		_, repo, parentTip, childTip, trunkTip, merged := groundFixture(t, func(lines []string) []string {
+			out := append([]string{}, lines...)
+			out[2] = "line a — rewritten by trunk"
+			return out
+		})
+		rec, now := identityOf(t, repo, parentTip, childTip), identityOf(t, repo, trunkTip, merged)
+		if rec.Raw == now.Raw {
+			t.Error("the raw half did not move: the fixture measured the same pair twice")
+		}
+		if rec.Patch == now.Patch {
+			t.Errorf("a trunk edit inside the three lines of context the reviewer read kept the identity (%s): "+
+				"the patch half cannot tell a reviewed hunk from its surroundings", rec.Patch)
+		}
+	})
+}
+
+// `--verbatim` rather than `--stable`, measured: `make` parses a recipe line and a top-level statement
+// differently, and a value that scores them the same is not describing what a reviewer would have read.
+func TestDiffIdentitySeesAWhitespaceSignificantLine(t *testing.T) {
+	f, repo, base, tabbed := changedFixture(t, map[string]string{"Makefile": "build:\n\techo one\n\techo two\n"})
+	f.Write("Makefile", "build:\n\techo one\n    echo two\n")
+	f.Commit("the same words, indented with spaces")
+	spaced := headOf(t, f)
+
+	a, b := identityOf(t, repo, base, tabbed), identityOf(t, repo, base, spaced)
+	if a.Raw == b.Raw {
+		t.Fatal("the two files hashed the same raw: the fixture built one commit, not two")
+	}
+	if a.Patch == b.Patch {
+		t.Errorf("a tab-indented recipe line and a space-indented statement scored the same patch (%s): "+
+			"the patch half is not recording whitespace", a.Patch)
+	}
+}
+
+// The same argument that keeps the raw half free of the reader's configuration applies to the patch half
+// with more force: its bytes *are* a rendering, so every option that reaches it must be pinned by us.
+func TestDiffIdentityIsNotMovedByDiffConfiguration(t *testing.T) {
+	cases := []struct{ key, value string }{
+		{"diff.context", "40"},
+		{"diff.algorithm", "patience"},
+		{"diff.noprefix", "true"},
+		{"diff.ignoreAllSpace", "true"},
+		{"core.whitespace", "cr-at-eol"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			f, repo, base, head := changedFixture(t, map[string]string{"a.txt": "one\nchanged\n"})
+			want := identityOf(t, repo, base, head)
+			f.Config(tc.key, tc.value)
+			repo.ResetMemo()
+			got := identityOf(t, repo, base, head)
+			if got != want {
+				t.Errorf("%s=%s moved the pair: raw %s→%s, patch %s→%s", tc.key, tc.value,
+					want.Raw, got.Raw, want.Patch, got.Patch)
+			}
+		})
+	}
+}

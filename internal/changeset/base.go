@@ -266,11 +266,11 @@ func MeasureSubmission(ctx context.Context, repo *git.Repo, c Changeset, db Defa
 	// would otherwise read as content the branch deleted. `MeasureContribution` excludes the same paths, and
 	// the two must agree — a submission measured one way and a check measured another refuses every approval
 	// ever written.
-	digest, err := repo.DiffRawDigest(ctx, m.BaseHead, head, DigestExclusions(ctx, repo, c, db, head)...)
-	if err != nil || digest == "" {
+	identity, err := repo.DiffIdentity(ctx, m.BaseHead, head, DigestExclusions(ctx, repo, c, db, head)...)
+	if err != nil || identity.Raw == "" {
 		return m
 	}
-	m.DiffID = model.FormatDiffID(digest)
+	m.DiffID = model.FormatDiffID(recordedIdentity(identity))
 	return m
 }
 

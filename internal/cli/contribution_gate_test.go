@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"strings"
 	"testing"
 
 	"gitpair/internal/gittest"
@@ -15,13 +16,10 @@ import (
 // destination in moves the ground with the branch, so the contribution is unchanged. Merging anything else
 // in puts that work inside the contribution, where a reviewer has not looked at it.
 
-// Where this change stops. Taking the destination into a branch is no longer refused by the stack rule — the
-// contribution above the ground the branch now sits on is unchanged, and that is what the parent comparison
-// asks. The gate still falls, on the rule that asks whether the branch carries content the review never saw,
-// which reads the branch's own history rather than its parent and counts everything the merge brought in as
-// new work. That rule is the next one to teach about the destination; this one is not, and the test is here
-// so the boundary is a fact rather than an assumption.
-func TestMergingTheDestinationInIsStillUnreviewedWork(t *testing.T) {
+// Where the unreviewed-content rule now stops: taking the destination in is not content the review never
+// saw. The branch did not write it, the integration branch did, and the reviewer had no reason to read
+// trunk. What the rule keeps refusing is content the destination does not carry — the next test is that one.
+func TestMergingTheDestinationInIsNotUnreviewedWork(t *testing.T) {
 	f, _, _ := stackedPair(t)
 	f.SwitchTo("main")
 	f.Commit("someone else lands unrelated work", gittest.WithFile("other.go", "package main\n"))
@@ -29,14 +27,19 @@ func TestMergingTheDestinationInIsStillUnreviewedWork(t *testing.T) {
 	f.MustGit("merge", "--no-edit", "main")
 
 	res := runIn(t, f.Dir(), "check", "--json")
-	if res.code == 0 && res.json(t)["ready"] == true {
-		t.Fatalf("check passed with the destination merged in: %v", res.json(t))
+	out := res.json(t)
+	if out["ready"] != true {
+		t.Fatalf("check refused with the destination merged in: %v", out["reasons"])
 	}
-	mustContain(t, res.stdout, "other.go", "the refusal is the unreviewed-content rule naming what came in")
+	credited, _ := out["drift_credited"].([]any)
+	if len(credited) == 0 {
+		t.Fatalf("drift_credited is empty: the gate let the merge through without saying it credited it\n%s", res.stdout)
+	}
+	if !strings.Contains(res.stdout, "other.go") {
+		t.Errorf("drift_credited does not name other.go:\n%s", res.stdout)
+	}
 	mustNotContain(t, res.stdout, "the parent branch",
 		"and the stack contributes nothing: the parent did not move")
-	mustNotContain(t, res.stdout, "the diff under it differs",
-		"and the contribution comparison was clean")
 }
 
 // The other side of the same comparison: work that is not the destination's lands inside the contribution,

@@ -106,20 +106,21 @@ type Event struct {
 // Marker is true when the commit establishes a lifecycle state.
 func (e Event) Marker() bool { return e.Kind != KindImplementation }
 
-// DiffID is the recorded diff identity split into its version and its digest, with ok=false when the
+// DiffID is the recorded diff identity split into its version and its halves, with ok=false when the
 // marker carried none, carried one computed under a definition this build does not know, or carried
 // something that is not a diff identity at all.
 //
 // The version check lives here rather than at each call site because every reader of the value has to
-// ask the same question before comparing: is this digest one I may compare at all. A `2:` value from a
-// future rule change reads as "no digest recorded", which sends the caller to the comparison it can
-// still make rather than refusing on a mismatch nobody can explain.
-func (e Event) DiffID() (version, digest string, ok bool) {
-	version, digest, ok = model.ParseDiffID(e.ReviewedDiffID)
-	if !ok || version != model.DiffIDVersion {
-		return "", "", false
+// ask the same question before comparing: is this identity one I may compare at all. A `3:` value from a
+// future rule change reads as "no identity recorded", which sends the caller to the comparison it can
+// still make rather than refusing on a mismatch nobody can explain. A `1:` value compares on its raw half
+// alone, because that is all it carried.
+func (e Event) DiffID() (version string, id model.DiffID, ok bool) {
+	version, id, ok = model.ParseDiffID(e.ReviewedDiffID)
+	if !ok || !model.AcceptsDiffIDVersion(version) {
+		return "", model.DiffID{}, false
 	}
-	return version, digest, true
+	return version, id, true
 }
 
 // Summary is the derived view of a changeset's history.
@@ -155,6 +156,11 @@ type Summary struct {
 	// marker and headRef. Only ReconcileStaleness fills it in, so it is empty for every
 	// caller that asks the marker question and not the tree question.
 	Drifted []string
+	// DriftCredited lists the paths ReconcileStaleness left out of Drifted because the destination
+	// carries that content: taking the integration branch in is not content the review never saw, it is
+	// content the review had no reason to read. Only ReconcileStaleness fills it in, and only where a
+	// destination was named — an ancestor branch that has not landed earns nothing here (PRD §10.4).
+	DriftCredited []string
 	// TrailingUnrecognised counts the trailing commits that carry Review-*
 	// trailers git-pair could not interpret. They always invalidate a marker:
 	// a newer git-pair may read them fine, and guessing from the tree would be a
@@ -245,17 +251,22 @@ func SummarizeHEAD(ctx context.Context, repo *git.Repo, slug, base string) (Summ
 // derivation and the drift in one reading rather than two that could disagree (PRD §9.5, §11.3).
 // Everywhere else state moves when a git-pair command records a marker, not when the author
 // commits (PRD §12).
-func SummarizeAgainstTree(ctx context.Context, repo *git.Repo, slug, base, headRef string) (Summary, error) {
+//
+// `destination` names the integration branch, and is what the drift rule credits: content head
+// shares with it is content the branch took in rather than content the author added. Empty means no
+// destination could be named, which costs the credit and never adds a refusal — the reading without
+// it is the one every approval written before the credit was measured under.
+func SummarizeAgainstTree(ctx context.Context, repo *git.Repo, slug, base, headRef, destination string) (Summary, error) {
 	s, err := Summarize(ctx, repo, slug, base, headRef)
 	if err != nil {
 		return s, err
 	}
-	return ReconcileStaleness(ctx, repo, slug, headRef, s)
+	return ReconcileStaleness(ctx, repo, slug, headRef, s, destination)
 }
 
 // SummarizeAgainstTreeHEAD is SummarizeAgainstTree for the checked-out branch.
-func SummarizeAgainstTreeHEAD(ctx context.Context, repo *git.Repo, slug, base string) (Summary, error) {
-	return SummarizeAgainstTree(ctx, repo, slug, base, "HEAD")
+func SummarizeAgainstTreeHEAD(ctx context.Context, repo *git.Repo, slug, base, destination string) (Summary, error) {
+	return SummarizeAgainstTree(ctx, repo, slug, base, "HEAD", destination)
 }
 
 // MarkerAt reads the Review-* trailers one commit carries.
@@ -552,7 +563,13 @@ func markerReason(m Event) string {
 // That is the content question and not the lineage one. A tree-identical rebase answers this
 // check "still here" and must still refuse, because the approval was about a commit, not about a
 // tree: `check`'s ancestry condition on `Review-Head` is what catches it (PRD §12).
-func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef string, s Summary) (Summary, error) {
+//
+// `destination` is the integration branch, and the rule credits it and nothing else. A branch that
+// takes trunk in has not added content; it has moved the ground under its own work, and the reviewer
+// had no reason to read trunk. A branch that carries an ancestor's unlanded work *has* added content
+// the reviewer never saw, and the destination does not vouch for that, so it is still drift (§10.4).
+func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef string, s Summary,
+	destination string) (Summary, error) {
 	if !s.Stale || s.Marker == nil {
 		return s, nil
 	}
@@ -580,6 +597,9 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 	if err != nil {
 		return s, err
 	}
+	if len(changed) > 0 && destination != "" {
+		changed, s.DriftCredited = creditDestination(ctx, repo, changed, from, headRef, destination)
+	}
 	if len(changed) > 0 {
 		s.State = model.StateWorking
 		s.Drifted = changed
@@ -591,9 +611,61 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 	// what is at HEAD, so the marker stands and the commits get named in the
 	// reason rather than counted against it.
 	s.Stale = false
+	if len(s.DriftCredited) > 0 {
+		// A different sentence, because it is a different fact: the commits after the marker did change
+		// files, and what makes them pass is that the content they changed them to is the destination's.
+		s.Reason = fmt.Sprintf("%s (%d commit%s since, all of it content the destination carries)",
+			markerReason(marker), s.Trailing, plural(s.Trailing))
+		return s, nil
+	}
 	s.Reason = fmt.Sprintf("%s (%d changeset-only commit%s since)",
 		markerReason(marker), s.Trailing, plural(s.Trailing))
 	return s, nil
+}
+
+// creditDestination removes from `changed` the paths whose content the destination supplies, and returns
+// what is left beside what was credited.
+//
+// Two readings, the whole-branch one first because it is one comparison and covers what the file-by-file
+// reading cannot.
+//
+// The whole-branch reading asks what merging the reviewed commit with the destination would produce, and
+// compares that tree with the tree at head. Equal means head *is* that merge: nothing was written on top of
+// it by hand, and every difference from the marker is git's own merge of the destination's content. A merge
+// with a conflict in it produces no tree, so a resolution somebody wrote by hand is not covered — which is
+// the point: the content the reviewer read is no longer what is there, and the resolution is content nobody
+// read.
+//
+// The file-by-file reading asks, for each path, whether head carries the destination's content there. A
+// path where it does is a path the branch took in rather than one it changed, which is what makes an edit
+// the author added since the review still drift: it matches neither the marker nor the destination.
+//
+// An unreadable destination costs the credit and not the verdict — what is left is reported as drift, the
+// reading this rule exists to soften (PRD §21).
+func creditDestination(ctx context.Context, repo *git.Repo, changed []string, marker, head,
+	destination string) (drift, credited []string) {
+	if res, err := repo.MergeTree(ctx, marker, destination); err == nil && res.Clean {
+		if tree, err := repo.RevParse(ctx, head+"^{tree}"); err == nil && tree == res.Tree {
+			return nil, changed
+		}
+	}
+	theirs, err := repo.PathsChanged(ctx, destination, head)
+	if err != nil {
+		return changed, nil
+	}
+	differsFromDestination := make(map[string]bool, len(theirs))
+	for _, p := range theirs {
+		differsFromDestination[p] = true
+	}
+	drift, credited = make([]string, 0, len(changed)), make([]string, 0, len(changed))
+	for _, p := range changed {
+		if differsFromDestination[p] {
+			drift = append(drift, p)
+			continue
+		}
+		credited = append(credited, p)
+	}
+	return drift, credited
 }
 
 func plural(n int) string {
