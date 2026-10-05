@@ -47,6 +47,20 @@ the run stays green — that is what a local run looks like — and a refusal (`
 red only under `--require`, which is the flag a hand-run of one branch uses. Nothing here turns a merge into a
 CI result.
 
+**There is no switch for the recursion guard, which is why the ask is a dispatch.** The alternative to asking
+is to let GitHub fire the `push` trigger itself, and that guard has no repository or organization setting to
+disable: events caused by `GITHUB_TOKEN` create no runs except `workflow_dispatch` and `repository_dispatch`,
+which "always create workflow runs" because they are explicit calls rather than side effects
+([Using the GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token),
+[the 2022 change that opened them](https://github.blog/changelog/2022-09-08-github-actions-use-github_token-with-workflow_dispatch-and-repository_dispatch/)).
+So dispatch is not one option among several; it is the route left open. The shape here names one workflow
+file, not a list of jobs — the jobs live in `ci.yml`, and the gate fails the build when the two workflow files
+stop naming each other. `repository_dispatch` is the alternative that names no workflow at all: the merge job
+emits one event type with `client_payload: {sha, dest}` and any workflow subscribes to it, which would also
+fix the sha-binding limitation below. It is declined for now because there is one consumer, the coupling string
+just moves from the file name to the event-type name, and a subscribing workflow's file always comes from the
+default branch.
+
 ## Validation
 
 `bash scripts/gates/ci-integrate.sh`: 90 checks, all passing, 20 of them new. The five cases are asked-and-
@@ -75,7 +89,8 @@ a fixture that only ever passes proves nothing, which is the lesson this reposit
 ## Open questions
 
 -   Should `ci.yml` grow a `workflow_dispatch` input naming a commit to check out, so the run can be pinned to
-    the merge's sha rather than to the branch tip?
+    the merge's sha rather than to the branch tip? `repository_dispatch` with `client_payload` would do this
+    without an input, and is the first thing to revisit if a second workflow ever needs to react to a merge.
 -   Should `main` require the `gates` check? That is the step that turns "the run exists" into "an untested
     tip cannot become the base of the next changeset", and it is a repository setting rather than a file in
     this changeset.
