@@ -8,7 +8,9 @@
 # the remote nothing but branches; a re-run does nothing twice; an undeclared changeset and a drifted
 # declaration are left alone; the queue-driven poll finds a declaration with no event behind it; a head that
 # is not proven green is not merged, whether the probe says "no" or "I cannot tell", and the probe is asked
-# about the declared commit; a dry run writes nothing; a merge that conflicts is aborted and reported red; a
+# about the declared commit; a merge that pushed asks the destination to test its new tip, by name and with
+# the merge's own sha, and an ask that cannot be made or is refused is said out loud; a dry run writes
+# nothing; a merge that conflicts is aborted and reported red; a
 # changeset whose branch sits outside feat/ merges like any other, and the trigger is checked for the branch
 # filter that would have stopped it; and the two workflow files still name each other, so a rename fails a
 # build instead of stalling a merge.
@@ -243,6 +245,93 @@ show "$out"
 check "green, and this is the commit CI finished with: merged" 0 $code
 contains "$out" "pushed to main" "the handoff finishes"
 check "the probe was asked about the declared head" "$DECL_CI" "$(tail -1 "$T/probe-calls")"
+
+step "the destination has to be asked to test what the merge produced"
+
+# The merge is pushed with the runner's own token, and GitHub creates no workflow runs for events a token
+# caused, so the destination's own push trigger cannot fire for a merge this job performed. Without a request
+# the destination keeps a tip no job ever built: the head the probe cleared is a different tree whenever the
+# destination moved in between, which is what two landings in one evening look like. The request is a hook for
+# the same reason the probe is one — what is under test is the job's decision to ask, and with which
+# arguments, not the forge. The stub records every call, so both the ask and its absence are assertions.
+cat > "$T/request" <<'EOS'
+#!/usr/bin/env bash
+printf '%s %s\n' "${1:-}" "${2:-}" >> "$REQUEST_CALLS"
+printf '%s\n' "${REQUEST_SAYS:-stub: asked}"
+exit "${REQUEST_RC:-0}"
+EOS
+chmod +x "$T/request"
+
+ci_request_run() { # ci_request_run <rc> <says> <dir> [job args...]
+  local rc=$1 says=$2 dir=$3; shift 3
+  ( cd "$dir" && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
+      REQUEST_RC="$rc" REQUEST_SAYS="$says" REQUEST_CALLS="$T/request-calls" \
+      bash "$CI" --ci-request "bash $T/request" "$@" 2>&1 )
+}
+
+for b in flow/proven-a flow/proven-b flow/proven-c flow/proven-d flow/proven-e; do
+  declare_changeset "$b" "src/proven-${b##*/}.ts" "export const proven_${b##*/} = 1" || { echo "fixture: $b" >&2; exit 1; }
+  git -C "$T/work" checkout -q "$b" && wing change integrate >/dev/null || { echo "fixture: declare $b" >&2; exit 1; }
+done
+git -C "$T/work" push -q origin flow/proven-a flow/proven-b flow/proven-c flow/proven-d flow/proven-e >/dev/null 2>&1 || {
+  echo "fixture: push the proven branches" >&2; exit 1; }
+: > "$T/request-calls"
+
+PROV1=$(clone prov1) || { echo "cannot clone for prov1" >&2; exit 1; }
+out=$(ci_request_run 0 'requested: ci.yml for main' "$PROV1" flow/proven-a); code=$?
+show "$out"
+check "a merge whose ask succeeded is still a green run (exit 0)" 0 $code
+contains "$out" "pushed to main" "the landing happened"
+contains "$out" "requested: ci.yml for main" "and the hook's own line reaches the log"
+MERGE_A=$(git -C "$T/origin.git" rev-parse main)
+check "the destination was asked by name" "main" "$(awk '{print $1}' "$T/request-calls" | tail -1)"
+check "and asked about the merge commit rather than the head it merged" "$MERGE_A" "$(awk '{print $2}' "$T/request-calls" | tail -1)"
+
+# The same changeset again: the destination already holds it, nothing was pushed, so there is no new tree to
+# test. An ask here buys a run that proves a combination this job did not produce.
+n0=$(wc -l < "$T/request-calls")
+out=$(ci_request_run 0 'requested' "$PROV1" flow/proven-a); code=$?
+show "$out"
+check "an already-landed changeset costs nothing (exit 0)" 0 $code
+contains "$out" "nothing to merge here" "and says there is nothing to do"
+check "and asks for no run, because nothing was pushed" "$n0" "$(wc -l < "$T/request-calls")"
+
+PROV2=$(clone prov2) || { echo "cannot clone for prov2" >&2; exit 1; }
+out=$(ci_request_run 2 'cannot tell: no forge named' "$PROV2" flow/proven-b); code=$?
+show "$out"
+check "a destination nobody could be asked about is still a green merge (exit 0)" 0 $code
+contains "$out" "cannot tell: no forge named" "the hook's reason is in the log"
+contains "$out" "its tip is unproven" "and the job says so in plain words"
+
+PROV3=$(clone prov3) || { echo "cannot clone for prov3" >&2; exit 1; }
+out=$(ci_request_run 1 'refused: the token lacks actions: write' "$PROV3" flow/proven-c); code=$?
+show "$out"
+check "a refused ask does not undo a landing that already happened (exit 0)" 0 $code
+contains "$out" "refused: the token lacks actions: write" "the reason reaches the log"
+contains "$out" "its tip is unproven" "and the gap is stated rather than swallowed"
+
+PROV4=$(clone prov4) || { echo "cannot clone for prov4" >&2; exit 1; }
+out=$(ci_request_run 1 'refused' "$PROV4" --require flow/proven-d); code=$?
+show "$out"
+check "--require turns a refused ask into a red run" 1 $code
+
+PROV5=$(clone prov5) || { echo "cannot clone for prov5" >&2; exit 1; }
+n0=$(wc -l < "$T/request-calls")
+out=$(ci_request_run 0 'requested' "$PROV5" --dry-run flow/proven-e); code=$?
+show "$out"
+check "a dry run writes nothing outside the clone (exit 0)" 0 $code
+check "and asks for no run it did not make" "$n0" "$(wc -l < "$T/request-calls")"
+
+# Three static claims, in the style of the workflow-name checks below. Each is a way the ask could stop
+# existing while every run stayed green: the scope withdrawn, the helper left unexecutable so the job's own
+# `-x` test skips it, or the default deleted from the script.
+check "the merge job is granted the scope to ask for a run" 1 "$(grep -c '^  actions: write$' "$ROOT/.github/workflows/git-pair-integrate.yml")"
+if [ -x "$ROOT/scripts/ci/gh-request-ci.sh" ]; then
+  ok "the request helper is executable, which is how the job finds it by default"
+else
+  fail "scripts/ci/gh-request-ci.sh is not executable — the job would find no hook and ask for nothing"
+fi
+check "and the job names it as the default" 1 "$(grep -c 'hook=("\$HERE/gh-request-ci.sh")' "$ROOT/scripts/ci/git-pair-integrate.sh")"
 
 step "a changeset under a branch name the trigger used to exclude"
 
