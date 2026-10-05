@@ -79,3 +79,5 @@ a fixture that only ever passes proves nothing, which is the lesson this reposit
 -   Should `main` require the `gates` check? That is the step that turns "the run exists" into "an untested
     tip cannot become the base of the next changeset", and it is a repository setting rather than a file in
     this changeset.
+
+> is it possible to disable the recursive workflow restriction for this one workflow? that way we don't have to maintain what list of CI jobs need to be run after integrating/merging?
