@@ -67,6 +67,12 @@ func classify(args []string) readClass {
 		// answer, so the same invocation never needs asking twice. It is here rather than under `diff`
 		// because it is a different question — what a merge would produce, not what two commits differ by.
 		return pureRead
+	case "patch-id":
+		// `patch-id` reads a patch on stdin and answers about it. Two fields make the answer — the patch on
+		// the input and the flags — both of which the memo key carries, so the same bytes never need asking
+		// twice. Without this case the default is `mutation`, and every identity measurement would clear the
+		// memo the read before it was taken.
+		return pureRead
 	case "symbolic-ref":
 		// `symbolic-ref --quiet --short HEAD` reads HEAD; `symbolic-ref <ref> <sha>` writes one.
 		if hasFlag(args, "--short") || hasFlag(args, "--quiet") {

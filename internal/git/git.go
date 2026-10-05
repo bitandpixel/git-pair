@@ -93,6 +93,12 @@ func (r *Repo) Git(ctx context.Context, args ...string) (string, error) {
 	return r.run(ctx, "", true, args...)
 }
 
+// GitStdin runs git with text on its standard input, for the read commands whose input is a pipe. The
+// memo key covers the input as well as the arguments, so two different patches are two different answers.
+func (r *Repo) GitStdin(ctx context.Context, stdin string, args ...string) (string, error) {
+	return r.run(ctx, stdin, true, args...)
+}
+
 // GitInherit runs git attached to the current terminal, for commands whose
 // output belongs to the user (diffs, difftools, editors, hooks).
 func (r *Repo) GitInherit(ctx context.Context, args ...string) error {
