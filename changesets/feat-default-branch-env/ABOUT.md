@@ -105,3 +105,4 @@ the flag's own answer is reported.
   base it measures against. A repository whose trunk is not `main` therefore gets a `base:` from whoever's
   shell ran `init`, which the note makes visible at the moment it happens and which
   `git pair init --base <ref> --set-base` corrects afterwards.
+> can you explain your view of the tradeoffs here?
