@@ -157,12 +157,23 @@ func (a *app) parentLive(ctx context.Context, repo *git.Repo, c changeset.Change
 		}
 		return st, nil
 	}
-	// The landing outranks the tip comparison, and a parent that landed by merge has not moved its
-	// branch, so `Recorded == Tip` is true and reads as "nothing happened" exactly when the work left
-	// the branch. Content decides that case, and content is asked of the commit the approval measured
-	// from rather than of the parent's branch tip: the two are the same commit only while that branch is
-	// the base, and after a rebase onto the landing it is the branch tip that names the older reading.
-	if st.Landed != "" && (st.Recorded == "" || st.Recorded == st.Tip) {
+	// The landing outranks the tip comparison, and it outranks it whatever the parent's branch did
+	// afterwards. A parent whose work has landed has finished, and the ordinary ordering is that it moved:
+	// a parent is reviewed after its child, so its own approval is a commit the child never recorded, and
+	// gating on `Recorded == Tip` sent that case — the common one — to the older comparison of two base
+	// trees. Content is asked of the commit the approval measured from rather than of the parent's branch
+	// tip: the two are the same commit only while that branch is the base, and after a rebase onto the
+	// landing it is the branch tip that names the older reading.
+	if st.Landed != "" {
+		if st.Recorded != "" && st.Tip != "" && st.Recorded != st.Tip {
+			// The landing answers the question, and the movement is still worth the sentence: the reader
+			// sees where the parent went as well as what the child still contributes.
+			note, err := a.parentMovementNote(ctx, repo, c, db, head, approved, st)
+			if err != nil {
+				return st, err
+			}
+			st.Note = note
+		}
 		return a.landedApprovalStillStands(ctx, repo, c, db, head, approved, st,
 			fmt.Sprintf("%s and have the result reviewed again", landedParentStep(c, st)))
 	}
@@ -178,27 +189,39 @@ func (a *app) parentLive(ctx context.Context, repo *git.Repo, c changeset.Change
 		}
 		return st, nil
 	}
-	moved, err := classifyParentMovement(ctx, repo, st.Recorded, st.Tip)
+	moved, err := a.parentMovementNote(ctx, repo, c, db, head, approved, st)
 	if err != nil {
 		return st, err
 	}
-	// The parent's own movement is an observation, not a verdict. A parent taking a commit — its review
-	// feedback, a rebase of its own, trunk merged into it — says nothing about whether this branch still
-	// contributes what the reviewer read, and the child's approval used to die on all three: one round of
-	// parent review cost a re-review of every child stacked on it. What a reader needs is the distinction the
-	// note now carries — the parent moved, and here is whether it moved where this branch works (PRD §21).
-	//
-	// Nothing on this path refuses, and the omission is deliberate rather than unfinished. Content a child
-	// added to its own branch is refused by the rule that counts content the review never saw, which reads
-	// this branch's history and needs no parent; content the *parent* rewrote under a child cannot change
-	// this branch's contribution, only make the eventual merge conflict — which is what the overlap below
-	// warns about, and what the merge job and CI settle. So only the file list is wanted here; the digest
-	// that comes with it is one memoized read and is not compared.
+	st.Note = moved
+	return st, nil
+}
+
+// parentMovementNote is the sentence for a parent branch that moved since the approval: what it gained, and
+// whether any of it lands on files this branch works in.
+//
+// The parent's own movement is an observation, not a verdict. A parent taking a commit — its review
+// feedback, a rebase of its own, trunk merged into it — says nothing about whether this branch still
+// contributes what the reviewer read, and the child's approval used to die on all three: one round of
+// parent review cost a re-review of every child stacked on it. What a reader needs is the distinction the
+// note now carries — the parent moved, and here is whether it moved where this branch works (PRD §21).
+//
+// Nothing on this path refuses, and the omission is deliberate rather than unfinished. Content a child
+// added to its own branch is refused by the rule that counts content the review never saw, which reads
+// this branch's history and needs no parent; content the *parent* rewrote under a child cannot change
+// this branch's contribution, only make the eventual merge conflict — which is what the overlap below
+// warns about, and what the merge job and CI settle. So only the file list is wanted here; the digest
+// that comes with it is one memoized read and is not compared.
+func (a *app) parentMovementNote(ctx context.Context, repo *git.Repo, c changeset.Changeset,
+	db changeset.DefaultBranchRef, head string, approved *lifecycle.Event, st parentStatus) (string, error) {
+	moved, err := classifyParentMovement(ctx, repo, st.Recorded, st.Tip)
+	if err != nil {
+		return "", err
+	}
 	contribution := changeset.MeasureContribution(ctx, repo, c, db, head, "", st.Measured)
 	overlap := parentOverlapPhrase(ctx, repo, st, contribution.Paths, head)
-	st.Note = fmt.Sprintf("the parent branch %s moved since review %s approved %s: %s%s",
-		st.Branch, approved.Short, short(st.Recorded), moved, overlap)
-	return st, nil
+	return fmt.Sprintf("the parent branch %s moved since review %s approved %s: %s%s",
+		st.Branch, approved.Short, short(st.Recorded), moved, overlap), nil
 }
 
 // parentOverlapPhrase says whether the parent's new commits reach any file this changeset changes, which is

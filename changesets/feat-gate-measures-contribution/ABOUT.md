@@ -13,6 +13,10 @@ Three rules changed, and one guard was added:
     now sits on, with the `Review-Diff-Id` the approval recorded. The older reading — the two bases a
     landing puts in front of the child, compared by the trees they carry — stays as the fallback for an
     approval that recorded no identity, which is every approval written before that trailer.
+-   That comparison is asked whenever the parent's work has landed, whatever the parent's branch did
+    afterwards. Gating it on the branch still standing at the tip the approval recorded sent the ordinary
+    ordering — a parent reviewed after its child, so its approval marker is a commit the child never
+    recorded — to the weaker fallback, which agreed for the wrong reason.
 -   Parent movement produces a note that names the kind of movement and whether the parent's new commits
     reach any file this branch changes.
 -   An approval kept on the landed path is also asked whether the branch still merges into the destination,
