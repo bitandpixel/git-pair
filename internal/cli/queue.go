@@ -94,7 +94,7 @@ func runReviewQueue(ctx context.Context, a *app) error {
 	// One trunk listing serves the whole queue; per branch it costs a tree listing and one batch
 	// read. That is what makes "resolve every branch" affordable — the formulation this replaced
 	// asked a question per ref for each branch.
-	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
+	db, err := a.resolveDefaultBranch(ctx, repo)
 	if err != nil {
 		return err
 	}

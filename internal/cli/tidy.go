@@ -89,7 +89,7 @@ func runChangeTidy(ctx context.Context, a *app, args []string, allLanded, dryRun
 	if len(args) > 0 && allLanded {
 		return &usageError{fmt.Errorf("--all-landed names the whole set, so it takes no changeset ids")}
 	}
-	db, err := changeset.DefaultBranch(ctx, repo, a.defaultBranch)
+	db, err := a.resolveDefaultBranch(ctx, repo)
 	if err != nil && !errors.Is(err, changeset.ErrNoDefaultBranch) {
 		return err
 	}

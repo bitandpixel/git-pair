@@ -80,7 +80,9 @@ is coming.
 
 Every command takes `--json` and `--default-branch <ref>`. Pass `--default-branch` in CI: a job that
 cloned with `init` and one `fetch` has no recorded remote default to read, and git-pair refuses rather
-than guess what has landed.
+than guess what has landed. `GIT_PAIR_DEFAULT_BRANCH` carries the same ref for a whole job, the flag
+outranks it, and a destination taken from the environment is named on stderr and reported as
+`default_branch_source: "env"`.
 
 Full flags, span semantics and the JSON shapes: [references/cli.md](references/cli.md). The landing
 side, which you read about and do not run: [references/integration.md](references/integration.md).

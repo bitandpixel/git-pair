@@ -641,6 +641,16 @@ because the answer belongs to the checkout in front of the command: a CI job tha
 branch has no remote HEAD, and two clones of one repository must not disagree about what has
 landed.
 
+`GIT_PAIR_DEFAULT_BRANCH` is that same value carried once in the process environment, which is the
+form a CI job reaches without threading the flag through every call, and the one the shipped merge job
+sets. The flag outranks it: the command line is the statement about this invocation, and a value
+inherited from the shell cannot contradict it. What the value moves is the destination rather than the
+amount of work, so using it is made visible rather than trusted — the run says once on stderr which
+variable named the branch and what it named, `status --json` reports `default_branch_source: "env"`
+where the flag would have said `"flag"`, and a value that resolves to nothing is refused exactly as a
+mistyped flag would be. An empty value is not set, so a job that means to leave the variable unset does
+not leave an empty ref to resolve.
+
 Every command also accepts `--no-cache`, which ignores the two local caches and derives everything
 from git again. Read-only commands ask git the same questions on every run — which changesets have landed,
 what chain each one left behind, what markers sit on a branch — and the answers to those questions follow
@@ -1370,10 +1380,12 @@ What the runner has to provide: `contents: write` for the merge commit, `checks:
 nothing on that answer, so a missing scope stalls it rather than failing it), `fetch-depth: 0` (the gate
 reads the approval out of history, and a shallow checkout cannot see it), and the integration branch named on
 every call: `--default-branch <ref>`, because a checkout that fetched one branch has no recorded remote
-default to compare against. `GIT_PAIR_DEFAULT_BRANCH` is not a git-pair interface — the command never reads
-it. It belongs to the shipped merge job, which sets it from the `GIT_PAIR_BASE` repository variable (default
-`main`) and passes the flag on each `git pair` call it makes; a `git pair` command run outside that script
-needs the flag. And the destination branch has to accept the push: `GITHUB_TOKEN`
+default to compare against. `GIT_PAIR_DEFAULT_BRANCH` is the same value for a whole process, and it is the
+form the shipped merge job uses: it takes the variable from the `GIT_PAIR_BASE` repository variable (default
+`main`) and every `git pair` the job runs gets that destination, including one added to the step later,
+without the flag being threaded through each call. The flag wins where both are given, and a run that took
+its destination from the environment says so on stderr and reports `default_branch_source: "env"`. And the
+destination branch has to accept the push: `GITHUB_TOKEN`
 cannot be a branch-protection bypass actor, so an unprotected trunk works as-is and a protected one needs a
 Ruleset bypass actor of its own (a GitHub App or a deploy key) with its token on the push remote.
 
@@ -2022,8 +2034,9 @@ that origin does not have, 0 on origin that is not here`. It is a note; pushing 
 `cannot tell which branch is the integration branch: ...` (exit 2) — there is nothing to compare
 against, so "has this landed?" has no answer and every changeset directory on the revision would
 look like work in progress. Pass `--default-branch origin/main` (a CI job that fetched one branch
-has no recorded remote HEAD, and a repository may name trunk something else), or record git's own
-answer once with `git remote set-head origin --auto`. `init` reports the same problem as
+has no recorded remote HEAD, and a repository may name trunk something else), set `GIT_PAIR_DEFAULT_BRANCH`
+to the same ref for a whole job, or record git's own answer once with `git remote set-head origin --auto`.
+`init` reports the same problem as
 `cannot infer a base: ...; pass --base <ref>`, because the recorded base and the landed test come
 from the same resolution. In CI the missing answer is usually the checkout: a job that fetched one
 branch has neither a remote HEAD nor `origin/main` to compare against, which says nothing about the
