@@ -176,3 +176,47 @@ func TestDestinationIsTheLiveParentBranchWhenTheParentReachedOnlyAReleaseLine(t 
 }
 
 // A base under `refs/git-pair/` that is not an integration ref — an archive ref, a stray, a retired
+
+// The same walk with the names this repository actually uses. Every fixture above names a branch exactly
+// what its changeset is called, and for that shape the two readings of "is this base landed?" agree: the
+// base string a parent recorded (`alpha`) is the id the destination files the record under (`alpha`). A
+// branch called `feat/alpha` breaks the coincidence — `parent:` holds the branch and the destination holds
+// `changesets/feat-alpha/` — and a walk that compares the branch name against ids sees an unlanded branch,
+// stops, and offers a branch holding nothing the destination lacks as where a child's work should land.
+//
+// Three deep with both ancestors landed is the shape that raised it: the child's own record points at
+// `feat/beta`, whose own record points at `feat/alpha`, and the walk has to cross both to reach `main`.
+func TestDestinationWalksAParentChainWhoseBranchNamesDifferFromTheirIds(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+
+	f.CreateBranch("feat/alpha")
+	f.CommitChangeset("feat-alpha", "main")
+	f.Commit("alpha work", gittest.WithFile("alpha.txt", "1\n"))
+	f.CreateBranch("feat/beta")
+	stageStacked(t, f, "feat-beta", "feat/alpha", "feat-alpha")
+	f.Commit("beta work", gittest.WithFile("beta.txt", "1\n"))
+	f.CreateBranch("feat/gamma")
+	stageStacked(t, f, "feat-gamma", "feat/beta", "feat-beta")
+	f.Commit("gamma work", gittest.WithFile("gamma.txt", "1\n"))
+
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land feat/beta", "feat/beta")
+	f.SwitchTo("feat/alpha")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land feat/alpha", "feat/alpha")
+
+	f.SwitchTo("feat/gamma")
+	got := destinationOf(t, f, "feat-gamma")
+	if got.Ref != "main" || got.Why != "parent" {
+		t.Errorf("destination = %s, want main (parent): both ancestors landed, so the only branch under "+
+			"this work is the integration branch — naming a stale parent branch is the answer that merges "+
+			"a child onto a branch already empty of its own work", got)
+	}
+	if len(got.Via) != 2 || got.Via[0] != "feat-beta" || got.Via[1] != "feat-alpha" {
+		t.Errorf("via = %v, want [feat-beta feat-alpha]: the report names the records it crossed by the "+
+			"names they are filed under, not the branches that carried them", got.Via)
+	}
+	if got.Unreachable != "" {
+		t.Errorf("unreachable = %q, want empty", got.Unreachable)
+	}
+}

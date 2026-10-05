@@ -92,8 +92,11 @@ func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db Default
 				}
 				// The loop guard belongs to the walk below, which marks the id before it reads the record. Marking
 				// it here would make the walk refuse the very hop this rule just decided to take.
-				if slices.Contains(ids, base) && !seen[base] {
-					base, baseChangeset = "", base
+				if id, landed := landedID(ids, base); landed && !seen[id] {
+					// The record is filed under the id, so the id is what the next hop has to read it by. Carrying
+					// the branch name over would ask the destination for a directory it does not have, and the walk
+					// would fall back to the default branch with a reason that names none of what it crossed.
+					base, baseChangeset = "", id
 					continue
 				}
 			}
@@ -126,6 +129,30 @@ func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db Default
 		out.Ref, out.Why = "", ""
 	}
 	return out, nil
+}
+
+// landedID reports whether a base a parent recorded names work the integration branch already holds, and
+// under which of its own records.
+//
+// The two sides of that question carry different names, and a rule that reads only one of them is wrong
+// wherever a branch name needs mapping. What a parent records in `base:` and `parent:` is a *branch* — where
+// its work was measured from — while the destination files its records under changeset *ids*. For a branch
+// whose name needs no mapping the two are the same string and every reading agrees; for `feat/auth` against
+// `feat-auth`, an exact comparison sees an unlanded branch and the walk stops there, offering a branch that
+// holds nothing the destination lacks as the place a child's work should land — which the queue then reports,
+// and a merge job then acts on.
+//
+// Both spellings are asked because a base can record either: a stack written from a branch names the branch,
+// and a record whose branch was gone when it was written down names the changeset. The match is reported
+// rather than assumed, because the next hop reads the record by that name.
+func landedID(ids []string, base string) (string, bool) {
+	if slices.Contains(ids, base) {
+		return base, true
+	}
+	if slug, err := SlugFromBranch(base); err == nil && slug != base && slices.Contains(ids, slug) {
+		return slug, true
+	}
+	return "", false
 }
 
 // String is the form a test failure prints: the answer and the reason for it together, because

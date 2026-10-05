@@ -2109,7 +2109,13 @@ rather than guessed once for the repository:
 
 1. the branch the changeset's own `base:` names, when it names one;
 2. for a stacked child, where its landed parent went — a stack lands as a line, so the child's destination
-   is the branch that carries the parent, and the walk names the parents it followed;
+   is the branch that carries the parent, and the walk names the parents it followed. The two sides of the
+   hop are named differently and the walk knows it: a parent's record names a *branch* (`parent: feat/auth`),
+   while the destination files its records under changeset *ids* (`changesets/feat-auth/`). The hop is taken
+   when either spelling matches, and the **id** is what carries forward, because that is the name the next
+   record is read by. Comparing only the branch name recognises no landed parent at all on a repository whose
+   branches are prefixed, stops at the branch, and offers as a destination a branch carrying nothing the
+   destination lacks — which the queue then prints, and the automatic merge then acts on;
 3. otherwise the repository's integration branch (§4): `--default-branch <ref>`, then
    `refs/remotes/origin/HEAD`, then a sole `origin/main` or `origin/master`, then a local `main` or
    `master`.

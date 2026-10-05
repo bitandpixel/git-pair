@@ -500,3 +500,85 @@ func TestChangeIntegrateAsksForTheMergeInACloneWhereTrunkIsOnlyAFetchRef(t *test
 		t.Errorf("check said ready=%v integrating=%v for the head just declared, want both true", chk["ready"], chk["integrating"])
 	}
 }
+
+// The same inherited destination with the names this repository actually uses: the branch is `feat/alpha`
+// and the record under it is `feat-alpha`. This is the shape that said a child should land on the branch it
+// is stacked on, carrying nothing the destination lacks, because the walk compared the branch name a parent
+// recorded against the ids the destination files its records under and matched none of them.
+//
+// Three levels deep is what makes it bite. With one landed ancestor the walk reads that ancestor's own
+// record, which names `main`, and the answer is right whatever the comparison does; it is the *second*
+// ancestor's record — `parent: feat/beta`, a branch — that has to be recognised as landed before the walk
+// can climb over it.
+//
+// The queue's field is asserted beside the command's own answer because the two are read by different
+// people: `change integrate` prints its target for the author, and scripts/ci/git-pair-integrate.sh takes
+// the branch it merges into from the queue row. One walk, two places for the wrong answer to be acted on.
+func TestChangeIntegrateNamesTheDestinationWhenBranchAndIdDiffer(t *testing.T) {
+	f := newRepo(t)
+	f.CreateBranch("feat/alpha")
+	f.CommitChangeset("feat-alpha", "main")
+	f.Commit("alpha work", gittest.WithFile("a.go", "package main\n"))
+	ready(t, f)
+	submit(t, f, "approve")
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "--no-edit", "-m", "land feat/alpha", "feat/alpha")
+
+	f.SwitchTo("feat/alpha")
+	f.CreateBranch("feat/beta")
+	stackedOnBranch(t, f, "feat-beta", "feat-alpha", "feat/alpha", "b.go")
+	ready(t, f)
+	submit(t, f, "approve")
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "--no-edit", "-m", "land feat/beta", "feat/beta")
+
+	f.SwitchTo("feat/beta")
+	f.CreateBranch("feat/gamma")
+	stackedOnBranch(t, f, "feat-gamma", "feat-beta", "feat/beta", "c.go")
+	ready(t, f)
+	submit(t, f, "approve")
+
+	j := runIn(t, f.Dir(), "change", "integrate", "--json").mustSucceed(t, "change", "integrate").json(t)
+	if j["destination"] != "main" {
+		t.Errorf("destination = %v, want main: both ancestors landed, and feat/beta carries nothing the "+
+			"destination does not already hold", j["destination"])
+	}
+	if j["destination_source"] != "parent" {
+		t.Errorf("destination_source = %v, want parent", j["destination_source"])
+	}
+	via, _ := j["destination_via"].([]any)
+	if len(via) != 2 || via[0] != "feat-beta" || via[1] != "feat-alpha" {
+		t.Errorf("destination_via = %v, want [feat-beta feat-alpha]: the records the walk crossed, named as "+
+			"the destination files them", j["destination_via"])
+	}
+
+	q := runIn(t, f.Dir(), "queue", "--json").mustSucceed(t, "queue", "--json").json(t)
+	rows, _ := q["awaiting_integration"].([]any)
+	var row map[string]any
+	for _, e := range rows {
+		if r, _ := e.(map[string]any); r["changeset"] == "feat-gamma" {
+			row = r
+		}
+	}
+	if row == nil {
+		t.Fatalf("queue awaiting_integration = %v, want a row for feat-gamma", rows)
+	}
+	if row["destination"] != "main" {
+		t.Errorf("queue destination = %v, want main: the CI job merges into the branch this field names, so a "+
+			"stale parent branch here lands the work on a branch already empty of it", row["destination"])
+	}
+}
+
+// stackedOnBranch writes a stacked changeset directory on the branch that is checked out, naming the parent
+// the way a branch names it: `parent:` holds the branch, `parent-changeset:` the id. Those two spellings are
+// the subject of the test above, so this fixture writes them itself rather than borrowing a helper that
+// makes them equal — which is how the walk's bug stayed invisible to the tests that came before it.
+func stackedOnBranch(t *testing.T, f *gittest.Fixture, slug, parentID, parentBranch, work string) {
+	t.Helper()
+	files := map[string]string{
+		"changesets/" + slug + "/CHANGESET.yaml": "id: " + slug + "\nparent: " + parentBranch +
+			"\nparent-changeset: " + parentID + "\n",
+		"changesets/" + slug + "/ABOUT.md": "# " + slug + "\n",
+	}
+	f.Commit("changeset "+slug, gittest.WithFiles(files), gittest.WithFile(work, "package main\n"))
+}
