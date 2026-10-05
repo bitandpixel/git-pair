@@ -484,6 +484,12 @@ approval based on implementation-state equivalence.
 
 ### Initial conservative stacked-approval rule
 
+> Superseded for the parent's own movement. The gate now compares the contribution this branch makes
+> with the diff identity the approval recorded, so a parent moving is a note and changed content is the
+> reason; PRD §21 states the rule and PRD §21.1 what the comparison measures, with the tests in
+> `internal/cli/contribution_gate_test.go` and `internal/cli/stacked_parent_test.go`. The list below is
+> what the note still classifies. Recorded 2026-10-03.
+
 For the initial implementation:
 
 > Any change to the parent branch after a child is approved invalidates the child's approval.

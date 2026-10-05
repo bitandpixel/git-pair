@@ -401,19 +401,22 @@ reviewed one, which is the case the field exists to catch.
 
 The other two fields name where the reviewed diff started rather than what it ended at.
 `Review-Base-Head` is the commit the submission measured its diff from, and `Review-Parent-Head` (a
-stacked changeset only) is the tip of the branch it is stacked on. `check` compares the first with the
-base under test today, which is how it answers whether the diff it would land is the diff that was
-approved, and the second with the parent branch's current tip, which is how it answers whether the parent
-moved (§11.3). While a parent's branch is the base the two fields name the same commit; once that parent
-has landed they differ, and the branch the second one names is often deleted — which is why the first one
-is a commit.
+stacked changeset only) is the tip of the branch it is stacked on. `check` compares the second with the
+parent branch's current tip, which is how it says whether the parent moved, and compares the recorded
+identity below with the contribution this branch makes from whichever commit is its ground today, which is
+how it answers whether the diff it would land is the diff that was approved (§11.3, PRD §21.1); the first
+is what makes that refusal name which side moved. While a parent's branch is the base the two fields name
+the same commit; once that parent has landed they differ, and the branch the second one names is often
+deleted — which is why the first one is a commit.
 
 `Review-Diff-Id` is the third of the three, and the only one that names the content: the identity of the
 recorded diff between that base and that head, hashed from what the diff changes — modes, blob OIDs,
-statuses, paths — with the changeset's own directory left out, so replying to a review thread cannot change
-the identity of the approval the reply is written into. It carries a version because the value is defined by
-the rules that produced it. A marker whose version this build does not know reads as no identity recorded,
-which is an absence rather than a difference, and the reader gets the comparison still available.
+statuses, paths — with the review record left out: this changeset's directory and every ancestor's, in both
+of their homes, so replying to a review thread cannot change the identity of the approval the reply is
+written into, and a parent's landing cannot read as the child deleting the parent's review. It carries a
+version because the value is defined by the rules that produced it. A marker whose version this build does
+not know reads as no identity recorded, which is an absence rather than a difference, and the reader gets
+the comparison still available.
 
 **Readiness is withdrawn with a command.** `git pair change unready` commits `Review-State: working`
 and takes the changeset out of the queue. Readiness is an offer made with `git pair change ready`, so
@@ -663,7 +666,7 @@ nothing, those reads exit 2. For a span of another branch, name its ends: `git p
 | Exit code | Meaning | Seen as |
 | --- | --- | --- |
 | 0 | success | — |
-| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:`; `git pair change integrate` refusing work the gate would refuse — no approval standing, content that moved since it, a rewritten history, a parent that moved, a dirty tree — or refusing a stacked child whose parent has not landed; `change tidy` naming a changeset that has not landed, or one this branch does not carry |
+| 1 | a git-pair rule or the repository state refused the operation | surviving additions; `working tree must be clean`; `ABOUT.md is missing`; `cannot resolve changeset base "vanished"`; `change wait` timing out, or refusing a changeset that is `WORKING`; `git pair check` printing `NOT READY:`; `git pair change integrate` refusing work the gate would refuse — no approval standing, content that moved since it, a rewritten history, a contribution that is not the diff the approval measured, a branch that would conflict with its destination, a dirty tree — or refusing a stacked child whose parent has not landed; `change tidy` naming a changeset that has not landed, or one this branch does not carry |
 | 2 | usage error | unknown flag, unknown command, or unknown subcommand of `change`/`review`/`skill`; `no changeset for this branch`; `no branch carries changeset "<slug>"`; detached HEAD; `cannot tell which branch is the integration branch`; `--block, --feedback and --approve are mutually exclusive`; `changeset has no review submissions yet`; `changeset <cs> has no review submission yet` (`change feedback`); `--interval expects a duration` (`change wait`); `"<path>" does not appear in <span>`; editor/TUI commands without a terminal; `skill install` with an unknown `--harness` or `--scope`, or with `--dest` alongside either |
 | 3 | the repository or git itself failed | `not a git repository`; a git subprocess exiting non-zero for a reason other than an unresolvable revision |
 
@@ -898,12 +901,15 @@ handling two shapes), and `policy` records which rule produced the verdict — `
 comparing the verdict built one of them and the other is the end of the lineage comparison.
 `reviewed_head` is the commit the newest permitting review named; it is reported whichever way the
 verdict went and omitted only when that marker names no head. `landed` reports a changeset the
-destination already holds (PRD §11.3), read from that branch's tree. Four more fields are the stack
+destination already holds (PRD §11.3), read from that branch's tree. Six more fields are the stack
 beside the verdict (PRD §21): `parent_landed` and `parent_landed_commit` say the branch this child was
 measured against is finished work and name the commit it became, `parent_stale_branch` says the
-parent's branch is still here holding nothing the destination lacks, and `parent_head_carries_landing`
+parent's branch is still here holding nothing the destination lacks, `parent_head_carries_landing`
 says this head is already on the landing — which is the half that stays answerable after that branch is
-deleted, and the half that decides whether any rebase is owed.
+deleted, and the half that decides whether any rebase is owed — and `parent_measured_base` and
+`parent_comparison` are the two facts behind a parent verdict: the commit the approval recorded measuring
+from, and which reading answered it, `contribution` when the recorded diff identity was compared with what
+this branch contributes today and `merge-base` when the older comparison of the two bases decided.
 
 This form carries the verdict in `ready` rather than in the exit code: a not-ready run prints its
 JSON and exits 0, so a job piping it into `jq` keeps git-pair's answer separate from the pipeline's.

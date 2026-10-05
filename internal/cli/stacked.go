@@ -16,13 +16,14 @@ import (
 // implementation commits, review submissions, approvals, rebases and merges while the child is being
 // read. Every one of those moves the tip the child's diff and its approval were computed against, and
 // none of them is visible in the child's own history — the child's commits are unchanged, so `check`'s
-// drift test passes. The conservative rule (PRD §21) is that any of them invalidates the child's
-// approval, and the only way to apply it is to have written the parent's tip down at the moment the
-// approval was given, which is what `Review-Parent-Head` is for.
+// drift test passes. What the approval is a claim about is the diff, so the parent's own movement is
+// reported as a note and the content this branch contributes is what refuses (PRD §21, §21.1). Both
+// readings need the value that can only be captured at the moment the approval was given: which is what
+// `Review-Parent-Head`, `Review-Base-Head` and `Review-Diff-Id` are for.
 //
-// The classification below exists because a rule that reads as arbitrary gets worked around. "The
-// parent moved" does not tell an author whether to rebase, re-review, or wait; "the parent was
-// approved, which moved its tip by one review commit" does.
+// The classification below exists because a note that reads as arbitrary gets ignored. "The parent
+// moved" does not tell an author whether to rebase, re-review, or wait; "the parent was approved, which
+// moved its tip by one review commit, and none of it touches your files" does.
 
 // parentStatus is what the parent branch has done since the child's approval.
 type parentStatus struct {
@@ -54,6 +55,11 @@ type parentStatus struct {
 	// integration branch. False covers "it reached a release branch" and "this clone cannot name the
 	// integration branch", which the prose separates with LandedReach.
 	LandedInDefaultBranch bool
+	// Comparison names the reading that decided the landed-parent question, so a reader of a verdict can
+	// see which comparison was made rather than only that one failed: "contribution" when the approval
+	// recorded a diff identity and the content was compared to it, "merge-base" for the older reading that
+	// compares the two bases a landing puts in front of the child. Empty means neither was asked.
+	Comparison string
 	// LandedReach is that prose: ", reachable from main", ", not reachable from main", or nothing when
 	// no branch identifies itself as the destination.
 	LandedReach string
@@ -151,26 +157,25 @@ func (a *app) parentLive(ctx context.Context, repo *git.Repo, c changeset.Change
 		}
 		return st, nil
 	}
-	// The landing outranks the tip comparison, and a parent that landed by merge has not moved its
-	// branch, so `Recorded == Tip` is true and reads as "nothing happened" exactly when the work left
-	// the branch. Content decides that case, and content is asked of the commit the approval measured
-	// from rather than of the parent's branch tip: the two are the same commit only while that branch is
-	// the base, and after a rebase onto the landing it is the branch tip that names the older reading.
-	if st.Landed != "" && (st.Recorded == "" || st.Recorded == st.Tip) {
-		same, err := landedBaseIsTheSameWork(ctx, repo, base, st.landedFull, head)
-		if err != nil {
-			return st, err
+	// The landing outranks the tip comparison, and it outranks it whatever the parent's branch did
+	// afterwards. A parent whose work has landed has finished, and the ordinary ordering is that it moved:
+	// a parent is reviewed after its child, so its own approval is a commit the child never recorded, and
+	// gating on `Recorded == Tip` sent that case — the common one — to the older comparison of two base
+	// trees. Content is asked of the commit the approval measured from rather than of the parent's branch
+	// tip: the two are the same commit only while that branch is the base, and after a rebase onto the
+	// landing it is the branch tip that names the older reading.
+	if st.Landed != "" {
+		if st.Recorded != "" && st.Tip != "" && st.Recorded != st.Tip {
+			// The landing answers the question, and the movement is still worth the sentence: the reader
+			// sees where the parent went as well as what the child still contributes.
+			note, err := a.parentMovementNote(ctx, repo, c, db, head, approved, st)
+			if err != nil {
+				return st, err
+			}
+			st.Note = note
 		}
-		if same {
-			st.Note = fmt.Sprintf("%s; the base moved onto the landing and the content under it did not, so the approval still measures this work",
-				st.Note)
-			return st, nil
-		}
-		advice := fmt.Sprintf("%s and have the result reviewed again", landedParentStep(c, st))
-		st.Reason = fmt.Sprintf("the parent %s landed as %s%s and the diff under it differs from what review %s approved: %s",
-			st.parentName(), st.Landed, st.LandedReach, approved.Short, advice)
-		st.Next = advice
-		return st, nil
+		return a.landedApprovalStillStands(ctx, repo, c, db, head, approved, st,
+			fmt.Sprintf("%s and have the result reviewed again", landedParentStep(c, st)))
 	}
 	if st.Recorded == st.Tip {
 		return st, nil
@@ -184,15 +189,77 @@ func (a *app) parentLive(ctx context.Context, repo *git.Repo, c changeset.Change
 		}
 		return st, nil
 	}
-	moved, err := classifyParentMovement(ctx, repo, st.Recorded, st.Tip)
+	moved, err := a.parentMovementNote(ctx, repo, c, db, head, approved, st)
 	if err != nil {
 		return st, err
 	}
-	advice := fmt.Sprintf("rebase onto %s and have the result reviewed again", st.Branch)
-	st.Reason = fmt.Sprintf("the parent branch %s moved since review %s approved %s: %s — %s",
-		st.Branch, approved.Short, short(st.Recorded), moved, advice)
-	st.Next = advice
+	st.Note = moved
 	return st, nil
+}
+
+// parentMovementNote is the sentence for a parent branch that moved since the approval: what it gained, and
+// whether any of it lands on files this branch works in.
+//
+// The parent's own movement is an observation, not a verdict. A parent taking a commit — its review
+// feedback, a rebase of its own, trunk merged into it — says nothing about whether this branch still
+// contributes what the reviewer read, and the child's approval used to die on all three: one round of
+// parent review cost a re-review of every child stacked on it. What a reader needs is the distinction the
+// note now carries — the parent moved, and here is whether it moved where this branch works (PRD §21).
+//
+// Nothing on this path refuses, and the omission is deliberate rather than unfinished. Content a child
+// added to its own branch is refused by the rule that counts content the review never saw, which reads
+// this branch's history and needs no parent; content the *parent* rewrote under a child cannot change
+// this branch's contribution, only make the eventual merge conflict — which is what the overlap below
+// warns about, and what the merge job and CI settle. So only the file list is wanted here; the digest
+// that comes with it is one memoized read and is not compared.
+func (a *app) parentMovementNote(ctx context.Context, repo *git.Repo, c changeset.Changeset,
+	db changeset.DefaultBranchRef, head string, approved *lifecycle.Event, st parentStatus) (string, error) {
+	moved, err := classifyParentMovement(ctx, repo, st.Recorded, st.Tip)
+	if err != nil {
+		return "", err
+	}
+	contribution := changeset.MeasureContribution(ctx, repo, c, db, head, "", st.Measured)
+	overlap := parentOverlapPhrase(ctx, repo, st, contribution.Paths, head)
+	return fmt.Sprintf("the parent branch %s moved since review %s approved %s: %s%s",
+		st.Branch, approved.Short, short(st.Recorded), moved, overlap), nil
+}
+
+// parentOverlapPhrase says whether the parent's new commits reach any file this changeset changes, which is
+// the difference between "the parent moved" — which reads as pedantry and trains an author to skip the note
+// — and "the parent moved where it matters". Both halves are facts: the overlap is read from the two file
+// lists, not inferred.
+//
+// A list this clone cannot read costs the detail and not the answer: the note still says the parent moved,
+// and an unreadable file list is a fact about this clone rather than about the parent, so it is not worth
+// failing the read over.
+func parentOverlapPhrase(ctx context.Context, repo *git.Repo, st parentStatus, mine []string, head string) string {
+	if st.Tip == "" || head == "" || len(mine) == 0 {
+		return ""
+	}
+	fork, err := repo.MergeBase(ctx, st.Tip, head)
+	if err != nil || fork == "" {
+		return ""
+	}
+	theirs, err := repo.PathsChanged(ctx, fork, st.Tip)
+	if err != nil {
+		return ""
+	}
+	shared := make([]string, 0, len(mine))
+	for _, p := range theirs {
+		for _, m := range mine {
+			if p == m {
+				shared = append(shared, p)
+				break
+			}
+		}
+	}
+	if len(shared) == 0 {
+		return "; none of them touch files this branch changes"
+	}
+	if len(shared) > 4 {
+		shared = shared[:4]
+	}
+	return fmt.Sprintf(", and %d of them touch files this branch also changes (%s)", len(shared), strings.Join(shared, ", "))
 }
 
 // parentLanded reads the parent's landing where landing lives — the destination's tree and history — and
@@ -429,23 +496,98 @@ func (a *app) parentGone(ctx context.Context, repo *git.Repo, c changeset.Change
 		st.Next = fmt.Sprintf("parent landed as %s; rebase onto %s", st.Landed, destination)
 		return st, nil
 	}
-	same, err := landedBaseIsTheSameWork(ctx, repo, base, commit, head)
+	return a.landedApprovalStillStands(ctx, repo, c, db, head, approved, st,
+		fmt.Sprintf("rebase onto %s and have the result reviewed again", destination))
+}
+
+// landedApprovalStillStands decides whether a child's approval survives its parent's landing, and writes the
+// finding on st: a note when the content under the approval has not moved, a reason and a step when it has.
+//
+// Two readings, in the order that knows more.
+//
+// The direct one, where the approval recorded the identity of its diff: measure what this head contributes
+// above the ground it now sits on, and compare the two values. That is the question itself, so it is stable
+// under everything the question has no interest in — the parent's branch moving, the shape of the landing,
+// the child taking the destination in — and it is one comparison rather than an inference from how far the
+// world has moved.
+//
+// The older one, for an approval that recorded no identity: the two bases a landing puts in front of the
+// child, compared by the trees they carry (`landedBaseIsTheSameWork`). With the head fixed it answers the
+// same question, and it is what every approval written before the trailer gets. It cannot answer it once the
+// child has taken the destination in, because then the two diffs no longer share a head.
+//
+// A kept approval is also asked whether the branch still merges into the destination. A branch that would
+// conflict has no clean patch to compare at all — what lands is whatever resolution somebody writes later,
+// over content no reviewer saw — and the merge job is the worst place to discover it, after the gate said
+// ready and CI said green.
+func (a *app) landedApprovalStillStands(ctx context.Context, repo *git.Repo, c changeset.Changeset,
+	db changeset.DefaultBranchRef, head string, approved *lifecycle.Event, st parentStatus, advice string) (parentStatus, error) {
+	same, how, err := a.landedWorkUnchanged(ctx, repo, c, db, head, approved, st)
 	if err != nil {
 		return st, err
 	}
+	st.Comparison = how
 	if same {
-		st.Note = fmt.Sprintf("parent %s landed as %s%s; the base moved onto the landing and the content under it did not, so the approval still measures this work",
-			st.parentName(), st.Landed, st.LandedReach)
-		if st.LandingUnderHead {
-			st.Note += fmt.Sprintf("; this head is already on %s, so the diff under test is this branch's own work above the landing", st.Landed)
+		if clean, conflicts := landedMergeIsClean(ctx, repo, db, head); !clean {
+			destination := displayRef(db.LocalName())
+			st.Reason = fmt.Sprintf("this branch would conflict with %s: %s. The content it contributes is what review %s approved; take %s in and have the result reviewed again.",
+				destination, strings.Join(conflicts, ", "), approved.Short, destination)
+			st.Next = fmt.Sprintf("git merge %s && git pair change ready --changeset %s", destination, c.Slug)
+			return st, nil
 		}
+		core := fmt.Sprintf("parent %s landed as %s%s; measured above the landing, this branch still contributes the content review %s approved",
+			st.parentName(), st.Landed, st.LandedReach, approved.Short)
+		if how == "merge-base" {
+			core = fmt.Sprintf("parent %s landed as %s%s; the base moved onto the landing and the content under it did not, so the approval still measures this work",
+				st.parentName(), st.Landed, st.LandedReach)
+		}
+		if st.LandingUnderHead {
+			core += fmt.Sprintf("; this head is already on %s, so the diff under test is this branch's own work above the landing", st.Landed)
+		}
+		if st.Note != "" {
+			core = st.Note + "; " + core
+		}
+		st.Note = core
 		return st, nil
 	}
-	advice := fmt.Sprintf("rebase onto %s and have the result reviewed again", destination)
 	st.Reason = fmt.Sprintf("the parent %s landed as %s%s and the diff under it differs from what review %s approved: %s",
 		st.parentName(), st.Landed, st.LandedReach, approved.Short, advice)
-	st.Next = fmt.Sprintf("parent landed as %s; rebase onto %s", st.Landed, destination)
+	st.Next = advice
 	return st, nil
+}
+
+// landedWorkUnchanged answers the content question for a child whose parent has landed, and names the
+// reading that answered it. See `landedApprovalStillStands` for the two readings and when each is used.
+func (a *app) landedWorkUnchanged(ctx context.Context, repo *git.Repo, c changeset.Changeset,
+	db changeset.DefaultBranchRef, head string, approved *lifecycle.Event, st parentStatus) (bool, string, error) {
+	// The recorded value is compared verbatim, and `DiffID` is what says it is a value this build can
+	// interpret at all: a marker written by a future version reads as no identity, which falls through to the
+	// older reading rather than comparing an encoding this build does not define.
+	if _, _, ok := approved.DiffID(); ok {
+		if now := changeset.MeasureContribution(ctx, repo, c, db, head, st.landedFull, approved.ReviewedBase); now.Measured {
+			return now.Digest == approved.ReviewedDiffID, "contribution", nil
+		}
+	}
+	same, err := landedBaseIsTheSameWork(ctx, repo, st.approvalBase(), st.landedFull, head)
+	return same, "merge-base", err
+}
+
+// landedMergeIsClean asks whether this branch still merges into the destination without a human.
+//
+// It answers "clean" where the question cannot be asked, and so never adds a refusal on an unreadable
+// repository: this condition only ever adds a refusal, and refusing without evidence would block merges
+// that are perfectly good — a clone whose git is too old for `merge-tree`, or a destination this clone
+// cannot name. The conservative direction PRD §2 asks for is on the question that *grants* an approval,
+// and this is not that question.
+func landedMergeIsClean(ctx context.Context, repo *git.Repo, db changeset.DefaultBranchRef, head string) (bool, []string) {
+	if db.Ref == "" || head == "" {
+		return true, nil
+	}
+	res, err := repo.MergeTree(ctx, db.Ref, head)
+	if err != nil {
+		return true, nil
+	}
+	return res.Clean, res.Conflicts
 }
 
 // landedBaseIsTheSameWork compares what the child's diff measures under the two bases a landing puts in

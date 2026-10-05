@@ -261,9 +261,12 @@ func MeasureSubmission(ctx context.Context, repo *git.Repo, c Changeset, db Defa
 	if m.BaseHead == "" || head == "" {
 		return m
 	}
-	// The changeset's own directory is excluded: the review record lives in it, so a reply to a review
-	// thread would otherwise change the digest of the approval it is written into.
-	digest, err := repo.DiffRawDigest(ctx, m.BaseHead, head, ActiveDirPath(c.Slug), LandedDirPath(c.Slug))
+	// The review record is excluded, this changeset's and every ancestor's: a reply to a review thread
+	// would otherwise change the digest of the approval it is written into, and the record a landing moves
+	// would otherwise read as content the branch deleted. `MeasureContribution` excludes the same paths, and
+	// the two must agree — a submission measured one way and a check measured another refuses every approval
+	// ever written.
+	digest, err := repo.DiffRawDigest(ctx, m.BaseHead, head, DigestExclusions(ctx, repo, c, db, head)...)
 	if err != nil || digest == "" {
 		return m
 	}

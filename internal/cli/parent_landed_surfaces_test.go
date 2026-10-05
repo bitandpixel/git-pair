@@ -86,9 +86,11 @@ func TestCheckNamesAStaleParentBranchInNextAction(t *testing.T) {
 	}
 }
 
-// The parent moving after the approval is a different fact and keeps its refusal. Without this row the
-// passing verdict above is indistinguishable from a gate that has stopped asking the question.
-func TestCheckStillRefusesAParentThatMovedAfterTheApproval(t *testing.T) {
+// The parent moving after the approval is a different fact from the content moving, and it is a note
+// rather than a refusal. Without this row the passing verdict above is indistinguishable from a gate that
+// has stopped asking the question at all: the note is the evidence that the comparison was made, and the
+// test of the comparison refusing is in `contribution_gate_test.go`, where the content actually moved.
+func TestCheckNotesAParentThatMovedAfterTheApproval(t *testing.T) {
 	f := newRepo(t)
 	f.CreateBranch("alpha")
 	f.CommitChangeset("alpha", "main")
@@ -100,12 +102,11 @@ func TestCheckStillRefusesAParentThatMovedAfterTheApproval(t *testing.T) {
 	f.Commit("alpha extra work", gittest.WithFile("c.go", "package main\n"))
 	f.SwitchTo("beta")
 
-	res := runIn(t, f.Dir(), "check")
-	if res.code == 0 {
-		t.Fatalf("check passed with stdout:\n%s", res.stdout)
-	}
+	res := runIn(t, f.Dir(), "check").mustSucceed(t, "check")
 	mustContain(t, res.stderr+res.stdout, "moved since review",
-		"the parent's own movement still refuses, with today's wording")
+		"the parent's own movement is reported, with what it was")
+	mustContain(t, res.stdout, "none of them touch files this branch changes",
+		"and whether that movement reaches this branch's files")
 }
 
 // A reviewer reading the queue wants to know a row is being read against a base that has already landed.

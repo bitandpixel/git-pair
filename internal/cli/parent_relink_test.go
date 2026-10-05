@@ -117,10 +117,15 @@ func TestRelinkKeepsAnApprovalWhoseDiffIsIdentical(t *testing.T) {
 	}
 }
 
-// The other side of the same rule, and the reason it is a rule rather than an exemption: the child was
-// rebased onto a trunk that had moved, so `base...head` under the parent's branch tip is not the diff the
-// reviewer saw. The approval measured different content, and `check` says so.
-func TestRelinkDropsAnApprovalWhoseDiffDiffers(t *testing.T) {
+// The other side of the same rule, and the reason it is a rule rather than an exemption: the content is
+// the same, and the approval still falls. `git rebase --onto` replays the child's commits onto the landing,
+// so the contribution above the ground it now sits on is byte for byte the contribution the reviewer read —
+// and the approval is dropped anyway, because the commits the review looked at are no longer in this
+// history. That is the `Review-Head` lineage rule, not the content rule: a rebase costs a review whatever
+// it changes, which is what keeps "re-review the content" and "rebase the branch" from being alternatives.
+//
+// The content rule's own refusal — the same head, different content — is in `contribution_gate_test.go`.
+func TestRelinkOntoTheLandingCostsAReviewForTheRewrite(t *testing.T) {
 	f := newRepo(t)
 	f.Commit("trunk note", gittest.WithFile("d.go", "package main\n"))
 	f.CreateBranch("alpha")
@@ -144,11 +149,12 @@ func TestRelinkDropsAnApprovalWhoseDiffDiffers(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "check", "--json")
 	if res.code == 0 && res.json(t)["ready"] == true {
-		t.Fatalf("check passed: %v, after the base moved and the content under it moved with it", res.json(t))
+		t.Fatalf("check passed: %v, after the reviewed commits left this history", res.json(t))
 	}
-	mustContain(t, res.stdout+res.stderr, "reviewed again",
-		"the reason names what has to happen, not just that something moved")
-	mustContain(t, res.stdout+res.stderr, "differs", "and says why: the measured diff is not the one the review saw")
+	mustContain(t, res.stdout+res.stderr, "no longer in this history",
+		"the reason names the rewrite, which is what the rebase did")
+	mustContain(t, res.stdout+res.stderr, "does not license integration",
+		"and says what that means for the approval")
 }
 
 // The derivation needs nothing from this clone's refs: with the parent's record deleted from the repository
