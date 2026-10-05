@@ -58,9 +58,9 @@ func TestContributionIsUnmovedByTakingTheDestinationIn(t *testing.T) {
 	if !after.Measured {
 		t.Fatal("the contribution after taking the destination in was not measured")
 	}
-	if after.Digest != first.Digest {
+	if after.Identity.Raw != first.Identity.Raw {
 		t.Errorf("merging the destination in changed the contribution: %s then %s — the trunk's own work is being counted as the child's",
-			first.Digest, after.Digest)
+			first.Identity.Raw, after.Identity.Raw)
 	}
 	if after.Base == first.Base {
 		t.Errorf("the ground did not move (%s both times): equal digests here would be an artifact of measuring the same pair twice",
@@ -101,9 +101,9 @@ func TestContributionCountsATrunkEditToAFileTheChildAlsoChanges(t *testing.T) {
 	f.SwitchTo("beta")
 	f.MustGit("merge", "--no-edit", "main")
 	after := measure(t, f, child, f.RevParse("beta"), landing, recorded)
-	if after.Digest == first.Digest {
+	if after.Identity.Raw == first.Identity.Raw {
 		t.Errorf("the shared file kept its identity across a trunk edit to it (%s): a blob OID is a whole-file "+
-			"identity, so this equality would mean the child's post-image had not changed — and it had", first.Digest)
+			"identity, so this equality would mean the child's post-image had not changed — and it had", first.Identity.Raw)
 	}
 }
 
@@ -136,7 +136,7 @@ func TestContributionLeavesOutTheReviewRecord(t *testing.T) {
 	if !got.Measured {
 		t.Fatal("the contribution after the record changed was not measured")
 	}
-	if got.Digest != want.Digest {
-		t.Errorf("the review record moved the identity of the work: %s then %s", want.Digest, got.Digest)
+	if got.Identity.Raw != want.Identity.Raw {
+		t.Errorf("the review record moved the identity of the work: %s then %s", want.Identity.Raw, got.Identity.Raw)
 	}
 }

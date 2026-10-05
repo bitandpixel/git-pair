@@ -18,9 +18,11 @@ type Contribution struct {
 	// Base is the commit the diff was measured from, named so a reader can reproduce it and so a refusal
 	// can say which side moved.
 	Base string
-	// Digest is that diff's identity, in the `<version>:<hex>` form `model.FormatDiffID` renders. It is
-	// what a recorded `Review-Diff-Id` is compared with.
-	Digest string
+	// Identity is that diff's identity: the content half, and the rendered-patch half when this build could
+	// compute one. It is what a recorded `Review-Diff-Id` is compared with, and the two are compared by
+	// half — the content half always, the patch half where a comparison needs to know where the changes
+	// sit (PRD §21.1).
+	Identity model.DiffID
 	// Paths are the files the contribution changes outside the review record. The stack's notes use them
 	// to say whether a parent's new commits reach any file this branch touches, which is the difference
 	// between "the parent moved" and "the parent moved where it matters".
@@ -148,8 +150,8 @@ func MeasureContribution(ctx context.Context, repo *git.Repo, c Changeset, db De
 		return Contribution{}
 	}
 	dirs := DigestExclusions(ctx, repo, c, db, head)
-	digest, err := repo.DiffRawDigest(ctx, base, head, dirs...)
-	if err != nil || digest == "" {
+	identity, err := repo.DiffIdentity(ctx, base, head, dirs...)
+	if err != nil || identity.Raw == "" {
 		return Contribution{}
 	}
 	// The file list is a convenience for the notes, not part of the identity: a note that cannot name the
@@ -158,7 +160,15 @@ func MeasureContribution(ctx context.Context, repo *git.Repo, c Changeset, db De
 	if err != nil {
 		paths = nil
 	}
-	return Contribution{Base: base, Digest: model.FormatDiffID(digest), Paths: paths, Measured: true}
+	return Contribution{Base: base, Identity: recordedIdentity(identity), Paths: paths, Measured: true}
+}
+
+// recordedIdentity carries a measurement across the line between the git layer, which asks git questions,
+// and the model, which holds the vocabulary a review is written in. The two structs are the same pair; the
+// git package has no reason to import the review vocabulary, and the review vocabulary has no reason to know
+// how a measurement is taken.
+func recordedIdentity(id git.DiffIdentity) model.DiffID {
+	return model.DiffID{Raw: id.Raw, Patch: id.Patch}
 }
 
 // newestAncestor picks the candidate that already contains all the others, which is the commit whose tree

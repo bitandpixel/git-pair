@@ -405,13 +405,18 @@ func ReviewMessage(slug, outcome, head, parentHead string) string {
 
 // ReviewMessageRecorded is a review submission that records each of the ends of the diff it reviewed, as
 // `review submit` does: the parent's tip, the commit the diff was measured from, and that diff's identity
-// in the `<version>:<hex>` form `model.FormatDiffID` renders.
+// in the `<version>:<raw>[+<patch>]` form `model.FormatDiffID` renders.
 //
 // Each trailer is written only when its value is non-empty, which is how a fixture produces the shapes the
 // product produces: an unstacked changeset records no parent, a submission that could not measure a base
 // records neither base nor digest, and a marker from before a trailer existed records none of them. Pass
 // a digest with an unknown version to produce the reading those markers get — "no digest recorded", not a
 // content difference.
+//
+// The identity is taken as the rendered string rather than as a `model.DiffID` on purpose: half the shapes
+// this suite has to ask about are values the product would never write — a `1:` marker, a truncated half,
+// a trailer with no `+` — and a fixture that could only build valid ones could not test the readers that
+// exist for the others.
 func ReviewMessageRecorded(slug, outcome, head, parentHead, baseHead, diffID string) string {
 	message := "review: " + outcome + " " + slug + "\n\nReview-Outcome: " + outcome +
 		"\nReview-Changeset: " + slug

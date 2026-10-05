@@ -106,20 +106,21 @@ type Event struct {
 // Marker is true when the commit establishes a lifecycle state.
 func (e Event) Marker() bool { return e.Kind != KindImplementation }
 
-// DiffID is the recorded diff identity split into its version and its digest, with ok=false when the
+// DiffID is the recorded diff identity split into its version and its halves, with ok=false when the
 // marker carried none, carried one computed under a definition this build does not know, or carried
 // something that is not a diff identity at all.
 //
 // The version check lives here rather than at each call site because every reader of the value has to
-// ask the same question before comparing: is this digest one I may compare at all. A `2:` value from a
-// future rule change reads as "no digest recorded", which sends the caller to the comparison it can
-// still make rather than refusing on a mismatch nobody can explain.
-func (e Event) DiffID() (version, digest string, ok bool) {
-	version, digest, ok = model.ParseDiffID(e.ReviewedDiffID)
-	if !ok || version != model.DiffIDVersion {
-		return "", "", false
+// ask the same question before comparing: is this identity one I may compare at all. A `3:` value from a
+// future rule change reads as "no identity recorded", which sends the caller to the comparison it can
+// still make rather than refusing on a mismatch nobody can explain. A `1:` value compares on its raw half
+// alone, because that is all it carried.
+func (e Event) DiffID() (version string, id model.DiffID, ok bool) {
+	version, id, ok = model.ParseDiffID(e.ReviewedDiffID)
+	if !ok || !model.AcceptsDiffIDVersion(version) {
+		return "", model.DiffID{}, false
 	}
-	return version, digest, true
+	return version, id, true
 }
 
 // Summary is the derived view of a changeset's history.

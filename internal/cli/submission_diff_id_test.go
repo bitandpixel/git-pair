@@ -20,9 +20,9 @@ func TestSubmissionRecordsTheIdentityOfTheDiffItReviewed(t *testing.T) {
 	f, slug, reviewed, marker := approvedChangeset(t)
 
 	trailers := f.Trailers(marker)
-	version, digest, ok := model.ParseDiffID(trailers["Review-Diff-Id"])
+	version, id, ok := model.ParseDiffID(trailers["Review-Diff-Id"])
 	if !ok || version != model.DiffIDVersion {
-		t.Fatalf("Review-Diff-Id = %q, want %q:<hex>", trailers["Review-Diff-Id"], model.DiffIDVersion)
+		t.Fatalf("Review-Diff-Id = %q, want %q:<hex>[+<hex>]", trailers["Review-Diff-Id"], model.DiffIDVersion)
 	}
 	base := trailers["Review-Base-Head"]
 	if base == "" {
@@ -30,14 +30,23 @@ func TestSubmissionRecordsTheIdentityOfTheDiffItReviewed(t *testing.T) {
 	}
 
 	repo := &git.Repo{Dir: f.Dir()}
-	want, err := repo.DiffRawDigest(context.Background(), f.RevParse(base), f.RevParse(reviewed),
+	want, err := repo.DiffIdentity(context.Background(), f.RevParse(base), f.RevParse(reviewed),
 		"changesets/"+slug, "changesets/.landed/"+slug)
 	if err != nil {
-		t.Fatalf("DiffRawDigest: %v", err)
+		t.Fatalf("DiffIdentity: %v", err)
 	}
-	if digest != want {
+	if id.Raw != want.Raw {
 		t.Errorf("the marker names digest %s, want %s: the recorded value must follow from the base the marker names",
-			digest, want)
+			id.Raw, want.Raw)
+	}
+	// The second half is what the gate relaxes with, so a submission that recorded only one would look
+	// healthy and quietly keep refusing every merge into a shared file.
+	if id.Patch == "" || want.Patch == "" {
+		t.Errorf("the rendered half is absent (marker %q, recomputed %q): a submission records both",
+			id.Patch, want.Patch)
+	}
+	if id.Patch != want.Patch {
+		t.Errorf("the marker names patch %s, want %s", id.Patch, want.Patch)
 	}
 }
 

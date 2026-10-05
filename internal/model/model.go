@@ -1,6 +1,8 @@
 // Package model holds the review vocabulary shared by every other package.
 package model
 
+import "strings"
+
 // State is the effective lifecycle state of a changeset, always derived from
 // commit history rather than stored.
 //
@@ -109,9 +111,11 @@ const (
 	// is what makes the reviewer's diff reproducible and what lets a refusal say *which* side moved;
 	// this names the content itself, so the question the gate asks — is this the diff that was
 	// approved? — is one comparison rather than an inference from how far the world has moved since
-	// (PRD §21). The value is `<version>:<hex>`, because the identity is defined by the digest's own
-	// rules (which flags, which paths excluded) and changing one of them has to be a version bump
-	// rather than a silent edit that mismatches every approval ever written.
+	// (PRD §21). The value is `<version>:<raw>` or `<version>:<raw>+<patch>` — the identity of the content,
+	// and the identity of the rendered hunks where this build could compute one — because the value is
+	// defined by the rules that produced it (which flags, which paths excluded, which patch-id mode) and
+	// changing one of them has to be a version bump rather than a silent edit that mismatches every
+	// approval ever written.
 	TrailerDiffId = "Review-Diff-Id"
 
 	StateValueReady = "ready"
@@ -133,41 +137,89 @@ const (
 	StateValueIntegrating = "integrating"
 )
 
-// DiffIDVersion is the definition the value in `Review-Diff-Id` was computed under: the raw-diff flags
-// `git.Repo.DiffRawDigest` pins, and the exclusion of the changeset's own directory.
+// DiffIDVersion is the definition the value written by this build was computed under: the raw-diff flags
+// `git.Repo.DiffIdentity` pins, the pinned `-U3` and `--default-prefix` on the patch half, `patch-id
+// --verbatim`, and the exclusion of the changeset's own directory.
 //
 // It is a constant rather than a setting because the definition is not the user's to choose — but it is
-// not permanent either, and a reader who finds `2:` in a marker written before a rule change should be
-// told the value predates the rule rather than be refused for a mismatch nobody can explain.
-const DiffIDVersion = "1"
+// not permanent either, and a reader who finds a version it does not know should be told the value predates
+// the rule rather than be refused for a mismatch nobody can explain.
+const DiffIDVersion = "2"
 
-// FormatDiffID renders a digest as the value of a `Review-Diff-Id` trailer.
-func FormatDiffID(digest string) string { return DiffIDVersion + ":" + digest }
-
-// ParseDiffID splits a `Review-Diff-Id` value into its version and its digest.
+// DiffID is what a review records about the diff it measured. Two identities of one diff, because they
+// answer different questions and neither covers the other:
 //
-// It reports ok=false for anything that does not read as `<version>:<hex>`, which is how a marker
+//   - Raw is the identity of the *content* — modes, blob OIDs, statuses, paths. It is the primary claim,
+//     and the half that keeps working when the other cannot be computed.
+//   - Patch is the identity of the *rendered* diff, and so of what changed and where. It is what lets an
+//     approval stand when something else edited a file this branch also edits, on a line nowhere near
+//     this branch's own, and what refuses when that edit lands inside the context the reviewer read.
+//
+// Patch is empty when it was not computed — an older git without `patch-id --verbatim`, or a diff with no
+// patch in it. Absence is not a difference: the comparison falls back to Raw alone (§21).
+type DiffID struct {
+	Raw   string
+	Patch string
+}
+
+// Empty says no identity was recorded at all.
+func (d DiffID) Empty() bool { return d.Raw == "" && d.Patch == "" }
+
+// FormatDiffID renders the pair as the value of a `Review-Diff-Id` trailer:
+// `<version>:<raw>` for a content identity alone, `<version>:<raw>+<patch>` when both halves exist.
+// One trailer rather than two, because the two halves are two readings of one measurement and a reader
+// comparing them should not have to check that two lines describe the same diff.
+func FormatDiffID(id DiffID) string {
+	if id.Raw == "" {
+		return ""
+	}
+	if id.Patch == "" {
+		return DiffIDVersion + ":" + id.Raw
+	}
+	return DiffIDVersion + ":" + id.Raw + "+" + id.Patch
+}
+
+// AcceptsDiffIDVersion reports whether a reader knows what a recorded version means. `1:` carried the raw
+// digest alone, which is still the primary claim, so those approvals keep being compared on that half;
+// a version nobody recognises is read as no identity rather than as a mismatch.
+func AcceptsDiffIDVersion(version string) bool {
+	return version == "1" || version == DiffIDVersion
+}
+
+// ParseDiffID splits a `Review-Diff-Id` value into its version and its halves.
+//
+// It reports ok=false for anything that does not read as `<version>:<hex>[+<hex>]`, which is how a marker
 // written by a hand-edited commit or a future version is recognised as unreadable rather than being
 // compared as if it meant something. Callers treat that as "no digest recorded", which is a fact
 // missing rather than a content difference — the direction that does not refuse an approval nobody
 // moved (PRD §21).
-func ParseDiffID(value string) (version, digest string, ok bool) {
-	for i := 0; i < len(value); i++ {
-		if value[i] != ':' {
+func ParseDiffID(value string) (version string, id DiffID, ok bool) {
+	i := strings.IndexByte(value, ':')
+	if i <= 0 {
+		return "", DiffID{}, false
+	}
+	version, rest := value[:i], value[i+1:]
+	if rest == "" {
+		return "", DiffID{}, false
+	}
+	raw, patch := rest, ""
+	hasPatch := false
+	if j := strings.IndexByte(rest, '+'); j >= 0 {
+		raw, patch, hasPatch = rest[:j], rest[j+1:], true
+	}
+	if !isHex(raw) || (hasPatch && !isHex(patch)) {
+		return "", DiffID{}, false
+	}
+	return version, DiffID{Raw: raw, Patch: patch}, true
+}
+
+func isHex(s string) bool {
+	for j := 0; j < len(s); j++ {
+		c := s[j]
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') {
 			continue
 		}
-		version, digest = value[:i], value[i+1:]
-		if version == "" || digest == "" {
-			return "", "", false
-		}
-		for j := 0; j < len(digest); j++ {
-			c := digest[j]
-			if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') {
-				continue
-			}
-			return "", "", false
-		}
-		return version, digest, true
+		return false
 	}
-	return "", "", false
+	return s != ""
 }

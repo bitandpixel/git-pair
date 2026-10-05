@@ -560,12 +560,25 @@ func (a *app) landedApprovalStillStands(ctx context.Context, repo *git.Repo, c c
 // reading that answered it. See `landedApprovalStillStands` for the two readings and when each is used.
 func (a *app) landedWorkUnchanged(ctx context.Context, repo *git.Repo, c changeset.Changeset,
 	db changeset.DefaultBranchRef, head string, approved *lifecycle.Event, st parentStatus) (bool, string, error) {
-	// The recorded value is compared verbatim, and `DiffID` is what says it is a value this build can
+	// The recorded value is compared by half, and `DiffID` is what says it is a value this build can
 	// interpret at all: a marker written by a future version reads as no identity, which falls through to the
 	// older reading rather than comparing an encoding this build does not define.
-	if _, _, ok := approved.DiffID(); ok {
+	if _, recorded, ok := approved.DiffID(); ok {
 		if now := changeset.MeasureContribution(ctx, repo, c, db, head, st.landedFull, approved.ReviewedBase); now.Measured {
-			return now.Digest == approved.ReviewedDiffID, "contribution", nil
+			if recorded.Raw == now.Identity.Raw {
+				return true, "contribution", nil
+			}
+			// The content half moved. The common reason is that the landing brought in a file this branch
+			// also edits, so a blob OID now names a file with the destination's lines in it. The rendered
+			// half answers what the content half cannot: are the hunks themselves what the reviewer read?
+			// It stands only over a merge git calls clean, because a merge with a conflict in it contains a
+			// resolution nobody reviewed — and the reading that may stand an approval is always the one that
+			// asks the most.
+			if recorded.Patch != "" && now.Identity.Patch != "" && recorded.Patch == now.Identity.Patch {
+				if clean, _ := landedMergeIsClean(ctx, repo, db, head); clean {
+					return true, "contribution-patch", nil
+				}
+			}
 		}
 	}
 	same, err := landedBaseIsTheSameWork(ctx, repo, st.approvalBase(), st.landedFull, head)
