@@ -62,7 +62,7 @@ on:
 
 # What this job needs, and the one thing it cannot get from the runner:
 #
-#   permissions          three categories, below. `contents: write` alone is not enough: the probe's API
+#   permissions          four categories, below. `contents: write` alone is not enough: the probe's API
 #                        calls live in `checks` and `statuses`, and a token that can write the merge but
 #                        cannot read the checks answers "cannot tell" — which the job treats as "do not
 #                        merge", so a missing scope stalls the merge quietly rather than failing loudly.
@@ -75,13 +75,22 @@ on:
 #   a test workflow      `workflow_run` names one by `name:`. No such workflow, no trigger — and dropping
 #                        `--require-ci` is the honest response, not a probe that always says green.
 #
-# `contents: write` is the whole ask, because the merge is an ordinary commit on the destination branch.
-# There is no second push: git-pair writes no ref, so this job has no namespace to publish into and nothing
-# to keep in sync with the merge (PRD §13.4).
+# `contents: write` is the whole ask for the merge, because the merge is an ordinary commit on the
+# destination branch. There is no second push: git-pair writes no ref, so this job has no namespace to
+# publish into and nothing to keep in sync with the merge (PRD §13.4).
+#
+# `actions: write` is for the one thing that does follow the push, and it is not about the merge. The merge is
+# pushed with this runner's own GITHUB_TOKEN, and GitHub creates no workflow runs for events a token caused,
+# so CI's own push trigger cannot fire for a merge this job performed: the destination keeps a tip no job
+# built, and the head the probe cleared is not that tree whenever the destination moved in between. Asking for
+# the run is a request rather than a caused event, so it gets through, and making a request is
+# `actions: write`. Without the scope the step reports "refused" and the merge still lands — the gap is
+# visible in the log rather than silent, which is why the ask is a named step rather than an unchecked curl.
 permissions:
   contents: write
   checks: read
   statuses: read
+  actions: write
 
 # One merge at a time per ref. Two jobs that both see the same declaration would make two merge attempts,
 # and the second one's push would be refused after its merge commit already existed locally — a confusing
@@ -115,7 +124,7 @@ jobs:
           go build -o "$HOME/.local/bin/git-pair" ./cmd/git-pair
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: gate it, merge it, push it
+      - name: gate it, merge it, push it, ask for its tests
         env:
           # Passed to git-pair as --default-branch below, and used as the destination when a changeset's own
           # destination names no branch. Set it as a repository variable to move off `main`.
@@ -128,7 +137,8 @@ jobs:
           # was starting is skipped rather than merged on an old run's reputation.
           TESTED: ${{ github.event.workflow_run.head_sha }}
           TESTED_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          # The probe asks about this repository's checks; it reads the token the runner already has.
+          # The probe asks about this repository's checks and the request hook asks for the destination's run;
+          # both read the token the runner already has.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail

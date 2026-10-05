@@ -20,6 +20,11 @@
 #                  the command that answers for a commit: it is handed the sha, prints why on one line, and
 #                  exits 0 green, 1 not green, 2 cannot tell (default scripts/ci/gh-head-green.sh, used
 #                  when GITHUB_REPOSITORY is set)
+#   --ci-request <cmd>
+#                  the command that asks for the destination to be tested after a merge: it is handed the
+#                  destination and the merge's sha, prints what it did on one line, and exits 0 requested,
+#                  1 refused, 2 cannot tell (default scripts/ci/gh-request-ci.sh, used when
+#                  GITHUB_REPOSITORY is set)
 #   --expect-head <sha>
 #                  merge nothing but this head. A trigger that was told "CI finished with this commit" names
 #                  it here, so a branch that moved since cannot be merged on the strength of a run that
@@ -30,7 +35,9 @@
 # "nothing to do yet" trains people to ignore the build. A head that is merely not green yet is the same
 # kind of nothing-yet, so it is a skip too. It is 1 when a merge or a push failed, and 2 for a bad
 # invocation. `--require` turns the refusals into errors, which is what a hand-run of one branch wants.
-# A merge that reaches the destination needs nothing after it: the destination's tree is the record.
+# A merge that reaches the destination needs one thing after it: a request that the destination's new tip be
+# tested, because the push that landed it came from this job's own token and GitHub creates no runs for
+# events a token caused. The destination's tree remains the whole record of the landing.
 #
 # Why the sequence is in this order (PRD §29):
 #
@@ -47,8 +54,16 @@
 #                           owner's behalf, because the author's declaration asked for exactly that.
 #   push <destination>      the landing exists when the destination branch says it does, and the pushed
 #                           branch's tree is then the whole record of it (PRD §13.4). Nothing follows this
-#                           push: no ref to write, nothing to publish, and no second command for anybody
-#                           to run. If the push fails, the landing did not happen.
+#                           push except the request below: no ref to write, nothing to publish, and no second
+#                           command for anybody to run. If the push fails, the landing did not happen.
+#   request the tests       after a push, ask the forge to test the destination's new tip. The push came from
+#                           the runner's own GITHUB_TOKEN, and GitHub makes no runs for events a token
+#                           caused, so the destination's own push trigger cannot fire for a merge this job
+#                           performed — and the merge is a different tree from the head the probe cleared
+#                           whenever the destination moved in between. A request that cannot be made (no
+#                           forge, no hook) is reported and stays green, which is the shape of a local run;
+#                           a request the forge refuses is an error under --require and a loud note without
+#                           it, because a landing nobody tested is worth a reader's attention either way.
 #
 # This is an example, not the product: git-pair still merges nothing, and nothing here is a git-pair
 # subcommand (PRD §26). It is the merge a repository's owner chooses to run on their own branches.
@@ -63,6 +78,7 @@ REMOTE=${GIT_PAIR_CI_REMOTE:-origin}
 GP=${GIT_PAIR_BIN:-git-pair}
 HERE=$(cd "$(dirname "$0")" && pwd)
 PROBE=${GIT_PAIR_CI_PROBE:-}
+REQUEST=${GIT_PAIR_CI_REQUEST:-}
 BRANCHES=()
 
 # The local name the destination is checked out under while the merge is made. It is deliberately not the
@@ -78,6 +94,7 @@ while [ $# -gt 0 ]; do
     -R|--remote) [ $# -ge 2 ] || { printf '%s needs a remote name\n' "$1" >&2; exit 2; }; REMOTE=$2; shift ;;
     -c|--require-ci) REQUIRE_CI=1 ;;
     --ci-probe) [ $# -ge 2 ] || { printf '%s needs a command\n' "$1" >&2; exit 2; }; PROBE=$2; shift ;;
+    --ci-request) [ $# -ge 2 ] || { printf '%s needs a command\n' "$1" >&2; exit 2; }; REQUEST=$2; shift ;;
     --expect-head) [ $# -ge 2 ] || { printf '%s needs a sha\n' "$1" >&2; exit 2; }; EXPECT_HEAD=$2; shift ;;
     -h|--help)
       # The help is the header above, printed rather than duplicated. Reading the block to its end keeps a
@@ -138,6 +155,31 @@ ci_green() {
   return "${rc:-0}"
 }
 
+# request_ci asks the forge to test the destination's new tip. It runs after a push and only after a push:
+# a merge that stayed in this clone tests nothing, and a destination that already held the work was tested
+# when it landed. The hook answers the way the probe does — 0 asked, 1 refused, 2 cannot tell — so one reader
+# of the log learns both halves from the same three words.
+#
+# It is not the merge's verdict and it does not become one. The landing already happened, and the case where
+# nothing can be asked is the ordinary case for a run outside a forge, so rc 2 is a reported fact rather than
+# a red build. A refusal is a fact with a reason attached: `--require` makes it an error, which is what a
+# hand-run of one branch wants, and without it the note says in plain words that the tip is unproven.
+request_ci() {
+  local dest=$1 sha=$2 out rc hook=()
+  if [ -n "$REQUEST" ]; then
+    read -r -a hook <<<"$REQUEST"
+  elif [ -n "${GITHUB_REPOSITORY:-}" ] && [ -x "$HERE/gh-request-ci.sh" ]; then
+    hook=("$HERE/gh-request-ci.sh")
+  fi
+  if [ ${#hook[@]} = 0 ]; then
+    note "no --ci-request given, no forge named: nothing will be asked to test $dest's new tip"
+    return 2
+  fi
+  out=$("${hook[@]}" "$dest" "$sha" 2>&1) || rc=$?
+  printf '%s\n' "$out" | sed 's/^/    /'
+  return "${rc:-0}"
+}
+
 # integrate_one <branch>: the whole handoff for one declared changeset.
 #
 # Every value it acts on comes from git-pair rather than from a guess: the head from the gate that cleared
@@ -145,7 +187,7 @@ ci_green() {
 # the parent's landing commit, and a commit is not a branch anything can merge into), and the changeset id
 # from the gate too, because a stacked child's source carries its parents' directories as well.
 integrate_one() {
-  local branch=$1 cs src decl dest head_now merge subject
+  local branch=$1 cs src decl dest head_now merge subject rc
 
   if ! git show-ref --verify --quiet "refs/heads/$branch"; then
     note "skip: no local branch $branch"
@@ -268,6 +310,21 @@ integrate_one() {
     return 1
   fi
   note "$cs: pushed to $dest — the destination's tree is the record of the landing"
+
+  # The push came from this job's own token, so the destination's push trigger will not fire for it; the
+  # request is where the tip gets its tests. It is asked here, where the destination and the merge's sha are
+  # both known, rather than by a step after this script that would have to re-derive both.
+  request_ci "$dest" "$merge"; rc=$?
+  case $rc in
+    0) ;;
+    2) note "$cs: landed, and nothing was asked to test $dest — its tip is unproven" ;;
+    *)
+      note "$cs: landed, and the request to test $dest was refused — its tip is unproven"
+      if [ "$REQUIRE" = 1 ]; then
+        return 1
+      fi
+      ;;
+  esac
 }
 
 # declared_row is the queue's read-only statement that somebody asked for this merge: it has a row for the
