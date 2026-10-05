@@ -18,8 +18,8 @@ type Destination struct {
 	// repository cannot name a destination, which is a different fact from naming the wrong one.
 	Ref string
 	// Why names where the answer came from, for the sentence that reports it: "base" for this
-	// changeset's own `base:`/`parent:`, "parent" for the branch a landed parent landed on, "default"
-	// for the integration branch.
+	// changeset's own `base:` (or the older `parent:`), "parent" for the branch a landed parent landed
+	// on, "default" for the integration branch.
 	Why string
 	// Via lists the parent changesets the walk crossed, nearest first, so a report can name the chain
 	// it walked rather than only the last hop.
@@ -90,9 +90,11 @@ func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db Default
 				if err != nil {
 					return out, err
 				}
+				// The recorded id is asked first, and the branch only beside it: `base-changeset:` names the
+				// changeset, which is what the destination files, while `base:` names the branch that carried it.
 				// The loop guard belongs to the walk below, which marks the id before it reads the record. Marking
 				// it here would make the walk refuse the very hop this rule just decided to take.
-				if id, landed := landedID(ids, base); landed && !seen[id] {
+				if id, landed := landedID(ids, baseChangeset, base); landed && !seen[id] {
 					// The record is filed under the id, so the id is what the next hop has to read it by. Carrying
 					// the branch name over would ask the destination for a directory it does not have, and the walk
 					// would fall back to the default branch with a reason that names none of what it crossed.
@@ -131,26 +133,29 @@ func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db Default
 	return out, nil
 }
 
-// landedID reports whether a base a parent recorded names work the integration branch already holds, and
-// under which of its own records.
+// landedID reports which of the names a parent's record carries — if any — is a changeset the integration
+// branch holds, and under which of its own records.
 //
-// The two sides of that question carry different names, and a rule that reads only one of them is wrong
-// wherever a branch name needs mapping. What a parent records in `base:` and `parent:` is a *branch* — where
-// its work was measured from — while the destination files its records under changeset *ids*. For a branch
-// whose name needs no mapping the two are the same string and every reading agrees; for `feat/auth` against
-// `feat-auth`, an exact comparison sees an unlanded branch and the walk stops there, offering a branch that
-// holds nothing the destination lacks as the place a child's work should land — which the queue then reports,
-// and a merge job then acts on.
-//
-// Both spellings are asked because a base can record either: a stack written from a branch names the branch,
-// and a record whose branch was gone when it was written down names the changeset. The match is reported
-// rather than assumed, because the next hop reads the record by that name.
-func landedID(ids []string, base string) (string, bool) {
-	if slices.Contains(ids, base) {
-		return base, true
-	}
-	if slug, err := SlugFromBranch(base); err == nil && slug != base && slices.Contains(ids, slug) {
-		return slug, true
+// The record carries two halves, and the order they are asked in follows what each can answer. `base-changeset:`
+// names the changeset below, which is what the destination files, so it still answers once the branch under the
+// work is gone; `base:` keeps naming the branch, which is the state in which a reader that trusted it names
+// finished work as the destination. The branch is asked as well, and its slug beside it, because a record can
+// carry the branch alone: `parent:` and `parent-changeset:` are read from files written before that pair
+// existed, and such a file can name a branch and no changeset. The match is reported rather than assumed,
+// because the next hop opens `changesets/<id>/` and a branch name there asks the destination for a directory it
+// does not have — which is how a walk that compared only the branch name came to offer a stale parent branch as
+// where a child's work should land, in the queue and on the command a pipeline reads.
+func landedID(ids []string, names ...string) (string, bool) {
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if slices.Contains(ids, name) {
+			return name, true
+		}
+		if slug, err := SlugFromBranch(name); err == nil && slices.Contains(ids, slug) {
+			return slug, true
+		}
 	}
 	return "", false
 }

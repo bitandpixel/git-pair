@@ -569,16 +569,18 @@ func TestChangeIntegrateNamesTheDestinationWhenBranchAndIdDiffer(t *testing.T) {
 	}
 }
 
-// stackedOnBranch writes a stacked changeset directory on the branch that is checked out, naming the parent
-// the way a branch names it: `parent:` holds the branch, `parent-changeset:` the id. Those two spellings are
-// the subject of the test above, so this fixture writes them itself rather than borrowing a helper that
-// makes them equal — which is how the walk's bug stayed invisible to the tests that came before it.
+// stackedOnBranch writes a stacked changeset directory on the branch that is checked out, naming the work
+// below it the way the current manifest does: `base:` holds the branch the parent was measured on and
+// `base-changeset:` holds the changeset that branch carries. Those two halves are the subject of the test
+// above — the destination files records under the id, and the branch is the half that goes stale — so this
+// fixture writes them itself rather than borrowing a helper that makes them equal, which is how the walk's
+// bug stayed invisible to the tests that came before it.
 func stackedOnBranch(t *testing.T, f *gittest.Fixture, slug, parentID, parentBranch, work string) {
 	t.Helper()
+	yaml := "id: " + slug + "\nbase: " + parentBranch + "\nbase-changeset: " + parentID + "\n"
 	files := map[string]string{
-		"changesets/" + slug + "/CHANGESET.yaml": "id: " + slug + "\nparent: " + parentBranch +
-			"\nparent-changeset: " + parentID + "\n",
-		"changesets/" + slug + "/ABOUT.md": "# " + slug + "\n",
+		"changesets/" + slug + "/CHANGESET.yaml": yaml,
+		"changesets/" + slug + "/ABOUT.md":       "# " + slug + "\n",
 	}
 	f.Commit("changeset "+slug, gittest.WithFiles(files), gittest.WithFile(work, "package main\n"))
 }

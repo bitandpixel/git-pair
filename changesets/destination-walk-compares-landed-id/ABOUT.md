@@ -1,12 +1,24 @@
-# Destination walk: a landed parent is matched by id, not only by branch name
+# Destination walk: a landed parent is recognised by its id, not by the branch that carried it
 
 ## Summary
 
-`DestinationFor` asks a stack's parents where each one landed, and it asked that question with the wrong
-string. A parent records a **branch** in `parent:` (`feat/auth`); the destination files its records under
-changeset **ids** (`changesets/feat-auth/`). The walk compared the branch name against the list of landed ids,
-matched none, stopped at that branch, and reported it as where the child's work should land.
-> I thought we had switched to `base` instead of `parent` in the manifest? and something similar for making the changeset id explicit 
+`DestinationFor` asks a stack's parents where each one landed, and it asked that question with the wrong half
+of the record. A parent's file holds two halves: `base:` names the branch the parent was measured on, and
+`base-changeset:` names the changeset that branch carries. The destination files its records under the second
+of those — `changesets/<id>/` — while the walk compared the first, a branch name, against the list of landed
+ids. On a repository whose branches are prefixed (`feat/auth`, landed as `changesets/feat-auth/`) that
+comparison matched nothing, so the walk stopped at the branch and reported it as where the child's work should
+land.
+
+## Response to review (f31c01b)
+
+Corrected. `base:` and `base-changeset:` are the pair the manifest uses; `parent:` and `parent-changeset:` are
+read from files written before that pair existed, and nothing writes them. The earlier text named the older
+spelling as if it were the rule, and the code comment followed it. The rule is now stated, commented, and
+tested in the current vocabulary: the walk asks the destination about the `base-changeset:` id first, and about
+the branch in `base:` — and the slug of that branch — only as the fallback for a record that carries a branch
+and no id. `internal/changeset/destination.go` and PRD §13.1 say it that way, and the tests cover the current
+pair, the older pair, and the branch-only record.
 
 ## Why
 
@@ -19,43 +31,57 @@ child's declaration printed
 
 and `queue --json` printed the same value as `awaiting_integration[].destination`. That field is the branch
 `scripts/ci/git-pair-integrate.sh` merges into, so an unattended run would have landed the work onto a branch
-holding only the first ancestor. `check`'s own next action named `refs/remotes/origin/main`, so the surfaces
-disagreed about the same changeset.
+holding only the first ancestor. `check`'s own next action named `refs/remotes/origin/main` for the same
+changeset, so the two surfaces disagreed — which is the promise §13.1 makes about them and this read broke.
 
-The comparison is exact today: `slices.Contains(ids, base)` where `base` is the branch name a parent recorded
-and `ids` are the destination's record names. They are equal only for a branch whose name needs no mapping, so
-every prefixed branch (`feat/…`, `fix/…`) misses. The existing tests use branch names equal to their ids, so
-the walk was covered and never tested in the shape that fails.
+The comparison was an exact `slices.Contains` of a branch name against ids. It is right only where a branch
+name needs no mapping, which is the shape every existing fixture had: `TestDestinationWalksAParentChain` walks
+three landed ancestors named `alpha`, `beta`, `gamma`, where the branch and the id are the same string. The
+walk was covered and never tested where the two halves of a record differ.
 
 ## How it works
 
-- `landedID(ids, base)` returns the id that names the branch the base records, or nothing. It asks for the
-  name as written and for `SlugFromBranch(base)`, because a `base:` can record either a branch or a changeset.
-- When a hop is taken, the walk carries the **id** forward as the changeset to read next, not the branch name.
-  The next hop reads `changesets/<id>/CHANGESET.yaml`, so carrying the branch would ask the destination for a
-  directory it does not have, and the walk would fall back to the default branch with a `via` that named none
-  of what it crossed.
-- The loop guard (`seen`) is keyed on the id, so the guard and the hop agree about what has been crossed.
+- `landedID(ids, baseChangeset, base)` asks the destination about the recorded id first, then the branch, then
+  the branch's slug, and reports the id it matched. The order follows what each half can answer: the id is what
+  the destination files, and the branch is the half that goes stale. The branch and its slug stay in the list
+  because a record can carry a branch alone — the older pair, or any file whose author wrote down a branch and
+  not a changeset.
+- When a hop is taken the walk carries the **id** forward as the record to read next, not the branch name. The
+  next hop opens `changesets/<id>/CHANGESET.yaml`, so carrying the branch would ask the destination for a
+  directory it does not have, and the walk would fall back to the default branch with a `via` naming none of
+  what it crossed.
+- The loop guard (`seen`) is keyed on the matched id, so the guard and the hop agree about what has been crossed.
+- Nothing else moved: the hop limit, the `base`/`parent`/`default` reasons, the `Unreachable` answer for a base
+  that no longer resolves, and the rule that an unlanded parent's branch is a legitimate destination.
 
 ## Tests
 
-- `TestDestinationWalksAParentChainWhoseBranchNamesDifferFromTheirIds` (`internal/changeset`) — a stack three
-  deep with branches `feat/alpha`, `feat/beta`, `feat/gamma` and ids `feat-alpha`, `feat-beta`, `feat-gamma`,
-  both ancestors landed: destination `main`, reason `parent`, `via` `[feat-beta feat-alpha]`. Red before the
-  fix, where it returned `feat/alpha` with `via` `[feat-beta]`.
-- `TestChangeIntegrateNamesTheDestinationWhenBranchAndIdDiffer` (`internal/cli`) — the same shape driven through
-  the commands that act on the answer: `change integrate --json` (`destination`, `destination_source`,
-  `destination_via`) and the `queue --json` row a pipeline merges into. The single-ancestor case cannot catch
+Three shapes in `internal/changeset/destination_test.go`, each a stack three deep with branches
+`feat/alpha`, `feat/beta`, `feat/gamma`, both ancestors landed, expecting `main` with `via`
+`[feat-beta feat-alpha]`:
+
+- `TestDestinationWalksAParentChainWhoseBranchNamesDifferFromTheirIds` — the current pair,
+  `base:`/`base-changeset:`. Red before the fix, where the answer was `feat/alpha` with `via` `[feat-beta]`.
+- `TestDestinationWalksAParentRecordedWithTheOldParentKeys` — `parent:`/`parent-changeset:`, because the
+  destination keeps whatever spelling the landings it carries brought with it.
+- `TestDestinationWalksAParentThatRecordedOnlyItsBranch` — the middle rung records `base: feat/alpha` and no
+  `base-changeset:`, which is what pins the branch-and-slug fallback.
+
+One shape in `internal/cli/integrate_test.go`:
+
+- `TestChangeIntegrateNamesTheDestinationWhenBranchAndIdDiffer` — the same three-deep stack driven through the
+  surfaces that act on the answer: `change integrate --json` (`destination`, `destination_source`,
+  `destination_via`) and the `queue --json` row a pipeline merges into. A single landed ancestor cannot catch
   this, because one landed parent's own record names `main` directly, so the fixture lands two.
 
 ## Notes for review
 
-- Nothing else in the walk changed: the hop limit, the `base`/`parent`/`default` reasons, and the
-  `Unreachable` answer for an unreadable base are as they were.
-- PRD §13.1 states the rule in the numbered list where the walk is specified; README's `change integrate`
-  paragraph now says the printed target and the queue's `destination` field are the same derived value.
-- The bug is older than this branch: `git log -p internal/changeset/destination.go` predates the recent
-  digest and credit work, which only made a three-deep stack with two landed ancestors common enough to hit it.
+- The bug is older than this branch: `git log -p internal/changeset/destination.go` predates the recent digest
+  and drift-credit work. What changed is that a three-deep stack with two landed ancestors became common
+  enough to walk into it.
+- The fixtures write `CHANGESET.yaml` by hand rather than through `init`, because the point of each is which
+  keys the record carries. `stageStacked` (the older helper, still used by the tests above these) writes the
+  `parent:` pair; `stackedOn` writes the current one and omits the id when asked.
 
 ## Out of scope
 
