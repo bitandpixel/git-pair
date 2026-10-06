@@ -91,5 +91,7 @@ never wanted the built-in headings.
 
 - Should `git pair change stack` and `change combine` say which scaffold they wrote, the way they report
   the base they recorded? Both create a changeset directory through `changeset.Write` and are silent today.
+> can you elaborate on this, what do you mean which scaffold they wrote?
 - Should a repository-level template ever be per-directory, for a monorepo whose packages review
   differently? Nothing in the current rule forbids adding that later, and nothing asks for it yet.
+we can defer this til later. It's a good callout though.
