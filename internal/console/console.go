@@ -56,12 +56,34 @@ func EditorCommand(ctx context.Context, repo *git.Repo, path string) (*exec.Cmd,
 		}
 		return command(repo, fields[0], append(fields[1:], path)...), nil
 	}
-	// eval + an unquoted expansion reproduces git's own handling, so
+	// eval + an unquoted expansion reproduces git's own handling of the value, so
 	// EDITOR="code --wait" splits into a program and its flags. Quoting the
 	// expansion instead treats the whole value as one program name. A value
 	// containing a literal space in the program name needs its own quoting
 	// (core.editor="/my editor.sh" --wait), exactly as it does for git.
-	cmd := exec.Command("/bin/sh", "-c", `eval exec ${GIT_PAIR_EDITOR} "$@"`, "git-pair", path)
+	//
+	// Only the value gets that parse; the path must be kept out of it. eval builds a
+	// command string from the expanded words and parses that string again, so a path
+	// holding shell metacharacters is read as shell rather than passed through:
+	// src/routes/api/businesses/$businessId/activate.ts — an ordinary Next.js
+	// dynamic route — loses both dynamic directories to parameter expansion, and the
+	// editor opens the missing path that is left as an empty buffer. A backtick runs
+	// a command, `*` can be replaced by other files, and a space splits the path in
+	// two. So the value goes through eval into the positional parameters, and the
+	// path travels in a variable, quoted at the exec and assigned from $1 before
+	// `set --` overwrites it, so nothing re-reads what it contains.
+	//
+	// The empty check is not decoration. A value that expands to nothing —
+	// core.editor=$UNSET — would leave `exec "$@" "$path"` with one word, which
+	// execs the reviewed file instead of an editor.
+	const launch = `path=$1
+eval "set -- ${GIT_PAIR_EDITOR}"
+if [ "$#" -eq 0 ]; then
+	printf '%s\n' 'git-pair: editor setting is empty' >&2
+	exit 127
+fi
+exec "$@" "$path"`
+	cmd := exec.Command("/bin/sh", "-c", launch, "git-pair", path)
 	cmd.Dir = repo.Dir
 	cmd.Env = append(os.Environ(), "GIT_PAIR_EDITOR="+value)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
