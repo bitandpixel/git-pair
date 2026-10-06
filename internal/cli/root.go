@@ -28,13 +28,13 @@ import (
 )
 
 // Version is what `git-pair --version` prints. A var, not a const: a release build overwrites it with
-// the tag through `-ldflags -X gitpair/internal/cli.Version=…`, which `.goreleaser.yaml` sets. A const
-// cannot be overwritten, so the stamped value would be refused at link time and every release would
-// report the value below. That value is therefore the dev-build answer — what `mise run build` gives
-// you — and so it names a state rather than a release: a build from a commit with no tag has no version
-// to report, and the value has to be one nobody can mistake for a published number. `0.1.0` could be so
-// mistaken, which is how a bug gets filed against a build that was never shipped. No release can ever
-// be named this, because a release is named by its tag.
+// the tag through `-ldflags -X gitpair/internal/cli.Version=…`, which `.goreleaser.yaml` sets, and
+// `mise run build` overwrites it with the commit through the same flag, from `scripts/dev-version.sh`. A
+// const cannot be overwritten, so a stamped value would be refused at link time and every build would
+// report the value below. That value is therefore the answer for a build stamped by neither: a build
+// from a commit with no tag has no version to report, so what it prints has to be something nobody can
+// mistake for a published number — `0.1.0` could be so mistaken, which is how a bug gets filed against a
+// build that was never shipped. No release can ever be named this, because a release is named by its tag.
 var Version = "0.0.0-untagged"
 
 // Exit codes.
