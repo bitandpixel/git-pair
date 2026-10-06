@@ -67,9 +67,10 @@ mise exec -- go build -o ~/bin/git-pair ./cmd/git-pair
 mise exec -- go install ./cmd/git-pair          # into $(go env GOPATH)/bin
 ```
 
-Without mise, any Go 1.27 toolchain works. A build from source prints `git-pair version 0.1.0` — the
-number in `internal/cli/root.go:Version` — where a release build prints its tag, stamped by goreleaser
-through `-ldflags -X gitpair/internal/cli.Version=…`. Cutting a release is `git tag v0.2.0 && git push
+Without mise, any Go 1.27 toolchain works. A build from source prints `git-pair version 0.0.0-untagged`
+— the value in `internal/cli/root.go:Version`, chosen to name a state rather than a release so a dev
+build cannot be mistaken for one that was shipped — where a release build prints its tag, stamped by
+goreleaser through `-ldflags -X gitpair/internal/cli.Version=…`. Cutting a release is `git tag v0.2.0 && git push
 origin v0.2.0`; everything before that tag is checked locally by `mise run release:check`,
 `release:snapshot` and `release:gate`, and `.github/workflows/release.yml` says what the runner does.
 
