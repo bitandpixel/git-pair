@@ -138,7 +138,8 @@ change and the reviewer edits it directly rather than using comment syntax.`,
 				return err
 			}
 			return openFile(cmd.Context(), a, s.repo, s.cs.AboutPath(), func() error {
-				return writeIfMissing(s.repo, s.cs.AboutPath(), changeset.AboutTemplate(s.cs.Slug))
+				_, err := s.cs.EnsureAbout(s.repo)
+				return err
 			})
 		},
 	}

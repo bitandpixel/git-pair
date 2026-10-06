@@ -272,7 +272,7 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 		a.printf("unchanged %s (already initialised)\n", cs.Dir)
 	}
 
-	described := about != "" || !aboutIsTemplate(ctx, repo, cs)
+	described := about != "" || !aboutIsTemplate(repo, cs)
 	if opts.noCommit {
 		a.printf("not committed (--no-commit)\n")
 		printInitNext(a, cs, described)

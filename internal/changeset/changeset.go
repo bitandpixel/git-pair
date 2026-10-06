@@ -23,6 +23,18 @@ const (
 	AboutFile    = "ABOUT.md"
 )
 
+// AboutTemplateFile is the repository's own ABOUT.md scaffold, named from the
+// repository root. A team whose reviewers want a different shape than PRD §6
+// writes this one file and commits it; `init`, `review about` and the scaffold
+// check then all read it instead of the built-in. It is a working-tree file, so
+// `init` never commits it and an author can try one without staging it.
+const AboutTemplateFile = ".git-pair/about-template.md"
+
+// AboutSlugToken is the placeholder a scaffold uses for the changeset id. A printf
+// verb would do the same job and read worse: the file is Markdown a person also
+// reads, and `%s` in a heading looks like a mistake someone left behind.
+const AboutSlugToken = "{{slug}}"
+
 // Errors callers branch on.
 var (
 	// ErrNoChangeset means the current branch has no changeset directory.
@@ -720,6 +732,15 @@ func Write(repo *git.Repo, c Changeset, opts WriteOptions) (written []string, er
 	if err := ValidateID(id); err != nil {
 		return nil, err
 	}
+	// The scaffold is read before anything is written, so an unreadable
+	// `.git-pair/about-template.md` fails the whole `init` instead of leaving a
+	// changeset directory with a CHANGESET.yaml and no ABOUT.md. It is read even when
+	// ABOUT.md is already there: the file is small, this is `init`, and a template the
+	// repository cannot read is worth failing over whatever the caller was asking for.
+	template, err := ResolveAboutTemplate(repo, c.Slug)
+	if err != nil {
+		return nil, err
+	}
 	absDir := filepath.Join(repo.Dir, c.Dir)
 	if _, err := os.Stat(absDir); errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(absDir, 0o755); err != nil {
@@ -785,7 +806,7 @@ func Write(repo *git.Repo, c Changeset, opts WriteOptions) (written []string, er
 			written = append(written, c.AboutPath())
 		}
 	case errors.Is(aboutStatErr, os.ErrNotExist):
-		if err := os.WriteFile(aboutPath, []byte(AboutTemplate(c.Slug)), 0o644); err != nil {
+		if err := os.WriteFile(aboutPath, []byte(template), 0o644); err != nil {
 			return written, err
 		}
 		written = append(written, c.AboutPath())
@@ -872,16 +893,90 @@ func (c Changeset) AboutExists(repo *git.Repo) bool {
 	return err == nil && !info.IsDir()
 }
 
-// AboutTemplate is the starting ABOUT.md written by `init`. Headings
-// follow PRD §6 so an agent has somewhere to put each kind of context.
+// aboutTemplateBuiltIn is the scaffold for a repository that supplies no
+// AboutTemplateFile. Headings follow PRD §6 so an agent has somewhere to put
+// each kind of context.
+const aboutTemplateBuiltIn = "# " + AboutSlugToken + "\n\n" +
+	"## Summary\n\n" +
+	"## What changed\n\n" +
+	"## Design decisions\n\n" +
+	"## Validation\n\n" +
+	"## Known limitations\n\n" +
+	"## Open questions\n"
+
+// AboutTemplate is the built-in scaffold rendered for slug, which is the
+// ABOUT.md `init` writes when the repository names no template of its own.
 func AboutTemplate(slug string) string {
-	return "# " + slug + "\n\n" +
-		"## Summary\n\n" +
-		"## What changed\n\n" +
-		"## Design decisions\n\n" +
-		"## Validation\n\n" +
-		"## Known limitations\n\n" +
-		"## Open questions\n"
+	return strings.ReplaceAll(aboutTemplateBuiltIn, AboutSlugToken, slug)
+}
+
+// ResolveAboutTemplate returns the ABOUT.md scaffold to write for slug: the
+// repository's AboutTemplateFile when it holds anything, and the built-in
+// scaffold otherwise.
+//
+// A blank file counts as no template. An author who creates the file and leaves
+// it empty gets the scaffold they would have got without it, which the ready
+// check then reports, rather than an ABOUT.md with nothing in it — a reviewer
+// reading silence learns the change was never described and has no way to tell
+// who to blame.
+//
+// A file that is there and cannot be read is an error rather than a quiet return
+// to the built-in: the author who committed a template expects their template,
+// and `init` writing a different document is the worse outcome.
+func ResolveAboutTemplate(repo *git.Repo, slug string) (string, error) {
+	if repo == nil {
+		return AboutTemplate(slug), nil
+	}
+	data, err := os.ReadFile(filepath.Join(repo.Dir, AboutTemplateFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return AboutTemplate(slug), nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", AboutTemplateFile, err)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return AboutTemplate(slug), nil
+	}
+	return strings.ReplaceAll(string(data), AboutSlugToken, slug), nil
+}
+
+// AboutIsUntouched reports whether about is the scaffold as written, which is
+// how `change ready` finds a changeset whose author never described it.
+//
+// The first line is not compared: it is the title, and an agent that replaced
+// `# booking` with `# Booking transaction locking` and left every section empty
+// is the case the warning exists for. The rest is compared line by line, ignoring
+// the trailing newline a writer adds and the whitespace an editor leaves behind.
+// The caller passes the resolved scaffold, so a repository with its own template
+// is recognised against that template rather than against the built-in.
+func AboutIsUntouched(about, template string) bool {
+	lines := func(s string) []string {
+		s = strings.TrimRight(s, "\r\n")
+		if s == "" {
+			return nil
+		}
+		out := strings.Split(s, "\n")
+		for i := range out {
+			out[i] = strings.TrimSpace(out[i])
+		}
+		return out
+	}
+	actual, want := lines(about), lines(template)
+	// Two lines at least, because the rule ignores the title: a document that is
+	// only a title was written by someone, and is not the scaffold.
+	if len(actual) < 2 || len(want) < 2 {
+		return false
+	}
+	actual, want = actual[1:], want[1:]
+	if len(actual) != len(want) {
+		return false
+	}
+	for i := range want {
+		if actual[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // WriteIfAbsent creates path with content when it does not already exist, and
@@ -904,9 +999,15 @@ func WriteIfAbsent(repo *git.Repo, relPath, content string) (bool, error) {
 }
 
 // EnsureAbout creates ABOUT.md from the scaffold if it is missing and reports
-// whether it was created.
+// whether it was created. The scaffold is the repository's own when it has one
+// (ResolveAboutTemplate), so a template reaches `review about` the same way it
+// reaches `init`.
 func (c Changeset) EnsureAbout(repo *git.Repo) (bool, error) {
-	return WriteIfAbsent(repo, c.AboutPath(), AboutTemplate(c.Slug))
+	template, err := ResolveAboutTemplate(repo, c.Slug)
+	if err != nil {
+		return false, err
+	}
+	return WriteIfAbsent(repo, c.AboutPath(), template)
 }
 
 // EnsureThread resolves a thread title to a path, creating the file when needed.
