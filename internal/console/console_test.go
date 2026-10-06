@@ -146,16 +146,26 @@ func TestFallsBackWhereADumbTerminalLeavesGitRefusing(t *testing.T) {
 	}
 }
 
-// The configured editor is a command line, and the flags are the reason it works: an editor
-// that is asked to wait must be launched as a program plus its arguments, with the file last.
-func TestEditorCommandLineIsSplitAndGivenTheFile(t *testing.T) {
+// editorProbe writes a stand-in editor that appends each argument it receives to a log, so a
+// test can assert on the argv the real editor was given rather than on how git-pair described
+// the launch. The arguments are bracketed because a log that only joins them cannot tell one
+// argument containing a space from two arguments.
+func editorProbe(t *testing.T) (probe, log string) {
+	t.Helper()
 	dir := t.TempDir()
-	log := filepath.Join(dir, "probe.log")
-	probe := filepath.Join(dir, "probe.sh")
-	script := "#!/bin/sh\nfor a in \"$@\"; do printf 'ARGV:%s\\n' \"$a\" >> '" + log + "'; done\n"
+	log = filepath.Join(dir, "probe.log")
+	probe = filepath.Join(dir, "probe.sh")
+	script := "#!/bin/sh\nfor a in \"$@\"; do printf 'ARGV:[%s]\\n' \"$a\" >> '" + log + "'; done\n"
 	if err := os.WriteFile(probe, []byte(script), 0o755); err != nil {
 		t.Fatalf("write probe: %v", err)
 	}
+	return probe, log
+}
+
+// The configured editor is a command line, and the flags are the reason it works: an editor
+// that is asked to wait must be launched as a program plus its arguments, with the file last.
+func TestEditorCommandLineIsSplitAndGivenTheFile(t *testing.T) {
+	probe, log := editorProbe(t)
 
 	repo := editorRepo(t, probe+" --wait", termUsable)
 	target := filepath.Join(repo.Dir, "ABOUT.md")
@@ -170,8 +180,106 @@ func TestEditorCommandLineIsSplitAndGivenTheFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the configured editor never ran: %v", err)
 	}
-	if want := "ARGV:--wait\nARGV:" + target + "\n"; string(got) != want {
+	if want := "ARGV:[--wait]\nARGV:[" + target + "]\n"; string(got) != want {
 		t.Errorf("the editor saw %q, want its flags then the file", got)
+	}
+}
+
+// The launch hands the editor value to a shell, because only a shell can split
+// `code --wait` the way git does. The path must not go through that same parse: eval reads
+// the command string it has just assembled, so a path containing shell metacharacters is
+// interpreted instead of passed. Every layer above looks correct — the TUI lists the right
+// row and hands over the right string — and the reviewer is left with an empty buffer, because
+// the editor was given a path that is no longer the file. Each case below is a legal filename
+// and a different thing a shell does to a path it is allowed to read.
+func TestEditorPathIsNotReadAsShell(t *testing.T) {
+	// The report was a Next.js dynamic route, so the first case keeps that shape: the
+	// metacharacter is in a directory, where losing it changes which file the editor opens
+	// rather than just its name.
+	const dynamic = "src/routes/api/businesses/$businessId/offering-schedules/$offeringScheduleId/activate.ts"
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"a Next.js dynamic route", dynamic},
+		{"parameter expansion", "src/$businessId/activate.ts"},
+		{"braced parameter expansion", "src/${businessId}/activate.ts"},
+		{"an expansion that has a value", "src/$PROBE_HOME/x.ts"},
+		{"command substitution", "src/$(touch $PROBE_HOME/pwned)/x.ts"},
+		{"backtick substitution", "src/`touch $PROBE_HOME/pwned-backtick`/x.ts"},
+		{"pathname expansion", "src/*/*.ts"},
+		{"a space", "src/two words/x.ts"},
+		{"a backslash", `src/a\b/x.ts`},
+		{"a single quote", "src/a'b/x.ts"},
+		{"a double quote", `src/a"b/x.ts`},
+		{"a semicolon", "src/a;b/x.ts"},
+		{"an operator", "src/a&&b/x.ts"},
+		{"a pipe", "src/a|b/x.ts"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			probe, log := editorProbe(t)
+			repo := editorRepo(t, probe+" --wait", termUsable)
+
+			target := filepath.Join(repo.Dir, filepath.FromSlash(c.path))
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			if err := os.WriteFile(target, []byte("export default function handler() {}\n"), 0o644); err != nil {
+				t.Fatalf("write target: %v", err)
+			}
+
+			// The path survives unexpanded is not enough on its own: it would also survive
+			// unexpanded with nothing named by it. These are the variables a substitution
+			// would have used, so the case fails if the shell was allowed to read the path.
+			t.Setenv("businessId", "EVIL")
+			t.Setenv("PROBE_HOME", repo.Dir)
+
+			cmd, err := EditorCommand(context.Background(), repo, target)
+			if err != nil {
+				t.Fatalf("EditorCommand: %v", err)
+			}
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("editor exited with an error: %v", err)
+			}
+			got, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatalf("the configured editor never ran: %v", err)
+			}
+			if want := "ARGV:[--wait]\nARGV:[" + target + "]\n"; string(got) != want {
+				t.Errorf("the editor saw %q, want the file byte for byte", got)
+			}
+			for _, stray := range []string{"pwned", "pwned-backtick"} {
+				if _, err := os.Stat(filepath.Join(repo.Dir, stray)); err == nil {
+					t.Errorf("the shell ran the substitution in the path: %s was created", stray)
+				}
+			}
+		})
+	}
+}
+
+// A value that expands to nothing is different from an empty setting, which the fallback
+// above already replaces: `core.editor=$UNSET` reaches the shell as words that vanish. Left
+// unchecked, `exec "$@" "$path"` has one word and execs the reviewed file — which is what the
+// reviewer is standing in front of, and which is why the probe here is an executable script.
+func TestEditorValueThatExpandsToNothingNamesNoProgram(t *testing.T) {
+	_, log := editorProbe(t)
+	repo := editorRepo(t, "$GIT_PAIR_NO_SUCH_EDITOR", termUsable)
+
+	target := filepath.Join(repo.Dir, "ABOUT.md")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\nprintf 'the file ran\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+
+	cmd, err := EditorCommand(context.Background(), repo, target)
+	if err != nil {
+		t.Fatalf("EditorCommand: %v", err)
+	}
+	if err := cmd.Run(); err == nil {
+		t.Error("an editor that names no program exited as though it had run")
+	}
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		t.Error("something ran as the editor; nothing should have")
 	}
 }
 
