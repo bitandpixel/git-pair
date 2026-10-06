@@ -508,6 +508,19 @@ Edits made in a review commit are high-level feedback.
 
 Agents may also update `ABOUT.md` in later implementation commits in response to review feedback.
 
+### The scaffold
+
+`git pair init` writes a scaffold, so an agent has somewhere to put each kind of context.
+The section list above is the built-in one, and a repository may replace it by committing
+`.git-pair/about-template.md` at the repository root. `init`, `review about`, and the check that
+reports an undescribed changeset all read that file when it is there, and the built-in list
+otherwise. `{{slug}}` is replaced with the changeset id wherever it appears.
+
+A template file with no content in it is treated as no template: the built-in scaffold is written,
+which the undescribed-changeset check then reports. A file that exists and cannot be read is an
+error. The repository's own template is never committed by `init`, which commits only the changeset
+directory.
+
 ---
 
 # 7. Review Threads
