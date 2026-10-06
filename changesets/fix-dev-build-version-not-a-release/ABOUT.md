@@ -60,3 +60,4 @@ to `0.1.0` cannot pass.
 - Should the dev answer carry the commit, as goreleaser's snapshots do (`0.1.1-SNAPSHOT-498c623`)? That
   needs the stamp at build time, so `mise run build` would have to inject it — a change to the build
   task rather than to this line.
+sure lets do that
