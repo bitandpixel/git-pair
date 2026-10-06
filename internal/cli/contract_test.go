@@ -185,6 +185,13 @@ func TestExitCodeUsageError(t *testing.T) {
 		args []string
 	}{
 		{"unknown flag", []string{"status", "--nope"}},
+		// Three shapes pflag raises that the classifier used to miss, each of which an agent would
+		// otherwise read as "the repository refused" and retry unchanged. `-V` is the one that was
+		// reported: there is no shorthand for the version flag, and `--version` is the answer.
+		{"unknown shorthand flag", []string{"status", "-x"}},
+		{"unknown shorthand flag on the root", []string{"-V"}},
+		{"flag with its argument missing", []string{"init", "--id"}},
+		{"bad flag syntax", []string{"---x"}},
 		{"unknown command", []string{"bogus"}},
 		{"unknown subcommand", []string{"review", "bogus"}},
 		{"unknown subcommand of a group", []string{"change", "bogus"}},

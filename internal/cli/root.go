@@ -218,10 +218,24 @@ func (a *app) warnUnansweredJSON(cmd *cobra.Command) {
 	a.warn("git-pair: `git pair %s` has no --json output; what it printed is the report itself\n", path)
 }
 
+// isUsageError classifies the errors cobra and pflag raise for an invocation nobody can carry out, as
+// opposed to the refusals that mean "the repository said no". It matches on the message because the
+// message is all there is: pflag builds these with fmt.Errorf and exports no sentinel types, so errors.As
+// has nothing to work with.
+//
+// Each clause names one message shape, with the invocation that produces it in contract_test.go — not a
+// family, and that is how the gap this fixes got in. "unknown flag" does not match pflag's
+// "unknown shorthand flag: 'V' in -V", so `git pair -V` came back as exit 1, which sends an agent off to
+// re-read a repository that refused nothing. `flag needs an argument` and `bad flag syntax` were the same
+// mistake twice over. A git failure cannot be pulled in here by an unlucky phrase: the git case is
+// matched ahead of this one in the caller.
 func isUsageError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "unknown command") ||
 		strings.Contains(msg, "unknown flag") ||
+		strings.Contains(msg, "unknown shorthand flag") ||
+		strings.Contains(msg, "flag needs an argument") ||
+		strings.Contains(msg, "bad flag syntax") ||
 		strings.Contains(msg, "invalid argument") ||
 		strings.Contains(msg, "accepts ") ||
 		strings.Contains(msg, "requires ")
