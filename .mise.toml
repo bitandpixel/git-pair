@@ -23,16 +23,23 @@ goreleaser = "2.18.2"
 # left behind by a different branch. Trunk keeps the plain name, and `build:prod` below
 # writes it from anywhere: overwriting the shared binary is sometimes the point, and is
 # never supposed to be a surprise.
+#
+# The version is stamped the same way the name is resolved: one script, both build tasks. A build from a
+# commit with no tag has no version to report, so `mise run build` installs a binary that prints
+# `0.0.0-dev+<sha>` — a value no release can be named, because a release is named by its tag, and the
+# commit is the thing a bug report needs. A plain `go build` skips the stamp and prints the fallback at
+# `internal/cli/root.go:Version`, which is the same answer with nothing to name the commit by.
 [tasks.build]
 run = """
 set -eu
 name=$(sh scripts/install-name.sh)
+version=$(sh scripts/dev-version.sh)
 mkdir -p "$HOME/.local/bin"
-go build -o "$HOME/.local/bin/$name" ./cmd/git-pair
+go build -ldflags "-X gitpair/internal/cli.Version=$version" -o "$HOME/.local/bin/$name" ./cmd/git-pair
 if [ "$name" = git-pair ]; then
-  echo "installed ~/.local/bin/git-pair - this is the binary 'git pair' runs"
+  echo "installed ~/.local/bin/git-pair at $version - this is the binary 'git pair' runs"
 else
-  echo "installed ~/.local/bin/$name (from $(git branch --show-current))"
+  echo "installed ~/.local/bin/$name at $version (from $(git branch --show-current))"
   echo "run it as '$name ...'; 'git pair' is still ~/.local/bin/git-pair, and the gate"
   echo "scripts under scripts/gates default to the name just installed"
 fi
@@ -42,15 +49,17 @@ description = "Compile and install onto ~/.local/bin as git-pair-<branch> (trunk
 # The shared name, from wherever you happen to be standing, said out loud: writing it
 # from a branch replaces the binary every other worktree and every `git pair` in the
 # shell sees, which is sometimes exactly what is wanted and never what should happen
-# by surprise.
+# by surprise. The version is stamped the same way, from the same script, so the shared binary says
+# which commit it was built from whichever worktree wrote it last.
 [tasks."build:prod"]
 run = """
 set -eu
 branch=$(git branch --show-current)
 if [ -z "$branch" ]; then branch="detached HEAD"; fi
+version=$(sh scripts/dev-version.sh)
 mkdir -p "$HOME/.local/bin"
-go build -o "$HOME/.local/bin/git-pair" ./cmd/git-pair
-echo "installed ~/.local/bin/git-pair from $branch - this replaces the binary 'git pair' runs"
+go build -ldflags "-X gitpair/internal/cli.Version=$version" -o "$HOME/.local/bin/git-pair" ./cmd/git-pair
+echo "installed ~/.local/bin/git-pair at $version from $branch - this replaces the binary 'git pair' runs"
 """
 description = "Install the shared ~/.local/bin/git-pair from any branch"
 
