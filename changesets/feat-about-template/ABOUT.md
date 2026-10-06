@@ -95,3 +95,32 @@ never wanted the built-in headings.
 - Should a repository-level template ever be per-directory, for a monorepo whose packages review
   differently? Nothing in the current rule forbids adding that later, and nothing asks for it yet.
 we can defer this til later. It's a good callout though.
+
+## Addressed feedback
+
+### "can you elaborate on this, what do you mean which scaffold they wrote?"
+
+The command is `git pair change stack`, and `change combine` was wrong in my sentence. `combine` archives
+one changeset directory inside another, copies the threads, and appends the pointer line to the survivor's
+`ABOUT.md`; it never calls `changeset.Write`, so it cannot scaffold anything. The question is about
+`change stack` alone.
+
+`change stack` builds the child's `Changeset` and calls `changeset.Write`
+(`internal/cli/change_stack.go:152`), which scaffolds `ABOUT.md` when the child directory has none — the
+shape where a branch was cut, commits made, and the stack recorded only afterwards. `Write` returns what it
+created in `written`, and the command reports only the metadata transition: `base:` and `base-changeset:`
+(`change_stack.go:165` for the no-change case, `:185` for the commit). So `changesets/<child>/ABOUT.md` can
+appear with no line saying it did, where `init` prints `created changesets/<id>/ABOUT.md` for the same event.
+
+Before this changeset the silence cost nothing: the file was always the same six headings, so naming it
+would have told the author nothing they could not guess. That stopped being true with this change — the file
+can now be a document from the repository's own template that the author has never read, written by a
+command whose output speaks only of `CHANGESET.yaml`. The fix is one line: print the `written` entries
+`change stack` currently throws away, so a scaffolded `ABOUT.md` is named the way `init` names it. I left it
+out to keep this diff to how the scaffold is resolved; it belongs here as much as anywhere.
+
+### "we can defer this til later. It's a good callout though."
+
+Deferred. The per-directory question stays a question and not a plan, and the reason it can be deferred
+without cost is that the present rule reads one path at the repository root: a later per-directory rule adds
+a lookup in front of it rather than changing it, so nothing here has to be undone to allow it.
