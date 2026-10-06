@@ -100,6 +100,11 @@ reviewable:
 - validation performed,
 - known limitations and open questions.
 
+`init` scaffolds those sections. A repository may commit `.git-pair/about-template.md` and choose its
+own, so fill in whatever headings `ABOUT.md` actually has rather than the list above — an `ABOUT.md`
+still holding its scaffold is the most common cause of a confused reviewer, and `change ready` says so
+on stderr.
+
 Answer reviewers in `ABOUT.md` or in the relevant thread file under `changesets/<id>/`. Replies are
 appended sections; git history supplies authorship and order.
 

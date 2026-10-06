@@ -121,7 +121,7 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 	// Warn about an ABOUT.md that is still the untouched template: an agent
 	// that never described the change is the most common cause of a confused
 	// reviewer. Informational only, so it cannot block automation.
-	if aboutIsTemplate(ctx, s.repo, s.cs) {
+	if aboutIsTemplate(s.repo, s.cs) {
 		a.warn("warning: %s still has the empty `init` template; describe the change for the reviewer\n",
 			s.cs.AboutPath())
 	}
@@ -166,28 +166,26 @@ func printReady(a *app, s *session, sha string, report *survival.Report, acknowl
 	a.printf("  queue: `git pair queue` now lists this changeset\n")
 }
 
-// aboutIsTemplate reports whether ABOUT.md is byte-identical to the scaffold,
-// ignoring the title line which contains the changeset name.
-func aboutIsTemplate(ctx context.Context, repo *git.Repo, cs changeset.Changeset) bool {
+// aboutIsTemplate reports whether ABOUT.md is the scaffold as written, ignoring
+// the title line. The scaffold is the one this repository resolves, so a team
+// that committed its own `.git-pair/about-template.md` is measured against that.
+func aboutIsTemplate(repo *git.Repo, cs changeset.Changeset) bool {
 	data, err := os.ReadFile(filepath.Join(repo.Dir, cs.AboutPath()))
 	if err != nil {
 		return false
 	}
-	template := strings.Split(strings.TrimRight(strings.TrimPrefix(changeset.AboutTemplate(cs.Slug), "# "+cs.Slug+"\n"), "\n"), "\n")
-	actual := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if len(actual) < 2 {
+	template, err := changeset.ResolveAboutTemplate(repo, cs.Slug)
+	if err != nil {
+		// The warning is informational, so a template this repository cannot read is no
+		// reason to nag about a file that may well be fully described. `init` and
+		// `review about` report the same read failure instead of swallowing it.
 		return false
 	}
-	actual = actual[1:]
-	if len(actual) != len(template) {
-		return false
-	}
-	for i := range template {
-		if strings.TrimSpace(actual[i]) != strings.TrimSpace(template[i]) {
-			return false
-		}
-	}
-	return true
+	return changeset.AboutIsUntouched(string(data), template) ||
+		// And against the built-in: a changeset created before the repository adopted a
+		// template, or scaffolded by hand from the PRD §6 headings, is just as
+		// undescribed, and the reviewer cannot tell the two scaffolds apart.
+		changeset.AboutIsUntouched(string(data), changeset.AboutTemplate(cs.Slug))
 }
 
 func isNothingToCommit(err error) bool {

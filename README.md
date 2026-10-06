@@ -98,7 +98,9 @@ Next: fill in changesets/booking-transaction/ABOUT.md, commit it with your imple
 `CHANGESET.yaml` records the changeset's `id` and its `base`;
 `ABOUT.md` is a scaffold with `Summary`, `What changed`, `Design decisions`, `Validation`,
 `Known limitations` and `Open questions`
-headings. Fill it in, commit it with your implementation, then:
+headings — or the headings your repository prefers, when it commits
+`.git-pair/about-template.md` (see [Configuration](#configuration)). Fill it in, commit it with your
+implementation, then:
 
 ```bash
 $ git pair change ready
@@ -1925,6 +1927,23 @@ like. Nothing is committed or shared — `git status` cannot see the
 directory and `git add` cannot stage it — and no command reports marks, so derived state is
 unaffected. Deleting that directory forgets the marks; the newest 12 commits per changeset are
 kept.
+
+The `ABOUT.md` scaffold is the repository's to choose. `git pair init`, `git pair review about`, and
+the check that reports an author who never described the change all read
+`.git-pair/about-template.md` when the repository has one, and the `Summary`, `What changed`,
+`Design decisions`, `Validation`, `Known limitations` and `Open questions` headings above otherwise.
+`{{slug}}` is replaced with the changeset id wherever it appears, so the title can be `# {{slug}}` or
+`# Booking locks in {{slug}}`. Commit the file, because the value of a template is that the next
+checkout starts from it; `init` never commits it, since it is an input to a changeset rather than part
+of one, and an author can try one out before staging it.
+
+Two decisions are worth stating, because both were taken to keep a mistake visible. A template file
+that is empty or whitespace-only counts as no template at all: the built-in scaffold is written, and
+`change ready` then says the file is still empty, rather than the reviewer being handed a blank
+`ABOUT.md` with no way to tell whose setting failed. A file that exists and cannot be read is an error
+that names it, not a quiet return to the built-in — an author who committed a template expects their
+template. And a repository that has adopted a template still gets the warning for a changeset holding
+the built-in scaffold, which was written before the template arrived and is just as undescribed.
 
 ## Development
 
