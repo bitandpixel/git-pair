@@ -41,6 +41,10 @@ type Options struct {
 	// a parent branch from the branch everything is measured against. The zero value says
 	// "nobody resolved it", which records no parent rather than guessing one.
 	Trunk changeset.DefaultBranchRef
+	// Mouse is whether the session asks the terminal to report the wheel, and what to say about a
+	// setting it could not read. ResolveMouse reads it from the repository; the zero value leaves
+	// the wheel alone, which is what a caller that has not resolved it should get.
+	Mouse MouseSetting
 }
 
 // Header is the session's identity line.
