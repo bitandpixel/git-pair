@@ -350,6 +350,10 @@ type reviewModel struct {
 	// written when a tool hands it back.
 	out      io.Writer
 	quitting bool
+	// mouse is the session's answer to whether the terminal should report the wheel to us,
+	// resolved from git-pair.mouse before the program started and carried here so the wheel
+	// handler and the handoff can both ask it. See mouse.go.
+	mouse MouseSetting
 	// submitted is the one-line summary of a review submitted from inside the
 	// session, printed after the alt screen closes.
 	submitted string
@@ -387,6 +391,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	m := reviewModel{
 		ctx: ctx, sess: sess, out: out, width: 80, height: 24, threadsOpen: true, previewOn: true,
+		mouse: opts.Mouse,
 		// There is no match to pick out until `n` or `enter` says there is. Zero would be row zero,
 		// which is a row the reviewer never asked to be standing on.
 		previewMatch: -1,
@@ -395,7 +400,19 @@ func Run(ctx context.Context, opts Options) error {
 	if n := sess.Resumed(); n > 0 {
 		m.setStatus(fmt.Sprintf("resumed %d reviewed mark%s from an earlier session", n, plural(n)), false)
 	}
-	p := tea.NewProgram(m, tea.WithContext(ctx), tea.WithOutput(out))
+	// A setting the session could not read is worth more on the screen than silently ignored:
+	// the reviewer who typed `git-pair.mouse = diabled` has to be told it did nothing.
+	if opts.Mouse.Note != "" {
+		m.setStatus(opts.Mouse.Note, false)
+	}
+	progOpts := []tea.ProgramOption{tea.WithContext(ctx), tea.WithOutput(out)}
+	if m.mouse.Report {
+		// Cell motion (1002) plus SGR coordinates (1006), which is what bubbletea sends for
+		// WithMouseCellMotion. Deliberately not 1003: hover reporting would give up the pointer
+		// for nothing, since nothing in this screen is a hover target.
+		progOpts = append(progOpts, tea.WithMouseCellMotion())
+	}
+	p := tea.NewProgram(m, progOpts...)
 	final, err := p.Run()
 	// Back on the shell's screen before anything is printed, so the submitted summary and any
 	// error land where the user will still be looking.
@@ -524,7 +541,7 @@ func (m reviewModel) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingNote = ""
 		if msg.err != nil {
 			m.setStatus(fmt.Sprintf("%s: %v", msg.label, msg.err), true)
-			return m, nil
+			return m, m.wheelBack(nil)
 		}
 		if err := m.sess.Reload(m.ctx); err != nil {
 			m.setStatus(err.Error(), true)
@@ -539,7 +556,8 @@ func (m reviewModel) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// is already on, so ask for the fresh one in the same breath.
 		m.forgetPatches()
 		m.refresh()
-		return m.ensurePreview()
+		rm, cmd := m.ensurePreview()
+		return rm, rm.wheelBack(cmd)
 
 	case docMsg:
 		if m.docs == nil {
@@ -593,6 +611,9 @@ func (m reviewModel) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus("", false)
 		}
 		return m, nil
+
+	case tea.MouseMsg:
+		return m.handleWheel(msg)
 
 	case tea.KeyMsg:
 		updated, cmd := m.handleKey(msg)

@@ -1437,6 +1437,18 @@ while the tool is for working on it. Plain `git pair diff` runs `git diff` with
 `core.quotePath=false` and inherits your pager and colour settings; the span label goes to
 stderr so stdout stays pipeable.
 
+The wheel scrolls the preview, when the terminal is willing to report it. The session asks for wheel
+events on the strength of `git-pair.mouse`, which is on unless you turn it off with
+`git config git-pair.mouse false` — the cost is not nothing, since a terminal reporting the wheel
+to the program stops using click-drag to select text until you hold Shift. Two facts about where
+the wheel comes from are worth knowing before concluding the setting did nothing. Under tmux,
+wheel events reach a program only with `set -g mouse on`; and tmux hands the wheel to whatever is
+on the alternate screen, which is where a session lives, so a program that never asked for the
+mouse is not preserving your scrollback, it is dropping the events. Inside an editor or difftool a
+handoff opened, scrolling is that program's own decision: git-pair releases the mouse before the
+child starts and asks for it back when the child exits, and vim rolls its windows only with
+`set mouse=a` set in vim.
+
 `git pair review` is an orchestration screen, not an editor (`git pair review open` is the same command
 under a longer name). What the review is made of is at the top, the changed files and their marks below it,
 and the reviewed counter under those:
@@ -1678,6 +1690,10 @@ keys the whole-screen preview uses — `j`/`k` a row, `d`/`u` or `ctrl-d`/`ctrl-
 `ctrl-f`/`ctrl-b` a page, `gg` the top and `G` the bottom — over the file the pane was already showing. Paging a diff that
 way is the whole point: the four page keys belong to whichever region holds them, so a diff too long to
 fit is paged by moving into it rather than by borrowing the list's keys from across the screen.
+The wheel does the same job without the moving into it: one notch is three rows of the diff on
+screen, wherever the pointer is standing — over the list, over the divider, over the overlay —
+because the pane is what you scroll while reading, and a pointer that has to be held over a column
+to move it is a second thing to aim at. Nothing else comes from the mouse: a click marks nothing.
 `Enter` there opens the file on show — the difftool for it, or the editor for a file the span added,
 which is the key the pane's own note points at.
 

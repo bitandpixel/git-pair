@@ -534,7 +534,10 @@ func openSession(ctx context.Context, a *app, s *session, sel span.Selector, inv
 	if note != "" {
 		a.warn("%s\n", note)
 	}
-	err := tui.Run(ctx, tui.Options{Repo: s.repo, Changeset: s.cs, Summary: s.summary, Span: sel, Trunk: s.trunk})
+	err := tui.Run(ctx, tui.Options{
+		Repo: s.repo, Changeset: s.cs, Summary: s.summary, Span: sel, Trunk: s.trunk,
+		Mouse: tui.ResolveMouse(ctx, s.repo),
+	})
 	if errors.Is(err, tui.ErrQuit) {
 		return nil
 	}
