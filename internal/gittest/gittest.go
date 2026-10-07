@@ -323,12 +323,34 @@ func WithAuthor(name, email string) CommitOpt {
 	}
 }
 
-// WithDate fixes both commit dates, which makes age reporting deterministic.
+// WithDate fixes both commit dates, which makes age reporting deterministic. A history whose two
+// dates disagree about the order is a history this option cannot build; use WithAuthorDate and
+// WithCommitterDate for that.
 func WithDate(when time.Time) CommitOpt {
-	stamp := when.UTC().Format(time.RFC3339)
 	return func(c *commitConfig) {
-		c.env = append(c.env, "GIT_AUTHOR_DATE="+stamp, "GIT_COMMITTER_DATE="+stamp)
+		WithAuthorDate(when)(c)
+		WithCommitterDate(when)(c)
 	}
+}
+
+// WithAuthorDate fixes the author date alone, leaving the committer date to the clock.
+//
+// The two dates are separate options because they answer different questions, and a rebase pulls
+// them apart: `git rebase` replays each commit as a new commit, so the author date keeps the day the
+// work was written while the committer date becomes the minute of the rebase — every commit the
+// replay touched then carries the same committer date, and the order they were made in is gone from
+// it. Anything that puts history in order has to say which date it means, and a fixture that can only
+// set both at once cannot ask the question at all.
+func WithAuthorDate(when time.Time) CommitOpt {
+	stamp := when.UTC().Format(time.RFC3339)
+	return func(c *commitConfig) { c.env = append(c.env, "GIT_AUTHOR_DATE="+stamp) }
+}
+
+// WithCommitterDate fixes the committer date alone, leaving the author date to the clock. See
+// WithAuthorDate for why the two dates are set apart.
+func WithCommitterDate(when time.Time) CommitOpt {
+	stamp := when.UTC().Format(time.RFC3339)
+	return func(c *commitConfig) { c.env = append(c.env, "GIT_COMMITTER_DATE="+stamp) }
 }
 
 // Commit writes a commit whose message is subject, and returns its full SHA.

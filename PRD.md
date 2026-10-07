@@ -2594,7 +2594,11 @@ which is what makes choosing a historical range safe rather than a negotiation w
 column is one timeline rather than two lists: the submissions by alias (the newest as `Last Review`,
 then `Review -2` and `Review -3`, older ones by the index you would type) with the changeset's own
 commits written between them where they happened, so `j` walks from a submission into the commits
-that followed it. The commits are the ones the base does not already hold, and only the ones that
+that followed it. Where they happened is git's walk of the range, taken topologically, and not the
+commits' dates: a rebase replays every commit it touches, so a rebased stack carries the minute of
+the rebase as the committer date of all of it, and a timeline sorted by that date cannot tell which
+submission came first. The dates are still what an age beside a row says. The commits are the ones the
+base does not already hold, and only the ones that
 change files — a marker commit holds no content to review and is on the list by alias already. A
 merge the author made to catch the changeset up with the base is among them: asked for against its
 first parent it reports the files it brought in, and it is the boundary a reviewer sets to keep what
