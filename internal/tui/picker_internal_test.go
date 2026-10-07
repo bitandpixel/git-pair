@@ -24,28 +24,40 @@ import (
 
 func pickerFixture(t *testing.T, reviews int) (reviewModel, *gittest.Fixture) {
 	t.Helper()
-	ctx := context.Background()
-	// Fixed, increasing dates. The columns merge a changeset's commits with its submissions by when
-	// they happened, and a fixture whose neighbours land in the same second cannot say which order
-	// that was. An hour apart keeps every age the picker prints inside the "Nd" range it expects.
+	// Fixed, increasing dates. The columns merge a changeset's commits with its submissions by the
+	// order they happened in, and a fixture whose neighbours land in the same second cannot say which
+	// order that was. An hour apart keeps every age the picker prints inside the "Nd" range it expects.
 	clock := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	stamp := func() gittest.CommitOpt {
+	return pickerFixtureWith(t, reviews, func() []gittest.CommitOpt {
 		clock = clock.Add(time.Hour)
-		return gittest.WithDate(clock)
+		return []gittest.CommitOpt{gittest.WithDate(clock)}
+	})
+}
+
+// pickerFixtureWith is pickerFixture with the caller's dates, one call per commit. The dates are the
+// caller's because the case worth asking about is a history whose author and committer dates disagree
+// about the order, which is what `git rebase` leaves behind, and a fixture that stamps both at once
+// cannot build one.
+func pickerFixtureWith(t *testing.T, reviews int, stamps func() []gittest.CommitOpt) (reviewModel, *gittest.Fixture) {
+	t.Helper()
+	ctx := context.Background()
+	// One call per commit, so a caller can hand a commit both of its dates.
+	stamped := func(opts ...gittest.CommitOpt) []gittest.CommitOpt {
+		return append(opts, stamps()...)
 	}
 	f := gittest.New(t)
-	f.Commit("seed", gittest.WithFile("main.go", "package main\n\nfunc main() {}\n"), stamp())
+	f.Commit("seed", stamped(gittest.WithFile("main.go", "package main\n\nfunc main() {}\n"))...)
 	f.CreateBranch(readonlySlug)
-	f.CommitChangeset(readonlySlug, "main", stamp())
-	f.Commit("implement", gittest.WithFiles(map[string]string{
+	f.CommitChangeset(readonlySlug, "main", stamped()...)
+	f.Commit("implement", stamped(gittest.WithFiles(map[string]string{
 		"service.go": "package main\n\nfunc Lock() {}\n",
 		"handler.go": "package main\n\nfunc Serve() {}\n",
-	}), stamp())
+	}))...)
 	for i := range reviews {
 		f.CommitReviewMarker(readonlySlug, "feedback",
-			gittest.WithFile(fmt.Sprintf("notes-%d.md", i), "note\n"), stamp())
+			stamped(gittest.WithFile(fmt.Sprintf("notes-%d.md", i), "note\n"))...)
 		f.Commit(fmt.Sprintf("response %d", i),
-			gittest.WithFile("service.go", fmt.Sprintf("package main\n\nfunc Lock() { tx%d() }\n", i)), stamp())
+			stamped(gittest.WithFile("service.go", fmt.Sprintf("package main\n\nfunc Lock() { tx%d() }\n", i)))...)
 	}
 
 	repo := &git.Repo{Dir: f.Dir()}
@@ -164,24 +176,71 @@ func moveTo(t *testing.T, m reviewModel, label string) reviewModel {
 // are not there twice: they are on the list by alias.
 func TestColumnsInterleaveTheChangesetsCommitsWithItsReviews(t *testing.T) {
 	m, f := pickerFixture(t, 2)
-	// Dates the merge can be pinned by: an early commit belongs at the bottom of the history, and a
-	// commit newer than everything is still no row at all if it holds nothing.
-	f.Commit("before any review", gittest.WithFile("early.go", "package main\n"),
+	// The history decides the order and the dates do not: this commit was written last and carries a
+	// date six years before the fixture, so it reads at the top of the column, where the history puts
+	// it, rather than at the bottom, where its date would. And a commit newer than everything is still
+	// no row at all if it holds nothing.
+	f.Commit("late work, dated early", gittest.WithFile("early.go", "package main\n"),
 		gittest.WithDate(time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)))
 	f.EmptyCommit("git-pair: ready never", gittest.WithDate(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)))
 	m = open(t, m)
 
 	got := columnLabels(m.endpointsFor(true))
-	want := []string{"response 1", "Last Review", "response 0", "Review -2", "before any review"}
+	want := []string{"late work, dated early", "response 1", "Last Review", "response 0", "Review -2", "implement"}
 	if !orderedBefore(got, want) {
-		t.Errorf("the BASE column reads %v, want the commits among the reviews in the order they "+
-			"happened", got)
+		t.Errorf("the BASE column reads %v, want the commits among the reviews in the order the history "+
+			"puts them, whatever date a row carries", got)
 	}
 	for _, absent := range []string{"git-pair: ready never", "seed"} {
 		if slices.Contains(got, absent) {
 			t.Errorf("the BASE column lists %q: the first is an empty marker and the second is below "+
 				"the changeset's base", absent)
 		}
+	}
+}
+
+// A rebased changeset is the case the columns cannot order by date. `git rebase` replays every commit
+// it touches, so the whole stack comes out of it carrying the minute of the rebase as its committer
+// date -- the one date the review submissions carry -- while the author dates keep the days the work
+// was written. Sorted by date, the submissions all tie, and the sort keeps them in the order the
+// records came back: oldest on top, with `Review 0` above `Last Review` and every work commit sunk
+// below them all, because those rows were read from a different date column and kept theirs.
+func TestRebasedStackStillReadsNewestFirst(t *testing.T) {
+	// One committer instant for the whole stack, days after the author dates it is standing in for.
+	rebased := time.Date(2026, 9, 9, 9, 0, 0, 0, time.UTC)
+	clock := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	m, _ := pickerFixtureWith(t, 2, func() []gittest.CommitOpt {
+		clock = clock.Add(24 * time.Hour)
+		return []gittest.CommitOpt{gittest.WithAuthorDate(clock), gittest.WithCommitterDate(rebased)}
+	})
+	m = open(t, m)
+
+	for _, col := range []struct {
+		name string
+		base bool
+	}{{"BASE", true}, {"HEAD", false}} {
+		got := columnLabels(m.endpointsFor(col.base))
+		want := []string{"response 1", "Last Review", "response 0", "Review -2", "implement"}
+		if !orderedBefore(got, want) {
+			t.Errorf("the %s column of a rebased stack reads %v, want the newest row first with the "+
+				"submissions among the commits that answer them, whatever date each row carries", col.name, got)
+		}
+	}
+}
+
+// The walk answers for the rows it read, so a submission it never saw -- one the session's summary
+// knows and the range no longer holds, because history moved under the picker -- has no position to
+// sort by. It goes on top, where the newest submission belongs, rather than at the bottom, which is
+// where the zero of an unset position would put it.
+func TestTimelinePutsASubmissionTheWalkMissedOnTop(t *testing.T) {
+	commits := []pickerItem{{label: "newest work", position: 3}, {label: "older work", position: 2}}
+	order := map[string]int{"reviewed": 1}
+	reviews := []lifecycle.Event{{SHA: "reviewed", Short: "reviewed"}, {SHA: "gone", Short: "gone"}}
+
+	got := columnLabels(timeline(reviews, commits, order))
+	want := []string{"Last Review", "newest work", "older work", "Review -2"}
+	if !orderedBefore(got, want) {
+		t.Errorf("the timeline reads %v, want the submission the walk missed above the commits it read", got)
 	}
 }
 
@@ -300,6 +359,7 @@ func TestEnterAlwaysAppliesThePair(t *testing.T) {
 // the stored index is the one shown.
 func TestPickerNamesReviewsByAliasThenIndex(t *testing.T) {
 	m, _ := pickerFixture(t, 5)
+	m = open(t, m) // the columns are drawn from the picker's read of the history, so open it to draw them
 	var got []string
 	for _, it := range m.endpointsFor(true) {
 		if strings.Contains(it.label, "Review") {

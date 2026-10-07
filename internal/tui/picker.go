@@ -52,6 +52,13 @@ type spanPicker struct {
 	// commits are the changeset's own non-empty commits, newest first, read once when `V` opens.
 	// The columns redraw on every keystroke, so this is the picker's only git call for them.
 	commits []pickerItem
+	// order answers "which came first" for every commit of the range, by sha, from the same walk as
+	// commits. The columns merge submissions and commits by it rather than by their dates, because a
+	// rebase takes the dates away from that question: it replays every commit it touches, so the whole
+	// replayed stack carries the minute of the rebase as its committer date, and submissions sorted by
+	// it all tie. A sort that keeps input order on ties then reads back as the order the records came
+	// in, which put the oldest submission at the top of a rebased changeset.
+	order map[string]int
 	// list is the `c`/`r` drill-in, nil while the columns are showing.
 	list *checkpointList
 	// err is what the picker refuses to leave unsaid: a pair git would not resolve, or a read of
@@ -90,10 +97,11 @@ type pickerItem struct {
 	label  string
 	detail string
 	group  string
-	// when is what the columns merge the submissions and the commits by. It is zero for the rows
-	// that are not events: Current, and the changeset base.
-	when time.Time
-	ckpt span.Checkpoint
+	// position is the row's place in git's walk of the changeset's range, oldest first, and is what
+	// the columns merge by. It is zero for the rows that are not events: Current, and the changeset
+	// base, which the merge does not touch.
+	position int
+	ckpt     span.Checkpoint
 }
 
 // --- the two columns --------------------------------------------------------
@@ -110,7 +118,7 @@ func (m reviewModel) endpointsFor(base bool) []pickerItem {
 		// because "Working Tree" named only the uncommitted half of it.
 		items = append(items, pickerItem{label: "Current", detail: "latest + edits", ckpt: span.WorkingTree()})
 	}
-	items = append(items, timeline(reviews, m.pick.commits)...)
+	items = append(items, timeline(reviews, m.pick.commits, m.pick.order)...)
 	if base {
 		items = append(items, pickerItem{
 			label: "Changeset Base",
@@ -132,15 +140,31 @@ func (m reviewModel) endpointsFor(base bool) []pickerItem {
 
 // timeline merges the review submissions with the changeset's own commits into one newest-first
 // list, so `j` walks from a review into the commits that followed it rather than hopping to a
-// second list. Equal timestamps keep the submission first: it is the event a reviewer names, and it
-// is committed after the work it approves.
-func timeline(reviews []lifecycle.Event, commits []pickerItem) []pickerItem {
+// second list. It orders by git's walk of the range -- see spanPicker.order for what a date costs a
+// rebased stack. Two rows of one walk never share a position, so the only ties left are submissions
+// the walk did not see, which keep the chronological order the summary reported them in.
+//
+// A submission the walk never saw is history the range no longer holds: the session's summary was
+// derived from commits the branch has since replaced. It goes above everything the walk did see,
+// because that is where the newest submission belongs and an unknown position would bury it.
+func timeline(reviews []lifecycle.Event, commits []pickerItem, order map[string]int) []pickerItem {
+	newest := -1
+	for _, it := range commits {
+		newest = max(newest, it.position)
+	}
+	for _, pos := range order {
+		newest = max(newest, pos)
+	}
 	rows := make([]pickerItem, 0, len(reviews)+len(commits))
 	for i, e := range reviews {
-		rows = append(rows, reviewItem(e, i, len(reviews)))
+		position, known := order[e.SHA]
+		if !known {
+			position = newest + 1
+		}
+		rows = append(rows, reviewItem(e, i, len(reviews), position))
 	}
 	rows = append(rows, commits...)
-	slices.SortStableFunc(rows, func(a, b pickerItem) int { return b.when.Compare(a.when) })
+	slices.SortStableFunc(rows, func(a, b pickerItem) int { return b.position - a.position })
 	return rows
 }
 
@@ -161,35 +185,47 @@ func pinnedRow(items []pickerItem, pending span.Checkpoint) (pickerItem, bool) {
 }
 
 // inlineCommits are the changeset's own commits -- everything the base does not already hold --
-// newest first, for the columns. A submission that changed files is a commit too, and it keeps one
-// row: the alias, not the sha. A merge the author made to catch up with the base keeps its own row
+// newest first, for the columns, beside the position of every commit of that range so the
+// submissions can be placed among them. A submission that changed files is a commit too, and it keeps
+// one row: the alias, not the sha. A merge the author made to catch up with the base keeps its own row
 // as well: it is where the history that arrived stops being this changeset's, and a reviewer who
 // wants the span either side of it has to be able to point at it.
-func (m reviewModel) inlineCommits(reviews []lifecycle.Event) ([]pickerItem, string) {
+func (m reviewModel) inlineCommits(reviews []lifecycle.Event) ([]pickerItem, map[string]int, string) {
 	base := m.sess.Header().Base
 	if base == "" {
-		return nil, ""
+		return nil, nil, ""
 	}
-	tips, err := m.sess.Repo().RecentNonEmptyCommits(m.ctx, pickerCommits, base+"..HEAD")
+	walk, err := m.sess.Repo().RangeCommits(m.ctx, base+"..HEAD")
 	if err != nil {
 		// Nothing else on this screen says the history is short, so the picker says it here rather
 		// than quietly showing fewer rows than the changeset has.
-		return nil, "cannot read this changeset's commits: " + err.Error()
+		return nil, nil, "cannot read this changeset's commits: " + err.Error()
+	}
+	order := make(map[string]int, len(walk))
+	for _, c := range walk {
+		order[c.SHA] = c.Position
 	}
 	submitted := make(map[string]bool, len(reviews))
 	for _, e := range reviews {
 		submitted[e.SHA] = true
 	}
 	var items []pickerItem
-	for _, t := range tips {
-		if submitted[t.SHA] {
+	for _, c := range walk {
+		if !c.ChangesFiles || submitted[c.SHA] {
 			continue
 		}
 		items = append(items, pickerItem{
-			label: t.Subject, detail: t.Short + " " + ago(t.When), when: t.When, ckpt: span.Commit(t.SHA),
+			label: c.Subject, detail: c.Short + " " + ago(c.When), position: c.Position,
+			ckpt: span.Commit(c.SHA),
 		})
 	}
-	return items, ""
+	// The window is the newest rows, cut from a walk that read the whole range: recent is the point,
+	// and the `c` drill reaches anything older.
+	if over := len(items) - pickerCommits; over > 0 {
+		items = items[over:]
+	}
+	slices.Reverse(items)
+	return items, order, ""
 }
 
 // newSpanPicker seeds the pending pair from the span on screen and puts each column's
@@ -197,7 +233,7 @@ func (m reviewModel) inlineCommits(reviews []lifecycle.Event) ([]pickerItem, str
 func (m reviewModel) newSpanPicker() spanPicker {
 	sel := m.sess.Selector()
 	p := spanPicker{base: sel.Base, head: sel.Head}
-	p.commits, p.err = m.inlineCommits(m.sess.Summary().Reviews)
+	p.commits, p.order, p.err = m.inlineCommits(m.sess.Summary().Reviews)
 	m.recentrePicker(&p)
 	return p
 }
@@ -207,7 +243,7 @@ func (m reviewModel) newSpanPicker() spanPicker {
 // "Review -2" keeps meaning the same submission however the other end is set (§5). The newest
 // is "Last Review" for the same reason the span label calls it "last review" — the reader is
 // not being asked to count backwards from a total they cannot see.
-func reviewItem(e lifecycle.Event, i, total int) pickerItem {
+func reviewItem(e lifecycle.Event, i, total, position int) pickerItem {
 	index := i - total // -1 for the newest
 	label := fmt.Sprintf("Review %d", index)
 	switch {
@@ -217,7 +253,7 @@ func reviewItem(e lifecycle.Event, i, total int) pickerItem {
 		index = i
 		label = fmt.Sprintf("Review %d", i)
 	}
-	return pickerItem{label: label, detail: e.Short + " " + ago(e.When), when: e.When,
+	return pickerItem{label: label, detail: e.Short + " " + ago(e.When), position: position,
 		ckpt: span.Review(index)}
 }
 

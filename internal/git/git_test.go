@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"gitpair/internal/git"
 	"gitpair/internal/gittest"
@@ -200,53 +201,123 @@ func TestRecentCommitsAndRefTipsCarryWhatAPickerNeeds(t *testing.T) {
 	}
 }
 
-// The `V` columns interleave a changeset's own commits with its review submissions, and what must
-// not come back is the commits that change nothing: a marker holds no content to review and is
-// already listed by alias. A merge is kept, because the first-parent diff reports the files it
-// brought in -- that merge is where the changeset caught up with something, and a reviewer needs the
-// row to put what arrived outside the span.
-func TestRecentNonEmptyCommitsSkipWhatChangesNothing(t *testing.T) {
+// The `V` columns interleave a changeset's own commits with its review submissions, and they order
+// them by the walk rather than by the dates, because a rebase leaves every commit it replayed
+// carrying the same committer date. So the walk has to name each commit's place in the order it
+// happened and say which commits changed files: a marker holds no content to review and is already
+// listed by alias, yet it still sits between the rows a reviewer reads, so it has to be counted. A
+// merge is kept, because the first-parent diff reports the files it brought in -- that merge is where
+// the changeset caught up with something, and a reviewer needs the row to put what arrived outside
+// the span.
+func TestRangeCommitsGiveTheRangeAnOrderDatesCannot(t *testing.T) {
 	f, repo := openFixture(t)
-	base := f.Head()
-	one := f.Commit("first work", gittest.WithFile("b.txt", "2\n"))
-	f.EmptyCommit("review: approve something")
-	two := f.Commit("second work", gittest.WithFile("c.txt", "3\n"))
-	f.CreateBranch("side", one)
-	f.SwitchTo("side")
-	side := f.Commit("side work", gittest.WithFile("d.txt", "4\n"))
-	f.SwitchTo("main")
-	f.MustGit("merge", "--no-ff", "-m", "merge side", "side")
-	merge := f.Head()
+	base, one, marker, two, side, merge := rebasedStack(t, f)
 
-	tips, err := repo.RecentNonEmptyCommits(context.Background(), 20, base+"..HEAD")
+	walk, err := repo.RangeCommits(context.Background(), base+"..HEAD")
 	if err != nil {
-		t.Fatalf("RecentNonEmptyCommits: %v", err)
+		t.Fatalf("RangeCommits: %v", err)
 	}
-	present := map[string]string{}
-	for _, tip := range tips {
-		present[tip.SHA] = tip.Subject
-		if tip.Short != tip.SHA[:7] || tip.Subject == "" || tip.When.IsZero() {
-			t.Errorf("entry = %+v, want a short id, a subject and a date beside the sha", tip)
+	bySHA := map[string]git.RangeCommit{}
+	for i, c := range walk {
+		bySHA[c.SHA] = c
+		if c.Position != i {
+			t.Errorf("%s carries position %d at row %d: the positions are the walk, oldest first, and the "+
+				"callers compare them with each other", c.SHA, c.Position, i)
 		}
+		if c.Short != c.SHA[:7] || c.Subject == "" || c.When.IsZero() {
+			t.Errorf("entry = %+v, want a short id, a subject and a date beside the sha", c)
+		}
+	}
+	// The whole range, markers included: the window is the caller's, and a position is worth nothing
+	// if the commits a caller leaves out of its rows stop taking up room in the order.
+	if len(walk) != 5 {
+		t.Errorf("walk = %d commits, want the five of the range including the empty marker", len(walk))
+	}
+	if _, ok := bySHA[base]; ok {
+		t.Errorf("%s is in the walk: the base already holds it, so it is not this changeset's own history", base)
+	}
+
+	// Which commit came first is what the dates can no longer answer, so it is what the walk has to.
+	// git walks a commit after its parents; siblings are git's to order, so only these pairs are named.
+	for _, pair := range [][2]string{{one, marker}, {marker, two}, {one, side}, {side, merge}, {two, merge}} {
+		before, after := bySHA[pair[0]], bySHA[pair[1]]
+		if before.SHA == "" || after.SHA == "" {
+			t.Fatalf("the walk is missing %q or %q: %v", pair[0], pair[1], walk)
+		}
+		if before.Position >= after.Position {
+			t.Errorf("%s reads as position %d and its child %s as %d: the columns merge by this order, so a "+
+				"commit has to come out below the one it follows", pair[0], before.Position, pair[1], after.Position)
+		}
+	}
+
+	if c, ok := bySHA[marker]; !ok || c.ChangesFiles {
+		t.Errorf("the empty marker = %+v, want a commit that changes no file: it holds no content to "+
+			"review and the row a reviewer uses for it is the alias", bySHA[marker])
 	}
 	for _, sha := range []string{one, two, side, merge} {
-		if _, ok := present[sha]; !ok {
-			t.Errorf("%s is missing from %v: a commit that changes files belongs in the list, and so "+
-				"does the merge that brought the side branch in", sha, present)
+		if !bySHA[sha].ChangesFiles {
+			t.Errorf("%s reads as changing no file", sha)
 		}
 	}
-	if len(present) != 4 {
-		t.Errorf("commits = %v, want the empty marker left out and nothing else", present)
-	}
+}
 
-	// The range is what git is asked for, so the commits below the changeset's base stay out, and
-	// the window is the window.
-	oneOnly, err := repo.RecentNonEmptyCommits(context.Background(), 1, base+"..HEAD")
-	if err != nil || len(oneOnly) != 1 {
-		t.Fatalf("limit 1 = %v (%v), want one commit", oneOnly, err)
+// rebasedStack builds the history both walks above are asked about: two commits on main with an empty
+// marker between them, a side branch off the first, and a merge bringing it back. Every commit carries
+// one committer date and an author date of its own, because that is what `git rebase` leaves behind:
+// it replays each commit it touches, so the minute of the rebase becomes the committer date of all of
+// them and the days the work was written survive only in the author dates. git compares dates at
+// one-second granularity, so with the committer dates tied nothing in the dates says which commit came
+// first -- which is the case the walks have to answer from the history itself.
+func rebasedStack(t *testing.T, f *gittest.Fixture) (base, one, marker, two, side, merge string) {
+	t.Helper()
+	rebased := time.Date(2026, 9, 9, 9, 0, 0, 0, time.UTC)
+	day := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	stamped := func(opts ...gittest.CommitOpt) []gittest.CommitOpt {
+		day = day.Add(24 * time.Hour)
+		return append(opts, gittest.WithAuthorDate(day), gittest.WithCommitterDate(rebased))
 	}
-	if oneOnly[0].SHA == base {
-		t.Errorf("limit 1 returned the base commit %s, want one from the range", base)
+	base = f.Head()
+	one = f.Commit("first work", stamped(gittest.WithFile("b.txt", "2\n"))...)
+	marker = f.EmptyCommit("review: approve something", stamped()...)
+	two = f.Commit("second work", stamped(gittest.WithFile("c.txt", "3\n"))...)
+	f.CreateBranch("side", one)
+	f.SwitchTo("side")
+	side = f.Commit("side work", stamped(gittest.WithFile("d.txt", "4\n"))...)
+	f.SwitchTo("main")
+	f.MustGit("merge", "--no-ff", "-m", "merge side", "side")
+	merge = f.Head()
+	return base, one, marker, two, side, merge
+}
+
+// `lifecycle.derive` reads the last record of the walk as the newest marker, so the walk has to keep a
+// commit below the commit it marks even when their dates tie -- and a rebased stack ties all at once.
+// git's default order promises only reverse chronology, so it is not the order this reads as; the
+// walk asks for it topologically.
+func TestLogFieldsKeepsAMarkerBelowTheCommitItFollows(t *testing.T) {
+	f, repo := openFixture(t)
+	base, one, marker, two, side, merge := rebasedStack(t, f)
+
+	records, err := repo.LogFields(context.Background(), base+"..HEAD", "%H")
+	if err != nil {
+		t.Fatalf("LogFields: %v", err)
+	}
+	at := map[string]int{}
+	for i, rec := range records {
+		at[rec[0]] = i
+	}
+	for _, pair := range [][2]string{{one, marker}, {marker, two}, {one, side}, {side, merge}, {two, merge}} {
+		before, after := pair[0], pair[1]
+		if _, ok := at[before]; !ok {
+			t.Fatalf("%s is missing from the walk: %v", before, records)
+		}
+		if _, ok := at[after]; !ok {
+			t.Fatalf("%s is missing from the walk: %v", after, records)
+		}
+		if at[before] >= at[after] {
+			t.Errorf("%s reads as record %d and its child %s as %d: the last record of this walk is the "+
+				"newest marker, so a commit has to come after the one it follows even when their dates "+
+				"are the same second", before, at[before], after, at[after])
+		}
 	}
 }
 

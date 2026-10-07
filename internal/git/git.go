@@ -504,12 +504,19 @@ func (r *Repo) CatFileBlobs(ctx context.Context, oids []string) (map[string]stri
 //
 // Each field is a git log format placeholder. The final field may contain
 // newlines (it normally holds a trailer block); earlier fields must not.
+//
+// The walk is asked topologically rather than left to git's default order, which promises only
+// reverse chronology and will show a parent before its child when the two share a second -- which is
+// every commit of a stack once `git rebase` has replayed it. Callers read this list as the order the
+// commits happened, and `lifecycle.derive` reads its last entry as the newest marker, so an order that
+// can put a marker ahead of the commit it marks is a wrong answer about the changeset's state rather
+// than a cosmetic one.
 func (r *Repo) LogFields(ctx context.Context, revRange string, fields ...string) ([][]string, error) {
 	if len(fields) == 0 {
 		return nil, errors.New("git: LogFields requires at least one field")
 	}
 	format := strings.Join(fields, FieldSep) + RecordSep
-	out, err := r.Git(ctx, "log", "--reverse", "--format="+format, revRange)
+	out, err := r.Git(ctx, "log", "--reverse", "--topo-order", "--format="+format, revRange)
 	if err != nil {
 		return nil, err
 	}
@@ -749,58 +756,84 @@ func (r *Repo) RecentCommits(ctx context.Context, limit int, revs ...string) ([]
 	return tips, nil
 }
 
-// RecentNonEmptyCommits lists the commits in revs that change at least one file, newest first, at
-// most limit of them.
+// RangeCommit is one commit of a range, as the order it happened in rather than as its dates say.
 //
-// Leaving the empty ones out is the whole point. A git-pair changeset carries commits that hold
-// nothing but a marker — `review: approve`, `git-pair: ready` — and those are lifecycle events,
-// not work: a reviewer who wants the last submission picks it by alias, not by sha.
+// Position is the reason this type exists. It is the commit's index in git's walk of the range, 0 for
+// the oldest commit above the base, and it is the only ordering a rebased stack still tells
+// truthfully: `git rebase` replays every commit it touches as a new commit, so the whole replayed
+// stack carries the minute of the rebase as its committer date and the author dates are the only
+// clock left. A caller that merges two reads by date then finds every submission tied, and the ties
+// are settled by the order the reads returned rather than by which submission came first.
+type RangeCommit struct {
+	SHA     string
+	Short   string
+	Subject string
+	// When is the author date, which is what an age beside a row should say: the day the work was
+	// written, not the minute a rebase replayed it.
+	When time.Time
+	// Position is the index of this commit in the walk, oldest first, counting every commit of the
+	// range including the ones left out of the result. It is comparable across the commits of one
+	// walk only, which is why one call answers the whole question rather than two date queries.
+	Position int
+	// ChangesFiles is true when the commit changed at least one file against its first parent. The
+	// marker commits of a changeset -- `review: approve`, `git-pair: ready` -- hold no content to
+	// review and are named by alias instead, so their readers want them flagged rather than absent:
+	// they still take a place in the order around them.
+	ChangesFiles bool
+}
+
+// RangeCommits walks revs oldest first and returns every commit in them, each with its position in
+// that walk and whether it changed a file.
 //
 // A merge is asked for against its first parent (`--diff-merges=first-parent`) rather than left
 // nameless. A merge is where a changeset catches up with the integration branch, and a reviewer has
 // to be able to put what arrived outside the span: with no row for it, the span from the last
 // submission to the working tree carries all of that history and the list offers nothing to set as
 // the boundary. The first-parent diff is also what makes a merge non-empty -- it reports the files
-// the merge brought in -- so a merge that brought nothing stays out with the markers. The picker
-// that uses this also takes a typed id, so a commit this window skips is reachable.
-func (r *Repo) RecentNonEmptyCommits(ctx context.Context, limit int, revs ...string) ([]CommitTip, error) {
-	if limit <= 0 {
-		limit = 100
-	}
+// the merge brought in -- so a merge that brought nothing reads as changing nothing, with the
+// markers.
+//
+// The walk is uncapped, which is what makes the positions worth anything: a window would drop the
+// commits outside it, and a caller ranking against a window would put the oldest submissions in the
+// wrong place. The range is a changeset's own history, which is the same range `lifecycle.Summarize`
+// walks uncapped with a larger format, and callers take the window they need afterwards.
+func (r *Repo) RangeCommits(ctx context.Context, revs ...string) ([]RangeCommit, error) {
 	// RecordSep opens each record rather than closing it, which keeps a commit's `--raw` file
 	// lines inside its own record instead of stranding them at the head of the next one.
 	format := RecordSep + "%H" + FieldSep + "%h" + FieldSep + "%at" + FieldSep + "%s"
-	args := []string{"log", "--raw", "--diff-merges=first-parent",
-		"--max-count=" + strconv.Itoa(limit), "--format=" + format}
+	args := []string{"log", "--reverse", "--topo-order", "--raw", "--diff-merges=first-parent", "--format=" + format}
 	args = append(args, revs...)
 	out, err := r.Git(ctx, args...)
 	if err != nil {
 		return nil, err
 	}
-	var tips []CommitTip
+	var commits []RangeCommit
+	// The position counts the walk, not the result: a commit this cannot read is still a commit that
+	// happened between the two it ranks, and the callers compare positions with each other.
+	position := -1
 	for _, record := range strings.Split(out, RecordSep) {
 		record = strings.TrimPrefix(record, "\n")
 		if record == "" {
 			continue
 		}
+		position++
 		lines := strings.SplitN(record, "\n", 2)
 		parts := strings.SplitN(lines[0], FieldSep, 4)
 		if len(parts) < 4 {
-			continue
-		}
-		if len(lines) < 2 || !changesFiles(lines[1]) {
 			continue
 		}
 		when, err := strconv.ParseInt(parts[2], 10, 64)
 		if err != nil {
 			continue
 		}
-		tips = append(tips, CommitTip{
+		commits = append(commits, RangeCommit{
 			SHA: parts[0], Short: parts[1], Subject: parts[3],
-			When: time.Unix(when, 0),
+			When:         time.Unix(when, 0),
+			Position:     position,
+			ChangesFiles: len(lines) == 2 && changesFiles(lines[1]),
 		})
 	}
-	return tips, nil
+	return commits, nil
 }
 
 // changesFiles reports whether a commit's `--raw` block named a file. One `:`-prefixed line per
