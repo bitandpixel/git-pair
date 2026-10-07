@@ -218,6 +218,9 @@ func treeFixture(t *testing.T) *gittest.Fixture {
 		"internal/tui/session.go": "package tui\n",
 		"internal/tui/tui.go":     "package tui\n",
 		"internal/tuition/why.go": "package tuition\n",
+		// Tracked, and left alone by the changeset: the file a reviewer writes a question into without
+		// meaning to join this review. It is in the tree only once somebody has written in it.
+		"notes/plan.md": "# the plan\n",
 	}))
 	const slug = "booking"
 	f.CreateBranch(slug)

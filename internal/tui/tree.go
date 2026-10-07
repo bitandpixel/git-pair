@@ -34,7 +34,8 @@ type treeRow struct {
 	dir   bool
 	// file is the index into Session.Files() for a file row, -1 for a directory.
 	file int
-	// total and marked count the files under a directory. They count them whether or not they
+	// total and marked count the files the span changed under a directory — not the files the working tree
+	// put on the list, which have no patch in the span to have read. They count them whether or not they
 	// are on screen: a folded directory still has to say what it stands in for, and that is
 	// the number `Space` is about to set.
 	total, marked int
@@ -139,14 +140,21 @@ func fold(b *branch, prefix, label string) (*branch, string, string) {
 	return b, prefix, label
 }
 
-// count is how many files sit under b, how many of them are reviewed, and how many carry an
-// uncommitted change — counting every file in the subtree whether or not any of it is on screen. The
-// third number is what lets a folded directory say that something inside it has been written to.
+// count is how many files the span changed sit under b, how many of them are reviewed, and how many carry an
+// uncommitted change — counting every file in the subtree whether or not any of it is on screen. The first
+// two count the span's files alone, so a directory holding only files the working tree put on the list says
+// nothing about what has been read; the third is what lets a folded directory say that something inside it
+// has been written to.
 func (b *branch) count(files []File) (total, marked, dirty int) {
 	for _, idx := range b.files {
-		total++
-		if files[idx].Reviewed {
-			marked++
+		// A file the working tree put on the list is not part of what the span changed, so it is in none of
+		// the counts a reviewer reads as how much of the changeset they have read. It is still a file under
+		// this directory that somebody wrote into, which is what the third number counts.
+		if !files[idx].OutsideSpan {
+			total++
+			if files[idx].Reviewed {
+				marked++
+			}
 		}
 		if files[idx].Dirty {
 			dirty++

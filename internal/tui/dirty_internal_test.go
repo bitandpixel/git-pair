@@ -162,6 +162,261 @@ func TestAFoldedDirectoryThatIsReadAndWrittenKeepsItsTick(t *testing.T) {
 	}
 }
 
+// --- the files the span never touched ---------------------------------------
+
+// A reviewer who stops reading and writes into a file the changeset never touched has made a change this
+// screen is the only place they will see it. It is in no span, so it is in no `diff --name-status`, and a
+// change with no row is a change nobody comes back for. git's `status` says the path is uncommitted, so the
+// tree holds a place for it beside the files the span did change, wearing the same mark for the reviewer's
+// own hand.
+func TestAFileOnlyTheReviewerChangedGetsARow(t *testing.T) {
+	m, f := treeModel(t)
+	if m.rowIndex(rowFile, "notes/plan.md") >= 0 {
+		t.Fatal("the file the changeset never touched is on the tree before anyone has written in it")
+	}
+
+	f.Append("notes/plan.md", "\nreviewer: which lock is this about?\n")
+	rescan(t, m.sess)
+	m.refresh()
+
+	if got := rowTextOf(t, m, "notes/plan.md"); got != "    ✱ plan.md" {
+		t.Errorf("the reviewer's own file reads %q, want the mark for it", got)
+	}
+	if got := nameStyle(rowAt(t, m, "notes/plan.md")); got.GetForeground() != lipgloss.Color("13") {
+		t.Error("the reviewer's own file does not name itself as the reviewer's")
+	}
+	// No sign: `Change` is git's answer about the span, and the honest answer about this file is that the
+	// span did nothing to it.
+	if got := rowAt(t, m, "notes/plan.md").change.Sign(); got != "" {
+		t.Errorf("the row wears sign %q, want none: the span did not create, delete or move this file", got)
+	}
+	// The directory above it is on the tree for the same reason, and says nothing about what has been read:
+	// every file under it is one this span has no patch for.
+	if got := rowTextOf(t, m, "notes/"); got != "▾   notes/" {
+		t.Errorf("a directory holding only the reviewer's files reads %q, want no review mark of its own", got)
+	}
+}
+
+// A file the reviewer created is the same case as a file the reviewer edited, with one thing added: git has
+// never been told about the path, which is why the pane has to ask git the other question about it (see
+// Session.WorkingPatch) and why Enter does not hand it to a difftool with no left side.
+func TestAFileTheReviewerCreatedGetsARow(t *testing.T) {
+	m, f := treeModel(t)
+	f.Write("scratch/idea.md", "a note of the reviewer's own\n")
+	rescan(t, m.sess)
+	m.refresh()
+
+	if got := rowTextOf(t, m, "scratch/idea.md"); got != "    ✱ idea.md" {
+		t.Errorf("a file the reviewer created reads %q, want the mark for it", got)
+	}
+	file, ok := m.sess.fileAt("scratch/idea.md")
+	if !ok || !file.OutsideSpan || !file.Untracked {
+		t.Errorf("the list says %+v, want a working-tree file git has never tracked", file)
+	}
+	// The file the reviewer *edited* is tracked, and its comparison — the revision under review against the
+	// bytes on disk — is worth opening. The one git has never seen has no other side to open.
+	if got := activateBy(rowAt(t, m, "scratch/idea.md")); got != actionEdit {
+		t.Errorf("Enter on a file git has never tracked = %d, want the editor", got)
+	}
+}
+
+// The counter counts the span, which is what makes it mean "how much of this changeset I have read". The
+// rows the working tree put on the list are in neither half of that number: there is no patch of theirs in
+// the span to have read, and a file that cannot be read is not something left to do.
+func TestTheCounterCountsTheSpanNotTheWorkingTree(t *testing.T) {
+	m, f := treeModel(t)
+	_, before := m.sess.Count()
+
+	f.Append("notes/plan.md", "reviewer: a question\n")
+	f.Write("scratch/idea.md", "a note of the reviewer's own\n")
+	f.Write("internal/tui/scratch.md", "reviewer: a note to self\n")
+	rescan(t, m.sess)
+	m.refresh()
+
+	if reviewed, total := m.sess.Count(); reviewed != 0 || total != before {
+		t.Errorf("the counter reads %d/%d after three working-tree files, want 0/%d", reviewed, total, before)
+	}
+	if got := rowAt(t, m, "notes/").total; got != 0 {
+		t.Errorf("the reviewer's own directory counts %d files, want 0", got)
+	}
+	// A directory the span changed keeps counting the files the span changed, with the reviewer's own file
+	// sitting inside it uncounted.
+	if got := rowAt(t, m, "internal/tui/"); got.total != 2 || got.marked != 0 {
+		t.Errorf("a directory the span changed reads %d/%d, want 0 of the two it touched", got.marked, got.total)
+	}
+}
+
+// Marking a directory marks what the span changed under it. The file the reviewer left lying in the middle of
+// the package is not part of that: one keystroke says which of the two it means by how many files it moves,
+// and the reviewer's own row keeps saying whose change it is.
+func TestMarkingADirectorySkipsTheReviewersOwnFiles(t *testing.T) {
+	m, f := treeModel(t)
+	f.Write("internal/tui/scratch.md", "reviewer: a note to self\n")
+	rescan(t, m.sess)
+	m = press(cursorOnDir(t, m, "internal/tui/"), tea.KeySpace)
+
+	if got := markedFiles(m.sess); len(got) != 2 {
+		t.Errorf("marking the package marked %v, want its two files alone", got)
+	}
+	if got := rowTextOf(t, m, "internal/tui/scratch.md"); got != "        ✱ scratch.md" {
+		t.Errorf("the reviewer's file inside a marked package reads %q, want the mark for it", got)
+	}
+	if got := rowTextOf(t, m, "internal/tui/"); got != "  ▾ ✓ tui/" {
+		t.Errorf("a package read all the way through loses its tick to a file outside the span: %q", got)
+	}
+}
+
+// `Space` marks what the span changed. A row with no patch in the span has nothing to have read, so the key
+// says so rather than ticking a row the counter will never count — a tick there would be a claim about a
+// diff that does not exist.
+func TestSpaceRefusesAFileTheSpanNeverTouched(t *testing.T) {
+	m, f := treeModel(t)
+	f.Append("notes/plan.md", "reviewer: a question\n")
+	f.Write("scratch/idea.md", "a note of the reviewer's own\n")
+	rescan(t, m.sess)
+	m.refresh()
+
+	at, _ := cursorOnPath(t, m, "notes/plan.md")
+
+	got := press(at, tea.KeySpace)
+	if got.status == "" || got.statusKind != notifSticky {
+		t.Fatalf("space on the reviewer's own file said %q (kind=%d), want a refusal that waits",
+			got.status, got.statusKind)
+	}
+	if !strings.Contains(got.status, "working tree") {
+		t.Errorf("the refusal says %q, want the reason and where the change is", got.status)
+	}
+	if marked := markedFiles(got.sess); len(marked) != 0 {
+		t.Errorf("space marked %v; the span has no patch of either file", marked)
+	}
+
+	// The same refusal belongs to a directory that exists only because of what the reviewer wrote under it:
+	// the keystroke would set nothing and say something.
+	got = press(cursorOnDir(t, m, "scratch/"), tea.KeySpace)
+	if got.status == "" || got.statusKind != notifSticky {
+		t.Fatalf("space on the reviewer's own directory said %q (kind=%d), want a refusal that waits",
+			got.status, got.statusKind)
+	}
+	if !strings.Contains(got.status, "scratch/") {
+		t.Errorf("the refusal says %q, want the directory it refused", got.status)
+	}
+}
+
+// Over history the working tree is not part of what is on screen, so nothing the reviewer has written belongs
+// to the span on show — and a row here would be an invitation to mark, edit and submit against a span that
+// refuses all three.
+func TestHistoryListsNoFilesOfTheReviewersOwn(t *testing.T) {
+	m, f := treeModel(t)
+	f.Append("notes/plan.md", "reviewer: a question\n")
+	f.Write("scratch/idea.md", "a note of the reviewer's own\n")
+	if err := m.sess.SetSpan(m.ctx, span.Selector{Base: span.ChangesetBase(), Head: span.Commit("HEAD")}); err != nil {
+		t.Fatalf("SetSpan: %v", err)
+	}
+	m.refresh()
+
+	for _, path := range []string{"notes/plan.md", "scratch/idea.md"} {
+		if m.rowIndex(rowFile, path) >= 0 {
+			t.Errorf("%s is on the tree over a historical span; the working tree is not in it", path)
+		}
+	}
+	if _, total := m.sess.Count(); total == 0 {
+		t.Error("the historical span's own files left the list")
+	}
+}
+
+// The row exists because of what is on disk, so the pane has to be able to show what is on disk. git compares
+// only what it tracks, so `git diff <rev> -- <path>` — the call behind every other patch on the screen —
+// prints nothing at all for a file the reviewer created. This is the answer the pane of that row shows
+// instead: the file's own lines, as the addition git would have printed had it ever been told about the path.
+func TestThePaneShowsAFileGitNeverTracked(t *testing.T) {
+	f := treeFixture(t)
+	sess := treeSession(t, f)
+	f.Write("scratch/idea.md", "first line\nsecond line\n")
+	rescan(t, sess)
+
+	if _, ok := sess.fileAt("scratch/idea.md"); !ok {
+		t.Fatal("a file the reviewer created is not on the list")
+	}
+	got := sess.WorkingPatch(context.Background(), "scratch/idea.md")
+	if got.Err != "" {
+		t.Fatalf("the patch of the reviewer's own new file failed: %s", got.Err)
+	}
+	if len(got.Lines) == 0 {
+		t.Fatal("the pane would show nothing about a file that exists because of what is on disk")
+	}
+	if !strings.Contains(strings.Join(got.Lines, "\n"), "first line") {
+		t.Errorf("the patch does not carry the file's own bytes:\n%s", strings.Join(got.Lines, "\n"))
+	}
+	if got.Added != 2 || got.Deleted != 0 {
+		t.Errorf("the patch counts +%d −%d, want +2 −0", got.Added, got.Deleted)
+	}
+
+	// A file git *does* know about keeps the comparison it has always had: the revision under review against
+	// the bytes on disk, and not the whole file as an addition.
+	f.Append("notes/plan.md", "reviewer: a question\n")
+	rescan(t, sess)
+	got = sess.WorkingPatch(context.Background(), "notes/plan.md")
+	if got.Err != "" {
+		t.Fatalf("the patch of the reviewer's edit failed: %s", got.Err)
+	}
+	if got.Added != 1 || got.Deleted != 0 {
+		t.Errorf("a reviewer's one-line edit counts +%d −%d, want +1 −0", got.Added, got.Deleted)
+	}
+}
+
+// The row's own Enter follows the same split the pane's bar says out loud. The file the reviewer created has
+// no left side anywhere git keeps, so a difftool handed it opens a window on nothing and the file itself is
+// the thing to read. The file the reviewer *edited* has a comparison worth opening: the revision under review
+// against the bytes on disk, which is the reviewer's own typing and nothing else.
+func TestEnterOnTheReviewersOwnFiles(t *testing.T) {
+	m, f := treeModel(t)
+	f.Append("notes/plan.md", "reviewer: a question\n")
+	f.Write("scratch/idea.md", "a note of the reviewer's own\n")
+	rescan(t, m.sess)
+	m.refresh()
+
+	created, _ := cursorOnPath(t, m, "scratch/idea.md")
+	got := press(created, tea.KeyEnter)
+	if !strings.Contains(got.pendingNote, "opened in the editor") {
+		t.Errorf("Enter on a file git has never tracked did not reach the editor: note %q", got.pendingNote)
+	}
+
+	edited, _ := cursorOnPath(t, m, "notes/plan.md")
+	got = press(edited, tea.KeyEnter)
+	if got.pendingNote != "" {
+		t.Errorf("Enter on a file the reviewer edited went to the editor rather than the difftool: note %q",
+			got.pendingNote)
+	}
+}
+
+// A directory the reviewer created files under has nothing for git to print: it compares only what it tracks,
+// so a pathspec over a subtree of new files is an empty answer. The tree says the files are there, so the pane
+// says why it cannot show them as a diff rather than leaving a blank column beside the rows that do.
+//
+// The file itself is the other half: git asked the way a new file is always asked, it prints the whole thing.
+func TestThePaneOfTheReviewersOwnNewFiles(t *testing.T) {
+	m, f := treeModel(t)
+	m.previewOn = true
+	f.Write("scratch/idea.md", "a note of the reviewer's own\n")
+	rescan(t, m.sess)
+	m.refresh()
+
+	dir := askPreview(t, cursorOnDir(t, m, "scratch/"))
+	if got := dir.previewNotice(); got != "new files git has not been told about" {
+		t.Errorf("the pane of a directory of new files says %q, want the reason it has no diff", got)
+	}
+
+	at, _ := cursorOnPath(t, dir, "scratch/idea.md")
+	file := askPreview(t, at)
+	if got := file.previewNotice(); got != "" {
+		t.Fatalf("the pane of the reviewer's new file says %q, want the file itself", got)
+	}
+	body := ansiCodes.ReplaceAllString(strings.Join(rowTexts(file.previewContent(unmarked)), "\n"), "")
+	if !strings.Contains(body, "a note of the reviewer's own") {
+		t.Errorf("the pane of the reviewer's new file does not carry its bytes:\n%s", body)
+	}
+}
+
 // --- the readings -----------------------------------------------------------
 
 // The four readings a file row can give, at once: read and untouched, read and written, untouched and

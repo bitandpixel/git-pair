@@ -129,8 +129,9 @@ type row struct {
 	// depth is how far a tree row sits under the top of the file tree. The rows under the reviewed
 	// counter are all at 0, because that section is not a tree.
 	depth int
-	// total and marked count the files under a directory row, folded ones included: they are what
-	// the row promises and what Space is about to set.
+	// total and marked count the files the span changed under a directory row, folded ones included: they
+	// are what the row promises and what Space is about to set. The files the working tree put on the list
+	// are in neither, because there is no patch of theirs to have read.
 	total, marked int
 	note          string // set on the thread heading when the threads could not be listed
 	count         int    // how many threads the heading is standing in for
@@ -143,6 +144,14 @@ type row struct {
 	// directory is folded. It is carried rather than looked up for the same reason `change` is: the row
 	// that colours its name and the row that says it is reviewed are one row.
 	dirty bool
+	// outside says this file is on the list because of what the working tree holds and not because of what
+	// the span did, which is the row that cannot be marked reviewed (see Session.Toggle) and whose Enter
+	// has no comparison to hand the difftool. Only a file row can carry it.
+	outside bool
+	// untracked is the subset of `outside` git has never been told about, so that the one other side of the
+	// file is nothing at all. It is what sends Enter to the editor rather than to a difftool that would
+	// open no window. Only a file row can carry it.
+	untracked bool
 }
 
 // inFileBlock is which rows belong to the file tree rather than to the changeset box. Directory rows
@@ -178,7 +187,7 @@ const (
 func activateBy(r row) action {
 	switch r.kind {
 	case rowFile:
-		return fileAction(r.change)
+		return fileAction(r.change, r.untracked)
 	case rowThread, rowAbout:
 		return actionArtifact
 	case rowDir, rowThreadsHead:
@@ -199,8 +208,13 @@ func activateBy(r row) action {
 // openArtifact opens a document the changeset invented; artifactAction is this rule for the changeset's
 // own files. A rename whose bytes are unchanged keeps the difftool, because the rename is the
 // comparison and it is the reason that file is under review at all.
-func fileAction(c Change) action {
-	if c == ChangeAdded {
+//
+// The one file outside the span that git has never tracked is the same case by a different route: it has no
+// left side because it is in no commit and no index entry, so the difftool would open a window on nothing.
+// A file outside the span that git *does* know keeps the difftool — the diff there is the reviewer's own
+// typing against the revision under review, and that is the comparison worth opening.
+func fileAction(c Change, untracked bool) action {
+	if c == ChangeAdded || untracked {
 		return actionEdit
 	}
 	return actionDiff
@@ -873,14 +887,25 @@ func (m *reviewModel) toggleMark() {
 	}
 	var note string
 	switch {
+	case r.kind == rowDir && r.total == 0:
+		// The directory is on the tree because of what the reviewer wrote under it, and every file it holds
+		// is one the span never touched. Marking it would set nothing and say something.
+		m.setRefusal("reviewed marks are for the span's files: nothing under " + r.path + " is in this span")
+		return
 	case r.kind == rowDir:
-		all := r.total > 0 && r.marked == r.total
+		all := r.marked == r.total
 		verb, reviewed := "marked", true
 		if all {
 			verb, reviewed = "cleared", false
 		}
 		n := m.sess.SetReviewedUnder(r.path, reviewed)
 		note = fmt.Sprintf("%s %d file%s under %s", verb, n, plural(n), r.path)
+	case r.kind == rowFile && r.outside:
+		// The row is on the list because of what the reviewer's working tree holds, not because of what the
+		// span did, so there is no patch of it here to have read. The row says so in the reviewer's own
+		// colour already; the keystroke has to say it too rather than tick a row silently.
+		m.setRefusal("reviewed marks are for the span's files: " + r.name + " is only in your working tree")
+		return
 	case r.kind == rowFile:
 		m.sess.Toggle(r.file)
 	default:
@@ -1177,8 +1202,8 @@ func (m reviewModel) activate() (tea.Model, tea.Cmd) {
 		return m.openSpanPicker()
 	case actionDiff, actionEdit:
 		// One call for both, so the rule and the exception live in one place. Only a file row can ask
-		// for either, and it carries the change the rule needs.
-		return m.openFile(r.path, r.change)
+		// for either, and it carries the two facts the rule needs.
+		return m.openFile(r.path, r.change, r.untracked)
 	case actionArtifact:
 		return m.openArtifact(r)
 	case actionCollapse:
@@ -1282,15 +1307,15 @@ func (m reviewModel) editorNote(path, name string) string {
 	return name + " has not changed in this span — opened in the editor"
 }
 
-// openFile is what Enter and the pane's enter do with a file: the difftool, except for a file the span
-// added, which the editor reads. See fileAction for why that one file is different, and openArtifact
-// for the same reasoning applied to a changeset document -- including the read-only gate, which lives
-// here because Enter is not a mutating key and so never passes through the one in handleKey. Over a
-// historical span the editor is refused the way `e` refuses it, and a file the span added that the
-// working tree no longer has goes to the difftool rather than to an empty buffer, because the patch is
-// the one place git still has the file's other side.
-func (m reviewModel) openFile(path string, c Change) (tea.Model, tea.Cmd) {
-	if c != ChangeAdded {
+// openFile is what Enter and the pane's enter do with a file: the difftool, except for the two files with
+// nothing on the other side of a comparison, which the editor reads. See fileAction for why those two are
+// different, and openArtifact for the same reasoning applied to a changeset document -- including the
+// read-only gate, which lives here because Enter is not a mutating key and so never passes through the one in
+// handleKey. Over a historical span the editor is refused the way `e` refuses it, and a file the span added
+// that the working tree no longer has goes to the difftool rather than to an empty buffer, because the patch
+// is the one place git still has the file's other side.
+func (m reviewModel) openFile(path string, c Change, untracked bool) (tea.Model, tea.Cmd) {
+	if c != ChangeAdded && !untracked {
 		return m.openDiff(path)
 	}
 	name := filepath.Base(path)
@@ -1899,10 +1924,11 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 		jumps := "a about  t threads  "
 		open := "enter diff"
 		if m.previewKind == previewDocument || m.previewKind == previewThreads ||
-			fileAction(m.previewFileChange()) == actionEdit {
-			// What is on show is a document, or a file the span added, and `enter` opens it in the editor
-			// rather than in the difftool -- the bar says "open" because that is the truth of it. Any other
-			// file, shown as its patch or as its own text, has a comparison worth opening.
+			fileAction(m.previewFileChange(), m.previewFileUntracked()) == actionEdit {
+			// What is on show is a document, a file the span added, or one git has never been told about, and
+			// `enter` opens it in the editor rather than in the difftool -- the bar says "open" because that is
+			// the truth of it. Any other file, shown as its patch or as its own text, has a comparison worth
+			// opening.
 			open = "enter open"
 		}
 		return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " +
@@ -2122,7 +2148,11 @@ func (m *reviewModel) buildRows() {
 	files := m.sess.Files()
 	inSpan := make(map[string]bool, len(files))
 	for _, f := range files {
-		inSpan[f.Path] = true
+		// The rows the working tree put on the list are not in the span, whatever the working tree says about
+		// the path: `d` on a thread the reviewer created is a file to read, not a comparison to open.
+		if !f.OutsideSpan {
+			inSpan[f.Path] = true
+		}
 	}
 	m.inSpan = inSpan
 	// The tree is rebuilt from the flat list on every refresh, which is what keeps a directory's
@@ -2135,7 +2165,8 @@ func (m *reviewModel) buildRows() {
 			continue
 		}
 		rows = append(rows, row{kind: rowFile, path: e.path, name: e.name, depth: e.depth, file: e.file,
-			change: files[e.file].Change, dirty: e.dirty})
+			change: files[e.file].Change, dirty: e.dirty,
+			outside: files[e.file].OutsideSpan, untracked: files[e.file].Untracked})
 	}
 	// The split between the two regions: from here down are the rows the changeset box draws. One index
 	// into one list rather than two lists, because a thread the reviewer creates has to appear in the
@@ -2335,7 +2366,15 @@ func signStyle(c Change) lipgloss.Style {
 // A subtree that is reviewed all the way down keeps its tick and says who wrote in it by name.
 func (m reviewModel) dirGutter(r row) string {
 	switch {
-	case r.total > 0 && r.marked == r.total:
+	case r.total == 0:
+		// Nothing under this directory is in the span: every file under it is on the list because the
+		// reviewer wrote into it. A tick, a circle or a count would all be a claim about files this span
+		// has no patch for, so the gutter says nothing except who wrote here.
+		if r.dirty {
+			return styleDirtyMark.Render("✱ ")
+		}
+		return "  "
+	case r.marked == r.total:
 		return styleMark.Render("✓ ")
 	case r.dirty:
 		return styleDirtyMark.Render("✱ ")
@@ -3366,7 +3405,7 @@ func (m reviewModel) openPreview() (tea.Model, tea.Cmd) {
 		// The same decision the row makes, so enter in the pane and enter on the list are one rule and
 		// not two that can drift. A file shown as its own text keeps its change: the pane reads an added
 		// file as text, and enter still opens the file rather than the patch it has no other side of.
-		return m.openFile(m.previewPath, m.previewFileChange())
+		return m.openFile(m.previewPath, m.previewFileChange(), m.previewFileUntracked())
 	}
 	if r, ok := m.previewRow(); ok {
 		return m.openArtifact(r)
@@ -3378,12 +3417,32 @@ func (m reviewModel) openPreview() (tea.Model, tea.Cmd) {
 // pane is showing something that is not a file in the span. It is what lets the pane's enter ask the
 // row's question rather than guess at it.
 func (m reviewModel) previewFileChange() Change {
-	for _, f := range m.sess.Files() {
-		if f.Path == m.previewPath {
-			return f.Change
-		}
+	if f, ok := m.sess.fileAt(m.previewPath); ok {
+		return f.Change
 	}
 	return ChangeChanged
+}
+
+// previewFileUntracked says whether the file the pane is showing is one git has never been told about, which
+// is the other case where `enter` opens the file instead of handing it to a difftool with no left side.
+func (m reviewModel) previewFileUntracked() bool {
+	f, ok := m.sess.fileAt(m.previewPath)
+	return ok && f.Untracked
+}
+
+// newFilesUnder says whether the tree lists a file git has never been told about underneath path — which is
+// what a directory's pane has no bytes to print for, because git compares only what it tracks. The row is the
+// answer to "what is here"; the pane cannot be, and says so.
+func (m reviewModel) newFilesUnder(path string) bool {
+	if path == "" {
+		return false
+	}
+	for _, f := range m.sess.Files() {
+		if f.Untracked && strings.HasPrefix(f.Path, path) {
+			return true
+		}
+	}
+	return false
 }
 
 // previewRow is the row the pane is a window onto, or false when it is no longer in the list: the rows are
@@ -3643,6 +3702,20 @@ func (m reviewModel) previewNotice() string {
 				return "(reading your edits…)"
 			}
 			if len(work.Lines) == 0 {
+				// Nothing git can print for this path, which says different things about a row the list put
+				// there for the working tree than about one the span put there.
+				if f, ok := m.sess.fileAt(m.previewPath); ok && f.OutsideSpan {
+					// The row exists because of the working tree, so "no changes in this span" would be true
+					// and useless: what the reviewer came here for is their own change, and git has none.
+					// An empty new file, or a read of it that failed.
+					return "nothing in the working tree to show"
+				}
+				if m.newFilesUnder(m.previewPath) {
+					// git compares only what it tracks, so a directory of files the reviewer created has no
+					// patch at all — while the tree above says plainly that something is there. The rows name
+					// the files; this says why the pane cannot show them as a diff.
+					return "new files git has not been told about"
+				}
 				return "no changes in this span"
 			}
 		}
