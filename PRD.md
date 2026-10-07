@@ -2435,6 +2435,28 @@ Neither mark moves by itself: the list is re-read when the span changes, when an
 difftool hands the terminal back, and when `r` is pressed — which re-reads the working tree even when no
 ref has moved, since an edit made in another window sends this screen no message.
 
+A path the working tree holds a change at and the span does not mention is on the tree as well. The reviewer
+who stops reading and writes into a file, or opens a new one to write a note in, has made a change this screen
+is the only place they will see it: it is in no span, so it is in no `diff --name-status`, and a change with no
+row is a change nobody comes back for. It sits in path order among the span's files with the same magenta name
+and the same `✱`, and it is in none of the counts — the reviewed counter says how much of the *span* has been
+read, and a file with no patch in the span has nothing to have read. `Space` refuses such a row, and refuses a
+directory whose every file is one of these, rather than ticking a row the counter will not count. The row
+carries no sign, because `Change` is git's answer about the span and the honest answer about these is that the
+span did nothing. Git's `status` is the answer again, so the same three states count and paths git was told to
+ignore stay off the list; over a historical span none of these rows exist, for the reason the mark does not.
+
+The file git has never been told about is the one case that needs more than a row. `git diff <rev> -- <path>`
+compares only what git tracks, so it prints nothing at all for a path in no commit and no index entry, and a
+pane showing nothing under a row that exists because of what is on disk would contradict the row above it. The
+pane asks git the other question — `--no-index` against `/dev/null`, which is how git itself writes the empty
+side of a created file — and prints the whole file as the addition. `Enter` on such a row goes to the editor
+rather than to the difftool, for the reason a document the changeset invented does: the comparison has no left
+side. A file outside the span that git does track keeps the difftool, because there the comparison is the
+reviewer's own typing against the revision under review. `d` keeps meaning "ask git for the diff" whatever the
+row is, and a directory holding only files git has never seen has no diff to print for the same reason and says
+so, since the rows beside it already say what is there.
+
 The shortcut bar holds the bottom band, and the band is as tall as the tallest shortcut bar the screen
 can show: the bar changes when the keys move between the file tree, the changeset box and the diff, and
 the band does not. A message about the last keystroke is drawn over the bar rather than beneath it, so
