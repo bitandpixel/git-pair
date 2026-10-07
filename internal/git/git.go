@@ -349,6 +349,33 @@ func parseStatusZ(out string) map[string]bool {
 // copy. Either way the record is followed by the path the file came from.
 func renamed(code byte) bool { return code == 'R' || code == 'C' }
 
+// UntrackedPaths lists the paths the working tree holds and git has never been told about: not in a commit,
+// not in the index, and not ignored. It is the half of `DirtyPaths` a bool cannot carry — the difference
+// between a file git knows that has been written to and a file git has never seen — and the difference that
+// decides whether `git diff <rev> -- <path>` has anything to say about a path at all. Git compares only what
+// it tracks, so the file a reviewer created previews as nothing unless the caller knows to ask another way.
+//
+// `--exclude-standard` is what keeps an ignored build directory out of the answer. Without it the listing
+// would be the reviewer's `node_modules`, and the question the caller asks — "is this the reviewer's own new
+// file?" — is never asked about a path git was told to ignore.
+//
+// Like `DirtyPaths`, this is repository-relative and unquoted: `-z` guarantees both, whatever directory the
+// caller stands in and whatever `status.relativePaths` says, so the two answers and the paths out of
+// `diff --name-status` are all the same string.
+func (r *Repo) UntrackedPaths(ctx context.Context) (map[string]bool, error) {
+	out, err := r.Git(ctx, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, err
+	}
+	untracked := map[string]bool{}
+	for _, path := range strings.Split(out, "\x00") {
+		if path != "" {
+			untracked[path] = true
+		}
+	}
+	return untracked, nil
+}
+
 // MergeBase resolves the best common ancestor of two revs.
 func (r *Repo) MergeBase(ctx context.Context, a, b string) (string, error) {
 	out, err := r.Git(ctx, "merge-base", a, b)
