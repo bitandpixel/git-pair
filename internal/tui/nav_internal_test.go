@@ -69,6 +69,14 @@ func lastIndexOfType(t *testing.T, m reviewModel, kind rowKind) int {
 	return last
 }
 
+// boxOf is the changeset box with the rows it is showing, and nothing else on the screen. A thread the
+// reviewer wrote is a file in the working tree as well as a row in the box, so a test about what the *box*
+// shows has to look at the box — the whole screen says the file's name either way.
+func boxOf(m reviewModel) string {
+	_, section := m.window()
+	return strings.Join(m.boxLines(section), "\n")
+}
+
 func rowList(m reviewModel) string {
 	var b strings.Builder
 	for i, r := range m.rows {
@@ -406,10 +414,10 @@ func TestThreadsHeadingCollapsesAndExpands(t *testing.T) {
 	if collapsed.metaCursor != head {
 		t.Errorf("collapse moved the box's cursor from the heading at %d to %d", head, collapsed.metaCursor)
 	}
-	if strings.Contains(collapsed.View(), "locking.md") {
+	if strings.Contains(boxOf(collapsed), "locking.md") {
 		t.Error("a collapsed box still showed its threads")
 	}
-	if !strings.Contains(m.View(), "locking.md") {
+	if !strings.Contains(boxOf(m), "locking.md") {
 		t.Error("the expanded box does not show the nested threads")
 	}
 

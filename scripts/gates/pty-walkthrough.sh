@@ -743,6 +743,9 @@ git -C "$WR" config user.name Writer
 git -C "$WR" config commit.gpgsign false
 printf 'package main\n\nfunc Keep() {}\n' > "$WR/src/keep.go"
 printf 'package main\n\nfunc Written() {}\n' > "$WR/src/written.go"
+# Committed on main and left alone by the branch: the file a reviewer writes a question into without
+# meaning to join this review. It is in no diff of the span, so its row is the only place it can appear.
+printf 'package main\n\nfunc Elsewhere() {}\n' > "$WR/src/elsewhere.go"
 git -C "$WR" add -A && git -C "$WR" commit -qm "seed"
 git -C "$WR" switch -qc written
 (cd "$WR" && "$G" init --base main >/dev/null) || { echo "written fixture: init failed"; exit 1; }
@@ -756,6 +759,12 @@ git -C "$WR" add -A && git -C "$WR" commit -qm "rewrite both"
 # The reviewer's own edit, uncommitted: the file is in the span, its diff inside the span is unchanged, and
 # the only new thing about it is that somebody has been writing in it.
 printf 'package main\n\nfunc Written() {\n\treturn the new way\n}\n\n// what covers this?\n' > "$WR/src/written.go"
+# And two files the changeset has nothing to say about, both of them the reviewer's: one git tracks, which
+# the reviewer then wrote into, and one git has never been told about. They belong on the tree, and in none
+# of the reviewed counts.
+printf 'package main\n\nfunc Elsewhere() {\n\treturn the reviewer was here\n}\n' > "$WR/src/elsewhere.go"
+mkdir -p "$WR/notes"
+printf '# a note the reviewer wrote\n' > "$WR/notes/reviewer.md"
 R=$WR
 # A taller window than the rest of the walkthrough, because this one has to show five tree rows and a
 # three-row list window would put the two files under the fold: scrolled to them, the marked row would only
@@ -765,6 +774,12 @@ R=$WR
 expectall "the file with the uncommitted change wears the mark" "$T/written.raw" $'\u2731 written.go'
 expectall "the file nobody wrote in wears no mark" "$T/written.raw" $'\u25cb keep.go'
 expectall "and a folded directory wears the mark for what it hides" "$T/writtenfold.raw" $'\u25b8 \u2731 src/'
+# The two files the span never mentioned are on the tree once the working tree holds a change at them, each
+# wearing the reviewer's mark -- and the counter still counts the span's four files alone, which is the half
+# a Go test cannot check against a real screen full of rows.
+expectall "a file the changeset never touched is on the tree once you wrote in it" "$T/written.raw" $'\u2731 elsewhere.go'
+expectall "a file you created is on the tree as well" "$T/written.raw" $'\u2731 reviewer.md'
+expectall "and the reviewed counter still counts the span" "$T/written.raw" '0 / 4 reviewed'
 # Which codes carry it is lipgloss's and the terminal's business, so the claim is the shape of it: the mark
 # arrives in some foreground colour, the name arrives in a colour *and* with weight -- the weight is what a
 # terminal with no colour to give still shows -- and the clean row's name arrives at neither.

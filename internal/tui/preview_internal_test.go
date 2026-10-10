@@ -247,9 +247,13 @@ func TestPreviewPassesGitsColoursThrough(t *testing.T) {
 
 // A file the span did not change has nothing to preview, and the pane says which case it is in
 // rather than showing an empty column.
+//
+// The row is named rather than left where the cursor starts: the top of this tree is a directory, and a
+// directory whose rows include files git has never been told about has its own reason to have no diff.
 func TestPreviewSaysWhenThereIsNothingToPreview(t *testing.T) {
 	m := previewModel(t)
 	m.patchFor = func(_ context.Context, _ string) Patch { return Patch{} }
+	m.cursor = indexOfNameBySuffix(t, m, "main.go")
 	m = askPreview(t, m)
 	if !strings.Contains(m.View(), "no changes in this span") {
 		t.Errorf("the pane of an untouched file said nothing about it:\n%s", m.View())
@@ -257,6 +261,7 @@ func TestPreviewSaysWhenThereIsNothingToPreview(t *testing.T) {
 
 	m = previewModel(t)
 	m.patchFor = func(_ context.Context, _ string) Patch { return Patch{Err: "git diff failed: boom"} }
+	m.cursor = indexOfNameBySuffix(t, m, "main.go")
 	m = askPreview(t, m)
 	if !strings.Contains(m.View(), "git diff failed") {
 		t.Error("a failed fetch left the pane blank instead of reporting itself")

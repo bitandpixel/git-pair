@@ -1564,6 +1564,25 @@ count and a name with a space in it still prints as itself — and a historical 
 the working tree is not inside a span that ended at a commit. The list is re-read when the span changes, when
 an editor or difftool hands the terminal back, and when you press `r`.
 
+A file you changed that this changeset never touched is on the tree as well, in path order beside the files it
+did. It is in no span, so it is in no diff of the span, and a change of yours with no row is a change you come
+back for and cannot find: `git status` says the path is uncommitted, so the tree holds a place for it — the same
+magenta name, the same `✱`, and none of the counts. The reviewed counter says how much of the *changeset* you
+have read, so neither half of it moves for a file with no patch here to have read, and `Space` says so rather
+than tick a row the counter will not count. A directory that exists only because you wrote something under it
+carries no mark and no count either, for the same reason. Files git was told to ignore stay off the list, since
+git's own status is the answer, and a historical span shows none of these rows: the working tree is not inside a
+span that ended at a commit.
+
+A file you created — in no commit and no index entry — is the one case that needs more than a row, because
+`git diff <rev> -- <path>` compares only what git tracks and prints nothing at all for a path it has never seen.
+The pane asks git the other question (`--no-index` against `/dev/null`, which is how git itself writes the empty
+side of a created file) and prints the whole file as the addition, and `Enter` opens it in the editor rather than
+in a difftool that would open a window on nothing. A file you edited that git does know keeps the difftool:
+there the comparison is your typing against the revision under review. `d` still means "ask git for the diff",
+whatever the row is, and a directory holding only files git has never seen says so rather than showing a blank
+column beside rows that do not.
+
 A directory's mark is its subtree's: `✓` when every file under it is reviewed, `○` when none is,
 and between the two the count of what is left (`▸ ◐ src/ 2/7`) — a tick there would be a claim about
 files nobody opened. `Enter` does whatever the row under the cursor is for: the difftool for a

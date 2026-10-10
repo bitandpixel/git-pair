@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -82,6 +83,19 @@ type File struct {
 	// is uncommitted. Dirty is about the reviewer's own hand on the file after the span ended, which is
 	// what the tree marks magenta and what a reviewer comes back for.
 	Dirty bool
+	// OutsideSpan says this row is on the list because the working tree holds a change at this path and
+	// the span has nothing to say about it: the file the reviewer stopped reading and wrote into, or the one
+	// the reviewer created and never added. `Change` is git's answer about the span, and the honest answer
+	// about these is that the span did nothing — so the row wears no sign, and no reviewed mark either.
+	// The reviewed counter counts what the span changed, and a file that is not in the span has no patch in
+	// it to have read. `Dirty` is the same fact on a row the span *did* change.
+	OutsideSpan bool
+	// Untracked says git has never been told about this path: no commit and no index entry hold it, so
+	// `git diff <rev> -- <path>` prints nothing for it however full the file on disk is. Only an
+	// OutsideSpan file can be asked, since a file the span changed is in a commit by definition. It is what
+	// makes the pane ask git the other question about a file the reviewer created, and what sends Enter to
+	// the editor: the only other side of such a file is nothing.
+	Untracked bool
 }
 
 // Change is what a review span did to one file, read from git's own `--name-status`.
@@ -283,7 +297,8 @@ func (s *Session) scan(ctx context.Context, sp span.Span) error {
 
 	files := make([]File, 0, len(names))
 	read := 0
-	dirty := s.dirtyPaths(ctx, sp)
+	work := s.readWorkingTree(ctx, sp)
+	inSpan := make(map[string]bool, len(names))
 	for _, name := range names {
 		key := keys[name]
 		marked := false
@@ -296,12 +311,35 @@ func (s *Session) scan(ctx context.Context, sp span.Span) error {
 			// rebase, different span — keys differently and so stays unreviewed.
 			marked, read = true, read+1
 		}
+		inSpan[name] = true
 		files = append(files, File{Path: name, Key: key, Reviewed: marked,
-			Change: statuses[name].Change, MovedFrom: statuses[name].From, Dirty: dirty[name]})
+			Change: statuses[name].Change, MovedFrom: statuses[name].From, Dirty: work.dirty[name]})
 	}
-	s.files = files
+	s.files = append(files, workingOnlyFiles(work, inSpan)...)
 	s.marksRead = read
 	return nil
+}
+
+// workingOnlyFiles are the rows for paths the working tree holds a change at and the span has nothing to say
+// about: the file the reviewer stopped reading and wrote a question into, and the file the reviewer created
+// in order to write it. `diff --name-status` cannot list them, because a span's two ends are both commits
+// and these changes are in neither. They are still the reviewer's own changes, made during this review, and
+// a change with no row is a change nobody comes back for — so the tree holds a place for them, marked the
+// same `Dirty` way, and counts them in nothing.
+//
+// The paths come out sorted because this list is what the tree flattens: `flattenTree` puts the files of one
+// directory in path order whether or not the span named them, so the two kinds of row make one tree rather
+// than two lists on one screen.
+func workingOnlyFiles(work workingPaths, inSpan map[string]bool) []File {
+	var out []File
+	for path := range work.dirty {
+		if inSpan[path] {
+			continue
+		}
+		out = append(out, File{Path: path, Dirty: true, OutsideSpan: true, Untracked: work.untracked[path]})
+	}
+	slices.SortFunc(out, func(a, b File) int { return strings.Compare(a.Path, b.Path) })
+	return out
 }
 
 // change is git's status for one path: what happened to it, and where a rename came from.
@@ -340,27 +378,43 @@ func (s *Session) changeStatuses(ctx context.Context, sp span.Span) map[string]c
 	return statuses
 }
 
-// dirtyPaths is the set of paths with an uncommitted change in the working tree, or nil when the
-// question has no answer to give.
+// workingPaths is what the reviewer's own working tree holds, as of the scan that built the list. Both
+// answers are nil where the question has no answer to give, and nil means the same thing twice: the screen
+// says nothing about a working tree it has not been told about.
+type workingPaths struct {
+	// dirty is every path with an uncommitted change — staged, unstaged, or untracked.
+	dirty map[string]bool
+	// untracked is the subset of those paths git has never been told about, and so the subset that
+	// `git diff <rev> -- <path>` is silent about however full the file on disk is.
+	untracked map[string]bool
+}
+
+// readWorkingTree asks the two questions the working tree answers, once per scan.
 //
-// A historical span has none. Its ends are both commits, so the working tree is not part of what is on
+// A historical span has neither. Its ends are both commits, so the working tree is not part of what is on
 // screen: an uncommitted change belongs to whatever the reviewer is doing now, and hanging it on a span
-// three submissions back would report it as work inside a span that cannot contain it. The pane leaves
-// its own working section out over history for the same reason.
+// three submissions back would report it as work inside a span that cannot contain it. The pane leaves its
+// own working section out over history for the same reason.
 //
-// A failure asks for nothing. It is `changeStatuses`'s rule: the marker is an annotation on a list git
-// already answered for, and a reviewer who could not be told the signs is not being told a worse thing
-// here. The cost is that a failed read reads as "no edits anywhere", which is why the read is one `git
-// status` over the whole tree rather than one per file.
-func (s *Session) dirtyPaths(ctx context.Context, sp span.Span) map[string]bool {
+// A failure asks for nothing. It is `changeStatuses`'s rule: these are annotations on a list git already
+// answered for, and a reviewer who could not be told the change signs is not being told a worse thing here.
+// The cost is that a failed read reads as "no edits anywhere", which is why the reads are whole-tree rather
+// than one per file.
+func (s *Session) readWorkingTree(ctx context.Context, sp span.Span) workingPaths {
 	if sp.Historical() {
-		return nil
+		return workingPaths{}
 	}
 	dirty, err := s.repo.DirtyPaths(ctx)
 	if err != nil {
-		return nil
+		return workingPaths{}
 	}
-	return dirty
+	untracked, err := s.repo.UntrackedPaths(ctx)
+	if err != nil {
+		// The rows can stand without this: it decides how a new file is *shown*, not whether the row is on
+		// the list, and a file that is not in fact new reads the same against the revision either way.
+		untracked = map[string]bool{}
+	}
+	return workingPaths{dirty: dirty, untracked: untracked}
 }
 
 // changeOf reads git's status letter. An unknown letter is a modification: a sign has to be earned, and
@@ -585,27 +639,44 @@ func (s *Session) Unreviewed() bool {
 // Span is the resolved span being reviewed.
 func (s *Session) Span() span.Span { return s.current }
 
-// Files is the changed-file list for the current span.
+// Files is the list the tree draws: the files the span changed, in git's order, followed by the rows the
+// working tree put there because the reviewer changed a file the span never touched (see
+// File.OutsideSpan). The reviewed counter counts the first group alone.
 func (s *Session) Files() []File { return s.files }
 
-// Toggle flips the reviewed mark for index i.
+// fileAt is the list's answer about one path: the row it holds for that exact path, and whether it holds one
+// at all. The screen asks the list rather than git, because the list is what put the row on screen and the
+// pane beside it has to agree with the row it is describing.
+func (s *Session) fileAt(path string) (File, bool) {
+	for _, f := range s.files {
+		if f.Path == path {
+			return f, true
+		}
+	}
+	return File{}, false
+}
+
+// Toggle flips the reviewed mark for index i. A file outside the span has no mark to flip: it is on the list
+// because of what the working tree holds, and there is no patch of it in this span to have read. The screen
+// refuses the keystroke; this is the same rule where the state lives.
 func (s *Session) Toggle(i int) {
-	if i < 0 || i >= len(s.files) {
+	if i < 0 || i >= len(s.files) || s.files[i].OutsideSpan {
 		return
 	}
 	s.files[i].Reviewed = !s.files[i].Reviewed
 }
 
-// SetReviewedUnder marks or clears every file under dir, a repository-relative directory path
-// ending in its separator. A directory has no state of its own: the store keeps an answer per file
+// SetReviewedUnder marks or clears every file the span changed under dir, a repository-relative directory
+// path ending in its separator. A directory has no state of its own: the store keeps an answer per file
 // and the counter counts files, so marking a directory means marking everything inside it — folded
-// or not, since a fold is a way of looking at the list rather than a claim about what has been read.
-// It returns how many files changed state, which is how the screen can say what one keystroke did
-// to rows the reviewer cannot currently see.
+// or not, since a fold is a way of looking at the list rather than a claim about what has been read. The
+// files the working tree put on the list are not among them: no keystroke marks a file reviewed that has no
+// patch in this span. It returns how many files changed state, which is how the screen can say what one
+// keystroke did to rows the reviewer cannot currently see.
 func (s *Session) SetReviewedUnder(dir string, reviewed bool) int {
 	changed := 0
 	for i := range s.files {
-		if s.files[i].Reviewed == reviewed || !isUnder(s.files[i].Path, dir) {
+		if s.files[i].Reviewed == reviewed || s.files[i].OutsideSpan || !isUnder(s.files[i].Path, dir) {
 			continue
 		}
 		s.files[i].Reviewed = reviewed
@@ -614,14 +685,20 @@ func (s *Session) SetReviewedUnder(dir string, reviewed bool) int {
 	return changed
 }
 
-// Count returns reviewed and total file counts.
+// Count returns reviewed and total file counts. The rows the working tree put on the list are not in the
+// total: the counter says how much of the *span* has been read, and a file the span did not change is not
+// part of what there is to read in it.
 func (s *Session) Count() (reviewed, total int) {
 	for _, f := range s.files {
+		if f.OutsideSpan {
+			continue
+		}
+		total++
 		if f.Reviewed {
 			reviewed++
 		}
 	}
-	return reviewed, len(s.files)
+	return reviewed, total
 }
 
 // Header renders the identity line.
@@ -673,12 +750,18 @@ func (s *Session) Patch(ctx context.Context, path string) Patch {
 // under review rather than from the span's start. The order is the whole point: whatever sits
 // between the span's ends is the author's work, so whatever sits after its end is the reviewer's.
 //
-// Those bytes look like any other diff, which is why the pane prints them under a caption naming
-// who they belong to, and why the reviewed counter keeps counting the span alone. It is also the
-// same working tree the difftool opens, so an edit made there shows up here.
+// Those bytes look like any other diff, which is why the pane prints them under a caption naming who
+// they belong to, and why the reviewed counter keeps counting the span alone. It is also the same working
+// tree the difftool opens, so an edit made there shows up here.
+//
+// A file git has never tracked is asked about the other way, because git will not compare what it does not
+// track (see untrackedPatch).
 //
 // An empty patch is the ordinary case: most files carry no reviewer edits.
 func (s *Session) WorkingPatch(ctx context.Context, path string) Patch {
+	if f, ok := s.fileAt(path); ok && f.Untracked {
+		return s.untrackedPatch(ctx, path)
+	}
 	return s.diff(ctx, s.current.To, "", path)
 }
 
@@ -824,9 +907,40 @@ func (s *Session) diff(ctx context.Context, from, to, path string) Patch {
 	if to != "" {
 		revs = append(revs, to)
 	}
+	return s.patch(ctx, gitDiff{after: append(revs, "--", path)})
+}
+
+// untrackedPatch is git's answer about a file git has never been told about: the whole file as an addition,
+// from /dev/null to the bytes on disk.
+//
+// The call behind every other patch on this screen — `git diff <rev> -- <path>` — prints nothing for such a
+// path, because git compares only what it tracks. For the row this pane is showing that is the wrong answer:
+// a file the reviewer created is on the list *because* of what is on disk, and a pane with nothing in it
+// would contradict the row above it. `--no-index` is git's own way of comparing an untracked path, and its
+// empty side is the same /dev/null git prints for any file a diff creates.
+func (s *Session) untrackedPatch(ctx context.Context, path string) Patch {
+	return s.patch(ctx, gitDiff{after: []string{"--no-index", "--", devNull, path}, differsIsExit1: true})
+}
+
+// devNull is git's own name for the empty side of a patch, spelled as git spells it in its output rather than
+// as the host filesystem names it: `--- /dev/null` is what git prints for a created file on every platform.
+const devNull = "/dev/null"
+
+// gitDiff is one `git diff` invocation: everything that comes after `diff` itself, revisions and pathspec
+// alike, so that the two forms the screen asks for differ in their arguments and nowhere else.
+type gitDiff struct {
+	after []string
+	// differsIsExit1 is the `--no-index` wrinkle: that form exits 1 to say the two sides differ, which is
+	// its answer rather than a failure. It is the same code git gives a path it cannot read, which is why
+	// the bytes decide between the two below, and not the code on its own.
+	differsIsExit1 bool
+}
+
+// patch runs one git diff for one path and turns its bytes into the pane's answer.
+func (s *Session) patch(ctx context.Context, req gitDiff) Patch {
 	show := append([]string{"-c", "core.quotePath=false", "diff",
-		"--no-ext-diff", "--no-textconv", "--color=always"}, revs...)
-	out, err := s.repo.Git(ctx, append(show, "--", path)...)
+		"--no-ext-diff", "--no-textconv", "--color=always"}, req.after...)
+	out, err := s.gitDiffOut(ctx, show, req.differsIsExit1)
 	if err != nil {
 		return Patch{Err: err.Error()}
 	}
@@ -848,8 +962,8 @@ func (s *Session) diff(ctx context.Context, from, to, path string) Patch {
 	// it is comparing, not from what a `textconv` filter turns them into, so a filter that hides a
 	// change from the patch cannot move these counts, and the size beside the path stays a
 	// description of the diff beneath it.
-	numstat := append([]string{"diff", "--no-ext-diff", "--numstat"}, revs...)
-	num, err := s.repo.Git(ctx, append(numstat, "--", path)...)
+	numstat := append([]string{"diff", "--no-ext-diff", "--numstat"}, req.after...)
+	num, err := s.gitDiffOut(ctx, numstat, req.differsIsExit1)
 	if err == nil {
 		// Unknown stays -1, which is what leaves the header without a size to show: no diff at all,
 		// or a binary in the patch.
@@ -858,6 +972,17 @@ func (s *Session) diff(ctx context.Context, from, to, path string) Patch {
 		}
 	}
 	return p
+}
+
+// gitDiffOut runs one form of `git diff` and keeps its bytes, taking `--no-index`'s exit 1 for what it is —
+// the two sides differ — wherever it produced output to show for that. Silence with the same code is the
+// other thing git means by it: a path it cannot read.
+func (s *Session) gitDiffOut(ctx context.Context, args []string, differsIsExit1 bool) (string, error) {
+	out, err := s.repo.Git(ctx, args...)
+	if err != nil && differsIsExit1 && out != "" && git.ExitCode(err) == 1 {
+		return out, nil
+	}
+	return out, err
 }
 
 // sumNumstat adds git's per-file numstat counts: one file for a path, the whole subtree for a
@@ -978,9 +1103,11 @@ func (s *Session) marksFor(ctx context.Context, commit string) reviewmark.Set {
 	return set
 }
 
-// SaveMarks writes the reviewer's answers for this span against the commit under review. Every
-// file in the span is answered, not only the marked ones: clearing a mark has to overwrite what
-// was stored, or the mark would reappear next session.
+// SaveMarks writes the reviewer's answers for this span against the commit under review. Every file in the
+// span is answered, not only the marked ones: clearing a mark has to overwrite what was stored, or the mark
+// would reappear next session. The rows the working tree put on the list are not answered at all: they have
+// no diff key to key a mark by, and a mark against nothing would come back as one on whatever file later
+// arrives at that path.
 func (s *Session) SaveMarks(ctx context.Context) error {
 	store, err := s.store(ctx)
 	if err != nil {
@@ -988,6 +1115,9 @@ func (s *Session) SaveMarks(ctx context.Context) error {
 	}
 	answers := make([]reviewmark.Answer, 0, len(s.files))
 	for _, f := range s.files {
+		if f.OutsideSpan {
+			continue
+		}
 		answers = append(answers, reviewmark.Answer{Path: f.Path, Key: f.Key, Reviewed: f.Reviewed})
 	}
 	return store.Save(s.current.To, answers)

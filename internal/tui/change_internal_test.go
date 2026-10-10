@@ -119,19 +119,29 @@ func cursorOnPath(t *testing.T, m reviewModel, path string) (reviewModel, int) {
 // added file is the one change with nothing on the span's left side, so its patch is the file again
 // with a `+` in front of every line -- the same reason the pane reads it as a file rather than as a
 // patch, and the same reason openArtifact gives a document the changeset invented to the editor.
-func TestEnterOnAnAddedFileGoesToTheEditor(t *testing.T) {
+//
+// The file the reviewer created outside the span is the same case by a different route: git has never been
+// told about the path, so it is in no commit and no index entry either, and a difftool handed it opens a
+// window on nothing. The file the reviewer *edited* outside the span keeps the difftool, because its
+// comparison -- the revision under review against the bytes on disk -- is the thing worth opening.
+func TestEnterOpensInEditorAFileWithNoOtherSide(t *testing.T) {
 	for _, c := range []struct {
-		name   string
-		change Change
-		want   action
+		name      string
+		change    Change
+		outside   bool
+		untracked bool
+		want      action
 	}{
-		{"a file the span added", ChangeAdded, actionEdit},
-		{"a modification", ChangeChanged, actionDiff},
-		{"a deletion", ChangeDeleted, actionDiff},
-		{"a move with the bytes unchanged", ChangeMovedWhole, actionDiff},
-		{"a move with edits", ChangeMoved, actionDiff},
+		{"a file the span added", ChangeAdded, false, false, actionEdit},
+		{"a modification", ChangeChanged, false, false, actionDiff},
+		{"a deletion", ChangeDeleted, false, false, actionDiff},
+		{"a move with the bytes unchanged", ChangeMovedWhole, false, false, actionDiff},
+		{"a move with edits", ChangeMoved, false, false, actionDiff},
+		{"a file outside the span the reviewer wrote into", ChangeChanged, true, false, actionDiff},
+		{"a file outside the span the reviewer created", ChangeChanged, true, true, actionEdit},
 	} {
-		if got := activateBy(row{kind: rowFile, change: c.change}); got != c.want {
+		got := activateBy(row{kind: rowFile, change: c.change, outside: c.outside, untracked: c.untracked})
+		if got != c.want {
 			t.Errorf("Enter on %s = %d, want %d", c.name, got, c.want)
 		}
 	}
