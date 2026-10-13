@@ -154,6 +154,8 @@ then trailers as separate paragraphs. `lifecycle.parseTrailers` (`internal/lifec
 handed git's own `%(trailers:only,unfold)` — so git, not git-pair, decides which lines are trailers — and on
 duplicates it keeps the **first** value it sees (`:724`). I had assumed the risk was body text shadowing a
 verdict; git's paragraph rule means the body never enters the block at all. The real risk is positional.
+> can a client artificially produce a new "paragraph" via newlines, or what makes a paragraph a paragraph
+in git's eyes?
 
 **Five crafted markers, measured.** Each a `git-pair: ready` marker, varying only what is appended:
 
@@ -188,6 +190,7 @@ true — the same trick `Review-Head` exists for.
 client-appended keys. Everything above is about persisting a result; the moment the gate branches on one, it
 becomes part of the contract and "not a schema change" stops being true of it. That's a line between two
 different things, not a veto on the mechanism.
+> sure and the escape hatch if a customer really wants to do this is have their pre-check hook check that custom trailer yes?
 
 **Also checked, since it was adjacent:** can reviewer `-m` text reach that parser? It sits in `Message.Body`,
 above the trailers. Crafted `-m` containing `Review-State: working` / `Review-Outcome: block` derived
