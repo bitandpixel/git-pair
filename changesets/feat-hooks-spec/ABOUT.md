@@ -77,8 +77,10 @@ the next engineer loosens the rule rather than the code.
     was checked against the built binary rather than from memory. The hooks output example this milestone's
     pages describe was regenerated from a fixture run in M4, which is how its earlier, invented version was
     caught; the new pages were written against the same run.
--   `mise run check` exited **0**: 36 test shards ok, none served from cache (every package re-run against
-    this tree), no `FAIL`, and its `gofmt -l internal cmd` step reported nothing.
+-   `mise run check` exited **0**, twice. The run that counts re-ran every package: 36 test shards ok, none
+    served from cache, no `FAIL`, and its `gofmt -l internal cmd` step reported nothing. The run after this
+    file was written exited 0 with all 36 shards served from cache, which is the expected shape when the only
+    change since is markdown.
 
 ## Known limitations
 
