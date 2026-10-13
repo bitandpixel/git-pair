@@ -130,3 +130,4 @@ override.
 -   Whether an untrusted tracked tree should refuse outright once a repository has committed hooks — today it
     proceeds with a note. The current answer favours the fresh clone; a team that wants enforcement will want
     the other one.
+> for multiple hooks in the same lifecycle dir, do they run in parallel by default? or sequentially?

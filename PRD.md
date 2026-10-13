@@ -1934,6 +1934,8 @@ Hooks live in two roots, consulted in this order:
 | tracked | `<worktree>/.git-pair/hooks/<point>/` | committed, therefore content that arrived from somewhere; runs only after `git pair hooks --trust` |
 | per-clone | `<git-dir>/git-pair/hooks/<point>/` | the person's own file under their own git directory, never committed, runs directly |
 
+> was it considered to have all the hooks live in the <git-dir> location, and trust is established by copying vendored hooks there?
+
 Within a point, the tracked root runs first, then the per-clone root: the repository's rules are the baseline
 and the client adds to them. Under a point, either a directory of scripts or a single file named for the
 point is accepted. Scripts run in lexicographic order by name, which is how a suite is sequenced — `01-fmt`,
