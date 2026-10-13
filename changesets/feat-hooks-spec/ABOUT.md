@@ -74,8 +74,9 @@ the next engineer loosens the rule rather than the code.
     with the new page among them.
 -   `git pair skill show references/hooks.md` renders the new page from the compiled-in copy.
 -   Every command and flag the new pages name (`git pair hooks`, `--trust`, `check --json`, the variable names)
-    was checked against the built binary rather than from memory; the hooks output example in PRD §11.4 was
-    regenerated from a fixture run, which is how its earlier version was found to be invented.
+    was checked against the built binary rather than from memory. The hooks output example this milestone's
+    pages describe was regenerated from a fixture run in M4, which is how its earlier, invented version was
+    caught; the new pages were written against the same run.
 -   `mise run check` — result recorded below.
 
 ## Known limitations
