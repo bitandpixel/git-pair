@@ -80,9 +80,9 @@ mechanism use it without re-deriving the changeset in every script.
 
 ## Validation
 
-- `mise run check` (gofmt, `go vet`, sharded test suite) — run twice on this branch, most recently
-  immediately before this handoff, both exit 0. Both runs are recorded under **Gate result**, including
-  which one was served from Go's test cache and why.
+- `mise run check` (gofmt, `go vet`, sharded test suite) — run three times on this branch, most recently
+  immediately before this handoff, all exit 0. Recorded under **Gate result**, including which runs came
+  from Go's test cache and the check that shows a cached pass is sound here.
 - The claims in the research document are experiments, not reasoning. Each was run against a fixture
   repository and the raw output is recorded in the document, so a reviewer can re-run any one of them. The
   exit-code finding was reproduced by driving the built binary (`go build -o /tmp/gp ./cmd/git-pair`) against
@@ -127,14 +127,29 @@ alteration of the contract, but gives clients a way to persist a result. Let's d
 
 ## Gate result
 
-`mise run check` (gofmt, `go vet`, sharded suite) run twice on this branch, the second time immediately
-before this handoff:
+`mise run check` (gofmt, `go vet`, sharded suite) run three times on this branch, the most recent
+immediately before this handoff. All three exited 0.
 
-- **At head `819a9e5`** — exit 0 after 77s: gofmt clean, `go vet` clean, 35 package shards executed and
-  reported `ok`, none failed, across 15 packages.
-- **At the current head** — exit 0 after 16s: gofmt clean, and all 35 shard results came from Go's test
-  cache (`(cached)` on every line, 0 failures), because no Go source has changed since the run above. Only
-  markdown has been added.
+| Run | Duration | What it did |
+| --- | --- | --- |
+| first | 77s | executed the suite: gofmt clean, `go vet` clean, 35 shards reported `ok`, none failed, across 15 packages |
+| second | 16s | all 35 shard results from Go's test cache, 0 failures |
+| third | 16s | same — 35 `ok` on `(cached)` lines, 0 failures |
+
+A cached pass is a real pass by Go's own definition: identical inputs, so the recorded result still holds.
+It is not 35 fresh executions, so both are stated rather than the flattering one. What makes the two cached
+runs sound is checkable rather than asserted — no Go file has been touched on this branch, and the whole
+span is six markdown files:
+
+```text
+$ git diff --name-only main...HEAD | grep -E '\.go$'
+(none)
+```
+
+The thing that would invalidate a cached pass is a change under `internal/` or `cmd/`, and this branch
+contains none. Each run tested the working tree as it stood at the time, which was the tree of the following
+commit; the runs are listed in order rather than pinned to hashes, because a gate run covers a tree, not a
+commit that does not exist yet.
 
 Relevant to a docs-only change in two of those packages: `internal/hygiene`, because the plan proposes a
 second subprocess path in shipped source, and `internal/cli`, because it holds the tests that bind `PRD.md`,
