@@ -2073,13 +2073,15 @@ hook names and the hash — so the consent is given against something visible.
 
 ```text
 $ git pair hooks
-tracked: .git-pair/hooks        accepted: yes
-clone:   .git/git-pair/hooks
-
-  pre-ready    01-fmt           tracked  executable
-  pre-ready    02-test          tracked  executable
-  pre-submit   01-body-policy   clone    executable
+pre-ready      worktree .git-pair/hooks/pre-ready/01-fmt
+pre-ready      worktree .git-pair/hooks/pre-ready/02-test
+pre-submit     clone   .git/git-pair/hooks/pre-submit/01-body-policy
 ```
+
+The columns are the point, the root (`worktree` or `clone`), and the path, with a note in parentheses for a
+script that is not executable. An unaccepted tracked tree puts one line above all of this: `tracked hooks are
+NOT trusted: they will not run until \`git pair hooks --trust\` records them`. `--json` answers with
+`tracked_root`, `clone_root`, `trusted`, `accepted` (the hash), `hooks[]` and `unknown[]`.
 
 The points are the six actions a changeset meets, on both sides: `pre-ready` and `post-ready`, `pre-integrate`
 and `post-integrate`, `pre-unready` and `post-unready`, `pre-abandon` and `post-abandon`, `pre-check` and
