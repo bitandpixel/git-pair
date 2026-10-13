@@ -593,6 +593,7 @@ Three things the plan did not predict, each of which changed the shape of the co
     refused by the gate for a reason that had nothing to do with the point under test. The table of author
     points therefore uses the per-clone root, and one separate case keeps the tracked root and its consent
     step honest at a non-ready point. Trust is a property of the root, not of the point.
+> couldn't the hooks just be installed before the `change integrate` command? 
 -   **A post-hook failure needs its own message, not just a nonzero exit.** The plan asks for a nonzero exit
     and a line that says what happened; writing it as `postHookError` made the second half concrete — the
     state the changeset is in, the hook, and "nothing was undone". M1's PRD paragraph said a post-hook failure
