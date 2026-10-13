@@ -22,7 +22,9 @@ import (
 	"gitpair/internal/changeset"
 	"gitpair/internal/git"
 	"gitpair/internal/lifecycle"
+	gitmodel "gitpair/internal/model"
 	"gitpair/internal/reviewmark"
+	"gitpair/internal/reviewops"
 	"gitpair/internal/span"
 )
 
@@ -46,6 +48,15 @@ type Options struct {
 	// setting it could not read. ResolveMouse reads it from the repository; the zero value leaves
 	// the wheel alone, which is what a caller that has not resolved it should get.
 	Mouse MouseSetting
+	// Submit records a review verdict and is supplied by the caller rather than performed here. The review
+	// screen and `git pair review submit` are two surfaces for one action, and a submission made here
+	// directly would be a second path past the reviewer's own `pre-submit` hooks — the failure mode being
+	// that a reviewer's check fires from the command line and not from the screen, which is the surface most
+	// reviewers use.
+	//
+	// It is required. A nil Submit is a caller that has not wired the one path, and running the screen
+	// without it would submit reviews nobody checked.
+	Submit func(outcome gitmodel.Outcome) (reviewops.Result, error)
 }
 
 // Header is the session's identity line.
@@ -144,6 +155,10 @@ type Session struct {
 	current span.Span
 	files   []File
 
+	// submit is the caller's one submission path, kept beside the session that carries the changeset it
+	// acts on. See Options.Submit for why the screen does not submit for itself.
+	submit func(gitmodel.Outcome) (reviewops.Result, error)
+
 	// marks and markErr hold the resolved store, so a repository without a usable git directory
 	// does not pay for it on every toggle.
 	marks   *reviewmark.Store
@@ -183,6 +198,7 @@ type Session struct {
 func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	s := &Session{
 		repo: opts.Repo, cs: opts.Changeset, summary: opts.Summary, sel: opts.Span, trunk: opts.Trunk,
+		submit: opts.Submit,
 	}
 	// The rule is read rather than just the ref, because the box says "the parent landed" beside the base,
 	// and only the rule knows it. `Measure` is the answer that cannot fail: a repository git will not talk to

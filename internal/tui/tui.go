@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"gitpair/internal/changeset"
 	"io"
 	"os"
 	"os/exec"
@@ -19,7 +18,6 @@ import (
 
 	"gitpair/internal/console"
 	gitmodel "gitpair/internal/model"
-	"gitpair/internal/reviewops"
 	"gitpair/internal/span"
 )
 
@@ -1093,11 +1091,14 @@ func (m reviewModel) handleSubmitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.mode = modeFiles
 	// All three ends of the diff are recorded, here and in `review submit`, from one measurement: a review
 	// is a claim about a parent tip, about a measurement point, and about the content between them, and the
-	// branch that named the first two can be deleted before anyone asks (PRD §21).
-	result, err := reviewops.Submit(m.ctx, m.sess.Repo(), m.sess.Changeset(),
-		outcome, "", true,
-		changeset.MeasureSubmission(m.ctx, m.sess.Repo(), m.sess.Changeset(), m.sess.Trunk(), ""),
-		m.sess.Trunk())
+	// branch that named the first two can be deleted before anyone asks (PRD §21). The submission itself
+	// belongs to the caller: the screen and the command are two surfaces for one action, and the reviewer's
+	// own `pre-submit` hooks have to fire on both (see Options.Submit).
+	if m.sess.submit == nil {
+		m.setStatus("this screen was opened without a submission path; use `git pair review submit`", true)
+		return m, nil
+	}
+	result, err := m.sess.submit(outcome)
 	if err != nil {
 		m.setStatus(err.Error(), true)
 		return m, nil

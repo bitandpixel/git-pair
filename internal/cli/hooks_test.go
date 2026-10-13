@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"gitpair/internal/gittest"
-	"gitpair/internal/hooks"
 )
 
 // The point of the whole feature, in one sentence: a repository can commit a script and have it run at the
@@ -457,22 +456,6 @@ func TestHooksCommandReportsConfiguration(t *testing.T) {
 		mustContain(t, human.stderr, "pre-redy", "the human form must name the misspelled point")
 	})
 
-	t.Run("a hook under a point this build does not run is said so", func(t *testing.T) {
-		f, _ := newChangeset(t, "checkout-flow", "main")
-		// Chosen at runtime rather than named, so the test keeps its meaning as later milestones wire
-		// more points: what it asserts is that an inert hook is visible, not that one particular
-		// directory is inert.
-		inert := inactivePoint(t)
-		putHook(t, f, "tracked", inert, "01-note", passHook)
-		trustHooks(t, f)
-
-		res := runIn(t, f.Dir(), "hooks", "--json").mustSucceed(t, "hooks", "--json")
-		entries := jsonListNamed(t, res, "hooks", inert)
-		if entries[0].(map[string]any)["active"] != false {
-			t.Errorf("active = %v, want false: a hook nobody runs has to be visible", entries[0])
-		}
-	})
-
 	t.Run("a non-executable hook is reported as one", func(t *testing.T) {
 		f, _ := newChangeset(t, "checkout-flow", "main")
 		path := putHook(t, f, "tracked", "pre-ready", "01-suite", passHook)
@@ -517,20 +500,6 @@ func TestNativeGitHookSeesTheResolution(t *testing.T) {
 			t.Errorf("git's own pre-commit is missing %q, got:\n%s", want, env)
 		}
 	}
-}
-
-// inactivePoint returns a lifecycle point this build does not invoke, for the test that asserts an inert
-// hook is still reported. It is derived rather than named so the test does not go stale every time a
-// milestone wires another point, and it fails loudly if the build ever runs everything.
-func inactivePoint(t *testing.T) string {
-	t.Helper()
-	for _, p := range hooks.AllPoints() {
-		if !hooks.Active(p) {
-			return p.String()
-		}
-	}
-	t.Fatal("every lifecycle point is wired, so nothing tests that an inert hook is reported")
-	return ""
 }
 
 // jsonListNamed returns the entries of a `hooks` array whose point or name matches, so a test that puts one

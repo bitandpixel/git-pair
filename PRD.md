@@ -1994,6 +1994,14 @@ input on stdin. It receives the resolution the command already made, so it never
 | `GIT_PAIR_HOOK_ROOT` | `worktree` or `clone` |
 | `GIT_PAIR_HOOKS` | `1`, inherited by anything the hook runs — a nested `git pair` runs no hooks |
 
+The two submission points add three more, because a submission is a verdict with content of its own:
+
+| Variable | Meaning |
+| --- | --- |
+| `GIT_PAIR_REVIEW_OUTCOME` | `approve`, `block`, or `feedback` |
+| `GIT_PAIR_REVIEW_HEAD` | the commit being reviewed, which is the head the review commit will name |
+| `GIT_PAIR_REVIEW_BODY_FILE` | a file holding the review body, so a hook can read the reviewer's reasoning without a quoting problem |
+
 Its stdout and stderr are captured and never written to git-pair's own stdout, which is where `--json`
 lives; a verdict an automation cannot parse is worse than no verdict. A failing hook's output is replayed on
 stderr with the refusal, because that is the text the author needs next. A passing hook's output is replayed
@@ -2056,9 +2064,9 @@ also the guard a hook inherits, so a hook that shells out to `git pair` cannot r
 ### `git pair hooks`
 
 `git pair hooks` answers what is configured, without running anything: both roots, each hook with its
-executability and whether this build invokes its point at all, any entry that is not a lifecycle point, and
-whether the tracked tree is accepted. A person who has just cloned the repository and been told a hook did
-not run needs to find out why from this command and no other.
+path and whether it is executable, any entry that is not a lifecycle point, and whether the tracked tree is
+accepted. A person who has just cloned the repository and been told a hook did not run needs to find out why
+from this command and no other.
 
 `git pair hooks --trust` records the tracked hooks tree as accepted and prints what it is approving — the
 hook names and the hash — so the consent is given against something visible.
@@ -2068,16 +2076,18 @@ $ git pair hooks
 tracked: .git-pair/hooks        accepted: yes
 clone:   .git/git-pair/hooks
 
-  pre-ready   01-fmt           tracked  executable
-  pre-ready   02-test          tracked  executable
-  pre-abandon 01-note          tracked  executable   not run by this build
+  pre-ready    01-fmt           tracked  executable
+  pre-ready    02-test          tracked  executable
+  pre-submit   01-body-policy   clone    executable
 ```
 
-The points this build runs are the author's four transitions on both sides — `pre-ready` and `post-ready`,
-`pre-unready` and `post-unready`, `pre-abandon` and `post-abandon`, `pre-integrate` and `post-integrate` —
-and both sides of the gate, `pre-check` and `post-check`. The reviewer's (`pre-submit`, `post-submit`) arrive
-with the milestone that runs them, and `git pair hooks` reports a hook under any of them as configured but
-not run, rather than pretending. The documentation follows the code rather than the plan.
+The points are the six actions a changeset meets, on both sides: `pre-ready` and `post-ready`, `pre-integrate`
+and `post-integrate`, `pre-unready` and `post-unready`, `pre-abandon` and `post-abandon`, `pre-check` and
+`post-check`, and the reviewer's `pre-submit` and `post-submit`. Every one of them is invoked by a command, so
+a configured hook is a hook that runs. The read-path commands — `queue`, `status`, `diff`, `feedback`,
+`history`, `wait` — have no points: a hook on a read turns a lookup into a build, and a cost test that counts
+subprocesses would start measuring the customer's script. An entry under a name outside the vocabulary is
+reported rather than run.
 
 ### The gate
 
@@ -2108,6 +2118,35 @@ the person standing at them. `check` carries none, for the reason §19.3 gives f
 `--allow-feedback` in its own list: the command that runs the gate is the only place the policy is known, and
 a policy relaxed from the seat of whoever is running it is not a policy. A repository that wants its own gate
 on its own result writes it as a `pre-check` hook that reads what it recorded.
+
+### The reviewer's submission
+
+`pre-submit` and `post-submit` are the reviewer's own points, and they differ from the author's in two ways
+that are easy to get wrong.
+
+**They run on the one path that makes a submission.** `review submit` and the review screen's `s` are two
+surfaces for one act, so both reach a single submission path, and that path is where the hooks are attached.
+Hooks placed inside the submission primitive instead would fire for the command and silently not fire for the
+screen — which is the surface reviewers actually use.
+
+**They run after staging.** A submission stages the reviewer's content first: source edits made while reading,
+thread files, the `ABOUT.md` edit. A hook that ran before that would approve a submission it could not see.
+So the hook sees the index the review commit is about to carry, and `pre-submit` fires before any review ref
+exists — a refusal writes no commit, no review ref, and no archive.
+
+**They are the client's own.** A reviewer reviewing a repository they cannot edit attaches them under
+`<git-dir>/git-pair/hooks/pre-submit/`, where there is nothing to accept and nobody to ask. Tracked hooks from
+the repository under review still need acceptance, because a committed script is content that arrived from
+somewhere.
+
+`--allow-hook-failure` records the submission over a refusing `pre-submit` hook. It exists here and not on
+`check` because the two override different things: a reviewer's hook is their own script on their own machine,
+and when it misbehaves it must not strand a verdict the reviewer has already decided to record. The override is
+loud — the human stream says so, and `--json` carries `overridden: true` beside the failed entry in `hooks`.
+
+The refusal says the review was not recorded and the reviewer's content is **still staged**. That state has no
+other symptom: the next plain `git commit` would land the reviewer's source edits as ordinary work with no
+verdict attached.
 
 ## 11.5 The agent skill
 

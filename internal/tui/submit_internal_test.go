@@ -12,6 +12,7 @@ import (
 	"gitpair/internal/gittest"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
+	"gitpair/internal/reviewops"
 	"gitpair/internal/span"
 )
 
@@ -37,7 +38,19 @@ func TestSubmitKeyEndsTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SummarizeHEAD: %v", err)
 	}
-	sess, err := NewSession(ctx, Options{Repo: repo, Changeset: cs, Summary: summary, Span: span.Full()})
+	// The screen performs no submission of its own: it calls the path its caller supplied, and that is the
+	// whole reason the path is injected. `review submit` and this screen are two surfaces for one action, and
+	// a reviewer's `pre-submit` hooks fire on the path — so a second path would be a surface where they
+	// silently do not. The counter here is the assertion that the screen went through it once, with the
+	// outcome the reviewer pressed.
+	var submitted []model.Outcome
+	sess, err := NewSession(ctx, Options{Repo: repo, Changeset: cs, Summary: summary, Span: span.Full(),
+		Submit: func(o model.Outcome) (reviewops.Result, error) {
+			submitted = append(submitted, o)
+			return reviewops.Submit(ctx, repo, cs, o, "", true,
+				changeset.MeasureSubmission(ctx, repo, cs, changeset.DefaultBranchRef{}, ""),
+				changeset.DefaultBranchRef{})
+		}})
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
@@ -71,6 +84,9 @@ func TestSubmitKeyEndsTheSession(t *testing.T) {
 	}
 	if got.State != model.StateBlocked {
 		t.Errorf("state after submit = %s, want BLOCKED", got.State)
+	}
+	if len(submitted) != 1 || submitted[0] != model.OutcomeBlock {
+		t.Errorf("the caller's submission path was called with %v, want exactly one block", submitted)
 	}
 }
 

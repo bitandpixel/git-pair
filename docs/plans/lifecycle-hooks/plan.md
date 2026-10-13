@@ -552,9 +552,10 @@ reviewer run — edit in the review screen, have the hook refuse, fix, submit.
 
 ## Execution status
 
-Not started: exploration decisions recorded above; the reviewer points and the per-clone root were added
-on 2026-10-13 after the first draft deferred them. M5 task 1 (the PRD §26 wording) is the gate on the
-rest, and the open spike on whether a hook result enters the review marker needs confirming before M4.
+M1 through M4 are done, each on its own branch, each stacked on the one below. The reviewer points and the
+per-clone root were added on 2026-10-13 after the first draft deferred them, and both landed in M4. What
+remains is M5: the PRD §26 sentence, the PRD §27 contract summary, the skill's hook reference, and the hygiene
+fixture. M5 task 1 (the §26 wording) is the gate on the rest.
 
 **M1 — done** on `feat/hooks-runner`, stacked on the approved plan branch.
 
@@ -640,5 +641,44 @@ The CI example in the README was exercised against a fixture repository rather t
 the JSON: the hook, the `--trust`, the refusal, the reason wording, and the `hooks` entry are the output that
 run produced.
 
-**M4 — not started.**
+**M4 — done** on `feat/hooks-reviewer-submit`, stacked on M3.
+
+What landed: `pre-submit` and `post-submit` at the one path that makes a submission, run after staging and
+before the review commit exists; the reviewer environment (`GIT_PAIR_REVIEW_OUTCOME`, `GIT_PAIR_REVIEW_HEAD`,
+`GIT_PAIR_REVIEW_BODY_FILE`); `review submit --allow-hook-failure` with `overridden` in the JSON; the
+`hooks` array in `review submit --json`; and the point vocabulary complete, which removed the `active` flag
+from `git pair hooks` (see below).
+
+Three things worth recording:
+
+-   **The review screen had a second submission path, and task 1 was written without knowing it.** The plan
+    says to keep `reviewops.Submit` free of hook calls "so the review screen's own submit path stays covered
+    by one call site" — but the screen called `reviewops.Submit` directly, so attaching hooks to the CLI's
+    call site would have left the surface reviewers actually use hook-free. Fixed by injecting the submission
+    into the screen: `tui.Options.Submit` is a function the CLI supplies (`a.submitReview`), and the screen has
+    no other way to submit. A hook now fires wherever a verdict is recorded. The screen opened without a
+    submission path says so on the status line rather than inventing its own.
+-   **`active` was removed rather than flipped to always-true.** M1 added it so a hook under a point nobody
+    ran stayed visible while the milestones wired the rest. With the last two points wired, every declared
+    point is invoked, so the field could never again be false — and a JSON field that can never be false is
+    data that misleads. `AllPoints()` still carries the vocabulary, `unknown[]` still catches a misspelled
+    directory, and the CLI tests run every point end to end, which is the stronger claim.
+-   **The reviewer's index is the hook's input, and a refusal has to say where the content is.** Two tests
+    caught the shape of this by being wrong first: a fixture whose "reviewer edit" was byte-identical to what
+    the commit already held staged nothing, and the hook correctly saw nothing. The index is real input here,
+    so the refusal names it — the review was *not recorded* and the content is *still staged* — because that
+    state has no other symptom: the next plain `git commit` would land the reviewer's source edits as ordinary
+    work with no verdict attached.
+
+The open spike the plan carried into this milestone — whether a hook result belongs in the review marker — is
+closed as no. The review commit carries what the reviewer did (the outcome, the body, what was reviewed and
+where it was measured), and a hook result is a fact about a machine, produced by a script that machine's owner
+can edit or delete. Recording it would make a verdict look like it was verified somewhere the reader has no
+reason to trust, and it would be unverifiable by anyone reading the review later. The `hooks` array in
+`review submit --json` is where the result lives: with the answer that produced it, not with the artifact.
+
+The per-clone root needed no new code: M1 discovered both roots and M2's `runPre`/`runPost` reach them for
+every point, so the reviewer's own hooks came with the wiring. What was reviewer-specific was the trust rule,
+which is asserted rather than assumed: a tracked hook from the repository under review stays skipped until
+accepted, and the same command runs it after `git pair hooks --trust`.
 

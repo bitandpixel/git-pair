@@ -52,13 +52,20 @@ const (
 	PostAbandon   Point = "post-abandon"
 	PreCheck      Point = "pre-check"
 	PostCheck     Point = "post-check"
-	PreSubmit     Point = "pre-submit"
-	PostSubmit    Point = "post-submit"
+	// The reviewer's submission. These are the client's own points: a reviewer reviewing a repository they
+	// cannot edit attaches them under their own git directory, where there is nothing to accept and nobody
+	// to ask. They run after git-pair has staged the reviewer's content and before the review commit exists.
+	PreSubmit  Point = "pre-submit"
+	PostSubmit Point = "post-submit"
 )
 
-// allPoints is the whole vocabulary, including points no command invokes yet. `git pair hooks` reports a hook
-// configured under an inactive point rather than ignoring it: a typo'd hook is otherwise
-// indistinguishable from an absent one, which is how a team ends up believing it has validation it does not run.
+// allPoints is the whole vocabulary, in the order a changeset meets the actions: made ready, integrated,
+// made unready, abandoned, checked, reviewed. A hook configured under a name outside this list is reported as
+// unknown rather than ignored: a typo'd hook is otherwise indistinguishable from an absent one, which is how a
+// team ends up believing it has validation it does not run. Every point here is invoked by a command, so a
+// configured hook under any of them runs. The read-path commands — `queue`, `status`, `diff`, `feedback`,
+// `history`, `wait` — have no points on purpose: a hook on a read turns a lookup into a build, and a cost test
+// that counts subprocesses would start measuring the customer's script.
 var allPoints = []Point{
 	PreReady, PostReady,
 	PreIntegrate, PostIntegrate,
@@ -73,30 +80,6 @@ func AllPoints() []Point { return append([]Point(nil), allPoints...) }
 
 // String lets a Point be formatted into messages and environment values.
 func (p Point) String() string { return string(p) }
-
-// active is the set of points some command in this build invokes. It grows as the milestones land; it is
-// kept here rather than inferred from call sites so that `git pair hooks` can say, in one place, which
-// configured hooks this build will actually run. The read-path commands — `queue`, `status`, `diff`,
-// `feedback`, `history`, `wait` — are absent on purpose: a hook on a read turns a lookup into a build, and a
-// cost test that counts subprocesses would start measuring the customer's script.
-var active = map[Point]bool{
-	PreReady:      true,
-	PostReady:     true,
-	PreUnready:    true,
-	PostUnready:   true,
-	PreAbandon:    true,
-	PostAbandon:   true,
-	PreIntegrate:  true,
-	PostIntegrate: true,
-	// The gate runs both of its points at the command's entry point rather than inside the gate function:
-	// the verdict is what a pipeline reads, so the repository's own conditions belong to the answer.
-	// `change integrate` runs the gate as the same code and must not run them, so it calls the gate directly.
-	PreCheck:  true,
-	PostCheck: true,
-}
-
-// Active reports whether this build invokes point.
-func Active(p Point) bool { return active[p] }
 
 // RootKind says which of the two roots a hook came from, and travels to the client as GIT_PAIR_HOOK_ROOT
 // and as the `root` field of the JSON report.

@@ -27,6 +27,10 @@ type hookContext struct {
 	Head    string
 	Dest    string
 	Outcome string // reviewer-side points; empty elsewhere
+	// BodyFile is a file holding the `-m` text, for a reviewer's own policy hook. The body travels as a
+	// path rather than as a variable because it is the reviewer's prose, of arbitrary length and with
+	// newlines in it, and a script should read it the way it reads any other file.
+	BodyFile string
 }
 
 func (c hookContext) env() map[string]string {
@@ -45,6 +49,13 @@ func (c hookContext) env() map[string]string {
 	}
 	if c.Outcome != "" {
 		env["GIT_PAIR_REVIEW_OUTCOME"] = c.Outcome
+		// The head the submission names, spelled out beside the outcome: a policy hook that refuses to
+		// approve unless a suite passed wants to say which commit its verdict was about, and `HEAD` at
+		// the moment it runs is that commit only if nothing staged has been committed yet.
+		env["GIT_PAIR_REVIEW_HEAD"] = c.Head
+	}
+	if c.BodyFile != "" {
+		env["GIT_PAIR_REVIEW_BODY_FILE"] = c.BodyFile
 	}
 	return env
 }
@@ -83,6 +94,17 @@ func (a *app) runPost(ctx context.Context, s *session, c hookContext) []hooks.Re
 func firstFailure(results []hooks.Result) (hooks.Result, bool) {
 	for _, r := range results {
 		if r.Blocking() {
+			return r, true
+		}
+	}
+	return hooks.Result{}, false
+}
+
+// firstFailureAt is `firstFailure` restricted to one point, for a caller that ran both halves of a transition
+// and needs to know whether the half that could not refuse anything is the one that failed.
+func firstFailureAt(results []hooks.Result, point hooks.Point) (hooks.Result, bool) {
+	for _, r := range results {
+		if r.Hook.Point == point && r.Blocking() {
 			return r, true
 		}
 	}
@@ -331,15 +353,15 @@ type unknownEntry struct {
 	dir  string
 }
 
-// hookEntry is one configured hook as this command reports it. `active` says whether this build invokes the
-// point at all, which is what makes a hook under a point nobody runs visible rather than silently inert.
+// hookEntry is one configured hook as this command reports it. Every point in the vocabulary is invoked, so a
+// configured hook is a hook that runs; what a reader has to notice is `executable`, and the `unknown` list
+// under the hooks, which is where a typo'd point name lands.
 type hookEntry struct {
 	Point      string `json:"point"`
 	Name       string `json:"name"`
 	Path       string `json:"path"`
 	Root       string `json:"root"`
 	Executable bool   `json:"executable"`
-	Active     bool   `json:"active"`
 }
 
 // hooksReport is `git pair hooks --json`.
@@ -412,7 +434,6 @@ func runHooksReport(ctx context.Context, a *app, trust bool) error {
 			rep.Hooks = append(rep.Hooks, hookEntry{
 				Point: point.String(), Name: h.Name, Path: h.Path, Root: string(h.Root),
 				Executable: err == nil && info.Mode()&0o111 != 0,
-				Active:     hooks.Active(point),
 			})
 		}
 	}
@@ -462,9 +483,6 @@ func runHooksReport(ctx context.Context, a *app, trust bool) error {
 		notes := []string{}
 		if !h.Executable {
 			notes = append(notes, "not executable")
-		}
-		if !h.Active {
-			notes = append(notes, "point not run by this build")
 		}
 		suffix := ""
 		if len(notes) > 0 {
