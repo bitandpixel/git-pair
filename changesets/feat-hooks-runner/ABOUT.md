@@ -97,7 +97,10 @@ override.
     documents rather than one.
 -   `go test ./internal/hygiene/` green — the new package introduces no literal for the git verbs git-pair
     itself must not invoke, and no read-path command gained a hook.
--   `mise run check` — see the result recorded below.
+-   `mise run check` exited 0 on the committed tree (`f96271e`): 35 test shards ok, 27 of them served from
+    cache, no `FAIL`, and the gate's own `gofmt -l internal cmd` step reported nothing. Run from the
+    repository root, which is the task that runs build, gofmt, vet and every package's tests including the
+    sharded `internal/cli` and `internal/tui` ones.
 
 ## Known limitations
 
