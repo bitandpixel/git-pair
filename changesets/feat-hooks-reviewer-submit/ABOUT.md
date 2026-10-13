@@ -90,7 +90,9 @@ feature usable for a reviewer at all. Both are tested, including the same tracke
 -   `go test ./internal/tui/ -run TestSubmit` green, including the new assertion that the screen called the
     injected path exactly once with the outcome the reviewer pressed.
 -   `go test ./internal/cli/ -run Docs` and `-run TestTheCommandTreeIsTheCommandSet` green.
--   `mise run check` — result recorded below.
+-   `mise run check` exited **0**: 36 test shards ok (31 served from cache, the rest re-run against the final
+    tree), no `FAIL`, and its `gofmt -l internal cmd` step reported nothing. Run again after this file was
+    written, with the same result.
 
 ## Known limitations
 
