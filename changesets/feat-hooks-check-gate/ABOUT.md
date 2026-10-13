@@ -83,6 +83,9 @@ arrived is what the report carries.
     on stderr only.
 -   `mise run check` exited 0: 36 test shards ok, 22 served from cache, no `FAIL`, and its `gofmt -l internal
     cmd` step reported nothing. Re-run after this file was written, with the same result.
+-   Restacked onto M1's answers to the reviewer's feedback and re-run: exit 0, 36 shards ok, no `FAIL`,
+    `gofmt` silent. The restack carried no code down the stack — M1 gained two documentation passages
+    and this branch's tree otherwise differs only by M2's later `ABOUT.md` edits.
 
 ## Known limitations
 
