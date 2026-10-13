@@ -268,17 +268,45 @@ it does not reverse anything, and the printed line says what actually happened (
 A post-hook that moved HEAD is detected (HEAD before against HEAD after) and reported as a warning that
 names the marker it invalidated.
 
-### What the record does not carry
+### What the record carries, and what it does not
 
-A hook result gets no trailer. `Review-Head`, `Review-Base-Head` and `Review-Diff-Id` are claims about a
-commit that `check` can re-derive and compare; a hook's exit status is a claim about whatever the reviewer's
+Two mechanisms, and they get different answers.
+
+**A new key that git-pair reads: no.** `Review-Head`, `Review-Base-Head` and `Review-Diff-Id` are claims
+about a commit that `check` can re-derive and compare. A hook's exit status is a claim about whatever a
 machine did at 14:32, and a rebase preserves the message while the thing it described stops being true. A
-verifiable-from-history record and an environment-conditional one do not mix, so the record stays as it is.
+record that is verifiable from history and one that is environment-conditional do not mix, so nothing
+`check` branches on is added.
 
-A client who wants the evidence in the record already has the way to get it: `review submit` commits
-everything in the working tree, so a hook that writes a log file into the changeset directory has that
-file in the review commit. That is the client-control principle applied consistently — the client who owns
-the hook owns what it produces, and puts it where reviewers read it — and it costs no schema change.
+**Lines a client appends: yes, under constraints.** Raised in review on this plan and measured in
+[research/2026-10-13-appending-to-the-marker-message.md](research/2026-10-13-appending-to-the-marker-message.md).
+`Message.Render` (`marker.go:34`) emits subject, body, then trailers as separate paragraphs, and
+`parseTrailers` (`lifecycle.go:713`) receives git's own `%(trailers:only,unfold)` and keeps the first value
+seen for a key (`:724`). Two properties follow, both measured:
+
+- Appending a key at the **end** of the block cannot forge anything, because the real keys are already
+  earlier and first-wins protects them. The same two keys in the opposite order do change the derived state,
+  so append position is the security property rather than a formatting preference.
+- The natural implementation — a script appending prose below the block after a blank line — silently
+  evicts the real `Review-State` from the block. Nothing errors, `change ready` still reports success, and
+  the changeset drops out of the queue as `WORKING`. That is the failure the append must be designed
+  against.
+
+So the append is git-pair's job, not the hook's: `Message` gains a field for client lines rendered after
+`Trailers` in the same paragraph, which makes the eviction case unreachable rather than warned about.
+Hook-supplied keys are rejected if they match anything git-pair reads or start with `Review-`; a client
+prefix (`Hook-`, or `X-Hook-`) keeps the reserved namespace reserved. Values are single-line, and the line
+should name the head it describes (`Hook-Test: pass head=<sha> dur=41s`) so a rebase leaves a claim that is
+visibly stale rather than silently true.
+
+The other route stays available and needs no design at all: `review submit` commits everything in the working
+tree, so a hook that writes a log file into the changeset directory lands it in the review commit. That is
+the client-control principle applied consistently, and it suits a result with bulk in it, where a trailer
+line would be the wrong shape.
+
+One line holds both mechanisms apart from becoming a contract: `check` never reads client-appended keys.
+The moment the gate branches on one, it is part of the contract and the "not a schema change" argument is
+gone. Persisting a result and letting it gate something are different things.
 
 ### Override
 
@@ -459,8 +487,8 @@ Verification
 | Could git's own `pre-commit`/`commit-msg` be the mechanism instead? | Resolved | No, and the cost is measurable. They cover the five commit points and nothing at `check`, `pre-commit` receives no arguments so it cannot tell a marker from an ordinary commit, tracked hooks need `core.hooksPath` (one flat directory, not cloned), and a native refusal gives exit 3 with empty `--json` instead of exit 1. git-pair keeps its own runner and exports context to native hooks regardless. Full measurements: [research/2026-10-13-native-git-hooks.md](research/2026-10-13-native-git-hooks.md). |
 | Does a manifest format earn a config dependency? | Open | Default is no: discovery by filesystem, attributes by git config. Revisit only if per-hook timeouts or per-hook blocking are actually wanted. |
 | Do post-hooks need a per-point opt-in to blocking? | Open | Deferred. Under §26 a blocking post-hook cannot reverse anything, so the only difference is exit code, and the plan already reports nonzero. |
-| Is there a safe form of reviewer-side hooks? | Resolved | Yes, and they are in scope as of 2026-10-13. Hooks are client control, so the reviewer owns their own hooks and what they enforce. The safety question moves from "may a hook gate a verdict" to "does a hook's result enter the record", and the answer there is no — see *What the record does not carry*. |
-| Should a hook result be recorded in the review marker? | Open | Recommended no. A trailer is a claim about a commit that survives a rebase; a hook result is a claim about a machine at a moment. If evidence is wanted, the client writes it into the tree and `review submit` commits it. Needs confirming before M4. |
+| Is there a safe form of reviewer-side hooks? | Resolved | Yes, and they are in scope as of 2026-10-13. Hooks are client control, so the reviewer owns their own hooks and what they enforce. The safety question moves from "may a hook gate a verdict" to "what may a hook write into the record", and the answer there is: client-appended lines yes, anything the gate reads no — see *What the record carries, and what it does not*. |
+| Should a hook result be recorded in the review marker? | Resolved | Split, after review feedback. A key git-pair reads: still no. Lines the client appends: yes — `Message` gains a field rendered after `Trailers` in the same paragraph, with reserved keys rejected and a client-owned prefix. Measured: appending at the end of the block cannot forge (first-wins protects the real keys), while appending prose below the block silently evicts `Review-State` and collapses the changeset to `WORKING`. See [research/2026-10-13-appending-to-the-marker-message.md](research/2026-10-13-appending-to-the-marker-message.md). |
 | Does `--no-cache` interact with hook state? | Open | Expected no: hooks run once per command and nothing about them is memoised. Confirm no fact-cache key covers them. |
 
 ## Risks
@@ -471,7 +499,7 @@ Verification
 | A hook that commits or rewrites invalidates the `Review-Head`/`Review-Diff-Id` a marker just recorded. | Detect and report the HEAD move. Document that hooks which rewrite history invalidate approvals by design, since that is git-pair's rebase rule anyway. |
 | A `pre-submit` hook mutates the index after inspecting it, so the review commit records content the hook never checked. | Compare the staged tree (`git write-tree`) before and after the hook and refuse on a change, naming the hook — the same shape as HEAD-move detection. |
 | A reviewer's own broken hook makes their verdict unreachable, with no way to record a review in a repository they cannot fix. | `review submit --allow-hook-failure`, reported as `overridden` in the `hooks` array. `GIT_PAIR_HOOKS=0` for a hook that hangs. |
-| A per-clone hook is invisible to teammates, so an approval that a local hook gated reads as unconditional. | The record carries no hook claim in either direction (see *What the record does not carry*), and the skill says plainly that the clone root is local discipline rather than shared policy. |
+| A per-clone hook is invisible to teammates, so an approval that a local hook gated reads as unconditional. | Client-appended lines are visible to everyone who reads the commit, and the gate reads none of them (see *What the record carries, and what it does not*); the skill says plainly that the clone root is local discipline rather than shared policy. |
 | Hooks make `change ready` slow in an agent loop, and a hang blocks it forever. | Context deadline from `git-pair.hookTimeout`, plus `GIT_PAIR_HOOKS=0` and `git-pair.hooks=false`. |
 | The trust step becomes friction and people blanket-approve without reading. | `hooks --trust` prints the tree it is approving; the hash covers content, so an edit re-prompts. The clone root needs no consent step precisely because it is the person's own code. |
 | A hook corrupts the clean-tree precondition of `change ready`. | Clean-tree check runs before and after pre-hooks; the second one refuses and names the hook. |

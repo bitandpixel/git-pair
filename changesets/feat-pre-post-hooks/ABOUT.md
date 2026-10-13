@@ -110,11 +110,15 @@ mechanism use it without re-deriving the changeset in every script.
 
 ## Open questions
 
-1. **Should a hook result be recorded in the review marker?** Recommended no, above. This is the one decision
-   that should be settled before M4 rather than during it, because a trailer is a schema change and adding
-   one later is a migration.
+1. **Should a hook result be recorded in the review marker?** Split, after review: a key git-pair reads is
+   still no, and lines a client appends are yes. Answered under **Review discussion** and in
+   `docs/plans/lifecycle-hooks/research/2026-10-13-appending-to-the-marker-message.md`, which the plan now
+   cites from its spike table.
 > Maybe it can't replace content in the trailer, but could append/insert content? Then it's not a schema change or an official 
 alteration of the contract, but gives clients a way to persist a result. Let's discuss this further.
+
+→ **Author reply:** agreed, with one constraint that came out of measuring it — the append has to be done
+by `Message.Render`, not by the hook. Full answer under **Review discussion** below.
 2. **Do hooks need a manifest?** Default is no — discovery by filesystem, attributes by git config — because
    `parseMetadata` is hand-rolled `key: value` and `go.mod` has no YAML or TOML. Worth revisiting only if
    per-hook timeouts or per-hook blocking are actually wanted.
@@ -130,3 +134,57 @@ clean, 35 package shards reported `ok` and none failed, covering 15 packages. Re
 change in two of them: `internal/hygiene`, because the plan proposes a second subprocess path in shipped
 source, and `internal/cli`, because it holds the tests that bind `PRD.md`, `README.md` and the skill to the
 command tree — neither is touched by this changeset, and both still pass.
+
+## Review discussion
+
+### On review `70e40ea`: appending to the marker rather than adding a trailer key
+
+The reframe is right, and it changed the plan. I had rejected recording a hook result as though "record it"
+meant one mechanism. It means two, and they get different answers — which is why the spike moved from open
+to resolved rather than to agreed.
+
+**What the parsing actually does.** `Message.Render` (`internal/marker/marker.go:34`) emits subject, body,
+then trailers as separate paragraphs. `lifecycle.parseTrailers` (`internal/lifecycle/lifecycle.go:713`) is
+handed git's own `%(trailers:only,unfold)` — so git, not git-pair, decides which lines are trailers — and on
+duplicates it keeps the **first** value it sees (`:724`). I had assumed the risk was body text shadowing a
+verdict; git's paragraph rule means the body never enters the block at all. The real risk is positional.
+
+**Five crafted markers, measured.** Each a `git-pair: ready` marker, varying only what is appended:
+
+| Appended | git's extracted block | Derived | |
+| --- | --- | --- | --- |
+| nothing | real trailers | `READY` | control |
+| prose below the block, blank-line separated | **only the prose** | `WORKING` | real trailers evicted |
+| `Review-Hook-Result: pass suite 41s` at block end | all three | `READY` | safe |
+| `Review-State: working` **after** the real one | all three | `READY` | cannot forge from below |
+| `Review-State: working` **before** the real one | all three | `WORKING` | forges |
+
+So your instinct holds, and for a better reason than "it isn't a schema change": **appending at the end of
+the block cannot forge anything**, because first-wins protects the keys already there. The same two keys in
+the opposite order flip the state, so the append position is the security property, not cosmetics.
+
+**The trap is the obvious implementation.** Row two is what a script does naturally — `printf '%s\n' "$out"
+>> $MSG` — and it silently kills the changeset. Nothing errors, `change ready` still exits 0 because the
+commit it meant to write was written, `queue` stops listing the changeset, and `status` says `WORKING`. A
+repository can sit on a marker that derives nothing, with an empty queue as the only symptom. `Render`'s own
+comment already warns about this failure class from the subject-line end; this is the same collapse from the
+other end.
+
+**What that does to the design.** The append becomes git-pair's job, not the hook's — `Message` gains a field
+rendered after `Trailers` in the same paragraph, which makes the eviction case unreachable instead of
+documented-against. Hook-supplied keys matching anything git-pair reads are rejected before the commit, and
+the `Review-` prefix stays reserved for git-pair, so a client picks `Hook-` or `X-Hook-` and cannot collide
+with a key added in a later release. Values single-line, and the line names the head it describes
+(`Hook-Test: pass head=<sha> dur=41s`) so a rebase leaves a claim that is visibly stale rather than silently
+true — the same trick `Review-Head` exists for.
+
+**The one thing I'd still refuse, and why it isn't a disagreement about your idea.** `check` must never read
+client-appended keys. Everything above is about persisting a result; the moment the gate branches on one, it
+becomes part of the contract and "not a schema change" stops being true of it. That's a line between two
+different things, not a veto on the mechanism.
+
+**Also checked, since it was adjacent:** can reviewer `-m` text reach that parser? It sits in `Message.Body`,
+above the trailers. Crafted `-m` containing `Review-State: working` / `Review-Outcome: block` derived
+`APPROVED` with the real outcome — git's block is the last paragraph only, and `Render`'s unconditional blank
+line is what contains it. Contained by that blank line rather than impossible by construction, so it's
+recorded, and it's one more reason the renderer owns the shape.
