@@ -230,13 +230,20 @@ type hookEntry struct {
 
 // hooksReport is `git pair hooks --json`.
 type hooksReport struct {
-	TrackedRoot string      `json:"tracked_root"`
-	CloneRoot   string      `json:"clone_root"`
-	Trusted     bool        `json:"trusted"`
-	Accepted    string      `json:"accepted,omitempty"`
-	Hooks       []hookEntry `json:"hooks"`
-	Unknown     []string    `json:"unknown"`
-	Disabled    string      `json:"disabled_by,omitempty"`
+	TrackedRoot string `json:"tracked_root"`
+	CloneRoot   string `json:"clone_root"`
+	Trusted     bool   `json:"trusted"`
+	// TrustState says which of the two reasons `trusted: false` carries: `accepted`, `changed`, or
+	// `unrecorded`. It is a state rather than a second boolean because the reader's next action differs — one
+	// is "read these", the other is "the repository moved these, read what changed".
+	TrustState string `json:"trust_state"`
+	Accepted   string `json:"accepted,omitempty"`
+	// TreeHash is the tracked tree's current hash, carried only when it differs from `Accepted`: a reader
+	// comparing the two needs both, and a reader whose hooks are trusted needs neither.
+	TreeHash string      `json:"tree_hash,omitempty"`
+	Hooks    []hookEntry `json:"hooks"`
+	Unknown  []string    `json:"unknown"`
+	Disabled string      `json:"disabled_by,omitempty"`
 }
 
 func runHooksReport(ctx context.Context, a *app, trust bool) error {
@@ -261,13 +268,15 @@ func runHooksReport(ctx context.Context, a *app, trust bool) error {
 	if off, why := hooks.Disabled(ctx, repo); off {
 		rep.Disabled = why
 	}
-	rep.Trusted, err = hooks.Trusted(ctx, repo)
+	state, accepted, current, err := hooks.Trust(ctx, repo)
 	if err != nil {
 		return err
 	}
-	rep.Accepted, err = hooks.Accepted(ctx, repo)
-	if err != nil {
-		return err
+	rep.Trusted = state == hooks.TrustAccepted
+	rep.TrustState = string(state)
+	rep.Accepted = accepted
+	if state == hooks.TrustChanged {
+		rep.TreeHash = current
 	}
 	// Unknown entries are reported per root, because the fix differs: a misspelled directory under the
 	// tracked root is a file to correct and commit, and one under the clone root is a file the reader wrote
@@ -324,7 +333,16 @@ func runHooksReport(ctx context.Context, a *app, trust bool) error {
 		return nil
 	}
 	if !rep.Trusted {
-		a.printf("tracked hooks are NOT trusted: they will not run until `git pair hooks --trust` records them\n")
+		// Two states, two sentences. "Never accepted" is a setting nobody has touched; "changed" is the
+		// repository shipping a new version of a check this clone had already approved, and it is the case
+		// where work goes on with the check not running and nobody having decided that. On stderr, beside the
+		// note a run makes when it skips these same hooks: the table is the answer, this is the warning about
+		// it, and a script that captures the report should not have the warning inside it.
+		if hooks.TrustState(rep.TrustState) == hooks.TrustChanged {
+			a.warn("tracked hooks CHANGED since you accepted them (accepted %s, the tree is now %s): they will not run until `git pair hooks --trust` records them\n", rep.Accepted, rep.TreeHash)
+		} else {
+			a.warn("tracked hooks are NOT trusted: they will not run until `git pair hooks --trust` records them\n")
+		}
 	}
 	for _, h := range rep.Hooks {
 		notes := []string{}

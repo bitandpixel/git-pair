@@ -244,7 +244,7 @@ func TestHookTrustGatesTheTrackedRoot(t *testing.T) {
 		}
 	})
 
-	t.Run("editing a hook invalidates the acceptance", func(t *testing.T) {
+	t.Run("editing a hook invalidates the acceptance, and says it changed rather than never ran", func(t *testing.T) {
 		f, _ := newChangeset(t, "checkout-flow", "main")
 		dir := scratch(t)
 		putHook(t, f, "tracked", "pre-ready", "01-suite", touch(dir, "RAN"))
@@ -258,6 +258,41 @@ func TestHookTrustGatesTheTrackedRoot(t *testing.T) {
 		report := runIn(t, f.Dir(), "hooks", "--json").mustSucceed(t, "hooks", "--json").json(t)
 		if report["trusted"] != false {
 			t.Errorf("trusted = %v after editing a hook, want false", report["trusted"])
+		}
+		// `trusted: false` alone cannot tell this clone from one where nobody has run `--trust`, which is
+		// how a team shipping a new version of a check ends up with the check not running for anybody who
+		// pulled, and no signal saying so.
+		if report["trust_state"] != "changed" {
+			t.Errorf("trust_state = %v, want changed", report["trust_state"])
+		}
+		accepted, _ := report["accepted"].(string)
+		tree, _ := report["tree_hash"].(string)
+		if accepted == "" || tree == "" || accepted == tree {
+			t.Errorf("accepted=%q tree_hash=%q, want both hashes and different, so a reader can see what moved", accepted, tree)
+		}
+
+		human := runIn(t, f.Dir(), "hooks").mustSucceed(t, "hooks")
+		mustContain(t, human.stderr, "CHANGED since you accepted them", "the note has to name the move, not just the absence")
+		mustContain(t, human.stderr, accepted, "and show the hash that was approved beside the one that would run")
+		mustContain(t, human.stderr, tree, "along with the tree's current hash")
+	})
+
+	t.Run("a clone that never accepted anything does not get the changed note", func(t *testing.T) {
+		f, _ := newChangeset(t, "checkout-flow", "main")
+		dir := scratch(t)
+		putHook(t, f, "tracked", "pre-ready", "01-suite", touch(dir, "RAN"))
+
+		report := runIn(t, f.Dir(), "hooks", "--json").mustSucceed(t, "hooks", "--json").json(t)
+		if report["trust_state"] != "unrecorded" {
+			t.Errorf("trust_state = %v, want unrecorded", report["trust_state"])
+		}
+		if _, ok := report["accepted"]; ok {
+			t.Errorf("accepted = %v, want the field absent when nothing was ever approved", report["accepted"])
+		}
+		human := runIn(t, f.Dir(), "hooks").mustSucceed(t, "hooks")
+		mustContain(t, human.stderr, "NOT trusted", "the first-time sentence stays the plain one")
+		if strings.Contains(human.stderr, "CHANGED") {
+			t.Errorf("a clone that never accepted anything was told its hooks changed:\n%s", human.stderr)
 		}
 	})
 

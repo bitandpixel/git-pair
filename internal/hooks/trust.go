@@ -91,28 +91,58 @@ func TreeHash(workTree string) (string, []string, error) {
 	return hex.EncodeToString(h.Sum(nil)[:16]), names, nil
 }
 
+// TrustState names a clone's relation to the tracked hooks tree. One boolean could not carry it, because
+// `trusted: false` covers two facts a reader acts on differently. A clone that has never accepted anything is
+// a person who has not looked yet. A clone whose recorded hash no longer matches is a person the repository
+// has moved under: the team shipped a new version of the check, and the choice is now to read it and accept
+// it, or to work without it. Those two need different sentences, because the second is the moment a hook
+// starts silently not running for everybody who pulled.
+//
+// The state the person reaches for in that second case — keep running the version they read — is available
+// today by copying that content into the per-clone root, which needs no acceptance. The tool does not do the
+// copying, and does not pretend the option is missing.
+type TrustState string
+
+const (
+	// TrustAccepted is the recorded content and the current content agreeing, including the case where
+	// there is nothing to accept.
+	TrustAccepted TrustState = "accepted"
+	// TrustChanged is a recorded acceptance the tracked tree no longer matches.
+	TrustChanged TrustState = "changed"
+	// TrustUnrecorded is a clone where nobody has accepted anything yet.
+	TrustUnrecorded TrustState = "unrecorded"
+)
+
+// Trust reports the clone's state beside both hashes, so a report can name what changed rather than only that
+// something did. The tree's hash comes from the same computation that decides acceptance, so the two values an
+// answer prints are comparable to the one `git pair hooks --trust` printed when the person approved it.
+func Trust(ctx context.Context, repo *git.Repo) (TrustState, string, string, error) {
+	current, _, err := TreeHash(repo.Dir)
+	if err != nil {
+		return TrustUnrecorded, "", "", err
+	}
+	if current == "" {
+		return TrustAccepted, "", "", nil
+	}
+	accepted, err := Accepted(ctx, repo)
+	if err != nil {
+		return TrustUnrecorded, "", current, err
+	}
+	switch {
+	case accepted == "":
+		return TrustUnrecorded, "", current, nil
+	case accepted == current:
+		return TrustAccepted, accepted, current, nil
+	default:
+		return TrustChanged, accepted, current, nil
+	}
+}
+
 // Trusted reports whether the tracked hooks tree matches what was accepted. A tree that does not exist is
 // trusted by vacuity: there is nothing there to run.
 func Trusted(ctx context.Context, repo *git.Repo) (bool, error) {
-	gitDir, err := repo.GitDir(ctx)
-	if err != nil {
-		return false, err
-	}
-	want, _, err := TreeHash(repo.Dir)
-	if err != nil {
-		return false, err
-	}
-	if want == "" {
-		return true, nil
-	}
-	recorded, err := os.ReadFile(trustRecordPath(gitDir))
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("reading the hook trust record: %w", err)
-	}
-	return strings.TrimSpace(string(recorded)) == want, nil
+	state, _, _, err := Trust(ctx, repo)
+	return state == TrustAccepted, err
 }
 
 // Accepted reports the recorded hash, or "" when nobody has accepted anything.

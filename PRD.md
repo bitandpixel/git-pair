@@ -1962,6 +1962,19 @@ An unaccepted tree does not run at all — the operation proceeds and the skippe
 so a clone is never surprised by an unreviewed script and never silently left without the checks it thinks it
 has. Editing a hook changes the hash, so an edit after acceptance is a new acceptance.
 
+Acceptance has three states, not two, because the reasons a tracked tree does not run are different facts.
+**Unrecorded** is a clone where nobody has accepted anything. **Changed** is a clone whose recorded hash the
+repository has moved under — the team shipped a new version of the check. They read differently on stderr, the
+second naming the accepted hash beside the tree's current one, because the second is the moment a check starts
+not running for everybody who pulled, and a note that reads the same in both makes a breaking change to a check
+look like a setting nobody touched. `git pair hooks --json` carries `trust_state` beside `trusted`, and
+`tree_hash` when the two differ.
+
+A clone in the changed state has a third option besides accepting or working without: it can keep running the
+version it did read, by copying that content into the per-clone root, which needs no acceptance. git-pair does
+not do the copying and does not keep a second copy of the hooks — the choice is between the repository's
+current content and content the person chose, and which one ran is visible from the roots the report prints.
+
 ### Execution
 
 A hook is executed directly, never through a shell, with the repository root as its working directory and no

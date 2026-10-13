@@ -1,11 +1,15 @@
 package hooks
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"gitpair/internal/git"
+	"gitpair/internal/gittest"
 )
 
 // The discovery rules are the interface a team writes against, and they are small enough to enumerate
@@ -131,5 +135,80 @@ func TestPlanSkippedUntrusted(t *testing.T) {
 	}
 	if !slices.Equal(got, []string{"01-repo"}) {
 		t.Errorf("skipped = %v, want [01-repo]", got)
+	}
+}
+
+// The two reasons a tracked tree does not run are different facts, and the report has to tell them apart: a
+// clone that has never accepted anything is a person who has not looked, and a clone whose accepted hash no
+// longer matches is a person the repository moved a check under. The states are the difference between
+// "read this" and "the team shipped a new version, and your work is running without it".
+func TestTrustStates(t *testing.T) {
+	ctx := context.Background()
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	repo := &git.Repo{Dir: f.Dir()}
+
+	// Nothing to accept is accepted by vacuity: an absent hooks directory must not read as a pending
+	// approval, or every repository without hooks would be reported as waiting on one.
+	state, accepted, current, err := Trust(ctx, repo)
+	if err != nil {
+		t.Fatalf("Trust with no hooks: %v", err)
+	}
+	if state != TrustAccepted || accepted != "" || current != "" {
+		t.Errorf("no hooks: state=%s accepted=%q current=%q, want accepted with neither hash", state, accepted, current)
+	}
+
+	if err := os.MkdirAll(filepath.Join(f.Dir(), ".git-pair", "hooks", "pre-ready"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	hook := filepath.Join(f.Dir(), ".git-pair", "hooks", "pre-ready", "01-suite")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+
+	state, accepted, current, err = Trust(ctx, repo)
+	if err != nil {
+		t.Fatalf("Trust before acceptance: %v", err)
+	}
+	if state != TrustUnrecorded || accepted != "" || current == "" {
+		t.Errorf("never accepted: state=%s accepted=%q current=%q, want unrecorded with only the tree hash", state, accepted, current)
+	}
+
+	want, _, err := Accept(ctx, repo)
+	if err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	state, accepted, current, err = Trust(ctx, repo)
+	if err != nil {
+		t.Fatalf("Trust after acceptance: %v", err)
+	}
+	if state != TrustAccepted || accepted != want || current != want {
+		t.Errorf("accepted: state=%s accepted=%q current=%q want=%s", state, accepted, current, want)
+	}
+
+	// The case the boolean used to swallow. A line added after the approval — a check that now runs
+	// something else too — is new content, and the answer has to name both hashes so the reader can see what
+	// moved rather than being told only that something is wrong.
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nmisbehave\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("rewrite hook: %v", err)
+	}
+	state, accepted, current, err = Trust(ctx, repo)
+	if err != nil {
+		t.Fatalf("Trust after the edit: %v", err)
+	}
+	if state != TrustChanged {
+		t.Errorf("after an edit: state=%s, want changed", state)
+	}
+	if accepted != want {
+		t.Errorf("recorded hash = %q, want the accepted %q", accepted, want)
+	}
+	if current == want || current == "" {
+		t.Errorf("current hash = %q, want a new hash beside the accepted %q", current, want)
+	}
+
+	// The two hashes a report shows are the same values `--trust` printed, so a person comparing them is
+	// comparing the thing they approved against the thing that would run.
+	if trusted, err := Trusted(ctx, repo); err != nil || trusted {
+		t.Errorf("Trusted = %v (%v) after the edit, want false", trusted, err)
 	}
 }

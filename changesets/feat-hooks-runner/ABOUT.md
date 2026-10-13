@@ -14,7 +14,9 @@ milestone of the approved lifecycle-hooks plan (`docs/plans/lifecycle-hooks/plan
 ## What changed
 
 -   `internal/hooks/` — the new package. `Discover` finds the hooks configured for a point across two roots;
-    `Run` executes them argv-exact with a deadline and captured output; `Trusted`/`Accept` are the trust store.
+    `Run` executes them argv-exact with a deadline and captured output; `Trusted`/`Accept`/`Trust` are the
+    trust store, where `Trust` reports the clone's state — accepted, changed, or unrecorded — beside both
+    hashes.
 -   `internal/cli/hooks.go` — `app.runHooks`, the single call site every command reaches its point through,
     plus `git pair hooks` and `git pair hooks --trust`.
 -   `internal/cli/change.go` — `runChangeReady` calls the `pre-ready` point after the built-in checks and
@@ -97,6 +99,18 @@ override.
     documents rather than one.
 -   `go test ./internal/hygiene/` green — the new package introduces no literal for the git verbs git-pair
     itself must not invoke, and no read-path command gained a hook.
+-   `Trust` is the new answer and `Trusted` is now expressed through it, so one comparison decides and the
+    report cannot disagree with the runner. The cases: no tracked tree is accepted by vacuity with neither hash
+    set; a tree nobody accepted is `unrecorded` with only the tree hash; after `Accept` both hashes equal the
+    approved value; after a rewrite it is `changed`, the recorded hash still the approved one, and `Trusted`
+    false.
+-   End to end in the CLI: a clone that never accepted gets the plain `NOT trusted` sentence and no `accepted`
+    field; a clone the repository moved under gets `CHANGED since you accepted them` with both hashes, on
+    stderr, and `trust_state: "changed"` with `tree_hash` in the JSON. The two hashes are asserted distinct, so
+    the report cannot print one value twice and call it a comparison.
+-   Checked against the built binary rather than only the tests: a fixture repository at the three states —
+    never accepted, `hooks --trust`, then a committed rewrite of the hook — printed the two sentences and the
+    hash pair this changeset claims.
 -   `mise run check` exited 0 on the committed tree (`f96271e`): 35 test shards ok, 27 of them served from
     cache, no `FAIL`, and the gate's own `gofmt -l internal cmd` step reported nothing. Run from the
     repository root, which is the task that runs build, gofmt, vet and every package's tests including the
@@ -124,6 +138,15 @@ override.
 -   Hooks are not part of `check`. That is M3, and it lands only on the command's entry point: `change
     integrate` runs `check`'s gate as the same code, and hooks firing there would double-run a suite inside
     one author action.
+-   **Acceptance answers three states, because two failures wear one sentence.** `trusted: false` covered both
+    a clone where nobody has run `--trust` and a clone whose accepted hash the repository moved under by
+    shipping a new version of the check. The second needs its own words: it is the moment a check starts not
+    running for everybody who pulled, and from the clone it looks identical to the first. `git pair hooks`
+    now reports `trust_state` (`accepted`, `changed`, `unrecorded`) and, when the two differ, both the
+    accepted hash and the tree's current one — the values `--trust` printed when the person approved, so the
+    comparison is against something they saw. A state rather than a second boolean, because the reader's next
+    action differs: one is "read these", the other is "read what moved, then decide". The warning goes to
+    stderr beside the note a run makes when it skips the same hooks; the table stays the answer on stdout.
 
 ## Open questions
 
@@ -134,6 +157,15 @@ override.
 -   Whether an untrusted tracked tree should refuse outright once a repository has committed hooks — today it
     proceeds with a note. The current answer favours the fresh clone; a team that wants enforcement will want
     the other one.
+-   Whether the `changed` state should be louder than `unrecorded` at run time. Today `change ready` says the
+    same sentence in both cases and `git pair hooks` is the command that explains which; if the enforcement
+    question above resolves toward refusing, the run-time note has to carry the distinction too, because "you
+    are working without the check the team shipped yesterday" is not a fact to relegate to a second command.
+-   Whether keeping the version you read deserves a command. It works today by copying the old content into
+    the per-clone root, which is git's model applied by hand (`git show <commit>:.git-pair/hooks/…` and a
+    `chmod +x`). A first-class `hooks --pin` would be a real convenience, and it is the piece this milestone
+    deliberately did not add: it needs a decision about what happens when a pinned copy and a later-accepted
+    tracked tree both match a point, and that decision belongs with the enforcement question above.
 
 ## Addressed feedback
 
@@ -177,9 +209,41 @@ accepted the tracked tree runs none of its hooks and says so on stderr rather th
 answer is that a committed check must run or the command must fail, that changes consent's consequence, not
 where the files live.
 
-> the second copy may be a feature rather than a bug in some cases. For example, the repo pushes a new version of the hooks
-but they are not backwards compatible for whatever reason.  The local dev can continue running the existing hooks until they are
-ready to adopt the new hooks. Then they overwrite the local .git hooks with the new vendored ones. With the acceptance-persisted
-model, the only option is to accept the new version of the hooks or skip them, right? Are there other tradeoffs I'm not thinking about?
-Like you mentioned, the drift and ability to customize seem okay to me becuase we already have a pattern for detecting this with
-skills. But you're right you do enforcement by the repo owner that each clone is more likely to run the hooks exactly as-desired. hmmm.
+### "the second copy may be a feature rather than a bug in some cases … with the acceptance-persisted model, the only option is to accept the new version of the hooks or skip them, right?"
+
+Not only those two. A clone whose repository shipped a version it does not want can keep running the version it
+did read: copy that content into the per-clone root (`<git-dir>/git-pair/hooks/<point>/`), which runs directly
+with no acceptance. That is the vendored model, applied by one developer for one point, and it is available
+today — `git show <commit>:.git-pair/hooks/pre-check/01-suite` into the clone root, `chmod +x`, and the check
+that was read is the check that runs. What git-pair does not do is keep that copy for everybody, which is where
+the two models actually differ.
+
+What the reviewer's scenario did expose was not the model but the signal, and that is fixed in this round.
+Under the single boolean, a team shipping a breaking new version produced the same sentence as a clone that had
+never accepted anything, so the developer who pulled could not tell "there is a new check to read" from "I have
+not run `--trust` yet", and the default outcome was that the check stopped running without anyone deciding it
+should. `git pair hooks` now answers `trust_state` — `unrecorded`, `changed`, `accepted` — and the changed case
+names the accepted hash beside the tree's current one, so the move is visible and the developer chooses.
+
+The tradeoffs, both ways, as they landed:
+
+- **Staleness is invisible under vendoring, visible here.** A vendored copy can enforce a rule the repository
+  no longer has, and produce a pass nobody can attribute; the acceptance model runs either the current content
+  or nothing, and the report says which.
+- **A false pass is the expensive failure for a check.** A developer on an old copy of `02-migration-check`
+  while the schema has moved gets a green hook that tested something else. Under acceptance the same situation
+  is a red flag on stderr with two hashes.
+- **Rollback is cheaper here.** When a team reverts a bad hook version, the tracked hash returns to the value
+  clones already accepted and everyone is running it again with no action; vendored copies have to be re-copied
+  one developer at a time.
+- **Coupling to the code is the tracked root's point.** A check that ships with the commit it checks cannot lag
+  it. A vendored check can be a rule written for a version of the tree this clone no longer holds.
+- **Adoption timing is the vendored model's real win, and it is the case above.** Its cost there is that the
+  repository cannot see which clones are behind, which is the property a team that wants its check enforced
+  cares most about.
+
+The two decisions are coupled, and it is worth naming: if the open question above resolves toward refusing when
+a tracked tree is unaccepted, a breaking hook version would stop every clone until each developer accepted, and
+the copy-into-the-clone-root escape becomes the only way to keep working. That is when a first-class pin command
+would earn its place, and it is recorded as an open question rather than built here — a command that promises a
+way to keep working should be designed together with the rule it routes around.
