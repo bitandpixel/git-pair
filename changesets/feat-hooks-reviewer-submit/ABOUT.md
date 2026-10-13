@@ -93,9 +93,14 @@ feature usable for a reviewer at all. Both are tested, including the same tracke
 -   `mise run check` exited **0**: 36 test shards ok (31 served from cache, the rest re-run against the final
     tree), no `FAIL`, and its `gofmt -l internal cmd` step reported nothing. Run again after this file was
     written, with the same result.
--   Restacked onto M1's answers to the reviewer's feedback and re-run: exit 0, 36 shards ok, no `FAIL`,
-    `gofmt` silent. Nothing about the reviewer's two questions bears on this milestone's behaviour —
-    both were answered from what the code already does — so no test changed.
+-   Restacked onto M1's answers to the reviewer's feedback, twice — once for the two questions, once for the
+    `trust_state` work that came out of the vendoring discussion — and re-run each time: exit 0, 36 shards ok,
+    no `FAIL`, `gofmt` silent. Neither answer bears on this milestone's behaviour; both were answered from what
+    the code already does, so no test changed. The reviewer-side trust rule did get sharper as a side effect of
+    the second answer: a reviewer reviewing a repository they cannot edit is exactly the person who may be
+    sitting on a `changed` tracked tree they never read, which is why the open question about unaccepted tracked
+    hooks now names the reviewer. The two documentation rows collided with M1's new trust-state wording during
+    the restack and carry both texts.
 
 ## Known limitations
 
