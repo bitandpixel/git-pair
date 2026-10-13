@@ -605,6 +605,7 @@ git-pair
 ├── status
 ├── diff
 ├── check
+├── hooks
 └── skill
     ├── install
     ├── list
@@ -1907,6 +1908,139 @@ cannot invalidate a review of it, so a dirty working tree does not change the an
 reports the dirt, because `status` is observing.
 
 Landing is not a command. The destination's tree is the record (§13), and §29 is the contract that says what a landing consists of: the gate, the merge, and nothing afterwards.
+
+## 11.4 Lifecycle hooks
+
+A repository can run its own script at a lifecycle point — the moment an author hands work on, or a reviewer
+submits a verdict — and refuse the operation when that script says no. The built-in checks can only ask what
+git already knows: a clean tree, an existing `ABOUT.md`, a standing approval. Whether the suite passed, the
+migration applies, the generated client is up to date — none of that is in the graph, and none of it is
+something this tool can know for a repository it does not own.
+
+**Hooks are client control, not repository enforcement.** git-pair publishes an event; the client owns the
+script. This is the same relationship as git's own hooks and `core.hooksPath`, and it is the reason a hook is
+allowed to run commands git-pair itself never invokes (§26): what that clause binds is what this tool runs of
+its own choosing, not what a person installs in their own checkout. It follows that a hook is not a control
+against the person working in the clone — they wrote it, and they can delete it. What it guarantees is that
+*nobody* hands work on over a failing check, and that the author sees the failure in the same words the CI
+job will use.
+
+### Configuration
+
+Hooks live in two roots, consulted in this order:
+
+| Root | Path | Trust |
+| --- | --- | --- |
+| tracked | `<worktree>/.git-pair/hooks/<point>/` | committed, therefore content that arrived from somewhere; runs only after `git pair hooks --trust` |
+| per-clone | `<git-dir>/git-pair/hooks/<point>/` | the person's own file under their own git directory, never committed, runs directly |
+
+The tracked root is a deliberate departure from git's own model, where `.git/hooks` is not cloned and a team
+vendors a script into every checkout. Vendoring buys one execution surface and costs a second copy of the
+check: the executed bytes drift from the reviewed ones, and the tool needs a drift report to say which is
+running. git-pair keeps one copy and makes consent the step instead of installation — the hash below is over
+the tracked tree's content, so what a person accepts is what a reviewer read, and what executes is still that
+file. It also keeps a check and the code it checks in one commit, so the migration check a schema change ships
+is the version of that check. The per-clone root is git's model, kept for the client's own additions.
+
+Within a point, the tracked root runs first, then the per-clone root: the repository's rules are the baseline
+and the client adds to them. Under a point, either a directory of scripts or a single file named for the
+point is accepted. Scripts run in lexicographic order by name, which is how a suite is sequenced — `01-fmt`,
+`02-test` — without inventing a format for declaring order, and the first failure stops the rest, because a
+suite that fails at minute one should not be followed by the next suite.
+
+Entries git-pair does not run are ignored by name, not by content: anything beginning with `.`, anything
+ending in `.sample` or `.md`, and anything ending in `~`, so editors and notes leave nothing behind. Names
+that are not lifecycle points are never guessed at — they are reported by `git pair hooks`, because an
+entry nobody runs is otherwise indistinguishable from no entry at all.
+
+### Trust
+
+A tracked file is code that runs on a clone, which is why git keeps its hooks under `.git/` and refuses to
+clone them. git-pair's tracked hooks are committable because consent is taken by content: the path, mode, and
+bytes of the tracked hooks tree are hashed and the hash is recorded per clone in `<git-dir>/git-pair/trusted-hooks`.
+An unaccepted tree does not run at all — the operation proceeds and the skipped hooks are named on stderr,
+so a clone is never surprised by an unreviewed script and never silently left without the checks it thinks it
+has. Editing a hook changes the hash, so an edit after acceptance is a new acceptance.
+
+Acceptance has three states, not two, because the reasons a tracked tree does not run are different facts.
+**Unrecorded** is a clone where nobody has accepted anything. **Changed** is a clone whose recorded hash the
+repository has moved under — the team shipped a new version of the check. They read differently on stderr, the
+second naming the accepted hash beside the tree's current one, because the second is the moment a check starts
+not running for everybody who pulled, and a note that reads the same in both makes a breaking change to a check
+look like a setting nobody touched. `git pair hooks --json` carries `trust_state` beside `trusted`, and
+`tree_hash` when the two differ.
+
+A clone in the changed state has a third option besides accepting or working without: it can keep running the
+version it did read, by copying that content into the per-clone root, which needs no acceptance. git-pair does
+not do the copying and does not keep a second copy of the hooks — the choice is between the repository's
+current content and content the person chose, and which one ran is visible from the roots the report prints.
+
+### Execution
+
+A hook is executed directly, never through a shell, with the repository root as its working directory and no
+input on stdin. It receives the resolution the command already made, so it never has to re-derive it:
+
+| Variable | Meaning |
+| --- | --- |
+| `GIT_PAIR_HOOK_POINT` | the point that fired, e.g. `pre-ready` |
+| `GIT_PAIR_CHANGESET` | the resolved changeset id |
+| `GIT_PAIR_BRANCH` | the branch holding the work |
+| `GIT_PAIR_BASE` | the base branch |
+| `GIT_PAIR_HEAD` | the current head commit |
+| `GIT_PAIR_DEFAULT_BRANCH` | the destination, when known |
+| `GIT_PAIR_HOOK_ROOT` | `worktree` or `clone` |
+| `GIT_PAIR_HOOKS` | `1`, inherited by anything the hook runs — a nested `git pair` runs no hooks |
+
+Its stdout and stderr are captured and never written to git-pair's own stdout, which is where `--json`
+lives; a verdict an automation cannot parse is worse than no verdict. A failing hook's output is replayed on
+stderr with the refusal, because that is the text the author needs next. A passing hook's output is replayed
+only when `GIT_PAIR_HOOK_OUTPUT` is set, because a suite that prints four hundred lines would make every
+hand-off unreadable.
+
+Each hook gets a deadline — `GIT_PAIR_HOOK_TIMEOUT` seconds, then `git-pair.hookTimeout` in git config, then
+ten minutes. There is no force flag for a hook that times out: waiting ten minutes and then running the
+operation anyway is how a hung check becomes a habit.
+
+### Refusal
+
+A **pre-hook** that exits nonzero refuses the operation with exit code **1**. It is a business refusal, not a
+git failure, and the distinction is the whole agent-facing contract: `1` means the repository said no and the
+state must be fixed, `3` means git itself broke. A refused handoff writes no marker, and the refusal names
+the hook, the point, and the hook's own output.
+
+A **post-hook** reports and never reverses. git-pair never unwinds a lifecycle transition (§26 forbids it
+running `reset`), and a post-hook that could reverse a published verdict would put that reversal in an
+agent's hands as a write the contract does not account for. A post-hook failure is printed, and reported in
+`--json`, and does not change the exit code.
+
+A pre-hook that changes the working tree is refused. The marker is written only over a clean tree, so files a
+hook generated and nobody staged would otherwise travel into a review that no one looked at.
+
+To run nothing: `git-pair.hooks=false` in git config, or `GIT_PAIR_HOOKS=0` in the environment — which is
+also the guard a hook inherits, so a hook that shells out to `git pair` cannot re-enter.
+
+### `git pair hooks`
+
+`git pair hooks` answers what is configured, without running anything: both roots, each hook with its
+executability and whether this build invokes its point at all, any entry that is not a lifecycle point, and
+whether the tracked tree is accepted. A person who has just cloned the repository and been told a hook did
+not run needs to find out why from this command and no other.
+
+`git pair hooks --trust` records the tracked hooks tree as accepted and prints what it is approving — the
+hook names and the hash — so the consent is given against something visible.
+
+```text
+$ git pair hooks
+tracked: .git-pair/hooks        accepted: yes
+clone:   .git/git-pair/hooks
+
+  pre-ready   01-fmt           tracked  executable
+  pre-ready   02-test          tracked  executable
+  pre-abandon 01-note          tracked  executable   not run by this build
+```
+
+The points this build runs are `pre-ready`. The others arrive with the milestones that run them, and the
+documentation follows the code rather than the plan.
 
 ## 11.5 The agent skill
 
