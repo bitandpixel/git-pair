@@ -136,23 +136,15 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 		Point: hooks.PreReady, Slug: s.cs.Slug, Branch: s.cs.Branch,
 		Base: s.cs.Base, Head: s.head, Dest: s.trunk.Ref,
 	}
-	hookResults, err := a.runHooks(ctx, s, hookCtx)
+	hookResults, err := a.runPre(ctx, s, hookCtx)
 	if err != nil {
 		return err
 	}
 	// A hook that formatted or generated files has invalidated the clean tree this command checked at the
-	// top. Refusing is the only honest answer: committing a marker over files nobody staged would put
-	// unreviewed content inside the span a reviewer is about to read, and the alternative — committing them
-	// on the author's behalf — is a thing git-pair does not do.
-	if len(hookResults) > 0 {
-		clean, err := s.repo.IsClean(ctx)
-		if err != nil {
-			return err
-		}
-		if !clean {
-			return fmt.Errorf("a %s hook left changes in the working tree; commit or stash them, then mark %s ready again",
-				hooks.PreReady, s.cs.Slug)
-		}
+	// top. See refuseIfHooksDirtiedTree for why refusing is the only honest answer, and why the check costs
+	// nothing in a repository that has no hooks.
+	if err := a.refuseIfHooksDirtiedTree(ctx, s, hookResults, hooks.PreReady, s.cs.Slug); err != nil {
+		return err
 	}
 
 	sha, err := marker.CommitWithEnv(ctx, s.repo, marker.ReadyMessage(s.cs.Slug), s.trunk, hooks.RenderEnv(hookCtx.env()))
@@ -162,8 +154,86 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 	// The marker commit is the whole operation: no ref is written, and nothing is anchored. The
 	// branch holds the chain from here, and it is the only thing that does until landing — which is
 	// why the merge happens before the branch goes away rather than after (PRD §13.3).
-	printReady(a, s, sha, report, opts.allowSurviving, hookResults)
+	//
+	// The post-hooks are told the marker's own commit as the head, because that is the head that now exists:
+	// a notification hook that reported the pre-transition commit would describe a state the branch no
+	// longer has.
+	post := a.runPost(ctx, s, hookContext{
+		Point: hooks.PostReady, Slug: s.cs.Slug, Branch: s.cs.Branch,
+		Base: s.cs.Base, Head: sha, Dest: s.trunk.Ref,
+	})
+	a.warnIfHooksMovedHead(ctx, s, sha, hooks.PostReady, post)
+	printReady(a, s, sha, report, opts.allowSurviving, append(hookResults, post...))
+	if f, failed := firstFailure(post); failed {
+		return postHookError(hooks.PostReady, f, s.cs.Slug)
+	}
 	return nil
+}
+
+// postHookError is the second half of the news: the transition happened and stands, and something after it
+// failed. The wording says which of the two the reader is looking at, because a bare "failed" makes an author
+// believe the marker was never written and go looking for a command to re-run — and re-running `change ready`
+// on a changeset that is already READY is the wrong next step.
+//
+// The exit code is still 1, the business-refusal half of the table in `root.go`. Nothing reverses the
+// transition: git-pair does not unwind a lifecycle point, so a post-hook failure that returned 0 would be a
+// failure that automation never sees.
+func postHookError(point hooks.Point, r hooks.Result, slug string) error {
+	switch r.Status {
+	case hooks.StatusNotExecutable:
+		return fmt.Errorf("%s is %s, but the %s hook %q is not executable; make it one with `chmod +x %s`",
+			slug, stateAfterPoint(point), point, r.Hook.Name, displayPath(r.Hook.Path))
+	case hooks.StatusTimeout:
+		return fmt.Errorf("%s is %s, but the %s hook %q exceeded its deadline; raise it with $%s or `git config git-pair.hookTimeout`",
+			slug, stateAfterPoint(point), point, r.Hook.Name, hooks.TimeoutEnv)
+	default:
+		return fmt.Errorf("%s is %s, but the %s hook %q failed with exit %d — the marker stands and nothing was undone",
+			slug, stateAfterPoint(point), point, r.Hook.Name, r.Exit)
+	}
+}
+
+// stateAfterPoint names what the transition left the changeset as, so the refusal states the fact rather
+// than leaving the reader to infer it from the absence of a "not". They are the words the commands
+// themselves print. `abandoned` is not a `model.State` — abandonment is a terminal record rather than a
+// state the queue derives — so it is spelled here rather than borrowed.
+func stateAfterPoint(p hooks.Point) string {
+	switch p {
+	case hooks.PostReady:
+		return string(model.StateReady)
+	case hooks.PostUnready:
+		return string(model.StateWorking)
+	case hooks.PostAbandon:
+		return "abandoned"
+	case hooks.PostIntegrate:
+		return string(model.StateIntegrating)
+	default:
+		return "changed"
+	}
+}
+
+// warnIfHooksMovedHead says when the hooks after a transition committed. The marker is the head a review is
+// anchored to, so a commit after it means the changeset now carries work that marker never described — and
+// the warning has to name the marker it invalidated, because "HEAD moved" does not tell an author which of
+// their commits review has gone blind to.
+//
+// It names the hooks that ran rather than one hook that committed. A hook is a child process that can do
+// anything a git command can, and git-pair does not watch the index between them, so "which of these did
+// it" is not a question this command can answer; naming the set is the honest version, and it is the set the
+// author has to read.
+func (a *app) warnIfHooksMovedHead(ctx context.Context, s *session, markerSHA string, point hooks.Point, ran []hooks.Result) {
+	now, err := s.repo.Head(ctx)
+	if err != nil || now == markerSHA {
+		return
+	}
+	names := make([]string, 0, len(ran))
+	for _, r := range ran {
+		if r.Ran() {
+			names = append(names, r.Hook.Name)
+		}
+	}
+	a.warn("git-pair: warning: the %s hooks (%s) moved HEAD to %s; the %s marker at %s no longer names the head of %s, "+
+		"so anything after it is work review has not been offered\n",
+		point, strings.Join(names, ", "), short(now), strings.TrimPrefix(point.String(), "post-"), short(markerSHA), s.cs.Slug)
 }
 
 func printReady(a *app, s *session, sha string, report *survival.Report, acknowledged bool, hookResults []hooks.Result) {
@@ -283,13 +353,39 @@ func runChangeUnready(ctx context.Context, a *app) error {
 		return err
 	}
 	if !inReview(s.summary.State) {
-		return printUnready(a, s, "")
+		// Nothing to withdraw, so no transition, and no hooks. A point fires when a lifecycle event
+		// happens; a command that writes nothing is not an event, and a repository's notify-on-withdrawal
+		// hook should not fire because someone re-ran a command that was already done.
+		return printUnready(a, s, "", nil)
 	}
-	sha, err := marker.Commit(ctx, s.repo, marker.UnreadyMessage(s.cs.Slug), s.trunk)
+	hc := hookContext{
+		Slug: s.cs.Slug, Branch: s.cs.Branch, Base: s.cs.Base, Head: s.head, Dest: s.trunk.Ref,
+	}
+	hc.Point = hooks.PreUnready
+	pre, err := a.runPre(ctx, s, hc)
+	if err != nil {
+		return err
+	}
+	// The marker this command writes is empty and is committed over whatever the index holds, so a hook that
+	// dirtied the tree is refused the same way `change ready` refuses it.
+	if err := a.refuseIfHooksDirtiedTree(ctx, s, pre, hooks.PreUnready, s.cs.Slug); err != nil {
+		return err
+	}
+	hc.Point = hooks.PostUnready
+	sha, err := marker.CommitWithEnv(ctx, s.repo, marker.UnreadyMessage(s.cs.Slug), s.trunk, hooks.RenderEnv(hc.env()))
 	if err != nil {
 		return fmt.Errorf("creating unready marker: %w", err)
 	}
-	return printUnready(a, s, sha)
+	hc.Head = sha
+	post := a.runPost(ctx, s, hc)
+	a.warnIfHooksMovedHead(ctx, s, sha, hooks.PostUnready, post)
+	if err := printUnready(a, s, sha, post); err != nil {
+		return err
+	}
+	if f, failed := firstFailure(post); failed {
+		return postHookError(hooks.PostUnready, f, s.cs.Slug)
+	}
+	return nil
 }
 
 // inReview reports whether the changeset is currently offered to a reviewer, and so
@@ -312,7 +408,7 @@ func inReview(state model.State) bool {
 
 // printUnready reports the retraction. An empty sha means there was nothing to retract:
 // the command still succeeded, and says why it recorded nothing.
-func printUnready(a *app, s *session, sha string) error {
+func printUnready(a *app, s *session, sha string, hookResults []hooks.Result) error {
 	// The marker is the newest commit, so its state is the derived state by
 	// construction. Without one the changeset keeps whatever state it had, which for
 	// a BLOCKED changeset is not WORKING.
@@ -330,6 +426,7 @@ func printUnready(a *app, s *session, sha string) error {
 			"recorded":             sha != "",
 			"unready_commit":       sha,
 			"review_queue_visible": false,
+			"hooks":                hooksForJSON(hookResults),
 		})
 	}
 	if sha == "" {
@@ -404,20 +501,42 @@ func runChangeAbandon(ctx context.Context, a *app) error {
 	}
 	if at != nil {
 		// Already ended. Like `change unready` on a changeset that was never offered,
-		// the wanted state already holds, so a script can abandon unconditionally.
-		return printAbandoned(a, s, at, "")
+		// the wanted state already holds, so a script can abandon unconditionally. And like that
+		// command, it runs no hooks: the ending happened earlier, and a notify-on-ending hook has
+		// already fired for it.
+		return printAbandoned(a, s, at, "", nil)
 	}
-
-	sha, err := marker.Commit(ctx, s.repo, marker.AbandonedMessage(s.cs.Slug), s.trunk)
+	hc := hookContext{
+		Slug: s.cs.Slug, Branch: s.cs.Branch, Base: s.cs.Base, Head: s.head, Dest: s.trunk.Ref,
+	}
+	hc.Point = hooks.PreAbandon
+	pre, err := a.runPre(ctx, s, hc)
+	if err != nil {
+		return err
+	}
+	if err := a.refuseIfHooksDirtiedTree(ctx, s, pre, hooks.PreAbandon, s.cs.Slug); err != nil {
+		return err
+	}
+	hc.Point = hooks.PostAbandon
+	sha, err := marker.CommitWithEnv(ctx, s.repo, marker.AbandonedMessage(s.cs.Slug), s.trunk, hooks.RenderEnv(hc.env()))
 	if err != nil {
 		return fmt.Errorf("creating abandon marker: %w", err)
 	}
-	return printAbandoned(a, s, &lifecycle.Event{SHA: sha, Short: short(sha), Kind: lifecycle.KindAbandoned}, sha)
+	hc.Head = sha
+	post := a.runPost(ctx, s, hc)
+	a.warnIfHooksMovedHead(ctx, s, sha, hooks.PostAbandon, post)
+	if err := printAbandoned(a, s, &lifecycle.Event{SHA: sha, Short: short(sha), Kind: lifecycle.KindAbandoned}, sha, post); err != nil {
+		return err
+	}
+	if f, failed := firstFailure(post); failed {
+		return postHookError(hooks.PostAbandon, f, s.cs.Slug)
+	}
+	return nil
 }
 
 // printAbandoned reports the ending. An empty sha means the changeset was already
 // abandoned, and the marker named by `at` is the one that says so.
-func printAbandoned(a *app, s *session, at *lifecycle.Event, sha string) error {
+func printAbandoned(a *app, s *session, at *lifecycle.Event, sha string, hookResults []hooks.Result) error {
 	if a.json {
 		return a.emitJSON(map[string]any{
 			"changeset":        s.cs.Slug,
@@ -426,6 +545,7 @@ func printAbandoned(a *app, s *session, at *lifecycle.Event, sha string) error {
 			"was":              string(s.summary.State),
 			"recorded":         sha != "",
 			"abandoned_commit": at.SHA,
+			"hooks":            hooksForJSON(hookResults),
 		})
 	}
 	if sha == "" {

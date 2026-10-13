@@ -49,12 +49,96 @@ func (c hookContext) env() map[string]string {
 	return env
 }
 
-// runHooks is the one call site. A command asks for its point, and either gets results it can report or an
-// error that refuses the operation.
+// runPre runs the point's hooks on the way into a transition and refuses the operation when one of them
+// fails.
+func (a *app) runPre(ctx context.Context, s *session, c hookContext) ([]hooks.Result, error) {
+	results, err := a.runPoint(ctx, s, c, blockingMode)
+	if err != nil {
+		return results, err
+	}
+	return results, hookError(results)
+}
+
+// runPost runs the point's hooks on the way out of a transition and reports them.
 //
-// Pre-hooks block and post-hooks report; which one a point is is the caller's decision, not this one's, so
-// the same call serves both and the caller decides what to do with a blocking result.
-func (a *app) runHooks(ctx context.Context, s *session, c hookContext) ([]hooks.Result, error) {
+// It returns no error, because there is nothing left to refuse: the marker is written, the changeset is in
+// the queue or out of it, and git-pair does not unwind a lifecycle transition. What it can do is say so —
+// the caller reports the failure and lets the exit code carry it, so automation learns that something after
+// the operation went wrong without being told the operation itself did.
+//
+// A hook that could not be reached at all is a different case from a hook that ran and failed. Discovery
+// trouble is printed and not fatal: a repository whose hooks directory has become unreadable should not turn
+// into a claim that the transition, which happened, did not.
+func (a *app) runPost(ctx context.Context, s *session, c hookContext) []hooks.Result {
+	results, err := a.runPoint(ctx, s, c, reportingMode)
+	if err != nil {
+		a.warn("git-pair: the %s hooks could not be read: %v\n", c.Point, err)
+	}
+	return results
+}
+
+// firstFailure picks the result the exit code should be reported for. Post-hooks keep running after one
+// fails — there is nothing to stop, and the remaining hooks may have side effects their owner still wants —
+// so the first failure is the one named.
+func firstFailure(results []hooks.Result) (hooks.Result, bool) {
+	for _, r := range results {
+		if r.Blocking() {
+			return r, true
+		}
+	}
+	return hooks.Result{}, false
+}
+
+// executedHooks reports whether any of these results came from a hook that actually ran. It is what makes
+// the clean-tree re-check cost nothing where there are no hooks: a repository with none configured does the
+// work it always did, and one extra `git status` per command is a price nobody agreed to. A hook that was
+// skipped for trust, or refused before starting for want of the executable bit, changed no file.
+func executedHooks(results []hooks.Result) bool {
+	for _, r := range results {
+		if r.Ran() {
+			return true
+		}
+	}
+	return false
+}
+
+// refuseIfHooksDirtiedTree refuses a marker commit when a hook that ran left changes in the working tree.
+//
+// The marker is written only over a clean tree, so files a hook generated and nobody staged would otherwise
+// travel into the span a reviewer is about to read. The alternative — committing them on the author's behalf
+// — is a thing git-pair does not do, so refusing is the only honest answer, and the refusal names the point
+// that produced them rather than reporting a dirty tree the author did not create.
+func (a *app) refuseIfHooksDirtiedTree(ctx context.Context, s *session, results []hooks.Result, point hooks.Point, slug string) error {
+	if !executedHooks(results) {
+		return nil
+	}
+	clean, err := s.repo.IsClean(ctx)
+	if err != nil {
+		return err
+	}
+	if !clean {
+		return fmt.Errorf("a %s hook left changes in the working tree; commit or stash them, then mark %s ready again",
+			point, slug)
+	}
+	return nil
+}
+
+// runMode says which half of the contract a point is being run under. It is a named type rather than a bool
+// because the two halves differ in three places at once — whether execution stops at a failure, whether a
+// failure becomes a refusal, and what the caller owes the reader — and a `true` at a call site says none of
+// them.
+type runMode int
+
+const (
+	// blockingMode is the way into a transition: the first failure stops the rest, and the caller refuses.
+	blockingMode runMode = iota
+	// reportingMode is the way out: every hook runs, because there is nothing left to save, and the caller
+	// reports what happened without reversing it.
+	reportingMode
+)
+
+// runPoint is the shared half: discovery, execution, and the rule that hook text never reaches stdout.
+func (a *app) runPoint(ctx context.Context, s *session, c hookContext, mode runMode) ([]hooks.Result, error) {
 	if s == nil {
 		return nil, nil
 	}
@@ -86,12 +170,16 @@ func (a *app) runHooks(ctx context.Context, s *session, c hookContext) ([]hooks.
 			len(plan.SkippedUntrusted()), c.Point, hooks.TrackedRootDir(s.repo.Dir))
 	}
 	if len(runnable) > 0 {
-		results = append(results, hooks.Run(ctx, s.repo, runnable, env)...)
+		if mode == blockingMode {
+			results = append(results, hooks.Run(ctx, s.repo, runnable, env)...)
+		} else {
+			results = append(results, hooks.RunAll(ctx, s.repo, runnable, env)...)
+		}
 	}
 	for _, r := range results {
 		a.replayHookOutput(r)
 	}
-	return results, hookError(results)
+	return results, nil
 }
 
 // replayHookOutput keeps hook text off stdout, where `--json` lives. A failing hook's output is what the
