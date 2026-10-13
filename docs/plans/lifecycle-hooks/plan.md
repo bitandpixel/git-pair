@@ -553,8 +553,8 @@ reviewer run — edit in the review screen, have the hook refuse, fix, submit.
 ## Execution status
 
 M1 through M4 are done, each on its own branch, each stacked on the one below. The reviewer points and the
-per-clone root were added on 2026-10-13 after the first draft deferred them, and both landed in M4. What
-remains is M5: the PRD §26 sentence, the PRD §27 contract summary, the skill's hook reference, and the hygiene
+per-clone root were added on 2026-10-13 after the first draft deferred them, and both landed in M4. M5 is the
+last milestone: the PRD §26 sentence, the PRD §27 contract summary, the skill's hook reference, and the hygiene
 fixture. M5 task 1 (the §26 wording) is the gate on the rest.
 
 **M1 — done** on `feat/hooks-runner`, stacked on the approved plan branch.
@@ -682,3 +682,35 @@ every point, so the reviewer's own hooks came with the wiring. What was reviewer
 which is asserted rather than assumed: a tracked hook from the repository under review stays skipped until
 accepted, and the same command runs it after `git pair hooks --trust`.
 
+
+**M5 — done** on `feat/hooks-spec`, stacked on M4.
+
+What landed: the §26 scope sentence, the §27 entry that says which half of the deferred pre-push work this
+closes, `skills/git-pair/references/hooks.md`, a Concepts entry in the README, and hook shapes added to the
+hygiene self-test fixture.
+
+**The §26 sentence names the rule's subject; it grants nothing.** Drafted first, as task 1 required, and
+agreed before the rest of the milestone was written. It says the rule binds what git-pair invokes of its own
+choosing, and that a hook is the client's own code under the client's authority — so the hygiene test binding
+shipped code is the subject the rule always had, not an exception added for the feature. The sentence sits
+after "There is no carve-out" rather than qualifying the bullet list, so the strong sentence stays whole and
+its scope is stated next to it. §11.4 already carried the same claim in one line; §26 is where it belongs.
+
+**§27 names which half closes.** The deferred list said "pre-push hooks". What this feature closes is the
+client's half — a person can attach their own script to a lifecycle event, which is where a push check belongs
+if a team wants one. What stays deferred is git-pair owning or running one, and everything server-side. Left as
+one entry rather than split, so the list still reads as the shape of the product.
+
+**The skill page carries the agent-facing rules the command reference does not.** Two of them are new to the
+skill and are the reason the page exists beside `cli.md`: `git pair hooks --trust` is a person's consent act,
+so an agent reports the unaccepted state and names the command rather than running it; and `GIT_PAIR_HOOKS=0`
+is the machine owner's escape hatch, not a way for an agent to get past a check. The page also carries the
+per-clone caveat plainly — a check that lives under `<git-dir>/` runs on one machine, so a team rule is the
+committed one.
+
+**The hygiene fixture asserts both directions for the hook runner.** The product scan already covers
+`internal/hooks` (it walks `cmd` and `internal`), so the runner invoking no forbidden verb is a fact about the
+shipped tree. What the fixture adds is that the scan is not vacuous *and* not over-eager on the feature's
+shapes: a hook run by path, environment and root-name literals, and a config key that names the tool are all
+marked OK, and a planted `exec.Command("git", "push", "origin")` in a hook-shaped function is marked BAD. Without
+the OK cases the feature's own code would be the thing that eventually gets a rule relaxed.

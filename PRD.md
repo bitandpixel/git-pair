@@ -4033,6 +4033,11 @@ left the clone ended with the laptop. The memory of a landing is now the destina
 the remote by definition, so there is nothing left to publish — and a landing that is not on the remote has
 not happened, which is the correct thing for a tool to report rather than to repair.
 
+The rule binds what this tool invokes of its own choosing. A lifecycle hook (§11.4) is the client's own code
+responding to a git-pair event under the client's authority: a hook may run any command, these among them,
+and git-pair is not the one running it. The hygiene test binds shipped code, which is the same subject the
+rule has always had.
+
 - nothing in shipped code invokes `push`, `update-ref`, `symbolic-ref` or `git tag`; the hygiene test fails
   the build on any of them, and a planted call site anywhere fails it too;
 - `merge`, `rebase`, `reset`, `switch`, `checkout` and branch management stay forbidden exactly as above;
@@ -4132,7 +4137,10 @@ governs branches; the durable refs this section was written against are gone (§
 is the family of mechanisms that would make git-pair responsible for a forge or a server rather than for a
 repository:
 
--   pre-push hooks,
+-   pre-push hooks, in the sense of git-pair installing or running one of its own: the tool still invokes no
+    push and owns no hook of that kind, and what lifecycle hooks (§11.4) close is the other half — a client
+    can now attach their own script to a lifecycle event and have it run, which is where a push check belongs
+    if a team wants one. Server-side enforcement stays deferred below.
 -   server-side validation,
 -   forge-level protection of anything outside `refs/heads/*` and `refs/tags/*`,
 -   protection against destructive rewrites of a changeset that has landed: the client refuses to write
