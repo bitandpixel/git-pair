@@ -96,9 +96,9 @@ that true: the same consent rule, and the same silence until somebody reads the 
 -   `go test ./internal/cli/ -run Docs` and `-run TestTheCommandTreeIsTheCommandSet` green.
 -   `mise run check` exited 0. On the implementation commit it reported **36 test shards ok, 1 served from
     cache**, no `FAIL`, and the gate's own `gofmt -l internal cmd` step reported nothing — almost nothing was
-    cached, which is what changing `internal/hooks` and `internal/cli` should do. Re-run on each tree since
-    (the changes being to this file, and the branch being restacked on the reviewer's answers to M1), it
-    exits 0 with every shard served from cache.
+    cached, which is what changing `internal/hooks` and `internal/cli` should do. Re-run on every tree since —
+    this file, and the branch restacked on M1's answers to the reviewer's questions — each time 36 shards ok,
+    no `FAIL`, `gofmt` silent.
 
 ## Known limitations
 
