@@ -113,6 +113,8 @@ mechanism use it without re-deriving the changeset in every script.
 1. **Should a hook result be recorded in the review marker?** Recommended no, above. This is the one decision
    that should be settled before M4 rather than during it, because a trailer is a schema change and adding
    one later is a migration.
+> Maybe it can't replace content in the trailer, but could append/insert content? Then it's not a schema change or an official 
+alteration of the contract, but gives clients a way to persist a result. Let's discuss this further.
 2. **Do hooks need a manifest?** Default is no — discovery by filesystem, attributes by git config — because
    `parseMetadata` is hand-rolled `key: value` and `go.mod` has no YAML or TOML. Worth revisiting only if
    per-hook timeouts or per-hook blocking are actually wanted.
