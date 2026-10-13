@@ -111,14 +111,12 @@ mechanism use it without re-deriving the changeset in every script.
 ## Open questions
 
 1. **Should a hook result be recorded in the review marker?** Split, after review: a key git-pair reads is
-   still no, and lines a client appends are yes. Answered under **Review discussion** and in
+   still no, and lines a client appends are yes — with the constraint that the append is done by
+   `Message.Render`, not by the hook. Full answer under **Review discussion**, and in
    `docs/plans/lifecycle-hooks/research/2026-10-13-appending-to-the-marker-message.md`, which the plan now
    cites from its spike table.
 > Maybe it can't replace content in the trailer, but could append/insert content? Then it's not a schema change or an official 
 alteration of the contract, but gives clients a way to persist a result. Let's discuss this further.
-
-→ **Author reply:** agreed, with one constraint that came out of measuring it — the append has to be done
-by `Message.Render`, not by the hook. Full answer under **Review discussion** below.
 2. **Do hooks need a manifest?** Default is no — discovery by filesystem, attributes by git config — because
    `parseMetadata` is hand-rolled `key: value` and `go.mod` has no YAML or TOML. Worth revisiting only if
    per-hook timeouts or per-hook blocking are actually wanted.
