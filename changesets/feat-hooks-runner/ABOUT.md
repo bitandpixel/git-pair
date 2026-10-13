@@ -176,3 +176,10 @@ The concern underneath the question is enforcement, and it is the open question 
 accepted the tracked tree runs none of its hooks and says so on stderr rather than refusing. If the right
 answer is that a committed check must run or the command must fail, that changes consent's consequence, not
 where the files live.
+
+> the second copy may be a feature rather than a bug in some cases. For example, the repo pushes a new version of the hooks
+but they are not backwards compatible for whatever reason.  The local dev can continue running the existing hooks until they are
+ready to adopt the new hooks. Then they overwrite the local .git hooks with the new vendored ones. With the acceptance-persisted
+model, the only option is to accept the new version of the hooks or skip them, right? Are there other tradeoffs I'm not thinking about?
+Like you mentioned, the drift and ability to customize seem okay to me becuase we already have a pattern for detecting this with
+skills. But you're right you do enforcement by the repo owner that each clone is more likely to run the hooks exactly as-desired. hmmm.
