@@ -694,7 +694,11 @@ reason and sets `ready: false`, so one command and one answer still cover the re
 Consent is by content: the path, mode and bytes of the tracked hooks tree are hashed and the hash recorded per
 clone in `<git-dir>/git-pair/trusted-hooks`, so an edit after acceptance is a new acceptance. An unaccepted
 tree runs no hooks and says so on stderr — the operation is not blocked, because a fresh clone must still get a
-verdict. Hooks are the client's control rather than repository enforcement: git-pair publishes the event and
+verdict. Two different states read as `trusted: false`, and `git pair hooks` separates them: `unrecorded` is a
+clone where nobody has accepted anything, and `changed` is a clone whose accepted version the repository replaced
+— the team shipped a new check, and this clone is now running without it. They warrant different actions, so the
+second names the accepted hash beside the tree's current one; a clone in that state can also keep running the
+version it read by copying that content into the per-clone root. Hooks are the client's control rather than repository enforcement: git-pair publishes the event and
 the checkout owns the script, which is why a hook may run commands git-pair itself never invokes (§26 binds
 what this tool runs of its own choosing). `GIT_PAIR_HOOKS=0` switches them off for one run — the person's own
 escape hatch for a script that is misbehaving, not a way past a check. The CI recipe is under

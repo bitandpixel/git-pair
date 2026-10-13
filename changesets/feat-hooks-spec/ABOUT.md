@@ -20,6 +20,8 @@ This is the fifth milestone, stacked on `feat/hooks-reviewer-submit`.
 -   `PRD.md` §26 — the scope sentence after the no-carve-out paragraph; §27 "Remote record enforcement" — the
     pre-push entry now says what closes and what stays deferred.
 -   `skills/git-pair/references/hooks.md` — new; `SKILL.md` links it. `git pair skill list` reports 5 files.
+    It carries the three acceptance states and the third option — keep running the version you read, by copying
+    it into the per-clone root.
 -   `README.md` — a **Lifecycle hooks.** entry in Concepts: discovery, ordering, environment, trust, what a
     failure means, and the CI pointer.
 -   `internal/hygiene/hygiene_test.go` — the hook runner's shapes in the self-test fixture, both directions.
@@ -81,10 +83,12 @@ the next engineer loosens the rule rather than the code.
     served from cache, no `FAIL`, and its `gofmt -l internal cmd` step reported nothing. The run after this
     file was written exited 0 with all 36 shards served from cache, which is the expected shape when the only
     change since is markdown.
--   Restacked onto M1's answers to the reviewer's feedback and re-run: exit 0, 36 shards ok, no `FAIL`,
-    `gofmt` silent. The reviewer's two questions reached this milestone as a fact rather than a
-    change — the vendoring answer added a paragraph to PRD §11.4, which this milestone's own §26 sentence sits
-    beside unchanged.
+-   Restacked onto M1's answers to the reviewer's feedback, twice — once for the two questions, once for the
+    `trust_state` work that came out of the vendoring discussion — and re-run each time: exit 0, 36 shards ok,
+    no `FAIL`, `gofmt` silent. The second round reached this milestone as content rather than as a fact: the
+    hook reference and the Concepts entry both have to state the three acceptance states, because a page that
+    tells a person to run `--trust` when the repository moved a check under them is the page that gets them to
+    approve a script they never read.
 
 ## Known limitations
 

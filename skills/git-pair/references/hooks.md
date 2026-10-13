@@ -129,9 +129,21 @@ An unaccepted tree does not run at all. The operation proceeds and the skipped h
 clone is never surprised by an unreviewed script and never silently left without the checks it thinks it has.
 Editing a hook changes the hash, so an edit after acceptance is a new acceptance.
 
+**`trusted: false` carries two different facts, and `trust_state` tells them apart.** `unrecorded` means nobody
+on this clone has ever accepted the tree — they have not looked. `changed` means this clone accepted a version
+and the repository has since shipped another — the team moved a check underneath them. Act on them differently:
+the first is "read these", the second is "read what moved, then decide", and the answer prints the hash that
+was approved beside the tree's current one so the comparison is against something you saw. Accepting whatever is
+there because the note asked you to is how a repository ends up running a check nobody read.
+
+A clone sitting on `changed` has a third option besides accepting and working without the check: copy the
+version it did read into the per-clone root, which runs with no consent step. That is the vendored model
+applied by one person for one point, and it is the honest way to keep working while the team's new version
+awaits you.
+
 ```bash
 git pair hooks            # what is configured, both roots, executable or not
-git pair hooks --json     # + tracked_root, clone_root, trusted, accepted, hooks[], unknown[]
+git pair hooks --json     # + tracked_root, clone_root, trusted, trust_state, accepted, tree_hash, hooks[], unknown[]
 git pair hooks --trust    # a person's act: records the tracked tree as accepted, printing names and hash
 ```
 
