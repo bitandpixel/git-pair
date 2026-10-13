@@ -94,10 +94,10 @@ that true: the same consent rule, and the same silence until somebody reads the 
 -   `go test ./internal/hooks/` green, including the active-point table, which is the assertion that `git pair
     hooks` cannot lie about what this build runs.
 -   `go test ./internal/cli/ -run Docs` and `-run TestTheCommandTreeIsTheCommandSet` green.
--   `mise run check` exited 0 twice. On the implementation commit (`e2e4f46`): 36 test shards ok, 1 served
-    from cache, no `FAIL`, and the gate's own `gofmt -l internal cmd` step reported nothing — almost nothing
-    cached, which is what changing `internal/hooks` and `internal/cli` should do. Re-run on the offered tree
-    (`3d5708d`, after this file): 36 ok, all 36 from cache, no `FAIL`, exit 0 in 17s.
+-   `mise run check` exited 0. On the implementation commit (`e2e4f46`): 36 test shards ok, 1 served from
+    cache, no `FAIL`, and the gate's own `gofmt -l internal cmd` step reported nothing — almost nothing was
+    cached, which is what changing `internal/hooks` and `internal/cli` should do. Re-run on each tree since,
+    the only changes being to this file, it exits 0 with every shard served from cache.
 
 ## Known limitations
 
