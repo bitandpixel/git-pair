@@ -81,7 +81,8 @@ arrived is what the report carries.
     shape. The committed hook, `git pair hooks --trust`, the refusal, the reason wording and the `hooks` entry
     are the output that run produced, including `check --json` exiting 0 with `ready: false` and the hook's log
     on stderr only.
--   `mise run check` — result recorded below.
+-   `mise run check` exited 0: 36 test shards ok, 22 served from cache, no `FAIL`, and its `gofmt -l internal
+    cmd` step reported nothing. Re-run after this file was written, with the same result.
 
 ## Known limitations
 
