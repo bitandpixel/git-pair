@@ -81,6 +81,10 @@ the next engineer loosens the rule rather than the code.
     served from cache, no `FAIL`, and its `gofmt -l internal cmd` step reported nothing. The run after this
     file was written exited 0 with all 36 shards served from cache, which is the expected shape when the only
     change since is markdown.
+-   Restacked onto M1's answers to the reviewer's feedback and re-run: exit 0, 36 shards ok, no `FAIL`,
+    `gofmt` silent. The reviewer's two questions reached this milestone as a fact rather than a
+    change — the vendoring answer added a paragraph to PRD §11.4, which this milestone's own §26 sentence sits
+    beside unchanged.
 
 ## Known limitations
 
