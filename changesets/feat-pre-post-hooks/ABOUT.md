@@ -197,3 +197,54 @@ above the trailers. Crafted `-m` containing `Review-State: working` / `Review-Ou
 `APPROVED` with the real outcome — git's block is the last paragraph only, and `Render`'s unconditional blank
 line is what contains it. Contained by that blank line rather than impossible by construction, so it's
 recorded, and it's one more reason the renderer owns the shape.
+
+### On the follow-up: what makes a paragraph a paragraph in git's eyes
+
+Yes — cheaply. One blank line is enough, and the consequence is not that the client's line sits apart but
+that the authoritative trailers stop being trailers. Measured with eight markers varying only the appended
+text; the full table is in the research note, and git's rule reads:
+
+1. The trailer block is the **last paragraph** — a run of non-blank lines.
+2. Every line in it must be trailer-shaped (`key: value`) or a continuation (leading whitespace). One line
+   that is neither removes the **entire** block, including the real trailers above it.
+3. Key case is not significant — lowercase `note: all good` was extracted as a trailer.
+4. A continuation appends to the *preceding* trailer's value.
+
+The four rows that matter:
+
+| Appended | git's block | Derived |
+| --- | --- | --- |
+| `Hook-Test: pass suite` | all three | `READY` |
+| `all tests passed` (no colon) | **empty** | `WORKING` |
+| <code>␣more indented detail</code> | real trailers, `Review-Changeset` value now `cs-q5 more indented detail` | `WORKING` |
+| blank line, then `Hook-Test: pass suite` | only `Hook-Test` | `WORKING` |
+
+That middle row is the one I had not considered and the one worth your attention: the block still *lists*
+`Review-State` and `Review-Changeset`, so it looks healthy in `git log`, while the slug no longer matches and
+`parseEvent` (`lifecycle.go:377`) voids the marker. Three independent injections destroy a changeset this
+way, all of them silent, all of them with `change ready` exiting 0.
+
+And sanitising afterwards does not help: putting a blank line after the client's own line is row four again.
+Separation is not a mitigation, which is the argument for the renderer owning the append — a hook cannot see
+this rule, and the four validations in the note each map to a row above.
+
+### On the follow-up: the escape hatch
+
+Yes, exactly — a `pre-check` hook reading their own trailer is the answer, and it deserves naming as a good
+pattern rather than a workaround: the thing it reads is a trailer in a marker commit, which is history. So
+unlike every other hook in this design, it behaves identically on every clone, which makes it the best-shaped
+hook to run in CI rather than the worst.
+
+Three caveats, and all of them land on the client:
+
+- The hook must write its own ancestry test. A rebase preserves the trailer's message, so `Hook-Test: pass`
+  can be a true statement about a commit that no longer exists — which is why naming the head in the line is
+  a requirement rather than a nicety.
+- `check` has no override flag, deliberately (PRD §19.3: a gate is the wrong place to acknowledge an
+  exception). A client whose own `pre-check` hook refuses has no flag past it; they fix the work or remove the
+  hook. That asymmetry is the first thing they will hit, so it belongs in the skill.
+- A missing trailer is a decision, not a default. It can mean the hook never ran or ran against a different
+  head, and fail-open is how a gate quietly stops gating.
+
+One implementation note: a `pre-check` hook that shells out to `git pair check` re-enters, so it inherits
+`GIT_PAIR_HOOKS=0` for exactly that case.

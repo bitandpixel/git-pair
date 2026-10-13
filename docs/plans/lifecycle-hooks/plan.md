@@ -287,17 +287,25 @@ seen for a key (`:724`). Two properties follow, both measured:
 - Appending a key at the **end** of the block cannot forge anything, because the real keys are already
   earlier and first-wins protects them. The same two keys in the opposite order do change the derived state,
   so append position is the security property rather than a formatting preference.
-- The natural implementation — a script appending prose below the block after a blank line — silently
-  evicts the real `Review-State` from the block. Nothing errors, `change ready` still reports success, and
-  the changeset drops out of the queue as `WORKING`. That is the failure the append must be designed
-  against.
+- Git takes the trailer block to be the **last paragraph**, and requires every line in it to be trailer-shaped
+  or a continuation. One line that is neither removes the whole block, including the authoritative trailers
+  above it. So a client destroys the marker three independent ways, and one is quiet: a blank line
+  manufactures a new paragraph and evicts the real trailers; a colon-less line empties the block; and a line
+  beginning with whitespace is a continuation that appends itself onto the preceding real trailer's value,
+  leaving a block that still *lists* `Review-State` and `Review-Changeset` while corrupting one of them out
+  of matching its slug. Nothing errors in any of the three; `change ready` still exits 0, and the changeset
+  simply stops appearing in the queue.
+- Sanitising after the fact does not work. Appending a blank line *after* the client's own line is the
+  eviction case again. Separation is not a mitigation; order and shape are.
 
 So the append is git-pair's job, not the hook's: `Message` gains a field for client lines rendered after
-`Trailers` in the same paragraph, which makes the eviction case unreachable rather than warned about.
-Hook-supplied keys are rejected if they match anything git-pair reads or start with `Review-`; a client
-prefix (`Hook-`, or `X-Hook-`) keeps the reserved namespace reserved. Values are single-line, and the line
-should name the head it describes (`Hook-Test: pass head=<sha> dur=41s`) so a rebase leaves a claim that is
-visibly stale rather than silently true.
+`Trailers` in the same paragraph, and four validations run on each before the commit — no `\n` or `\r` in the
+value, the rendered line must be trailer-shaped with a non-empty key, the rendered line must not begin with
+whitespace, and reserved keys and the `Review-` prefix are refused. Each maps to a measured row, and a
+rejection names the hook and the row it hit rather than dropping the line silently, which would leave a
+repository believing it had recorded a result. A client prefix (`Hook-`, or `X-Hook-`) keeps the reserved
+namespace reserved, and the line names the head it describes (`Hook-Test: pass head=<sha> dur=41s`) so a
+rebase leaves a claim visibly stale rather than silently true.
 
 The other route stays available and needs no design at all: `review submit` commits everything in the working
 tree, so a hook that writes a log file into the changeset directory lands it in the review commit. That is
@@ -307,6 +315,15 @@ line would be the wrong shape.
 One line holds both mechanisms apart from becoming a contract: `check` never reads client-appended keys.
 The moment the gate branches on one, it is part of the contract and the "not a schema change" argument is
 gone. Persisting a result and letting it gate something are different things.
+
+A team that wants a gate on their own result writes it themselves, as a `pre-check` hook reading their own
+trailer. That is the escape hatch and it is a good one — the thing it reads is history rather than the
+environment, so unlike every other hook it behaves identically on every clone and is the best-shaped hook to
+run in CI. Three caveats come with it and all three are the client's to own: the hook must do its own
+ancestry test, because a rebase preserves the trailer's message; there is no override flag on `check`, by
+PRD §19.3's reasoning, so a client whose own hook refuses has to fix the work or remove the hook; and a
+missing trailer is a decision rather than a default, since it can mean the hook never ran. Details in the
+research note.
 
 ### Override
 
