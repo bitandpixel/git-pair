@@ -130,4 +130,45 @@ override.
 -   Whether an untrusted tracked tree should refuse outright once a repository has committed hooks — today it
     proceeds with a note. The current answer favours the fresh clone; a team that wants enforcement will want
     the other one.
-> for multiple hooks in the same lifecycle dir, do they run in parallel by default? or sequentially?
+
+## Addressed feedback
+
+### "for multiple hooks in the same lifecycle dir, do they run in parallel by default? or sequentially?"
+
+Sequentially, one at a time, in lexicographic order by name: `01-fmt`, then `02-test`, then `03-lint`.
+`hooks.Run` walks the collected list in order and returns as soon as one hook blocks, so a suite that fails at
+minute one is not followed by the next suite. Post-hooks are the exception to the stopping rule and not to the
+ordering — `hooks.RunAll` runs all of them whatever the outcomes, because once the marker is written there is
+nothing left to prevent.
+
+Order is why the naming convention exists, and it has no meaning if the scripts overlap. Two suites racing on
+one working tree, one build cache, or one scratch database produce a failure neither author can reproduce, and
+the replayed output would arrive in whatever order the scheduler chose. There is no flag for parallel
+execution: a repository that wants two suites to overlap can run them itself from one script, where it can
+also say what the shared state is.
+
+### "was it considered to have all the hooks live in the \<git-dir\> location, and trust is established by copying vendored hooks there?"
+
+Yes — that is git's own model, where `.git/hooks` is not cloned and a team vendors a script into each checkout.
+It buys a single execution surface, and it costs a second copy of the check. The copy drifts from the source
+the moment somebody edits it, so the tool then needs a drift report saying which of the two bytes are running.
+This repository has that shape once already: `git pair skill list` answers `current`, `stale`, `absent` and
+`unavailable` by comparing bytes, and it is a command whose entire job is the comparison a vendoring model
+would need for hooks.
+
+The tracked root avoids the second copy by making consent the step rather than installation. The recorded hash
+covers the tracked tree's path, mode and bytes, per clone, in `<git-dir>/git-pair/trusted-hooks` — so what a
+person accepts is the content they read, an edit is a new acceptance, and the file that executes is the one a
+reviewer saw. It also keeps a check and the code it checks in one reviewable commit: the change that alters a
+schema carries the migration check beside it, and the check's version is the version of the code it inspects,
+which a copy under `<git-dir>` cannot claim by itself.
+
+The per-clone root is the git-dir-only model, and it is where that model belongs:
+`<git-dir>/git-pair/hooks/<point>/` is a person's own file, never committed, run without a consent step, and it
+is how a reviewer attaches a check to a repository they cannot edit. The two roots are therefore not two ways
+of installing the same script — one is the repository's baseline, the other is git's model kept for the client.
+
+The concern underneath the question is enforcement, and it is the open question above: a clone that has not
+accepted the tracked tree runs none of its hooks and says so on stderr rather than refusing. If the right
+answer is that a committed check must run or the command must fail, that changes consent's consequence, not
+where the files live.

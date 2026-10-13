@@ -1934,7 +1934,13 @@ Hooks live in two roots, consulted in this order:
 | tracked | `<worktree>/.git-pair/hooks/<point>/` | committed, therefore content that arrived from somewhere; runs only after `git pair hooks --trust` |
 | per-clone | `<git-dir>/git-pair/hooks/<point>/` | the person's own file under their own git directory, never committed, runs directly |
 
-> was it considered to have all the hooks live in the <git-dir> location, and trust is established by copying vendored hooks there?
+The tracked root is a deliberate departure from git's own model, where `.git/hooks` is not cloned and a team
+vendors a script into every checkout. Vendoring buys one execution surface and costs a second copy of the
+check: the executed bytes drift from the reviewed ones, and the tool needs a drift report to say which is
+running. git-pair keeps one copy and makes consent the step instead of installation — the hash below is over
+the tracked tree's content, so what a person accepts is what a reviewer read, and what executes is still that
+file. It also keeps a check and the code it checks in one commit, so the migration check a schema change ships
+is the version of that check. The per-clone root is git's model, kept for the client's own additions.
 
 Within a point, the tracked root runs first, then the per-clone root: the repository's rules are the baseline
 and the client adds to them. Under a point, either a directory of scripts or a single file named for the
