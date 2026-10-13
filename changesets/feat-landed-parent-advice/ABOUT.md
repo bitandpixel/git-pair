@@ -77,7 +77,9 @@ stay, with the plan requiring the `--json` key set to be compared before and aft
     suppression rule aimed at the wrong case.
 -   The plan's M1 task 5 includes the case where the advice is followed, expecting the refusal: the point is
     that the author sees the command as a declinable choice, not as a trap.
--   `mise run check` — result recorded below.
+-   `mise run check` exited **0**: 35 test shards ok, none served from cache (every package re-run for this
+    tree), no `FAIL`, and its `gofmt -l internal cmd` step reported nothing. The shard count is one below the
+    hooks stack's 36 because this branch sits on `main` and carries none of that work's test files.
 
 ## Known limitations
 
