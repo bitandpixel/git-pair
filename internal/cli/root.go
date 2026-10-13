@@ -295,6 +295,7 @@ Gate:              git pair check, then merge into the destination with ordinary
 		newStatusCommand(a),
 		newDiffCommand(a),
 		newCheckCommand(a),
+		newHooksCommand(a),
 		newSkillCommand(a),
 	)
 	return root

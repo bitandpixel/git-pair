@@ -690,6 +690,7 @@ duplicate it exists to catch.
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history, and where it measured with `Review-Base-Head`, which is what lets `check` tell which side moved, and what it measured with `Review-Diff-Id`, the identity of that diff in two halves — the content, and the rendered hunks (`<version>:<raw>+<patch>`) (§11.3) |
+| `hooks` | `--trust` | lifecycle hooks: what is configured, and the way to accept the tracked root. Reports both roots — `.git-pair/hooks/<point>/` committed, `<git-dir>/git-pair/hooks/<point>/` per-clone — each hook's executability, whether this build invokes its point at all, and any entry that is not a lifecycle point, since a misspelled directory is otherwise indistinguishable from no check at all. A tracked hook runs only after `git pair hooks --trust` records its content, and an edit after that is a new acceptance; the per-clone root is your own file and needs none. `--trust` prints the hook names and the hash it is approving. PRD §11.4 |
 | `review history` | `--changeset <slug>` | only review marker commits, indexed from `0`, each naming the commit it reviewed under `REVIEWED` and the reviewer who submitted it under `REVIEWER` |
 | `queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus a `LANDED UNREVIEWED` heading for a landing whose destination holds no approval of what it carries (a finding no command closes, and one a `change tidy` that reached the destination does end, because the move is the acknowledgement); read from the repository, not the checkout. A second list, `AWAITING INTEGRATION` / `awaiting_integration`, holds approved work whose author has asked for the merge (§9.9) with the branch it is asking to land on — never in both lists, because a declaration is a marker and a branch carrying one is not `READY` |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug, plus the landing read from the destination's tree: `landed`, `landed_commit`, `landed_branch`, and the chain that arrived with it (`chain_base`, `chain_head`, `reviewed`) |
@@ -702,7 +703,11 @@ duplicate it exists to catch.
 
 `change ready` checks, in order: clean working tree, `ABOUT.md` exists, the repository has
 commits, no blocking surviving additions — the last acknowledged with
-`--allow-surviving-review-additions`. `check` asks what the merge would act on: the newest marker is a
+`--allow-surviving-review-additions` — and then the `pre-ready` hooks, where the repository checks what
+git cannot know: whether the suite passed, the migration applies, the generated client is current. A hook
+that exits nonzero refuses with exit **1** and writes no marker, naming the hook and replaying its output;
+a hook that changes the working tree is refused too, since the marker is written only over a clean tree
+(PRD §11.4). `check` asks what the merge would act on: the newest marker is a
 review whose outcome permits integration (`approve`, or `feedback` under `--allow-feedback`), nothing
 unreadable came after it, the changeset has not ended, the integration branch does not already hold it,
 and the tree still matches what the review looked at (ignoring `changesets/<cs>/`). It reads no other

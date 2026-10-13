@@ -172,6 +172,18 @@ func ReviewMessage(slug string, outcome model.Outcome, head string, m changeset.
 // empty (an approval with no edits is a legitimate review), so empty commits are
 // always allowed here.
 func Commit(ctx context.Context, repo *git.Repo, msg Message, db changeset.DefaultBranchRef) (string, error) {
+	return commit(ctx, repo, msg, db, nil)
+}
+
+// CommitWithEnv writes a marker commit with variables added to the commit's environment, which is the only
+// thing a git hook inherits. The lifecycle hooks runner uses it so a repository that also runs git's own
+// `pre-commit` or `commit-msg` gets the resolution git-pair already made, instead of guessing at it from an
+// empty argument list.
+func CommitWithEnv(ctx context.Context, repo *git.Repo, msg Message, db changeset.DefaultBranchRef, env []string) (string, error) {
+	return commit(ctx, repo, msg, db, env)
+}
+
+func commit(ctx context.Context, repo *git.Repo, msg Message, db changeset.DefaultBranchRef, env []string) (string, error) {
 	if err := refuseIfIntegrated(ctx, repo, msg, db); err != nil {
 		return "", err
 	}
@@ -179,7 +191,11 @@ func Commit(ctx context.Context, repo *git.Repo, msg Message, db changeset.Defau
 	if err != nil {
 		return "", err
 	}
-	if err := repo.Commit(ctx, rendered, true); err != nil {
+	if len(env) > 0 {
+		if err := repo.CommitWithEnv(ctx, rendered, env); err != nil {
+			return "", err
+		}
+	} else if err := repo.Commit(ctx, rendered, true); err != nil {
 		return "", err
 	}
 	return repo.Head(ctx)

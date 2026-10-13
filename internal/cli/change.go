@@ -14,6 +14,7 @@ import (
 	"gitpair/internal/changeset"
 	"gitpair/internal/console"
 	"gitpair/internal/git"
+	"gitpair/internal/hooks"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/marker"
 	"gitpair/internal/model"
@@ -126,18 +127,46 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 			s.cs.AboutPath())
 	}
 
-	sha, err := marker.Commit(ctx, s.repo, marker.ReadyMessage(s.cs.Slug), s.trunk)
+	// The repository's own gate, on the way to the queue. This is the half nothing else can do: the
+	// built-in checks can only ask what git already knows — a clean tree, an existing ABOUT.md, a standing
+	// approval — so until here the first moment a changeset's content was ever verified was CI, after the
+	// hand-off. A pre-hook's nonzero exit refuses the operation, and it refuses it as exit 1: the invocation
+	// was right and the repository said no.
+	hookCtx := hookContext{
+		Point: hooks.PreReady, Slug: s.cs.Slug, Branch: s.cs.Branch,
+		Base: s.cs.Base, Head: s.head, Dest: s.trunk.Ref,
+	}
+	hookResults, err := a.runHooks(ctx, s, hookCtx)
+	if err != nil {
+		return err
+	}
+	// A hook that formatted or generated files has invalidated the clean tree this command checked at the
+	// top. Refusing is the only honest answer: committing a marker over files nobody staged would put
+	// unreviewed content inside the span a reviewer is about to read, and the alternative — committing them
+	// on the author's behalf — is a thing git-pair does not do.
+	if len(hookResults) > 0 {
+		clean, err := s.repo.IsClean(ctx)
+		if err != nil {
+			return err
+		}
+		if !clean {
+			return fmt.Errorf("a %s hook left changes in the working tree; commit or stash them, then mark %s ready again",
+				hooks.PreReady, s.cs.Slug)
+		}
+	}
+
+	sha, err := marker.CommitWithEnv(ctx, s.repo, marker.ReadyMessage(s.cs.Slug), s.trunk, hooks.RenderEnv(hookCtx.env()))
 	if err != nil {
 		return fmt.Errorf("creating ready marker: %w", err)
 	}
 	// The marker commit is the whole operation: no ref is written, and nothing is anchored. The
 	// branch holds the chain from here, and it is the only thing that does until landing — which is
 	// why the merge happens before the branch goes away rather than after (PRD §13.3).
-	printReady(a, s, sha, report, opts.allowSurviving)
+	printReady(a, s, sha, report, opts.allowSurviving, hookResults)
 	return nil
 }
 
-func printReady(a *app, s *session, sha string, report *survival.Report, acknowledged bool) {
+func printReady(a *app, s *session, sha string, report *survival.Report, acknowledged bool, hookResults []hooks.Result) {
 	if a.json {
 		out := map[string]any{
 			"changeset":              s.cs.Slug,
@@ -148,6 +177,7 @@ func printReady(a *app, s *session, sha string, report *survival.Report, acknowl
 			"ready_commit":           sha,
 			"review_queue_visible":   true,
 			"acknowledged_survivors": 0,
+			"hooks":                  hooksForJSON(hookResults),
 		}
 		if report != nil {
 			out["acknowledged_survivors"] = len(report.Code)

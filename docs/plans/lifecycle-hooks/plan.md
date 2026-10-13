@@ -552,6 +552,31 @@ reviewer run — edit in the review screen, have the hook refuse, fix, submit.
 
 ## Execution status
 
-Not started. Exploration decisions recorded above; the reviewer points and the per-clone root were added
+Not started: exploration decisions recorded above; the reviewer points and the per-clone root were added
 on 2026-10-13 after the first draft deferred them. M5 task 1 (the PRD §26 wording) is the gate on the
 rest, and the open spike on whether a hook result enters the review marker needs confirming before M4.
+
+**M1 — done** on `feat/hooks-runner`, stacked on the approved plan branch.
+
+What landed: `internal/hooks` (discovery over both roots, trust by content hash, argv-exact execution with a
+deadline), `app.runHooks` as the single call site called from `runChangeReady` before `marker.Commit`, the
+post-hook clean-tree re-check, `git pair hooks` with `--trust`, and the `hooks` array in `change ready
+--json`. PRD §11.4, the README command table and the skill's `cli.md` all name the command, which is what
+`TestEveryCommandIsNamedInTheDocs` and `TestTheCommandTreeIsTheCommandSet` hold.
+
+Two deviations from the plan, both deliberate:
+
+-   **`git pair hooks` reports configuration, not the last result.** The plan's reporting section asks for
+    "the last result of each". There is no results store, and building one in M1 would have meant inventing
+    the persistence that the plan's own "what the record carries, and what it does not" section leaves open.
+    The command therefore answers what is configured, what is executable, and whether this build invokes the
+    point at all — which is the question a person asks first, and the one that makes a misspelled point
+    visible. A results store stays open.
+-   **`GIT_PAIR_HOOK_OUTPUT` instead of a `-v` flag.** A flag on `change ready` would put an option on the
+    author's command for a diagnostic about someone else's script, and `change ready` already refuses to grow
+    flags the gate does not need. The variable is read once, on the CLI side.
+
+Task 3 (the resolution onto the marker commit) landed as `git.Repo.CommitWithEnv` and
+`marker.CommitWithEnv`, reached through `runEnv` rather than a second spawn path so `run` stays the one place
+the memo is consulted. A test installs git's own `pre-commit` and asserts it reads `GIT_PAIR_CHANGESET`.
+

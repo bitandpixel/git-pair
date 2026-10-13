@@ -111,11 +111,17 @@ func (r *Repo) GitInherit(ctx context.Context, args ...string) error {
 // The memo covers captured invocations only. An invocation attached to the terminal belongs to the reader
 // — a diff, a difftool, an editor — and its output never comes back through here to be kept.
 func (r *Repo) run(ctx context.Context, stdin string, capture bool, args ...string) (string, error) {
+	return r.runEnv(ctx, nil, stdin, capture, args...)
+}
+
+// runEnv is run with variables added to the environment of the git subprocess it starts. It stays inside
+// `run` rather than becoming a second spawn path so the memo and the classification stay in one place.
+func (r *Repo) runEnv(ctx context.Context, env []string, stdin string, capture bool, args ...string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if !capture {
-		return r.spawn(ctx, stdin, false, args...)
+		return r.spawnEnv(ctx, env, stdin, false, args...)
 	}
 	class := classify(args)
 	key := memoKey(args, stdin)
@@ -125,20 +131,39 @@ func (r *Repo) run(ctx context.Context, stdin string, capture bool, args ...stri
 		}
 		return e.stdout, nil
 	}
-	stdout, err := r.spawn(ctx, stdin, true, args...)
+	stdout, err := r.spawnEnv(ctx, env, stdin, true, args...)
 	if e, keep := kept(stdout, err); keep && r.Memoizing() {
 		r.st().memo.put(key, e)
 	}
 	return stdout, err
 }
 
-// spawn runs git once, with no memo in the way.
+// spawn is spawnEnv with nothing added to the environment, which is every call site but one.
 func (r *Repo) spawn(ctx context.Context, stdin string, capture bool, args ...string) (string, error) {
+	return r.spawnEnv(ctx, nil, stdin, capture, args...)
+}
+
+// spawnEnv is spawn with variables added to the environment of the one subprocess.
+//
+// The overlay exists because it is the only channel to a git hook: git gives a hook no arguments and takes
+// its environment from the commit that ran it. A caller that wants a hook to know something has to say it
+// here, on the commit, rather than to the hook.
+func (r *Repo) spawnEnv(ctx context.Context, env []string, stdin string, capture bool, args ...string) (string, error) {
 	full := append([]string{"-c", "core.quotePath=false"}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Dir = r.Dir
 	if len(r.Env) > 0 {
 		cmd.Env = r.Env
+	}
+	if len(env) > 0 {
+		// The overlay is appended to what the child would otherwise have inherited, not substituted
+		// for it: git needs the rest of the environment to find the repository, the credentials, and
+		// the author identity a hook may read.
+		base := cmd.Env
+		if len(base) == 0 {
+			base = os.Environ()
+		}
+		cmd.Env = append(base, env...)
 	}
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
@@ -987,6 +1012,17 @@ func (r *Repo) Commit(ctx context.Context, message string, allowEmpty bool, extr
 	args = append(args, "-m", message)
 	args = append(args, extra...)
 	_, err := r.Git(ctx, args...)
+	return err
+}
+
+// CommitWithEnv creates a commit with variables added to its environment, and so to the environment of any
+// git hook that commit runs.
+//
+// This is the whole channel git offers a hook, and it is why the resolution travels here rather than being
+// re-derived by a repository's own `pre-commit`: a hook gets no arguments, and the rules for "which changeset
+// is this" live in this binary. A script that re-implemented them would get a second, different answer.
+func (r *Repo) CommitWithEnv(ctx context.Context, message string, env []string) error {
+	_, err := r.runEnv(ctx, env, "", true, "commit", "--allow-empty", "-m", message)
 	return err
 }
 
