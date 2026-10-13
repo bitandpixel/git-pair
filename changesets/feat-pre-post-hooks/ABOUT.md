@@ -80,8 +80,9 @@ mechanism use it without re-deriving the changeset in every script.
 
 ## Validation
 
-- `mise run check` (gofmt, `go vet`, sharded test suite) — run on this branch before the handoff; the result
-  is stated in the handoff note at the bottom of this file.
+- `mise run check` (gofmt, `go vet`, sharded test suite) — run on this branch before the handoff: exit 0,
+  77s, 35 package shards `ok`, 0 failures, across 15 packages including `internal/hygiene` and
+  `internal/cli`. Full result under **Gate result**.
 - The claims in the research document are experiments, not reasoning. Each was run against a fixture
   repository and the raw output is recorded in the document, so a reviewer can re-run any one of them. The
   exit-code finding was reproduced by driving the built binary (`go build -o /tmp/gp ./cmd/git-pair`) against
@@ -122,4 +123,8 @@ mechanism use it without re-deriving the changeset in every script.
 
 ## Gate result
 
-_To be filled in from `mise run check` immediately before `git pair change ready`._
+`mise run check` on this branch, immediately before the handoff: **exit 0** after 77s. gofmt clean, `go vet`
+clean, 35 package shards reported `ok` and none failed, covering 15 packages. Relevant to a docs-only
+change in two of them: `internal/hygiene`, because the plan proposes a second subprocess path in shipped
+source, and `internal/cli`, because it holds the tests that bind `PRD.md`, `README.md` and the skill to the
+command tree — neither is touched by this changeset, and both still pass.
