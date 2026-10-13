@@ -91,6 +91,10 @@ that true: the same consent rule, and the same silence until somebody reads the 
     with the marker still standing; a post-hook that commits is noticed by name; and every hook after a
     failure still runs. Plus the JSON carrying both sides in order, the post-hook context naming the marker as
     head, the three idempotent runs firing nothing, and the tracked-root rule at a non-ready point.
+-   `TestTrackedRootAtTheIntegratePoint` covers the tracked root at the declaration point, installed the way a
+    repository ships it. Unaccepted the hook is skipped and the consent command is named; accepted it blocks the
+    declaration with no marker written; and installed after the approval, the refusal names the hook file as
+    content the approval never covered — it is not a message about the hook at all.
 -   `go test ./internal/hooks/` green, including the active-point table, which is the assertion that `git pair
     hooks` cannot lie about what this build runs.
 -   `go test ./internal/cli/ -run Docs` and `-run TestTheCommandTreeIsTheCommandSet` green.
@@ -126,3 +130,36 @@ that true: the same consent rule, and the same silence until somebody reads the 
     stderr are the whole contract. Nothing here persists it.
 -   M1 asks the same question about an untrusted tracked tree refusing outright once a repository has committed
     hooks. It stays open.
+
+## Addressed feedback
+
+### "couldn't the hooks just be installed before the `change integrate` command?"
+
+Yes. The install has to fall before the approval, and that is the whole of the ordering.
+
+A tracked hook is a commit, so installing it puts a commit somewhere in the sequence. Installed between the
+approval and the command, the install is what the declaration gate refuses, because the hook file is content the
+reviewer never saw:
+
+```text
+Cannot declare checkout-flow ready to integrate:
+- content outside changesets/checkout-flow/ changed since a296f63: .git-pair/hooks/pre-integrate/01-suite
+```
+
+Installed before `change ready`, so the approval covers it, the hook is ordinary reviewed content, consent is
+recorded against the tree with `git pair hooks --trust`, and `pre-integrate` fires from the tracked root like
+any other point. `TestTrackedRootAtTheIntegratePoint` now runs all three of those states: unaccepted (skipped,
+with the consent command named), accepted (blocks the declaration, no marker written, the hook and its output
+named), and installed after the approval (the refusal above, and the hook never runs).
+
+Two things this corrected in the plan, both kept in the deviation note rather than dropped:
+
+-   The note said the obstacle was the head comparison — that installing after the approval "moves the head
+    `change integrate`'s gate reads". It is the content comparison instead, and that is a better reason: the
+    gate objects to unreviewed content, not to a sha moving. The wording now says so, with the message it
+    actually prints.
+-   The tracked root is no longer proven only at a non-ready point; it is proven at the declaration point too.
+
+The table of author points still installs at the per-clone root. That is not a limitation of the runner — it is
+so the four transitions read identically and none of them depends on a consent step, which belongs to the root
+and not to the point. One case per root, at the point where the roots differ, is what keeps both honest.

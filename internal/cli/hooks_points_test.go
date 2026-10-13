@@ -288,3 +288,73 @@ func TestNoopTransitionsRunNoHooks(t *testing.T) {
 		})
 	}
 }
+
+// TestTrackedRootAtTheIntegratePoint is the answer to "couldn't the hooks just be installed before
+// `change integrate`?". They can, and the ordering is the whole of the question. A tracked hook is a commit,
+// and the integrate gate compares the head the approval recorded with `HEAD`: installed after the approval the
+// install is itself the reason the gate refuses, which says nothing about the point under test. Installed
+// before the approval the hook is ordinary reviewed content, consent is recorded against the tree, and the
+// point fires from the tracked root like any other. The table above uses the per-clone root for uniformity
+// across the four points; this is the case that keeps the tracked root honest at the point the table cannot
+// install it at.
+func TestTrackedRootAtTheIntegratePoint(t *testing.T) {
+	t.Run("installed before the approval, consent still decides whether it runs", func(t *testing.T) {
+		dir := scratch(t)
+		f, _ := newChangeset(t, "checkout-flow", "main")
+		putHook(t, f, "tracked", "pre-integrate", "01-suite", touch(dir, "RAN"))
+		ready(t, f)
+		submit(t, f, "approve")
+
+		res := runIn(t, f.Dir(), "change", "integrate").mustSucceed(t, "change", "integrate")
+
+		if _, err := os.Stat(filepath.Join(dir, "RAN")); err == nil {
+			t.Error("an unaccepted tracked hook ran at integrate")
+		}
+		mustContain(t, res.stderr, "did not run", "the run must say the hook was skipped")
+		mustContain(t, res.stderr, "git pair hooks --trust", "and name the way to accept it")
+	})
+
+	t.Run("accepted, it blocks the declaration", func(t *testing.T) {
+		f, _ := newChangeset(t, "checkout-flow", "main")
+		putHook(t, f, "tracked", "pre-integrate", "01-suite", failHook("suite red"))
+		ready(t, f)
+		submit(t, f, "approve")
+		trustHooks(t, f)
+		head := f.Head()
+
+		res := runIn(t, f.Dir(), "change", "integrate")
+
+		if res.code != exitRefusal {
+			t.Fatalf("exit = %d, want %d\nstderr: %s", res.code, exitRefusal, res.stderr)
+		}
+		if f.Head() != head {
+			t.Error("a refused declaration wrote a marker")
+		}
+		mustContain(t, res.stderr, "01-suite", "the refusal must name the hook")
+		mustContain(t, res.stderr, "suite red", "with its own output")
+	})
+
+	t.Run("installed after the approval, the install is what the gate refuses", func(t *testing.T) {
+		dir := scratch(t)
+		f, _ := newChangeset(t, "checkout-flow", "main")
+		ready(t, f)
+		submit(t, f, "approve")
+		putHook(t, f, "tracked", "pre-integrate", "01-suite", touch(dir, "RAN"))
+		trustHooks(t, f)
+
+		res := runIn(t, f.Dir(), "change", "integrate")
+
+		// The refusal is the ordering's cost, and it is not about the head moving: the hook file is content
+		// the approval never covered, and the declaration gate says so by name. This is the message a test of
+		// the point would have to explain away, which is why the table installs at the per-clone root.
+		if res.code != exitRefusal {
+			t.Fatalf("exit = %d, want %d\nstdout: %s\nstderr: %s", res.code, exitRefusal, res.stdout, res.stderr)
+		}
+		mustContain(t, res.stdout+res.stderr, "content outside", "the refusal must be about the install, not the hook")
+		mustContain(t, res.stdout+res.stderr, ".git-pair/hooks/pre-integrate/01-suite",
+			"and name the file the reviewer never saw")
+		if _, err := os.Stat(filepath.Join(dir, "RAN")); err == nil {
+			t.Error("the hook ran although the command never reached the point")
+		}
+	})
+}

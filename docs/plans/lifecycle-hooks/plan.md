@@ -588,12 +588,17 @@ the `hooks` array in the `unready`, `abandon` and `integrate` JSON contracts.
 
 Three things the plan did not predict, each of which changed the shape of the code:
 
--   **Installing a tracked hook moves the head `change integrate`'s gate reads.** A tracked hook is a commit,
-    and the gate compares the approved head with `HEAD`, so a test that installed hooks after the approval was
-    refused by the gate for a reason that had nothing to do with the point under test. The table of author
-    points therefore uses the per-clone root, and one separate case keeps the tracked root and its consent
-    step honest at a non-ready point. Trust is a property of the root, not of the point.
-> couldn't the hooks just be installed before the `change integrate` command? 
+-   **A tracked hook is content the approval has to cover, which gives the install a place in the sequence.** A
+    tracked hook is a commit, and the declaration gate compares what the reviewer saw with what the branch now
+    carries. Installed after the approval, the install is the thing it refuses —
+    `content outside changesets/checkout-flow/ changed since <approval>: .git-pair/hooks/pre-integrate/01-suite`
+    — which is a statement about the install, not about the point under test. Installed before the approval the
+    hook is ordinary reviewed content, consent is recorded against the tree, and the point fires from the
+    tracked root like any other; `TestTrackedRootAtTheIntegratePoint` runs it both ways, unaccepted (skipped,
+    with the consent command named) and accepted (blocking the declaration with no marker written). The table of
+    author points still installs at the per-clone root, so the four points read identically and none of them
+    depends on a consent step that belongs to the root rather than the point. Trust is a property of the root,
+    not of the point.
 -   **A post-hook failure needs its own message, not just a nonzero exit.** The plan asks for a nonzero exit
     and a line that says what happened; writing it as `postHookError` made the second half concrete — the
     state the changeset is in, the hook, and "nothing was undone". M1's PRD paragraph said a post-hook failure
