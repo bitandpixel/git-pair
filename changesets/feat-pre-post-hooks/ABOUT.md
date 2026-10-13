@@ -80,9 +80,9 @@ mechanism use it without re-deriving the changeset in every script.
 
 ## Validation
 
-- `mise run check` (gofmt, `go vet`, sharded test suite) — run on this branch before the handoff: exit 0,
-  77s, 35 package shards `ok`, 0 failures, across 15 packages including `internal/hygiene` and
-  `internal/cli`. Full result under **Gate result**.
+- `mise run check` (gofmt, `go vet`, sharded test suite) — run twice on this branch, most recently
+  immediately before this handoff, both exit 0. Both runs are recorded under **Gate result**, including
+  which one was served from Go's test cache and why.
 - The claims in the research document are experiments, not reasoning. Each was run against a fixture
   repository and the raw output is recorded in the document, so a reviewer can re-run any one of them. The
   exit-code finding was reproduced by driving the built binary (`go build -o /tmp/gp ./cmd/git-pair`) against
@@ -127,11 +127,19 @@ alteration of the contract, but gives clients a way to persist a result. Let's d
 
 ## Gate result
 
-`mise run check` on this branch, immediately before the handoff: **exit 0** after 77s. gofmt clean, `go vet`
-clean, 35 package shards reported `ok` and none failed, covering 15 packages. Relevant to a docs-only
-change in two of them: `internal/hygiene`, because the plan proposes a second subprocess path in shipped
-source, and `internal/cli`, because it holds the tests that bind `PRD.md`, `README.md` and the skill to the
-command tree — neither is touched by this changeset, and both still pass.
+`mise run check` (gofmt, `go vet`, sharded suite) run twice on this branch, the second time immediately
+before this handoff:
+
+- **At head `819a9e5`** — exit 0 after 77s: gofmt clean, `go vet` clean, 35 package shards executed and
+  reported `ok`, none failed, across 15 packages.
+- **At the current head** — exit 0 after 16s: gofmt clean, and all 35 shard results came from Go's test
+  cache (`(cached)` on every line, 0 failures), because no Go source has changed since the run above. Only
+  markdown has been added.
+
+Relevant to a docs-only change in two of those packages: `internal/hygiene`, because the plan proposes a
+second subprocess path in shipped source, and `internal/cli`, because it holds the tests that bind `PRD.md`,
+`README.md` and the skill to the command tree. Neither is touched by this changeset, and neither was among
+any failures.
 
 ## Review discussion
 
