@@ -97,8 +97,15 @@ that true: the same consent rule, and the same silence until somebody reads the 
 -   `mise run check` exited 0. On the implementation commit it reported **36 test shards ok, 1 served from
     cache**, no `FAIL`, and the gate's own `gofmt -l internal cmd` step reported nothing — almost nothing was
     cached, which is what changing `internal/hooks` and `internal/cli` should do. Re-run on every tree since —
-    this file, and the branch restacked on M1's answers to the reviewer's questions — each time 36 shards ok,
-    no `FAIL`, `gofmt` silent.
+    this file, and the branch restacked twice onto M1's answers to the reviewer (the two questions, then the
+    `trust_state` work that came out of the vendoring discussion) — each time 36 shards ok, no `FAIL`, `gofmt`
+    silent.
+-   The reviewer's questions reach this milestone as a fact rather than a change. Hooks run sequentially and the
+    run stops at the first blocking result, which is what `runPre` relies on to skip the rest of a suite; and
+    the trust state changes what `git pair hooks` reports, not when a hook fires. Both of M1's documentation
+    rows collided with its new trust-state wording during the restack, in `README.md` and
+    `references/cli.md`; the resolution carries both texts, so the row states the point set and the three
+    acceptance states.
 
 ## Known limitations
 
