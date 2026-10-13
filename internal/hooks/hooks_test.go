@@ -79,12 +79,26 @@ func TestPointSet(t *testing.T) {
 			t.Errorf("point %q does not say which side of the transition it runs on", p)
 		}
 	}
-	// The runner is wired for one point at a time, so this build must claim exactly that one. A point
-	// marked active that nothing invokes is the failure `git pair hooks` exists to expose.
+	// The runner is wired point by point, so this build must claim exactly the points some command
+	// invokes. A point marked active that nothing invokes is the failure `git pair hooks` exists to
+	// expose, and this list is where that lie gets caught: it changes when a milestone wires a point,
+	// and only then.
+	wantActive := map[Point]bool{
+		PreReady: true, PostReady: true,
+		PreUnready: true, PostUnready: true,
+		PreAbandon: true, PostAbandon: true,
+		PreIntegrate: true, PostIntegrate: true,
+	}
 	for _, p := range all {
-		want := p == PreReady
-		if got := Active(p); got != want {
+		if got, want := Active(p), wantActive[p]; got != want {
 			t.Errorf("Active(%s) = %v, want %v", p, got, want)
+		}
+	}
+	// Every author transition has both halves. A post-hook with no pre-hook, or the reverse, is a
+	// milestone that stopped halfway.
+	for _, action := range []string{"ready", "unready", "abandon", "integrate"} {
+		if !Active(Point("pre-"+action)) || !Active(Point("post-"+action)) {
+			t.Errorf("the %s transition is not wired on both sides", action)
 		}
 	}
 }

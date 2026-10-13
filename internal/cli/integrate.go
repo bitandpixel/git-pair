@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"gitpair/internal/changeset"
+	"gitpair/internal/hooks"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/marker"
 	"gitpair/internal/model"
@@ -97,6 +98,9 @@ type integrateResult struct {
 	Commit  string
 	Written bool
 	Reasons []string
+	// Hooks is what the lifecycle points produced, reported beside the verdict. It is on the result rather
+	// than passed separately so the one report function carries it in both the prose and the JSON form.
+	Hooks []hooks.Result
 }
 
 // integrateJSON is the machine-readable answer. `reasons` is an array in both outcomes, so a caller
@@ -124,6 +128,10 @@ type integrateJSON struct {
 	DestinationUnreachable string   `json:"destination_unreachable,omitempty"`
 	Reasons                []string `json:"reasons"`
 	NextAction             string   `json:"next_action,omitempty"`
+	// Hooks is what the repository's own scripts at `pre-integrate` and `post-integrate` produced, beside
+	// the verdict, so a pipeline that reads this answer learns that a failure it is looking at came from a
+	// script and not from git-pair's gate.
+	Hooks []map[string]any `json:"hooks"`
 }
 
 func runChangeIntegrate(ctx context.Context, a *app, opts *integrateOptions) error {
@@ -166,13 +174,41 @@ func runChangeIntegrate(ctx context.Context, a *app, opts *integrateOptions) err
 		return reportIntegrate(a, s, dest, integrateResult{Reasons: reasons}, g.Summary.State)
 	}
 	if at := alreadyDeclared(s); at != "" {
+		// Already declared, so this run writes nothing and fires no hooks. A notify-the-team hook that
+		// fired on every re-run of a command that had already done its job would be the first thing a
+		// person switched off.
 		return reportIntegrate(a, s, dest, integrateResult{Commit: at}, g.Summary.State)
 	}
-	sha, err := marker.Commit(ctx, s.repo, marker.IntegrateMessage(s.cs.Slug, s.head), s.trunk)
+	// The repository's own condition, after git-pair's. Running a suite that costs minutes before the
+	// gate has said whether this is even declarable would make the slow check the loud one, and `check`
+	// already named what refused.
+	hc := hookContext{
+		Slug: s.cs.Slug, Branch: s.cs.Branch, Base: s.cs.Base, Head: s.head, Dest: dest.Ref,
+	}
+	hc.Point = hooks.PreIntegrate
+	pre, err := a.runPre(ctx, s, hc)
+	if err != nil {
+		return err
+	}
+	if err := a.refuseIfHooksDirtiedTree(ctx, s, pre, hooks.PreIntegrate, s.cs.Slug); err != nil {
+		return err
+	}
+	hc.Point = hooks.PostIntegrate
+	sha, err := marker.CommitWithEnv(ctx, s.repo, marker.IntegrateMessage(s.cs.Slug, s.head), s.trunk, hooks.RenderEnv(hc.env()))
 	if err != nil {
 		return fmt.Errorf("creating integrate marker: %w", err)
 	}
-	return reportIntegrate(a, s, dest, integrateResult{Commit: sha, Written: true}, model.StateIntegrating)
+	hc.Head = sha
+	post := a.runPost(ctx, s, hc)
+	a.warnIfHooksMovedHead(ctx, s, sha, hooks.PostIntegrate, post)
+	all := append(append([]hooks.Result{}, pre...), post...)
+	if err := reportIntegrate(a, s, dest, integrateResult{Commit: sha, Written: true, Hooks: all}, model.StateIntegrating); err != nil {
+		return err
+	}
+	if f, failed := firstFailure(post); failed {
+		return postHookError(hooks.PostIntegrate, f, s.cs.Slug)
+	}
+	return nil
 }
 
 // unlandedParentReason is the automatic path's rule about stacks: a child is declared only once the branch
@@ -234,6 +270,7 @@ func reportIntegrate(a *app, s *session, dest changeset.Destination, res integra
 		DestinationVia:         dest.Via,
 		DestinationUnreachable: dest.Unreachable,
 		Reasons:                orEmpty(res.Reasons),
+		Hooks:                  hooksForJSON(res.Hooks),
 	}
 	if len(res.Reasons) == 0 {
 		out.NextAction = integrateNextAction(s, dest)

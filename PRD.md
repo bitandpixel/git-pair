@@ -2010,8 +2010,36 @@ the hook, the point, and the hook's own output.
 
 A **post-hook** reports and never reverses. git-pair never unwinds a lifecycle transition (§26 forbids it
 running `reset`), and a post-hook that could reverse a published verdict would put that reversal in an
-agent's hands as a write the contract does not account for. A post-hook failure is printed, and reported in
-`--json`, and does not change the exit code.
+agent's hands as a write the contract does not account for. A post-hook that fails still makes the command
+exit **nonzero**, and prints the hook's output, because a failure automation never sees is a failure nobody
+fixes. What it does not do is undo anything, and the message says which of the two the reader is looking at:
+
+```text
+$ git pair change ready
+Ready: booking-transaction
+  head:  91bf204
+  ...
+git-pair: booking-transaction is READY, but the post-ready hook "01-notify" failed with exit 1 — the marker
+stands and nothing was undone
+```
+
+A reader told only "failed" assumes the marker was not written and looks for the command to re-run; re-running
+`change ready` on a changeset that is already `READY` is the wrong next step, which is why the line states the
+state as well as the failure.
+
+Every post-hook runs, even after one of them has failed. Stopping at the first failure is right on the way
+into a transition, where the point is to prevent something; on the way out there is nothing to prevent, and a
+notification hook should not be silenced because the coverage hook before it failed.
+
+A post-hook that commits is detected — HEAD before the hooks against HEAD after — and reported as a warning
+naming the marker it invalidated and the hooks that ran. The marker is the head a review is anchored to, so a
+commit after it means the changeset carries work that marker never described.
+
+**A command that writes nothing fires no hooks.** `change unready` on a changeset that was never offered,
+`change abandon` on one already abandoned, and `change integrate` on a head already declared all succeed and
+record nothing, and a transition that did not happen is not an event. A notify-on-withdrawal hook that fired
+on every re-run of a command that had already done its job is the first thing a person switches off, and the
+switch they reach for is the one that turns all hooks off.
 
 A pre-hook that changes the working tree is refused. The marker is written only over a clean tree, so files a
 hook generated and nobody staged would otherwise travel into a review that no one looked at.
@@ -2039,8 +2067,11 @@ clone:   .git/git-pair/hooks
   pre-abandon 01-note          tracked  executable   not run by this build
 ```
 
-The points this build runs are `pre-ready`. The others arrive with the milestones that run them, and the
-documentation follows the code rather than the plan.
+The points this build runs are the author's four transitions on both sides: `pre-ready` and `post-ready`,
+`pre-unready` and `post-unready`, `pre-abandon` and `post-abandon`, `pre-integrate` and `post-integrate`. The
+gate's (`pre-check`, `post-check`) and the reviewer's (`pre-submit`, `post-submit`) arrive with the milestones
+that run them, and `git pair hooks` reports a hook under any of them as configured but not run, rather than
+pretending. The documentation follows the code rather than the plan.
 
 ## 11.5 The agent skill
 

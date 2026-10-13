@@ -76,8 +76,19 @@ func (p Point) String() string { return string(p) }
 
 // active is the set of points some command in this build invokes. It grows as the milestones land; it is
 // kept here rather than inferred from call sites so that `git pair hooks` can say, in one place, which
-// configured hooks this build will actually run.
-var active = map[Point]bool{PreReady: true}
+// configured hooks this build will actually run. The read-path commands — `queue`, `status`, `diff`,
+// `feedback`, `history`, `wait` — are absent on purpose: a hook on a read turns a lookup into a build, and a
+// cost test that counts subprocesses would start measuring the customer's script.
+var active = map[Point]bool{
+	PreReady:      true,
+	PostReady:     true,
+	PreUnready:    true,
+	PostUnready:   true,
+	PreAbandon:    true,
+	PostAbandon:   true,
+	PreIntegrate:  true,
+	PostIntegrate: true,
+}
 
 // Active reports whether this build invokes point.
 func Active(p Point) bool { return active[p] }
@@ -125,6 +136,18 @@ type Result struct {
 	DurationMS int64  `json:"duration_ms"`
 	Stdout     string `json:"-"`
 	Stderr     string `json:"-"`
+}
+
+// Ran reports whether the hook was executed at all, as opposed to being skipped for trust or refused before
+// it started for want of the executable bit. It is the difference between "this script changed a file" and
+// "this script never ran", which a clean-tree check has to be able to tell.
+func (r Result) Ran() bool {
+	switch r.Status {
+	case StatusPassed, StatusFailed, StatusTimeout:
+		return true
+	default:
+		return false
+	}
 }
 
 // Blocking reports whether this outcome refuses the operation. Only a passed hook is not a refusal — except
@@ -344,12 +367,25 @@ func parseDuration(v string) (time.Duration, error) {
 // itself: which event fired, and what the changeset's resolution was. Values arrive in env so the script
 // never has to re-derive the changeset through the ambiguity rules this repository already implements.
 func Run(ctx context.Context, repo *git.Repo, hooks []Hook, env map[string]string) []Result {
+	return run(ctx, repo, hooks, env, true)
+}
+
+// RunAll executes every hook, whatever the ones before it did.
+//
+// It is the post-hook half of the contract. Stopping at the first failure is right on the way into a
+// transition, where the point is to prevent something; on the way out there is nothing to prevent, and a
+// notification hook should not be silenced because the coverage hook before it failed.
+func RunAll(ctx context.Context, repo *git.Repo, hooks []Hook, env map[string]string) []Result {
+	return run(ctx, repo, hooks, env, false)
+}
+
+func run(ctx context.Context, repo *git.Repo, hooks []Hook, env map[string]string, stopOnFailure bool) []Result {
 	results := make([]Result, 0, len(hooks))
 	limit := timeout(ctx, repo)
 	for _, h := range hooks {
 		r := runOne(ctx, repo, h, env, limit)
 		results = append(results, r)
-		if r.Blocking() {
+		if stopOnFailure && r.Blocking() {
 			break
 		}
 	}

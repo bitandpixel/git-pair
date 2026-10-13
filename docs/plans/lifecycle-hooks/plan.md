@@ -580,3 +580,32 @@ Task 3 (the resolution onto the marker commit) landed as `git.Repo.CommitWithEnv
 `marker.CommitWithEnv`, reached through `runEnv` rather than a second spawn path so `run` stays the one place
 the memo is consulted. A test installs git's own `pre-commit` and asserts it reads `GIT_PAIR_CHANGESET`.
 
+**M2 — done** on `feat/hooks-author-points`, stacked on M1.
+
+What landed: `runHooks` split into `runPre`/`runPost` over a shared `runPoint` with an explicit `runMode`,
+`hooks.RunAll` beside `hooks.Run`, both sides of the four author transitions wired, the HEAD-move check, and
+the `hooks` array in the `unready`, `abandon` and `integrate` JSON contracts.
+
+Three things the plan did not predict, each of which changed the shape of the code:
+
+-   **Installing a tracked hook moves the head `change integrate`'s gate reads.** A tracked hook is a commit,
+    and the gate compares the approved head with `HEAD`, so a test that installed hooks after the approval was
+    refused by the gate for a reason that had nothing to do with the point under test. The table of author
+    points therefore uses the per-clone root, and one separate case keeps the tracked root and its consent
+    step honest at a non-ready point. Trust is a property of the root, not of the point.
+-   **A post-hook failure needs its own message, not just a nonzero exit.** The plan asks for a nonzero exit
+    and a line that says what happened; writing it as `postHookError` made the second half concrete — the
+    state the changeset is in, the hook, and "nothing was undone". M1's PRD paragraph said a post-hook failure
+    "does not change the exit code", which contradicts this section of the plan; the paragraph now matches the
+    plan.
+-   **The HEAD-move warning cannot name the hook that committed.** A hook is a child process that can run any
+    git command and git-pair does not watch the index between them, so the warning names the hooks that ran
+    and the marker they invalidated, which is the honest version of the same information.
+
+Two things the plan left open, decided here: a command that writes nothing runs no hooks — `unready` on a
+changeset never offered, `abandon` on one already abandoned, `integrate` on a head already declared — because
+a transition that did not happen is not an event; and post-hooks do not stop at the first failure, because
+there is nothing left to prevent.
+
+**M3 — not started.**
+
