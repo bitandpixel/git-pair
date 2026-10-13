@@ -613,5 +613,32 @@ changeset never offered, `abandon` on one already abandoned, `integrate` on a he
 a transition that did not happen is not an event; and post-hooks do not stop at the first failure, because
 there is nothing left to prevent.
 
-**M3 — not started.**
+**M3 — done** on `feat/hooks-check-gate`, stacked on M2.
+
+What landed: `pre-check` running before the gate and `post-check` after the verdict is built, both
+contributing reasons so `ready` stays the single answer; the `hooks` array beside `reasons` in `check --json`;
+the two gate points activated; and a test that `change integrate` runs neither, so the repository's suite
+starts once per author action rather than twice.
+
+Three things worth recording:
+
+-   **`check --json` exits 0 when the gate refuses.** The verdict travels in `ready`, and `check_test.go:307`
+    asserts that deliberately. The milestone's first draft asserted exit 1 in JSON mode and was wrong. The
+    tests now assert both forms — the JSON for `ready: false`, the human form for exit 1 and `NOT READY:` —
+    because the two carry the answer differently and a reader uses one of them at a time.
+-   **A hook that spawned a background process held the command open past its deadline.** `exec.Cmd.Wait`
+    waits for the captured pipes to close, and the write ends belong to whatever the hook left running, so a
+    `sleep 30` behind a one-second deadline cost thirty seconds. Fixed with `cmd.WaitDelay`: five seconds of
+    grace for output genuinely still arriving, then the pipes close and the verdict is reported. The gate's
+    timeout case went from 30s to 6s, and M1's equivalent case had been paying the same 30s unnoticed.
+-   **A post-hook joins the verdict at the gate, and nowhere else.** At a marker a post-hook cannot reverse
+    the transition and does not try; at `check` there is nothing to reverse, so its failure is a condition
+    like any other. The invariant kept in both places is that the exit code and `ready` never answer different
+    questions.
+
+The CI example in the README was exercised against a fixture repository rather than written from the shape of
+the JSON: the hook, the `--trust`, the refusal, the reason wording, and the `hooks` entry are the output that
+run produced.
+
+**M4 — not started.**
 

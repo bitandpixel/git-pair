@@ -88,6 +88,7 @@ func TestPointSet(t *testing.T) {
 		PreUnready: true, PostUnready: true,
 		PreAbandon: true, PostAbandon: true,
 		PreIntegrate: true, PostIntegrate: true,
+		PreCheck: true, PostCheck: true,
 	}
 	for _, p := range all {
 		if got, want := Active(p), wantActive[p]; got != want {

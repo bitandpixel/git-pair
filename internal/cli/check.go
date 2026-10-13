@@ -10,6 +10,7 @@ import (
 
 	"gitpair/internal/changeset"
 	"gitpair/internal/git"
+	"gitpair/internal/hooks"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 )
@@ -148,10 +149,28 @@ type checkJSON struct {
 	// for the reason `reasons` is one, and empty in the ordinary case, so a consumer that ignores it loses
 	// nothing.
 	Recommendations []string `json:"recommendations"`
+	// Hooks is what the repository's own scripts at `pre-check` and `post-check` produced, beside the
+	// verdict they contributed to. It is the field that answers "who refused this": a reason naming a hook
+	// says a file in the repository said no, and this says which one, with what status and for how long.
+	Hooks []map[string]any `json:"hooks"`
 }
 
 func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	s, err := a.load(ctx)
+	if err != nil {
+		return err
+	}
+	// The repository's own conditions, asked before git-pair's. `check` is a report rather than an action:
+	// its whole value is that one run names every reason the merge would be wrong, so a suite that would fail
+	// is not skipped because the gate already had a reason of its own. `change integrate` orders these the
+	// other way round, and the difference is that it is a write with a cheap answer available first.
+	//
+	// Every hook runs even after one has failed, for the same reason: a report that stops at the first
+	// failure is a report with a round trip added per problem.
+	hc := hookContext{
+		Point: hooks.PreCheck, Slug: s.cs.Slug, Branch: s.cs.Branch, Base: s.cs.Base, Head: s.head,
+	}
+	hookResults, err := a.runPoint(ctx, s, hc, reportingMode)
 	if err != nil {
 		return err
 	}
@@ -173,7 +192,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		Landed:       g.Landed != "",
 		LandedCommit: short(g.Landed),
 		LandedAt:     g.Where,
-		Reasons:      g.Reasons,
+		Reasons:      append(append([]string{}, g.Reasons...), hookReasons(hookResults)...),
 		// Advice the verdict does not depend on. It is computed after the gate, never inside it: a reason
 		// refuses a merge, and this does not.
 		Recommendations: stackLinkRecommendations(ctx, a, s),
@@ -211,6 +230,28 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	if out.Recommendations == nil {
 		// The same argument applies to the advice: one shape, in both verdicts.
 		out.Recommendations = []string{}
+	}
+	// The repository's own conditions on the way out, and here they do join the verdict. A post-hook beside a
+	// marker cannot reverse the transition it follows, and does not try; `check` writes nothing, so its
+	// post-hooks have nothing to reverse and everything to say. The alternative — a hook failing while
+	// `ready` stays true — is the one shape a pipeline cannot use, because the exit code and the field would
+	// answer different questions.
+	hc.Point = hooks.PostCheck
+	postResults, err := a.runPoint(ctx, s, hc, reportingMode)
+	if err != nil {
+		return err
+	}
+	if reasons := hookReasons(postResults); len(reasons) > 0 {
+		out.Reasons = append(out.Reasons, reasons...)
+		out.Ready = false
+		// The next step was written for a verdict that no longer holds. Leaving it would tell a reader who
+		// stops at `next_action` to merge a change the gate refused.
+		out.NextAction = ""
+	}
+	hookResults = append(hookResults, postResults...)
+	out.Hooks = hooksForJSON(hookResults)
+	if out.Reasons == nil {
+		out.Reasons = []string{}
 	}
 
 	if a.json {

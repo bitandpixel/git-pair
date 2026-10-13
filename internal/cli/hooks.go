@@ -225,6 +225,31 @@ func hookError(results []hooks.Result) error {
 	return nil
 }
 
+// hookReasons turns the hook outcomes that are not a pass into gate reasons.
+//
+// The wording names the point and the script rather than the condition, because a reader who cannot tell
+// git-pair's own conditions apart from the repository's own scripts will go looking for a marker that is not
+// missing. Every one of these says "a file you wrote said no", which is a different fix from any condition
+// the gate derives from history.
+func hookReasons(results []hooks.Result) []string {
+	var out []string
+	for _, r := range results {
+		if !r.Blocking() {
+			continue
+		}
+		switch r.Status {
+		case hooks.StatusTimeout:
+			out = append(out, fmt.Sprintf("the %s hook %q exceeded its deadline (raise it with $%s)",
+				r.Hook.Point, r.Hook.Name, hooks.TimeoutEnv))
+		case hooks.StatusNotExecutable:
+			out = append(out, fmt.Sprintf("the %s hook %q is not executable", r.Hook.Point, r.Hook.Name))
+		default:
+			out = append(out, fmt.Sprintf("the %s hook %q failed with exit %d", r.Hook.Point, r.Hook.Name, r.Exit))
+		}
+	}
+	return out
+}
+
 // hooksForJSON renders the results for a `--json` verdict. The array is `[]` when nothing is configured,
 // following the rule in `orEmpty`: an array answers "asked, and none", and null answers "not asked".
 func hooksForJSON(results []hooks.Result) []map[string]any {

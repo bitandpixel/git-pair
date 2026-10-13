@@ -88,6 +88,11 @@ var active = map[Point]bool{
 	PostAbandon:   true,
 	PreIntegrate:  true,
 	PostIntegrate: true,
+	// The gate runs both of its points at the command's entry point rather than inside the gate function:
+	// the verdict is what a pipeline reads, so the repository's own conditions belong to the answer.
+	// `change integrate` runs the gate as the same code and must not run them, so it calls the gate directly.
+	PreCheck:  true,
+	PostCheck: true,
 }
 
 // Active reports whether this build invokes point.
@@ -337,6 +342,10 @@ const DefaultTimeout = 10 * time.Minute
 // timeout resolves the deadline from the environment, then git config, then the default. An unparsable value
 // falls back rather than refusing, because the value is a bound on a script and not a fact about the
 // repository — the worst a wrong value can do is wait too long or too briefly.
+// outputDrainGrace is how long a hook's captured streams are waited for after the hook itself is done or
+// killed, before the pipes are closed and whatever arrived is what the report carries.
+const outputDrainGrace = 5 * time.Second
+
 func timeout(ctx context.Context, repo *git.Repo) time.Duration {
 	if v := os.Getenv(TimeoutEnv); v != "" {
 		if d, err := parseDuration(v); err == nil && d > 0 {
@@ -418,6 +427,14 @@ func runOne(ctx context.Context, repo *git.Repo, h Hook, env map[string]string, 
 	// A hook gets no terminal on stdin. Agents run the commands that reach here, and a script that reads
 	// stdin would otherwise wait for a person who is not watching that terminal.
 	cmd.Stdin = nil
+	// A hook that starts a background process and then exits does not release the captured streams: the
+	// write ends of the pipes belong to whatever it left running, and `Wait` waits for them to close as
+	// well as for the process. Without this, a hook killed at its deadline can hold the whole command
+	// open for the lifetime of a child the hook no longer owns — measured in the gate's timeout case,
+	// where a `sleep 30` behind a one-second deadline cost thirty seconds. The grace period is for output
+	// that is genuinely still arriving when the deadline lands; after it the pipes are closed and the
+	// verdict is reported.
+	cmd.WaitDelay = outputDrainGrace
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 

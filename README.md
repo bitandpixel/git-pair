@@ -690,11 +690,12 @@ duplicate it exists to catch.
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history, and where it measured with `Review-Base-Head`, which is what lets `check` tell which side moved, and what it measured with `Review-Diff-Id`, the identity of that diff in two halves — the content, and the rendered hunks (`<version>:<raw>+<patch>`) (§11.3) |
-| `hooks` | `--trust` | lifecycle hooks: what is configured, and the way to accept the tracked root. Reports both roots — `.git-pair/hooks/<point>/` committed, `<git-dir>/git-pair/hooks/<point>/` per-clone — each hook's executability, whether this build invokes its point at all, and any entry that is not a lifecycle point, since a misspelled directory is otherwise indistinguishable from no check at all. The points wired in this build are both sides of the author's four transitions: `pre-`/`post-ready`, `-unready`, `-abandon`, `-integrate`. A pre-hook's nonzero exit refuses the operation with exit **1**; a post-hook's makes the command exit nonzero too, prints the hook's output, and reverses nothing — the message names the state the changeset is in, because a reader told only "failed" assumes the marker was never written. A tracked hook runs only after `git pair hooks --trust` records its content, and an edit after that is a new acceptance; the per-clone root is your own file and needs none. `--trust` prints the hook names and the hash it is approving. Acceptance has three states because there are two reasons a tracked tree does not run: `unrecorded` means nobody has accepted anything, `changed` means the repository shipped a new version since you did — `--json` answers `trust_state` beside `trusted` and carries `tree_hash` when the two differ, and the changed case names both hashes on stderr, because that is the moment a check starts not running for everybody who pulled. A clone in that state can keep running the version it read by copying that content into the per-clone root. PRD §11.4 |
+| `hooks` | `--trust` | lifecycle hooks: what is configured, and the way to accept the tracked root. Reports both roots — `.git-pair/hooks/<point>/` committed, `<git-dir>/git-pair/hooks/<point>/` per-clone — each hook's executability, whether this build invokes its point at all, and any entry that is not a lifecycle point, since a misspelled directory is otherwise indistinguishable from no check at all. The points wired in this build are both sides of the author's four transitions — `pre-`/`post-ready`,
+`-unready`, `-abandon`, `-integrate` — and both sides of the gate: `pre-check` and `post-check`. A pre-hook's nonzero exit refuses the operation with exit **1**; a post-hook's makes the command exit nonzero too, prints the hook's output, and reverses nothing — the message names the state the changeset is in, because a reader told only "failed" assumes the marker was never written. A tracked hook runs only after `git pair hooks --trust` records its content, and an edit after that is a new acceptance; the per-clone root is your own file and needs none. `--trust` prints the hook names and the hash it is approving. Acceptance has three states because there are two reasons a tracked tree does not run: `unrecorded` means nobody has accepted anything, `changed` means the repository shipped a new version since you did — `--json` answers `trust_state` beside `trusted` and carries `tree_hash` when the two differ, and the changed case names both hashes on stderr, because that is the moment a check starts not running for everybody who pulled. A clone in that state can keep running the version it read by copying that content into the per-clone root. PRD §11.4 |
 | `review history` | `--changeset <slug>` | only review marker commits, indexed from `0`, each naming the commit it reviewed under `REVIEWED` and the reviewer who submitted it under `REVIEWER` |
 | `queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus a `LANDED UNREVIEWED` heading for a landing whose destination holds no approval of what it carries (a finding no command closes, and one a `change tidy` that reached the destination does end, because the move is the acknowledgement); read from the repository, not the checkout. A second list, `AWAITING INTEGRATION` / `awaiting_integration`, holds approved work whose author has asked for the merge (§9.9) with the branch it is asking to land on — never in both lists, because a declaration is a marker and a branch carrying one is not `READY` |
 | `status` | `--changeset <slug>` | derived state, for this branch's changeset or one named by slug, plus the landing read from the destination's tree: `landed`, `landed_commit`, `landed_branch`, and the chain that arrived with it (`chain_base`, `chain_head`, `reviewed`) |
-| `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition — the review's outcome, whether the commit it approved is still in this history, and whether the content still matches; reports `integrating` beside the verdict, so CI's gate is one command and two fields (`jq -e '.ready and .integrating'`); no `--changeset`, because it is the gate a forge runs *on* a revision |
+| `check` | `--allow-feedback` | asserts integration-readiness and exits 1 when it is not; lists every failed condition — the review's outcome, whether the commit it approved is still in this history, whether the content still matches, and what the repository's own `pre-check`/`post-check` scripts said (§11.4); reports `integrating` beside the verdict, so CI's gate is one command and two fields (`jq -e '.ready and .integrating'`); no `--changeset`, because it is the gate a forge runs *on* a revision, and no override flag, because the command that runs the gate is not where a policy gets relaxed |
 | `diff [path...]` | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--stat`, `--tool` | paths are checked against the span first, so a typo is an error, not an empty diff |
 | `skill list` | — | the agent skill this binary carries, and every directory a harness would read it from, each marked `current`, `stale`, `absent` or `unavailable`. `current` means the installed bytes equal this binary's, which is the check that keeps an installed skill from describing an older tool. Read-only |
 | `skill show` | `[path]` | prints one compiled-in file of the skill, `SKILL.md` by default, so it can be read or copied without a checkout. No JSON output |
@@ -1015,6 +1016,53 @@ git pair check --json | jq -e '.ready and .integrating'
   "integrating": false
 }
 ```
+
+The same gate, with the repository's own checks inside it. A clone that has accepted the tracked hooks tree
+runs `.git-pair/hooks/pre-check/` before the verdict is assembled, so the suite is one of the conditions
+`ready` answers instead of a second job whose result has to be joined to it afterwards:
+
+```bash
+# committed once, at .git-pair/hooks/pre-check/01-suite
+#!/bin/sh
+make test
+
+# once per clone, after reading the script:
+git pair hooks --trust
+
+# and on every revision:
+git pair check --json | jq -e '.ready and .integrating'
+```
+
+A hook that exits nonzero contributes a reason naming it, so the answer stays one answer:
+
+```json
+{
+  "changeset": "booking-transaction",
+  "ready": false,
+  "reasons": [
+    "the pre-check hook \"01-suite\" failed with exit 1"
+  ],
+  "hooks": [
+    {"point": "pre-check", "name": "01-suite", "root": "worktree", "status": "failed", "exit": 1, "duration_ms": 41234}
+  ]
+}
+```
+
+The hook's own output is on stderr and never on stdout — the `--json` above still parses, which is the whole
+reason it is captured rather than passed through. Run in a terminal, the same refusal puts the log above the
+verdict:
+
+```text
+$ git pair check
+make test: 3 tests failed
+NOT READY:
+- the pre-check hook "01-suite" failed with exit 1
+```
+
+There is no flag that merges over a refused `check`. `change ready` and `review submit` carry an override for
+the judgement of the person standing at them, and `check` carries none, for the reason §19.3 gives for the
+absence of `--allow-feedback` there. `post-check` hooks join the verdict too, which is the one place a
+post-hook may: `check` writes nothing, so there is nothing there for a post-hook to reverse (§11.4).
 
 `git pair change tidy --json` — the move, or the move a `--dry-run` would make. `destination` is the
 branch the ids were checked for landing against, `commit` is the rename commit this run wrote and is empty
