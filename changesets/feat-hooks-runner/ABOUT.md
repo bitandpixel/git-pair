@@ -101,6 +101,10 @@ override.
     cache, no `FAIL`, and the gate's own `gofmt -l internal cmd` step reported nothing. Run from the
     repository root, which is the task that runs build, gofmt, vet and every package's tests including the
     sharded `internal/cli` and `internal/tui` ones.
+-   After the review feedback, `mise run check` exited 0 again on `1f06e27`: 36 test shards ok, 31 served from
+    cache, no `FAIL`, `gofmt` silent. The change since the run above is documentation only — two answered
+    reviewer questions and the paragraph they exposed as missing — so no test was added and none of the
+    existing ones changed.
 
 ## Known limitations
 
