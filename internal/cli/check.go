@@ -492,6 +492,18 @@ func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback boo
 		g.Reasons = append(g.Reasons, fmt.Sprintf("changeset %s: `base` in %s names %s, the branch the changeset is on, so the base moves with every commit and the changeset can never contain anything",
 			s.cs.Slug, s.cs.MetadataPath(), s.cs.Branch))
 	}
+	// The repository's own scripts, asked last: it is the one condition the branch cannot fix by editing the
+	// branch, and the one a green verdict used to hide. It lives in the gate rather than in the report beside it
+	// because the difference is the verdict — `check` used to answer "ready" while the checks the repository
+	// asked for were skipped for want of a recorded position, and a pipeline that merged on that answer merged
+	// work the team's own suite never saw.
+	hooksReason, err := a.hooksPositionReason(ctx, s.repo)
+	if err != nil {
+		return nil, err
+	}
+	if hooksReason != "" {
+		g.Reasons = append(g.Reasons, hooksReason)
+	}
 	return g, nil
 }
 

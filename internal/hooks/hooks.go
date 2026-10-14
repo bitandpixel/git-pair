@@ -195,13 +195,22 @@ func Discover(ctx context.Context, repo *git.Repo, point Point) (Plan, error) {
 // the fix rather than the memo. Neither answer can move inside a process: the off switch is the environment
 // plus a config value read at the start, and the git directory is where it is.
 type Resolution struct {
-	repo   *git.Repo
-	offSet bool
-	off    bool
-	offWhy string
-	dirSet bool
-	gitDir string
-	dirErr error
+	repo     *git.Repo
+	offSet   bool
+	off      bool
+	offWhy   string
+	dirSet   bool
+	gitDir   string
+	dirErr   error
+	trustSet bool
+	state    TrustState
+	accepted string
+	current  string
+	trustErr error
+
+	declineSet bool
+	declined   string
+	declineErr error
 }
 
 // Resolve prepares the run's answers without asking git anything; each question is asked the first time an
@@ -226,6 +235,39 @@ func (r *Resolution) gitDirAt(ctx context.Context) (string, error) {
 	return r.gitDir, r.dirErr
 }
 
+// Trust is TrustAt for a run that may already have asked the questions above, answered once for the whole
+// run. The state decides two things at once now — whether the tracked scripts run, and whether the gate will
+// call a changeset ready while they did not — so a run that asked it per hook point would walk the same
+// directory for every point and answer the same question each time.
+func (r *Resolution) Trust(ctx context.Context) (TrustState, string, string, error) {
+	if !r.trustSet {
+		gitDir, err := r.gitDirAt(ctx)
+		if err != nil {
+			r.trustErr = err
+		} else {
+			r.state, r.accepted, r.current, r.trustErr = TrustAt(gitDir, r.repo.Dir)
+		}
+		r.trustSet = true
+	}
+	return r.state, r.accepted, r.current, r.trustErr
+}
+
+// DeclinedHash is the recorded decline for a run that may already have asked the questions above. It is a
+// separate memo from Trust on purpose: the state machine answers "does the record match the tree?", and the
+// sentence beside a skipped run needs the recorded value itself, including the case where it no longer matches.
+func (r *Resolution) DeclinedHash(ctx context.Context) (string, error) {
+	if !r.declineSet {
+		gitDir, err := r.gitDirAt(ctx)
+		if err != nil {
+			r.declineErr = err
+		} else {
+			r.declined, r.declineErr = DeclinedAt(gitDir)
+		}
+		r.declineSet = true
+	}
+	return r.declined, r.declineErr
+}
+
 // Discover is Discover for a run that may already have asked the two questions below.
 func (r *Resolution) Discover(ctx context.Context, point Point) (Plan, error) {
 	var plan Plan
@@ -239,7 +281,7 @@ func (r *Resolution) Discover(ctx context.Context, point Point) (Plan, error) {
 		// further to read without it. The tracked root alone would be the unsafe half to run anyway.
 		return plan, err
 	}
-	state, _, _, err := TrustAt(gitDir, r.repo.Dir)
+	state, _, _, err := r.Trust(ctx)
 	if err != nil {
 		return plan, err
 	}

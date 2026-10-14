@@ -188,9 +188,28 @@ func (a *app) runPoint(ctx context.Context, s *session, c hookContext, mode runM
 				runnable = append(runnable, h)
 			}
 		}
-		a.warn("git-pair: %d tracked hook(s) at %s did not run — the tree under %s has not been accepted; "+
-			"review it and run `git pair hooks --trust`\n",
-			len(plan.SkippedUntrusted()), c.Point, hooks.TrackedRootDir(s.repo.Dir))
+		// The sentence depends on why they did not run, because the reader's next act does. An unrecorded tree
+		// is content nobody has read; a declined one is content somebody read and chose not to run, and telling
+		// that person to accept it would be telling them to revisit a decision they already made — beside
+		// losing the hash that tells them whether the tree they declined is the tree that is here.
+		state, _, _, err := run.Trust(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if state == hooks.TrustDeclined {
+			// The recorded hash, not the one the state machine compared: this sentence is read by the person who
+			// declined, and the number they need is the one they chose.
+			declined, err := run.DeclinedHash(ctx)
+			if err != nil {
+				return nil, err
+			}
+			a.warn("git-pair: %d tracked hook(s) at %s did not run — the tree under %s is declined for this clone (declined %s); `git pair hooks --trust` runs it after you read it\n",
+				len(plan.SkippedUntrusted()), c.Point, hooks.TrackedRootDir(s.repo.Dir), declined)
+		} else {
+			a.warn("git-pair: %d tracked hook(s) at %s did not run — the tree under %s has not been accepted; "+
+				"review it and run `git pair hooks --trust`\n",
+				len(plan.SkippedUntrusted()), c.Point, hooks.TrackedRootDir(s.repo.Dir))
+		}
 	}
 	if len(runnable) > 0 {
 		if mode == blockingMode {
@@ -319,7 +338,7 @@ func displayPath(path string) string {
 // --- git pair hooks ---------------------------------------------------------
 
 func newHooksCommand(a *app) *cobra.Command {
-	var trust bool
+	var trust, decline bool
 	cmd := &cobra.Command{
 		Use:   "hooks",
 		Short: "Report the lifecycle hooks this repository and this clone configure",
@@ -339,23 +358,41 @@ At each root a point is either one executable file or a directory whose executab
 lexicographic order.
 
 The tracked tree is trusted by content, not by a flag: any edit to any hook invalidates the acceptance,
-because the thing that was approved was that content. An unaccepted tree does not run and the command says so
-on stderr — the operation itself still proceeds, so a clone nobody has approved is still a clone you can
-work in.
+because the thing that was approved was that content. Four states describe a clone's relation to it —
+` + "`accepted`" + `, ` + "`declined`" + `, ` + "`changed`" + `, ` + "`unrecorded`" + `. Only ` + "`accepted`" + ` runs the scripts.
+
+The commands that start or advance work refuse while the tree is ` + "`changed`" + ` or ` + "`unrecorded`" + `: ` + "`init`" + ` before a
+changeset exists, ` + "`change ready`" + ` before the hand-off, ` + "`review submit`" + ` before the reviewer's content is
+staged, and the gate behind ` + "`check`" + ` and ` + "`change integrate`" + ` before a merge. A hand-off, a verdict and a
+merge should not rest on checks that never ran. What still works with nothing recorded is this command, and
+the two that take work out of the queue — ` + "`change unready`" + ` and ` + "`change abandon`" + `: reading the scripts and
+putting the work down are what you do because you have not decided yet.
+
+` + "`--decline`" + ` is the other position a person can take: read the scripts, choose not to run them here. It is
+recorded against the same content hash as an acceptance, so the next version the repository ships is
+unrecorded again rather than quietly inherited — the difference between a team that opted out and a team that
+never heard is a fact the report can state, and a fact a gate can ask for without pushing anyone into
+approving a script they do not want.
 
 Nothing here runs a hook. This command reports configuration; the lifecycle commands run.
 
 Exit codes: 0 reported, 2 usage, 3 git failed.`,
 		Example: `  git pair hooks
   git pair hooks --json
-  git pair hooks --trust`,
+  git pair hooks --trust
+  git pair hooks --decline`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHooksReport(cmd.Context(), a, trust)
+			if trust && decline {
+				return &usageError{fmt.Errorf("--trust and --decline record opposite positions about the same content; say which one this clone is taking")}
+			}
+			return runHooksReport(cmd.Context(), a, trust, decline)
 		},
 	}
 	cmd.Flags().BoolVar(&trust, "trust", false,
 		"record the tracked hooks tree as accepted so its hooks may run; prints what is being approved first")
+	cmd.Flags().BoolVar(&decline, "decline", false,
+		"record the tracked hooks tree as read and chosen not to run; prints what is being declined first")
 	return cmd
 }
 
@@ -383,20 +420,25 @@ type hooksReport struct {
 	TrackedRoot string `json:"tracked_root"`
 	CloneRoot   string `json:"clone_root"`
 	Trusted     bool   `json:"trusted"`
-	// TrustState says which of the two reasons `trusted: false` carries: `accepted`, `changed`, or
+	// TrustState says which of the reasons `trusted: false` carries: `accepted`, `declined`, `changed`, or
 	// `unrecorded`. It is a state rather than a second boolean because the reader's next action differs — one
-	// is "read these", the other is "the repository moved these, read what changed".
+	// is "read these", another is "the repository moved these, read what changed", and a decline is a position
+	// nobody needs to revisit until the content does.
 	TrustState string `json:"trust_state"`
 	Accepted   string `json:"accepted,omitempty"`
-	// TreeHash is the tracked tree's current hash, carried only when it differs from `Accepted`: a reader
-	// comparing the two needs both, and a reader whose hooks are trusted needs neither.
+	// Declined is the recorded decline, carried even when it no longer matches the tree: "declined at 3f1a…,
+	// the tree is now 82b0…" is the sentence that tells a person the script they refused has a new version
+	// sitting unrecorded behind it.
+	Declined string `json:"declined,omitempty"`
+	// TreeHash is the tracked tree's current hash, carried whenever the tree is not the accepted content: a
+	// reader comparing the two needs both, and a reader whose hooks are trusted needs neither.
 	TreeHash string      `json:"tree_hash,omitempty"`
 	Hooks    []hookEntry `json:"hooks"`
 	Unknown  []string    `json:"unknown"`
 	Disabled string      `json:"disabled_by,omitempty"`
 }
 
-func runHooksReport(ctx context.Context, a *app, trust bool) error {
+func runHooksReport(ctx context.Context, a *app, trust, decline bool) error {
 	repo, err := a.loadRepo(ctx)
 	if err != nil {
 		return err
@@ -407,6 +449,9 @@ func runHooksReport(ctx context.Context, a *app, trust bool) error {
 	}
 	if trust {
 		return acceptHooks(ctx, a, repo, gitDir)
+	}
+	if decline {
+		return declineHooks(ctx, a, repo, gitDir)
 	}
 
 	rep := hooksReport{
@@ -425,7 +470,11 @@ func runHooksReport(ctx context.Context, a *app, trust bool) error {
 	rep.Trusted = state == hooks.TrustAccepted
 	rep.TrustState = string(state)
 	rep.Accepted = accepted
-	if state == hooks.TrustChanged {
+	rep.Declined, err = hooks.Declined(ctx, repo)
+	if err != nil {
+		return err
+	}
+	if state != hooks.TrustAccepted {
 		rep.TreeHash = current
 	}
 	// Unknown entries are reported per root, because the fix differs: a misspelled directory under the
@@ -482,15 +531,20 @@ func runHooksReport(ctx context.Context, a *app, trust bool) error {
 		return nil
 	}
 	if !rep.Trusted {
-		// Two states, two sentences. "Never accepted" is a setting nobody has touched; "changed" is the
-		// repository shipping a new version of a check this clone had already approved, and it is the case
-		// where work goes on with the check not running and nobody having decided that. On stderr, beside the
-		// note a run makes when it skips these same hooks: the table is the answer, this is the warning about
-		// it, and a script that captures the report should not have the warning inside it.
-		if hooks.TrustState(rep.TrustState) == hooks.TrustChanged {
+		// Three states, three sentences. "Never recorded" is a setting nobody has touched; "changed" is the
+		// repository shipping a new version of a check this clone had already approved, and it is the case where
+		// work goes on with the check not running and nobody having decided that; "declined" is a decision
+		// somebody did make, and the only thing it needs is that the hash beside it is the one they chose, so a
+		// new version is visible as new. On stderr, beside the note a run makes when it skips these same hooks:
+		// the table is the answer, this is the warning about it, and a script that captures the report should
+		// not have the warning inside it.
+		switch hooks.TrustState(rep.TrustState) {
+		case hooks.TrustChanged:
 			a.warn("tracked hooks CHANGED since you accepted them (accepted %s, the tree is now %s): they will not run until `git pair hooks --trust` records them\n", rep.Accepted, rep.TreeHash)
-		} else {
-			a.warn("tracked hooks are NOT trusted: they will not run until `git pair hooks --trust` records them\n")
+		case hooks.TrustDeclined:
+			a.warn("tracked hooks DECLINED for this clone (declined %s): they will not run. `git pair hooks --trust` runs them after you read them\n", rep.Declined)
+		default:
+			a.warn("tracked hooks are NOT trusted: they will not run until `git pair hooks --trust` records them, or `--decline` records that you read them and chose not to run them\n")
 		}
 	}
 	for _, h := range rep.Hooks {
@@ -518,6 +572,62 @@ func reportUnknown(a *app, rep hooksReport, found []unknownEntry) {
 	}
 }
 
+// hooksPositionReason is what the commands that create or advance a changeset ask about the repository's own
+// scripts: a tracked hooks tree this clone has recorded no position on carries checks that have not run, and
+// git-pair does not build on top of that silence.
+//
+// The reviewer asked for it as early as it can be asked — "it should be obvious as early as possible that there
+// are hooks that repo owner wants run" — so it is met at `init`, before a directory exists, at `change ready`,
+// before the hand-off, at `review submit`, before the reviewer's content is staged, and at the gate, where
+// `check` and `change integrate` refuse the merge. One sentence on every surface, because a person who meets it
+// twice should read the same words and the same two ways out, not a different refusal each time.
+//
+// `accepted` answers it by running the scripts. `declined` answers it differently: a person read them and chose
+// not to run them here, which is a position rather than an absence, and is what lets the tool ask for one without
+// pushing anyone into approving a script they do not want. What neither is, is silence — so `unrecorded` and
+// `changed` both refuse. `changed` refuses because content that moved under an acceptance is content nobody has
+// looked at since; letting the older record answer for it would make one acceptance cover the whole history of the
+// directory, which is the reading the state machine in `hooks.TrustAt` refuses.
+//
+// Two commands deliberately do not ask: `change unready` and `change abandon`. Both take work out of the queue
+// rather than putting it in, and a person who cannot run the checks is exactly the person who needs to put the
+// work down. Refusing them would turn the safety mechanism into a trap.
+//
+// The off switch is not an answer either. `GIT_PAIR_HOOKS=0` and `git-pair.hooks=false` say a machine does not
+// want to run scripts right now, which says nothing about what those scripts do; the position is
+// `git pair hooks --decline`, written down where the next reader can see it was taken.
+func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo) (string, error) {
+	state, accepted, current, err := a.hookRun(repo).Trust(ctx)
+	if err != nil {
+		return "", err
+	}
+	switch state {
+	case hooks.TrustAccepted, hooks.TrustDeclined:
+		return "", nil
+	}
+	root := displayPath(hooks.TrackedRootDir(repo.Dir))
+	if state == hooks.TrustChanged {
+		return fmt.Sprintf("the repository's tracked hooks under %s changed since this clone accepted them (accepted %s, the tree is now %s): the checks they carry have not run on this content — read what moved, then `git pair hooks --trust` to run it or `git pair hooks --decline` to record that you read it and chose not to",
+			root, short(accepted), short(current)), nil
+	}
+	return fmt.Sprintf("the repository's tracked hooks under %s have not been recorded in this clone: the checks they carry have not run — read them, then `git pair hooks --trust` to run them or `git pair hooks --decline` to record that you read them and chose not to",
+		root), nil
+}
+
+// hooksPositionRefusal is the same question as an error, for the commands that refuse rather than report. It is a
+// business refusal (exit 1) like a dirty tree or a failing pre-hook: the invocation was right, and the clone has
+// a step to take. Nothing is written before it, so a refusal leaves the repository as it was found.
+func (a *app) hooksPositionRefusal(ctx context.Context, repo *git.Repo) error {
+	reason, err := a.hooksPositionReason(ctx, repo)
+	if err != nil {
+		return err
+	}
+	if reason == "" {
+		return nil
+	}
+	return fmt.Errorf("%s", reason)
+}
+
 func acceptHooks(ctx context.Context, a *app, repo *git.Repo, gitDir string) error {
 	hash, names, err := hooks.Accept(ctx, repo)
 	if err != nil {
@@ -531,6 +641,26 @@ func acceptHooks(ctx context.Context, a *app, repo *git.Repo, gitDir string) err
 		a.printf("  %s\n", n)
 	}
 	a.printf("recorded %s at %s\n", hash, displayPath(filepath.Join(gitDir, "git-pair", "trusted-hooks")))
+	return nil
+}
+
+// declineHooks records the position `--trust` does not: read, and not run here. It prints the same list first,
+// because a decline about content nobody has looked at is the same formality as an acceptance about it, and a
+// formality is how a team ends up declining the check it wanted.
+func declineHooks(ctx context.Context, a *app, repo *git.Repo, gitDir string) error {
+	hash, names, err := hooks.Decline(ctx, repo)
+	if err != nil {
+		return err
+	}
+	if a.json {
+		return a.emitJSON(map[string]any{"declined": hash, "files": orEmpty(names)})
+	}
+	a.printf("Declining the tracked hooks under %s for this clone:\n", displayPath(hooks.TrackedRootDir(repo.Dir)))
+	for _, n := range names {
+		a.printf("  %s\n", n)
+	}
+	a.printf("recorded %s at %s\n", hash, displayPath(filepath.Join(gitDir, "git-pair", "declined-hooks")))
+	a.printf("they will not run; a new version the repository commits is unrecorded again, not declined\n")
 	return nil
 }
 
