@@ -99,7 +99,8 @@ func landingContractFor(ctx context.Context, repo *git.Repo, s *session) landing
 //
 // `alreadyDeclared` is the condition shared outright rather than restated, because it is the one that reads a
 // marker rather than a state. Two copies of "this head is already handed over" would drift the first time a
-// re-offer superseded a declaration.
+// re-offer superseded a declaration — and it costs nothing to ask, since it compares the session's head
+// against the marker it has already read.
 func declarable(s *session, lc landingContract) bool {
 	switch {
 	case s.summary.State != model.StateApproved:
