@@ -885,7 +885,10 @@ for a stacked child whose parent has not landed the parent's landing first (§PR
 Once the directory is in the destination it says there is nothing further to do. It stays one instruction, because
 a consumer parsing advice should not have to choose between two exits; the human screens print the other exit
 under it — `git pair change integrate`, then `git push origin <branch>`, handing the merge to whoever owns the
-destination — exactly where that command would record a declaration, and nowhere it would refuse one.
+destination — exactly where that command would record a declaration, and nowhere it would refuse one. Past the
+declaration the sentence changes again: while the branch is unpublished it names `git push origin <branch>`, and
+once the request is on the remote it names the wait for the destination's owner, with the author's own merge
+printed under it on the human screens as the other exit (§PRD §21).
 
 ```json
 {
