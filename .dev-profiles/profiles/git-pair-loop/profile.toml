@@ -1,0 +1,16 @@
+# Machine-readable facts about this profile, read by `dev-profiles doctor` and `install`.
+name = "git-pair-loop"
+summary = "Human review on the branch with git-pair: branch, commit, changeset, review, hand-off."
+
+# A command that prints pending housekeeping. Reported by doctor, never a failure: tidying is a commit, and a
+# commit is somebody's decision. This is the loop's own housekeeping — landed changesets to move out of the way —
+# and a profile composed alongside it declares its own rather than replacing this one.
+housekeeping = "git pair change tidy --dry-run --all-landed"
+
+# The line AGENTS.md gets for this profile: the skill an agent should open, and the reason it should open it. The
+# driver used to append three sentences of its own to every stanza; they belonged to whichever profile governed the
+# hand-off, and a repository adopting a second workflow got them anyway. A profile that ships skills must name at
+# least one entry point, and every entry point needs a reason.
+[[router]]
+name = "git-pair-workflow"
+reason = "how work gets written and handed off for review: branch, commit, changeset, review"

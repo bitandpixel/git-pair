@@ -1,0 +1,49 @@
+# Machine-readable facts about this profile, read by `dev-profiles doctor` and `install`.
+name = "git-pair-github-integration"
+summary = "The merge a declaration asks for: a job verifies the merge candidate and lands it with ordinary git."
+
+# What the profile ships, as opposed to what the consumer authors. The consumer commits these; `install` is the
+# command that makes a committed copy true again, and `doctor` byte-compares them. The verify script is deliberately
+# absent from this list — install writes what the library owns, and the consumer's own validation is not the
+# library's to write. Both lists are single-line arrays: the parser this driver reads is a subset, and a value that
+# wraps is a value nobody sees. The keys also sit above every table line, because a key written below one belongs to
+# that table and nothing looks there.
+# One list, two obligations. `ci_files` names bytes this profile owns in the consumer tree — `install` writes them,
+# `doctor` byte-compares them and their exec bit, and a committed copy matching neither is a stray — and it is also what
+# the destination is obliged to keep: `doctor` checks each path against the destination branch and reports the rest as
+# arriving with this change, because "a job verifies the merge candidate" is void if the job is not there to run.
+#
+# A file the profile needs but does not own does not belong here. It is a `[[require]]` role, whose answer the consumer
+# writes in `[commands]`; `doctor` refuses a demanded command that points at something this profile ships, so the two
+# mechanisms cannot both claim the same path.
+ci_files = [".github/workflows/git-pair-integrate.yml", "scripts/ci/git-pair-integrate.sh", "scripts/ci/install-git-pair.sh"]
+
+
+# This profile is incomplete on its own. It ships the merge side of the workflow and nothing about how work gets
+# onto a branch, so an agent pointed only here would be told how to land a change it has no rules for writing.
+# Declaring the need by name — with no version — means doctor fails when the consumer adopts half the arrangement.
+# There is no version constraint here on purpose: a consumer cannot lag a declared profile, because doctor fails
+# when that profile's VERSION moves past the version the repository accepted.
+[[needs]]
+name = "git-pair-loop"
+
+# The profile ships a job that merges to the destination, so it demands the validation that merge is conditional
+# on. It does not get to say what green means in somebody else's repository: the answer is any command line —
+# `mise run gates`, `./gradlew check`, `make verify` — and it lives in the consumer's marker, the only file a
+# consumer may write, which the merge job also reads:
+#
+#   [commands]
+#   verify = "scripts/ci/verify-candidate.sh"
+#
+# A repository that merges by hand declares git-pair-manual-integration instead and demands nothing.
+[[require]]
+name = "verify"
+reason = "the validation the merge is conditional on: run what the destination's own CI runs, every check even after one fails"
+
+# The line AGENTS.md gets for this profile: the skill an agent should open, and the reason it should open it. The
+# driver used to append three sentences of its own to every stanza; they belonged to whichever profile governed the
+# hand-off, and a repository adopting a second workflow got them anyway. A profile that ships skills must name at
+# least one entry point, and every entry point needs a reason.
+[[router]]
+name = "git-pair-github-integration"
+reason = "the last step of a `git-pair-loop`: a job verifies the merge candidate in the tree that would land, then lands it with ordinary git"

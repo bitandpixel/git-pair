@@ -1,0 +1,8 @@
+# Machine-readable facts about this profile, read by `dev-profiles doctor` and `install`.
+name = "forge-pr"
+summary = "GitHub pull requests as the review and merge surface, with optional stacked layers."
+
+# Nothing to tidy: pull requests are their own record and the forge retires them.
+housekeeping = ""
+
+# No files from this profile need to exist on the default branch.
