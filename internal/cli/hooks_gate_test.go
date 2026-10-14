@@ -92,7 +92,13 @@ func TestCheckAsksForAPositionOnTrackedHooks(t *testing.T) {
 		putHook(t, f, "tracked", "pre-check", "02-suite", touch(dir, "RAN_CHECK"))
 		ready(t, f)
 		submit(t, f, "approve")
-		declineHooks(t, f)
+		// The hash is what the note has to carry: "declined" alone does not tell this reader whether the script
+		// they refused is the script that is here.
+		record := runIn(t, f.Dir(), "hooks", "--decline", "--json").mustSucceed(t, "hooks", "--decline", "--json").json(t)
+		declined, _ := record["declined"].(string)
+		if declined == "" {
+			t.Fatal("--decline recorded no hash")
+		}
 
 		res := runIn(t, f.Dir(), "check").mustSucceed(t, "check")
 		for _, name := range []string{"RAN_READY", "RAN_CHECK"} {
@@ -100,7 +106,7 @@ func TestCheckAsksForAPositionOnTrackedHooks(t *testing.T) {
 				t.Errorf("a declined hook ran (%s)", name)
 			}
 		}
-		mustContain(t, res.stderr, "declined", "the run says which position kept the script from running")
+		mustContain(t, res.stderr, "declined "+declined, "the run says which position kept the script from running, and which content it was about")
 
 		out := runIn(t, f.Dir(), "check", "--json").mustSucceed(t, "check", "--json").json(t)
 		if out["ready"] != true {

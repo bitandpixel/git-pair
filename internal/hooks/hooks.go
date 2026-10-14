@@ -207,6 +207,10 @@ type Resolution struct {
 	accepted string
 	current  string
 	trustErr error
+
+	declineSet bool
+	declined   string
+	declineErr error
 }
 
 // Resolve prepares the run's answers without asking git anything; each question is asked the first time an
@@ -246,6 +250,22 @@ func (r *Resolution) Trust(ctx context.Context) (TrustState, string, string, err
 		r.trustSet = true
 	}
 	return r.state, r.accepted, r.current, r.trustErr
+}
+
+// DeclinedHash is the recorded decline for a run that may already have asked the questions above. It is a
+// separate memo from Trust on purpose: the state machine answers "does the record match the tree?", and the
+// sentence beside a skipped run needs the recorded value itself, including the case where it no longer matches.
+func (r *Resolution) DeclinedHash(ctx context.Context) (string, error) {
+	if !r.declineSet {
+		gitDir, err := r.gitDirAt(ctx)
+		if err != nil {
+			r.declineErr = err
+		} else {
+			r.declined, r.declineErr = DeclinedAt(gitDir)
+		}
+		r.declineSet = true
+	}
+	return r.declined, r.declineErr
 }
 
 // Discover is Discover for a run that may already have asked the two questions below.
