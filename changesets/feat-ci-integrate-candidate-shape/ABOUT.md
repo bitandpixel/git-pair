@@ -23,8 +23,10 @@ The driver flag this uses, `--verify-cmd`, is the layer below (`feat-ci-verify-c
     separates the rule worth copying — a landing conditional on the suite the destination would run — from this
     repository's value at that seam, `mise run gates` and `jdx/mise-action`, because this file ships as the
     sample and the two are easy to confuse.
--   `.github/workflows/ci.yml`: `pull_request` and `workflow_dispatch`, no branch pushes. Its header now says
-    what the branch trigger was for and why that reason is gone.
+-   `.github/workflows/ci.yml`: `pull_request`, `workflow_dispatch`, and `push` for the destination branch
+    alone. The branch pushes went, because their only justification was the probe reading branch-head checks
+    and nothing does that now. Its header now says what the branch trigger was for, why that reason is gone,
+    and why trunk is kept.
 -   `scripts/gates/ci-integrate.sh`: the static section that asserted the two files name each other (6 checks)
     now asserts what this shape needs (22), and the check that required `actions: write` became a pairing.
 -   `README.md`, `PRD.md` §29's pointer, and `skills/git-pair/references/integration.md`: the places that
@@ -98,6 +100,10 @@ runner to see one is the first to complain.
 -   The destination's new tip *is* the tested candidate, so trunk is not untested after a merge; what it lacks
     is a run record on trunk, because a token-caused push creates none. `--ci-request` is how that record is
     asked for, and this file does not pass it.
+-   Trunk keeps a `push` trigger in `ci.yml` for commits pushed straight to `main`, which have no candidate run
+    behind them. It costs a run only for human pushes, since a token-caused push creates none — but it is one
+    more line that names the destination branch, because a trigger cannot read `vars`. A repository moved off
+    `main` edits it in two places, and the comment there says so.
 -   Two declarations for the same destination are serialised per ref, not per destination (`concurrency`
     groups on `github.ref`). Pre-existing and unchanged.
 -   **The gate's stack-cost guard has almost no slack, and it is not this change.** The paragraph in
