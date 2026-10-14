@@ -78,7 +78,9 @@ The submission points add three, because a verdict has content of its own:
 
 A hook's stdout and stderr never reach git-pair's stdout — that is where `--json` lives. A failing hook's
 output is replayed on stderr with the refusal, because that is the text the author needs next to the word
-"failed". A passing hook's output is replayed only when `GIT_PAIR_HOOK_OUTPUT=1`, so a suite that prints four
+"failed"; at the reviewer's submission points run from the review screen it is shown on the screen instead,
+because the screen owns the terminal while the submission runs and text written beside it is painted over.
+A passing hook's output is replayed only when `GIT_PAIR_HOOK_OUTPUT=1`, so a suite that prints four
 hundred lines does not make every hand-off unreadable.
 
 Each hook gets a deadline: `GIT_PAIR_HOOK_TIMEOUT` seconds, then `git-pair.hookTimeout` in git config, then

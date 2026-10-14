@@ -2004,7 +2004,10 @@ The two submission points add three more, because a submission is a verdict with
 
 Its stdout and stderr are captured and never written to git-pair's own stdout, which is where `--json`
 lives; a verdict an automation cannot parse is worse than no verdict. A failing hook's output is replayed on
-stderr with the refusal, because that is the text the author needs next. A passing hook's output is replayed
+stderr with the refusal, because that is the text the author needs next — except at the reviewer's submission
+points run from the review screen, where the screen owns the terminal while the submission runs and text
+written beside it is painted over: there the same output is shown on the screen with the refusal, so a
+reviewer is not left holding a message that names the hook and not the reason. A passing hook's output is replayed
 only when `GIT_PAIR_HOOK_OUTPUT` is set, because a suite that prints four hundred lines would make every
 hand-off unreadable.
 
