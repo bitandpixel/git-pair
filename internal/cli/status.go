@@ -73,6 +73,11 @@ type parentJSON struct {
 	Reason    string `json:"reason,omitempty"`
 	Next      string `json:"next,omitempty"`
 	Note      string `json:"note,omitempty"`
+	// Step is the housekeeping the parent's landing leaves — take this head onto the landing, or delete a
+	// parent branch that holds nothing the destination does not. It is beside `note` rather than inside it
+	// because the two halves are read apart by the gate: `check` prints the note and withholds the step
+	// while an approval stands on this head, and this surface is where the step is still read (PRD §29).
+	Step string `json:"step,omitempty"`
 	// MeasuredBase is the commit the approval recorded measuring its diff from, in the same short form as
 	// `tip`: the left side of the diff the reviewer read. Empty when the approval recorded none, which is
 	// every approval written before the trailer existed.
@@ -437,6 +442,7 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 			Reason:                ps.Reason,
 			Next:                  ps.Next,
 			Note:                  ps.Note,
+			Step:                  ps.Step,
 			MeasuredBase:          short(ps.Measured),
 			Comparison:            ps.Comparison,
 			Landed:                ps.Landed != "",
@@ -614,6 +620,9 @@ func printStatus(a *app, v *statusView) {
 			}
 			if p.Note != "" {
 				a.printf("  note:   %s\n", p.Note)
+			}
+			if p.Step != "" {
+				a.printf("  step:   %s\n", p.Step)
 			}
 		}
 		// Each step is the ancestor's own record, which is the half the `parent:` line cannot carry: a

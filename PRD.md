@@ -3567,9 +3567,11 @@ to live, so:
     approval yet. Without an approval it is a note and never a reason: a changeset that has not been
     offered has nothing for a parent to invalidate. `status --json` carries `parent.landed`,
     `parent.landed_commit`, `parent.landed_in_default_branch`, `parent.stale_branch`,
-    `parent.head_carries_landing`, `parent.measured_base` and `parent.comparison`; `check --json`
+    `parent.head_carries_landing`, `parent.measured_base`, `parent.comparison` and `parent.step`;
+    `check --json`
     carries `parent_landed`, `parent_landed_commit`, `parent_stale_branch`,
-    `parent_head_carries_landing`, `parent_measured_base` and `parent_comparison`. The last two of those are one reading reported
+    `parent_head_carries_landing`, `parent_measured_base`, `parent_comparison` and
+    `parent_approval_survives_landing`. The last two of those are one reading reported
     twice, because they are statements about two different things: `stale_branch` is about the parent's
     branch still being here to delete, and `head_carries_landing` is about this head sitting on the landing
     commit, which is the half that survives the branch being deleted and the half that decides whether any
@@ -3579,6 +3581,32 @@ to live, so:
     the child's head does not carry the landing, and `git branch -D <parent-branch>` once it does — with the
     worktree named, and `git worktree remove <path>` as text, when another worktree holds that branch and the
     delete would stop there. git-pair runs neither (§26).
+
+**The verdict does not advise a rewrite that costs the approval it rests on.** The step above is a fact about
+where commits sit, and `status` and `queue` print it on that reading: neither carries a verdict, so nothing
+either prints can invalidate an approval, and a stale parent branch is a real thing to clear. A passing
+verdict is a different surface, because the step there can be a command whose only effect on the verdict
+above it is to make that verdict fail. Where this head does not carry the landing, the step is a rewrite of
+the very commits the approval names — the tree comes out byte-identical and the gate then refuses the
+rewritten history, because what the reviewer certified was a commit (§21). So `check` prints the command only
+where following it costs nothing standing:
+
+-   a head already on the landing keeps its step: what is left there is deleting a branch, which invalidates
+    nothing;
+-   a changeset with no verdict in front of the gate — WORKING, READY, or a FEEDBACK verdict read under
+    `--allow-feedback` — keeps its step, because nothing is standing for the rewrite to cost;
+-   an approval whose comparison could not be reached keeps its step, and the verdict says the step is given
+    unverified: silence about a step is worse than a step the reader can decline, and an unknown is not the
+    knowledge that the rewrite is safe;
+-   an approval that is standing, on content the comparison found unchanged and a branch that still merges
+    cleanly into the destination, is given no command. The verdict prints the comparison sentence in its
+    place — the parent landed, this head is still measured on it, and nothing is owed until the merge happens
+    — and `parent_approval_survives_landing` is the same fact for a reader of `--json`.
+
+The restack is withheld, not forbidden: it stays in `status` and `queue`, and it can run after the merge, on
+a branch nobody had to certify. The refusal after a rewrite stays exactly as it was — the gate's half of that
+incident was correct, and a tool that quietly accepted a different commit would be accepting a state nobody
+read.
 
 **An approval follows the base only when the content did not move.** `base...head` is the difference between
 the tree at the merge base and the tree at head, and head is the same commit under both bases, so the two

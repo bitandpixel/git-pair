@@ -15,15 +15,75 @@ import (
 // of content nobody has changed.
 
 // TestCheckPassesAChildOnALandedParent is the case the whole milestone exists for: the child is approved,
-// its own content has not moved, and the only new fact is that the branch underneath it has landed.
-func TestCheckPassesAChildOnALandedParentAndNamesTheStep(t *testing.T) {
+// its own content has not moved, and the only new fact is that the branch underneath it has landed. The
+// step the landing leaves is withheld here, because running it would rewrite the head the approval certifies
+// and so make the verdict below it fail; the fact and the comparison are printed in its place.
+func TestCheckPassesAChildOnALandedParentWithoutAdvisingTheRewrite(t *testing.T) {
+	f := approvedChildOnALandedParent(t)
+
+	res := runIn(t, f.Dir(), "check")
+	res.mustSucceed(t, "check")
+	mustContain(t, res.stdout, "landed as "+shortOf(f.landing),
+		"a passing verdict still says what is underneath the work")
+	mustContain(t, res.stdout, "still contributes the content review",
+		"and the comparison that withheld the step says so on the same line")
+	mustNotContain(t, res.stdout, "git rebase", "no command on a passing verdict may cost that verdict")
+
+	out := runIn(t, f.Dir(), "check", "--json").mustSucceed(t, "check").json(t)
+	if out["ready"] != true {
+		t.Fatalf("ready is %v with reasons %v: a landed parent changes no content this child owns",
+			out["ready"], out["reasons"])
+	}
+	if reasons := out["reasons"].([]any); len(reasons) != 0 {
+		t.Errorf("reasons = %v, want none", reasons)
+	}
+	if na, _ := out["next_action"].(string); strings.Contains(na, "git rebase") {
+		t.Errorf("next_action = %q: the restack is housekeeping the merge does not need, and running it "+
+			"rewrites the head the approval names", na)
+	}
+	if out["parent_landed"] != true || out["parent_landed_commit"] != shortOf(f.landing) {
+		t.Errorf("parent_landed = %v / %v, want true and %s", out["parent_landed"], out["parent_landed_commit"], shortOf(f.landing))
+	}
+	if out["parent_approval_survives_landing"] != true {
+		t.Errorf("parent_approval_survives_landing = %v, want true: it is the fact the missing step rests on, "+
+			"and a reader of next_action cannot tell withheld-from-equal without it", out["parent_approval_survives_landing"])
+	}
+}
+
+// The other half of the same fixture: the author runs the command the tool used to print. The refusal is the
+// correct half of the incident — an approval certifies a commit — and this pins that the withheld step is a
+// choice the author can still make, visible as a refusal rather than a trap.
+func TestCheckRefusesTheChildThatTookTheWithheldRestack(t *testing.T) {
+	f := approvedChildOnALandedParent(t)
+
+	f.MustGit("rebase", "--onto", f.landing, "alpha", "beta")
+	res := runIn(t, f.Dir(), "check")
+	if res.code != exitRefusal {
+		t.Fatalf("check after the rewrite exited %d, want %d\nstdout: %s", res.code, exitRefusal, res.stdout)
+	}
+	mustContain(t, res.stdout, "no longer in this history",
+		"the rewritten head is refused, which is what the approval is a claim about")
+}
+
+// landedChild is a child whose parent has landed and whose content still measures what the approval recorded;
+// landing is the commit the parent's work became in the destination.
+type landedChild struct {
+	*gittest.Fixture
+	landing string
+}
+
+// approvedChildOnALandedParent is the fixture the whole milestone exists for: the child is approved, its own
+// content has not moved, and the only new fact is that the branch underneath it has landed. The parent's own
+// ready and approve commits have to arrive before the child's approval records the parent tip, or the fixture
+// is the `parent moved since review` case rather than the landing case, and the parent is merged without
+// moving afterwards so its branch is still present — the side the advice got wrong.
+func approvedChildOnALandedParent(t *testing.T) landedChild {
+	t.Helper()
 	f := newRepo(t)
 	f.CreateBranch("alpha")
 	f.CommitChangeset("alpha", "main")
 	f.Commit("alpha work", gittest.WithFile("a.go", "package main\n"))
 	stackedOff(t, f, "beta", "alpha", "alpha", "b.go")
-	// The parent's own ready and approve commits have to arrive before the child's approval records the
-	// parent tip, or the fixture is the `parent moved since review` case rather than the landing case.
 	f.SwitchTo("alpha")
 	ready(t, f)
 	submit(t, f, "approve")
@@ -33,27 +93,7 @@ func TestCheckPassesAChildOnALandedParentAndNamesTheStep(t *testing.T) {
 	f.SwitchTo("alpha")
 	landing := landApproved(t, f, "alpha", "main")
 	f.SwitchTo("beta")
-
-	res := runIn(t, f.Dir(), "check")
-	res.mustSucceed(t, "check")
-	mustContain(t, res.stdout, "landed as "+shortOf(landing),
-		"a passing verdict still says what is underneath the work")
-	mustContain(t, res.stdout, "rebase onto it", "and which step that leaves")
-
-	out := runIn(t, f.Dir(), "check", "--json").json(t)
-	if out["ready"] != true {
-		t.Fatalf("ready is %v with reasons %v: a landed parent changes no content this child owns",
-			out["ready"], out["reasons"])
-	}
-	if reasons := out["reasons"].([]any); len(reasons) != 0 {
-		t.Errorf("reasons = %v, want none", reasons)
-	}
-	if na, ok := out["next_action"].(string); !ok || !strings.Contains(na, "rebase onto it") {
-		t.Errorf("next_action = %v, want it to name the rebase the landing leaves", out["next_action"])
-	}
-	if out["parent_landed"] != true || out["parent_landed_commit"] != shortOf(landing) {
-		t.Errorf("parent_landed = %v / %v, want true and %s", out["parent_landed"], out["parent_landed_commit"], shortOf(landing))
-	}
+	return landedChild{Fixture: f, landing: landing}
 }
 
 // The other half of the choice: the child is already on the landing commit, so what is left is a branch to
