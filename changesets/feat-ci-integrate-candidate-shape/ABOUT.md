@@ -139,12 +139,12 @@ runner to see one is the first to complain.
 ## Open questions
 
 -   Should this repository pass `--ci-request` after all, so a merge leaves a trunk run behind? Answered on
-    review (`cac6104`): yes, for the paper trail and the notification, and this layer implements it.
+    review (`cac6104`) — *“I like the idea of a github-native paper trail and notifications in case something
+    goes red. let's add it”* — and this layer implements it.
 -   The same question now belongs to every repository adopting the profile, not to each file. `bitandpixel/dev-profiles`
     carries its own integrate workflow, which does not ask today. Whether the answer lives in that file or in
     the profile as house policy for the GitHub family is the open half of the vendoring discussion, and it is
     easier to settle once the profile can carry forge-specific policy at all.
-I like the idea of a github-native paper trail and notifications in case something goes red. let's add it
 -   Once this ships, `bitandpixel/dev-profiles` carries a second copy of the driver and its own replay of it.
     Deleting that copy depends on a released binary new enough to have `--verify-cmd`, so the removal belongs
     after the next tag.
