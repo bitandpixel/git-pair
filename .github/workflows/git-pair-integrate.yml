@@ -189,6 +189,7 @@ jobs:
           # then correctly refuses to merge. The driver needs the variable; the suite must not see it. This is
           # the general hazard of testing a candidate inside the job that merges it: the candidate's
           # environment is the merge environment, and the suite was written against nobody's.
+          # instead of having to explicitly name each env variable to unset, could we instead give the tests a blank slate env?
           VERIFY_CMD='env -u GIT_PAIR_DEFAULT_BRANCH mise run gates'
           set -- --verify-cmd "$VERIFY_CMD"
           # Named rather than left to the driver's default, because the file claims the ask in its own header:
