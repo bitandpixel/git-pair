@@ -1,7 +1,7 @@
 # The landing contract, for an agent who does not run it
 
 Landing is three steps, in this order, and nothing else. You take part in the first two and report on the
-last; the merge belongs to the person who owns the destination branch.
+last; the merge belongs to whoever owns the destination branch.
 
 ```bash
 git pair check                       # 1. the gate — yours
@@ -20,6 +20,14 @@ the destination acts on it.
 Nothing about a landing is written down separately either. A changeset is landed when the destination
 branch carries `changesets/<id>/`, and that directory is the whole record. There is no fifth step to
 forget, no ref to publish, and no configuration that makes the answer better.
+
+Whoever owns the destination branch is one decision with two common shapes: a person who reads the branch
+and merges it, or a job the repository set up to merge what has been declared. They satisfy the same three
+facts — approved, declared, and green on the declared head — and git-pair asks nothing about which shape a
+repository uses, detects nothing to find out, and names no tool in its advice. `scripts/ci/git-pair-integrate.sh`
+is this repository's own version of the second shape, which is what it is: an example of somebody acting on
+the declaration, not a fifth step or a requirement. What you report is the same either way — the gate's
+verdict, and whether the request is on the branch.
 
 ## 1. The gate you run
 

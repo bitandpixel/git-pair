@@ -35,16 +35,43 @@ func stackedApprovedPair(t *testing.T, f *gittest.Fixture) {
 func nextLines(t *testing.T, f *gittest.Fixture) map[string]string {
 	t.Helper()
 	out := map[string]string{
-		"status":  lastPrintedLine(t, runIn(t, f.Dir(), "status").stdout),
-		"check":   lastPrintedLine(t, runIn(t, f.Dir(), "check").stdout),
-		"wait":    lastPrintedLine(t, runIn(t, f.Dir(), "change", "wait").stdout),
-		"submit":  lastPrintedLine(t, runIn(t, f.Dir(), "review", "submit", "--approve").stdout),
+		"status":  nextStepLine(t, runIn(t, f.Dir(), "status").stdout),
+		"check":   nextStepLine(t, runIn(t, f.Dir(), "check").stdout),
+		"wait":    nextStepLine(t, runIn(t, f.Dir(), "change", "wait").stdout),
+		"submit":  nextStepLine(t, runIn(t, f.Dir(), "review", "submit", "--approve").stdout),
 		"json":    stringField(t, runIn(t, f.Dir(), "check", "--json").json(t), "next_action"),
 		"jsonst":  stringField(t, runIn(t, f.Dir(), "status", "--json").json(t), "next_action"),
 		"jsonwt":  stringField(t, runIn(t, f.Dir(), "change", "wait", "--json").json(t), "next_action"),
 		"jsonsub": stringField(t, runIn(t, f.Dir(), "review", "submit", "--approve", "--json").json(t), "next_action"),
 	}
 	return out
+}
+
+func nextStepLine(t *testing.T, out string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if step, ok := strings.CutPrefix(trimmed, "Next: "); ok {
+			return strings.TrimSpace(step)
+		}
+		if step, ok := strings.CutPrefix(trimmed, "next:"); ok {
+			return strings.TrimSpace(step)
+		}
+	}
+	t.Fatalf("output prints no next step:\n%s", out)
+	return ""
+}
+
+// printedHandoff returns the hand-off line a screen printed under its next step, or "" when it printed none.
+// The two screens indent it differently — under `Next: ` and under `next:  ` — so the test for it looks at
+// what the line says rather than at how far in it sits.
+func printedHandoff(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "or hand it to ") {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func lastPrintedLine(t *testing.T, out string) string {
@@ -65,11 +92,11 @@ func stringField(t *testing.T, doc map[string]any, key string) string {
 	return got
 }
 
-// The waiting sentence, in the words it has to have: it names the parent, gives the parent's landing as the
-// step that is owed now, and names where the child's own merge will go once that has happened — which is the
-// integration branch, not the parent's branch.
-const waitingBeta = "waiting on parent alpha: land it first (`git pair check`, then merge into main with " +
-	"ordinary git), then `git pair check` and merge into main"
+// The waiting sentence, in the words it has to have: it names the parent, sends the reader to the parent's
+// own screen for the parent's step rather than spelling a second copy of the landing contract here, and then
+// names where this changeset's own merge will go — the integration branch, not the parent's branch.
+const waitingBeta = "waiting on parent alpha: its landing is owed first (`git pair status --changeset alpha` " +
+	"names the step), then `git pair check` and merge into main"
 
 func TestApprovedChildOfAnUnlandedParentIsToldTheParentLandsFirst(t *testing.T) {
 	f := newRepo(t)
@@ -87,6 +114,160 @@ func TestApprovedChildOfAnUnlandedParentIsToldTheParentLandsFirst(t *testing.T) 
 	}
 }
 
+// The hand-off line, and the one property it has to hold: it appears exactly where `git pair change
+// integrate` would record a declaration. A screen that offers the hand-off where the command refuses is the
+// failure the design rejected — a `READY` changeset told the merge is available reads as permission to skip
+// the review — and a screen that hides it where the command would accept leaves the second exit
+// undiscoverable. So each row states both halves, read from the same fixture.
+func TestHandoffLineAppearsExactlyWhereTheDeclarationWouldBeRecorded(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, f *gittest.Fixture)
+		want    bool
+		exit    int
+		records bool
+	}{
+		{"approved", func(t *testing.T, f *gittest.Fixture) {}, true, exitOK, true},
+		{"never reviewed", func(t *testing.T, f *gittest.Fixture) {
+			// Back to the offer: an approved changeset re-offered has no verdict covering the head.
+			f.MustGit("reset", "--hard", "HEAD~1")
+		}, false, exitRefusal, false},
+		{"head moved since the approval", func(t *testing.T, f *gittest.Fixture) {
+			f.Commit("a commit after the approval", gittest.WithFile("b.go", "package main\n"))
+		}, false, exitRefusal, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := approvedUnstacked(t)
+			tc.arrange(t, f)
+
+			statusOut := runIn(t, f.Dir(), "status").stdout
+			checkOut := runIn(t, f.Dir(), "check").stdout
+			if got := printedHandoff(statusOut); (got != "") != tc.want {
+				t.Errorf("status printed the hand-off %v, want %v:\n%s", got != "", tc.want, statusOut)
+			}
+			if got := printedHandoff(checkOut); (got != "") != tc.want {
+				t.Errorf("check printed the hand-off %v, want %v:\n%s", got != "", tc.want, checkOut)
+			}
+
+			// The other half of the equivalence, from the command itself.
+			declared := runIn(t, f.Dir(), "change", "integrate", "--json")
+			if declared.code != tc.exit {
+				t.Fatalf("change integrate exited %d, want %d\n%s%s", declared.code, tc.exit, declared.stdout, declared.stderr)
+			}
+			if tc.exit == exitOK {
+				if got := declared.json(t)["recorded"]; got != tc.records {
+					t.Errorf("recorded = %v, want %v", got, tc.records)
+				}
+			}
+		})
+	}
+}
+
+// The states the design excluded, asserted one at a time rather than as a leftover: each is a case where the
+// command refuses, and the screen has to stay quiet.
+func TestHandoffLineStaysQuietWhereTheDeclarationIsRefused(t *testing.T) {
+	t.Run("child of an unlanded parent", func(t *testing.T) {
+		f := newRepo(t)
+		stackedApprovedPair(t, f)
+
+		if got := printedHandoff(runIn(t, f.Dir(), "status").stdout); got != "" {
+			t.Errorf("status offers the hand-off while the parent is unlanded: %q", got)
+		}
+		if got := printedHandoff(runIn(t, f.Dir(), "check").stdout); got != "" {
+			t.Errorf("check offers the hand-off while the parent is unlanded: %q", got)
+		}
+		res := runIn(t, f.Dir(), "change", "integrate")
+		if res.code != exitRefusal {
+			t.Errorf("change integrate exited %d on an unlanded parent, want %d:\n%s", res.code, exitRefusal, res.stdout)
+		}
+	})
+
+	t.Run("feedback instead of an approval", func(t *testing.T) {
+		f := newRepo(t)
+		f.CreateBranch("alpha")
+		f.CommitChangeset("alpha", "main")
+		f.Commit("alpha work", gittest.WithFile("a.go", "package main\n"))
+		ready(t, f)
+		submit(t, f, "feedback")
+
+		if got := printedHandoff(runIn(t, f.Dir(), "status").stdout); got != "" {
+			t.Errorf("status offers the hand-off on a changeset the default policy cannot declare: %q", got)
+		}
+		if res := runIn(t, f.Dir(), "change", "integrate"); res.code != exitRefusal {
+			t.Errorf("change integrate exited %d on feedback, want %d", res.code, exitRefusal)
+		}
+	})
+
+	t.Run("head already declared", func(t *testing.T) {
+		f := approvedUnstacked(t)
+		runIn(t, f.Dir(), "change", "integrate").mustSucceed(t, "change integrate")
+
+		if got := printedHandoff(runIn(t, f.Dir(), "status").stdout); got != "" {
+			t.Errorf("status offers the hand-off again after the hand-off: %q", got)
+		}
+		again := runIn(t, f.Dir(), "change", "integrate", "--json").json(t)
+		if again["recorded"] != false {
+			t.Errorf("the second declaration recorded a marker: %v", again)
+		}
+	})
+}
+
+// The machine contract the human line must not touch: `next_action` stays one instruction, so a consumer
+// parsing it never has to decide between two exits.
+func TestHandoffLineNeverEntersTheMachineAnswer(t *testing.T) {
+	f := approvedUnstacked(t)
+
+	for name, doc := range map[string]map[string]any{
+		"status": runIn(t, f.Dir(), "status", "--json").json(t),
+		"check":  runIn(t, f.Dir(), "check", "--json").json(t),
+	} {
+		action, _ := doc["next_action"].(string)
+		if action == "" {
+			t.Fatalf("%s --json printed no next_action: %v", name, doc)
+		}
+		if strings.Contains(action, "or hand it to") {
+			t.Errorf("%s --json carries the human hand-off in next_action: %q", name, action)
+		}
+		if strings.Contains(action, "\n") {
+			// The contract in one assertion: one string, one instruction. A second sentence appended here
+			// would be a fork a consumer has to parse out of advice.
+			t.Errorf("%s --json next_action is more than one instruction: %q", name, action)
+		}
+		if !strings.Contains(action, "merge into main with ordinary git") {
+			t.Errorf("%s --json next_action is %q, want the landing sentence on its own", name, action)
+		}
+	}
+
+	// The two lines name one destination, read from one contract: an author who reads both must not be
+	// handed two branches.
+	statusOut := runIn(t, f.Dir(), "status").stdout
+	step, handoff := nextStepLine(t, statusOut), printedHandoff(statusOut)
+	if handoff == "" {
+		t.Fatal("status printed no hand-off line for an approved, declarable changeset")
+	}
+	if !strings.Contains(step, "merge into main") || !strings.Contains(handoff, "main's owner") {
+		t.Errorf("the step and the hand-off name different destinations:\n  %s\n  %s", step, handoff)
+	}
+	if !strings.Contains(handoff, "git push origin alpha") {
+		t.Errorf("the hand-off leaves out the push the other side has to be able to see the request: %q", handoff)
+	}
+}
+
+// approvedUnstacked is a changeset approved on its own branch against main — the shape where the merge is
+// the author's step and the hand-off is the alternative to it.
+func approvedUnstacked(t *testing.T) *gittest.Fixture {
+	t.Helper()
+	f := newRepo(t)
+	f.CreateBranch("alpha")
+	f.CommitChangeset("alpha", "main")
+	f.Commit("alpha work", gittest.WithFile("a.go", "package main\n"))
+	ready(t, f)
+	submit(t, f, "approve")
+	return f
+}
+
 // The control the change has to leave alone: an unstacked changeset is merged into its base, in the sentence
 // that has always been right, with nothing waiting and nothing appended.
 func TestUnstackedLandingAdviceIsTheBaseAndAMerge(t *testing.T) {
@@ -99,9 +280,9 @@ func TestUnstackedLandingAdviceIsTheBaseAndAMerge(t *testing.T) {
 
 	const want = "`git pair check`, then merge into main with ordinary git"
 	for name, line := range map[string]string{
-		"status": lastPrintedLine(t, runIn(t, f.Dir(), "status").stdout),
-		"check":  lastPrintedLine(t, runIn(t, f.Dir(), "check").stdout),
-		"wait":   lastPrintedLine(t, runIn(t, f.Dir(), "change", "wait").stdout),
+		"status": nextStepLine(t, runIn(t, f.Dir(), "status").stdout),
+		"check":  nextStepLine(t, runIn(t, f.Dir(), "check").stdout),
+		"wait":   nextStepLine(t, runIn(t, f.Dir(), "change", "wait").stdout),
 		"json":   stringField(t, runIn(t, f.Dir(), "check", "--json").json(t), "next_action"),
 	} {
 		if !strings.HasSuffix(line, want) {
@@ -125,9 +306,9 @@ func TestChildOfALandedParentIsToldWhereItsOwnMergeGoes(t *testing.T) {
 
 	const want = "`git pair check`, then merge into main with ordinary git (where alpha landed)"
 	for name, line := range map[string]string{
-		"status": lastPrintedLine(t, runIn(t, f.Dir(), "status").stdout),
-		"check":  lastPrintedLine(t, runIn(t, f.Dir(), "check").stdout),
-		"wait":   lastPrintedLine(t, runIn(t, f.Dir(), "change", "wait").stdout),
+		"status": nextStepLine(t, runIn(t, f.Dir(), "status").stdout),
+		"check":  nextStepLine(t, runIn(t, f.Dir(), "check").stdout),
+		"wait":   nextStepLine(t, runIn(t, f.Dir(), "change", "wait").stdout),
 		"json":   stringField(t, runIn(t, f.Dir(), "check", "--json").json(t), "next_action"),
 	} {
 		if !strings.HasSuffix(line, want) {
@@ -164,8 +345,8 @@ func TestChildOfAParentWithNoRecordedChangesetWaitsOnTheBranch(t *testing.T) {
 	ready(t, f)
 	submit(t, f, "approve")
 
-	line := lastPrintedLine(t, runIn(t, f.Dir(), "status").stdout)
-	const want = "waiting on parent alpha: land it first (`git pair check`, then merge into main with ordinary git)"
+	line := nextStepLine(t, runIn(t, f.Dir(), "status").stdout)
+	const want = "waiting on parent alpha: its landing is owed first (`git pair status --changeset alpha` names the step)"
 	if !strings.Contains(line, want) {
 		t.Errorf("status next step is %q, want it to contain %q", line, want)
 	}
@@ -187,8 +368,8 @@ func TestChildWithFeedbackIsStillToldWhichLandingIsNext(t *testing.T) {
 	ready(t, f)
 	submit(t, f, "feedback")
 
-	line := lastPrintedLine(t, runIn(t, f.Dir(), "status").stdout)
-	if !strings.HasPrefix(line, "Next: optionally address feedback") {
+	line := nextStepLine(t, runIn(t, f.Dir(), "status").stdout)
+	if !strings.HasPrefix(line, "optionally address feedback") {
 		t.Errorf("status next step is %q, want the feedback prefix kept", line)
 	}
 	if !strings.Contains(line, waitingBeta) {
@@ -214,7 +395,7 @@ func TestDeepStackWaitsOnTheParentDirectlyBelow(t *testing.T) {
 	ready(t, f)
 	submit(t, f, "approve")
 
-	line := lastPrintedLine(t, runIn(t, f.Dir(), "status").stdout)
+	line := nextStepLine(t, runIn(t, f.Dir(), "status").stdout)
 	if !strings.Contains(line, "waiting on parent beta:") {
 		t.Errorf("status next step is %q, want it to name the parent directly below", line)
 	}
@@ -235,8 +416,8 @@ func TestChildOfADeletedUnlandedParentStillGetsAStep(t *testing.T) {
 
 	res := runIn(t, f.Dir(), "status")
 	res.mustSucceed(t, "status")
-	line := lastPrintedLine(t, res.stdout)
-	if !strings.Contains(line, "Next:") {
+	line := nextStepLine(t, res.stdout)
+	if line == "" {
 		t.Errorf("status printed no next step: %q", res.stdout)
 	}
 	if !strings.Contains(line, "waiting on parent alpha") {
@@ -244,5 +425,17 @@ func TestChildOfADeletedUnlandedParentStillGetsAStep(t *testing.T) {
 	}
 	if strings.Contains(line, "merge into alpha") {
 		t.Errorf("status offers a branch that no longer exists as a merge target: %s", line)
+	}
+	// The pointer the waiting sentence gives is a decision, and this is the state where it has to be the
+	// other one: `git pair status --changeset alpha` answers here with an error, so the sentence names the
+	// command that resolves the unreconciled stack instead of pointing at a screen that cannot answer.
+	if strings.Contains(line, "status --changeset alpha") {
+		t.Errorf("status points at its own command for a changeset it has just said is unreadable: %q", line)
+	}
+	if !strings.Contains(line, "git pair init --parent <branch> --set-parent") {
+		t.Errorf("status does not name the command that resolves a parent whose branch is gone: %q\n%s", line, res.stdout)
+	}
+	if !strings.Contains(res.stdout, "its branch is gone") {
+		t.Errorf("status does not say what is missing: %q", res.stdout)
 	}
 }

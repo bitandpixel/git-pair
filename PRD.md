@@ -870,6 +870,10 @@ git switch main && git merge booking-transaction  # …or a squash, or a cherry-
 git pair status --changeset booking-transaction   # landed at 4f2c81a, with the chain that arrived
 ```
 
+That is the exit where the author merges. The other one hands the merge over: `git pair change integrate`
+(§9.9) records the request and the author pushes, and the destination's owner performs the merge. §21 shows
+what the two exits look like on the screen that offers them, so they are spelled there once.
+
 Three properties are worth naming, because they are what the previous shape of this chapter had
 backwards:
 
@@ -1611,6 +1615,10 @@ Uncommitted changes: no
 Next: `git pair check`, then merge into main with ordinary git
 ```
 
+That `Next:` line is also what `--json` reports in `next_action`. The human screen prints one line under it
+for a changeset `git pair change integrate` would accept — handing the merge to the destination's owner — and
+§21 prints the pair together, so both exits are spelled once rather than in every transcript that shows one.
+
 Nothing durable is reported, because nothing durable exists yet: the branch holds the history, and
 git-pair writes no ref at any point before or after a landing. A changeset the destination carries reads:
 
@@ -1799,6 +1807,10 @@ NOT READY:
 - latest review outcome is blocking
 - content outside changesets/booking-transaction/ changed since 91bf204: src/booking/service.ts
 ```
+
+The passing verdict's `next:` line is the machine answer as well, and the human screen carries the hand-off
+line under it wherever `git pair change integrate` would accept the changeset — §21 shows the two lines
+together.
 
 A rewritten branch says so in the same list:
 
@@ -3743,14 +3755,45 @@ branch review can still rebase, amend or block an hour from now — and a merge 
 that may stop existing. Refusing the request is the whole
 mitigation; the human path stays open, so nothing is lost but the automation.
 
-**The next step says which landing is owed.** The refusal above is a fact four reporting surfaces contradict
-if they print the landing contract (§9.5) from the changeset's own base, because a stacked child's base names
-the parent's branch. `status` (§11.1), `check` (§11.3), `change wait` (§9.4) and `review submit` (§10.4) each
-print one sentence for a child whose parent has not landed, and the sentence is the parent's step first:
+**The next step says which landing is owed.** Four reporting surfaces tell an author how their work reaches
+the destination — `status` (§11.1), `check` (§11.3), `change wait` (§9.4) and `review submit` (§10.4) — and
+this is the one place the contract they print is stated. The rest of this document and the agent skill quote
+it; a sentence spelled out a second time somewhere else is how it begins to disagree with itself, and the
+test that reads these documents compares each quote with what the code builds.
+
+Two facts decide the sentence, both read from the repository rather than from the changeset's own file: where
+the work is going, which the destination walk above answers and a stacked child's recorded base does not; and
+whether something below it has to land first.
+
+**A sentence names the step and the destination, never the actor.** The merge is ordinary git performed by
+whoever owns the destination branch (§9.5, §13.4), and git-pair asks nothing about who that is or what they
+run: a person with merge rights and a job set up to merge declared work satisfy the same three facts —
+approved, declared, and green on the declared head (§11.3). So no sentence names a forge, a workflow, a
+runner, or a job, and none depends on detecting one. A workflow file existing is not a workflow merging, and
+guidance built on reading one would be wrong in every repository that merged some other way.
+
+**Both exits are printed where a human reads; one is printed where a machine reads.** Beside the author's own
+merge, `status` and `check` name the other way the work gets taken — the hand-off, which is a request and a
+push and nothing else:
 
 ```text
-waiting on parent booking: land it first (`git pair check`, then merge into main with ordinary git),
-then `git pair check` and merge into main
+Next: `git pair check`, then merge into main with ordinary git
+      or hand it to main's owner: `git pair change integrate`, then `git push origin booking-transaction`
+```
+
+That second line appears exactly where `git pair change integrate` would record the declaration and nowhere
+else, because the test is the same command's own — a changeset never reviewed, a head moved since its
+approval, an unlanded parent below it, or a head already handed over are each a case where it refuses. An
+offer the command answers with exit 1 is the failure the rule exists to prevent: on a `READY` changeset it
+would say the merge is available two lines under "wait for a reviewer". `next_action` in `--json` stays one
+instruction, because a consumer parsing advice should never have to choose between two exits.
+
+**A surface that does not own a step refers the reader to the surface that does.** The child's waiting
+sentence names the parent and sends the reader to the parent's own screen instead of spelling the parent's
+`check` and merge, and `git pair change integrate`'s unlanded-parent refusal does the same:
+
+```text
+waiting on parent booking: its landing is owed first (`git pair status --changeset booking` names the step), then `git pair check` and merge into main
 ```
 
 It names no parent branch as a merge target for the child, on two grounds: the child's work goes where its

@@ -144,8 +144,10 @@ func TestCheckRefusesAChildRewrittenOntoASquashedParentLanding(t *testing.T) {
 	}
 	mustContain(t, res.stdout, "differs from what review", "the reason names the comparison that failed")
 	mustContain(t, res.stdout, "have the result reviewed again", "and the step it leaves asks for a review of the result")
-	mustContain(t, res.stdout, "git pair change ready --changeset beta",
+	mustContain(t, res.stdout, "re-offer it with `git pair change ready`",
 		"and the step is the re-offer, since this head is already on the landing")
+	mustNotContain(t, res.stdout, "change ready --changeset",
+		"and the step names no selector: `change ready` takes the changeset this branch carries, and has no --changeset flag")
 	mustNotContain(t, res.stdout, "git branch -D alpha and", "not a branch deletion glued to a review request")
 
 	out := runIn(t, f.Dir(), "check", "--json").json(t)
@@ -194,6 +196,6 @@ func TestCheckNamesTheMergeWhenALandedParentWouldConflictWithTheChild(t *testing
 	}
 	mustContain(t, res.stdout, "would conflict with main", "the reason names the condition and the destination")
 	mustContain(t, res.stdout, "shared.txt", "and the file that would conflict")
-	mustContain(t, res.stdout, "git merge main && git pair change ready --changeset beta",
+	mustContain(t, res.stdout, "git merge main && git pair change ready",
 		"and the step is the merge followed by a re-offer, not a rewrite onto the landing")
 }

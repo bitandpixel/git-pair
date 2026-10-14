@@ -87,10 +87,10 @@ func TestChildOfALandedStackIsToldWhereItsOwnMergeGoes(t *testing.T) {
 	}
 }
 
-// The same reading with the parent still unlanded: the child waits on beta, and both halves of the waiting
-// sentence — where beta's own merge goes, and where gamma's follows it — are the integration branch. beta's
-// record naming alpha's branch is no more a destination here than it is above; the difference is that gamma
-// cannot merge yet either way.
+// The same reading with the parent still unlanded: the child waits on beta. The sentence names the
+// integration branch once, for gamma's own merge, and leaves beta's step to beta's screen — beta's record
+// naming alpha's branch is no more a destination here than it is above, and spelling beta's merge in gamma's
+// sentence was a second copy of a contract that already had one home.
 func TestChildOfAnUnlandedParentWhoseBaseHasLandedWaitsOnTheDestination(t *testing.T) {
 	f := stackOfThree(t)
 	f.SwitchTo("alpha")
@@ -105,9 +105,12 @@ func TestChildOfAnUnlandedParentWhoseBaseHasLandedWaitsOnTheDestination(t *testi
 		if strings.Contains(line, "into alpha") {
 			t.Errorf("%s sends a merge to a branch whose work is in the destination: %s", name, line)
 		}
-		if n := strings.Count(line, "merge into main"); n != 2 {
-			t.Errorf("%s names the destination %d times, want twice — where beta merges and where gamma follows:\n\t%s",
-				name, n, line)
+		if n := strings.Count(line, "merge into main"); n != 1 {
+			t.Errorf("%s names the destination %d times, want once — gamma's own merge, with beta's step left to "+
+				"beta's screen:\n\t%s", name, n, line)
+		}
+		if !strings.Contains(line, "`git pair status --changeset beta`") {
+			t.Errorf("%s does not send the reader to the parent's own advice:\n\t%s", name, line)
 		}
 	}
 }
