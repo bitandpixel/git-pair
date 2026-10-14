@@ -662,6 +662,49 @@ appending still contains every line the reviewer wrote, and `ABOUT.md` edits are
 so blocking on those would fail almost every real changeset and push users toward reflexive use
 of the override. See `docs/plans/completed/gitpr-mvp/research/git-plumbing-findings.md`.
 
+**Lifecycle hooks.** A repository can run its own script at the moment work is handed on, and refuse the
+hand-off when the script says no. The built-in gate can only ask what git already knows — a clean tree, an
+`ABOUT.md` that exists, a standing approval. Whether the suite passed, the migration applies, the generated
+client is current: none of that is in the graph, and no tool can know it for a repository it does not own.
+
+Hooks live in two roots, consulted in that order: `.git-pair/hooks/<point>/` is committed, so it is content
+that arrived from somewhere and runs only after a person accepts it with `git pair hooks --trust`; and
+`<git-dir>/git-pair/hooks/<point>/` is your own file under your own git directory, never committed, and needs
+no consent — which is where a reviewer attaches a check for a repository they cannot edit. Under a point, a
+directory of scripts or one file named for the point is accepted, run in lexicographic order (`01-fmt`,
+`02-test`), the tracked root first, so the repository's rules are the baseline and the client adds to them.
+The twelve points are the six actions on both sides — `pre-`/`post-ready`, `-integrate`, `-unready`,
+`-abandon`, `-check`, `-submit` — and the read-path commands run none, on purpose: a hook on a read turns a
+lookup into a build. A misspelled point is reported by `git pair hooks` under `unknown[]` rather than ignored,
+because an entry nobody runs is otherwise indistinguishable from no entry.
+
+A hook is executed directly, never through a shell, with the repository root as its cwd and nothing on stdin,
+and it reads the resolution from the environment (`GIT_PAIR_HOOK_POINT`, `GIT_PAIR_CHANGESET`,
+`GIT_PAIR_BRANCH`, `GIT_PAIR_BASE`, `GIT_PAIR_HEAD`, `GIT_PAIR_DEFAULT_BRANCH`, `GIT_PAIR_HOOK_ROOT`; the two
+submission points add `GIT_PAIR_REVIEW_OUTCOME`, `GIT_PAIR_REVIEW_HEAD`, `GIT_PAIR_REVIEW_BODY_FILE`). Its
+output never reaches stdout, which is where `--json` lives; a failure is replayed on stderr with the refusal.
+
+**A pre-hook's nonzero exit refuses with exit 1** — the same class of refusal as a dirty tree, never exit 3,
+which means git itself failed — and writes nothing. **A post-hook's failure exits nonzero too, prints the
+hook's output, and reverses nothing**: the message names the state the changeset is in, the hook, and that
+nothing was undone, so judge it by that line rather than by the exit code. At `check` both points join the
+verdict instead, because `check` writes nothing to undo: a failing `pre-check` or `post-check` appends a
+reason and sets `ready: false`, so one command and one answer still cover the repository's own conditions.
+
+Consent is by content: the path, mode and bytes of the tracked hooks tree are hashed and the hash recorded per
+clone in `<git-dir>/git-pair/trusted-hooks`, so an edit after acceptance is a new acceptance. An unaccepted
+tree runs no hooks and says so on stderr — the operation is not blocked, because a fresh clone must still get a
+verdict. Two different states read as `trusted: false`, and `git pair hooks` separates them: `unrecorded` is a
+clone where nobody has accepted anything, and `changed` is a clone whose accepted version the repository replaced
+— the team shipped a new check, and this clone is now running without it. They warrant different actions, so the
+second names the accepted hash beside the tree's current one; a clone in that state can also keep running the
+version it read by copying that content into the per-clone root. Hooks are the client's control rather than repository enforcement: git-pair publishes the event and
+the checkout owns the script, which is why a hook may run commands git-pair itself never invokes (§26 binds
+what this tool runs of its own choosing). `GIT_PAIR_HOOKS=0` switches them off for one run — the person's own
+escape hatch for a script that is misbehaving, not a way past a check. The CI recipe is under
+[Landing a declared change from CI](#landing-a-declared-change-from-ci); the contract is PRD §11.4 and
+`skills/git-pair/references/hooks.md`.
+
 ## Command reference
 
 Every command accepts the persistent `--json` flag, but only `status`, `change ready`,

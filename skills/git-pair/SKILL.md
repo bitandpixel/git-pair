@@ -85,7 +85,9 @@ outranks it, and a destination taken from the environment is named on stderr and
 `default_branch_source: "env"`.
 
 Full flags, span semantics and the JSON shapes: [references/cli.md](references/cli.md). The landing
-side, which you read about and do not run: [references/integration.md](references/integration.md).
+side, which you read about and do not run: [references/integration.md](references/integration.md). The
+repository's own scripts at a lifecycle point, and the two commands an agent must not run on a person's
+behalf: [references/hooks.md](references/hooks.md).
 Putting this skill into a repository or a machine: [references/installing-the-skill.md](references/installing-the-skill.md).
 
 ## ABOUT.md

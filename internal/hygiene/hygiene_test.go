@@ -246,6 +246,7 @@ func TestDetectorCatchesInjectedViolations(t *testing.T) {
 		`func (r *repo) shBr()   { exec.Command("sh", "-c", "git branch -D feature") } // BAD`,
 		`func (r *repo) direct() { exec.Command("git", "reset", "--hard") } // BAD`,
 		`func (r *repo) shExec() { exec.Command("git", "switch", "main") } // BAD`,
+		`func (r *repo) hookPublish(p string) error { return exec.Command("git", "push", "origin").Run() } // BAD: a hook runner that published the branch itself is the shape this scan exists to stop`,
 		``,
 		`// Layer B: a bare verb string, e.g. one spread into a git call elsewhere.`,
 		`var flags = []string{"rebase", "main"} // BAD`,
@@ -258,6 +259,11 @@ func TestDetectorCatchesInjectedViolations(t *testing.T) {
 		`func (r *repo) ok3()    { r.Git("symbolic-ref", "--quiet", "--short", "HEAD") } // OK: the read-only form, and the one file that uses it`,
 		"func (r *repo) prose()  { fmt.Errorf(\"run `git switch -c <branch>` first\") } // OK: help text, not an exec",
 		`func (r *repo) keys() map[string]any { return map[string]any{"branch": "main", "checkout": false} } // OK: --json keys`,
+		// The hook runner runs a script the checkout supplied, by path, with no argv at all. None of these
+		// shapes may be reported: a scan that flagged them would flag the feature rather than its abuse.
+		`func (r *repo) hook(p string) error { return exec.Command(p).Run() } // OK: a configured script runs by path, and a path is not a git verb`,
+		`func (r *repo) hookEnv() []string { return []string{"GIT_PAIR_HOOK_POINT", "GIT_PAIR_HOOK_ROOT", "worktree", "clone"} } // OK: environment and root names, none of them verbs`,
+		`func (r *repo) hookTimeout() string { return "git-pair.hookTimeout" } // OK: a config key that names the tool, not a verb`,
 		``,
 		`type view struct {`,
 		"\tBranch string `json:\"branch\"` // OK: struct tag",
