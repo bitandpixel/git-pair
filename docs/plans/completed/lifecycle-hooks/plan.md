@@ -497,7 +497,7 @@ Verification
   `go test ./internal/hygiene/` green.
 - `git pair skill show` renders the new page.
 
-### M6 — The unaccepted state, made a decision rather than an absence
+### M6 — The unaccepted state, made a decision rather than an absence — landed as `d4c8853`
 
 Arises from the open question M1 carried through the stack, put to the reviewer during M5: should a repository
 that has committed tracked hooks refuse outright in a clone that has not accepted them. The reviewer's answer on
@@ -554,7 +554,7 @@ Verification
 | Do post-hooks need a per-point opt-in to blocking? | Open | Deferred. Under §26 a blocking post-hook cannot reverse anything, so the only difference is exit code, and the plan already reports nonzero. |
 | Is there a safe form of reviewer-side hooks? | Resolved | Yes, and they are in scope as of 2026-10-13. Hooks are client control, so the reviewer owns their own hooks and what they enforce. The safety question moves from "may a hook gate a verdict" to "what may a hook write into the record", and the answer there is: client-appended lines yes, anything the gate reads no — see *What the record carries, and what it does not*. |
 | Should a hook result be recorded in the review marker? | Resolved | Split, after review feedback. A key git-pair reads: still no. Lines the client appends: yes — `Message` gains a field rendered after `Trailers` in the same paragraph, with reserved keys rejected and a client-owned prefix. Measured: appending at the end of the block cannot forge (first-wins protects the real keys), while appending prose below the block silently evicts `Review-State` and collapses the changeset to `WORKING`. See [research/2026-10-13-appending-to-the-marker-message.md](research/2026-10-13-appending-to-the-marker-message.md). |
-| Should a repository with committed hooks refuse outright in an unaccepted clone? | **Adopted, implemented in M6** | Mandatory, with a `declined` state as the way out: the tracked tree is recorded per-clone beside `trusted-hooks` and keyed by the tree hash, and `check` — with `change integrate` behind the same gate — refuses while it is `unrecorded` or `changed`. The consequence the reviewer took knowingly: a CI checkout is a clone that has recorded nothing, so a job takes a position in its own script (`git pair hooks --trust`, or `--decline` where a team has genuinely chosen that), and `GIT_PAIR_HOOKS=0` is deliberately not a substitute — it says a machine does not want to run scripts, not what the scripts do. Nothing breaks on upgrade because no repository has tracked hooks yet. |
+| Should a repository with committed hooks refuse outright in an unaccepted clone? | **Adopted, implemented in M6** | Mandatory, with a `declined` state as the way out: the tracked tree is recorded per-clone beside `trusted-hooks` and keyed by the tree hash, and the commands that start or advance work refuse while it is `unrecorded` or `changed` — `init`, `change ready`, `review submit`, and the gate behind `check` and `change integrate` — while `change unready`, `change abandon` and `git pair hooks` stay free. The consequence the reviewer took knowingly: a CI checkout is a clone that has recorded nothing, so a job takes a position in its own script (`git pair hooks --trust`, or `--decline` where a team has genuinely chosen that), and `GIT_PAIR_HOOKS=0` is deliberately not a substitute — it says a machine does not want to run scripts, not what the scripts do. Nothing breaks on upgrade because no repository has tracked hooks yet. |
 | Does `--no-cache` interact with hook state? | Open | Expected no: hooks run once per command and nothing about them is memoised. Confirm no fact-cache key covers them. |
 
 ## Risks
@@ -798,5 +798,40 @@ time, which was the rule M5 was cut to write down, and M6 updates that contract 
 plan carried as open is therefore closed by M6 rather than left standing.
 
 Landed in the integration branch as of 2026-10-14: M1 at `9abcfc7`, M2 at `c77633e`, M3 at `29f49e8`, M4 at
-`6768da6`. M5 is approved and declared, awaiting the merge; M6 is implemented on top of it on
-`feat/hooks-declined-state`, which is why the two move together — M6 edits the same contract pages M5 wrote.
+`6768da6`, M5 at `984f797`, M6 at `d4c8853` (approved `d9ed281`, declared `a697b3a`). Six milestones, six
+changesets, every one reviewed before it landed.
+
+## Closure
+
+The plan is complete: six milestones, each its own changeset, each reviewed before it landed.
+
+What shipped:
+
+- A hook runner that executes the client's script directly — never through a shell — with the repository root as
+  its working directory, the resolution the command already made in the environment, and output that cannot reach
+  `--json` (`internal/hooks`).
+- Twelve points, the six actions a changeset meets on both sides, including the reviewer's `pre-submit` and
+  `post-submit`, with the read-path commands deliberately running none: a hook on a read turns a lookup into a
+  build.
+- Consent by content for the tracked root — path, mode and bytes hashed, recorded per clone — four states, and a
+  per-clone record for each position a person can take.
+- The repository's own conditions inside the verdict: a failing pre-hook refuses with exit 1 like a dirty tree and
+  writes nothing, a failing post-hook reports without reversing what it followed, and `check` keeps one answer for
+  both because it writes nothing to undo.
+- The position a clone owes about the repository's scripts, asked where work starts (`init`, the hand-off, the
+  reviewer's submission) and again at the gate that licenses the merge.
+
+What the plan left undone, from its non-goals and the milestones' open questions:
+
+- No bridge from the native git hooks, so a clone's own `pre-commit` still knows nothing about the resolution.
+- No shared, reviewed statement that a repository's hooks are declined. A decline is this clone's answer; a team
+  that wants one on record writes it into its own CI, and a tracked file for it would be inherited by the next
+  clone, which is the thing it must not become.
+- `status` and `queue` report the state only through `git pair hooks`. They do not mark a row for a clone that has
+  recorded nothing, which is a surface a person can read but cannot fix from.
+- `--decline` records that the list was shown, not that it was read. An optional note (`--reason`) would make a
+  position reviewable without making it tracked.
+
+The number to beat if the feature grows: the stack-cost gate measures 49 git invocations at two levels against the
+50 allowed, and the trust read is a filesystem walk through the run's memoized `Resolution`. A change that turns
+that read into a git question has to say so in the gate's paragraph.
