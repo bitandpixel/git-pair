@@ -1123,6 +1123,13 @@ The machine-readable answer carries the changeset, the branch, the base, the sta
 head, whether this run wrote the marker, the declaration's commit, the destination with its source and the
 chain walked to reach it, `reasons` as an array in both outcomes, and the next step.
 
+That next step depends on what this run did. A run that wrote the marker names the push, because a merge
+performed by somebody else can only be performed on what they can see. A run that recorded nothing — the head
+was already declared — reports the declared path (§21): the push while the branch is unpublished, and once the
+request is on the remote, the wait, with the author's own merge printed beside it as the other exit. That
+second case used to print "nothing recorded" and no step at all, which left an author who had run the command
+twice holding a fact and no instruction.
+
 Exit codes: `0` declared or already declared, `1` refused, `2` usage, `3` git failed (§22).
 
 Nothing here performs the merge, and the product is not where a merge lives (§26). A repository that wants a
@@ -1810,7 +1817,8 @@ NOT READY:
 
 The passing verdict's `next:` line is the machine answer as well, and the human screen carries the hand-off
 line under it wherever `git pair change integrate` would accept the changeset — §21 shows the two lines
-together.
+together. Where the head is already declared, the sentence is a different one — the push while the branch is
+unpublished, the wait once it is not — and §21's declared path states it for all three surfaces.
 
 A rewritten branch says so in the same list:
 
@@ -3815,6 +3823,19 @@ approval, an unlanded parent below it, or a head already handed over are each a 
 offer the command answers with exit 1 is the failure the rule exists to prevent: on a `READY` changeset it
 would say the merge is available two lines under "wait for a reviewer". `next_action` in `--json` stays one
 instruction, because a consumer parsing advice should never have to choose between two exits.
+
+**The declared path is that statement one step later.** Once the request for this head is recorded, the merge
+sentence is nobody's next step — and neither is a second `change integrate`, which records nothing. So
+`check` (§11.3), `status` (§11.1) and a re-run of `change integrate` (§9.9) say the same three things in the
+same order: while the branch is not on the remote, the step is the push, because a merge somebody else
+performs can only be performed on what they can see; once it is, the step is the wait — waiting on main's owner to merge it: `git pair status --changeset booking-transaction`
+reports the landing — with the author's own merge printed beside it (or land it yourself: `git pair check`,
+then merge into main with ordinary git) so waiting is never the only exit offered. Which of the two the screen picks is measured against `origin` and the branch the changeset records,
+because that is the remote and the ref the advice itself names; anything it cannot read answers unpublished,
+which costs a re-run of a harmless command. And when the newest marker is a declaration that names a commit
+the branch has left behind, the step is to declare this head — not a push of a request nobody will act on.
+One builder spells all four sentences, which is the only reason three surfaces can be trusted to say them
+alike.
 
 **A surface that does not own a step refers the reader to the surface that does.** The child's waiting
 sentence names the parent and sends the reader to the parent's own screen instead of spelling the parent's

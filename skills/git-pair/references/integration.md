@@ -29,6 +29,12 @@ is this repository's own version of the second shape, which is what it is: an ex
 the declaration, not a fifth step or a requirement. What you report is the same either way — the gate's
 verdict, and whether the request is on the branch.
 
+After step 2 and the push, the report you give is that the work is waiting, never that it has landed: the
+destination carrying `changesets/<id>/` is what makes a landing a fact, and until it does, `git pair status
+--changeset <id>` is the read that says so. `git pair check` prints the same position as its next step —
+waiting on main's owner to merge it: `git pair status --changeset booking-transaction` reports the landing —
+and git-pair ran none of the merge, so a summary that says "merged" is reporting an action nobody took.
+
 ## 1. The gate you run
 
 ```bash

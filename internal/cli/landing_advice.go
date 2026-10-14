@@ -6,6 +6,7 @@ import (
 
 	"gitpair/internal/changeset"
 	"gitpair/internal/git"
+	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 )
 
@@ -154,6 +155,136 @@ func handoffLine(lc landingContract, branch string) string {
 	}
 	return fmt.Sprintf("or hand it to %s's owner: `git pair change integrate`, then `git push origin %s`",
 		target, branch)
+}
+
+// The declared path. A head covered by its own declaration has already been asked for, so the merge sentence
+// is no longer the next step — and neither is a second declaration, which is why `declarable` keeps the
+// hand-off line off this state. What is left is making the request visible, then waiting for the person who
+// acts on it. Three sentences, spelled once here, are read by `check`, `status` and `change integrate`.
+
+// declaredPath is what the two facts of the declared state resolve to, passed in rather than read so the
+// builders stay testable without a repository: `CoversHead` is `alreadyDeclared`'s answer, and `Pushed` is
+// `declarationPushed`'s.
+type declaredPath struct {
+	// CoversHead says the declaration names this head. When the newest marker is `integrate` and this is
+	// false, a commit has come under the declaration and the head it names is not the one being reported.
+	CoversHead bool
+	// Pushed says the branch as published on origin already carries the head, so the other side can see the
+	// request.
+	Pushed bool
+}
+
+// pushNextAction is the step that makes a declaration reachable by whoever can act on it. It is the sentence
+// `git pair change integrate` prints, moved here so the three surfaces cannot spell the push three ways — and
+// still names the push as a command the author runs, never as one git-pair ran: publishing is not this tool's
+// verb (PRD §26), and a log line that reads like a completed action is how a tool acquires a side effect
+// nobody agreed to.
+//
+// It queues the work; it does not promise a merge. The earlier form said "<destination> merges what …", which
+// stated as fact the decision that belongs to whoever owns the branch — and a repository whose owner merges
+// nothing, or merges next Tuesday, was being told a future had been fixed. What the push does is put the
+// request where the owner can see it, and the two fields an automated owner gates on are named beside it.
+func pushNextAction(branch, target string) string {
+	if branch == "" {
+		branch = "<branch>"
+	}
+	if target == "" {
+		target = "the destination branch"
+	}
+	return fmt.Sprintf("`git push origin %s` — queues it for merging with %s's owner; `git pair check --json` reports ready and integrating",
+		branch, target)
+}
+
+// mergeWaitNextAction is the step after the push: the merge is the destination owner's, git-pair performs
+// none of it (PRD §26, §13), and there is no command to block on — `change wait` belongs to review (§9.4) and
+// landing has no command of its own. So the sentence names a read, in the shape the `READY` state already
+// uses for waiting on a reviewer: the thing you are waiting for, then the command that tells you when it
+// happened. It names no actor beyond the destination's owner and detects nothing about who merges, the same
+// rule the hand-off line follows.
+func mergeWaitNextAction(lc landingContract, slug string) string {
+	target := displayRef(lc.Destination)
+	if target == "" {
+		target = "the destination branch"
+	}
+	if slug == "" {
+		slug = "<changeset>"
+	}
+	return fmt.Sprintf("waiting on %s's owner to merge it: `git pair status --changeset %s` reports the landing",
+		target, slug)
+}
+
+// selfMergeLine is the mirror of `handoffLine` for the state where the hand-off is already done: the request
+// is out, and the other exit — taking the work in yourself — stays on the screen so waiting is never the
+// only thing offered. It is printed on the human screens only, because `next_action` carries one instruction.
+// The merge sentence comes from `landingNextAction` rather than being spelled again: one spelling per step is
+// the rule this file exists to enforce.
+func selfMergeLine(lc landingContract) string {
+	return "or land it yourself: " + landingNextAction(lc)
+}
+
+// declaredAlternative is the human screen's second line for the declared path, and the empty string for every
+// other state — so a caller prints it exactly the way it prints `handoffLine`, and the rule for when the two
+// appear lives here once. It is deliberately not the same condition as `declarable`: the hand-off belongs to
+// the state before a declaration, this one to the state after it.
+func declaredAlternative(lc landingContract, d declaredPath) string {
+	if !d.CoversHead || !d.Pushed {
+		return ""
+	}
+	return selfMergeLine(lc)
+}
+
+// undeclaredHeadLine is the declared path's third answer: the newest marker is a declaration, and it names a
+// commit this branch has left behind. Neither the push nor the wait is the step — the request on the branch
+// is about a commit nobody is going to merge — so the sentence names the declaration that covers this head.
+// These are `status`'s words, moved here so `check` can say them without a second copy.
+func undeclaredHeadLine() string {
+	return "the head moved since the declaration: `git pair change integrate` to declare this head"
+}
+
+// declaredNextAction picks the step a declared head owes. The order is the order the facts matter in: a
+// declaration about a different commit is not a request waiting on a push, and an unpublished request is not
+// yet something to wait on.
+func declaredNextAction(lc landingContract, branch, slug string, d declaredPath) string {
+	if !d.CoversHead {
+		return undeclaredHeadLine()
+	}
+	if !d.Pushed {
+		return pushNextAction(branch, displayRef(lc.Destination))
+	}
+	return mergeWaitNextAction(lc, slug)
+}
+
+// declarationPushed reports whether the branch as published on origin already carries the head, which is what
+// makes a declaration visible to whoever acts on it. Measured against `origin` and the branch the changeset
+// records, because that is the remote and the ref the advice itself names — `git push origin <branch>` — and
+// the alternative is to read a remote the sentence does not mention.
+//
+// Any doubt answers not-pushed, which is the cheap direction: that sentence names a command that is harmless
+// to re-run, and the alternative line stays on the screen either way.
+func declarationPushed(ctx context.Context, repo *git.Repo, branch, head string) bool {
+	if branch == "" || head == "" || repo == nil {
+		return false
+	}
+	tip, err := repo.RevParse(ctx, "refs/remotes/origin/"+branch)
+	if err != nil {
+		return false
+	}
+	in, err := repo.IsAncestor(ctx, head, tip)
+	return err == nil && in
+}
+
+// declaredPath answers the two facts the declared path needs, and asks neither unless the newest marker is a
+// declaration: the pushed test costs two git reads, and the only question they can answer is about a head
+// somebody has already asked to have merged. A screen that is not in that state gets the zero value, which no
+// branch of the declared path prints.
+func (s *session) declaredPath(ctx context.Context) declaredPath {
+	if s.summary.Marker == nil || s.summary.Marker.Kind != lifecycle.KindIntegrate {
+		return declaredPath{}
+	}
+	return declaredPath{
+		CoversHead: alreadyDeclared(s) != "",
+		Pushed:     declarationPushed(ctx, s.repo, s.cs.Branch, s.head),
+	}
 }
 
 // stackUnder is the stack under a changeset as far as the landing sentence needs it: the parent it sits on,

@@ -208,25 +208,30 @@ func adviceCorpus(t *testing.T) []adviceLine {
 
 	// The state sentences, which name the commands a changeset runs next.
 	for _, tc := range []struct {
-		state  model.State
-		stale  bool
-		suffix string
+		state    model.State
+		stale    bool
+		declared declaredPath
+		suffix   string
 	}{
-		{model.StateWorking, false, ""},
-		{model.StateReady, false, ""},
-		{model.StateFeedback, false, ""},
-		{model.StateFeedback, true, "/stale"},
-		{model.StateApproved, false, ""},
-		{model.StateApproved, true, "/stale"},
-		{model.StateIntegrating, false, ""},
-		{model.StateIntegrating, true, "/stale"},
+		{model.StateWorking, false, declaredPath{}, ""},
+		{model.StateReady, false, declaredPath{}, ""},
+		{model.StateFeedback, false, declaredPath{}, ""},
+		{model.StateFeedback, true, declaredPath{}, "/stale"},
+		{model.StateApproved, false, declaredPath{}, ""},
+		{model.StateApproved, true, declaredPath{}, "/stale"},
+		// The declared path in each of its three answers: a declaration to publish, a request already
+		// visible, and a declaration that no longer names this head.
+		{model.StateIntegrating, false, declaredPath{CoversHead: true}, "/unpublished"},
+		{model.StateIntegrating, false, declaredPath{CoversHead: true, Pushed: true}, "/pushed"},
+		{model.StateIntegrating, true, declaredPath{}, "/stale"},
 	} {
 		summary := lifecycle.Summary{State: tc.state, Stale: tc.stale}
-		add("nextAction/"+string(tc.state)+tc.suffix, nextAction(summary, lc))
+		add("nextAction/"+string(tc.state)+tc.suffix, nextAction(summary, lc, "beta", "beta", tc.declared))
 		add("waitNextAction/"+string(tc.state), waitNextAction(tc.state, "HEAD", lc))
 	}
 	abandoned := &lifecycle.Event{Kind: lifecycle.KindAbandoned, SHA: "abcdef1"}
-	add("nextAction/abandoned", nextAction(lifecycle.Summary{State: model.StateWorking, Abandoned: abandoned}, lc))
+	add("nextAction/abandoned",
+		nextAction(lifecycle.Summary{State: model.StateWorking, Abandoned: abandoned}, lc, "beta", "beta", declaredPath{}))
 	for _, o := range []model.Outcome{model.OutcomeBlock, model.OutcomeFeedback, model.OutcomeApprove} {
 		add("nextActionFor/"+string(o), nextActionFor(o, lc))
 		add("nextActionFor/"+string(o)+"/waiting", nextActionFor(o, waiting))
@@ -256,6 +261,15 @@ func adviceCorpus(t *testing.T) []adviceLine {
 	// build does not have.
 	add("handoffLine", handoffLine(lc, "beta"))
 	add("handoffLine/unknown", handoffLine(landingContract{}, ""))
+
+	// The declared path's own sentences, each named directly so a flag that drifts on one of them is caught
+	// even where no screen happens to print it today.
+	add("pushNextAction", pushNextAction("beta", "main"))
+	add("pushNextAction/unknown", pushNextAction("", ""))
+	add("mergeWaitNextAction", mergeWaitNextAction(lc, "beta"))
+	add("mergeWaitNextAction/unknown", mergeWaitNextAction(landingContract{}, ""))
+	add("selfMergeLine", selfMergeLine(lc))
+	add("undeclaredHeadLine", undeclaredHeadLine())
 
 	return append(out, commandAdvice(t)...)
 }

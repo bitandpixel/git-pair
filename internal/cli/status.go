@@ -292,6 +292,10 @@ type statusView struct {
 	// handoff is the second exit beside the author's own merge, and it is printed on the human screen only:
 	// `next_action` stays one instruction for anything parsing it.
 	handoff string
+	// takeLine is the mirror of handoff for the state where the hand-off is already done: the request is on
+	// the branch, and the author's own merge stays offered beside the wait. Human screen only, for the same
+	// reason.
+	takeLine string
 }
 
 // stackChain walks the changesets this one was stacked on, nearest first. Each step is read from the
@@ -385,7 +389,7 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 		Uncommitted: uncommitted(s),
 		Reviews:     len(s.summary.Reviews),
 		Reason:      s.summary.Reason,
-		NextAction:  nextAction(s.summary, lc),
+		NextAction:  nextAction(s.summary, lc, s.cs.Branch, s.cs.Slug, s.declaredPath(ctx)),
 	}
 	// A derived base is reported beside the recorded one rather than over it: `base` is what the changeset
 	// says its stack is, and `base_ref` is what every diff in this document was measured against. A stacked
@@ -508,6 +512,9 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 	if !s.baseIsOwnBranch && s.onCurrentBranch && !view.json.Landed && declarable(s, lc) {
 		view.handoff = handoffLine(lc, s.cs.Branch)
 	}
+	// The same slot on the other side of the declaration: once the request is out, the wait is the machine
+	// answer and the author's own merge becomes the offered alternative.
+	view.takeLine = declaredAlternative(lc, s.declaredPath(ctx))
 	return view, nil
 }
 
@@ -675,6 +682,10 @@ func printStatus(a *app, v *statusView) {
 			// the merge is the destination branch's, and git-pair performs none of it (PRD §26).
 			a.printf("      %s\n", v.handoff)
 		}
+		if v.takeLine != "" {
+			// The other exit beside the wait, so waiting is never the only thing offered.
+			a.printf("      %s\n", v.takeLine)
+		}
 	}
 }
 
@@ -687,7 +698,7 @@ func yesNo(b bool) string {
 
 // nextAction tells an agent what to run next, so it does not have to re-derive
 // the lifecycle from the state name.
-func nextAction(s lifecycle.Summary, lc landingContract) string {
+func nextAction(s lifecycle.Summary, lc landingContract, branch, slug string, d declaredPath) string {
 	if s.Abandoned != nil {
 		// The state is WORKING, which would otherwise read as "keep going". Nothing is
 		// owed on an abandoned changeset, and `change ready` refuses it, so the honest
@@ -716,13 +727,10 @@ func nextAction(s lifecycle.Summary, lc landingContract) string {
 		return landingNextAction(lc)
 	case model.StateIntegrating:
 		// The author's step is over; the merge belongs to whoever owns the destination branch, and git-pair
-		// performs none of it (PRD §26). The push is named first because until the branch is on the remote
-		// nobody else can see the request at all.
-		if s.Stale {
-			// A declaration is about a commit, and a commit has landed on top of the one it named.
-			return "the head moved since the declaration: `git pair change integrate` to declare this head"
-		}
-		return "push the branch so whoever merges can see the request; then " + landingNextAction(lc)
+		// performs none of it (PRD §26). Which of the declared path's three sentences this is — declare this
+		// head, push the branch, or wait — is decided beside the hand-off line, in `declaredNextAction`, so
+		// `check` and `change integrate` cannot drift from this screen.
+		return declaredNextAction(lc, branch, slug, d)
 	}
 	return ""
 }

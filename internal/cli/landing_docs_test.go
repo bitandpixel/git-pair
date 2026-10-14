@@ -31,13 +31,23 @@ func TestDocumentsQuoteTheLandingSentencesTheCodeBuilds(t *testing.T) {
 	}
 	handoffCommands = handoffCommands[start:]
 
+	// The declared path's sentences, pinned the same way. A document may paraphrase the rule around them, but
+	// where it shows what a screen says, it shows what the builders print — which is the only reason three
+	// surfaces can be trusted to say the push, the wait, and the alternative alike.
+	waitStep := mergeWaitNextAction(landingContract{Destination: destination}, branch)
+	takeLine := selfMergeLine(landingContract{Destination: destination})
+	push := pushNextAction(branch, destination)
+
 	quotes := map[string][]string{
-		// The canonical statement quotes all three sentences in full.
-		"../../PRD.md": {waiting, landing, handoff},
+		// The canonical statement quotes the sentences in full, including the declared path's.
+		"../../PRD.md": {waiting, landing, handoff, waitStep, takeLine},
 		// The human guide and the agent reference quote the waiting sentence and the hand-off's commands,
-		// in their own surrounding prose.
-		"../../README.md":                         {waiting, handoffCommands},
+		// in their own surrounding prose. The README also carries the push sentence in two transcripts, which
+		// is the test that moving it into a shared builder left them byte-identical.
+		"../../README.md":                         {waiting, handoffCommands, push},
 		"../../skills/git-pair/references/cli.md": {waiting, handoffCommands},
+		// The agent that declares and pushes reports a wait, so it has to have seen the sentence.
+		"../../skills/git-pair/references/integration.md": {waitStep},
 	}
 	for path, want := range quotes {
 		text := quoteText(readDoc(t, path))
@@ -56,6 +66,11 @@ func TestDocumentsQuoteTheLandingSentencesTheCodeBuilds(t *testing.T) {
 		text := quoteText(readDoc(t, path))
 		if strings.Contains(text, "land it first (git pair check") {
 			t.Errorf("%s restates the parent's landing inside the child's next step; the sentence refers the reader to `git pair status --changeset <parent>` instead", path)
+		}
+		// The sentence `status` used for a declared head: it told an author to push whether or not the branch
+		// was pushed, and ended by handing them the merge. The declared path replaced it.
+		if strings.Contains(text, "push the branch so whoever merges can see the request") {
+			t.Errorf("%s still quotes the sentence the declared path replaced; the push and the wait are two different steps now", path)
 		}
 	}
 }

@@ -262,7 +262,7 @@ Integrating: booking-transaction
   head:        0eaad3b
   declared by: 91bf204
   merge into:  main
-  next:        `git push origin booking-transaction` — main merges what `git pair check --json` reports ready and integrating
+  next:        `git push origin booking-transaction` — queues it for merging with main's owner; `git pair check --json` reports ready and integrating
 ```
 
 That is the whole command: one empty marker, no ref, no push, no merge. It runs the gate above before it
@@ -885,7 +885,10 @@ for a stacked child whose parent has not landed the parent's landing first (§PR
 Once the directory is in the destination it says there is nothing further to do. It stays one instruction, because
 a consumer parsing advice should not have to choose between two exits; the human screens print the other exit
 under it — `git pair change integrate`, then `git push origin <branch>`, handing the merge to whoever owns the
-destination — exactly where that command would record a declaration, and nowhere it would refuse one.
+destination — exactly where that command would record a declaration, and nowhere it would refuse one. Past the
+declaration the sentence changes again: while the branch is unpublished it names `git push origin <branch>`, and
+once the request is on the remote it names the wait for the destination's owner, with the author's own merge
+printed under it on the human screens as the other exit (§PRD §21).
 
 ```json
 {
@@ -1207,7 +1210,7 @@ shape.
   "destination": "main",
   "destination_source": "base",
   "reasons": [],
-  "next_action": "`git push origin booking-transaction` — main merges what `git pair check --json` reports ready and integrating"
+  "next_action": "`git push origin booking-transaction` — queues it for merging with main's owner; `git pair check --json` reports ready and integrating"
 }
 ```
 

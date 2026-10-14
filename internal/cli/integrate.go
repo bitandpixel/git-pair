@@ -171,13 +171,13 @@ func runChangeIntegrate(ctx context.Context, a *app, opts *integrateOptions) err
 		return err
 	}
 	if len(reasons) > 0 {
-		return reportIntegrate(a, s, dest, integrateResult{Reasons: reasons}, g.Summary.State)
+		return reportIntegrate(ctx, a, s, dest, integrateResult{Reasons: reasons}, g.Summary.State)
 	}
 	if at := alreadyDeclared(s); at != "" {
 		// Already declared, so this run writes nothing and fires no hooks. A notify-the-team hook that
 		// fired on every re-run of a command that had already done its job would be the first thing a
 		// person switched off.
-		return reportIntegrate(a, s, dest, integrateResult{Commit: at}, g.Summary.State)
+		return reportIntegrate(ctx, a, s, dest, integrateResult{Commit: at}, g.Summary.State)
 	}
 	// The repository's own condition, after git-pair's. Running a suite that costs minutes before the
 	// gate has said whether this is even declarable would make the slow check the loud one, and `check`
@@ -202,7 +202,7 @@ func runChangeIntegrate(ctx context.Context, a *app, opts *integrateOptions) err
 	post := a.runPost(ctx, s, hc)
 	a.warnIfHooksMovedHead(ctx, s, sha, hooks.PostIntegrate, post)
 	all := append(append([]hooks.Result{}, pre...), post...)
-	if err := reportIntegrate(a, s, dest, integrateResult{Commit: sha, Written: true, Hooks: all}, model.StateIntegrating); err != nil {
+	if err := reportIntegrate(ctx, a, s, dest, integrateResult{Commit: sha, Written: true, Hooks: all}, model.StateIntegrating); err != nil {
 		return err
 	}
 	if f, failed := firstFailure(post); failed {
@@ -260,7 +260,7 @@ func alreadyDeclared(s *session) string {
 
 // reportIntegrate is the answer in whichever shape was asked for. One function so the run that wrote a
 // marker, the run that found one, and the run that refused cannot drift into three shapes.
-func reportIntegrate(a *app, s *session, dest changeset.Destination, res integrateResult, state model.State) error {
+func reportIntegrate(ctx context.Context, a *app, s *session, dest changeset.Destination, res integrateResult, state model.State) error {
 	out := integrateJSON{
 		Changeset:              s.cs.Slug,
 		Branch:                 s.cs.Branch,
@@ -278,7 +278,17 @@ func reportIntegrate(a *app, s *session, dest changeset.Destination, res integra
 		Hooks:                  hooksForJSON(res.Hooks),
 	}
 	if len(res.Reasons) == 0 {
-		out.NextAction = integrateNextAction(s, dest)
+		if res.Written {
+			// This run wrote the request, so the step is to make it visible.
+			out.NextAction = integrateNextAction(s, dest)
+		} else {
+			// Nothing was written because the head is already handed over — the declared path, read from the
+			// same builder `check` and `status` use. This path used to compute an action and never show it, so
+			// an author re-running the command was told "nothing recorded" and left without a step.
+			out.NextAction = declaredNextAction(landingContract{Destination: dest.Ref}, s.cs.Branch, s.cs.Slug,
+				declaredPath{CoversHead: alreadyDeclared(s) != "",
+					Pushed: declarationPushed(ctx, s.repo, s.cs.Branch, s.head)})
+		}
 	}
 	if a.json {
 		if len(res.Reasons) > 0 {
@@ -300,6 +310,14 @@ func reportIntegrate(a *app, s *session, dest changeset.Destination, res integra
 		a.printf("%s is already declared ready to integrate at %s (head %s): nothing recorded\n",
 			s.cs.Slug, short(res.Commit), short(s.head))
 		a.printf("  merge into: %s%s\n", displayRef(dest.Ref), destinationNote(dest))
+		a.printf("  next:        %s\n", out.NextAction)
+		// Indented under the step it stands beside, at the width of the `next:` prefix above. The other exit,
+		// offered where the request is already visible to the person who can act on it.
+		if alt := declaredAlternative(landingContract{Destination: dest.Ref},
+			declaredPath{CoversHead: alreadyDeclared(s) != "",
+				Pushed: declarationPushed(ctx, s.repo, s.cs.Branch, s.head)}); alt != "" {
+			a.printf("               %s\n", alt)
+		}
 		return nil
 	}
 	a.printf("Integrating: %s\n", s.cs.Slug)
@@ -310,21 +328,12 @@ func reportIntegrate(a *app, s *session, dest changeset.Destination, res integra
 	return nil
 }
 
-// integrateNextAction is the step that makes the declaration reachable by whoever can act on it. It names
-// push as a command the author runs and never as one git-pair ran: publishing is not this tool's verb
-// (PRD §26), and a log line that reads like a completed action is how a tool acquires a side effect nobody
-// agreed to.
+// integrateNextAction is the step that makes the declaration reachable by whoever can act on it. The words
+// live in `pushNextAction` beside the rest of the declared path, so `check` and `status` name the push the
+// same way this command does — see that builder for why the push is a command the author runs and never one
+// git-pair ran.
 func integrateNextAction(s *session, dest changeset.Destination) string {
-	branch := s.cs.Branch
-	if branch == "" {
-		branch = "<branch>"
-	}
-	target := displayRef(dest.Ref)
-	if target == "" {
-		target = "the destination branch"
-	}
-	return fmt.Sprintf("`git push origin %s` — %s merges what `git pair check --json` reports ready and integrating",
-		branch, target)
+	return pushNextAction(s.cs.Branch, displayRef(dest.Ref))
 }
 
 // destinationNote labels a destination that did not come from this changeset's own base. Short on
