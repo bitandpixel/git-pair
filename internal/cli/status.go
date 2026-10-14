@@ -289,6 +289,9 @@ type statusView struct {
 	json      statusJSON
 	span      span.Span
 	latestAge string
+	// handoff is the second exit beside the author's own merge, and it is printed on the human screen only:
+	// `next_action` stays one instruction for anything parsing it.
+	handoff string
 }
 
 // stackChain walks the changesets this one was stacked on, nearest first. Each step is read from the
@@ -499,6 +502,12 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 		view.json.NextAction = fmt.Sprintf("landed at %s in %s: nothing further to do for a changeset that has landed",
 			view.json.LandedCommit, view.json.LandedBranch)
 	}
+	// The second exit, offered exactly where `change integrate` would accept the changeset. It is computed
+	// after the three overrides above, because a screen whose next step is "switch to that branch" or "this
+	// has landed" is not offering a merge to anybody.
+	if !s.baseIsOwnBranch && s.onCurrentBranch && !view.json.Landed && declarable(s, lc) {
+		view.handoff = handoffLine(lc, s.cs.Branch)
+	}
 	return view, nil
 }
 
@@ -661,6 +670,11 @@ func printStatus(a *app, v *statusView) {
 	}
 	if j.NextAction != "" {
 		a.printf("Next: %s\n", j.NextAction)
+		if v.handoff != "" {
+			// Indented under the step it stands beside, because it is the same step with a different owner:
+			// the merge is the destination branch's, and git-pair performs none of it (PRD §26).
+			a.printf("      %s\n", v.handoff)
+		}
 	}
 }
 

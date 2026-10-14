@@ -212,8 +212,13 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		DriftCredited:   g.Summary.DriftCredited,
 	}
 	out.Ready = len(out.Reasons) == 0
+	// Read once for the passing verdict, and carried to the human screen so the merge line and the hand-off
+	// line name the same destination. A refused verdict never reaches either, so the read stays off the path
+	// CI takes when the answer is no.
+	var lc landingContract
 	if out.Ready {
-		out.NextAction = landingNextAction(landingContractFor(ctx, s.repo, s))
+		lc = landingContractFor(ctx, s.repo, s)
+		out.NextAction = landingNextAction(lc)
 		if g.Parent.advisesRestack() {
 			// Spelled beside the landing contract rather than inside it: `landingNextAction` is one string
 			// shared by `status`, `check`, `change ready` and `review`, and the parent's step is a different
@@ -314,6 +319,12 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	}
 	a.printRecommendations(out.Recommendations)
 	a.printf("next:  %s\n", out.NextAction)
+	if declarable(s, lc) {
+		// The second exit, and the human form only: `next_action` above stays one instruction. Which of the
+		// two is right is the author's and the destination owner's decision, not something git-pair can
+		// know — git-pair asks nothing about who merges, or with what (PRD §26).
+		a.printf("       %s\n", handoffLine(lc, s.cs.Branch))
+	}
 	return nil
 }
 

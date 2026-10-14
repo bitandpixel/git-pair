@@ -6,6 +6,7 @@ import (
 
 	"gitpair/internal/changeset"
 	"gitpair/internal/git"
+	"gitpair/internal/model"
 )
 
 // The landing contract (PRD §29) is one sentence, and four commands print it: `status`, `check`,
@@ -84,6 +85,63 @@ func landingContractFor(ctx context.Context, repo *git.Repo, s *session) landing
 		Via: []string{below.name()},
 	})
 	return out
+}
+
+// declarable asks, from the facts a reporting screen already holds, whether `git pair change integrate`
+// would accept this changeset.
+//
+// It is the screen's half of that command's test, and deliberately not a gate run: the gate is the step the
+// same sentence already names — "`git pair check`, then …" — and paying for a content comparison to decide
+// whether to print one more line would move the gate's cost into the cheap screen, which is the thing
+// `TestStatusStackChainCostsABoundedReadPerStep` exists to bound. What it does check is every reason the
+// command refuses before it reaches the gate, and the equivalence is tested rather than assumed: the screens
+// offer the hand-off exactly where `change integrate` exits 0.
+//
+// `alreadyDeclared` is the condition shared outright rather than restated, because it is the one that reads a
+// marker rather than a state. Two copies of "this head is already handed over" would drift the first time a
+// re-offer superseded a declaration.
+func declarable(s *session, lc landingContract) bool {
+	switch {
+	case s.summary.State != model.StateApproved:
+		// WORKING and READY have no verdict to declare, and FEEDBACK is declarable only under a policy the
+		// reviewer chose with a flag this screen does not have. Offering the hand-off there would offer a
+		// refusal — the failure mode this predicate exists to rule out.
+		return false
+	case s.summary.Stale:
+		// The approval speaks about a commit this branch is no longer standing on; the step is to re-offer.
+		return false
+	case s.summary.Abandoned != nil:
+		// Nothing is owed on an ended changeset, least of all a merge request.
+		return false
+	case lc.WaitingOn != "":
+		// The parent's turn, and `change integrate` refuses the child until the parent's record is in the
+		// destination. The waiting sentence already says whose step it is.
+		return false
+	case alreadyDeclared(s) != "":
+		return false
+	}
+	return true
+}
+
+// handoffLine is the second exit beside the author's own merge: hand it to whoever owns the destination
+// branch. It is printed on the human screens and nowhere else — `next_action` stays one instruction, so a
+// machine consumer is never asked to parse a fork out of advice — and it names no actor beyond "the owner of
+// <destination>": whoever that is, person or pipeline, satisfies the same three facts of approved, declared,
+// and green, and git-pair asks nothing about how they merge (PRD §26).
+//
+// The push is part of the step rather than a courtesy. A merge performed by somebody else can only be
+// performed on what they can see, which is what makes the hand-off a different instruction from the author
+// merging from their own clone.
+func handoffLine(lc landingContract, branch string) string {
+	target := displayRef(lc.Destination)
+	if target == "" {
+		target = "the destination branch"
+	}
+	if branch == "" {
+		branch = "<branch>"
+	}
+	return fmt.Sprintf("or hand it to %s's owner: `git pair change integrate`, then `git push origin %s`",
+		target, branch)
 }
 
 // stackUnder is the stack under a changeset as far as the landing sentence needs it: the parent it sits on,

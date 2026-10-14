@@ -160,7 +160,7 @@ with a reason that explains what the screen should have said. See
       where there is no parent screen to point at.
 - [x] Land a decision, in a code comment, on what "its advice" means when the parent's own screen is not
       readable from here (a parent branch deleted with no landing): point at the reason the reader does have.
-- [ ] Update the tests that pin the current waiting text (`landing_advice_test.go`,
+- [x] Update the tests that pin the current waiting text (`landing_advice_test.go`,
       `restack_advice_test.go`, `parent_landed_surfaces_test.go`) to the new sentence, keeping every assertion
       that names an absence (`no "merge into alpha"`, no `git rebase` in a verdict's `next_action`).
 
@@ -182,16 +182,16 @@ with a reason that explains what the screen should have said. See
 
 #### Tasks
 
-- [ ] Extract the predicate `change integrate` already applies before writing a marker — verdict permits
+- [x] Extract the predicate `change integrate` already applies before writing a marker — verdict permits
       integration, head not stale, nothing below unlanded, no declaration covering this head — and have both
       `change integrate` and the screens call it. Keep it cheap: the facts a screen already holds, no gate run.
-- [ ] Print, as a second `Next:` line on `status` and a second line under `check`'s `next:`, the hand-off form:
+- [x] Print, as a second `Next:` line on `status` and a second line under `check`'s `next:`, the hand-off form:
       `or hand it to <destination>'s owner: `git pair change integrate`, then `git push origin <branch>``.
       The destination's name comes from the same contract the merge line uses, so the two cannot name different
       branches.
-- [ ] Print nothing in the states the demonstration excluded: never reviewed, stale head, unlanded parent,
+- [x] Print nothing in the states the demonstration excluded: never reviewed, stale head, unlanded parent,
       already declared.
-- [ ] Do not add the line to `change ready`'s acknowledgement, and record why in the commit: the predicate is
+- [x] Do not add the line to `change ready`'s acknowledgement, and record why in the commit: the predicate is
       false there by construction, since a changeset that was just offered has no verdict to integrate on.
 - [ ] Tests: the offer and the acceptance from one fixture (offer present ⇔ `change integrate` accepted); the
       four excluded states; `--json` byte-unchanged on `status` and `check`; and the hand-off line passing the

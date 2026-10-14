@@ -247,6 +247,11 @@ func adviceCorpus(t *testing.T) []adviceLine {
 	// merge happens to conflict.
 	add("conflictStep", conflictStep("main"))
 
+	// The hand-off line, and its fallbacks: both name commands, and neither is allowed to name one the
+	// build does not have.
+	add("handoffLine", handoffLine(lc, "beta"))
+	add("handoffLine/unknown", handoffLine(landingContract{}, ""))
+
 	return append(out, commandAdvice(t)...)
 }
 
