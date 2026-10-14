@@ -168,8 +168,12 @@ func (a *app) parentLive(ctx context.Context, repo *git.Repo, c changeset.Change
 			// by, and it went unasked. The step is still given — silence about a step is worse than a
 			// step the reader can decline — so the note says why it is given without the comparison,
 			// the same clause the branch-is-gone path uses for the same fall-through.
-			st.Note += "; the approval recorded no parent tip and no measured base, so git-pair cannot " +
+			clause := "the approval recorded no parent tip and no measured base, so git-pair cannot " +
 				"compare the diff it measured with the one under test"
+			if st.Note != "" {
+				clause = st.Note + "; " + clause
+			}
+			st.Note = clause
 			return st, nil
 		}
 		if st.Note == "" {
@@ -600,10 +604,10 @@ func (a *app) landedApprovalStillStands(ctx context.Context, repo *git.Repo, c c
 				destination, strings.Join(conflicts, ", "), approved.Short, destination, st.Next)
 			return st, nil
 		}
-		core := fmt.Sprintf("parent %s landed as %s%s; measured above the landing, this branch still contributes the content review %s approved",
+		core := fmt.Sprintf("%s landed as %s%s; measured above the landing, this branch still contributes the content review %s approved",
 			st.parentName(), st.Landed, st.LandedReach, approved.Short)
 		if how == "merge-base" {
-			core = fmt.Sprintf("parent %s landed as %s%s; the base moved onto the landing and the content under it did not, so the approval still measures this work",
+			core = fmt.Sprintf("%s landed as %s%s; the base moved onto the landing and the content under it did not, so the approval still measures this work",
 				st.parentName(), st.Landed, st.LandedReach)
 		}
 		if st.LandingUnderHead {
