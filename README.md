@@ -1455,7 +1455,7 @@ an example — no git-pair command merges anything, and none of this is one:
 
 | file | role |
 | --- | --- |
-| `.github/workflows/git-pair-integrate.yml` | the triggers, the permissions, the build — nothing else |
+| `.github/workflows/git-pair-integrate.yml` | the triggers, the permissions, the command the candidate is tested with — nothing else |
 | `scripts/ci/git-pair-integrate.sh` | the sequence, in shell, so it can be replayed without a runner |
 | `scripts/gates/ci-integrate.sh` | the replay: that job against scratch bare remotes, part of `mise run gates` |
 
@@ -1474,7 +1474,9 @@ The sequence is §29's landing contract, and the order is the point:
     withdrawn, or answered.
 2.  With `--require-ci`: prove the head green (below).
 3.  `git merge --no-ff <declared head>` into the destination the **queue** names.
-4.  `git push` the destination — the landing exists when the branch says it does, and there is nothing to
+4.  With `--verify-cmd`: run the repository's own suite against that merge commit, and push only if it passes
+    (below).
+5.  `git push` the destination — the landing exists when the branch says it does, and there is nothing to
     run afterwards: the destination carrying `changesets/<id>/` is the record.
 
 Three details a first attempt usually gets the wrong way round:
@@ -1490,7 +1492,8 @@ Three details a first attempt usually gets the wrong way round:
 
 What the job will not do: merge a change the gate refuses (it says so and exits 0, because a job triggered by
 an event usually runs before anybody has declared anything, and a red build for "not yet" teaches nobody
-anything); merge a head it cannot prove green; leave a conflicted merge in the tree (`git merge --abort`,
+anything); merge a head it cannot prove green; push a candidate its own tests refused (the local destination
+is put back, nothing is pushed, and the run is red); leave a conflicted merge in the tree (`git merge --abort`,
 exit 1); call `change integrate` itself, since a pipeline that writes
 the declaration is asking for its own merge; or force anything.
 
@@ -1515,13 +1518,40 @@ scripts/ci/git-pair-integrate.sh --require-ci --expect-head "$TESTED_SHA" feat/m
     while the job was starting is skipped rather than merged on the strength of a run that tested other
     work. It also fixes *which* commit the probe is asked about: the declared head, never whatever the branch
     tip became in the meantime.
--   The workflow triggers on `workflow_run` — the test workflow completing — and on the schedule, not on
-    `push`. A merge job that ran on the feature branch would put its own check run on the very commit it has
-    to certify, and then wait for itself.
+-   The workflow triggers on the push that carries the declaration, and on `workflow_dispatch` for the
+    recovery run. It does not trigger on `pull_request`, which is the test workflow's, and it does not run on
+    a schedule: a job is billed for starting, so polling the queue every few minutes is the most expensive
+    way to ask a question the declaration already answers.
 
-The guarantee is about the head, not about the merge. `main` runs its own CI after the push; a repository
-that wants the *merge result* proven before it lands wants a merge queue, which is a different mechanism and
-outside this example.
+Two questions get answered around a merge, and they are not the same question.
+
+-   **Was this head tested?** The probe's, above. Its answer is about a commit somebody already ran, which is
+    the right thing to want when the run you trust is not your own.
+-   **Does the destination still work with this work in it?** `--verify-cmd`'s, and only the merge commit can
+    answer it: the destination may have moved since the head was certified, and the merge is the combination
+    no run on the branch has ever seen.
+
+```bash
+scripts/ci/git-pair-integrate.sh --verify-cmd 'mise run gates' feat/my-branch
+```
+
+-   The command is run by `sh -c`, in the clone, with the merge commit checked out — so it sees the tree the
+    destination would become, not the branch head. `GIT_PAIR_CI_VERIFY_CMD` is the same value for a whole
+    process.
+-   A non-zero answer is an error rather than a skip, with or without `--require`: the local destination is
+    reset to what the remote holds, nothing is pushed, and the run is red. Every other refusal in the script
+    is a skip, because a push-triggered job normally runs before anybody has declared anything — a candidate
+    that failed its own tests is not that, and on a repository without per-commit CI this is the only place
+    the author would see it.
+-   `--expect-head` matters more here, not less: it is what makes the candidate be built from the commit the
+    declaration named, so the tree under test is the one the author asked for.
+
+The guarantee is therefore about the candidate. The destination still needs its own run after the push — the
+merge goes up with the job's token, and GitHub creates no runs for what a token caused — which is what
+`--ci-request` and `scripts/ci/gh-request-ci.sh` ask for. A repository that wants a head proven before the
+merge, and does not want to build the candidate itself, gates on the forge's checks with `--require-ci`
+instead; the two are options of one script, and `scripts/gates/ci-integrate.sh` replays both without a
+runner.
 
 From one run of the replay:
 
@@ -1533,8 +1563,9 @@ Merge made by the 'ort' strategy.
   flow-merge: merged
 ```
 
-What the runner has to provide: `contents: write` for the merge commit, `checks: read` and
-`statuses: read` for the probe (a token that cannot read them answers "cannot tell", and the job merges
+What the runner has to provide: `contents: write` for the merge commit, which is the whole ask for a job that
+tests its own candidate — `checks: read` and
+`statuses: read` as well when it passes `--require-ci` (a token that cannot read them answers "cannot tell", and the job merges
 nothing on that answer, so a missing scope stalls it rather than failing it), `fetch-depth: 0` (the gate
 reads the approval out of history, and a shallow checkout cannot see it), and the integration branch named on
 every call: `--default-branch <ref>`, because a checkout that fetched one branch has no recorded remote
@@ -2145,9 +2176,11 @@ its own namespaced name, rather than a build another worktree left behind. See
 `scripts/install-name.sh`. `scripts/gates/install-sh.sh` takes a `dist/` directory instead, and defaults to
 the one `mise run release:snapshot` writes.
 
-`.github/workflows/ci.yml` runs `mise run gates` on every push and pull request — one line, because the
-task is the definition. `.github/workflows/git-pair-integrate.yml` then triggers on that workflow finishing
-and performs the landing of a declared changeset (§Landing a declared change from CI).
+`.github/workflows/ci.yml` runs `mise run gates` on pull requests and when somebody asks for it — one line,
+because the task is the definition. `.github/workflows/git-pair-integrate.yml` triggers instead on the push
+that declares a changeset, runs the same task against the merge candidate, and performs the landing if it
+passes (§Landing a declared change from CI). Neither waits on the other and neither runs on a schedule: the
+merge job tests what it is about to push, so there is no finished run to wait for and no queue to poll.
 
 The installer replay is not in `gates`. That ladder is what every change pays for, and the replay needs
 goreleaser, a cross-compile of four targets, and a listening socket — none of which matters until a tag is

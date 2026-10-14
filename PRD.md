@@ -1126,9 +1126,9 @@ chain walked to reach it, `reasons` as an array in both outcomes, and the next s
 Exit codes: `0` declared or already declared, `1` refused, `2` usage, `3` git failed (§22).
 
 Nothing here performs the merge, and the product is not where a merge lives (§26). A repository that wants a
-pipeline to perform it can copy one: `.github/workflows/git-pair-integrate.yml` for the trigger and the
-permissions, `scripts/ci/git-pair-integrate.sh` for the sequence, and `scripts/gates/ci-integrate.sh` to
-replay that job against scratch remotes. Its shape is an example; what a job gates on is §11.3's two fields,
+pipeline to perform it can copy one: `.github/workflows/git-pair-integrate.yml` for the trigger, the
+permissions, and the command the candidate is tested with, `scripts/ci/git-pair-integrate.sh` for the
+sequence, and `scripts/gates/ci-integrate.sh` to replay that job against scratch remotes. Its shape is an example; what a job gates on is §11.3's two fields,
 and what makes a landing a fact is §13: the destination carrying the directory.
 
 ---
