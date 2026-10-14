@@ -132,6 +132,7 @@ runner to see one is the first to complain.
     one that was just tested, so the ask buys a record rather than information — and it costs `actions: write`
     plus a workflow that can be dispatched. Left off deliberately; it is a judgement about what a green trunk
     means, and the reviewer may hold it differently.
+I like the idea of a github-native paper trail and notifications in case something goes red. let's add it
 -   Once this ships, `bitandpixel/dev-profiles` carries a second copy of the driver and its own replay of it.
     Deleting that copy depends on a released binary new enough to have `--verify-cmd`, so the removal belongs
     after the next tag.
