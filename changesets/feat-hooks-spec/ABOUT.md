@@ -113,10 +113,42 @@ the next engineer loosens the rule rather than the code.
 
 ## Open questions
 
--   M1's question still stands: should a repository that has committed tracked hooks refuse outright in a clone
-    that has not accepted them? The skill page now tells an agent to report the state rather than run `--trust`,
-    which makes the unaccepted state more visible but leaves the product answering "ready" without the
-    repository's own checks having run.
-I'm leaning towards making this mandatory. We could perhaps create an explicit declined state as an escape hatch?
+-   M1's question stands, with a direction recorded and one decision still owed: should a repository that has
+    committed tracked hooks refuse outright in a clone that has not accepted them? The skill page tells an agent
+    to report the state rather than run `--trust`, which makes the unaccepted state visible but leaves the
+    product answering "ready" without the repository's own checks having run. The direction, the store chosen
+    for `declined`, and the decision that still has to be made are answered under *Addressed feedback* below,
+    and written up as M6 in `docs/plans/lifecycle-hooks/plan.md`.
 -   Nothing persists a hook result, so no page can promise a reader will be able to find out later what ran.
     If that ever matters, the results store M1 declined to invent is the piece.
+
+## Addressed feedback
+
+-   **"I'm leaning towards making this mandatory. We could perhaps create an explicit declined state as an
+    escape hatch?"** — on the open question about a repository that has committed tracked hooks in a clone that
+    has not accepted them. Answered 2026-10-14, and the answer is a handoff rather than a change to this
+    milestone.
+
+    The direction is agreed: make the unaccepted state cost something, and give a person who means to opt out an
+    explicit `declined` to choose instead of a silence that looks the same from outside. Where `declined` is
+    recorded is decided: per-clone, beside `trusted-hooks` in the git directory
+    (`trustRecordPath`, `internal/hooks/trust.go`), keyed by the same tree hash acceptance is keyed by — a hook
+    added to a declined tree is new code and returns to `unaccepted`.
+
+    What that store decides about the gate, and why it is not this milestone's to answer: a per-clone record is
+    a fact about one machine, exactly like acceptance. `status`, `queue` and `git pair hooks` can all report it,
+    and it can stop nagging the person who chose it. A verdict another clone has to reach cannot read it, and CI
+    is a clone that has never accepted anything — so "`check` refuses while a tracked hook is unaccepted" would
+    refuse everything in a fresh clone, and the way for a pipeline to pass would be to run
+    `git pair hooks --trust`, which hands consent to the runner. M1 refused that shape for the same reason and
+    says so where the trust rule is written: "refusing to work in a clone one has not yet approved would make
+    the safety mechanism the thing people route around".
+
+    So the enforcement change needs one more decision before it can be written — whether mandatory lives inside
+    the verdict (which needs a shared, reviewed statement that a repository's hooks are declined, with the
+    per-clone record as the personal layer over it) or stays out of the verdict and lives in reporting. It is
+    written up as **M6 — The unaccepted state, made a decision rather than an absence** in
+    `docs/plans/lifecycle-hooks/plan.md`, with the four states it implies (`accepted`, `changed`, `declined`,
+    `unaccepted`) and the hash-keyed return to `unaccepted`. What this milestone changed is the open question
+    above and the plan; the PRD still describes what the code does today, which is the rule M5 exists to write
+    down.
