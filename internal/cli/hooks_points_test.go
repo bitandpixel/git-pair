@@ -300,15 +300,16 @@ func TestNoopTransitionsRunNoHooks(t *testing.T) {
 // a position is worth and what it is not.
 func TestTrackedRootAtTheIntegratePoint(t *testing.T) {
 	// The point is not reached at all when nobody has recorded a position: the checks the tree carries have not
-	// run, and a declaration that calls the work ready over them is the failure the state exists to close. So the
-	// hook is not run — the same outcome consent produced, for a different reason, and the reason has to name both
-	// ways out because only one of them runs the suite.
-	t.Run("installed before the approval and never recorded, the declaration refuses", func(t *testing.T) {
+	// run, and a declaration that calls the work ready over them is the failure the state exists to close. Since
+	// the hand-off and the submission ask too, the way a changeset arrives at integrate with nothing recorded is
+	// for the repository to ship the suite while the work is in review — the case the gate has to keep asking
+	// about on its own, because the hand-off could not have asked about content that did not exist yet.
+	t.Run("shipped while the change was in review, the declaration refuses", func(t *testing.T) {
 		dir := scratch(t)
 		f, _ := newChangeset(t, "checkout-flow", "main")
-		putHook(t, f, "tracked", "pre-integrate", "01-suite", touch(dir, "RAN"))
 		ready(t, f)
 		submit(t, f, "approve")
+		putHook(t, f, "tracked", "pre-integrate", "01-suite", touch(dir, "RAN"))
 
 		res := runIn(t, f.Dir(), "change", "integrate")
 		if res.code != exitRefusal {
@@ -329,16 +330,17 @@ func TestTrackedRootAtTheIntegratePoint(t *testing.T) {
 		}
 	})
 
-	// A recorded decline lets the declaration through, and the hook still does not run: what the gate asked for was
-	// a position, not a licence to execute. The note beside the skip names the decline and its hash instead of
+	// A recorded decline lets the declaration through, and the hook still does not run: what was asked for was a
+	// position, not a licence to execute. The note beside the skip names the decline and its hash instead of
 	// telling this reader to accept content they have already read and refused.
 	t.Run("declined, the declaration proceeds and the hook stays skipped", func(t *testing.T) {
 		dir := scratch(t)
 		f, _ := newChangeset(t, "checkout-flow", "main")
 		putHook(t, f, "tracked", "pre-integrate", "01-suite", touch(dir, "RAN"))
+		// The position is taken before the hand-off, which asks for one too now.
+		declineHooks(t, f)
 		ready(t, f)
 		submit(t, f, "approve")
-		declineHooks(t, f)
 
 		res := runIn(t, f.Dir(), "change", "integrate").mustSucceed(t, "change", "integrate")
 
@@ -352,9 +354,11 @@ func TestTrackedRootAtTheIntegratePoint(t *testing.T) {
 	t.Run("accepted, it blocks the declaration", func(t *testing.T) {
 		f, _ := newChangeset(t, "checkout-flow", "main")
 		putHook(t, f, "tracked", "pre-integrate", "01-suite", failHook("suite red"))
+		// Accepted before the hand-off, which asks for a position first. The point under test is `pre-integrate`,
+		// so accepting does not make the hand-off run the failing script — only the declaration does.
+		trustHooks(t, f)
 		ready(t, f)
 		submit(t, f, "approve")
-		trustHooks(t, f)
 		head := f.Head()
 
 		res := runIn(t, f.Dir(), "change", "integrate")

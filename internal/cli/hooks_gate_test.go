@@ -17,15 +17,26 @@ import (
 // rest on.
 func TestCheckAsksForAPositionOnTrackedHooks(t *testing.T) {
 	// reviewedChangeset leaves one thing outstanding: what this clone says about the hook the repository ships.
-	// The hand-off and the approval are done, so every refusal below is the hooks and nothing else.
-	reviewedChangeset := func(t *testing.T) (*gittest.Fixture, string) {
+	// A handed-off, approved changeset that carries no hooks. With the hand-off asking for a position as well,
+	// the way a clone reaches the gate with nothing recorded is for the repository to ship the scripts while the
+	// work is in flight — which is also the case the gate must keep asking about independently, because the
+	// hand-off could not have asked about content that did not exist yet.
+	reviewedChangeset := func(t *testing.T) *gittest.Fixture {
 		t.Helper()
-		dir := scratch(t)
 		f, _ := newChangeset(t, "checkout-flow", "main")
-		putHook(t, f, "tracked", "pre-ready", "01-suite", touch(dir, "RAN_READY"))
 		ready(t, f)
 		submit(t, f, "approve")
-		return f, dir
+		return f
+	}
+	// reasonsCarrying finds the hooks reason among whatever else the verdict refuses for. A fixture that commits
+	// a hook after the approval earns a content reason too, and the one under test is not necessarily first.
+	reasonsCarrying := func(reasons []any, phrase string) bool {
+		for _, r := range reasons {
+			if s, ok := r.(string); ok && strings.Contains(s, phrase) {
+				return true
+			}
+		}
+		return false
 	}
 	checkRefused := func(t *testing.T, f *gittest.Fixture) string {
 		t.Helper()
@@ -37,15 +48,18 @@ func TestCheckAsksForAPositionOnTrackedHooks(t *testing.T) {
 	}
 
 	t.Run("no position recorded, the verdict refuses and names both ways out", func(t *testing.T) {
-		f, dir := reviewedChangeset(t)
+		f := reviewedChangeset(t)
+		dir := scratch(t)
+		putHook(t, f, "tracked", "pre-check", "01-suite", touch(dir, "RAN_CHECK"))
 
 		have := checkRefused(t, f)
 		mustContain(t, have, "have not been recorded in this clone", "the refusal has to say what is missing")
 		mustContain(t, have, "git pair hooks --trust", "and the way that runs the checks")
 		mustContain(t, have, "git pair hooks --decline", "and the way that does not, so the gate is not read as demanding approval")
-		if _, err := os.Stat(filepath.Join(dir, "RAN_READY")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "RAN_CHECK")); err == nil {
 			t.Error("an unrecorded hook ran")
 		}
+		mustContain(t, have, "did not run", "and the run says the scripts were skipped")
 
 		// The same answer in both fields a pipeline reads. A `ready: true` with the reason only in prose would
 		// let a job that ignores prose do exactly what the previous paragraph describes.
@@ -57,8 +71,8 @@ func TestCheckAsksForAPositionOnTrackedHooks(t *testing.T) {
 		if len(reasons) == 0 {
 			t.Fatal("reasons is empty while the verdict refuses")
 		}
-		if !strings.Contains(reasons[0].(string), "recorded in this clone") {
-			t.Errorf("reasons = %v, want the hooks refusal", reasons)
+		if !reasonsCarrying(reasons, "recorded in this clone") {
+			t.Errorf("reasons = %v, want the hooks refusal among them", reasons)
 		}
 	})
 
@@ -90,15 +104,16 @@ func TestCheckAsksForAPositionOnTrackedHooks(t *testing.T) {
 		// A hook at the point `check` itself runs, so the run is asked to say what it did with these scripts and
 		// has an answer to give that is not "nothing was configured here".
 		putHook(t, f, "tracked", "pre-check", "02-suite", touch(dir, "RAN_CHECK"))
-		ready(t, f)
-		submit(t, f, "approve")
-		// The hash is what the note has to carry: "declined" alone does not tell this reader whether the script
-		// they refused is the script that is here.
+		// The position is taken before the hand-off, because the hand-off asks for one too now.
+		// The hash is what the note has to carry: "declined" alone does not tell this reader whether the
+		// script they refused is the script that is here.
 		record := runIn(t, f.Dir(), "hooks", "--decline", "--json").mustSucceed(t, "hooks", "--decline", "--json").json(t)
 		declined, _ := record["declined"].(string)
 		if declined == "" {
 			t.Fatal("--decline recorded no hash")
 		}
+		ready(t, f)
+		submit(t, f, "approve")
 
 		res := runIn(t, f.Dir(), "check").mustSucceed(t, "check")
 		for _, name := range []string{"RAN_READY", "RAN_CHECK"} {
@@ -122,12 +137,13 @@ func TestCheckAsksForAPositionOnTrackedHooks(t *testing.T) {
 		f, _ := newChangeset(t, "checkout-flow", "main")
 		putHook(t, f, "tracked", "pre-ready", "01-suite", touch(dir, "RAN_READY"))
 		trustHooks(t, f)
-		f.Append(filepath.Join(".git-pair", "hooks", "pre-ready", "01-suite"), "echo escalated\n")
-		f.Commit("escalate the hook")
-		// Approved after the move, so nothing else is outstanding: the tree this clone accepted is not the tree
-		// that is here, and that is the only fact the refusal is about.
+		// Hand-off and approval while the accepted content is still what is here, so nothing else is outstanding
+		// when the repository moves it: the tree this clone accepted is not the tree that is here, and that is the
+		// fact the refusal is about.
 		ready(t, f)
 		submit(t, f, "approve")
+		f.Append(filepath.Join(".git-pair", "hooks", "pre-ready", "01-suite"), "echo escalated\n")
+		f.Commit("escalate the hook")
 
 		have := checkRefused(t, f)
 		mustContain(t, have, "changed since this clone accepted them", "the refusal has to say the tree moved")
@@ -139,7 +155,9 @@ func TestCheckAsksForAPositionOnTrackedHooks(t *testing.T) {
 	// reader can see it was taken. Without this, the quietest way past the gate would be an environment variable
 	// nobody has to read.
 	t.Run("the off switch is not a position", func(t *testing.T) {
-		f, _ := reviewedChangeset(t)
+		f := reviewedChangeset(t)
+		dir := scratch(t)
+		putHook(t, f, "tracked", "pre-check", "01-suite", touch(dir, "RAN_CHECK"))
 		t.Setenv("GIT_PAIR_HOOKS", "0")
 
 		have := checkRefused(t, f)
@@ -214,5 +232,108 @@ func TestHooksDeclineCommand(t *testing.T) {
 		}
 		human := runIn(t, f.Dir(), "hooks").mustSucceed(t, "hooks")
 		mustContain(t, human.stderr, "NOT trusted", "and the human report says nothing is running")
+	})
+}
+
+// The reviewer asked for the position to be obvious as early as it can be, so it is met before the work exists
+// rather than only where it is merged: `init` refuses before a changeset directory is written, `change ready`
+// before the hand-off, and `review submit` before the reviewer's content is staged. The two commands that take
+// work *out* of the queue deliberately do not ask, because the person who cannot run the checks is exactly the
+// person who needs to put the work down.
+func TestTheCommandsThatStartWorkAskForAPosition(t *testing.T) {
+	t.Run("init refuses before a changeset exists, and leaves nothing behind", func(t *testing.T) {
+		f := newRepo(t)
+		putHook(t, f, "tracked", "pre-ready", "01-suite", "#!/bin/sh\nexit 0\n")
+		f.CreateBranch("checkout-flow")
+		before := f.Head()
+
+		res := runIn(t, f.Dir(), "init")
+		if res.code != exitRefusal {
+			t.Fatalf("`init` exited %d, want %d\nstdout: %s\nstderr: %s",
+				res.code, exitRefusal, res.stdout, res.stderr)
+		}
+		have := res.stdout + res.stderr
+		mustContain(t, have, "have not been recorded in this clone",
+			"the first command a newcomer runs tells them the repository ships scripts")
+		mustContain(t, have, "git pair hooks --trust", "and names the way that runs them")
+		mustContain(t, have, "git pair hooks --decline", "and the way that does not")
+		if _, err := os.Stat(filepath.Join(f.Dir(), "changesets", "checkout-flow")); err == nil {
+			t.Error("a refused init still created the changeset directory")
+		}
+		if f.Head() != before {
+			t.Error("a refused init wrote a commit")
+		}
+
+		// Reading is never gated, so the refusal is a stop with a way forward rather than a wall.
+		runIn(t, f.Dir(), "hooks").mustSucceed(t, "hooks")
+
+		trustHooks(t, f)
+		runIn(t, f.Dir(), "init").mustSucceed(t, "init")
+	})
+
+	// Not only the unseen content: a script the repository moved after this clone accepted it is content nobody
+	// has read since, so the hand-off asks about that too rather than leaving it to the gate.
+	t.Run("the hand-off refuses a moved script as well as an unseen one", func(t *testing.T) {
+		f, _ := newChangeset(t, "checkout-flow", "main")
+		putHook(t, f, "tracked", "pre-ready", "01-suite", "#!/bin/sh\nexit 0\n")
+		trustHooks(t, f)
+		f.Append(filepath.Join(".git-pair", "hooks", "pre-ready", "01-suite"), "echo escalated\n")
+		f.Commit("escalate the hook")
+
+		res := runIn(t, f.Dir(), "change", "ready")
+		if res.code != exitRefusal {
+			t.Fatalf("`change ready` exited %d, want %d\nstdout: %s\nstderr: %s",
+				res.code, exitRefusal, res.stdout, res.stderr)
+		}
+		mustContain(t, res.stdout+res.stderr, "changed since this clone accepted them",
+			"the hand-off names the move, not only the absence")
+	})
+
+	// Asked before the stage, so a reviewer is not left with a dirty index and a verdict they did not record —
+	// which is what a refusal discovered by the pre-submit hooks would have done.
+	t.Run("a refused submission stages nothing", func(t *testing.T) {
+		f, _ := reviewerFixture(t)
+		f.Write("handler.go", "package main\n\nfunc ServeHTTP() {}\n")
+		putHook(t, f, "tracked", "pre-submit", "01-repo", "#!/bin/sh\nexit 0\n")
+
+		res := runIn(t, f.Dir(), "review", "submit", "--approve")
+		if res.code != exitRefusal {
+			t.Fatalf("`review submit --approve` exited %d, want %d\nstdout: %s\nstderr: %s",
+				res.code, exitRefusal, res.stdout, res.stderr)
+		}
+		staged, err := f.Git("diff", "--cached", "--name-only")
+		if err != nil {
+			t.Fatalf("reading the index: %v", err)
+		}
+		if strings.TrimSpace(staged) != "" {
+			t.Errorf("the refusal left these staged: %q", staged)
+		}
+		if !strings.Contains(f.Read("handler.go"), "ServeHTTP") {
+			t.Error("the reviewer's own edit was disturbed by the refusal")
+		}
+	})
+
+	t.Run("putting the work down stays free", func(t *testing.T) {
+		f, _ := newChangeset(t, "checkout-flow", "main")
+		putHook(t, f, "tracked", "pre-ready", "01-suite", "#!/bin/sh\nexit 0\n")
+
+		// Abandon is the escape hatch for work that was never offered; refusing it would trap the person the
+		// rule is meant to protect.
+		runIn(t, f.Dir(), "change", "abandon").mustSucceed(t, "change", "abandon")
+	})
+
+	t.Run("unready works with the record cleared", func(t *testing.T) {
+		f, _ := newChangeset(t, "checkout-flow", "main")
+		putHook(t, f, "tracked", "pre-ready", "01-suite", "#!/bin/sh\nexit 0\n")
+		trustHooks(t, f)
+		ready(t, f)
+		// A position is this clone's, so clearing the record is what a second clone looks like: nothing
+		// recorded, and the work still takeable out of the queue.
+		record := filepath.Join(f.Dir(), ".git", "git-pair", "trusted-hooks")
+		if err := os.Remove(record); err != nil {
+			t.Fatalf("clear the record: %v", err)
+		}
+
+		runIn(t, f.Dir(), "change", "unready").mustSucceed(t, "change", "unready")
 	})
 }

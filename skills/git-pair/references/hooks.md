@@ -141,12 +141,18 @@ and the third needs nobody — but check the hash beside it, because a new versi
 unrecorded, not declined, and the report shows both hashes so you can tell which you have. Accepting whatever is
 there because a note asked you to is how a repository ends up running a check nobody read.
 
-**The verdict asks for a position.** While the tracked tree is `unrecorded` or `changed`, `git pair check` refuses
-and `git pair change integrate` with it, with a reason that names both ways out. This is deliberate and it is not
-an obstacle to route around: the checks the repository asked for have not run, and a merge should not be able to
-rest on that. `accepted` and `declined` both clear it — one because the scripts ran, one because a person answered
-a question about them. Commands that write no verdict (`change ready`, `review submit`, `status`) report the skip
-instead of refusing it, so you can still work, still hand off, and still read the thing you are being asked about.
+**The commands that start or advance work ask for a position.** While the tracked tree is `unrecorded` or
+`changed`, `git pair init` refuses before the changeset directory exists, `git pair change ready` before the
+hand-off, `git pair review submit` before the reviewer's content is staged, and the gate refuses the merge —
+`git pair check`, and `git pair change integrate` with it. Each says the same sentence and names both ways out, so
+meeting it twice is not two different problems. None of it is an obstacle to route around: the checks the
+repository asked for have not run. `accepted` and `declined` both clear it — one because the scripts ran, one
+because a person answered a question about them.
+
+Two doors stay open with nothing recorded, on purpose. `change unready` and `change abandon` work, because they
+take work out of the queue and a person who cannot run the checks still has to be able to put the work down. And
+`git pair hooks` never asks, because reading the scripts is the act that comes *before* the decision — a command
+that refused until you had decided would make the reading impossible.
 
 A clone sitting on `changed` has a third option besides accepting and declining: copy the version it did read into
 the per-clone root, which runs with no consent step. That is the vendored model applied by one person for one
@@ -162,8 +168,9 @@ git pair hooks --decline  # a person's act: records it as read and chosen not to
 **`--trust` and `--decline` are a person's decisions, not an agent's.** The first says "I read this script and I
 allow it to run on my machine"; the second says "I read this script and I am choosing not to run it here." Either
 way the sentence is about what a person read, so an agent cannot truthfully say it. When tracked hooks have no
-position recorded, report the state, print what `check` refused with, and name both commands — that is the whole
-of your part. Do not run either one yourself, and do not reach for `GIT_PAIR_HOOKS=0` to get a green answer: that
+position recorded — which you will now find at the first command you run, because `init` and `change ready` ask as
+well as the gate — report the state, print the refusal as it came, and name both commands. That is the whole of
+your part, and it is a stop, not a detour: an agent that records a position has said something about what it read. Do not run either one yourself, and do not reach for `GIT_PAIR_HOOKS=0` to get a green answer: that
 switch belongs to the person whose machine it is, for the moment their own script is misbehaving, and it is not a
 position — the verdict refuses with hooks switched off, because the off switch says a machine does not want to run
 scripts right now and says nothing about what those scripts do.
@@ -192,7 +199,9 @@ since a runner has recorded nothing about the hash:
 
 `--trust` is the usual line, because a runner that is going to be told the suite passed has to run it. A team that
 has genuinely decided not to run the tracked scripts on runners records `git pair hooks --decline` in the job
-instead; what does not work is neither, and what does not count is `GIT_PAIR_HOOKS=0` standing in for either.
+instead; what does not work is neither, and what does not count is `GIT_PAIR_HOOKS=0` standing in for either. Put
+the line where the first gated command runs: a job that only calls `git pair check` needs it once, and a job that
+runs `git pair init` or `change ready` needs it before those, or they refuse.
 
 Run the hooks through `check`, not by calling the scripts: that is the one command whose exit code and whose
 `ready` agree about every condition, yours included. Pass `--default-branch` in CI — a job that cloned with

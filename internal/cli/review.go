@@ -294,6 +294,13 @@ func (o submitOptions) outcome() (model.Outcome, error) {
 // re-staging after them would quietly discard what a reviewer's own script decided to leave staged.
 func (a *app) submitReview(ctx context.Context, s *session, outcome model.Outcome, body string,
 	stageAll, allowHookFailure bool) (reviewops.Result, []hooks.Result, bool, error) {
+	// The reviewer's clone owes the same answer as the author's, and asked here rather than at the pre-submit
+	// hooks so a refusal stages nothing: the alternative is a reviewer left with a dirty index and a verdict they
+	// did not record. There is no override flag beside this one, because the way through is one command that
+	// records a position — and `--allow-hook-failure` covers refusing scripts, not unread ones.
+	if err := a.hooksPositionRefusal(ctx, s.repo); err != nil {
+		return reviewops.Result{}, nil, false, err
+	}
 	if stageAll {
 		if err := s.repo.StageAll(ctx); err != nil {
 			return reviewops.Result{}, nil, false, err

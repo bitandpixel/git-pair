@@ -702,13 +702,15 @@ unrecorded rather than quietly exempt, and `git pair hooks` prints the hash each
 `git pair hooks --trust` and `git pair hooks --decline` are the two ways to answer; both print what they are
 recording first, because a position about content nobody has seen is not a position.
 
-**The verdict asks for a position.** While the tracked tree is `unrecorded` or `changed`, `git pair check` refuses
-and `git pair change integrate` with it: the checks the repository asked for have not run, and a merge should not
-rest on that. `accepted` passes because the scripts ran and `declined` passes because a person answered a question
-about them, which is what makes the demand fair — without a decline, a gate that waits on approval asks every clone
-to either execute code it does not want or stay red forever. Commands that write no verdict — `change ready`,
-`review submit`, `status` — report the skip rather than refusing it, so a fresh clone still gets a verdict and a
-clone nobody has approved is still a clone you can work in.
+**The commands that start or advance work ask for a position.** While the tracked tree is `unrecorded` or
+`changed`, `git pair init` refuses before the changeset directory exists, `change ready` before the hand-off,
+`review submit` before your content is staged, and the gate refuses the merge — `check`, and `change integrate`
+with it. The same sentence on every surface, naming both ways out. `accepted` passes because the scripts ran and
+`declined` passes because a person answered a question about them, which is what makes the demand fair: without a
+decline, a gate that waits on approval asks every clone to either execute code it does not want or stay red
+forever. Two commands deliberately keep working with nothing recorded — `change unready` and `change abandon` take
+work out of the queue, and the person who cannot run the checks still has to be able to put the work down — and
+`git pair hooks` is never gated, because reading the scripts is what you do before you decide.
 
 Hooks are the client's control rather than repository enforcement: git-pair publishes the event and
 the checkout owns the script, which is why a hook may run commands git-pair itself never invokes (§26 binds

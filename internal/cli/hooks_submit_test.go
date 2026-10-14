@@ -169,20 +169,28 @@ func TestSubmitPointsInBothRoots(t *testing.T) {
 		}
 	})
 
-	t.Run("a tracked hook needs acceptance, and runs once accepted", func(t *testing.T) {
+	t.Run("a tracked hook needs a position before the reviewer can submit, and runs once accepted", func(t *testing.T) {
 		f, _ := reviewerFixture(t)
 		dir := scratch(t)
 		putHook(t, f, "tracked", "pre-submit", "01-repo", touch(dir, "RAN_TRACKED"))
 
-		runIn(t, f.Dir(), "review", "submit", "--approve").mustSucceed(t, "review", "submit", "--approve")
-
-		if _, err := os.Stat(filepath.Join(dir, "RAN_TRACKED")); err == nil {
-			t.Error("a tracked hook from the repository under review ran unaccepted")
+		// The reviewer's clone owes the same answer as the author's. Asked here, before the tree is staged, so a
+		// refusal does not leave the reviewer with a dirty index and a verdict they did not record.
+		res := runIn(t, f.Dir(), "review", "submit", "--approve")
+		if res.code != exitRefusal {
+			t.Fatalf("`review submit --approve` exited %d, want %d\nstdout: %s\nstderr: %s",
+				res.code, exitRefusal, res.stdout, res.stderr)
 		}
+		if _, err := os.Stat(filepath.Join(dir, "RAN_TRACKED")); err == nil {
+			t.Error("a tracked hook from the repository under review ran with no position recorded")
+		}
+		have := res.stdout + res.stderr
+		mustContain(t, have, "have not been recorded in this clone", "the refusal says what is missing")
+		mustContain(t, have, "git pair hooks --decline", "and offers the position that is not approval")
 
-		// The same verdict once the reviewer has read the script they are being asked to run. A second
-		// submission supersedes the first, which is ordinary: the point of the case is the acceptance, and
-		// trust lives with the clone, not with the changeset.
+		// The same verdict once the reviewer has read the script they are being asked to run. There is no flag
+		// beside this refusal, because the way through is one command that records a position; the flag that does
+		// exist, `--allow-hook-failure`, covers scripts that refuse, not scripts that are unread.
 		trustHooks(t, f)
 		runIn(t, f.Dir(), "review", "submit", "--approve").mustSucceed(t, "review", "submit", "--approve")
 		if _, err := os.Stat(filepath.Join(dir, "RAN_TRACKED")); err != nil {

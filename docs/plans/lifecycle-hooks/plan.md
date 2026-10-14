@@ -520,8 +520,11 @@ Deliverables
   are the code's; the decision text above called the fourth `unaccepted` before the code existed.
 - `git pair hooks --decline` as the human act beside `--trust`, printing what it records, and the report showing
   all four with the hash each position was taken against.
-- The verdict asking for a position: `git pair check` refuses on `unrecorded` and `changed`, and `change integrate`
-  inherits it through the same gate, with the reason naming both commands. `accepted` and `declined` clear it.
+- The commands that start or advance work asking for a position: `init` before a changeset directory exists,
+  `change ready` before the hand-off, `review submit` before the reviewer's content is staged, and the gate behind
+  `check` and `change integrate`. One sentence, naming both ways out, from one helper so the surfaces cannot drift.
+  `accepted` and `declined` clear it; `change unready` and `change abandon` deliberately do not ask, because they
+  take work out of the queue, and `git pair hooks` is never gated so that reading precedes deciding.
 - The PRD's hook contract, the README, and `references/cli.md` carrying the fourth state and the demand.
 - The skill's hook reference carrying the difference between `GIT_PAIR_HOOKS=0` (the machine owner's escape hatch,
   which is not a position and does not lift the refusal) and `declined` (a stated position about this repository's
@@ -535,7 +538,11 @@ Verification
   recorded ones pass, and the off switch does not change either answer.
 - `git pair hooks --decline` human and JSON, and `--trust` with `--decline` as a usage error (exit 2).
 - The tracked root at the integrate point, which is the one place a hook is ordinary reviewed content rather than a
-  fixture: unrecorded refuses the declaration and writes no marker; declined lets it through with the hook skipped.
+  fixture: the repository shipping the suite while the change is in review is the unrecorded case the early
+  refusals cannot catch, and the gate is what meets it; declined lets the declaration through with the hook skipped.
+- `TestTheCommandsThatStartWorkAskForAPosition`: `init` refuses without writing a directory or a commit, the
+  hand-off refuses a moved script as well as an unseen one, a refused `review submit` stages nothing and leaves the
+  reviewer's own edit untouched, and `change unready`/`change abandon` still work with nothing recorded.
 
 
 ## Spikes / research
@@ -741,6 +748,16 @@ from nobody having looked, and it is the one a team needs to see before it re-ru
 The gate is `integrationGate`, not a check-only bolt, because `change integrate` asks the same question and a
 declaration that reads "ready" over unrun checks is the failure being closed. `hooks.Resolution` memoizes the trust
 read so a run that asks the state for the gate and again for each hook point asks once.
+
+`review dc0956c` (feedback) moved the ask earlier: "it should be obvious as early as possible that there are hooks
+that repo owner wants run", naming init/ready/review. The helper left `check.go` for `hooks.go` and the three
+commands call it before they write or stage anything. Two exceptions were kept and documented rather than argued
+away: `change unready` and `change abandon` stay free, because the person who cannot run the checks has to be able
+to put the work down; and `git pair hooks` stays ungated, because a command that refuses until you have decided
+would make the reading that is supposed to precede the decision impossible. The fixtures that reached a hand-off
+with no position now record one first — which is the change working, not a test being accommodated — and the
+integrate-point's unrecorded case became the one the early refusals cannot catch: hooks shipped while the change is
+already in review.
 
 What landed: the §26 scope sentence, the §27 entry that says which half of the deferred pre-push work this
 closes, `skills/git-pair/references/hooks.md`, a Concepts entry in the README, and hook shapes added to the

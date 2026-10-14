@@ -8,9 +8,10 @@ clone that had recorded nothing about those scripts simply did not run them: the
 only signal was a line on a stream a machine is free to drop.
 
 This changeset adds the missing position — `git pair hooks --decline`, "a person read these scripts and chose not
-to run them here" — and makes the verdict ask for one. While the tracked hooks tree is `unrecorded` or `changed`,
-`git pair check` refuses and `git pair change integrate` refuses with it, through the same gate, with a reason that
-names both ways out. `accepted` passes because the scripts ran; `declined` passes because somebody answered a
+to run them here" — and makes the tool ask for one at the first moment it can. While the tracked hooks tree is
+`unrecorded` or `changed`, `git pair init` refuses before the changeset directory exists, `change ready` before the
+hand-off, `review submit` before the reviewer's content is staged, and the gate refuses the merge — `git pair
+check`, and `git pair change integrate` with it — each carrying the same sentence and naming both ways out. `accepted` passes because the scripts ran; `declined` passes because somebody answered a
 question about them. What neither is, is silence.
 
 The reviewer asked for this while reading the hook contract (`review 1af9b87`): leaning towards making the
@@ -61,10 +62,25 @@ edits the PRD's hook section, the README, `references/cli.md` and the skill's ho
 
 ## Design decisions
 
-**The mandate lives in the verdict, not in the report.** `change ready`, `review submit` and `status` keep
-reporting the skip rather than refusing it: you can still work in a clone nobody has approved, still hand off,
-still read the scripts you are being asked about. The gate is the one place where "the checks did not run" must
-stop the action, because it is the one place an action is a merge.
+**Asked as early as it can be asked, and asked in the same words.** The first version of this changeset refused
+only at the gate. Review said the existence of the repository's own checks should be obvious at the first moment
+possible, so the same question is now met at `git pair init` — before a changeset directory exists — at
+`change ready`, before the hand-off, and at `review submit`, before the reviewer's content is staged, as well as at
+the gate behind `check` and `change integrate`. One sentence on every surface, naming both ways out, so a person
+who meets it twice reads the same words rather than two different refusals.
+
+The argument I had against refusing at the hand-off — that the hand-off is where a person reads the scripts, and a
+refusal there pushes them to approve without reading — is answered by what stays open rather than by the gate's
+location. `git pair hooks` is never gated, so reading is always available; `change unready` and `change abandon`
+are never gated, so the work can still be put down; and both position commands print the list before they record
+anything, so nobody takes a position blind. What the hand-off should not do is put work in front of a reviewer
+whose suite never ran, which is what it used to do while the only refusal lived at the merge.
+
+**`review submit` asks before the stage, not after it.** A refusal discovered by the `pre-submit` hooks leaves the
+reviewer with a staged tree and a verdict they did not record; asking first leaves their index exactly as they left
+it. There is no override flag beside this refusal, because the way through is one command that records a position.
+`--allow-hook-failure` remains for what it is for: a reviewer's own script refusing a verdict they have decided to
+record, not a script nobody has read.
 
 **The record is per-clone, not tracked.** A tracked `declined` file would be inherited by the next clone, which
 turns "this person read it and said no" into "this directory is exempt". The reviewer chose per-clone; the
@@ -111,8 +127,8 @@ both commands.
 
 ## Known limitations
 
-**A CI checkout is a clone that has recorded nothing.** From this change a pipeline that runs `git pair check`
-must take a position in its own script — `git pair hooks --trust` is the usual line, since a runner that reports
+**A CI checkout is a clone that has recorded nothing.** From this change a pipeline that runs `git pair check` —
+or `git pair init`, or `change ready`, which ask too — must take a position in its own script — `git pair hooks --trust` is the usual line, since a runner that reports
 the suite passed has to run it — and neither position is a line an agent should add on its own initiative. This is
 safe to merge today because no repository in the wild has tracked hooks yet: the state is absent by vacuity
 exactly where the tree is absent, which is every repository that never used the feature.
@@ -126,12 +142,31 @@ this clone; a verdict another clone reaches still cannot. If a team wants "this 
 runners" to be a shared, reviewed statement, that is a tracked file with its own review, and it is not in this
 change.
 
+## Addressed feedback
+
+`review dc0956c` (feedback) edited this file to say:
+
+> in my mind, it should be obvious as early as possible that there are hooks that repo owner wants run. so it
+> would make sense to refuse on init/ready/review etc if the scripts are in an unrecorded/changed status
+
+Done. `git pair init`, `git pair change ready` and `git pair review submit` now refuse on `unrecorded` and
+`changed`, each before it writes or stages anything, carrying the gate's sentence; the shared helper
+(`hooksPositionReason`, moved out of `check` into `hooks.go`) is what keeps the wording identical. `change unready`
+and `change abandon` were left free, and that exception is deliberate and documented in the code and on the skill
+page: those two take work out of the queue, and the person who cannot run the repository's checks is the person who
+most needs to put the work down. `git pair hooks` stays ungated so that reading is never behind the decision that
+is supposed to follow it.
+
+The fixtures that used to reach the hand-off with no position recorded now record one first, which is the point of
+the change. The integrate-point test's unrecorded case was rebuilt as the case the early refusals cannot catch —
+the repository ships the suite while the change is already in review — which is also why the gate keeps asking on
+its own.
+
 ## Open questions
 
 - Should `status` and `queue` say more than they do now for a declined tree? They report the state through
   `git pair hooks`; neither nags, which is the point of a recorded position. A future `--decline` that carried an
   optional note (`--reason`) would make the position reviewable without making it tracked.
-- Should `change ready` refuse too, so the author finds out at the hand-off rather than at the gate? It was left
-  reporting because the hand-off is where a person reads the scripts, and refusing there pushes them to approve
-  without reading.
-in my mind, it should be obvious as early as possible that there are hooks that repo owner wants run. so it would make sense to refuse on init/ready/review etc if the scripts are in an unrecorded/changed status
+- Should `status` and `queue` mark a changeset whose clone has no position recorded, now that the hand-off refuses?
+  They report the state through `git pair hooks`. A marker on the row would help a person scanning a queue they
+  cannot fix from here, since the position belongs to the clone reading the queue.

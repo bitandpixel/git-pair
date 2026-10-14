@@ -1982,16 +1982,24 @@ into "nobody has to read the scripts in this directory again", which is the oppo
 stale decline stays reportable, because "declined 3f1a…, the tree is now 82b0…" is the sentence that tells a
 person the script they refused has been replaced.
 
-**The verdict asks for a position.** `git pair check` refuses, and `git pair change integrate` with it, while the
-tracked tree is unrecorded or changed: the checks the repository asked for have not run, and a merge decision
-should not be able to rest on that. `accepted` passes because the scripts ran and `declined` passes because a
-person answered a question about them; what neither is, is silence. The decline is what makes the demand fair —
-without it, a gate that refuses until scripts are approved asks every clone to either execute code it does not
-want or stay permanently red, and a team under a deadline executes the code. The off switch is not a position:
-`GIT_PAIR_HOOKS=0` and `git-pair.hooks=false` say a machine does not want to run scripts right now, which says
-nothing about what those scripts do, and the quietest way past a gate should not be an environment variable nobody
-has to read. Commands that write no verdict — `change ready`, `review submit`, `status` — keep reporting the skip
-rather than refusing it, so a clone nobody has approved is still a clone you can work in.
+**The commands that start or advance work ask for a position.** `git pair init` refuses before a changeset
+directory exists, `git pair change ready` before the hand-off, `git pair review submit` before the reviewer's
+content is staged, and the gate refuses the merge: `git pair check`, and `git pair change integrate` with it.
+One sentence on every surface, naming both ways out, because a person who meets the refusal twice should read the
+same words. The reviewer asked for it this way — the existence of the repository's own checks should be obvious as
+early as it can be, and the hand-off is where a reviewer is asked to spend attention, so a queue that can fill with
+work whose suite never ran is the failure they cannot see.
+`accepted` passes because the scripts ran and `declined` passes because a person answered a question about them;
+what neither is, is silence. The decline is what makes the demand fair — without it, a gate that refuses until
+scripts are approved asks every clone to either execute code it does not want or stay permanently red, and a team
+under a deadline executes the code. The off switch is not a position: `GIT_PAIR_HOOKS=0` and
+`git-pair.hooks=false` say a machine does not want to run scripts right now, which says nothing about what those
+scripts do, and the quietest way past a gate should not be an environment variable nobody has to read.
+
+Two commands deliberately do not ask: `change unready` and `change abandon`. Both take work out of the queue
+rather than putting it in, and the person who cannot run the repository's checks is exactly the person who needs to
+put the work down; refusing them would make the safety mechanism a trap. `git pair hooks` is never gated either —
+reading the scripts is what you do *because* you have not decided, so it cannot be behind the decision.
 
 A clone in the changed state has a third option besides accepting or working without: it can keep running the
 version it did read, by copying that content into the per-clone root, which needs no acceptance. git-pair does

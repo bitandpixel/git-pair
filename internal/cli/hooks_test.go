@@ -216,18 +216,30 @@ func TestPreReadyHookFailureModes(t *testing.T) {
 // after the approval is a new approval; and the per-clone root needs no such step, because it is the
 // person's own file under their own git directory.
 func TestHookTrustGatesTheTrackedRoot(t *testing.T) {
-	t.Run("an unaccepted tracked hook does not run, and the command says so", func(t *testing.T) {
+	t.Run("an unaccepted tracked hook stops the hand-off, and the refusal names both ways out", func(t *testing.T) {
 		f, _ := newChangeset(t, "checkout-flow", "main")
 		dir := scratch(t)
 		putHook(t, f, "tracked", "pre-ready", "01-suite", touch(dir, "RAN"))
 
-		res := runIn(t, f.Dir(), "change", "ready").mustSucceed(t, "change", "ready")
-
+		res := runIn(t, f.Dir(), "change", "ready")
+		if res.code != exitRefusal {
+			t.Fatalf("`change ready` exited %d, want %d\nstdout: %s\nstderr: %s",
+				res.code, exitRefusal, res.stdout, res.stderr)
+		}
 		if _, err := os.Stat(filepath.Join(dir, "RAN")); err == nil {
 			t.Error("an unaccepted hook ran: a clone would execute a stranger's script")
 		}
-		mustContain(t, res.stderr, "did not run", "the run must say the hook was skipped")
-		mustContain(t, res.stderr, "git pair hooks --trust", "and name the way to accept it")
+		// The hand-off is where a reviewer is asked to spend attention, so it asks here rather than leaving the
+		// queue to fill with work whose suite never ran. Both ways out are named because a refusal that names
+		// only `--trust` reads as a demand to approve.
+		have := res.stdout + res.stderr
+		mustContain(t, have, "have not been recorded in this clone", "the refusal says what is missing")
+		mustContain(t, have, "git pair hooks --trust", "and the way that runs the checks")
+		mustContain(t, have, "git pair hooks --decline", "and the way that does not")
+		marker := filepath.Join(f.Dir(), ".git", "git-pair", "changesets", "checkout-flow", "ready")
+		if _, err := os.Stat(marker); err == nil {
+			t.Error("a refused hand-off still wrote a ready marker")
+		}
 	})
 
 	t.Run("accepting lets it run, and prints what is being approved", func(t *testing.T) {

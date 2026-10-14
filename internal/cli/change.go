@@ -105,6 +105,12 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 	if err := a.refuseIfAbandoned(ctx, s); err != nil {
 		return err
 	}
+	// The repository's own scripts, before the hand-off rather than after it. The gate still asks — content can
+	// move under a recorded position — but the hand-off is where a reviewer is asked to spend their attention,
+	// and a queue that can fill up with work whose suite never ran is the thing the reviewer cannot see.
+	if err := a.hooksPositionRefusal(ctx, s.repo); err != nil {
+		return err
+	}
 
 	report, err := survivalCheck(ctx, s)
 	if err != nil {

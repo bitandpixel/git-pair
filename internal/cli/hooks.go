@@ -359,9 +359,14 @@ lexicographic order.
 
 The tracked tree is trusted by content, not by a flag: any edit to any hook invalidates the acceptance,
 because the thing that was approved was that content. Four states describe a clone's relation to it —
-` + "`accepted`" + `, ` + "`declined`" + `, ` + "`changed`" + `, ` + "`unrecorded`" + ` — and the two that stop the scripts running are
-the last two plus a decline. An unaccepted tree does not run and the command says so on stderr — the
-operation itself still proceeds, so a clone nobody has approved is still a clone you can work in.
+` + "`accepted`" + `, ` + "`declined`" + `, ` + "`changed`" + `, ` + "`unrecorded`" + `. Only ` + "`accepted`" + ` runs the scripts.
+
+The commands that start or advance work refuse while the tree is ` + "`changed`" + ` or ` + "`unrecorded`" + `: ` + "`init`" + ` before a
+changeset exists, ` + "`change ready`" + ` before the hand-off, ` + "`review submit`" + ` before the reviewer's content is
+staged, and the gate behind ` + "`check`" + ` and ` + "`change integrate`" + ` before a merge. A hand-off, a verdict and a
+merge should not rest on checks that never ran. What still works with nothing recorded is this command, and
+the two that take work out of the queue — ` + "`change unready`" + ` and ` + "`change abandon`" + `: reading the scripts and
+putting the work down are what you do because you have not decided yet.
 
 ` + "`--decline`" + ` is the other position a person can take: read the scripts, choose not to run them here. It is
 recorded against the same content hash as an acceptance, so the next version the repository ships is
@@ -565,6 +570,62 @@ func reportUnknown(a *app, rep hooksReport, found []unknownEntry) {
 		a.warn("git-pair: %s is not a lifecycle point; expected one of: %s\n",
 			displayPath(filepath.Join(u.dir, u.name)), strings.Join(pointNames(), ", "))
 	}
+}
+
+// hooksPositionReason is what the commands that create or advance a changeset ask about the repository's own
+// scripts: a tracked hooks tree this clone has recorded no position on carries checks that have not run, and
+// git-pair does not build on top of that silence.
+//
+// The reviewer asked for it as early as it can be asked — "it should be obvious as early as possible that there
+// are hooks that repo owner wants run" — so it is met at `init`, before a directory exists, at `change ready`,
+// before the hand-off, at `review submit`, before the reviewer's content is staged, and at the gate, where
+// `check` and `change integrate` refuse the merge. One sentence on every surface, because a person who meets it
+// twice should read the same words and the same two ways out, not a different refusal each time.
+//
+// `accepted` answers it by running the scripts. `declined` answers it differently: a person read them and chose
+// not to run them here, which is a position rather than an absence, and is what lets the tool ask for one without
+// pushing anyone into approving a script they do not want. What neither is, is silence — so `unrecorded` and
+// `changed` both refuse. `changed` refuses because content that moved under an acceptance is content nobody has
+// looked at since; letting the older record answer for it would make one acceptance cover the whole history of the
+// directory, which is the reading the state machine in `hooks.TrustAt` refuses.
+//
+// Two commands deliberately do not ask: `change unready` and `change abandon`. Both take work out of the queue
+// rather than putting it in, and a person who cannot run the checks is exactly the person who needs to put the
+// work down. Refusing them would turn the safety mechanism into a trap.
+//
+// The off switch is not an answer either. `GIT_PAIR_HOOKS=0` and `git-pair.hooks=false` say a machine does not
+// want to run scripts right now, which says nothing about what those scripts do; the position is
+// `git pair hooks --decline`, written down where the next reader can see it was taken.
+func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo) (string, error) {
+	state, accepted, current, err := a.hookRun(repo).Trust(ctx)
+	if err != nil {
+		return "", err
+	}
+	switch state {
+	case hooks.TrustAccepted, hooks.TrustDeclined:
+		return "", nil
+	}
+	root := displayPath(hooks.TrackedRootDir(repo.Dir))
+	if state == hooks.TrustChanged {
+		return fmt.Sprintf("the repository's tracked hooks under %s changed since this clone accepted them (accepted %s, the tree is now %s): the checks they carry have not run on this content — read what moved, then `git pair hooks --trust` to run it or `git pair hooks --decline` to record that you read it and chose not to",
+			root, short(accepted), short(current)), nil
+	}
+	return fmt.Sprintf("the repository's tracked hooks under %s have not been recorded in this clone: the checks they carry have not run — read them, then `git pair hooks --trust` to run them or `git pair hooks --decline` to record that you read them and chose not to",
+		root), nil
+}
+
+// hooksPositionRefusal is the same question as an error, for the commands that refuse rather than report. It is a
+// business refusal (exit 1) like a dirty tree or a failing pre-hook: the invocation was right, and the clone has
+// a step to take. Nothing is written before it, so a refusal leaves the repository as it was found.
+func (a *app) hooksPositionRefusal(ctx context.Context, repo *git.Repo) error {
+	reason, err := a.hooksPositionReason(ctx, repo)
+	if err != nil {
+		return err
+	}
+	if reason == "" {
+		return nil
+	}
+	return fmt.Errorf("%s", reason)
 }
 
 func acceptHooks(ctx context.Context, a *app, repo *git.Repo, gitDir string) error {

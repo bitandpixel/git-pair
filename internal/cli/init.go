@@ -125,6 +125,14 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	if opts.parent != "" && opts.parent == branch {
 		return &usageError{fmt.Errorf("--parent %s is the branch this changeset lives on, so the stack would move with every commit. Name the branch you branched off", branch)}
 	}
+	// The repository's own scripts, asked before anything exists to describe the work. A changeset is the unit
+	// the team's checks are measured against, so the earliest useful moment to say "this repository ships hooks
+	// and this clone has not answered about them" is the moment before you start one. Nothing has been written
+	// yet, so the refusal leaves no half-created changeset behind, and `git pair hooks` is never gated — reading
+	// the scripts is always available, including from here.
+	if err := a.hooksPositionRefusal(ctx, repo); err != nil {
+		return err
+	}
 	base := opts.base
 	if base == "" {
 		// Resolved before the changeset itself. When there is no trunk to infer a base from,
