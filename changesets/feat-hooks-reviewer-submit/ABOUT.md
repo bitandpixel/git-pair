@@ -119,9 +119,10 @@ of it is readable.
     status area, with the hook's text arriving mid-frame and gone on the next repaint — which is the defect the
     change is for, and why the transcript above is quoted rather than described.
 -   `go test ./internal/cli/ -run Docs` and `-run TestTheCommandTreeIsTheCommandSet` green.
--   `mise run check` exited **0**: 36 test shards ok (31 served from cache, the rest re-run against the final
-    tree), no `FAIL`, and its `gofmt -l internal cmd` step reported nothing. Run again after this file was
-    written, with the same result.
+-   `mise run check` exited **0** on the head this changeset carries after the feedback round, with the test
+    cache cleared first so no shard was answered from an earlier tree: 36 test shards ok, none served from
+    cache, no `FAIL`, and its `gofmt -l internal cmd` step reported nothing. The run that covered the original
+    submission reported the same 36 ok with 31 shards served from cache.
 -   Restacked onto M1's answers to the reviewer's feedback, twice — once for the two questions, once for the
     `trust_state` work that came out of the vendoring discussion — and re-run each time: exit 0, 36 shards ok,
     no `FAIL`, `gofmt` silent. Neither answer bears on this milestone's behaviour; both were answered from what
