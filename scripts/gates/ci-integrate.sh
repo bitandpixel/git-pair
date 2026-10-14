@@ -554,7 +554,8 @@ check "and it leaves the manual trigger unfiltered, because that is the recovery
 # comments, so this file can explain what was dropped without the assertion reading the explanation as a ask.
 PERM=$(awk '/^permissions:/{f=1;next} f&&/^[a-z]/{f=0} f' "$INTEGRATE" | grep -v '^[[:space:]]*#')
 check "the job asks to write the destination" 1 "$(printf '%s\n' "$PERM" | grep -c 'contents: write')"
-check "and nothing it no longer uses" 0 "$(printf '%s\n' "$PERM" | grep -Ec '(actions|checks|statuses):')"
+check "and to make the one request that follows" 1 "$(printf '%s\n' "$PERM" | grep -c 'actions: write')"
+check "and holds nothing the probe would have needed" 0 "$(printf '%s\n' "$PERM" | grep -Ec '(checks|statuses):')"
 
 # What the job runs. `--verify-cmd` is the whole point of the shape — the merge is conditional on the suite
 # running against the candidate — and `--require-ci` must not come back into this file's own commands, because
@@ -564,9 +565,21 @@ check "and nothing it no longer uses" 0 "$(printf '%s\n' "$PERM" | grep -Ec '(ac
 INTEGRATE_CODE=$(grep -v '^[[:space:]]*#' "$INTEGRATE")
 check "the job makes the merge conditional on the suite" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c -- '--verify-cmd')" -ge 1 ] && echo 1 || echo 0 )"
 check "and does not also gate on somebody else's checks" 0 "$(printf '%s\n' "$INTEGRATE_CODE" | grep -Ec -- '--require-ci|--ci-probe')"
+
+# The request that follows a landing is house policy, not decoration. The destination's new tip is the tree
+# this job just tested, so the run adds no answer — but a trunk with no run of its own has nothing to go red
+# and nobody to notify when the merge is where the trouble was. Three things have to hold together, and each
+# has failed alone before: the ask named in the file, the scope that makes a request, and a token for the tool
+# that makes it. An ask without a token answers "cannot tell", which the driver reports and then survives —
+# the quiet version of a paper trail that was never printed.
 check "the merge reads the whole history, so an approval and a landing can be found" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'fetch-depth: 0')" -ge 1 ] && echo 1 || echo 0 )"
 check "two jobs for one declaration would race, so a merge is never cancelled midway" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'cancel-in-progress: false')" -ge 1 ] && echo 1 || echo 0 )"
 check "and the queue report runs after a failure, when it is most wanted" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'if: always()')" -ge 1 ] && echo 1 || echo 0 )"
+check "the merge job asks the destination to test what it landed" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c -- '--ci-request')" -ge 1 ] && echo 1 || echo 0 )"
+check "and names the helper rather than leaning on the driver's default" 1 \
+  "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c -- '--ci-request scripts/ci/gh-request-ci.sh')"
+check "and the tool that asks is given a token to ask with" 1 \
+  "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'GITHUB_TOKEN')" -ge 1 ] && echo 1 || echo 0 )"
 
 # The pair, in the direction that still matters. After a merge, trunk's own push trigger cannot fire — the
 # push came from a token, and GitHub makes no runs for what a token caused — so `scripts/ci/gh-request-ci.sh`

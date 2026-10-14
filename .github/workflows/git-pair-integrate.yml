@@ -50,12 +50,15 @@
 #
 # What this job needs:
 #
-#   permissions          `contents: write` is the whole ask, because the merge is an ordinary commit on the
-#                        destination branch. There is no second push: git-pair writes no ref, so this job has
-#                        no namespace to publish into and nothing to keep in sync with the merge (PRD §13.4).
-#                        The old file also asked for `checks: read`, `statuses: read` and `actions: write`,
-#                        which belonged to the probe and to the post-merge request below; with neither in this
-#                        job's path, asking for them would be a wider token than the job uses.
+#   permissions          `contents: write` is the ask for the merge, because the merge is an ordinary commit
+#                        on the destination branch. There is no second push: git-pair writes no ref, so this
+#                        job has no namespace to publish into and nothing to keep in sync with the merge
+#                        (PRD §13.4). `actions: write` is for one thing that is not the merge: the request
+#                        below that trunk's new tip be tested. It is not about landing — a request is an ask,
+#                        not a caused event, and making one is what this scope buys. What stays dropped is
+#                        `checks: read` and `statuses: read`: those belonged to the probe, and a job that
+#                        tests its own candidate has no head-check to consult. A token asks for what the job
+#                        uses.
 #   branch protection    a protected trunk is the real setup cost. `GITHUB_TOKEN` cannot be added to a bypass
 #                        list, so on a repository that restricts pushes to `main` this job needs a Ruleset
 #                        bypass actor of its own (a GitHub App, or a deploy key with a role) and that token in
@@ -68,12 +71,18 @@
 #                        — which is the honest shape for a repository whose tests are somebody else's business,
 #                        and the wrong one for this file.
 #
-# The driver keeps `--require-ci`, `--ci-probe` and `--ci-request` for consumers that want a merge gated on a
-# forge's checks as well as (or instead of) the candidate's own run, and `scripts/gates/ci-integrate.sh`
-# replays those paths without a runner. This file passes none of them: the candidate is tested before the
-# push, so there is no head-check to trust, and the tip the destination keeps is the one that was just tested.
-# After a merge, `.github/workflows/ci.yml` is what trunk's own push trigger cannot cause, and asking for it
-# is `scripts/ci/gh-request-ci.sh` behind `--ci-request` — a consumer's choice, not this job's.
+# The driver keeps `--require-ci` and `--ci-probe` for consumers that want a merge gated on a forge's checks
+# as well as (or instead of) the candidate's own run, and `scripts/gates/ci-integrate.sh` replays those paths
+# without a runner. This file passes neither: the candidate is tested before the push, so there is no
+# head-check to trust.
+#
+# It does pass `--ci-request`, and the reason is a paper trail rather than information. The tree the
+# destination keeps is the tree this job just tested, so a run on it adds no answer — but a trunk with no run
+# of its own has nothing to go red, and nothing to notify anybody about when the merge is where the trouble
+# was. The push that landed it cannot cause that run itself (it came from this job's token, and GitHub creates
+# no runs for what a token caused), so the ask is made by name against `.github/workflows/ci.yml`, which
+# merges nothing. A refused ask is said out loud and does not undo the landing; a missing token makes the ask
+# unanswerable, which is the failure mode worth a comment because it looks like success.
 name: git-pair integrate
 
 on:
@@ -89,9 +98,10 @@ on:
         required: false
         type: string
 
-# `contents: write`, and nothing else. See "permissions" above.
+# `contents: write` for the merge, `actions: write` for the ask that follows it. See "permissions" above.
 permissions:
   contents: write
+  actions: write
 
 # One merge at a time per ref. Two jobs that both see the same declaration would make two merge attempts, and
 # the second one's push would be refused after its merge commit already existed locally — a confusing failure
@@ -156,6 +166,10 @@ jobs:
           # arrived after this event was created: the candidate the job tests is built from the commit the
           # declaration named, not from whatever the branch reached while the job was starting.
           PUSHED: ${{ github.event.after }}
+          # The request hook asks GitHub for a run, and `gh` authenticates from this. Without it the hook
+          # answers "cannot tell", the job says so and stays green — so the missing paper trail would be a
+          # line in a log nobody reads rather than a failure anyone would see.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
           # The merge commit is authored by this job. Saying so in the identity is honest: the approval
@@ -169,6 +183,11 @@ jobs:
           # on the branch itself has ever seen.
           VERIFY_CMD='mise run gates'
           set -- --verify-cmd "$VERIFY_CMD"
+          # Named rather than left to the driver's default, because the file claims the ask in its own header:
+          # a reader should see the request here, and the gate asserts this line exists beside the scope that
+          # makes it. The helper asks `.github/workflows/ci.yml` to run the destination branch — a file that
+          # merges nothing, which is what makes the ask safe.
+          set -- "$@" --ci-request scripts/ci/gh-request-ci.sh
           case "$EVENT" in
             workflow_dispatch) [ -n "$CHOSEN" ] && set -- "$@" "$CHOSEN" ;;
             *) [ -n "$REF_NAME" ] && [ "$REF_NAME" != "$GIT_PAIR_DEFAULT_BRANCH" ] && set -- "$@" "$REF_NAME" ;;

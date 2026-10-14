@@ -22,13 +22,17 @@ The driver flag this uses, `--verify-cmd`, is the layer below (`feat-ci-verify-c
     binary it gates with through `GIT_PAIR_BIN`, and the queue report stays under `if: always()`. Its header
     separates the rule worth copying — a landing conditional on the suite the destination would run — from this
     repository's value at that seam, `mise run gates` and `jdx/mise-action`, because this file ships as the
-    sample and the two are easy to confuse.
+    sample and the two are easy to confuse. It also asks the destination to test what landed — `--ci-request`
+    with the shipped helper named, `actions: write` for that request alone, and a token for `gh` — added on
+    review (`cac6104`) so a landing leaves a run on the trunk that can go red and notify somebody.
 -   `.github/workflows/ci.yml`: `pull_request`, `workflow_dispatch`, and `push` for the destination branch
     alone. The branch pushes went, because their only justification was the probe reading branch-head checks
     and nothing does that now. Its header now says what the branch trigger was for, why that reason is gone,
     and why trunk is kept.
 -   `scripts/gates/ci-integrate.sh`: the static section that asserted the two files name each other (6 checks)
-    now asserts what this shape needs (22), and the check that required `actions: write` became a pairing.
+    now asserts what this shape needs (29), and the check that required `actions: write` became a pairing — an
+    ask only with its scope, a scope only with its ask — beside positive checks that the ask, its scope, and
+    its token are all present.
 -   `README.md`, `PRD.md` §29's pointer, and `skills/git-pair/references/integration.md`: the places that
     stated the landing facts as "approved, declared, and green on the declared head", and the sentence that
     said the merge job triggers on `workflow_run` and the schedule.
@@ -53,11 +57,15 @@ workflow *by name*, and its default is `ci.yml`. With that file gone, the only d
 be the one that merges, so "please test the destination's new tip" would become "please land a changeset".
 Keeping two files with one job each also keeps the read-only token on the job that only reads.
 
-**The probe's scopes went with the probe.** `checks: read`, `statuses: read` and `actions: write` belonged to
-`--require-ci` and to the post-merge ask. A token should ask for what the job uses, so the gate now asserts the
-pairing in both directions: a file asks for a run only if it holds the scope to make the ask, and holds that
-scope only if it asks. The old check could only assert the second half in one direction, which is how a wide
-token survives.
+**The probe's scopes went with the probe; the request's came back.** `checks: read` and `statuses: read`
+belonged to `--require-ci`, and a job that tests its own candidate has no head-check to consult, so they stay
+dropped. `actions: write` belongs to the request that follows a landing, and this repository wants that
+request: the trunk's tip is the tree the job just tested, so the run adds no answer, but a trunk with no run
+of its own has nothing to go red and nobody to notify when the merge is where the trouble was. That is a
+paper trail bought with one scope, and the token is the part that fails quietly — `gh` with nothing to
+authenticate with answers "cannot tell", the driver says so and stays green, and the trail simply is not
+there. A token asks for what the job uses, which is why the pairing is asserted in both directions rather than
+one.
 
 **The build step names its binary.** `mise run build` installs under the name `scripts/install-name.sh`
 derives from the branch, so a replay cannot quietly test a build another worktree left in the shared
@@ -110,7 +118,9 @@ runner to see one is the first to complain.
 -   The `if:` over-match above, accepted.
 -   The destination's new tip *is* the tested candidate, so trunk is not untested after a merge; what it lacks
     is a run record on trunk, because a token-caused push creates none. `--ci-request` is how that record is
-    asked for, and this file does not pass it.
+    asked for, and this file asks for it: `--ci-request` with the helper named, `actions: write` for the
+    request, and `GITHUB_TOKEN` for `gh`. A refused ask is reported and does not undo the landing; the failure
+    mode the three together are asserted against is the quiet one, where no token means nothing was ever asked.
 -   Trunk keeps a `push` trigger in `ci.yml` for commits pushed straight to `main`, which have no candidate run
     behind them. It costs a run only for human pushes, since a token-caused push creates none — but it is one
     more line that names the destination branch, because a trigger cannot read `vars`. A repository moved off
@@ -128,10 +138,12 @@ runner to see one is the first to complain.
 
 ## Open questions
 
--   Should this repository pass `--ci-request` after all, so a merge leaves a trunk run behind? The tree is the
-    one that was just tested, so the ask buys a record rather than information — and it costs `actions: write`
-    plus a workflow that can be dispatched. Left off deliberately; it is a judgement about what a green trunk
-    means, and the reviewer may hold it differently.
+-   Should this repository pass `--ci-request` after all, so a merge leaves a trunk run behind? Answered on
+    review (`cac6104`): yes, for the paper trail and the notification, and this layer implements it.
+-   The same question now belongs to every repository adopting the profile, not to each file. `bitandpixel/dev-profiles`
+    carries its own integrate workflow, which does not ask today. Whether the answer lives in that file or in
+    the profile as house policy for the GitHub family is the open half of the vendoring discussion, and it is
+    easier to settle once the profile can carry forge-specific policy at all.
 I like the idea of a github-native paper trail and notifications in case something goes red. let's add it
 -   Once this ships, `bitandpixel/dev-profiles` carries a second copy of the driver and its own replay of it.
     Deleting that copy depends on a released binary new enough to have `--verify-cmd`, so the removal belongs
