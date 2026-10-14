@@ -328,6 +328,20 @@ $ git pair status --changeset booking-transaction --json | jq '{landed, landed_c
 }
 ```
 
+A parent that has not landed yet is the other half of the same question, and it decides what the child's
+next step is. `git pair status`, `git pair check`, `git pair change wait` and `git pair review submit` print the
+landing contract (§PRD §29) for a stacked child as the parent's step first:
+`waiting on parent booking: land it first (`git pair check`, then merge into main with ordinary git), then
+`git pair check` and merge into main`. The parent's branch is not offered as the child's merge target, on two
+grounds: the child's work goes where the parent's went, and the child's own merge is the step
+`git pair change integrate` (§9.9) refuses until the parent's record is in the destination — a merge onto a
+branch review can still rebase, amend or block is a merge on history that may stop existing. Once the parent
+has landed, the same four surfaces print the child's own merge and say where the branch name came from,
+against the same destination `change integrate` prints on its `merge into:` line. Where the record cannot
+show the parent's landing at all — a `parent:` with no changeset beside it — the sentence keeps the waiting
+form and names the branch it can see, which is the direction the declaration refuses in rather than a guess
+that the parent is finished.
+
 A parent that landed while its child is still stacked on it is the thing an author hits first after a
 landing. The child's chain — the commits a reviewer approved, which trunk never held — is the child's
 history until the child is rebased onto the landing or the parent's branch goes away, and a merge landing
@@ -806,7 +820,8 @@ read that failed — so a short list is never mistaken for the whole chain. `def
 the commit it pointed at, and how the run learned it (`flag`, `origin-head` or `sole-candidate`):
 a CI log that says nothing has landed has two causes, a stale fetch and a wrong trunk, and neither
 one is visible in a sentence about the changeset.
-`next_action` is the landing contract (§PRD §29) in one line: `check`, then the merge with ordinary git.
+`next_action` is the landing contract (§PRD §29) in one line: `check`, then the merge with ordinary git, and
+for a stacked child whose parent has not landed the parent's landing first (§PRD §21).
 Once the directory is in the destination it says there is nothing further to do.
 
 ```json

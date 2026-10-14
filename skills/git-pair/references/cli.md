@@ -165,6 +165,14 @@ command as `parent.note` and `parent.step`, and `git pair queue` prints it in `p
 no verdict, so they can advise the housekeeping safely, and it runs after the merge, on a branch nobody had to
 certify.
 
+A stacked child of a parent that has **not** landed is the same reading, one step earlier. `status`, `check`,
+`change wait` and `review submit` print the landing step as the parent's:
+`waiting on parent booking: land it first (git pair check, then merge into main with ordinary git), then
+git pair check and merge into main`. No branch of the stack is offered as the child's merge target — a child
+lands where its parent landed — and `git pair change integrate` refuses to declare the child until the
+parent's record is in the destination. `check` passing on a child is not permission to merge the child: land
+the bottom of the stack first.
+
 `git pair change wait --json` — `ref` is where the activity appeared (`HEAD`, or a remote-tracking
 branch brought in by `--fetch` but not yet merged), `review_commit` and `review_commit_full` appear only
 when a submission ended the wait, and `timed_out` is the difference between "a reviewer acted" and "gave

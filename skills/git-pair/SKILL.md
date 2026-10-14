@@ -208,6 +208,11 @@ An agent asked "may this land?" runs `git pair check` and stops there. Do not me
 yours; performing it is not, and `change integrate` is written so that the
 request cannot outlive the gate that cleared it.
 
+A stacked child waits for its parent, and the next step says so: while the parent's record is not in the
+destination, the sentence beside the verdict is the parent's landing, and `change integrate` refuses to
+declare the child. A passing `check` on a child is not permission to merge the child. Land the bottom of the
+stack first, with ordinary git, by whoever owns the branches.
+
 Two things to know, because you may be asked about them. Rebasing after an approval invalidates it:
 `check` compares the tree against what the review looked at, ignoring `changesets/<id>/`, so anything
 committed outside that directory after an approval makes the approval stale. Re-offer with

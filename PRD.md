@@ -1688,7 +1688,9 @@ The state already says `INTEGRATING` while that is true; the commit is what `sta
 author looking at their own branch wants the address of the thing they did, not only the state it produced.
 `next_action` for that state names the push that makes the request visible to whoever can act on it, with
 the landing contract (§29) still attached — and names `git pair change integrate` again when a commit has
-landed on top of the head the declaration covered, because a declaration is about a commit.
+landed on top of the head the declaration covered, because a declaration is about a commit. The landing
+contract itself names the parent's landing before the child's own merge while a stacked child's parent is
+unlanded (§21).
 
 `latest_review.reviewed_head` is the commit that submission spoke about, from its `Review-Head`
 trailer (§10.4) — the other end of the comparison `git pair check` makes when it refuses a rewritten
@@ -1876,7 +1878,8 @@ is the merge the author has just taken back. The human form prints the declarati
 `declared: <sha>`, because a log that says "ready" about a branch somebody handed over should say that too.
 
 `next_action` is the handoff the passing verdict licenses (§9.5) — the gate, then the merge, then the
-record — and it is present only when `ready` is true. When the gate failed its next step is its
+record — and it is present only when `ready` is true. For a stacked child whose parent has not landed, that
+sentence is the parent's landing first and the child's merge second (§21). When the gate failed its next step is its
 `reasons`, and a consumer should not have to decide which of two fields to believe. The sentence is the
 one `status` prints, spelled by the same function and tested against it: this is the command an agent
 runs to decide whether work may land, and the step that follows should not have to be parsed out of a
@@ -3631,6 +3634,32 @@ stand behind the result, while a declaration asks for a merge nobody will be ask
 branch review can still rebase, amend or block an hour from now — and a merge into it would sit on history
 that may stop existing. Refusing the request is the whole
 mitigation; the human path stays open, so nothing is lost but the automation.
+
+**The next step says which landing is owed.** The refusal above is a fact four reporting surfaces contradict
+if they print the landing contract (§9.5) from the changeset's own base, because a stacked child's base names
+the parent's branch. `status` (§11.1), `check` (§11.3), `change wait` (§9.4) and `review submit` (§10.4) each
+print one sentence for a child whose parent has not landed, and the sentence is the parent's step first:
+
+```text
+waiting on parent booking: land it first (`git pair check`, then merge into main with ordinary git),
+then `git pair check` and merge into main
+```
+
+It names no parent branch as a merge target for the child, on two grounds: the child's work goes where its
+parent's went, which the destination walk above answers and the recorded base does not; and the child's own
+merge is the step the paragraph above refuses. Once the parent's record is in the destination, the same four
+surfaces print the child's own merge and say where the answer came from — `git pair check`, then merge into
+main with ordinary git (where booking landed) — the branch `git pair change integrate` puts on its
+`merge into:` line, so the sentence an author is told and the declaration they run name one destination.
+
+Two properties belong to that reading. It is **cheap**: one parent read and one landing lookup, the way
+`queue` reads the same fact (§10.6), and nothing that walks the parent's markers or the child's chain — these
+are reporting surfaces and `change wait` polls them, which bounds what a screen may add per ancestor. And it
+**degrades rather than failing**: a git error costs the detail and not the command, because a next step is
+advice; the readings that refuse a merge are `check`'s and `change integrate`'s, and they return the error.
+Where a parent branch is recorded with no changeset id, so its landing cannot be shown, the sentence keeps the
+waiting form and names the branch it can see — the direction the declaration refuses in, rather than a guess
+that the parent is finished.
 
 ## When the parent is abandoned
 
