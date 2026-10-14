@@ -227,6 +227,7 @@ with a reason that explains what the screen should have said. See
       decision, with the pointer to `scripts/ci/git-pair-integrate.sh` — and no new claim about what a runner
       does.
 
+everything is marked complete in this plan, are all the milestones in this single changeset?
 #### Verification
 
 - The quote test fails when a builder's wording changes and the document does not (prove it by editing one
