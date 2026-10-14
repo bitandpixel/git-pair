@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"gitpair/internal/gittest"
@@ -125,4 +126,41 @@ func TestReviewQueueCostPerLandedChangesetIsBounded(t *testing.T) {
 			"the finding is meant to cost a bounded few reads each, not a walk of the destination",
 			per, empty, withDirs, landings)
 	}
+}
+
+// `check` fires two hook points — `pre-check` before the gate, `post-check` after the verdict — and each of
+// them asks git the same two questions before either can find out that the repository has no hooks at all:
+// whether the switch is off, and where the clone's git directory is. Asked per point that is four invocations
+// on the path every author and every CI job walks, in repositories that never use the feature; asked once per
+// run it is two. The cost gate in scripts/gates/ci-integrate.sh counts the same quantity from outside a Go
+// test, and its ceiling for a two-level stack is 50, which the per-point version of this formulation exceeded.
+// This is the assertion that says which of those four reads belong in the formulation at all.
+func TestCheckAsksTheHookQuestionsOncePerRun(t *testing.T) {
+	f, _ := newChangeset(t, "checkout-flow", "main")
+	_, lines := f.SpawnShimLines(t)
+
+	runIn(t, f.Dir(), "check", "--json").mustSucceed(t, "check", "--json")
+
+	asked := callsContaining(lines(), "config --bool git-pair.hooks")
+	if asked != 1 {
+		t.Errorf("one run read the hook off switch %d times, want once per run: %v",
+			asked, linesMatching(lines(), "git-pair.hooks"))
+	}
+	asked = callsContaining(lines(), "rev-parse --absolute-git-dir")
+	if asked != 1 {
+		t.Errorf("one run resolved the git directory %d times, want once per run: %v",
+			asked, linesMatching(lines(), "absolute-git-dir"))
+	}
+}
+
+func callsContaining(lines []string, needle string) int { return len(linesMatching(lines, needle)) }
+
+func linesMatching(lines []string, needle string) []string {
+	var out []string
+	for _, l := range lines {
+		if strings.Contains(l, needle) {
+			out = append(out, l)
+		}
+	}
+	return out
 }

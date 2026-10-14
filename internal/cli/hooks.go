@@ -142,12 +142,13 @@ func (a *app) runPoint(ctx context.Context, s *session, c hookContext, mode runM
 	if s == nil {
 		return nil, nil
 	}
-	if off, why := hooks.Disabled(ctx, s.repo); off {
+	run := a.hookRun(s.repo)
+	if off, why := run.Disabled(ctx); off {
 		// A deliberate off switch needs no commentary; the person or the job set it knowing why.
 		_ = why
 		return []hooks.Result{}, nil
 	}
-	plan, err := hooks.Discover(ctx, s.repo, c.Point)
+	plan, err := run.Discover(ctx, c.Point)
 	if err != nil {
 		return nil, err
 	}
@@ -223,6 +224,31 @@ func hookError(results []hooks.Result) error {
 		}
 	}
 	return nil
+}
+
+// hookReasons turns the hook outcomes that are not a pass into gate reasons.
+//
+// The wording names the point and the script rather than the condition, because a reader who cannot tell
+// git-pair's own conditions apart from the repository's own scripts will go looking for a marker that is not
+// missing. Every one of these says "a file you wrote said no", which is a different fix from any condition
+// the gate derives from history.
+func hookReasons(results []hooks.Result) []string {
+	var out []string
+	for _, r := range results {
+		if !r.Blocking() {
+			continue
+		}
+		switch r.Status {
+		case hooks.StatusTimeout:
+			out = append(out, fmt.Sprintf("the %s hook %q exceeded its deadline (raise it with $%s)",
+				r.Hook.Point, r.Hook.Name, hooks.TimeoutEnv))
+		case hooks.StatusNotExecutable:
+			out = append(out, fmt.Sprintf("the %s hook %q is not executable", r.Hook.Point, r.Hook.Name))
+		default:
+			out = append(out, fmt.Sprintf("the %s hook %q failed with exit %d", r.Hook.Point, r.Hook.Name, r.Exit))
+		}
+	}
+	return out
 }
 
 // hooksForJSON renders the results for a `--json` verdict. The array is `[]` when nothing is configured,
@@ -353,7 +379,7 @@ func runHooksReport(ctx context.Context, a *app, trust bool) error {
 		Hooks:       []hookEntry{},
 		Unknown:     []string{},
 	}
-	if off, why := hooks.Disabled(ctx, repo); off {
+	if off, why := a.hookRun(repo).Disabled(ctx); off {
 		rep.Disabled = why
 	}
 	state, accepted, current, err := hooks.Trust(ctx, repo)
@@ -377,7 +403,7 @@ func runHooksReport(ctx context.Context, a *app, trust bool) error {
 		found = append(found, unknownEntry{u, rep.CloneRoot})
 	}
 	for _, point := range hooks.AllPoints() {
-		plan, err := hooks.Discover(ctx, repo, point)
+		plan, err := a.hookRun(repo).Discover(ctx, point)
 		if err != nil {
 			return err
 		}

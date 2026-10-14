@@ -2002,7 +2002,10 @@ hand-off unreadable.
 
 Each hook gets a deadline — `GIT_PAIR_HOOK_TIMEOUT` seconds, then `git-pair.hookTimeout` in git config, then
 ten minutes. There is no force flag for a hook that times out: waiting ten minutes and then running the
-operation anyway is how a hung check becomes a habit.
+operation anyway is how a hung check becomes a habit. After the deadline the captured streams get five seconds
+to drain and are then closed, because a hook that started a background process and exited leaves the write
+ends of those pipes held by the process it abandoned, and `Wait` waits for them: a `sleep 30` behind a
+one-second deadline otherwise cost thirty seconds, which is the difference between a deadline and a suggestion.
 
 ### Refusal
 
@@ -2070,11 +2073,41 @@ clone:   .git/git-pair/hooks
   pre-abandon 01-note          tracked  executable   not run by this build
 ```
 
-The points this build runs are the author's four transitions on both sides: `pre-ready` and `post-ready`,
-`pre-unready` and `post-unready`, `pre-abandon` and `post-abandon`, `pre-integrate` and `post-integrate`. The
-gate's (`pre-check`, `post-check`) and the reviewer's (`pre-submit`, `post-submit`) arrive with the milestones
-that run them, and `git pair hooks` reports a hook under any of them as configured but not run, rather than
-pretending. The documentation follows the code rather than the plan.
+The points this build runs are the author's four transitions on both sides — `pre-ready` and `post-ready`,
+`pre-unready` and `post-unready`, `pre-abandon` and `post-abandon`, `pre-integrate` and `post-integrate` —
+and both sides of the gate, `pre-check` and `post-check`. The reviewer's (`pre-submit`, `post-submit`) arrive
+with the milestone that runs them, and `git pair hooks` reports a hook under any of them as configured but
+not run, rather than pretending. The documentation follows the code rather than the plan.
+
+### The gate
+
+`check` is where a hook's failure belongs to the verdict rather than refusing an operation, because `check`
+writes nothing. Two consequences, both deliberate:
+
+**Both points contribute reasons.** A `pre-check` hook that exits nonzero, and a `post-check` one too, each
+append a reason and make `ready` false. A post-hook beside a marker cannot reverse the transition it follows
+and does not try; a post-hook beside the gate has nothing to reverse, so its failure is a condition like any
+other. The shape it must never take is a nonzero exit beside `ready: true`, which would hand a pipeline two
+answers to one question. A `next_action` written for a verdict that has just fallen is cleared rather than
+left there to be acted on.
+
+**The reason names who refused.** `the pre-check hook "01-suite" failed with exit 1` is a different sentence
+from any the gate derives from history, and deliberately so: a reader who takes a script's failure for a
+condition about their markers goes looking for a commit that is not missing. The `hooks` array beside
+`reasons` carries the same event with its status, exit and duration.
+
+**The hooks run before the gate, and every one of them runs.** `check` is a report, and its value is that one
+run names every reason the merge would be wrong; skipping the suite because the gate already had a reason
+would put a round trip in per problem. `change integrate` runs the same gate as the same code and orders
+these the other way round — its own conditions first, then `pre-integrate` — because it is an action with a
+cheap answer available first, and because firing the gate's hooks there would start the repository's suite
+twice in one author action. That is why the points are attached to the command and not to the gate function.
+
+**There is no override.** `change ready` and `review submit` carry an `--allow-*` flag for the judgement of
+the person standing at them. `check` carries none, for the reason §19.3 gives for the absence of
+`--allow-feedback` in its own list: the command that runs the gate is the only place the policy is known, and
+a policy relaxed from the seat of whoever is running it is not a policy. A repository that wants its own gate
+on its own result writes it as a `pre-check` hook that reads what it recorded.
 
 ## 11.5 The agent skill
 

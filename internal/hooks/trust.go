@@ -117,14 +117,32 @@ const (
 // something did. The tree's hash comes from the same computation that decides acceptance, so the two values an
 // answer prints are comparable to the one `git pair hooks --trust` printed when the person approved it.
 func Trust(ctx context.Context, repo *git.Repo) (TrustState, string, string, error) {
-	current, _, err := TreeHash(repo.Dir)
+	gitDir, err := repo.GitDir(ctx)
+	if err != nil {
+		return TrustUnrecorded, "", "", err
+	}
+	return TrustAt(gitDir, repo.Dir)
+}
+
+// Trusted reports whether the tracked hooks tree matches what was accepted. A tree that does not exist is
+// trusted by vacuity: there is nothing there to run.
+func Trusted(ctx context.Context, repo *git.Repo) (bool, error) {
+	state, _, _, err := Trust(ctx, repo)
+	return state == TrustAccepted, err
+}
+
+// TrustAt is Trust for a caller that already knows where the git directory is. The state itself is read from
+// the filesystem — the tree hash and the record beside it — so the directory is the only git question in it,
+// and a run that asks it once can answer this for every hook point it walks.
+func TrustAt(gitDir, workTree string) (TrustState, string, string, error) {
+	current, _, err := TreeHash(workTree)
 	if err != nil {
 		return TrustUnrecorded, "", "", err
 	}
 	if current == "" {
 		return TrustAccepted, "", "", nil
 	}
-	accepted, err := Accepted(ctx, repo)
+	accepted, err := AcceptedAt(gitDir)
 	if err != nil {
 		return TrustUnrecorded, "", current, err
 	}
@@ -138,19 +156,8 @@ func Trust(ctx context.Context, repo *git.Repo) (TrustState, string, string, err
 	}
 }
 
-// Trusted reports whether the tracked hooks tree matches what was accepted. A tree that does not exist is
-// trusted by vacuity: there is nothing there to run.
-func Trusted(ctx context.Context, repo *git.Repo) (bool, error) {
-	state, _, _, err := Trust(ctx, repo)
-	return state == TrustAccepted, err
-}
-
-// Accepted reports the recorded hash, or "" when nobody has accepted anything.
-func Accepted(ctx context.Context, repo *git.Repo) (string, error) {
-	gitDir, err := repo.GitDir(ctx)
-	if err != nil {
-		return "", err
-	}
+// AcceptedAt is Accepted with the directory the record lives under already resolved.
+func AcceptedAt(gitDir string) (string, error) {
 	data, err := os.ReadFile(trustRecordPath(gitDir))
 	if errors.Is(err, os.ErrNotExist) {
 		return "", nil
@@ -159,6 +166,15 @@ func Accepted(ctx context.Context, repo *git.Repo) (string, error) {
 		return "", fmt.Errorf("reading the hook trust record: %w", err)
 	}
 	return strings.TrimSpace(string(data)), nil
+}
+
+// Accepted reports the recorded hash, or "" when nobody has accepted anything.
+func Accepted(ctx context.Context, repo *git.Repo) (string, error) {
+	gitDir, err := repo.GitDir(ctx)
+	if err != nil {
+		return "", err
+	}
+	return AcceptedAt(gitDir)
 }
 
 // Accept records the current tracked hooks tree as approved and returns the hash and the file names that
