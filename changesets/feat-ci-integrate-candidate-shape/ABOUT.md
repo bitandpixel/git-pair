@@ -73,7 +73,10 @@ gated on and rebuilds it.
 
 `bash scripts/gates/ci-integrate.sh` → `CI-INTEGRATE: all checks passed (122 checks)`, against 90 on `main`
 and 105 on the parent layer. `mise run gates` → `E2E: all checks passed`, `PTY: all checks passed`,
-`CI-INTEGRATE: all checks passed`, exit 0.
+`CI-INTEGRATE: all checks passed`, exit 0 in 135s — run in a scratch worktree at the restacked tip (`018b4a9`)
+so the checkout under review was not moved. A scratch worktree needs `MISE_TRUSTED_CONFIG_PATHS=<worktree>`:
+without it mise refuses an unseen config file and the ladder fails at zero seconds with what reads like a
+build error.
 
 The static checks are text checks, and each one is there for a failure that would otherwise be silent: a
 branch allowlist on the trigger (evaluated before anything git-pair says, so it can exclude a whole changeset
@@ -90,12 +93,20 @@ runner to see one is the first to complain.
 
 ## Known limitations
 
--   **Nothing here has executed on a runner.** Actions for this account is out of minutes again (the
-    `The job was not started because recent account payments have failed` annotation, last observed on run
-    `38477131713` / job `115570469173` and on schedule run `38483758035`), so the claims only a runner can
-    check — that the `if:` fires on a declaration, that `contents: write` is enough to push, that the report
-    still prints after a failure, that the file parses — rest on text assertions and the driver's replay. The
-    first declaration pushed after minutes return is the real test; `gh run view <id> --log` settles it.
+-   **What a runner has now proven, and what it has not.** Minutes came back partway through this stack, and
+     three pushes to this branch started runs of *this* file — `38596941248` (head `df92077`), `38597587466`
+     (head `6c4959f`), `38603795241` (head `018b4a9`) — each ending with job `integrate` **skipped**, because
+     none of those heads carried the declaration trailer. That is the filter measured on a runner rather than
+     asserted: a push starts a run, the `if:` costs it nothing, and `ci.yml` started nothing for those pushes
+     either. The old shape charged three `mise run gates` runs for the same three pushes.
+   - Still unproven: the merge path — a declaration reaching `--verify-cmd` and pushing —, that
+     `contents: write` alone is enough to land the merge, and that the report prints after a failure. The
+     first chance is this changeset's own declaration: GitHub reads the workflow file from the pushed
+     commit's tree, so the declaration push here starts the job defined in this file, which then tests the
+     tree that contains it. `gh run view <id> --log` is what settles each of the three.
+   - Layer 1 was landed by the shape this one replaces, which is the expected order: `main` still carried the
+     old file when the declaration was pushed, so run `38598069537` (`workflow_run` on `ef5fa30`, 16:26:20)
+     walked the queue and produced `b5f54a4` at 16:26:42 with the probe's `--require-ci` in force.
 -   The `if:` over-match above, accepted.
 -   The destination's new tip *is* the tested candidate, so trunk is not untested after a merge; what it lacks
     is a run record on trunk, because a token-caused push creates none. `--ci-request` is how that record is
