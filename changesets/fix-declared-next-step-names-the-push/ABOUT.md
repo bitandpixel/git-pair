@@ -35,16 +35,17 @@ other exit, never as the only one:
 ```console
 $ git pair check                     # declared, not yet pushed
 next:  `git push origin feat-ci-verify-cmd` — main merges what `git pair check --json` reports ready and integrating
+> I think we should avoid saying definitively that "main" will merge it. We could say this will queue it for merging with the owner of <trunk/destination>?
 
 $ git pair check                     # declared and pushed
 next:  waiting on main's owner to merge it: `git pair status --changeset feat-ci-verify-cmd` reports the landing
-       or take it yourself: `git pair check`, then merge into main with ordinary git
+       or land it yourself: `git pair check`, then merge into main with ordinary git
 
 $ git pair change integrate          # again, at the same head, pushed
 feat-ci-verify-cmd is already declared ready to integrate at ff79a41 (head ff79a41): nothing recorded
   merge into: main
   next:        waiting on main's owner to merge it: `git pair status --changeset feat-ci-verify-cmd` reports the landing
-               or take it yourself: `git pair check`, then merge into main with ordinary git
+               or land it yourself: `git pair check`, then merge into main with ordinary git
 ```
 
 ## What changed
@@ -150,3 +151,5 @@ field duplicating a sentence is a second thing to keep true. If a consumer needs
 -   Whether the queue should carry the declared path too. Its rows report what a person watching the repository
     owes, and a declared changeset asks nothing of them — which may be exactly why it needs the wait, or
     exactly why it stays silent.
+> There could be a world in which the merge to trunk is not automated, but the agent still pushes integrating declarations. 
+The queue would be a way for the owner to identify anything that needs to be manually merged
