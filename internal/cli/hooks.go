@@ -200,25 +200,39 @@ func (a *app) runPoint(ctx context.Context, s *session, c hookContext, mode runM
 		}
 	}
 	for _, r := range results {
+		if a.hookPresenter != nil {
+			a.hookPresenter(r)
+			continue
+		}
 		a.replayHookOutput(r)
 	}
 	return results, nil
 }
 
-// replayHookOutput keeps hook text off stdout, where `--json` lives. A failing hook's output is what the
-// author needs, so it always goes to stderr; a passing hook's output goes there only when asked for, because
-// a suite that prints 400 lines on success would make every handoff unreadable.
-func (a *app) replayHookOutput(r hooks.Result) {
+// hookOutputLines is the text of one hook run, in the shape the human surfaces print: a failing hook always
+// shows its own text, because that is the reason the operation stopped, and a passing hook shows it only when
+// $GIT_PAIR_HOOK_OUTPUT asks for it, because a suite that prints 400 lines on success would make every handoff
+// unreadable.
+func hookOutputLines(r hooks.Result) []string {
 	if r.Status == hooks.StatusSkippedUntrusted {
-		return
+		return nil
 	}
-	if r.Blocking() || hooks.EchoOutput() {
-		if out := strings.TrimRight(r.Stdout, "\n"); out != "" {
-			a.warn("%s\n", out)
+	if !r.Blocking() && !hooks.EchoOutput() {
+		return nil
+	}
+	var lines []string
+	for _, chunk := range []string{r.Stdout, r.Stderr} {
+		if trimmed := strings.TrimRight(chunk, "\n"); trimmed != "" {
+			lines = append(lines, trimmed)
 		}
-		if errOut := strings.TrimRight(r.Stderr, "\n"); errOut != "" {
-			a.warn("%s\n", errOut)
-		}
+	}
+	return lines
+}
+
+// replayHookOutput keeps hook text off stdout, where `--json` lives, by putting it on stderr.
+func (a *app) replayHookOutput(r hooks.Result) {
+	for _, lines := range hookOutputLines(r) {
+		a.warn("%s\n", lines)
 	}
 }
 

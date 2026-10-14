@@ -648,15 +648,69 @@ func openSession(ctx context.Context, a *app, s *session, sel span.Selector, inv
 		Mouse: tui.ResolveMouse(ctx, s.repo),
 		// The screen submits through the same call the command does, so the reviewer's `pre-submit` hooks fire
 		// wherever a verdict is recorded. A second path into `reviewops.Submit` would be a path with no hooks.
-		Submit: func(outcome model.Outcome) (reviewops.Result, error) {
-			result, _, _, err := a.submitReview(ctx, s, outcome, "", true, false)
-			return result, err
-		},
+		Submit: a.screenSubmission(ctx, s),
 	})
 	if errors.Is(err, tui.ErrQuit) {
 		return nil
 	}
 	return err
+}
+
+// screenSubmission is the review screen's submission path: the command's own path, with the one change the
+// screen needs because it owns the terminal while the submission runs. The hooks' output comes back inside the
+// refusal instead of on stderr, where the frame would paint over it (see app.hookPresenter), so the reviewer
+// reads why the hook stopped them without leaving the screen. Everything else is shared with `review submit`,
+// which is the point of injecting it: a screen that submitted for itself would be a second surface where the
+// reviewer's `pre-submit` hooks do not run.
+//
+// A refusal ends the submission and not the session. The comments, the ABOUT edit and the staged files all
+// exist at that moment, so the screen keeps them and says what was refused; the reviewer fixes the finding and
+// presses the outcome key again. Exiting nonzero is what `review submit` does, and it is right there — a
+// command that ran and was refused should say so to the shell. Quitting the screen is not that: `q` is the
+// ordinary way out of a screen that looked at a changeset and recorded nothing, and a nonzero code for it would
+// report a business refusal nobody made.
+func (a *app) screenSubmission(ctx context.Context, s *session) func(model.Outcome) (reviewops.Result, error) {
+	return func(outcome model.Outcome) (reviewops.Result, error) {
+		var printed []string
+		a.hookPresenter = func(r hooks.Result) { printed = append(printed, hookOutputLines(r)...) }
+		defer func() { a.hookPresenter = nil }()
+
+		result, _, _, err := a.submitReview(ctx, s, outcome, "", true, false)
+		if err != nil {
+			err = withHookText(err, printed)
+		}
+		return result, err
+	}
+}
+
+// withHookText puts the refused submission's hook output into the message the screen shows. The screen wraps
+// prose, so several lines are fine; the text is capped, because a lint run that dumped a megabyte would
+// replace the review rather than inform it. The tail survives and the head is cut: for a test suite or a lint
+// run, the part that says what failed is at the end.
+func withHookText(err error, chunks []string) error {
+	if len(chunks) == 0 {
+		return err
+	}
+	const (
+		maxLines = 15
+		maxRunes = 1200
+	)
+	lines := strings.Split(strings.Join(chunks, "\n"), "\n")
+	truncated := false
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+		truncated = true
+	}
+	text := strings.Join(lines, "\n")
+	if len(text) > maxRunes {
+		text = text[len(text)-maxRunes:]
+		truncated = true
+	}
+	note := ""
+	if truncated {
+		note = "\n… the earlier output is cut; `git pair review submit` prints it in full."
+	}
+	return fmt.Errorf("%w\n\nthe hook printed:\n%s%s", err, text, note)
 }
 
 // reviewLabel names a review submission the way `review history` does.
