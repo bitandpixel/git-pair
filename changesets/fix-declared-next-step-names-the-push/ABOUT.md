@@ -124,6 +124,13 @@ field duplicating a sentence is a second thing to keep true. If a consumer needs
     the wording moved into the shared builder; and the quote test proved to bite — changing "waiting on %s's
     owner to merge it" fails two document assertions.
 -   `mise run check` and `mise run gates` (the CI integration, the PTY walkthrough, the issue-29 scenarios).
+-   One `e2e-29.sh` run reported `E2E: FAILURES PRESENT`, and its log is gone: the command was piped through
+    `tail`, which kept only the last twenty lines and took the pipeline's exit status with it, so the failure
+    was at first read as a pass. Four subsequent full `mise run gates` runs and a direct
+    `bash scripts/gates/e2e-29.sh` were clean, and nothing in that script's declared-head region asserts any
+    next-step wording — it checks `ready`/`integrating`, the queue's text, the declaration commit, its
+    trailers, and that it wrote no ref. Unreproduced, recorded rather than dropped; the CI job runs the same
+    gates as the condition for merging, so a real failure stops the merge instead of being noticed after it.
 
 ## Known limitations
 

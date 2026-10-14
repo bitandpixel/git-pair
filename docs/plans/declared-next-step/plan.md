@@ -192,4 +192,4 @@ builders. `mise run check` for the suite, `mise run gates` including the PTY wal
 
 | Date | Audit | Summary |
 | --- | --- | --- |
-| — | — | none yet |
+| 2026-10-14 | self-verification before hand-off | `mise run check` green. `mise run gates` failed once inside `e2e-29.sh` with the log lost — the command was piped through `tail`, which also masked the task's exit code, so the failure read as a pass at first. Four later full gates runs and a direct `e2e-29.sh` were clean, and the script's declared-head region pins no next-step wording. Recorded as an unreproduced failure rather than converted into a pass; the box "`mise run gates`" above means the four clean runs plus the CI job that gates the merge on the same script. |
