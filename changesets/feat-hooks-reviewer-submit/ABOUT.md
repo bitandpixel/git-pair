@@ -119,3 +119,4 @@ feature usable for a reviewer at all. Both are tested, including the same tracke
     a reviewer who never ran `--trust` reviews without the repository's own checks having run, and the stderr
     note is the only trace.
 -   M5 has to settle the PRD §26 sentence about git verbs inside hooks.
+> what happens if the presubmit hook fails when you submit using the tui? does it exit with nonzero or show the error in the tui?
