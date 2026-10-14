@@ -97,10 +97,17 @@ both commands.
   ordinary reviewed content rather than a fixture. Unrecorded refuses the declaration and writes no marker;
   declined lets the declaration through with the hook still skipped; accepted runs the hook, which then blocks the
   declaration with no marker written.
-- `mise run gates` at hand-off: the unit suites, the e2e scripts, the PTY walkthrough, the CI integration script,
-  and the invocation-cost gate. The trust read is a filesystem read through the run's memoized `Resolution`, so no
-  new git invocations are expected and the measured figure should stay where M4 left it (49 at two levels, 50
-  allowed); the gate's number is quoted in the hand-off note either way.
+- Checked against a real binary in a scratch repository rather than only through the test harness, because the
+  sentences are the product here: the unrecorded refusal names both commands, `--decline` records and clears the
+  refusal while the hook stays skipped, a moved script returns the clone to `unrecorded` with the stale decline
+  still reported, the off switch does not lift the refusal, and `--trust` with `--decline` exits 2. That pass found
+  one defect: the note beside a skipped run printed an empty hash, because it read the state machine's comparison
+  value instead of the recorded decline. Fixed in the second commit, and the gate test now asserts the hash appears.
+- `mise run gates` at hand-off, green: 358 assertions across the suite, the e2e scripts, the PTY walkthrough and
+  the CI integration script (90 checks), and the invocation-cost gate at **49 measured against the 50 allowed** —
+  the same numbers the previous changeset left, which is the expected result: the trust read is a filesystem read
+  through the run's memoized `Resolution`, so it adds no git invocations to a command that asks the state for the
+  gate and again for each hook point.
 
 ## Known limitations
 
