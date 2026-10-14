@@ -194,7 +194,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	}
 	out.Ready = len(out.Reasons) == 0
 	if out.Ready {
-		out.NextAction = landingNextAction(s.cs.Base)
+		out.NextAction = landingNextAction(landingContractFor(ctx, s.repo, s))
 		if g.Parent.advisesRestack() {
 			// Spelled beside the landing contract rather than inside it: `landingNextAction` is one string
 			// shared by `status`, `check`, `change ready` and `review`, and the parent's step is a different

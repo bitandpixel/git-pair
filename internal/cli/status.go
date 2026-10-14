@@ -368,6 +368,10 @@ func localBranchSet(ctx context.Context, repo *git.Repo) (map[string]bool, error
 
 func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 	view := &statusView{}
+	// The landing sentence needs two readings the base cannot give it — where the work is going, and whether
+	// a parent has to land first — and they are read once here so every next step on this screen speaks from
+	// the same pair.
+	lc := landingContractFor(ctx, s.repo, s)
 	view.json = statusJSON{
 		Changeset:   s.cs.Slug,
 		Branch:      s.cs.Branch,
@@ -378,7 +382,7 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 		Uncommitted: uncommitted(s),
 		Reviews:     len(s.summary.Reviews),
 		Reason:      s.summary.Reason,
-		NextAction:  nextAction(s.summary, s.cs.Base),
+		NextAction:  nextAction(s.summary, lc),
 	}
 	// A derived base is reported beside the recorded one rather than over it: `base` is what the changeset
 	// says its stack is, and `base_ref` is what every diff in this document was measured against. A stacked
@@ -669,7 +673,7 @@ func yesNo(b bool) string {
 
 // nextAction tells an agent what to run next, so it does not have to re-derive
 // the lifecycle from the state name.
-func nextAction(s lifecycle.Summary, base string) string {
+func nextAction(s lifecycle.Summary, lc landingContract) string {
 	if s.Abandoned != nil {
 		// The state is WORKING, which would otherwise read as "keep going". Nothing is
 		// owed on an abandoned changeset, and `change ready` refuses it, so the honest
@@ -688,14 +692,14 @@ func nextAction(s lifecycle.Summary, base string) string {
 			return "the head moved since the review: read it with `git pair change feedback`, " +
 				"then `git pair change ready` to offer the new head"
 		}
-		return "optionally address feedback (read it with `git pair change feedback`), then " + landingNextAction(base)
+		return "optionally address feedback (read it with `git pair change feedback`), then " + landingNextAction(lc)
 	case model.StateApproved:
 		if s.Stale {
 			// The gate asks the tree, and it refuses this head (PRD §9.5). Pointing an agent at it
 			// anyway would be a surprise it cannot predict from `state`.
 			return "the head moved since the review: `git pair change ready` to offer it for review again"
 		}
-		return landingNextAction(base)
+		return landingNextAction(lc)
 	case model.StateIntegrating:
 		// The author's step is over; the merge belongs to whoever owns the destination branch, and git-pair
 		// performs none of it (PRD §26). The push is named first because until the branch is on the remote
@@ -704,21 +708,7 @@ func nextAction(s lifecycle.Summary, base string) string {
 			// A declaration is about a commit, and a commit has landed on top of the one it named.
 			return "the head moved since the declaration: `git pair change integrate` to declare this head"
 		}
-		return "push the branch so whoever merges can see the request; then " + landingNextAction(base)
+		return "push the branch so whoever merges can see the request; then " + landingNextAction(lc)
 	}
 	return ""
-}
-
-// landingNextAction is the landing contract (PRD §29) in one line, spelled once because four commands tell
-// an author this same thing and a fifth spelling is how a contract drifts. git-pair performs the gate and the
-// record and nothing in between: the merge itself is ordinary git, performed by whoever owns the
-// branch, which is what keeps PRD §26's no-merge posture intact.
-func landingNextAction(base string) string {
-	if base == "" {
-		base = "the base branch"
-	}
-	// The steps are the landing contract (PRD §29): the gate, then the merge with ordinary git. There is
-	// no step after the merge — the destination carrying `changesets/<id>/` is the record, and git-pair
-	// writes no ref that could be left unpublished.
-	return fmt.Sprintf("`git pair check`, then merge into %s with ordinary git", base)
 }
