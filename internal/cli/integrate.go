@@ -221,6 +221,11 @@ func runChangeIntegrate(ctx context.Context, a *app, opts *integrateOptions) err
 // or blocked an hour from now, and an unattended merge into it would be performed against history that
 // stopped existing. Refusing the request is the whole mitigation; the human path stays open, so nothing is
 // lost but the automation.
+//
+// The reason names the parent and points at its screen for the step — `git pair status --changeset <id>` —
+// rather than spelling the parent's `check` and merge as this file's copy of the landing contract. The rule
+// the refusal owns is why a declaration is refused where `check` is not; the command that lands the parent is
+// the parent's own advice, and it is spelled in one place.
 func unlandedParentReason(cs changeset.Changeset, parent parentStatus) []string {
 	if parent.Branch == "" || parent.Landed != "" {
 		return nil
@@ -234,8 +239,8 @@ func unlandedParentReason(cs changeset.Changeset, parent parentStatus) []string 
 			parent.Branch, parent.Branch, parent.Branch)}
 	}
 	return []string{fmt.Sprintf(
-		"the parent %s is not landed on the integration branch, so declaring %s would ask for a merge onto %s — a branch review can still rewrite. Land the parent first: `git pair check`, then merge with ordinary git. Merging %s onto %s by hand stays open; git-pair declines to queue it, not to allow it",
-		parent.Changeset, cs.Slug, parent.Branch, cs.Slug, parent.Branch)}
+		"the parent %s is not landed on the integration branch, so declaring %s would ask for a merge onto %s — a branch review can still rewrite. Land the parent first: `git pair status --changeset %s` names its step. Merging %s onto %s by hand stays open; git-pair declines to queue it, not to allow it",
+		parent.Changeset, cs.Slug, parent.Branch, parent.Changeset, cs.Slug, parent.Branch)}
 }
 
 // alreadyDeclared is a declaration that still covers this head, or "" when one is needed.

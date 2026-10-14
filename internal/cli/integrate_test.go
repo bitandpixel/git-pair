@@ -317,8 +317,10 @@ func TestChangeIntegrateRefusesAChildWhoseParentHasNotLanded(t *testing.T) {
 	}
 	mustContain(t, res.stdout, "the parent alpha is not landed on the integration branch",
 		"the refusal names the parent and the missing fact about it")
-	mustContain(t, res.stdout, "merge with ordinary git",
-		"and the step that would have made the parent land")
+	mustContain(t, res.stdout, "`git pair status --changeset alpha` names its step",
+		"and the parent's step is the parent's own advice, not a second copy of the landing contract")
+	mustNotContain(t, res.stdout, "git pair check",
+		"and the refusal spells no merge of its own: one sentence says how a changeset lands, and this is not it")
 	if f.Head() != before {
 		t.Error("a refused declaration still wrote a commit")
 	}

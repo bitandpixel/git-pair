@@ -65,11 +65,11 @@ func stringField(t *testing.T, doc map[string]any, key string) string {
 	return got
 }
 
-// The waiting sentence, in the words it has to have: it names the parent, gives the parent's landing as the
-// step that is owed now, and names where the child's own merge will go once that has happened — which is the
-// integration branch, not the parent's branch.
-const waitingBeta = "waiting on parent alpha: land it first (`git pair check`, then merge into main with " +
-	"ordinary git), then `git pair check` and merge into main"
+// The waiting sentence, in the words it has to have: it names the parent, sends the reader to the parent's
+// own screen for the parent's step rather than spelling a second copy of the landing contract here, and then
+// names where this changeset's own merge will go — the integration branch, not the parent's branch.
+const waitingBeta = "waiting on parent alpha: its landing is owed first (`git pair status --changeset alpha` " +
+	"names the step), then `git pair check` and merge into main"
 
 func TestApprovedChildOfAnUnlandedParentIsToldTheParentLandsFirst(t *testing.T) {
 	f := newRepo(t)
@@ -165,7 +165,7 @@ func TestChildOfAParentWithNoRecordedChangesetWaitsOnTheBranch(t *testing.T) {
 	submit(t, f, "approve")
 
 	line := lastPrintedLine(t, runIn(t, f.Dir(), "status").stdout)
-	const want = "waiting on parent alpha: land it first (`git pair check`, then merge into main with ordinary git)"
+	const want = "waiting on parent alpha: its landing is owed first (`git pair status --changeset alpha` names the step)"
 	if !strings.Contains(line, want) {
 		t.Errorf("status next step is %q, want it to contain %q", line, want)
 	}

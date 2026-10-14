@@ -193,7 +193,7 @@ func adviceCorpus(t *testing.T) []adviceLine {
 
 	cs := changeset.Changeset{Slug: "beta", Branch: "beta", Base: "alpha", BaseChangeset: "alpha"}
 	lc := landingContract{Destination: "refs/heads/main"}
-	waiting := landingContract{Destination: "main", WaitingOn: "alpha", WaitingTarget: "main"}
+	waiting := landingContract{Destination: "main", WaitingOn: "alpha"}
 
 	// The landing sentence, in each shape it takes.
 	add("landingNextAction/base", landingNextAction(landingContract{}))

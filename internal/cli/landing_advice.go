@@ -36,11 +36,10 @@ type landingContract struct {
 	// including on the waiting sentence, where the parent has not landed anywhere to name yet.
 	DestinationNote string
 	// WaitingOn names the parent that has to land before this changeset can: its changeset id when the stack
-	// recorded one, its branch when it did not. Empty when nothing below is unlanded.
+	// recorded one, its branch when it did not. Empty when nothing below is unlanded. The sentence names the
+	// parent's own screen for the parent's step, so the contract spells this changeset's steps and no other
+	// changeset's.
 	WaitingOn string
-	// WaitingTarget is where the parent's own work says it is going, which is where this changeset follows
-	// it. Empty falls back to Destination.
-	WaitingTarget string
 }
 
 // landingContractFor reads the two facts a landing sentence states, from the repository rather than from the
@@ -62,6 +61,7 @@ func landingContractFor(ctx context.Context, repo *git.Repo, s *session) landing
 	}
 	// Ask the parent where its own work is going rather than walking the child's chain: the child follows the
 	// parent there, so it is the same answer, and the walk is what would make this cost grow with the stack.
+	// The child's merge names that branch; the parent's own step is left to the parent's screen.
 	target := below.destination(ctx, repo, s.trunk)
 	if target == "" {
 		// No record answered, and this clone may not even name the integration branch to fall back on. Say
@@ -71,7 +71,7 @@ func landingContractFor(ctx context.Context, repo *git.Repo, s *session) landing
 			target = s.cs.Base
 		}
 	}
-	out := landingContract{Destination: target, WaitingTarget: target}
+	out := landingContract{Destination: target}
 	if below.Landed == "" {
 		out.WaitingOn = below.name()
 		return out
@@ -193,15 +193,17 @@ func stackBelow(ctx context.Context, repo *git.Repo, cs changeset.Changeset, db 
 	return out, nil
 }
 
-// landingNextAction is the landing contract (PRD §29) in one line, spelled once because four commands tell an
+// landingNextAction is the landing contract (PRD §21) in one line, spelled once because four commands tell an
 // author this same thing and a fifth spelling is how a contract drifts. git-pair performs the gate and the
 // record and nothing in between: the merge itself is ordinary git, performed by whoever owns the branch,
 // which is what keeps PRD §26's no-merge posture intact.
 //
 // The waiting form exists because the merge is not always the next step. A child whose parent has not landed
 // is one merge away from a branch review can still rewrite, and `git pair change integrate` refuses to
-// declare it for exactly that reason — so the sentence names what is waiting, gives the parent the landing
-// step that is actually owed now, and only then names the merge this changeset runs once that has happened.
+// declare it for exactly that reason. So the sentence names what is waiting and then names only its own
+// merge; the parent's step belongs to the parent's screen. Spelling it here was the second copy of a sentence
+// this file was written to reduce to one — and it went stale the first time the landing contract changed,
+// because nothing tied the two copies together.
 func landingNextAction(lc landingContract) string {
 	target := displayRef(lc.Destination)
 	if target == "" {
@@ -210,10 +212,6 @@ func landingNextAction(lc landingContract) string {
 	if lc.WaitingOn == "" {
 		return fmt.Sprintf("`git pair check`, then merge into %s with ordinary git%s", target, lc.DestinationNote)
 	}
-	waiting := displayRef(lc.WaitingTarget)
-	if waiting == "" {
-		waiting = target
-	}
-	return fmt.Sprintf("waiting on parent %s: land it first (`git pair check`, then merge into %s with ordinary git), "+
-		"then `git pair check` and merge into %s", lc.WaitingOn, waiting, target)
+	return fmt.Sprintf("waiting on parent %s: its landing is owed first (`git pair status --changeset %s` names the step), "+
+		"then `git pair check` and merge into %s", lc.WaitingOn, lc.WaitingOn, target)
 }

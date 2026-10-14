@@ -119,18 +119,18 @@ with a reason that explains what the screen should have said. See
 
 #### Tasks
 
-- [ ] Spike: run the two broken paths and record the emitted text and the failure —
+- [x] Spike: run the two broken paths and record the emitted text and the failure —
       `stacked.go:358` (head already on the landing, contribution never read) and `stacked.go:600` (the
       conflicting merge with the destination). The command itself is already verified in the research note;
       what is left is the end-to-end fixtures, so the fix is tested where it is emitted rather than at the
       builder.
-- [ ] Fix the wording in both places, choosing the command from what `change ready` actually accepts, and
+- [x] Fix the wording in both places, choosing the command from what `change ready` actually accepts, and
       saying what the reader must do about a second changeset on the branch if that is the shape they are in.
-- [ ] Add the contract test in the `cli` package: collect the emitted advice strings from a fixture set (or
+- [x] Add the contract test in the `cli` package: collect the emitted advice strings from a fixture set (or
       from the builders directly, where they are reachable), extract each `git pair …` token, and validate it
       against `commandPaths(newRootCommand(&app{}))` and that command's declared flags — the machinery
       `docs_contract_test.go` already uses for prose.
-- [ ] Decide where the strings live well enough to be collected: an exported-for-test registry is not worth it;
+- [x] Decide where the strings live well enough to be collected: an exported-for-test registry is not worth it;
       a fixture-driven sweep of `status`, `check`, `queue`, `change integrate` and `change wait` output is,
       because it also covers strings assembled at runtime.
 
@@ -150,15 +150,15 @@ with a reason that explains what the screen should have said. See
 
 #### Tasks
 
-- [ ] Rewrite the waiting form in `landingNextAction` to
+- [x] Rewrite the waiting form in `landingNextAction` to
       `waiting on parent <name>: its landing is owed first (`git pair status --changeset <name>` names the step),
       then `git pair check` and merge into <destination>`. Keep one clause for the parent, one for this
       changeset, and no `git rebase`.
-- [ ] Rewrite `unlandedParentReason` to name the parent and point at its advice, keeping the two things the
+- [x] Rewrite `unlandedParentReason` to name the parent and point at its advice, keeping the two things the
       refusal owns and the sentence does not: why a declaration is refused where `check` is not, and that the
       human path stays open. Keep the `--set-parent` clause for the parent-with-no-recorded-changeset case,
       where there is no parent screen to point at.
-- [ ] Land a decision, in a code comment, on what "its advice" means when the parent's own screen is not
+- [x] Land a decision, in a code comment, on what "its advice" means when the parent's own screen is not
       readable from here (a parent branch deleted with no landing): point at the reason the reader does have.
 - [ ] Update the tests that pin the current waiting text (`landing_advice_test.go`,
       `restack_advice_test.go`, `parent_landed_surfaces_test.go`) to the new sentence, keeping every assertion
