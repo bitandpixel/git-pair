@@ -134,3 +134,4 @@ change.
 - Should `change ready` refuse too, so the author finds out at the hand-off rather than at the gate? It was left
   reporting because the hand-off is where a person reads the scripts, and refusing there pushes them to approve
   without reading.
+in my mind, it should be obvious as early as possible that there are hooks that repo owner wants run. so it would make sense to refuse on init/ready/review etc if the scripts are in an unrecorded/changed status
