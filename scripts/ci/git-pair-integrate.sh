@@ -25,6 +25,13 @@
 #                  destination and the merge's sha, prints what it did on one line, and exits 0 requested,
 #                  1 refused, 2 cannot tell (default scripts/ci/gh-request-ci.sh, used when
 #                  GITHUB_REPOSITORY is set)
+#   --verify-cmd <cmd>
+#                  run this against the merge candidate — after the merge commit exists and before the push —
+#                  so the suite is asked of the tree the destination would become rather than of the branch
+#                  head. Non-zero puts the local destination back, merges nothing, and exits 1. This is the
+#                  one refusal in this script that is never a skip: a repository that stopped running CI on
+#                  every push has nowhere else to show the author a failing candidate. Set
+#                  GIT_PAIR_CI_VERIFY_CMD for a whole process.
 #   --expect-head <sha>
 #                  merge nothing but this head. A trigger that was told "CI finished with this commit" names
 #                  it here, so a branch that moved since cannot be merged on the strength of a run that
@@ -33,8 +40,10 @@
 # The exit code is 0 when every changeset considered was merged, was already handled, or was legitimately
 # not ready — a job triggered by a push runs before anybody has declared anything, and a red build for
 # "nothing to do yet" trains people to ignore the build. A head that is merely not green yet is the same
-# kind of nothing-yet, so it is a skip too. It is 1 when a merge or a push failed, and 2 for a bad
-# invocation. `--require` turns the refusals into errors, which is what a hand-run of one branch wants.
+# kind of nothing-yet, so it is a skip too. It is 1 when a merge or a push failed, when the merge candidate
+# failed its --verify-cmd tests, and 2 for a bad invocation. `--require` turns the refusals into errors, which
+# is what a hand-run of one branch wants; a failing candidate is an error with or without it, because there is
+# nowhere else the author would see it.
 # A merge that reaches the destination needs one thing after it: a request that the destination's new tip be
 # tested, because the push that landed it came from this job's own token and GitHub creates no runs for
 # events a token caused. The destination's tree remains the whole record of the landing.
@@ -52,6 +61,13 @@
 #                         cannot be about a head that arrived while this job was starting.
 #   merge --no-ff           ordinary git, run by whoever owns the destination — here the job, on the
 #                           owner's behalf, because the author's declaration asked for exactly that.
+#   verify candidate        with --verify-cmd, the repository's own tests are asked of the tree the
+#                           destination would become — the merge commit above, not the branch head. The probe
+#                           above answers "did some run certify this head"; this answers "does the
+#                           combination work", which is what the probe cannot say whenever the destination
+#                           moved since the head was certified, and which a repository can answer with no
+#                           forge in the picture at all. A failure here is an error rather than a skip: with
+#                           no separate test workflow, this run is the only place the author sees it.
 #   push <destination>      the landing exists when the destination branch says it does, and the pushed
 #                           branch's tree is then the whole record of it (PRD §13.4). Nothing follows this
 #                           push except the request below: no ref to write, nothing to publish, and no second
@@ -79,6 +95,7 @@ GP=${GIT_PAIR_BIN:-git-pair}
 HERE=$(cd "$(dirname "$0")" && pwd)
 PROBE=${GIT_PAIR_CI_PROBE:-}
 REQUEST=${GIT_PAIR_CI_REQUEST:-}
+VERIFY=${GIT_PAIR_CI_VERIFY_CMD:-}
 BRANCHES=()
 
 # The local name the destination is checked out under while the merge is made. It is deliberately not the
@@ -95,6 +112,7 @@ while [ $# -gt 0 ]; do
     -c|--require-ci) REQUIRE_CI=1 ;;
     --ci-probe) [ $# -ge 2 ] || { printf '%s needs a command\n' "$1" >&2; exit 2; }; PROBE=$2; shift ;;
     --ci-request) [ $# -ge 2 ] || { printf '%s needs a command\n' "$1" >&2; exit 2; }; REQUEST=$2; shift ;;
+    --verify-cmd) [ $# -ge 2 ] || { printf '%s needs a command\n' "$1" >&2; exit 2; }; VERIFY=$2; shift ;;
     --expect-head) [ $# -ge 2 ] || { printf '%s needs a sha\n' "$1" >&2; exit 2; }; EXPECT_HEAD=$2; shift ;;
     -h|--help)
       # The help is the header above, printed rather than duplicated. Reading the block to its end keeps a
@@ -302,6 +320,26 @@ integrate_one() {
   fi
   merge=$(git rev-parse HEAD)
   note "merged as ${merge:0:7} against ${dest}"
+
+  # The candidate, tested rather than assumed. A head that was green on its own branch says nothing about
+  # this tree: the destination moved, and the merge is exactly the combination nobody has run. It is also the
+  # only place the answer is produced once a repository stops running its tests on every push — which is why
+  # a failure is an error rather than the skip every other refusal here is. A green job that landed nothing
+  # on account of its own tests would hide the one thing the author needs to see.
+  #
+  # The local destination goes back first. The job merges several changesets in one run, and without the
+  # reset the next one would be merged onto, and verified against, a tree this run has already refused.
+  if [ -n "$VERIFY" ]; then
+    note "$cs: verifying the candidate ${merge:0:7} against ${dest}: $VERIFY"
+    if ! sh -c "$VERIFY"; then
+      if ! git checkout -q -B "$BASE_LOCAL" "$REMOTE/$dest"; then
+        note "$cs: could not put $BASE_LOCAL back after a failed verification — later changesets in this run are unverified"
+      fi
+      note "$cs: the merge candidate failed verification — nothing merged into $dest"
+      return 1
+    fi
+    note "$cs: the candidate passed verification"
+  fi
 
   if ! git push -q "$REMOTE" "HEAD:refs/heads/$dest"; then
     # The landing is the pushed branch. A merge that stayed in this job's clone is not one, and there is
