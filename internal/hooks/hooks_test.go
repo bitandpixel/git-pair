@@ -59,8 +59,8 @@ func TestUnknownPointsIn(t *testing.T) {
 	}
 }
 
-// The point set is the documentation's subject and the switch's subject at the same time, so the two have to
-// agree: every point is named, ordered, and known to `Active`.
+// The point set is the documentation's subject and the report's subject at the same time, so the two have to
+// agree on one vocabulary: six actions, each with a side before and a side after.
 func TestPointSet(t *testing.T) {
 	all := AllPoints()
 	if len(all) == 0 {
@@ -79,28 +79,35 @@ func TestPointSet(t *testing.T) {
 			t.Errorf("point %q does not say which side of the transition it runs on", p)
 		}
 	}
-	// The runner is wired point by point, so this build must claim exactly the points some command
-	// invokes. A point marked active that nothing invokes is the failure `git pair hooks` exists to
-	// expose, and this list is where that lie gets caught: it changes when a milestone wires a point,
-	// and only then.
-	wantActive := map[Point]bool{
-		PreReady: true, PostReady: true,
-		PreUnready: true, PostUnready: true,
-		PreAbandon: true, PostAbandon: true,
-		PreIntegrate: true, PostIntegrate: true,
-		PreCheck: true, PostCheck: true,
+	// The vocabulary is the six actions a changeset meets, each on both sides. A half with no partner is a
+	// milestone that stopped halfway. That each of these is invoked by a command is not the hooks package's
+	// to claim: the CLI tests run every point end to end, which is the assertion that a point exists because
+	// something fires it.
+	wantActions := []string{"ready", "integrate", "unready", "abandon", "check", "submit"}
+	if len(all) != 2*len(wantActions) {
+		t.Errorf("%d points configured, want %d (six actions, two sides)", len(all), 2*len(wantActions))
 	}
-	for _, p := range all {
-		if got, want := Active(p), wantActive[p]; got != want {
-			t.Errorf("Active(%s) = %v, want %v", p, got, want)
+	for _, action := range wantActions {
+		for _, side := range []string{"pre-", "post-"} {
+			if !seen[Point(side+action)] {
+				t.Errorf("the %s transition has no %s half", action, side+action)
+			}
 		}
 	}
-	// Every author transition has both halves. A post-hook with no pre-hook, or the reverse, is a
-	// milestone that stopped halfway.
-	for _, action := range []string{"ready", "unready", "abandon", "integrate"} {
-		if !Active(Point("pre-"+action)) || !Active(Point("post-"+action)) {
-			t.Errorf("the %s transition is not wired on both sides", action)
+	// A read-path command must not acquire a point by accident. A hook on a read turns a lookup into a
+	// build, and a cost test that counts subprocesses would start measuring the customer's script.
+	for _, read := range []string{"queue", "status", "diff", "feedback", "history", "wait"} {
+		for _, side := range []string{"pre-", "post-"} {
+			if seen[Point(side+read)] {
+				t.Errorf("the read path %q has a lifecycle point; reads run no hooks", side+read)
+			}
 		}
+	}
+	// `check` and `submit` are points in their own right, not aliases for a transition: the gate answers
+	// with conditions and the submission is a reviewer's act, so a hook written for one must not fire on the
+	// other. An approve-named point would be that alias.
+	if seen[Point("pre-approve")] || seen[Point("post-approve")] {
+		t.Error("an approve point is configured; the reviewer's points are pre-submit and post-submit")
 	}
 }
 

@@ -70,6 +70,11 @@ type app struct {
 	// two points (`check`: `pre-check` then `post-check`) or twelve (`git pair hooks`) would otherwise ask the
 	// same two questions once per point. See hooks.Resolution.
 	hooksRun *hooks.Resolution
+	// hookPresenter, when set, takes each executed hook's output instead of that text going to stderr. The
+	// review screen sets it: the screen owns the terminal while a submission runs, so text written to stderr
+	// in that window is repainted over, and the reviewer would be left holding a refusal that names the hook
+	// and not the reason. The presenter decides where the text is shown instead.
+	hookPresenter func(hooks.Result)
 }
 
 // hookRun is this run's hook facts, resolved on first use and shared by every point the command walks. Neither

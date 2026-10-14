@@ -15,6 +15,7 @@ import (
 	"gitpair/internal/changeset"
 	"gitpair/internal/console"
 	"gitpair/internal/git"
+	"gitpair/internal/hooks"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 	"gitpair/internal/reviewops"
@@ -207,6 +208,11 @@ type submitOptions struct {
 	approve  bool
 	message  string
 	noStage  bool
+	// allowHookFailure records the submission anyway when a `pre-submit` hook refuses it. It exists because
+	// a reviewer's own script is the client's, not the repository's: a hook that misbehaves on the
+	// reviewer's machine must not strand a verdict they have decided to record. `check` has no such flag,
+	// and the difference is who is standing at the command.
+	allowHookFailure bool
 }
 
 func newReviewSubmitCommand(a *app) *cobra.Command {
@@ -248,6 +254,8 @@ makes a clean-tree approval work.`,
 	cmd.Flags().BoolVar(&opts.approve, "approve", false, "accept the implementation")
 	cmd.Flags().StringVarP(&opts.message, "message", "m", "", "additional body text for the review commit")
 	cmd.Flags().BoolVar(&opts.noStage, "no-stage", false, "commit only what is already staged")
+	cmd.Flags().BoolVar(&opts.allowHookFailure, "allow-hook-failure", false,
+		"record the submission even if a pre-submit hook refuses it")
 	return cmd
 }
 
@@ -272,6 +280,95 @@ func (o submitOptions) outcome() (model.Outcome, error) {
 	}
 }
 
+// submitReview is the one place a review submission is made. `review submit` and the review screen's
+// approve/feedback/block keys both reach it, and that is the point: a reviewer's own checks have to fire once
+// wherever a submission is made, and the screen calling `reviewops.Submit` on its own was exactly the second
+// call site where one of them would stop firing without anyone noticing.
+//
+// The order is stage, hooks, commit. A `pre-submit` hook exists to read what the review commit is about to
+// carry — the source edits made in the screen, the thread files, the ABOUT.md edit — and those are only in
+// the index once staging has happened. Running the hook first would have it inspect the tree before the
+// reviewer's edits were part of the submission.
+//
+// `reviewops.Submit` is then told not to stage: the hooks may have edited the index in between, and
+// re-staging after them would quietly discard what a reviewer's own script decided to leave staged.
+func (a *app) submitReview(ctx context.Context, s *session, outcome model.Outcome, body string,
+	stageAll, allowHookFailure bool) (reviewops.Result, []hooks.Result, bool, error) {
+	if stageAll {
+		if err := s.repo.StageAll(ctx); err != nil {
+			return reviewops.Result{}, nil, false, err
+		}
+	}
+	hc := hookContext{
+		Point: hooks.PreSubmit, Slug: s.cs.Slug, Branch: s.cs.Branch, Base: s.cs.Base,
+		Head: s.head, Dest: s.trunk.Ref, Outcome: string(outcome),
+	}
+	if body != "" {
+		// The reviewer's prose travels as a file, not as an environment variable: it has newlines in it,
+		// it can be long, and a policy hook that greps it for "LGTM" should read it the way it reads any
+		// other file.
+		f, err := os.CreateTemp("", "git-pair-review-body-*")
+		if err != nil {
+			return reviewops.Result{}, nil, false, err
+		}
+		if _, err := f.WriteString(body); err != nil {
+			f.Close()
+			os.Remove(f.Name())
+			return reviewops.Result{}, nil, false, err
+		}
+		if err := f.Close(); err != nil {
+			os.Remove(f.Name())
+			return reviewops.Result{}, nil, false, err
+		}
+		hc.BodyFile = f.Name()
+		defer os.Remove(f.Name())
+	}
+
+	pre, err := a.runPre(ctx, s, hc)
+	overridden := false
+	if err != nil {
+		if !allowHookFailure {
+			return reviewops.Result{}, pre, false, a.refusedBySubmitHook(ctx, s, pre)
+		}
+		overridden = true
+		a.warn("git-pair: the pre-submit hooks refused this submission; --allow-hook-failure records it anyway\n")
+	}
+
+	result, err := reviewops.Submit(ctx, s.repo, s.cs, outcome, body, false,
+		changeset.MeasureSubmission(ctx, s.repo, s.cs, s.trunk, s.head), s.trunk)
+	if err != nil {
+		return reviewops.Result{}, pre, overridden, err
+	}
+
+	hc.Point = hooks.PostSubmit
+	// The post-hook is told the review commit, not the commit it reviewed: what now exists is the submission,
+	// and a notification quoting the reviewed head describes a commit the reviewer was looking at rather than
+	// the record this run made.
+	hc.Head = result.Commit
+	hc.BodyFile = ""
+	post := a.runPost(ctx, s, hc)
+	a.warnIfHooksMovedHead(ctx, s, result.Commit, hooks.PostSubmit, post)
+	return result, append(pre, post...), overridden, nil
+}
+
+// refusedBySubmitHook is a pre-submit refusal with the one thing a refusal at this point makes ambiguous said
+// out loud. The reviewer's content is staged, and there is no commit. Nothing else shows that: the next
+// `git pair review submit` would re-stage and be fine, and the next plain `git commit` would land the
+// reviewer's source edits as ordinary work with no verdict attached to them. A reviewer who has just been
+// refused needs to know which of the two they are about to do.
+func (a *app) refusedBySubmitHook(ctx context.Context, s *session, pre []hooks.Result) error {
+	refusal := hookError(pre)
+	if refusal == nil {
+		refusal = fmt.Errorf("the pre-submit hooks refused the submission")
+	}
+	staged, err := s.repo.HasStagedChanges(ctx)
+	if err != nil || !staged {
+		return refusal
+	}
+	return fmt.Errorf("%s; the review was not recorded, and your staged changes are still staged — fix what the "+
+		"hook reported and submit again, or unstage them before committing anything else", refusal)
+}
+
 func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 	outcome, err := opts.outcome()
 	if err != nil {
@@ -292,8 +389,7 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 	// records what it could measure and nothing for what it could not, which is why no error comes back
 	// from here: a missing measurement is an absence a later reader can see, not a reason to lose the
 	// reviewer's verdict.
-	result, err := reviewops.Submit(ctx, s.repo, s.cs, outcome, opts.message, !opts.noStage,
-		changeset.MeasureSubmission(ctx, s.repo, s.cs, s.trunk, s.head), s.trunk)
+	result, hookResults, overridden, err := a.submitReview(ctx, s, outcome, opts.message, !opts.noStage, opts.allowHookFailure)
 	if err != nil {
 		return err
 	}
@@ -316,6 +412,8 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 			"empty":           result.Empty(),
 			"previous_review": previous,
 			"next_action":     nextActionFor(result.Outcome, lc),
+			"hooks":           hooksForJSON(hookResults),
+			"overridden":      overridden,
 		})
 	}
 	a.printf("Review submitted: %s\n", s.cs.Slug)
@@ -336,6 +434,15 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 	a.printf("  next:    %s\n", nextActionFor(result.Outcome, lc))
 	if clean, err := s.repo.IsClean(ctx); err == nil && !clean {
 		a.warn("\nwarning: the working tree is still dirty; those changes are not part of this review\n")
+	}
+	// A post-hook failure is reported the way every other one is: the exit code carries it, the wording says
+	// what actually happened, and nothing is taken back. The submission is a published verdict — undoing it
+	// would be a write the contract does not account for — so the only honest thing left is to say that the
+	// record stands.
+	if f, failed := firstFailureAt(hookResults, hooks.PostSubmit); failed {
+		return fmt.Errorf("%s has a %s review recorded at %s, but the post-submit hook %q failed with exit %d — "+
+			"the submission stands and nothing was undone",
+			s.cs.Slug, strings.ToUpper(string(result.Outcome)), short(result.Commit), f.Hook.Name, f.Exit)
 	}
 	return nil
 }
@@ -539,11 +646,71 @@ func openSession(ctx context.Context, a *app, s *session, sel span.Selector, inv
 	err := tui.Run(ctx, tui.Options{
 		Repo: s.repo, Changeset: s.cs, Summary: s.summary, Span: sel, Trunk: s.trunk,
 		Mouse: tui.ResolveMouse(ctx, s.repo),
+		// The screen submits through the same call the command does, so the reviewer's `pre-submit` hooks fire
+		// wherever a verdict is recorded. A second path into `reviewops.Submit` would be a path with no hooks.
+		Submit: a.screenSubmission(ctx, s),
 	})
 	if errors.Is(err, tui.ErrQuit) {
 		return nil
 	}
 	return err
+}
+
+// screenSubmission is the review screen's submission path: the command's own path, with the one change the
+// screen needs because it owns the terminal while the submission runs. The hooks' output comes back inside the
+// refusal instead of on stderr, where the frame would paint over it (see app.hookPresenter), so the reviewer
+// reads why the hook stopped them without leaving the screen. Everything else is shared with `review submit`,
+// which is the point of injecting it: a screen that submitted for itself would be a second surface where the
+// reviewer's `pre-submit` hooks do not run.
+//
+// A refusal ends the submission and not the session. The comments, the ABOUT edit and the staged files all
+// exist at that moment, so the screen keeps them and says what was refused; the reviewer fixes the finding and
+// presses the outcome key again. Exiting nonzero is what `review submit` does, and it is right there — a
+// command that ran and was refused should say so to the shell. Quitting the screen is not that: `q` is the
+// ordinary way out of a screen that looked at a changeset and recorded nothing, and a nonzero code for it would
+// report a business refusal nobody made.
+func (a *app) screenSubmission(ctx context.Context, s *session) func(model.Outcome) (reviewops.Result, error) {
+	return func(outcome model.Outcome) (reviewops.Result, error) {
+		var printed []string
+		a.hookPresenter = func(r hooks.Result) { printed = append(printed, hookOutputLines(r)...) }
+		defer func() { a.hookPresenter = nil }()
+
+		result, _, _, err := a.submitReview(ctx, s, outcome, "", true, false)
+		if err != nil {
+			err = withHookText(err, printed)
+		}
+		return result, err
+	}
+}
+
+// withHookText puts the refused submission's hook output into the message the screen shows. The screen wraps
+// prose, so several lines are fine; the text is capped, because a lint run that dumped a megabyte would
+// replace the review rather than inform it. The tail survives and the head is cut: for a test suite or a lint
+// run, the part that says what failed is at the end.
+func withHookText(err error, chunks []string) error {
+	if len(chunks) == 0 {
+		return err
+	}
+	const (
+		maxLines = 15
+		maxRunes = 1200
+	)
+	lines := strings.Split(strings.Join(chunks, "\n"), "\n")
+	truncated := false
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+		truncated = true
+	}
+	text := strings.Join(lines, "\n")
+	if len(text) > maxRunes {
+		text = text[len(text)-maxRunes:]
+		truncated = true
+	}
+	note := ""
+	if truncated {
+		note = "\n… the earlier output is cut; `git pair review submit` prints it in full."
+	}
+	return fmt.Errorf("%w\n\nthe hook printed:\n%s%s", err, text, note)
 }
 
 // reviewLabel names a review submission the way `review history` does.

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"gitpair/internal/gittest"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
+	"gitpair/internal/reviewops"
 	"gitpair/internal/span"
 )
 
@@ -37,7 +39,19 @@ func TestSubmitKeyEndsTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SummarizeHEAD: %v", err)
 	}
-	sess, err := NewSession(ctx, Options{Repo: repo, Changeset: cs, Summary: summary, Span: span.Full()})
+	// The screen performs no submission of its own: it calls the path its caller supplied, and that is the
+	// whole reason the path is injected. `review submit` and this screen are two surfaces for one action, and
+	// a reviewer's `pre-submit` hooks fire on the path — so a second path would be a surface where they
+	// silently do not. The counter here is the assertion that the screen went through it once, with the
+	// outcome the reviewer pressed.
+	var submitted []model.Outcome
+	sess, err := NewSession(ctx, Options{Repo: repo, Changeset: cs, Summary: summary, Span: span.Full(),
+		Submit: func(o model.Outcome) (reviewops.Result, error) {
+			submitted = append(submitted, o)
+			return reviewops.Submit(ctx, repo, cs, o, "", true,
+				changeset.MeasureSubmission(ctx, repo, cs, changeset.DefaultBranchRef{}, ""),
+				changeset.DefaultBranchRef{})
+		}})
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
@@ -71,6 +85,9 @@ func TestSubmitKeyEndsTheSession(t *testing.T) {
 	}
 	if got.State != model.StateBlocked {
 		t.Errorf("state after submit = %s, want BLOCKED", got.State)
+	}
+	if len(submitted) != 1 || submitted[0] != model.OutcomeBlock {
+		t.Errorf("the caller's submission path was called with %v, want exactly one block", submitted)
 	}
 }
 
@@ -125,5 +142,43 @@ func TestCtrlCInSubmitModeLeavesWithoutSubmitting(t *testing.T) {
 	}
 	if m.submitted != "" {
 		t.Errorf("ctrl-c submitted %q, want nothing submitted", m.submitted)
+	}
+}
+
+// A refused submission is the other half of the injected path. The screen calls the caller's submit, the
+// caller's submit runs the reviewer's `pre-submit` hooks, and a hook can say no. When it does the reviewer is
+// mid-action: their comments, their ABOUT edit and their staged files all exist, and a submission that ended
+// the session would throw them away. So a refusal is a message, not an exit — the screen stays where it was,
+// and the only thing lost is the verdict that was refused.
+func TestRefusedSubmissionStaysOpenWithTheReason(t *testing.T) {
+	m := submitModel(t)
+	const reason = "hook \"01-suite\" at pre-submit refused the operation with exit 1; " +
+		"the review was not recorded, and your staged changes are still staged"
+	m.sess.submit = func(model.Outcome) (reviewops.Result, error) {
+		return reviewops.Result{}, errors.New(reason)
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	m = updated.(reviewModel)
+
+	if m.quitting || cmd != nil {
+		t.Errorf("a refused submission ended the session (quitting = %v, cmd = %v)", m.quitting, cmd)
+	}
+	if m.mode != modeFiles {
+		t.Errorf("mode = %v, want the file list back so the review is still editable", m.mode)
+	}
+	if m.submitted != "" {
+		t.Errorf("submitted = %q, want nothing submitted", m.submitted)
+	}
+	// The reason has to survive the screen's own formatting: it is a long sentence, and a status area that
+	// swallowed it would leave the reviewer with "something failed" and no way to act.
+	view := m.View()
+	for _, want := range []string{"01-suite", "pre-submit", "staged"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the screen does not render %q; the refusal must be readable, not just set", want)
+		}
+	}
+	if !strings.Contains(view, "refused") {
+		t.Error("the status area did not render the refusal sentence")
 	}
 }
