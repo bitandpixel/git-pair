@@ -12,8 +12,9 @@
 # the merge's own sha, and an ask that cannot be made or is refused is said out loud; a dry run writes
 # nothing; a merge that conflicts is aborted and reported red; a
 # changeset whose branch sits outside feat/ merges like any other, and the trigger is checked for the branch
-# filter that would have stopped it; and the two workflow files still name each other, so a rename fails a
-# build instead of stalling a merge.
+# filter that would have stopped it; a candidate is tested against the tree the destination would become, and
+# one that fails is an error that pushes nothing and puts the local destination back; and the two workflow
+# files still name each other, so a rename fails a build instead of stalling a merge.
 #
 # What it does not: it is not a GitHub Actions test. The workflow file is thin on purpose — build, then this
 # script — so the behaviour worth proving lives here, and the file's own claims (permissions, triggers,
@@ -409,6 +410,90 @@ else
 fi
 if [ -z "$(git -C "$CI4" status --porcelain)" ]; then ok "the clone was left clean"; else fail "the clone was left dirty"; fi
 if [ -f "$CI4/.git/MERGE_HEAD" ]; then fail "a merge was left half-done"; else ok "and no merge was left half-done"; fi
+
+step "the candidate has to pass the tests it is merged with"
+
+# `--verify-cmd` is what makes a landing conditional on this repository's own suite, so it is the one part of
+# the job that has no second chance anywhere else: a repository that does not run CI on every push has no
+# other run whose red the author would see. Three things are proven here, in one run each.
+#
+#   1. without the flag the job merges on the gate alone, as it always did,
+#   2. with it, the command is asked about the tree the destination would become — the merge commit, not the
+#      branch head the branch's own runs tested,
+#   3. and a candidate that fails is an error rather than a skip: nothing is pushed, the local destination is
+#      put back so the next changeset in the same run is not merged onto a refused tree, and the run says so
+#      with exit 1.
+#
+# Trunk moves first, from the same starting point the branches were cut at. That move is what makes (2)
+# checkable: a command run at the branch head cannot see `moved.txt`, and a command run at the merge commit
+# can. The failing candidate is picked out by a file only its own branch has, so one run carries both verdicts.
+
+git -C "$T/work" checkout -q main || { fail "candidate fixture: checkout main"; }
+printf 'trunk moved after the branches were cut\n' > "$T/work/moved.txt"
+git -C "$T/work" add -A && git -C "$T/work" commit -qm "main: moved after the cut" >/dev/null 2>&1
+git -C "$T/work" push -q origin main >/dev/null 2>&1 || fail "candidate fixture: move main"
+for b in flow/plain flow/failing flow/verified; do
+  case $b in
+    flow/plain)    f=src/p.ts;   v='export const p = 1' ;;
+    flow/failing)  f=src/nope.ts; v='export const nope = 2' ;;
+    flow/verified) f=src/ok.ts;  v='export const ok = 3' ;;
+  esac
+  declare_changeset "$b" "$f" "$v" "$MAIN0" || { fail "candidate fixture: $b"; }
+done
+for b in flow/plain flow/failing flow/verified; do
+  git -C "$T/work" checkout -q "$b" && wing change integrate >/dev/null 2>&1 || fail "candidate fixture: declare $b"
+done
+git -C "$T/work" push -q origin flow/plain flow/failing flow/verified >/dev/null 2>&1 || fail "candidate fixture: push"
+
+CIV=$(clone civ) || { fail "cannot clone for the candidate cases"; }
+out=$(cigr "$CIV" flow/plain); code=$?
+show "$out"
+check "with no --verify-cmd the job merges on the gate alone" 0 $code
+contains "$out" "pushed to main" "and it lands the work"
+no_contains "$out" "verifying the candidate" "and no candidate was tested, because nobody asked for one"
+
+# One command, two verdicts: it fails only for the tree that carries the failing changeset's own file, so the
+# run below shows both halves of the behaviour at once — a refused candidate and a landed one.
+VCMD='if [ -f src/nope.ts ]; then echo "candidate: the suite says no"; exit 1; fi
+      printf "candidate: has %s\n" "$([ -f moved.txt ] && echo moved.txt || echo "no moved.txt")"
+      git rev-parse -q --verify HEAD^2 >/dev/null && echo "candidate: two parents" || echo "candidate: one parent"'
+out=$(cigr "$CIV" --verify-cmd "$VCMD" flow/failing flow/verified); code=$?
+show "$out"
+check "a candidate that fails its tests makes the run red, flag or no flag" 1 $code
+contains "$out" "flow-failing: the merge candidate failed verification" "it says which candidate it refused"
+contains "$out" "candidate: the suite says no" "and the suite's own words reach the log"
+contains "$out" "flow-verified: the candidate passed verification" "the other candidate was tested too"
+contains "$out" "candidate: has moved.txt" "and it was tested against the tree that has trunk's newest move"
+contains "$out" "candidate: two parents" "on the merge commit itself, not on the branch head"
+contains "$out" "flow-verified: pushed to main" "and only that one landed"
+
+if git -C "$T/origin.git" cat-file -e main:changesets/flow-verified/CHANGESET.yaml 2>/dev/null; then
+  ok "the destination carries the candidate that passed"
+else
+  fail "the candidate that passed its tests did not reach the destination"
+fi
+for path in changesets/flow-failing/CHANGESET.yaml src/nope.ts; do
+  if git -C "$T/origin.git" cat-file -e "main:$path" 2>/dev/null; then
+    fail "a candidate that failed verification put $path on the destination"
+  else
+    ok "and nothing of the refused candidate reached the destination — not even $path"
+  fi
+done
+# The reset, checked where it matters: the job keeps one local destination for the whole run, so a tree this
+# run refused has to be gone before the next merge is made. A merge on top of it would land the refused work
+# under the passed work's own merge commit, which is the quiet failure this assertion is here for.
+DEST=$(git -C "$CIV" rev-parse -q --verify git-pair-ci-destination)
+TIP=$(git -C "$T/origin.git" rev-parse main)
+if [ "$DEST" = "$TIP" ]; then
+  ok "the local destination was put back to what the remote holds"
+else
+  fail "the local destination still holds a tree the run refused (${DEST:0:7} against remote ${TIP:0:7})"
+fi
+if git -C "$CIV" cat-file -e "git-pair-ci-destination:src/nope.ts" 2>/dev/null; then
+  fail "the refused candidate is still in the local destination, where the next merge would build on it"
+else
+  ok "and the refused tree is out of it, so the next changeset is merged against the real destination"
+fi
 
 step "the two workflow files still name each other"
 
