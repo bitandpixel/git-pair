@@ -154,6 +154,17 @@ the newest marker, so a re-offer or a re-review stops an automatic merge without
 }
 ```
 
+A stacked child of a landed parent is read in three places, and they advise apart on purpose. `check --json`
+adds `parent_landed`, `parent_landed_commit`, `parent_stale_branch`, `parent_head_carries_landing`,
+`parent_measured_base`, `parent_comparison` and `parent_approval_survives_landing`. Where that last one is
+true there is no `git rebase` in `next_action` and none to run: the comparison found this branch still
+contributing what the approval recorded and merging cleanly into the destination, so a rewrite would only
+rewrite the commits the approval names — and the next `check` would refuse them, on a byte-identical tree.
+Do not restack a changeset to tidy it while a verdict is passing. `git pair status` prints the fact and the
+command as `parent.note` and `parent.step`, and `git pair queue` prints it in `parent_notes`; those two carry
+no verdict, so they can advise the housekeeping safely, and it runs after the merge, on a branch nobody had to
+certify.
+
 `git pair change wait --json` — `ref` is where the activity appeared (`HEAD`, or a remote-tracking
 branch brought in by `--fetch` but not yet merged), `review_commit` and `review_commit_full` appear only
 when a submission ended the wait, and `timed_out` is the difference between "a reviewer acted" and "gave

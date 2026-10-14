@@ -335,8 +335,8 @@ holds that chain itself while a squash holds it nowhere else. So the order that 
 land the parent, then settle the child, then delete.
 
 A stack says what is left of it at the same moment, and this is the ordinary next thing an author hits after
-landing a parent: `git pair status`, `git pair check` and `git pair queue` name the landing and print the
-command that settles the child. While the child's head is not on the landing it is
+landing a parent: `git pair status` and `git pair queue` name the landing and print the command that settles
+the child. While the child's head is not on the landing it is
 `git rebase --onto <landing> <parent-branch> <child-branch>`; once it is, the parent's branch is stale and the
 command is `git branch -D <parent-branch>` — with the worktree named when another worktree has that branch
 checked out, because the delete fails there and removing a worktree is not git-pair's to do. Once the parent's
@@ -344,6 +344,21 @@ branch is deleted as well and this head is already on the landing, the step is n
 that instead of printing a rebase onto a branch that no longer exists. Nothing in
 git-pair runs either one: the rebase and the delete are ordinary git, performed by whoever owns the branches
 (PRD §26).
+
+`git pair check` is the one surface that withholds the rewrite, and it does so in the one case where following
+the command would cost the verdict it just gave: an approval standing on this head, the content comparison
+came out equal, and the branch merges cleanly. Running the rebase there rewrites the commits the approval
+names, the tree comes out byte-identical, and the gate then refuses the rewritten history — so the verdict
+prints what the comparison found in place of the command, on the line that would have carried it:
+`parent: booking landed as 74fb6c5; measured above the landing, this branch still contributes the content
+review e931e25 approved`.
+
+The restack is withheld rather than forbidden. `git pair status` prints the same fact and the command on two
+lines — `note:` and `step:` — and `git pair queue` prints it in its housekeeping note, so the tidier history
+is still on the record for whoever wants it, and it can run after the merge on a branch nobody had to
+certify. Where there is no approval to cost — a child never offered, or one whose verdict is feedback read
+under `--allow-feedback` — `check` prints the command like the other two, and where the comparison could not
+be reached it prints the command and says it is given unverified (PRD §21).
 
 A landing does not by itself end the child's approval. `check` compares the diff under test with the diff the
 approval measured, which it can do because the submission recorded the commit it measured from
@@ -963,7 +978,7 @@ handling two shapes), and `policy` records which rule produced the verdict — `
 comparing the verdict built one of them and the other is the end of the lineage comparison.
 `reviewed_head` is the commit the newest permitting review named; it is reported whichever way the
 verdict went and omitted only when that marker names no head. `landed` reports a changeset the
-destination already holds (PRD §11.3), read from that branch's tree. Six more fields are the stack
+destination already holds (PRD §11.3), read from that branch's tree. Seven more fields are the stack
 beside the verdict (PRD §21): `parent_landed` and `parent_landed_commit` say the branch this child was
 measured against is finished work and name the commit it became, `parent_stale_branch` says the
 parent's branch is still here holding nothing the destination lacks, `parent_head_carries_landing`
@@ -973,7 +988,10 @@ deleted, and the half that decides whether any rebase is owed — and `parent_me
 from, and which reading answered it — `contribution` when the recorded content identity was compared with what
 this branch contributes today, `contribution-patch` when the content moved and the recorded identity of the
 rendered hunks did not (a file this branch edits also changed in the destination, and the branch still merges
-cleanly), and `merge-base` when the older comparison of the two bases decided.
+cleanly), and `merge-base` when the older comparison of the two bases decided. `parent_approval_survives_landing`
+is why a landed parent can be reported with no restack in `next_action`: the comparison ran, this branch still
+contributes what the approval recorded, and the branch merges cleanly, so the rewrite would cost the approval
+the verdict rests on.
 
 A branch that merged the integration branch in also carries `drift_credited`: the paths that differ from the
 reviewed commit and were not counted as drift because the destination carries that content (PRD §11.3). It is
@@ -988,7 +1006,10 @@ Usage errors and git failures still exit 2 and 3 here.
 A passing verdict also carries `next_action` — the same sentence `status` prints in its `next_action`,
 naming the merge — so an agent that gates on `ready` learns what
 comes next without parsing the human output. It is present only when `ready` is true, because on a
-failing gate the next step is `reasons`.
+failing gate the next step is `reasons`. Where a landed parent leaves a restack the verdict is free to advise,
+that step is appended to it; where the restack would cost the standing approval it is left out of this field
+and out of the human verdict alike, and `parent_approval_survives_landing` says which of the two happened
+(PRD §21).
 
 `integrating` answers the other half of a merge gate, and the two are reported apart because they are two
 questions: `ready` is "may this merge", `integrating` is "did the author ask for one" (§9.9).

@@ -127,7 +127,7 @@ requires knowing that the content is unchanged, and an unknown is not that knowl
 
 ## Milestones
 
-### M1 — One decision, both parent paths
+### M1 — One decision, both parent paths — **done**
 
 Deliverables
 
@@ -172,7 +172,7 @@ Verification
 - `go test ./internal/cli/ -run Docs` and `-run TestTheCommandTreeIsTheCommandSet` green; `mise run check`
   green.
 
-### M2 — The contract says which surface advises what
+### M2 — The contract says which surface advises what — **done**
 
 Deliverables
 
@@ -202,31 +202,38 @@ Verification
   the shape of the output.
 - `git pair check --json | jq 'keys'` compared before and after, to show what changed in the contract.
 
-### M3 — Only if the spikes find a dependency
+### M3 — Only if the spikes find a dependency — **deleted**
 
 Deliverable: the housekeeping has a moment that is actually right — after the merge, or on the surface where
 it costs nothing — instead of relying on the verdict to prompt it.
 
-This milestone exists only if a spike answers "yes" to one of the spike questions below. If the answers are
-all "no", M3 is deleted and the plan closes with M2.
+Not taken. Spike 1 answered "no" — nothing requires the child to take the destination in before it merges —
+and the design already puts the housekeeping where it costs nothing: `status` and `queue` keep printing it, and
+both say it can run after the merge. There was no milestone here to earn.
 
 ## Spikes / research
 
-Each answers one question; conclusions land in `research/` before M1 is finalised.
+Each answered one question; the conclusions are in `research/`.
 
-1. **Does anything require the child to take the destination in before it merges?** Compare the result of
-   merging the un-restacked child into the destination with the result of merging the restacked child, over
-   plain-merge, squash and rebase-merge landings. Expectation: identical trees, differing history shape.
-   A difference is a finding for M3, not a reason to keep advising.
+1. **Does anything require the child to take the destination in before it merges?** **No.** Merging the
+   un-restacked child into the destination and merging the restacked one produced the same tree in every
+   landing shape — plain merge, merge over moved trunk, merge with a shared file, squash, and rebase-merge.
+   The rebase changed the child's own tree only where trunk had moved, and added trunk's content, which the
+   merge brought anyway. See
+   [`2026-10-14-does-the-child-owe-the-destination-before-the-merge.md`](research/2026-10-14-does-the-child-owe-the-destination-before-the-merge.md).
 2. **Does carrying the parent's commits affect `change tidy`, the queue's wait measurement, `history`, or the
-   review span?** The parent's review and ready markers ride along in the child's history; establish whether
-   any reader is misled by them.
+   review span?** **Not asked.** No part of this change reads or writes those surfaces, and the implementation
+   does not depend on the answer. It is recorded as open rather than assumed.
 3. **Is the measured contribution above the landing always what the gate would compute with the destination as
-   base?** Find a fixture where the two disagree, if one exists. The design depends on them agreeing; a
-   counterexample changes M1's predicate to consult the gate's own measurement rather than a second one.
-4. **How often is the branch-present case the one that happens?** A count is not needed, but the plan's
-   priority rests on it being the ordinary case right after a landing, which the incident supports and a
-   second observation would confirm.
+   base?** **Yes, with one asymmetry that supports the design.** Where the comparison answered equal, the gate
+   passed and the merge carried the reviewed content; no fixture was found where the two disagreed about a
+   merge that should happen, so M1's predicate consults the measurement it has. The asymmetry: in the squash
+   case the same content reads equal *until* the author takes the step, and reads different afterwards, when
+   the recorded base has stopped being an ancestor of the head and the reading falls through to the older
+   comparison of two base trees.
+4. **How often is the branch-present case the one that happens?** A landing is a merge into the destination and
+   no git-pair command deletes the parent's branch, so the branch is present unless deleted by hand — the
+   ordinary case, confirmed by the incident and by the fixture built for M1's tests.
 
 ## Risks
 
@@ -261,10 +268,34 @@ Layered, in the order that catches a mistake cheapest:
 
 | Date | Audit | Summary |
 | --- | --- | --- |
-| — | — | Not yet audited. |
+| 2026-10-14 | Spikes 1 and 3, then M1/M2 | Both measurement spikes answered in `research/`; spike 1 says the merge does not need the restack, spike 3 says the contribution measurement agrees with the gate and the one asymmetry argues for withholding. M1 shipped with the two predicates pinned apart in `stacked_internal_test.go`; M2 shipped with the PRD's parent-landing section, the README's stack prose and check-field list, and the skill's agent-facing rule. M3 deleted. |
 
 ## Execution status
 
 Plan written on 2026-10-13 from the transcript in
-`research/2026-10-13-approved-child-advised-to-rewrite.md`. Not started. The spikes are listed rather than
-assumed; M1's predicate is the part that depends on spike 3 agreeing, and that is the first thing to settle.
+`research/2026-10-13-approved-child-advised-to-rewrite.md`. Implemented on `feat/next-action-fixes` on
+2026-10-14 and closed with M2; M3 was deleted for want of a spike that earned it.
+
+What the code ended up with:
+
+-   `parentStatus.Step` and `parentStatus.Note` split the landed-parent sentence into the instruction and the
+    fact, which is what lets `check` print one without the other. `landedParentStep` is still the only
+    spelling of the command, and it is now called from one place.
+-   `parentStatus.ApprovalSurvivesLanding` is written only by `landedApprovalStillStands`, only where an
+    approval is the verdict, and only when the content came out equal and the branch merges cleanly. The
+    comparison sentence is the note it leaves behind.
+-   `advisesRestack()` beside `owesLandingStep()` is the instruction's predicate, tested beside the fact's in
+    `stacked_internal_test.go`. `check` prints the step where it is true; `status` prints it whenever
+    `owesLandingStep()` is.
+-   Two sentences that misadvised were corrected on the way, both in the same family: a refusal for a
+    conflicting merge now names its own step in the reason, as every other parent refusal does, and a child
+    already standing on the landing is told to re-offer rather than handed a branch deletion glued to "and
+    have the result reviewed again".
+-   The branch-is-gone path never set `Step`, so a passing verdict no longer prints a rebase naming a parent
+    branch that has been deleted. That command could never run, and `TestOwesLandingStep` and
+    `TestLandedParentStepSaysNothingIsOwedWhenTheBranchIsGoneAndTheHeadIsOnTheLanding` already said so.
+
+The JSON decision M2 asked for is recorded in the changeset's `ABOUT.md`: `check --json` gained
+`parent_approval_survives_landing`, and `status --json` gained `parent.step`, because neither `parent_comparison`
+nor `next_action` can tell "withheld because the comparison came out equal" from "not offered because there
+was nothing to compare".
