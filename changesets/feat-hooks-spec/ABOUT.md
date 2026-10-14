@@ -117,5 +117,6 @@ the next engineer loosens the rule rather than the code.
     that has not accepted them? The skill page now tells an agent to report the state rather than run `--trust`,
     which makes the unaccepted state more visible but leaves the product answering "ready" without the
     repository's own checks having run.
+I'm leaning towards making this mandatory. We could perhaps create an explicit declined state as an escape hatch?
 -   Nothing persists a hook result, so no page can promise a reader will be able to find out later what ran.
     If that ever matters, the results store M1 declined to invent is the piece.
