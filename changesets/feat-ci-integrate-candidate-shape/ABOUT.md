@@ -17,8 +17,9 @@ The driver flag this uses, `--verify-cmd`, is the layer below (`feat-ci-verify-c
 
 -   `.github/workflows/git-pair-integrate.yml`: triggers are `push: '**'` and `workflow_dispatch`. The job's
     `if:` is an allowlist — dispatch, or a push to a non-destination branch whose commit message carries
-    `Review-State: integrating`. `permissions:` is `contents: write` alone. The driver is invoked with
-    `--verify-cmd 'mise run gates'` and `--expect-head` from `github.event.after`. The build step names the
+    `Review-State: integrating`. `permissions:` is `contents: write` for the merge and `actions: write` for the request that follows it. The
+driver is invoked with `--verify-cmd 'env -u GIT_PAIR_DEFAULT_BRANCH mise run gates'` and `--expect-head` from
+`github.event.after`. The build step names the
     binary it gates with through `GIT_PAIR_BIN`, and the queue report stays under `if: always()`. Its header
     separates the rule worth copying — a landing conditional on the suite the destination would run — from this
     repository's value at that seam, `mise run gates` and `jdx/mise-action`, because this file ships as the
@@ -30,7 +31,7 @@ The driver flag this uses, `--verify-cmd`, is the layer below (`feat-ci-verify-c
     and nothing does that now. Its header now says what the branch trigger was for, why that reason is gone,
     and why trunk is kept.
 -   `scripts/gates/ci-integrate.sh`: the static section that asserted the two files name each other (6 checks)
-    now asserts what this shape needs (29), and the check that required `actions: write` became a pairing — an
+    now asserts what this shape needs (27), and the check that required `actions: write` became a pairing — an
     ask only with its scope, a scope only with its ask — beside positive checks that the ask, its scope, and
     its token are all present.
 -   `README.md`, `PRD.md` §29's pointer, and `skills/git-pair/references/integration.md`: the places that
@@ -67,6 +68,17 @@ authenticate with answers "cannot tell", the driver says so and stays green, and
 there. A token asks for what the job uses, which is why the pairing is asserted in both directions rather than
 one.
 
+**The candidate's environment is the merge environment, and that is a new coupling.** The first declaration
+this shape saw on a runner (`38607720677`) refused its own merge, and the tree was fine. The step exports
+`GIT_PAIR_DEFAULT_BRANCH` because the driver needs to know the destination, and the candidate inherits the
+step's environment — so the suite ran with that variable set, and with it set the product says where its
+destination came from. Several tests assert that a verdict carries no such tool line, so they failed, and the
+job did the only honest thing with a candidate whose suite fails: it said so and pushed nothing. `env -u
+GIT_PAIR_DEFAULT_BRANCH` on the verify command separates the two — the driver keeps the variable, the suite
+sees the environment it was written against. Nothing here was wrong with `main` plus this branch; what the
+combination exposed was the job definition, which is precisely the class of thing a head-check cannot see, and
+it took 56 seconds on a runner rather than a trunk that looked green because nobody ran it.
+
 **The build step names its binary.** `mise run build` installs under the name `scripts/install-name.sh`
 derives from the branch, so a replay cannot quietly test a build another worktree left in the shared
 `~/.local/bin`. On a runner nothing is shared, but the name is still the branch's — so the plain `git-pair` the
@@ -85,6 +97,15 @@ and 105 on the parent layer. `mise run gates` → `E2E: all checks passed`, `PTY
 so the checkout under review was not moved. A scratch worktree needs `MISE_TRUSTED_CONFIG_PATHS=<worktree>`:
 without it mise refuses an unseen config file and the ladder fails at zero seconds with what reads like a
 build error.
+
+The environment finding is reproducible in three commands, and the third is the fix:
+
+```bash
+GIT_PAIR_DEFAULT_BRANCH=main go test ./internal/cli -run TestChangeIntegrateRefusesWorkThatWasNeverApproved  # FAILS
+go test ./internal/cli -run TestChangeIntegrateRefusesWorkThatWasNeverApproved                                # passes
+GIT_PAIR_DEFAULT_BRANCH=main sh -c 'env -u GIT_PAIR_DEFAULT_BRANCH go test ./internal/cli -run \
+  TestChangeIntegrateRefusesWorkThatWasNeverApproved'                                                          # passes
+```
 
 The static checks are text checks, and each one is there for a failure that would otherwise be silent: a
 branch allowlist on the trigger (evaluated before anything git-pair says, so it can exclude a whole changeset
@@ -107,11 +128,17 @@ runner to see one is the first to complain.
      none of those heads carried the declaration trailer. That is the filter measured on a runner rather than
      asserted: a push starts a run, the `if:` costs it nothing, and `ci.yml` started nothing for those pushes
      either. The old shape charged three `mise run gates` runs for the same three pushes.
-   - Still unproven: the merge path — a declaration reaching `--verify-cmd` and pushing —, that
-     `contents: write` alone is enough to land the merge, and that the report prints after a failure. The
-     first chance is this changeset's own declaration: GitHub reads the workflow file from the pushed
-     commit's tree, so the declaration push here starts the job defined in this file, which then tests the
-     tree that contains it. `gh run view <id> --log` is what settles each of the three.
+   - **The merge path is now proven, on a candidate that should fail.** The first declaration (`ab87732`)
+     started run `38607720677` from this branch's copy of the file: the job ran rather than being skipped, the
+     candidate was built from the destination's tip plus the declared head, `--verify-cmd` executed against it,
+     the run said `feat-ci-integrate-candidate-shape: the merge candidate failed verification — nothing merged
+     into main`, and `origin/main` stayed at `8c8f267`. The queue report printed afterwards, which is the
+     `if: always()` step doing its job over a red run. The same head under the old shape would have merged:
+     its checks were green, because `ci.yml` runs the suite in an environment without the variable that broke
+     it.
+   - Still unproven: that `contents: write` alone is enough to land a merge, and that the post-merge request
+     reaches `ci.yml` — both live behind a candidate that passes, which is what the `env -u` above is meant to
+     deliver. `gh run view <id> --log` is what settles each.
    - Layer 1 was landed by the shape this one replaces, which is the expected order: `main` still carried the
      old file when the declaration was pushed, so run `38598069537` (`workflow_run` on `ef5fa30`, 16:26:20)
      walked the queue and produced `b5f54a4` at 16:26:42 with the probe's `--require-ci` in force.

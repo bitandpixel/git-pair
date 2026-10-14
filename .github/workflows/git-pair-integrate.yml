@@ -181,7 +181,15 @@ jobs:
           # and `mise run gates` is what green means here. `gates` builds first, so the binary the gate runs is
           # the one this tree produced — and it is the tree *after* the merge, which is the combination no run
           # on the branch itself has ever seen.
-          VERIFY_CMD='mise run gates'
+          #
+          # `env -u` is not decoration. The candidate inherits this step's environment, and one variable in it
+          # changes what the product says: with `GIT_PAIR_DEFAULT_BRANCH` set, git-pair reports where its
+          # destination came from, and the suite has tests asserting that a verdict carries no such line. Run
+          # here, that is a failing candidate on a tree that is perfectly fine — which the job reports, and
+          # then correctly refuses to merge. The driver needs the variable; the suite must not see it. This is
+          # the general hazard of testing a candidate inside the job that merges it: the candidate's
+          # environment is the merge environment, and the suite was written against nobody's.
+          VERIFY_CMD='env -u GIT_PAIR_DEFAULT_BRANCH mise run gates'
           set -- --verify-cmd "$VERIFY_CMD"
           # Named rather than left to the driver's default, because the file claims the ask in its own header:
           # a reader should see the request here, and the gate asserts this line exists beside the scope that

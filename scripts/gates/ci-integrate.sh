@@ -566,6 +566,14 @@ INTEGRATE_CODE=$(grep -v '^[[:space:]]*#' "$INTEGRATE")
 check "the job makes the merge conditional on the suite" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c -- '--verify-cmd')" -ge 1 ] && echo 1 || echo 0 )"
 check "and does not also gate on somebody else's checks" 0 "$(printf '%s\n' "$INTEGRATE_CODE" | grep -Ec -- '--require-ci|--ci-probe')"
 
+# The candidate is run by the job that merges it, so it runs in the job's environment — and this step exports
+# a variable that changes what the product says out loud. With `GIT_PAIR_DEFAULT_BRANCH` set, git-pair names
+# where its destination came from, and the suite asserts that a verdict carries no such tool line. A
+# candidate run that way fails on a tree that is fine, and the job is right to refuse it: the only defect here
+# would be the job definition, and the suite found it on a runner in 56 seconds where no local run could.
+check "but the candidate is not run with the job's own destination in its environment" 1 \
+  "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'env -u GIT_PAIR_DEFAULT_BRANCH')" -ge 1 ] && echo 1 || echo 0 )"
+
 # The request that follows a landing is house policy, not decoration. The destination's new tip is the tree
 # this job just tested, so the run adds no answer — but a trunk with no run of its own has nothing to go red
 # and nobody to notify when the merge is where the trouble was. Three things have to hold together, and each
