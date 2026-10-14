@@ -310,3 +310,73 @@ func TestDestinationWalksAParentThatRecordedOnlyItsBranch(t *testing.T) {
 		t.Errorf("via = %v, want [feat-beta feat-alpha]", got.Via)
 	}
 }
+
+// The first hop is believed because the caller resolved it: a changeset measured against a branch this clone
+// cannot name has already failed every command that derived its state. That belief is sound about the
+// caller's *own* record and about nothing else. A parent's record is read out of somebody else's tree — this
+// changeset's head, or the destination's — and its `base:` names the branch under the parent, which is the
+// name that outlives the work it carried. Asked unproven, it answers "merge into the branch under the
+// parent", which for a stack whose lower levels have been merged one after the other tells an author to
+// merge finished work into itself.
+//
+// So the two entry points are the two beliefs, and this test is the difference between them: one record,
+// asked as the caller's own and as what it actually is. If these two ever agree, the difference has died and
+// one of the two entry points should go.
+func TestDestinationOfParentProvesTheRecordItIsHanded(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("feat/alpha")
+	f.CommitChangeset("feat-alpha", "main")
+	f.Commit("alpha work", gittest.WithFile("alpha.txt", "1\n"))
+	f.CreateBranch("feat/beta")
+	stackedOn(t, f, "feat-beta", "feat/alpha", "feat-alpha")
+	f.Commit("beta work", gittest.WithFile("beta.txt", "1\n"))
+	f.CreateBranch("feat/gamma")
+	stackedOn(t, f, "feat-gamma", "feat/beta", "feat-beta")
+	f.Commit("gamma work", gittest.WithFile("gamma.txt", "1\n"))
+
+	landOnTrunk(t, f, "feat/beta", "feat/alpha")
+
+	f.SwitchTo("feat/gamma")
+	ctx := context.Background()
+	r := repo(f)
+	db, err := changeset.DefaultBranch(ctx, r, "")
+	if err != nil {
+		t.Fatalf("DefaultBranch: %v", err)
+	}
+	// The parent's record as the landing sentence reads it: its own words, out of this changeset's tree.
+	st, err := changeset.StackAt(ctx, r, "HEAD", "feat-beta")
+	if err != nil {
+		t.Fatalf("StackAt: %v", err)
+	}
+	parent := changeset.Changeset{
+		Slug:          "feat-beta",
+		Base:          st.Base,
+		ParentBranch:  st.Parent,
+		BaseChangeset: st.BaseChangeset,
+		Branch:        "feat/beta",
+	}
+
+	believed, err := changeset.DestinationFor(ctx, r, parent, db)
+	if err != nil {
+		t.Fatalf("DestinationFor: %v", err)
+	}
+	if believed.Ref != "feat/alpha" || believed.Why != "base" {
+		t.Fatalf("DestinationFor on a parent's record = %s (%s), want feat/alpha (base): the first hop is "+
+			"believed unproven, and that unproven answer is the one the child was given", believed.Ref, believed.Why)
+	}
+
+	got, err := changeset.DestinationOfParent(ctx, r, parent, db)
+	if err != nil {
+		t.Fatalf("DestinationOfParent: %v", err)
+	}
+	if got.Ref != "main" || got.Why != "parent" {
+		t.Errorf("DestinationOfParent = %s (%s), want main (parent): the record below names the stale branch of "+
+			"a changeset the destination already holds, so it is not a destination", got.Ref, got.Why)
+	}
+	if len(got.Via) != 1 || got.Via[0] != "feat-alpha" {
+		// The base handed in named a changeset the destination holds, and the walk crossed that one to reach
+		// the branch recorded under it.
+		t.Errorf("via = %v, want [feat-alpha]", got.Via)
+	}
+}

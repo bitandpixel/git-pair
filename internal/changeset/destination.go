@@ -36,7 +36,8 @@ type Destination struct {
 // reason `status`'s stack walk is bounded.
 const destinationWalkLimit = 16
 
-// DestinationFor resolves where a changeset's work lands.
+// DestinationFor resolves where a changeset's work lands, from the record of the changeset this clone is
+// standing on.
 //
 // The changeset's own base answers this in the ordinary case, and stops answering it in two others. A base
 // the resolver derived from the destination (`BaseDerived`) is a measurement point — the run the child shares
@@ -58,6 +59,32 @@ const destinationWalkLimit = 16
 // `Why`, and a destination that cannot be named at all leaves `Ref` empty — "this clone cannot name a
 // destination" is a fact a caller has to be able to tell apart from a guess.
 func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranchRef) (Destination, error) {
+	return destinationFor(ctx, repo, c, db, false)
+}
+
+// DestinationOfParent resolves where a parent's work lands, from a record read out of somebody else's tree —
+// a parent's `changesets/<id>/CHANGESET.yaml` in this changeset's head or in the integration branch, rather
+// than the record of the changeset this clone is standing on.
+//
+// The distinction is the one the walk already makes between its first hop and every hop after it, and it is
+// about who proved the value. A changeset's own `base:` names a branch this clone resolved in order to
+// compute the state it is reporting, so believing it costs nothing. A parent's `base:` is read out of a tree
+// that may well be a landed one, and a branch keeps its name after the work it carried has been merged: the
+// value that answered "where is this going" when the parent was cut is the value that names finished work
+// once the parent has landed. Asking the first hop to prove itself — resolve the name, and refuse it when the
+// integration branch already carries it as a landed changeset — is what makes a stack whose lower changesets
+// have all been merged end at the branch holding those landings instead of at a stale branch beneath them.
+//
+// The answer is the same shape as `DestinationFor`'s, including `Why`: with the first hop proved, it is
+// reported as "parent" rather than "base", because it came from a parent's record either way.
+func DestinationOfParent(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranchRef) (Destination, error) {
+	return destinationFor(ctx, repo, c, db, true)
+}
+
+// destinationFor is the walk both entry points share. proveBase says whether the value in `c.Base` was
+// resolved by the caller (`DestinationFor`, standing on its own changeset) or read out of another
+// changeset's tree (`DestinationOfParent`), and so whether the first hop has to prove itself.
+func destinationFor(ctx context.Context, repo *git.Repo, c Changeset, db DefaultBranchRef, proveBase bool) (Destination, error) {
 	out := Destination{}
 	base, baseChangeset := c.Base, c.BaseChangeset
 	if c.BaseDerived {
@@ -65,14 +92,32 @@ func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db Default
 		base = ""
 	}
 	seen := map[string]bool{}
+	// The destination's namespace is asked once for the walk rather than once per hop. Every hop asks the same
+	// question of the same branch — does this branch already carry that changeset, under either spelling —
+	// and the answer cannot change while the walk is running, so a walk four hops deep would otherwise list
+	// the same three trees four times. `LandedIDs` is a memoized read in a normal run and a counted one in
+	// the chain cost test, which is where the difference between the two shapes becomes visible.
+	var landedIDs []string
+	var namespaceRead bool
+	landedAt := func() ([]string, error) {
+		if !namespaceRead {
+			ids, err := LandedIDs(ctx, repo, db.Ref)
+			if err != nil {
+				return nil, err
+			}
+			landedIDs, namespaceRead = ids, true
+		}
+		return landedIDs, nil
+	}
 	for hops := 0; hops < destinationWalkLimit; hops++ {
 		if base != "" {
 			why := "base"
-			if hops > 0 {
-				// Only the walked values need proving: a changeset measured against a base this clone
-				// cannot resolve has already failed every command that derives its state, so the direct
-				// answer is proven by the caller having got this far. A parent's recorded base is read
-				// out of a landed tree and may name a branch that has since been tidied away.
+			if hops > 0 || proveBase {
+				// Only the values the caller did not resolve itself need proving: a changeset measured
+				// against a base this clone cannot resolve has already failed every command that derives its
+				// state, so the direct answer is proven by the caller having got this far. A value read out of
+				// another changeset's tree — walked into, or handed in by `DestinationOfParent` — may name a
+				// branch that has since been tidied away.
 				if _, err := repo.RevParse(ctx, base); err != nil {
 					if !errors.Is(err, git.ErrUnknownRevision) {
 						return out, err
@@ -85,8 +130,8 @@ func DestinationFor(ctx context.Context, repo *git.Repo, c Changeset, db Default
 			// A parent's recorded base that names a directory the integration branch carries is a landed
 			// changeset, not a destination: the branch outlived the work it carried, which is the same fact
 			// that moves a child's measurement base. Keep walking, through that changeset's own record.
-			if hops > 0 && db.Ref != "" {
-				ids, err := LandedIDs(ctx, repo, db.Ref)
+			if (hops > 0 || proveBase) && db.Ref != "" {
+				ids, err := landedAt()
 				if err != nil {
 					return out, err
 				}
