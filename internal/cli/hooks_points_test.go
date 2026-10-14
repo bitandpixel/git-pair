@@ -296,22 +296,57 @@ func TestNoopTransitionsRunNoHooks(t *testing.T) {
 // before the approval the hook is ordinary reviewed content, consent is recorded against the tree, and the
 // point fires from the tracked root like any other. The table above uses the per-clone root for uniformity
 // across the four points; this is the case that keeps the tracked root honest at the point the table cannot
-// install it at.
+// install it at — and, since the verdict began asking for a position on tracked content, the case that shows what
+// a position is worth and what it is not.
 func TestTrackedRootAtTheIntegratePoint(t *testing.T) {
-	t.Run("installed before the approval, consent still decides whether it runs", func(t *testing.T) {
+	// The point is not reached at all when nobody has recorded a position: the checks the tree carries have not
+	// run, and a declaration that calls the work ready over them is the failure the state exists to close. So the
+	// hook is not run — the same outcome consent produced, for a different reason, and the reason has to name both
+	// ways out because only one of them runs the suite.
+	t.Run("installed before the approval and never recorded, the declaration refuses", func(t *testing.T) {
 		dir := scratch(t)
 		f, _ := newChangeset(t, "checkout-flow", "main")
 		putHook(t, f, "tracked", "pre-integrate", "01-suite", touch(dir, "RAN"))
 		ready(t, f)
 		submit(t, f, "approve")
 
+		res := runIn(t, f.Dir(), "change", "integrate")
+		if res.code != exitRefusal {
+			t.Fatalf("`change integrate` exited %d, want %d\nstdout: %s\nstderr: %s",
+				res.code, exitRefusal, res.stdout, res.stderr)
+		}
+
+		if _, err := os.Stat(filepath.Join(dir, "RAN")); err == nil {
+			t.Error("an unrecorded tracked hook ran at integrate")
+		}
+		have := res.stdout + res.stderr
+		mustContain(t, have, "have not been recorded in this clone", "the refusal must name what is missing")
+		mustContain(t, have, "git pair hooks --trust", "and the position that runs the checks")
+		mustContain(t, have, "git pair hooks --decline", "and the one that does not")
+		marker := filepath.Join(f.Dir(), ".git", "git-pair", "changesets", "checkout-flow", "integrate")
+		if _, err := os.Stat(marker); err == nil {
+			t.Error("a refused declaration still wrote a marker")
+		}
+	})
+
+	// A recorded decline lets the declaration through, and the hook still does not run: what the gate asked for was
+	// a position, not a licence to execute. The note beside the skip names the decline and its hash instead of
+	// telling this reader to accept content they have already read and refused.
+	t.Run("declined, the declaration proceeds and the hook stays skipped", func(t *testing.T) {
+		dir := scratch(t)
+		f, _ := newChangeset(t, "checkout-flow", "main")
+		putHook(t, f, "tracked", "pre-integrate", "01-suite", touch(dir, "RAN"))
+		ready(t, f)
+		submit(t, f, "approve")
+		declineHooks(t, f)
+
 		res := runIn(t, f.Dir(), "change", "integrate").mustSucceed(t, "change", "integrate")
 
 		if _, err := os.Stat(filepath.Join(dir, "RAN")); err == nil {
-			t.Error("an unaccepted tracked hook ran at integrate")
+			t.Error("a declined tracked hook ran at integrate")
 		}
 		mustContain(t, res.stderr, "did not run", "the run must say the hook was skipped")
-		mustContain(t, res.stderr, "git pair hooks --trust", "and name the way to accept it")
+		mustContain(t, res.stderr, "declined", "and name the position that skipped it")
 	})
 
 	t.Run("accepted, it blocks the declaration", func(t *testing.T) {

@@ -528,6 +528,12 @@ func trustHooks(t *testing.T, f *gittest.Fixture) {
 	runIn(t, f.Dir(), "hooks", "--trust").mustSucceed(t, "hooks", "--trust")
 }
 
+// declineHooks records the other position a person can take on tracked content: read, and chosen not to run.
+func declineHooks(t *testing.T, f *gittest.Fixture) {
+	t.Helper()
+	runIn(t, f.Dir(), "hooks", "--decline").mustSucceed(t, "hooks", "--decline")
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)

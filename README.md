@@ -668,7 +668,7 @@ hand-off when the script says no. The built-in gate can only ask what git alread
 client is current: none of that is in the graph, and no tool can know it for a repository it does not own.
 
 Hooks live in two roots, consulted in that order: `.git-pair/hooks/<point>/` is committed, so it is content
-that arrived from somewhere and runs only after a person accepts it with `git pair hooks --trust`; and
+that arrived from somewhere, runs only after a person accepts it with `git pair hooks --trust`, and is asked about by the verdict, which wants a position — acceptance or a recorded decline — before it will call the work ready; and
 `<git-dir>/git-pair/hooks/<point>/` is your own file under your own git directory, never committed, and needs
 no consent — which is where a reviewer attaches a check for a repository they cannot edit. Under a point, a
 directory of scripts or one file named for the point is accepted, run in lexicographic order (`01-fmt`,
@@ -693,15 +693,28 @@ reason and sets `ready: false`, so one command and one answer still cover the re
 
 Consent is by content: the path, mode and bytes of the tracked hooks tree are hashed and the hash recorded per
 clone in `<git-dir>/git-pair/trusted-hooks`, so an edit after acceptance is a new acceptance. An unaccepted
-tree runs no hooks and says so on stderr — the operation is not blocked, because a fresh clone must still get a
-verdict. Two different states read as `trusted: false`, and `git pair hooks` separates them: `unrecorded` is a
-clone where nobody has accepted anything, and `changed` is a clone whose accepted version the repository replaced
-— the team shipped a new check, and this clone is now running without it. They warrant different actions, so the
-second names the accepted hash beside the tree's current one; a clone in that state can also keep running the
-version it read by copying that content into the per-clone root. Hooks are the client's control rather than repository enforcement: git-pair publishes the event and
+tree runs no hooks and says so on stderr. Four states describe what a clone has done about that tree:
+`unrecorded` is one where nobody has recorded anything, `changed` is one whose accepted version the repository
+replaced — the team shipped a new check, and this clone is now running without it — and `declined` is one where a
+person read the scripts and chose not to run them. A decline is recorded beside the acceptance, in
+`<git-dir>/git-pair/declined-hooks`, against the same content hash, so the next version the repository commits is
+unrecorded rather than quietly exempt, and `git pair hooks` prints the hash each position was taken against.
+`git pair hooks --trust` and `git pair hooks --decline` are the two ways to answer; both print what they are
+recording first, because a position about content nobody has seen is not a position.
+
+**The verdict asks for a position.** While the tracked tree is `unrecorded` or `changed`, `git pair check` refuses
+and `git pair change integrate` with it: the checks the repository asked for have not run, and a merge should not
+rest on that. `accepted` passes because the scripts ran and `declined` passes because a person answered a question
+about them, which is what makes the demand fair — without a decline, a gate that waits on approval asks every clone
+to either execute code it does not want or stay red forever. Commands that write no verdict — `change ready`,
+`review submit`, `status` — report the skip rather than refusing it, so a fresh clone still gets a verdict and a
+clone nobody has approved is still a clone you can work in.
+
+Hooks are the client's control rather than repository enforcement: git-pair publishes the event and
 the checkout owns the script, which is why a hook may run commands git-pair itself never invokes (§26 binds
 what this tool runs of its own choosing). `GIT_PAIR_HOOKS=0` switches them off for one run — the person's own
-escape hatch for a script that is misbehaving, not a way past a check. The CI recipe is under
+escape hatch for a script that is misbehaving, not a way past a check, and not a position either: the answer the
+verdict asks for is written down by `--decline` where the next reader can see it. The CI recipe is under
 [Landing a declared change from CI](#landing-a-declared-change-from-ci); the contract is PRD §11.4 and
 `skills/git-pair/references/hooks.md`.
 

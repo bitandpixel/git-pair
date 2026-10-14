@@ -31,6 +31,17 @@ func trustRecordPath(gitDir string) string {
 	return filepath.Join(gitDir, "git-pair", "trusted-hooks")
 }
 
+// declinedRecordPath is where a decline is recorded, beside the acceptance.
+//
+// It is a separate file rather than a marker inside the acceptance record because the two answers are not
+// states of one thing: they are two positions a person can hold about two different trees. A clone may have
+// accepted last month's suite and decline this month's, and reading the pair is what tells a report which of
+// the two the person took *for the content in front of them* — which is the whole difference between a team
+// that opted out and a team that never heard.
+func declinedRecordPath(gitDir string) string {
+	return filepath.Join(gitDir, "git-pair", "declined-hooks")
+}
+
 // TreeHash hashes the tracked hooks tree: every regular file's path, mode, and content. The mode is in the
 // hash because an executable bit is part of what a hook is — making a script executable, or removing it,
 // changes what the repository is asking to run.
@@ -98,7 +109,12 @@ func TreeHash(workTree string) (string, []string, error) {
 // it, or to work without it. Those two need different sentences, because the second is the moment a hook
 // starts silently not running for everybody who pulled.
 //
-// The state the person reaches for in that second case — keep running the version they read — is available
+// `declined` was added for the case those two still conflate: a person who looked, read the scripts, and
+// chose not to run them here. Before it, that choice and "nobody has looked" were the same observable fact, so
+// a report could not tell a team that opted out from a team that never heard — and a gate could not ask for a
+// position without also asking people to accept scripts they do not want.
+//
+// The state the person reaches for in the moved-under case — keep running the version they read — is available
 // today by copying that content into the per-clone root, which needs no acceptance. The tool does not do the
 // copying, and does not pretend the option is missing.
 type TrustState string
@@ -107,9 +123,14 @@ const (
 	// TrustAccepted is the recorded content and the current content agreeing, including the case where
 	// there is nothing to accept.
 	TrustAccepted TrustState = "accepted"
+	// TrustDeclined is content this clone's owner read and chose not to run. It is a position on this
+	// hash, so it says nothing about the next version the repository ships.
+	TrustDeclined TrustState = "declined"
 	// TrustChanged is a recorded acceptance the tracked tree no longer matches.
 	TrustChanged TrustState = "changed"
-	// TrustUnrecorded is a clone where nobody has accepted anything yet.
+	// TrustUnrecorded is a clone where nobody has accepted or declined anything about the current
+	// content. A decline that no longer matches the tree lands here, because a position on last month's
+	// script is not a position on this one.
 	TrustUnrecorded TrustState = "unrecorded"
 )
 
@@ -132,8 +153,14 @@ func Trusted(ctx context.Context, repo *git.Repo) (bool, error) {
 }
 
 // TrustAt is Trust for a caller that already knows where the git directory is. The state itself is read from
-// the filesystem — the tree hash and the record beside it — so the directory is the only git question in it,
-// and a run that asks it once can answer this for every hook point it walks.
+// the filesystem — the tree hash and the two records beside it — so the directory is the only git question in
+// it, and a run that asks it once can answer this for every hook point it walks.
+//
+// The two records are asked in one order, and the order is the safety property. An acceptance of the current
+// content wins, because running the checks the repository asked for is the answer the gate is looking for. A
+// decline of the current content is next. A stale acceptance outranks a decline of anything, because "the tree
+// moved under a person who approved the old version" is the fact a report must not bury under a choice they
+// made about different content. Anything else is unrecorded.
 func TrustAt(gitDir, workTree string) (TrustState, string, string, error) {
 	current, _, err := TreeHash(workTree)
 	if err != nil {
@@ -146,13 +173,19 @@ func TrustAt(gitDir, workTree string) (TrustState, string, string, error) {
 	if err != nil {
 		return TrustUnrecorded, "", current, err
 	}
+	declined, err := DeclinedAt(gitDir)
+	if err != nil {
+		return TrustUnrecorded, "", current, err
+	}
 	switch {
-	case accepted == "":
-		return TrustUnrecorded, "", current, nil
 	case accepted == current:
 		return TrustAccepted, accepted, current, nil
-	default:
+	case declined == current:
+		return TrustDeclined, accepted, current, nil
+	case accepted != "":
 		return TrustChanged, accepted, current, nil
+	default:
+		return TrustUnrecorded, "", current, nil
 	}
 }
 
@@ -177,6 +210,30 @@ func Accepted(ctx context.Context, repo *git.Repo) (string, error) {
 	return AcceptedAt(gitDir)
 }
 
+// DeclinedAt is Declined with the directory the record lives under already resolved. An absent file and an
+// empty one both mean no decline has been recorded, which is the same answer a reader needs.
+func DeclinedAt(gitDir string) (string, error) {
+	data, err := os.ReadFile(declinedRecordPath(gitDir))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading the hook decline record: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// Declined reports the recorded declined hash, or "" when nobody has declined anything. It is reported even
+// when it no longer matches the tree: "declined at 3f1a…, the tree is now 82b0…" is the sentence that tells a
+// person the script they refused has a new version sitting unrecorded behind it.
+func Declined(ctx context.Context, repo *git.Repo) (string, error) {
+	gitDir, err := repo.GitDir(ctx)
+	if err != nil {
+		return "", err
+	}
+	return DeclinedAt(gitDir)
+}
+
 // Accept records the current tracked hooks tree as approved and returns the hash and the file names that
 // were approved. The names come back so the caller can print what it is asking the person to consent to: a
 // consent step nobody can read is a formality, and a formality is how people end up running a stranger's
@@ -194,11 +251,52 @@ func Accept(ctx context.Context, repo *git.Repo) (string, []string, error) {
 		return "", nil, err
 	}
 	path := trustRecordPath(gitDir)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", nil, fmt.Errorf("creating %s: %w", filepath.Dir(path), err)
-	}
-	if err := os.WriteFile(path, []byte(hash+"\n"), 0o644); err != nil {
-		return "", nil, fmt.Errorf("writing %s: %w", path, err)
+	if err := recordPosition(gitDir, path, declinedRecordPath(gitDir), hash); err != nil {
+		return "", nil, err
 	}
 	return hash, names, nil
+}
+
+// Decline records the current tracked hooks tree as content this clone's owner read and chose not to run, and
+// returns the hash and the names it covers — the same list `Accept` prints, for the same reason: a position
+// taken about content nobody can see is not a position, it is a reflex.
+//
+// Declining runs nothing, exactly as an unrecorded tree does. What it buys is a difference a report can state:
+// the gate can ask for a position without pushing a person into accepting scripts they do not want, and the
+// next version of a declined script comes back as unrecorded rather than quietly inheriting the decline.
+func Decline(ctx context.Context, repo *git.Repo) (string, []string, error) {
+	hash, names, err := TreeHash(repo.Dir)
+	if err != nil {
+		return "", nil, err
+	}
+	if hash == "" {
+		return "", nil, fmt.Errorf("%s holds no hooks to decline", TrackedRootDir(repo.Dir))
+	}
+	gitDir, err := repo.GitDir(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	if err := recordPosition(gitDir, declinedRecordPath(gitDir), trustRecordPath(gitDir), hash); err != nil {
+		return "", nil, err
+	}
+	return hash, names, nil
+}
+
+// recordPosition writes one per-clone position and clears the other.
+//
+// They clear each other because both are answers to "what do you think of the content that is here now".
+// Leaving a stale acceptance in place beside a fresh decline would let the older record answer for newer
+// content — which is the one reading the state machine in TrustAt refuses to allow, and the reason a decline
+// of last month's suite cannot be allowed to cover this month's.
+func recordPosition(gitDir, path, other, hash string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("creating %s: %w", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(hash+"\n"), 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	if err := os.Remove(other); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("clearing %s: %w", other, err)
+	}
+	return nil
 }

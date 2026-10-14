@@ -481,7 +481,51 @@ func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback boo
 		g.Reasons = append(g.Reasons, fmt.Sprintf("changeset %s: `base` in %s names %s, the branch the changeset is on, so the base moves with every commit and the changeset can never contain anything",
 			s.cs.Slug, s.cs.MetadataPath(), s.cs.Branch))
 	}
+	// The repository's own scripts, asked last: it is the one condition the branch cannot fix by editing the
+	// branch, and the one a green verdict used to hide. It lives in the gate rather than in the report beside it
+	// because the difference is the verdict — `check` used to answer "ready" while the checks the repository
+	// asked for were skipped for want of a recorded position, and a pipeline that merged on that answer merged
+	// work the team's own suite never saw.
+	hooksReason, err := a.hooksPositionReason(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	if hooksReason != "" {
+		g.Reasons = append(g.Reasons, hooksReason)
+	}
 	return g, nil
+}
+
+// hooksPositionReason is the gate's condition on the tracked hooks tree: a clone that has recorded no
+// position on the content the repository ships has not run the checks that content carries, and git-pair does
+// not call that ready.
+//
+// `accepted` answers it by running them. `declined` answers it differently: a person read the scripts and chose
+// not to run them here, which is a position rather than an absence, and is what lets the gate ask for one
+// without pushing anyone into approving a script they do not want. What neither is, is silence — so
+// `unrecorded` and `changed` both refuse. `changed` refuses because content that moved under an acceptance is
+// content nobody has looked at since; letting the older record answer for it would make one acceptance cover
+// the whole history of the directory, which is the reading the state machine in `hooks.TrustAt` refuses.
+//
+// The off switch is not an answer either. `GIT_PAIR_HOOKS=0` and `git-pair.hooks=false` say a machine does not
+// want to run scripts right now, which says nothing about what those scripts do; the position is
+// `git pair hooks --decline`, written down where the next reader can see it was taken.
+func (a *app) hooksPositionReason(ctx context.Context, s *session) (string, error) {
+	state, accepted, current, err := a.hookRun(s.repo).Trust(ctx)
+	if err != nil {
+		return "", err
+	}
+	switch state {
+	case hooks.TrustAccepted, hooks.TrustDeclined:
+		return "", nil
+	}
+	root := displayPath(hooks.TrackedRootDir(s.repo.Dir))
+	if state == hooks.TrustChanged {
+		return fmt.Sprintf("the repository's tracked hooks under %s changed since this clone accepted them (accepted %s, the tree is now %s): the checks they carry have not run on this content — read what moved, then `git pair hooks --trust` to run it or `git pair hooks --decline` to record that you read it and chose not to",
+			root, short(accepted), short(current)), nil
+	}
+	return fmt.Sprintf("the repository's tracked hooks under %s have not been recorded in this clone: the checks they carry have not run — read them, then `git pair hooks --trust` to run them or `git pair hooks --decline` to record that you read them and chose not to",
+		root), nil
 }
 
 // integrationVerdict is the marker whose review outcome licenses a merge.

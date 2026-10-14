@@ -505,37 +505,38 @@ that has committed tracked hooks refuse outright in a clone that has not accepte
 to record where `declined` lives: per-clone, beside `trusted-hooks` in the git directory, keyed by the same tree
 hash acceptance is keyed by.
 
-The store is what constrains the shape, and it is worth stating before anyone writes code. A record under
-`<git-dir>/` is a fact about one machine, exactly like acceptance. `status`, `queue` and `git pair hooks` can
-report it, and it can stop nagging the person who chose it. A verdict another clone has to reach cannot read it,
-and a CI checkout is a clone that has accepted nothing — so making the gate a refusal means a fresh clone
-refuses everything, and the way a pipeline passes is to run `git pair hooks --trust`, which hands consent to the
-runner. M1 rejected that shape for the same reason, in the comment above the trust rule: refusing to work in a
-clone one has not yet approved makes the safety mechanism the thing people route around.
-
-So the milestone's first task is the decision the store cannot make: does mandatory live inside the verdict, in
-which case there has to be a shared, reviewed statement that a repository's hooks are declined with the
-per-clone record as the personal layer over it, or does it live in reporting, where the cost of an unaccepted
-state is visibility on every surface rather than a refusal.
+The store is what constrained the shape, and it is worth keeping on the record because it is the part a later
+reader will ask about. A record under `<git-dir>/` is a fact about one machine, exactly like acceptance. A verdict
+another clone has to reach cannot read it, and a CI checkout is a clone that has accepted nothing — so making the
+gate a refusal means a fresh clone refuses everything, and the way a pipeline passes is to take a position in the
+job. The reviewer took that trade knowingly: no repository has tracked hooks yet, so the mandate lands on nobody
+who is using the tool today, and the alternative — visibility on every surface with no refusal — was the position
+that could not say "this team requires the suite".
 
 Deliverables
 
 - The four trust states named and reported: `accepted` (tree hash matches), `changed` (the tree moved since
-  acceptance), `declined` (hash matches what this person declined), and `unaccepted` (never seen). Today there
-  is no `declined`, so the absence and the choice look identical from outside.
-- `git pair hooks` reporting all four, and `status`/`queue` saying which one a tracked tree is in — the point of
-  the state is that a reader can tell a team that opted out from a team that never heard.
-- Whatever the first decision concludes, the PRD sentence that matches it. If the verdict does not change, §26
-  and §27 say so plainly rather than leaving "mandatory" to be inferred from the existence of the state.
-- The skill's hook reference carrying the difference between `GIT_PAIR_HOOKS=0` (the machine owner's escape
-  hatch, already documented) and `declined` (a stated position about this repository's scripts).
+  acceptance), `declined` (hash matches what this person declined), and `unrecorded` (never seen). The state names
+  are the code's; the decision text above called the fourth `unaccepted` before the code existed.
+- `git pair hooks --decline` as the human act beside `--trust`, printing what it records, and the report showing
+  all four with the hash each position was taken against.
+- The verdict asking for a position: `git pair check` refuses on `unrecorded` and `changed`, and `change integrate`
+  inherits it through the same gate, with the reason naming both commands. `accepted` and `declined` clear it.
+- The PRD's hook contract, the README, and `references/cli.md` carrying the fourth state and the demand.
+- The skill's hook reference carrying the difference between `GIT_PAIR_HOOKS=0` (the machine owner's escape hatch,
+  which is not a position and does not lift the refusal) and `declined` (a stated position about this repository's
+  scripts), and the rule that neither `--trust` nor `--decline` is an agent's command to run.
 
 Verification
 
-- Unit tests for `hooks.TrustState` covering the four states, and one that a hook added to a declined tree is
-  `unaccepted` again rather than still declined — the hash rule is the whole safety of the state.
-- A declined tracked tree reported on every surface that reports an unaccepted one today, and no change to any
-  verdict unless the first decision says otherwise.
+- Unit tests for the four states, and one that a hook added to a declined tree is `unrecorded` again rather than
+  still declined — the hash rule is the whole safety of the state.
+- `check --json` per state: the two silent ones refuse with the reason in `reasons` and `ready: false`, the two
+  recorded ones pass, and the off switch does not change either answer.
+- `git pair hooks --decline` human and JSON, and `--trust` with `--decline` as a usage error (exit 2).
+- The tracked root at the integrate point, which is the one place a hook is ordinary reviewed content rather than a
+  fixture: unrecorded refuses the declaration and writes no marker; declined lets it through with the hook skipped.
+
 
 ## Spikes / research
 
@@ -546,7 +547,7 @@ Verification
 | Do post-hooks need a per-point opt-in to blocking? | Open | Deferred. Under §26 a blocking post-hook cannot reverse anything, so the only difference is exit code, and the plan already reports nonzero. |
 | Is there a safe form of reviewer-side hooks? | Resolved | Yes, and they are in scope as of 2026-10-13. Hooks are client control, so the reviewer owns their own hooks and what they enforce. The safety question moves from "may a hook gate a verdict" to "what may a hook write into the record", and the answer there is: client-appended lines yes, anything the gate reads no — see *What the record carries, and what it does not*. |
 | Should a hook result be recorded in the review marker? | Resolved | Split, after review feedback. A key git-pair reads: still no. Lines the client appends: yes — `Message` gains a field rendered after `Trailers` in the same paragraph, with reserved keys rejected and a client-owned prefix. Measured: appending at the end of the block cannot forge (first-wins protects the real keys), while appending prose below the block silently evicts `Review-State` and collapses the changeset to `WORKING`. See [research/2026-10-13-appending-to-the-marker-message.md](research/2026-10-13-appending-to-the-marker-message.md). |
-| Should a repository with committed hooks refuse outright in an unaccepted clone? | Decided in direction, unimplemented | Mandatory is the direction, with an explicit `declined` state as the escape hatch, recorded per-clone beside `trusted-hooks` and keyed by the tree hash. The constraint that shapes the rest: a per-clone record cannot feed a verdict another clone has to reach, so either the gate stays out of the verdict or `declined` also gets a shared, reviewed form. Written up as M6. |
+| Should a repository with committed hooks refuse outright in an unaccepted clone? | **Adopted, implemented in M6** | Mandatory, with a `declined` state as the way out: the tracked tree is recorded per-clone beside `trusted-hooks` and keyed by the tree hash, and `check` — with `change integrate` behind the same gate — refuses while it is `unrecorded` or `changed`. The consequence the reviewer took knowingly: a CI checkout is a clone that has recorded nothing, so a job takes a position in its own script (`git pair hooks --trust`, or `--decline` where a team has genuinely chosen that), and `GIT_PAIR_HOOKS=0` is deliberately not a substitute — it says a machine does not want to run scripts, not what the scripts do. Nothing breaks on upgrade because no repository has tracked hooks yet. |
 | Does `--no-cache` interact with hook state? | Open | Expected no: hooks run once per command and nothing about them is memoised. Confirm no fact-cache key covers them. |
 
 ## Risks
@@ -636,8 +637,9 @@ Three things the plan did not predict, each of which changed the shape of the co
     `content outside changesets/checkout-flow/ changed since <approval>: .git-pair/hooks/pre-integrate/01-suite`
     — which is a statement about the install, not about the point under test. Installed before the approval the
     hook is ordinary reviewed content, consent is recorded against the tree, and the point fires from the
-    tracked root like any other; `TestTrackedRootAtTheIntegratePoint` runs it both ways, unaccepted (skipped,
-    with the consent command named) and accepted (blocking the declaration with no marker written). The table of
+    tracked root like any other; `TestTrackedRootAtTheIntegratePoint` runs it three ways since M6 — unrecorded (the
+    declaration refuses, no marker, both position commands named), declined (the declaration proceeds and the hook
+    stays skipped) and accepted (blocking the declaration with no marker written). The table of
     author points still installs at the per-clone root, so the four points read identically and none of them
     depends on a consent step that belongs to the root rather than the point. Trust is a property of the root,
     not of the point.
@@ -726,6 +728,20 @@ accepted, and the same command runs it after `git pair hooks --trust`.
 
 **M5 — done** on `feat/hooks-spec`, stacked on M4.
 
+**M6 — the unaccepted-hooks decision** on `feat/hooks-declined-state`, stacked on M5 (both edit the hook contract
+and the skill page, and the reviewer's question arrived while reading M5).
+
+The reviewer's two follow-up choices are the reason the shape is what it is: the refusal is per-clone and
+content-keyed rather than tracked, and the decline is taken with `git pair hooks --decline` beside `--trust`. What
+that leaves, and what the code settles: `accepted` and `declined` clear the verdict and the two silent states do
+not, the two records clear each other so a position about one version cannot answer for another, and a decline
+whose hash no longer matches stays reportable — "declined 3f1a…, the tree is now 82b0…" is a different situation
+from nobody having looked, and it is the one a team needs to see before it re-runs a script it had said no to.
+
+The gate is `integrationGate`, not a check-only bolt, because `change integrate` asks the same question and a
+declaration that reads "ready" over unrun checks is the failure being closed. `hooks.Resolution` memoizes the trust
+read so a run that asks the state for the gate and again for each hook point asks once.
+
 What landed: the §26 scope sentence, the §27 entry that says which half of the deferred pre-push work this
 closes, `skills/git-pair/references/hooks.md`, a Concepts entry in the README, and hook shapes added to the
 hygiene self-test fixture.
@@ -758,10 +774,12 @@ the OK cases the feature's own code would be the thing that eventually gets a ru
 
 **M5's review round left one point as a decision, and it is recorded rather than answered.** The reviewer asked
 whether the unaccepted state should be mandatory and suggested an explicit `declined` state as the escape hatch
-(`review 1af9b87`), which this milestone answers under *Addressed feedback*: agreed in direction, with the store
-chosen (per-clone, keyed by the tree hash) and the one decision the store cannot make written up as M6 above. M5
-changed its own open question and this plan; the PRD still describes the behaviour the code has, which is the
-rule M5 was cut to write down. The spike the plan carried as open is therefore handed on rather than closed.
+(`review 1af9b87`). The reviewer chose mandatory with a declined escape, and M6 below is the implementation:
+the store is per-clone and keyed by the tree hash, and the mandate lives in the verdict rather than in reporting.
+M5 changed its own open question and this plan; the PRD M5 shipped described the behaviour the code had at the
+time, which was the rule M5 was cut to write down, and M6 updates that contract alongside the code. The spike the
+plan carried as open is therefore closed by M6 rather than left standing.
 
 Landed in the integration branch as of 2026-10-14: M1 at `9abcfc7`, M2 at `c77633e`, M3 at `29f49e8`, M4 at
-`6768da6`. M5 is the last milestone and is in review.
+`6768da6`. M5 is approved and declared, awaiting the merge; M6 is implemented on top of it on
+`feat/hooks-declined-state`, which is why the two move together — M6 edits the same contract pages M5 wrote.

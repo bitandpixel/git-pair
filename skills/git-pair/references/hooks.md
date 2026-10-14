@@ -127,33 +127,46 @@ clone them. git-pair's tracked hooks are committable because consent is taken by
 bytes of the tracked hooks tree are hashed, and the hash is recorded per clone in
 `<git-dir>/git-pair/trusted-hooks`.
 
-An unaccepted tree does not run at all. The operation proceeds and the skipped hooks are named on stderr, so a
-clone is never surprised by an unreviewed script and never silently left without the checks it thinks it has.
-Editing a hook changes the hash, so an edit after acceptance is a new acceptance.
+An unaccepted tree does not run at all, and the skipped hooks are named on stderr, so a clone is never surprised
+by an unreviewed script and never silently left without the checks it thinks it has. Editing a hook changes the
+hash, so an edit after acceptance is a new acceptance.
 
-**`trusted: false` carries two different facts, and `trust_state` tells them apart.** `unrecorded` means nobody
-on this clone has ever accepted the tree — they have not looked. `changed` means this clone accepted a version
-and the repository has since shipped another — the team moved a check underneath them. Act on them differently:
-the first is "read these", the second is "read what moved, then decide", and the answer prints the hash that
-was approved beside the tree's current one so the comparison is against something you saw. Accepting whatever is
-there because the note asked you to is how a repository ends up running a check nobody read.
+**`trust_state` carries four states, because the reasons a tracked tree does not run are different facts.**
+`unrecorded` means nobody on this clone has recorded anything about the tree — they have not looked. `changed`
+means this clone accepted a version and the repository has since shipped another — the team moved a check
+underneath them. `declined` means somebody read the scripts and chose not to run them here, which is a position
+rather than an absence, recorded beside the acceptance in `<git-dir>/git-pair/declined-hooks` against the same
+content hash. Act on them differently: the first is "read these", the second is "read what moved, then decide",
+and the third needs nobody — but check the hash beside it, because a new version of a declined script is
+unrecorded, not declined, and the report shows both hashes so you can tell which you have. Accepting whatever is
+there because a note asked you to is how a repository ends up running a check nobody read.
 
-A clone sitting on `changed` has a third option besides accepting and working without the check: copy the
-version it did read into the per-clone root, which runs with no consent step. That is the vendored model
-applied by one person for one point, and it is the honest way to keep working while the team's new version
-awaits you.
+**The verdict asks for a position.** While the tracked tree is `unrecorded` or `changed`, `git pair check` refuses
+and `git pair change integrate` with it, with a reason that names both ways out. This is deliberate and it is not
+an obstacle to route around: the checks the repository asked for have not run, and a merge should not be able to
+rest on that. `accepted` and `declined` both clear it — one because the scripts ran, one because a person answered
+a question about them. Commands that write no verdict (`change ready`, `review submit`, `status`) report the skip
+instead of refusing it, so you can still work, still hand off, and still read the thing you are being asked about.
+
+A clone sitting on `changed` has a third option besides accepting and declining: copy the version it did read into
+the per-clone root, which runs with no consent step. That is the vendored model applied by one person for one
+point, and it is the honest way to keep working while the team's new version awaits you.
 
 ```bash
 git pair hooks            # what is configured, both roots, executable or not
-git pair hooks --json     # + tracked_root, clone_root, trusted, trust_state, accepted, tree_hash, hooks[], unknown[]
+git pair hooks --json     # + tracked_root, clone_root, trusted, trust_state, accepted, declined, tree_hash, hooks[], unknown[]
 git pair hooks --trust    # a person's act: records the tracked tree as accepted, printing names and hash
+git pair hooks --decline  # a person's act: records it as read and chosen not to run, printing names and hash
 ```
 
-**`--trust` is a person's decision, not an agent's.** It says "I read this script and I allow it to run on my
-machine." If tracked hooks are unaccepted, report that and name the command; do not run it yourself. The same
-applies to `GIT_PAIR_HOOKS=0`: that switch belongs to the person whose machine it is, for the moment their own
-script is misbehaving. An agent who sets it has removed the check the repository put there, which is the
-opposite of the work.
+**`--trust` and `--decline` are a person's decisions, not an agent's.** The first says "I read this script and I
+allow it to run on my machine"; the second says "I read this script and I am choosing not to run it here." Either
+way the sentence is about what a person read, so an agent cannot truthfully say it. When tracked hooks have no
+position recorded, report the state, print what `check` refused with, and name both commands — that is the whole
+of your part. Do not run either one yourself, and do not reach for `GIT_PAIR_HOOKS=0` to get a green answer: that
+switch belongs to the person whose machine it is, for the moment their own script is misbehaving, and it is not a
+position — the verdict refuses with hooks switched off, because the off switch says a machine does not want to run
+scripts right now and says nothing about what those scripts do.
 
 ## Per-clone, and what that costs
 
@@ -169,13 +182,17 @@ credit a run it performed records that itself, as a `pre-check` hook that writes
 
 ## In CI
 
-The tracked root is what CI gets, because CI checks the tree out — and it needs one line of consent, since a
-runner has never accepted the hash:
+The tracked root is what CI gets, because CI checks the tree out — and it needs one line to take a position,
+since a runner has recorded nothing about the hash:
 
 ```yaml
 - run: git pair hooks --trust
 - run: git pair check --json --default-branch origin/main | jq -e '.ready and .integrating'
 ```
+
+`--trust` is the usual line, because a runner that is going to be told the suite passed has to run it. A team that
+has genuinely decided not to run the tracked scripts on runners records `git pair hooks --decline` in the job
+instead; what does not work is neither, and what does not count is `GIT_PAIR_HOOKS=0` standing in for either.
 
 Run the hooks through `check`, not by calling the scripts: that is the one command whose exit code and whose
 `ready` agree about every condition, yours included. Pass `--default-branch` in CI — a job that cloned with

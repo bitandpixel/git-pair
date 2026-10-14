@@ -1934,7 +1934,7 @@ Hooks live in two roots, consulted in this order:
 
 | Root | Path | Trust |
 | --- | --- | --- |
-| tracked | `<worktree>/.git-pair/hooks/<point>/` | committed, therefore content that arrived from somewhere; runs only after `git pair hooks --trust` |
+| tracked | `<worktree>/.git-pair/hooks/<point>/` | committed, therefore content that arrived from somewhere; runs only after `git pair hooks --trust`, and the verdict asks this clone for a position — `--trust` or `--decline` — before it will call the work ready |
 | per-clone | `<git-dir>/git-pair/hooks/<point>/` | the person's own file under their own git directory, never committed, runs directly |
 
 The tracked root is a deliberate departure from git's own model, where `.git/hooks` is not cloned and a team
@@ -1961,17 +1961,37 @@ entry nobody runs is otherwise indistinguishable from no entry at all.
 A tracked file is code that runs on a clone, which is why git keeps its hooks under `.git/` and refuses to
 clone them. git-pair's tracked hooks are committable because consent is taken by content: the path, mode, and
 bytes of the tracked hooks tree are hashed and the hash is recorded per clone in `<git-dir>/git-pair/trusted-hooks`.
-An unaccepted tree does not run at all — the operation proceeds and the skipped hooks are named on stderr,
-so a clone is never surprised by an unreviewed script and never silently left without the checks it thinks it
-has. Editing a hook changes the hash, so an edit after acceptance is a new acceptance.
+An unaccepted tree does not run at all, and the skipped hooks are named on stderr, so a clone is never surprised
+by an unreviewed script and never silently left without the checks it thinks it has. Editing a hook changes the
+hash, so an edit after acceptance is a new acceptance.
 
-Acceptance has three states, not two, because the reasons a tracked tree does not run are different facts.
-**Unrecorded** is a clone where nobody has accepted anything. **Changed** is a clone whose recorded hash the
-repository has moved under — the team shipped a new version of the check. They read differently on stderr, the
-second naming the accepted hash beside the tree's current one, because the second is the moment a check starts
-not running for everybody who pulled, and a note that reads the same in both makes a breaking change to a check
-look like a setting nobody touched. `git pair hooks --json` carries `trust_state` beside `trusted`, and
-`tree_hash` when the two differ.
+The relation between a clone and the tracked tree has four states, because the reasons a tracked tree does not run
+are different facts. **Unrecorded** is a clone where nobody has recorded anything. **Changed** is a clone whose
+recorded hash the repository has moved under — the team shipped a new version of the check. **Declined** is a
+clone where a person read the scripts and chose not to run them here; it is recorded the same way, in
+`<git-dir>/git-pair/declined-hooks`, against the same content hash, and the two records clear each other so a
+position about one version cannot answer for another. They read differently on stderr, the second naming the
+accepted hash beside the tree's current one, because the second is the moment a check starts not running for
+everybody who pulled, and a note that reads the same in both makes a breaking change to a check look like a
+setting nobody touched. `git pair hooks --json` carries `trust_state` beside `trusted`, `declined` beside
+`accepted`, and `tree_hash` whenever the tree is not the accepted content.
+
+A decline is keyed by hash for the same reason acceptance is. The next version the repository commits is
+unrecorded, not declined: a standing opt-out for a directory would turn "this team read the script and said no"
+into "nobody has to read the scripts in this directory again", which is the opposite of what the state is for. A
+stale decline stays reportable, because "declined 3f1a…, the tree is now 82b0…" is the sentence that tells a
+person the script they refused has been replaced.
+
+**The verdict asks for a position.** `git pair check` refuses, and `git pair change integrate` with it, while the
+tracked tree is unrecorded or changed: the checks the repository asked for have not run, and a merge decision
+should not be able to rest on that. `accepted` passes because the scripts ran and `declined` passes because a
+person answered a question about them; what neither is, is silence. The decline is what makes the demand fair —
+without it, a gate that refuses until scripts are approved asks every clone to either execute code it does not
+want or stay permanently red, and a team under a deadline executes the code. The off switch is not a position:
+`GIT_PAIR_HOOKS=0` and `git-pair.hooks=false` say a machine does not want to run scripts right now, which says
+nothing about what those scripts do, and the quietest way past a gate should not be an environment variable nobody
+has to read. Commands that write no verdict — `change ready`, `review submit`, `status` — keep reporting the skip
+rather than refusing it, so a clone nobody has approved is still a clone you can work in.
 
 A clone in the changed state has a third option besides accepting or working without: it can keep running the
 version it did read, by copying that content into the per-clone root, which needs no acceptance. git-pair does

@@ -234,3 +234,103 @@ func TestTrustStates(t *testing.T) {
 		t.Errorf("Trusted = %v (%v) after the edit, want false", trusted, err)
 	}
 }
+
+// A decline is the position that was missing: content read, and chosen not to run here. Two properties make it
+// worth a state of its own rather than a boolean beside the acceptance. It has to be distinguishable from never
+// having looked — that is its whole use to a report, and what lets the gate ask for a position without pushing
+// anyone into approving a script — and it must not become a permanent exemption, which is why it is keyed by the
+// same content hash acceptance is.
+func TestDeclineStates(t *testing.T) {
+	ctx := context.Background()
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))
+	repo := &git.Repo{Dir: f.Dir()}
+	dir := filepath.Join(f.Dir(), ".git-pair", "hooks", "pre-ready")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	hook := filepath.Join(dir, "01-suite")
+	writeHook := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(hook, []byte(body), 0o755); err != nil {
+			t.Fatalf("write hook: %v", err)
+		}
+	}
+	writeHook("#!/bin/sh\nexit 0\n")
+
+	// The list comes back for the same reason `Accept` prints one: a position taken about content nobody has
+	// been shown is not a position.
+	want, names, err := Decline(ctx, repo)
+	if err != nil {
+		t.Fatalf("Decline: %v", err)
+	}
+	if want == "" || len(names) != 1 || !strings.Contains(names[0], "01-suite") {
+		t.Errorf("Decline = %q, %v, want a hash and the one file it covers", want, names)
+	}
+	state, accepted, current, err := Trust(ctx, repo)
+	if err != nil {
+		t.Fatalf("Trust after the decline: %v", err)
+	}
+	if state != TrustDeclined || current != want {
+		t.Errorf("declined: state=%s current=%q, want declined at %q", state, current, want)
+	}
+	// Declining runs nothing. The distinction from an unrecorded tree is who decided, not what happened.
+	if trusted, err := Trusted(ctx, repo); err != nil || trusted {
+		t.Errorf("Trusted = %v (%v) for declined content, want false — a decline is not a way to get a script run",
+			trusted, err)
+	}
+	if got, err := Declined(ctx, repo); err != nil || got != want {
+		t.Errorf("Declined = %q (%v), want %q", got, err, want)
+	}
+
+	// The hash rule. A new version of a declined script is new content, and the decline says nothing about it:
+	// it comes back unrecorded rather than quietly inherited, which is the difference between a position on a
+	// script and an exemption for a directory.
+	writeHook("#!/bin/sh\nmisbehave\nexit 0\n")
+	state, accepted, current, err = Trust(ctx, repo)
+	if err != nil {
+		t.Fatalf("Trust after the new version: %v", err)
+	}
+	if state != TrustUnrecorded {
+		t.Errorf("after a new version of declined content: state=%s, want unrecorded", state)
+	}
+	if accepted != "" {
+		t.Errorf("accepted = %q for a clone that never accepted anything", accepted)
+	}
+	if current == want || current == "" {
+		t.Errorf("current = %q, want a new hash beside the declined %q", current, want)
+	}
+	// The stale decline stays reportable, because "declined 3f1a…, the tree is now 82b0…" is the sentence that
+	// tells a person the script they refused has a new version sitting unrecorded behind it.
+	if got, err := Declined(ctx, repo); err != nil || got != want {
+		t.Errorf("Declined = %q (%v) after the new version, want the stale %q to stay reportable", got, err, want)
+	}
+
+	// The two records clear each other, in both directions. An acceptance beside an older decline would let a
+	// position about different content answer for this content, and a decline beside an older acceptance would
+	// report content the person has just declined as `changed` — telling them to re-read what they just read.
+	writeHook("#!/bin/sh\nexit 0\n")
+	if _, _, err := Accept(ctx, repo); err != nil {
+		t.Fatalf("Accept after the decline: %v", err)
+	}
+	if got, err := Declined(ctx, repo); err != nil || got != "" {
+		t.Errorf("Declined = %q (%v) after accepting, want the cleared record", got, err)
+	}
+	if state, _, _, err := Trust(ctx, repo); err != nil || state != TrustAccepted {
+		t.Errorf("state = %s (%v) after accepting, want accepted", state, err)
+	}
+	writeHook("#!/bin/sh\nexit 1\n")
+	if _, _, err := Decline(ctx, repo); err != nil {
+		t.Fatalf("Decline after the acceptance: %v", err)
+	}
+	state, accepted, _, err = Trust(ctx, repo)
+	if err != nil {
+		t.Fatalf("Trust after declining: %v", err)
+	}
+	if state != TrustDeclined {
+		t.Errorf("state = %s after declining, want declined", state)
+	}
+	if accepted != "" {
+		t.Errorf("accepted = %q after declining, want the cleared record: the older acceptance must not make this content read as changed", accepted)
+	}
+}
