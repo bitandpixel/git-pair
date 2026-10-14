@@ -66,9 +66,27 @@ ends held by the process it abandoned. A `sleep 30` behind a one-second deadline
 seconds, which turns a deadline into a suggestion. Five seconds of drain, then the pipes close and whatever
 arrived is what the report carries.
 
+**The two questions a point asks belong to the run.** Before a point can find out that the repository has no
+hooks, it asks git whether hooks are switched off and where the clone's git directory is. `check` has two
+points and `git pair hooks` has twelve, so per point that is four invocations on the path every author and
+every CI job walks, in repositories that never use the feature — and the cost gate in
+`scripts/gates/ci-integrate.sh` counts invocations with the caches off, because a bound on what a formulation
+costs cannot depend on whether somebody asked the same question a minute ago. Neither answer can move inside a
+process: the off switch is the environment plus one config value, and the git directory is where it is. So
+`hooks.Resolution` holds both, taken lazily and kept; `app.hookRun` shares one resolution across every point
+the command walks, and `TrustAt`/`AcceptedAt` take the directory from it instead of resolving it again. The
+in-process memo in `internal/git` would have answered the repeats for free in normal use, which is exactly why
+it is not the fix: the memo makes the duplicate invisible to the measurement that exists to catch it.
+
 ## Validation
 
 -   `go build ./...` clean; `gofmt -l internal cmd` empty.
+-   `mise run gates` — not just `check` — exited **0**: 90 checks, no `FAIL`, and its cost section reads
+    `a child on a parent stays inside the recorded cost of the stack (49 measured, 50 allowed)`, with the
+    repeat line beside it (`49 then 49`). The same measurement before this changeset's once-per-run resolution
+    was 51, which is the assertion that made CI decline the head. `TestCheckAsksTheHookQuestionsOncePerRun`
+    pins it from the Go side with `gittest.SpawnShimLines`: it reports 2 and 2 against a per-point resolution
+    and 1 and 1 against the shared one.
 -   `go test ./internal/hooks/ ./internal/cli/ ./internal/hygiene/` green, run in full (121s). The new cases:
     a failing `pre-check` refuses the gate with itself as the only reason, keeps its output off stdout and on
     stderr, and the human form exits 1 under `NOT READY:`; a passing hook leaves the verdict alone and is
