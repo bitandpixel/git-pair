@@ -167,12 +167,18 @@ no verdict, so they can advise the housekeeping safely, and it runs after the me
 certify.
 
 A stacked child of a parent that has **not** landed is the same reading, one step earlier. `status`, `check`,
-`change wait` and `review submit` print the landing step as the parent's:
-`waiting on parent booking: land it first (git pair check, then merge into main with ordinary git), then
+`change wait` and `review submit` name the parent's landing and point at the screen that spells it:
+`waiting on parent booking: its landing is owed first (git pair status --changeset booking names the step), then
 git pair check and merge into main`. No branch of the stack is offered as the child's merge target — a child
 lands where its parent landed — and `git pair change integrate` refuses to declare the child until the
 parent's record is in the destination. `check` passing on a child is not permission to merge the child: land
 the bottom of the stack first.
+
+The merge itself has two exits, and the human screens print both: merge it yourself with ordinary git, or
+`git pair change integrate`, then `git push origin <branch>` to hand it to whoever owns the destination branch.
+`next_action` in `--json` carries only the first, so read the line above as one instruction and know the
+second exists. Whether the destination's owner is a person or a job is not git-pair's business, and no advice
+names one (PRD §26).
 
 `git pair change wait --json` — `ref` is where the activity appeared (`HEAD`, or a remote-tracking
 branch brought in by `--fetch` but not yet merged), `review_commit` and `review_commit_full` appear only

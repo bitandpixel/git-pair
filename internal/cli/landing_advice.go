@@ -263,13 +263,36 @@ func stackBelow(ctx context.Context, repo *git.Repo, cs changeset.Changeset, db 
 // this file was written to reduce to one — and it went stale the first time the landing contract changed,
 // because nothing tied the two copies together.
 func landingNextAction(lc landingContract) string {
+	if lc.WaitingOn != "" {
+		return waitingNextAction(lc)
+	}
 	target := displayRef(lc.Destination)
 	if target == "" {
 		target = "the base branch"
 	}
-	if lc.WaitingOn == "" {
-		return fmt.Sprintf("`git pair check`, then merge into %s with ordinary git%s", target, lc.DestinationNote)
+	return fmt.Sprintf("`git pair check`, then merge into %s with ordinary git%s", target, lc.DestinationNote)
+}
+
+// waitingNextAction is the child's sentence while a parent's landing is owed. It names the parent and refers
+// the reader to the parent's own screen rather than spelling the parent's `check` and merge, and it puts the
+// child's own step last so a reader who stops at the end of the line still reads their own destination. The
+// parent is never named as a merge target for the child: a stacked child lands where its parent landed, and
+// `git pair change integrate` refuses the child until the parent's record is in the destination.
+//
+// The reference is a decision rather than a formatting accident, which is why it is its own builder. Spelling
+// the parent's step inside the child's sentence put one author's `check` and merge into a sentence belonging
+// to another changeset — and worse than odd when the parent is approved under a feedback policy this child
+// knows nothing about, or is a grandparent several screens away. The parent's screen is the one place its
+// landing is spelled; the parent's id is the pointer to it, because ids are unique and branch names are not.
+func waitingNextAction(lc landingContract) string {
+	parent := displayRef(lc.WaitingOn)
+	if parent == "" {
+		parent = "<parent>"
 	}
-	return fmt.Sprintf("waiting on parent %s: its landing is owed first (`git pair status --changeset %s` names the step), "+
-		"then `git pair check` and merge into %s", lc.WaitingOn, lc.WaitingOn, target)
+	target := displayRef(lc.Destination)
+	if target == "" {
+		target = "the base branch"
+	}
+	return fmt.Sprintf("waiting on parent %s: its landing is owed first (`git pair status --changeset %s` names the step), then `git pair check` and merge into %s",
+		parent, parent, target)
 }

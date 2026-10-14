@@ -329,10 +329,11 @@ $ git pair status --changeset booking-transaction --json | jq '{landed, landed_c
 ```
 
 A parent that has not landed yet is the other half of the same question, and it decides what the child's
-next step is. `git pair status`, `git pair check`, `git pair change wait` and `git pair review submit` print the
-landing contract (§PRD §29) for a stacked child as the parent's step first:
-`waiting on parent booking: land it first (`git pair check`, then merge into main with ordinary git), then
-`git pair check` and merge into main`. The parent's branch is not offered as the child's merge target, on two
+next step is. `git pair status`, `git pair check`, `git pair change wait` and `git pair review submit` print
+the landing contract (§PRD §29) for a stacked child by naming the parent's landing first and pointing at the
+screen that spells it:
+`waiting on parent booking: its landing is owed first (`git pair status --changeset booking` names the step), then `git pair check` and merge into main`.
+The parent's branch is not offered as the child's merge target, on two
 grounds: the child's work goes where the parent's went, and the child's own merge is the step
 `git pair change integrate` (§9.9) refuses until the parent's record is in the destination — a merge onto a
 branch review can still rebase, amend or block is a merge on history that may stop existing. Once the parent
@@ -823,7 +824,10 @@ a CI log that says nothing has landed has two causes, a stale fetch and a wrong 
 one is visible in a sentence about the changeset.
 `next_action` is the landing contract (§PRD §29) in one line: `check`, then the merge with ordinary git, and
 for a stacked child whose parent has not landed the parent's landing first (§PRD §21).
-Once the directory is in the destination it says there is nothing further to do.
+Once the directory is in the destination it says there is nothing further to do. It stays one instruction, because
+a consumer parsing advice should not have to choose between two exits; the human screens print the other exit
+under it — `git pair change integrate`, then `git push origin <branch>`, handing the merge to whoever owns the
+destination — exactly where that command would record a declaration, and nowhere it would refuse one.
 
 ```json
 {

@@ -193,7 +193,7 @@ with a reason that explains what the screen should have said. See
       already declared.
 - [x] Do not add the line to `change ready`'s acknowledgement, and record why in the commit: the predicate is
       false there by construction, since a changeset that was just offered has no verdict to integrate on.
-- [ ] Tests: the offer and the acceptance from one fixture (offer present ⇔ `change integrate` accepted); the
+- [x] Tests: the offer and the acceptance from one fixture (offer present ⇔ `change integrate` accepted); the
       four excluded states; `--json` byte-unchanged on `status` and `check`; and the hand-off line passing the
       M1 command test.
 
@@ -214,16 +214,16 @@ with a reason that explains what the screen should have said. See
 
 #### Tasks
 
-- [ ] Make PRD §21's "The next step says which landing is owed" the one canonical statement: the two facts, the
+- [x] Make PRD §21's "The next step says which landing is owed" the one canonical statement: the two facts, the
       two exits, "git-pair names the step and the destination, never the actor or the tooling", and the rule
       that a surface which does not own a step refers the reader to the one that does. Fold in the sentences
       that currently repeat it — §9.5, §11.1, §11.3 keep their local claims and link instead of restating.
-- [ ] Update the three quotes of the waiting sentence (README's stack prose, `references/cli.md`, the PRD's
+- [x] Update the three quotes of the waiting sentence (README's stack prose, `references/cli.md`, the PRD's
       fenced block) to M2's wording, and add the hand-off line where the README documents `next_action`.
-- [ ] Add the quote test: for each sentence a document is expected to carry, build it from the builders and
+- [x] Add the quote test: for each sentence a document is expected to carry, build it from the builders and
       require the document to contain it. Name the documents the way `docFiles` does, so a new reference page
       is covered without anyone remembering.
-- [ ] Record in `references/integration.md` that the automated path is one shape of the destination owner's
+- [x] Record in `references/integration.md` that the automated path is one shape of the destination owner's
       decision, with the pointer to `scripts/ci/git-pair-integrate.sh` — and no new claim about what a runner
       does.
 

@@ -2,87 +2,165 @@
 
 ## Summary
 
-The landing guidance is written by hand in too many places, and it has drifted.
+The landing guidance was written by hand in too many places, and it had drifted in three ways that a reader
+could see.
 
-Two surfaces spell the parent's landing step in two different wordings — the child's waiting sentence and
-`git pair change integrate`'s refusal — and three documents quote the waiting sentence, so any change to the
-landing contract has to be made in five places or those places begin to disagree with each other. This
-changeset makes one builder own the wording of a landing step, makes every other surface name the changeset
-and point at the screen that prints it, and adds the second exit — hand the merge to the destination's owner
-with `git pair change integrate` — to the screens a human reads.
+The first was a child's next step restating its parent's work:
 
-The consolidation is the substance; the hand-off line is what makes it necessary. With one exit, repeating a
-sentence three times is merely wasteful. With two, every repetition has to carry both.
+```console
+$ git pair status        # beta, APPROVED, stacked on alpha, alpha merged nowhere
+Next: waiting on parent alpha: land it first (`git pair check`, then merge into main
+      with ordinary git), then `git pair check` and merge into main
+```
 
-Committed so far: the plan and its two research notes. No behaviour has changed yet.
+That says "do the review" to two people. The parent's landing is its author's step, spelled by the parent's
+own screen; the child's screen owns the child's step and nothing else. `git pair change integrate`'s refusal
+repeated the same sentence a second time, in a third wording, so a change to the landing contract had to be
+made in five places or those places began to disagree.
+
+The second was a sentence with one actor where there are two. "then merge into main with ordinary git" is the
+author merging. The other exit — write the request, push it, let whoever owns `main` merge it — was nowhere in
+the advice, so an author whose repository merges declared work was still told to merge by hand, and an author
+whose repository has nobody with merge rights had no line saying the merge is not their job.
+
+```console
+$ git pair status        # alpha, APPROVED
+Next: `git pair check`, then merge into main with ordinary git
+      or hand it to main's owner: `git pair change integrate`, then `git push origin alpha`
+```
+
+The third was advice that names a command this build does not answer to. Two sentences told the reader to run
+`git pair change ready --changeset <id>`, and `change ready` has no `--changeset` flag — it takes the
+changeset from the branch you are standing on. Copying the flag from `status --changeset` is a mistake a
+reviewer cannot catch by reading, because both forms look right.
+
+```console
+$ git pair change integrate      # beta, stacked on the unlanded alpha
+Cannot declare beta ready to integrate:
+  - the parent alpha is not landed on the integration branch, so declaring beta would ask for a merge onto
+    alpha — a branch review can still rewrite. Land the parent first: `git pair status --changeset alpha`
+    names its step. Merging beta onto alpha by hand stays open; git-pair declines to queue it, not to allow it
+    ...
+```
 
 ## What changed
 
--   `docs/plans/landing-handoff-guidance/plan.md` — four milestones: advice that names commands this build
-    answers to; refer-don't-restate; the hand-off line gated by the same predicate `change integrate` uses;
-    and one canonical PRD statement with the documentation's quotes pinned by a test.
--   `docs/plans/landing-handoff-guidance/research/2026-10-14-handoff-line-when-declaration-refused.md` — the
-    two variants written out against real output from the landed pair, which is what decided the narrow rule:
-    the wide one offers `git pair change integrate` in two states where that command exits 1, including a
-    `READY` changeset that has never been reviewed.
--   `docs/plans/landing-handoff-guidance/research/2026-10-14-advice-that-names-a-missing-flag.md` — two
-    emitted sentences name `git pair change ready --changeset <id>`, and `change ready` has no `--changeset`
-    flag. The note records which commands do carry it, why `change ready` deliberately does not, and the
-    correction (plain `git pair change ready`; the two-changeset shape already has its own refusals).
+-   `internal/cli/landing_advice.go` — the wording now has three named builders instead of one:
+    `landingNextAction` (a changeset's own step), `waitingNextAction` (a child whose parent's landing is owed)
+    and `handoffLine` (the second exit). `declarable` is the screen's half of `change integrate`'s test. All
+    four are read by `status` and `check`, so both screens say the same thing about the same facts.
+-   `internal/cli/status.go` — `statusView` gained a `handoff` field, computed after the three overrides that
+    replace the next step (wrong checkout, base-is-own-branch, already landed) so a screen that is not
+    offering a merge offers nothing else either, and printed indented under `Next:`.
+-   `internal/cli/check.go` — the landing contract is read once for the passing verdict and carried to the
+    human print, so the merge line and the hand-off line cannot name different destinations. The refused
+    verdict returns before either is printed, and the read stays off the path CI takes when the answer is no.
+-   `internal/cli/integrate.go` — the unlanded-parent refusal refers to the parent's screen instead of
+    spelling its step, and keeps the part only it can say: a declaration asks for an unattended merge, and
+    the human path stays open.
+-   `internal/cli/stacked.go` — the two sentences that named a flag the command does not have: the
+    already-in-destination re-offer step and the conflicting-merge step now say `git pair change ready`, which
+    is what the command is, with no selector. The conflicting-merge step also became `conflictStep`, a
+    function rather than two copies of a `fmt.Sprintf`, so the advice contract test can hold it to account.
+-   Tests — `advice_contract_test.go` (new): every sentence a command prints is scanned for the commands it
+    names, each resolved against the command tree, with flags resolved against **that** command and not
+    against the union. It is the check-prose contract test extended to advice assembled with `fmt.Sprintf`,
+    which that test cannot see. `landing_advice_test.go`: the hand-off appears in exactly the states where
+    `change integrate` records a declaration — asserted per state from both the screen and the command's exit
+    code and `recorded` field — stays out of the states where it refuses, and never enters `next_action`.
+    `landing_docs_test.go` (new): the documents' quotes are compared with what the builders produce.
+-   Docs — PRD §21's "The next step says which landing is owed" is now the single canonical statement: the two
+    facts, "names the step and the destination, never the actor", both exits with the screen transcript, and
+    the refer-don't-restate rule. The README and the agent reference quote it rather than restating it.
 
 ## Design decisions
 
-**A surface that does not own a step refers the reader to the one that does.** The child's waiting sentence
-will name the parent and point at `git pair status --changeset <parent>` instead of spelling the parent's
-`check` and merge; `change integrate`'s refusal will do the same, keeping the part only it can say — that a
-declaration asks for an unattended merge, and the human path stays open. The test for the change is an
-absence: the refusal contains no `git pair check`.
+**A surface that does not own a step refers the reader to the one that does.** The child names the parent and
+points at `git pair status --changeset <parent>`; `change integrate` does the same and keeps its own argument.
+The acceptance test for the consolidation is an absence — no `git pair check` anywhere in the refusal — because
+the property is that no second copy of the parent's step survives.
 
-**`next_action` stays one instruction.** The hand-off goes to the human forms of `status` and `check`, where a
-second line costs a parser nothing. Machine consumers already branch on `state`, `ready` and `integrating`; a
-fork inside a sentence would make them parse advice.
+**`next_action` stays one instruction.** The hand-off is printed on the human forms of `status` and `check`
+only, where a second line costs a parser nothing. Machine consumers already branch on `state`, `ready` and
+`integrating`; a fork inside a sentence would make them parse advice to decide which exit to take. One test
+exists to keep the machine answer single, and it is the cheapest thing to break by accident.
 
-**The offer and the acceptance read one predicate.** The screens print the hand-off exactly when
-`change integrate` would accept the changeset, by calling the test that command already applies before writing
-a marker. The equivalence is the milestone's acceptance test, run over four states.
+**The offer and the acceptance read the same rule, and the equivalence is tested rather than assumed.**
+`declarable` applies each reason `change integrate` refuses before it reaches its gate — verdict, staleness,
+abandonment, nothing below unlanded, head not already declared — and shares that command's own `alreadyDeclared`
+outright, because it is the condition that reads a marker rather than a state and two copies would drift the
+first time a re-offer superseded a declaration. Each state then asserts both halves from one fixture: the line
+printed, and `change integrate` exiting 0 with `recorded: true`.
 
-**The line sits after the `git pair check` the sentence already names,** so a gate refusal is covered by the
-step in front of it. That is what lets `status` decide from the facts it holds — verdict, staleness, what is
-below, whether the head is already declared — instead of paying for a content comparison it does not currently
-run, which the per-ancestor cost test would notice.
+**It is not a gate run.** The gate is the step the sentence in front of it already names — "`git pair check`,
+then …" — and paying for a content comparison to decide whether to print one more line would move the gate's
+cost into the cheap screen, which is what `TestStatusStackChainCostsABoundedReadPerStep` exists to bound. The
+residual is stated under Known limitations.
 
-**No coupling to whoever merges.** git-pair names the step and the destination, never the actor: the hand-off
-line says "main's owner", not a forge, a workflow file, or a job. Detecting the automated path — reading a
-workflow, a repository variable, a check run — is excluded deliberately, because it would be wrong in forks,
-self-hosted runners and monorepos, and because a workflow existing is not a workflow merging.
+**Variant A over variant B, on real output.** The wide alternative — print the hand-off whenever the changeset
+is approved — was mocked up against the landed pair and rejected: it offers `git pair change integrate` on a
+`READY` changeset that has never been reviewed, two lines under "wait for a reviewer", and on a child whose
+parent has not landed. Both are exit-1 offers. The narrow rule is the one that never offers a refusal, and the
+reasoning is in the plan's research note so the next editor does not re-litigate it.
 
-**Advice gets the check prose already has.** `docs_contract_test.go` proves the PRD, the README and the skill
-name commands that exist, both directions. Emitted advice is assembled with `fmt.Sprintf` and is invisible to
-it, and a test that pins the string verbatim will pin a command that fails — which is how the `--changeset`
-sentences survived. The new test resolves each command against the tree and its flags against *that* command,
-not against the union of all of them, since `--changeset` existing somewhere is precisely the mistake made.
+**git-pair names the step and the destination, never the actor.** The hand-off says "main's owner". Nothing
+here reads a workflow file, a repository variable, a check run, or a runner name: that would be wrong in
+forks, self-hosted runners and monorepos, and a workflow existing is not a workflow merging. Whoever the
+owner is, person or job, satisfies the same three facts — approved, declared, green on the declared head —
+and git-pair asks nothing about how they merge (PRD §26).
+
+**Advice gets the check prose already has, checked against one command.** `docs_contract_test.go` proves the
+PRD, the README and the skill name commands that exist, both directions. Emitted advice is invisible to it, and
+a test pinning a sentence verbatim pins whatever mistake the sentence contains — which is how the
+`--changeset` sentences survived review. The new test resolves flags against the command the advice actually
+names, since "`--changeset` exists somewhere in git-pair" is precisely the mistake that was made.
+
+**The documents quote, and the quotes are pinned to the builders.** `landing_docs_test.go` builds the waiting
+sentence, the landing sentence and the hand-off line from the builders and requires the PRD, the README and
+`references/cli.md` to contain them, normalising markdown spans and line wrapping so presentation cannot be the
+reason a quote test fails. It also keeps the removed wording out: any document that spells "land it first
+(`git pair check`…" inside the child's step fails. Changing a builder's wording now fails three document
+assertions, which is the drift this changeset exists to stop.
 
 ## Validation
 
-Nothing to validate yet beyond the plan's own claims, which the two research notes support with captured
-output and `--help` transcripts. Each milestone states its verification; the two that matter most are
-cross-checks rather than unit tests — offer ⇔ acceptance for M3, and quote ⇔ builder for M4 — because both
-exist to stop two sources drifting, and a test on one source alone cannot see that.
+-   The hand-off's equivalence, per state: approved (line printed, `change integrate` exits 0 and records),
+    never reviewed, head moved since the approval, child of an unlanded parent, feedback instead of an
+    approval, head already declared (no line, and a second `change integrate` records nothing).
+-   The machine answer: `status --json` and `check --json` carry the landing sentence in `next_action` with no
+    hand-off in it; the two human lines name one destination, read from one contract.
+-   The advice contract test, proved against the pre-fix tree: it fails on `git pair change ready --changeset
+    <id>` and passes after the correction; it resolves `status --changeset`, `check --changeset` and the
+    builders' own output.
+-   The absence that is the consolidation's point: `change integrate`'s refusal contains no `git pair check`.
+-   The quote test, proved by drifting a builder one word ("its landing is owed first" → "its landing comes
+    first"): three document assertions fail, and pass again on restore.
+-   The control that must not move: an unstacked approved changeset still ends its next step with
+    `` `git pair check`, then merge into main with ordinary git ``, with the hand-off as the only addition.
+-   `mise run check` (gofmt, vet, the sharded suite including the docs contract and the hygiene scan) and
+    `mise run gates` (the CI integration, the PTY walkthrough, and the issue-29 scenarios).
 
 ## Known limitations
 
--   The cheap declarability predicate cannot see a content-comparison refusal, so a green-looking `APPROVED`
-    whose content drifted could show the hand-off line before `check` refuses it. Mitigated by the ordering
-    (the hand-off comes after the `check` the same sentence names); the fallback, if it proves confusing, is to
-    print the line only on `check`'s verdict, where the gate actually ran.
--   M4's quote test protects four sentences. A fifth added later by copying prose rather than referencing the
-    builder is outside its reach; the mitigation is the rule itself — a surface refers, or it owns.
+-   `declarable` cannot see a content-comparison refusal, so an `APPROVED` changeset whose content drifted
+    since the review can show the hand-off line before `check` refuses it. The mitigation is ordering: the
+    line sits after the `git pair check` the sentence in front of it already names, so the step that would
+    catch it is printed first. If it proves confusing, the fallback is to print the line on `check`'s verdict
+    only, where the gate actually ran.
+-   Agents do not see the hand-off. `next_action` carries one instruction by design, and the agent guide names
+    both exits in prose (SKILL.md, "What is not yours"), so an agent following `--json` alone reads the merge
+    and not the alternative.
+-   `git pair queue` keeps its own next-step lines and its `parent_notes`. Nothing there printed the merge
+    sentence, so the consolidation did not reach it; its housekeeping note is a different voice, and the plan
+    leaves it alone deliberately.
+-   The quote test pins four sentences. A fifth copy added later by pasting prose rather than calling a
+    builder is outside its reach; the defence there is the rule itself — a surface refers, or it owns.
 
 ## Open questions
 
--   Whether `git pair queue` should refer to the parent's advice the same way M2 does for `change integrate`.
-    Its `parent_notes` currently own a housekeeping sentence, which is a different voice, so the answer may be
-    "no, and the difference is the point".
--   Whether the hand-off line belongs in `change ready`'s acknowledgement after all. The plan says no — the
-    predicate is false at that moment by construction, since a changeset just offered has no verdict — and
-    that reasoning is recorded in M3's tasks so it is not re-litigated by the next editor.
+-   Whether `git pair queue` should refer to the parent's advice the way `change integrate` now does. Its
+    `parent_notes` own a housekeeping sentence, which is a different voice, so the answer may be "no, and the
+    difference is the point".
+-   Whether `status` should grow an `--allow-feedback`. It would have to mean the same thing it means to
+    `change integrate`, because the screens offer exactly what the command accepts; the answer right now is
+    that a reader who wants a feedback-policy head declared runs the command and gets the verdict.
