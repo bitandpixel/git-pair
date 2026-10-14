@@ -137,6 +137,13 @@ type checkJSON struct {
 	// where it has been deleted; this one answers in both cases, and a gate that advises a rebase should
 	// read it before it does.
 	ParentHeadCarriesLanding bool `json:"parent_head_carries_landing"`
+	// ParentApprovalSurvivesLanding is the reason a passing verdict can name a landed parent without naming
+	// the restack: the content comparison ran, this branch still contributes what the approval recorded, and
+	// the branch merges cleanly into the destination, so the rewrite would cost the approval the verdict is
+	// resting on. False means the step was advised, or that there was no parent landing to compare at all —
+	// `parent_landed` and `parent_head_carries_landing` separate those, and `next_action` carries whichever
+	// answer the reader is acting on.
+	ParentApprovalSurvivesLanding bool `json:"parent_approval_survives_landing"`
 	// NextAction is the step a passing verdict licenses — the merge someone else performs, then the
 	// record — spelled the same way `status` spells it. It appears only when the gate passed: when it
 	// did not, `reasons` is the next step, and a consumer should never have to decide which of two
@@ -188,12 +195,12 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	out.Ready = len(out.Reasons) == 0
 	if out.Ready {
 		out.NextAction = landingNextAction(s.cs.Base)
-		if g.Parent.Landed != "" && g.Parent.owesLandingStep() {
+		if g.Parent.advisesRestack() {
 			// Spelled beside the landing contract rather than inside it: `landingNextAction` is one string
-			// shared by `status`, `check`, `change ready` and `review`, it takes only a base, and teaching it
-			// about parents would make the same sentence mean two things in four commands.
+			// shared by `status`, `check`, `change ready` and `review`, and the parent's step is a different
+			// fact with a different condition on it.
 			out.NextAction += fmt.Sprintf("; parent %s landed as %s — %s", g.Parent.parentName(), g.Parent.Landed,
-				landedParentStep(s.cs, g.Parent))
+				g.Parent.Step)
 		}
 	}
 	out.ParentLanded = g.Parent.Landed != ""
@@ -202,6 +209,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	out.ParentMeasuredBase = short(g.Parent.Measured)
 	out.ParentComparison = g.Parent.Comparison
 	out.ParentHeadCarriesLanding = g.Parent.LandingUnderHead
+	out.ParentApprovalSurvivesLanding = g.Parent.ApprovalSurvivesLanding
 	if out.Reasons == nil {
 		// `reasons` is an array in both verdicts. `null` would make every consumer
 		// handle two shapes for the same fact, and the fact it is checking — whether the
@@ -237,10 +245,26 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		a.printf("declared: %s (`git pair change integrate`)\n", short(d.SHA))
 	}
 	if g.Parent.Landed != "" {
-		// Beside the verdict, not inside it: the gate passed, and the reader still needs to know the base
-		// underneath is finished work with a step attached to it.
-		a.printf("parent: %s landed as %s — %s\n", g.Parent.parentName(), g.Parent.Landed,
-			landedParentStep(s.cs, g.Parent))
+		// Beside the verdict, not inside it: the gate passed, and the reader still needs to know what is
+		// underneath the work. Which half of that is printed depends on what the step would cost. Where it
+		// is advised, it is the command, because "rebase onto it" is a sentence the author has to translate
+		// into three arguments. Where it is withheld, the comparison sentence takes its place — the reader
+		// learns the content was measured against the approval and came out equal, which is the fact that
+		// makes the missing command an answer rather than an omission (PRD §29).
+		switch {
+		case g.Parent.advisesRestack() && g.Parent.Comparison == "":
+			// The step is given, and so is the reason it is given without the comparison. Silence about a
+			// step would be the worse failure, so the advice stands — and the reader is told it rests on an
+			// unknown rather than on a measurement that came out equal.
+			a.printf("parent: %s landed as %s; %s — %s\n", g.Parent.parentName(), g.Parent.Landed,
+				g.Parent.Note, g.Parent.Step)
+		case g.Parent.advisesRestack():
+			a.printf("parent: %s landed as %s — %s\n", g.Parent.parentName(), g.Parent.Landed, g.Parent.Step)
+		case g.Parent.Note != "":
+			a.printf("parent: %s\n", g.Parent.Note)
+		default:
+			a.printf("parent: %s landed as %s\n", g.Parent.parentName(), g.Parent.Landed)
+		}
 	} else if g.Parent.Note != "" {
 		// The stack observation the verdict did not act on: the parent moved, or its record says too little
 		// to compare. Printing it on the passing verdict is the point — the gate is where an author reads

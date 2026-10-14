@@ -162,9 +162,11 @@ func TestUnchangedParentLeavesTheChildApproved(t *testing.T) {
 // It passes the gate now, and that is the point of measuring the contribution. The child's own work is
 // unchanged; what changed is that its parent's work reached the destination by a route with no ancestry in
 // it. Measuring the child's diff from a merge base with that landing, the parent's content arrives in the
-// child's patch a second time and the approval dies on a shape the child has no part in choosing. What is
-// left for the child is the rebase the landing always left it — and the merge probe below is what keeps
-// that pass honest: a branch that would conflict has no clean content to compare.
+// child's patch a second time and the approval dies on a shape the child has no part in choosing. Nothing is
+// left to run here: the branch is deleted, the content still measures what was read, and the verdict says so
+// rather than printing a rebase — the rewrite would only cost the approval it rests on, and the command would
+// name a branch that no longer exists. The merge probe below is what keeps that pass honest: a branch that
+// would conflict has no clean content to compare.
 func TestChildOfALandedParentIsToldWhereTheWorkWent(t *testing.T) {
 	f, _, _ := stackedPair(t)
 
@@ -178,7 +180,10 @@ func TestChildOfALandedParentIsToldWhereTheWorkWent(t *testing.T) {
 	res := runIn(t, f.Dir(), "check").mustSucceed(t, "check")
 	mustContain(t, res.stdout, "booking landed as "+shortOf(landing),
 		"the landing named")
-	mustContain(t, res.stdout, "rebase onto it", "the step the landing leaves")
+	mustContain(t, res.stdout, "still contributes the content review",
+		"and the comparison that withheld the step says so in its place")
+	mustNotContain(t, res.stdout, "git rebase",
+		"no rewrite is owed by an approved child whose content still measures the same, and its parent branch is gone")
 
 	// The stack is reported even though the branch is gone: the child has to be told the parent
 	// left, not left to wonder why nothing answers.

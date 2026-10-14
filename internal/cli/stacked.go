@@ -47,6 +47,17 @@ type parentStatus struct {
 	// Note is a one-line observation that is not a refusal — the parent moved, or there was
 	// nothing to compare — for `status` and `queue` to show.
 	Note string
+	// Step is the housekeeping the parent's landing leaves: the command that takes this head onto the
+	// landing, or the deletion of a parent branch that holds nothing the destination does not. It is beside
+	// Note and not inside it because the two are read apart: a fact about where the head sits belongs on
+	// every surface, and an instruction to rewrite belongs only where following it costs nothing. See
+	// `advisesRestack`.
+	Step string
+	// ApprovalSurvivesLanding says the content comparison ran, found this branch still contributes what
+	// the approval recorded, and found the branch merges cleanly into the destination. It is written only
+	// where an approval is the verdict the gate rests on, so it is also a statement that the approval is
+	// standing: a rewrite of this head would invalidate it (PRD §21).
+	ApprovalSurvivesLanding bool
 	// Landed is the commit the destination carries the parent's work at, empty when the destination holds
 	// no directory for the parent. Landing outranks every reading of the branch tip, because `--no-ff`,
 	// squash and cherry-pick all leave the parent's branch exactly where the approval recorded it.
@@ -152,6 +163,15 @@ func (a *app) parentLive(ctx context.Context, repo *git.Repo, c changeset.Change
 		// The approval predates both trailers, or was written by a hand-edited commit. The absence is
 		// not evidence that the parent moved, and refusing here would refuse every child approved
 		// before parent tracking existed. Say what is missing and let the reviewer decide.
+		if st.Landed != "" {
+			// The content question this path would have asked is the one a landed parent is answered
+			// by, and it went unasked. The step is still given — silence about a step is worse than a
+			// step the reader can decline — so the note says why it is given without the comparison,
+			// the same clause the branch-is-gone path uses for the same fall-through.
+			st.Note += "; the approval recorded no parent tip and no measured base, so git-pair cannot " +
+				"compare the diff it measured with the one under test"
+			return st, nil
+		}
 		if st.Note == "" {
 			st.Note = fmt.Sprintf("parent %s: the approval recorded no parent tip and no measured base, so git-pair cannot tell whether it has moved", st.Branch)
 		}
@@ -175,7 +195,7 @@ func (a *app) parentLive(ctx context.Context, repo *git.Repo, c changeset.Change
 			st.Note = note
 		}
 		return a.landedApprovalStillStands(ctx, repo, c, db, head, approved, st,
-			fmt.Sprintf("%s and have the result reviewed again", landedParentStep(c, st)))
+			rewriteAdvice(c, st))
 	}
 	if st.Recorded == st.Tip {
 		return st, nil
@@ -310,13 +330,31 @@ func (a *app) parentLanded(ctx context.Context, repo *git.Repo, c changeset.Chan
 		}
 		st.ParentWorktree = path
 	}
+	// The observation and the command are written apart so a surface can print one without the other: the
+	// verdict reads the fact and withholds the rewrite while an approval stands on exactly this head, and
+	// `status` and `queue` print both because there a stale branch is the subject.
 	if on {
-		st.Note = fmt.Sprintf("your head is on %s, so %s", st.Landed, landedParentStep(c, st))
+		st.Note = fmt.Sprintf("your head is on %s", st.Landed)
+		st.Step = landedParentStep(c, st)
 		return st, nil
 	}
-	st.Note = fmt.Sprintf("%s: this head is still measured on %s, which the landing replaced",
-		landedParentStep(c, st), st.Branch)
+	st.Note = fmt.Sprintf("this head is still measured on %s, which the landing replaced", st.Branch)
+	st.Step = landedParentStep(c, st)
 	return st, nil
+}
+
+// rewriteAdvice is the step the landed-parent refusal leaves when the content under the approval is not the
+// content under test: take this head onto the landing, and have the result read again. It is spelled here
+// rather than inline because the two halves of the branch-present case need different sentences and one
+// string would have to serve both: where the head is not on the landing the rewrite is the work, and where it
+// already is, naming the branch deletion "and have the result reviewed again" reads as two unrelated commands
+// when the work actually left is the re-offer.
+func rewriteAdvice(cs changeset.Changeset, st parentStatus) string {
+	if st.LandingUnderHead {
+		return fmt.Sprintf("this head is already on %s, so what it now contributes was never read — re-offer it with `git pair change ready --changeset %s` and have the result reviewed again",
+			st.Landed, cs.Slug)
+	}
+	return fmt.Sprintf("%s and have the result reviewed again", landedParentStep(cs, st))
 }
 
 // landedParentStep is the step a landed parent leaves, spelled once because `status`, `check` and `queue`
@@ -417,6 +455,31 @@ func (st parentStatus) approvalBase() string {
 // `parent:` line above it already printed is noise a reader learns to skip.
 func (st parentStatus) owesLandingStep() bool {
 	return st.Landed != "" && !(st.LandingUnderHead && st.Tip == "")
+}
+
+// advisesRestack is whether to put the landed parent's step in front of the author. It is a different
+// question from `owesLandingStep`, which is a fact about where commits sit, and the two will be edited
+// apart, so they are tested apart.
+//
+// The step is withheld in exactly one case: the head is not on the landing, so the step is a rewrite of
+// this very branch, and a standing approval is a claim about the content of exactly that head. Following
+// the step then rewrites the commits the approval names, and its only effect on a passing gate is to make
+// it fail — the refusal is correct, because what the reviewer certified was a commit, and the advice was
+// wrong, because the merge the author was about to run needed none of it. The restack is housekeeping that
+// can equally run after the merge, on a branch nobody had to certify.
+//
+// A head already on the landing keeps its step: what is left there is deleting a branch that holds nothing
+// the destination does not, which invalidates nothing. And where the comparison could not be reached — an
+// approval that recorded no identity, a measurement this clone cannot take — the step is still given, with
+// the note saying the answer is unverified: silence about a step is worse than a step the reader can decline.
+func (st parentStatus) advisesRestack() bool {
+	if st.Step == "" || !st.owesLandingStep() {
+		return false
+	}
+	if st.LandingUnderHead {
+		return true
+	}
+	return !st.ApprovalSurvivesLanding
 }
 
 // parentName is how the parent is best called: by changeset when the stack knows it, by branch when
@@ -530,9 +593,11 @@ func (a *app) landedApprovalStillStands(ctx context.Context, repo *git.Repo, c c
 	if same {
 		if clean, conflicts := landedMergeIsClean(ctx, repo, db, head); !clean {
 			destination := displayRef(db.LocalName())
-			st.Reason = fmt.Sprintf("this branch would conflict with %s: %s. The content it contributes is what review %s approved; take %s in and have the result reviewed again.",
-				destination, strings.Join(conflicts, ", "), approved.Short, destination)
 			st.Next = fmt.Sprintf("git merge %s && git pair change ready --changeset %s", destination, c.Slug)
+			// The reason names its own step, as every other parent refusal does: a reader of `check` has the
+			// verdict and the way out in one line, and `status` prints the reason rather than a second field.
+			st.Reason = fmt.Sprintf("this branch would conflict with %s: %s. The content it contributes is what review %s approved; take %s in and have the result reviewed again — %s.",
+				destination, strings.Join(conflicts, ", "), approved.Short, destination, st.Next)
 			return st, nil
 		}
 		core := fmt.Sprintf("parent %s landed as %s%s; measured above the landing, this branch still contributes the content review %s approved",
@@ -548,6 +613,7 @@ func (a *app) landedApprovalStillStands(ctx context.Context, repo *git.Repo, c c
 			core = st.Note + "; " + core
 		}
 		st.Note = core
+		st.ApprovalSurvivesLanding = true
 		return st, nil
 	}
 	st.Reason = fmt.Sprintf("the parent %s landed as %s%s and the diff under it differs from what review %s approved: %s",

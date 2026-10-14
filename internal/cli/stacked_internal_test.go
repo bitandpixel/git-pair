@@ -88,6 +88,65 @@ func TestOwesLandingStep(t *testing.T) {
 	}
 }
 
+// TestAdvisesRestack pins the instruction apart from the fact. `owesLandingStep` says where the commits sit
+// and is what `status` and `queue` print on; `advisesRestack` says whether putting the command in front of
+// the author costs anything, and is what the verdict prints. They agree except on the one case the restack
+// plan was written for — an approval standing on content the rewrite would invalidate — so they are tested
+// separately rather than collapsed into one predicate someone will later "simplify" into agreeing always.
+func TestAdvisesRestack(t *testing.T) {
+	const rebase = "rebase onto it: `git rebase --onto abcdef1 alpha beta`"
+	const deletion = "the branch alpha is stale — it holds nothing the destination does not: `git branch -D alpha`"
+	tests := []struct {
+		name string
+		st   parentStatus
+		want bool
+	}{
+		{
+			name: "nothing landed",
+			st:   parentStatus{Branch: "alpha", Tip: "1234567"},
+			want: false,
+		},
+		{
+			name: "a landing with no step to print, which is the branch-gone path leaving it to its own prose",
+			st:   parentStatus{Branch: "alpha", Landed: "abcdef1"},
+			want: false,
+		},
+		{
+			name: "a child that has not been approved: nothing is standing for the rewrite to cost",
+			st:   parentStatus{Branch: "alpha", Tip: "1234567", Landed: "abcdef1", Step: rebase},
+			want: true,
+		},
+		{
+			name: "the comparison could not be reached, so the step is given unverified rather than withheld",
+			st:   parentStatus{Branch: "alpha", Tip: "1234567", Landed: "abcdef1", Step: rebase, Comparison: ""},
+			want: true,
+		},
+		{
+			name: "an approval standing on content that measures the same above the landing",
+			st:   parentStatus{Branch: "alpha", Tip: "1234567", Landed: "abcdef1", Step: rebase, Comparison: "contribution", ApprovalSurvivesLanding: true},
+			want: false,
+		},
+		{
+			name: "the same approval, and the step is the deletion of a stale branch: deleting it invalidates nothing",
+			st: parentStatus{Branch: "alpha", Tip: "1234567", Landed: "abcdef1", Step: deletion,
+				StaleBranch: true, LandingUnderHead: true, ApprovalSurvivesLanding: true},
+			want: true,
+		},
+		{
+			name: "the head is below the landing and the comparison said the content differs",
+			st:   parentStatus{Branch: "alpha", Tip: "1234567", Landed: "abcdef1", Step: rebase, Comparison: "merge-base"},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.st.advisesRestack(); got != tt.want {
+				t.Errorf("advisesRestack() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // The rebase `landedParentStep` prints names the parent's branch. On the branch-is-gone path — the only
 // caller that leaves `Tip` empty — that branch does not exist, and a head already carrying the landing has
 // no rebase to run in any case. This is the case where the helper has to say so rather than print the
