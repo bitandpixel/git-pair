@@ -89,6 +89,16 @@ the next engineer loosens the rule rather than the code.
     hook reference and the Concepts entry both have to state the three acceptance states, because a page that
     tells a person to run `--trust` when the repository moved a check under them is the page that gets them to
     approve a script they never read.
+-   Restacked onto M3's landing (`29f49e8`) and then onto M4's restacked head, and re-run: `mise run gates`
+    exited **0** with 90 checks — the test shards, the end-to-end script, the PTY walkthrough and the cost
+    gate, which measured 49 invocations for a two-level stack against the ceiling of 50. Nothing collided: the
+    two changes under this milestone since it was cut are M3's `check` gate and the landing-advice work that
+    reached `main` while the stack was in review, and this milestone documents code rather than editing it.
+-   One sentence in each of the two pages it owns moved on the restack, because M4's second feedback round
+    settled it after they were written: a refused submission's hook output is shown **on the review screen**
+    when the submission came from the screen, not on stderr, where the frame would paint over it. Both pages
+    said "replayed on stderr with the refusal" and nothing more, which after M4 was a description of the CLI
+    path only. The PRD's hook section and the reference's output paragraph now carry the exception.
 
 ## Known limitations
 
