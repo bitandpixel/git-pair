@@ -32,8 +32,10 @@ func TestStatusReportsADeclaration(t *testing.T) {
 	mustContain(t, res.stdout, "INTEGRATING", "the state is the derivation's, not a label this command adds")
 	mustContain(t, res.stdout, "ready to integrate at "+f.Short(declared),
 		"and the answer names the commit that made it so")
-	mustContain(t, res.stdout, "push the branch",
+	mustContain(t, res.stdout, "git push origin booking-transaction",
 		"the next step is the push that makes the request visible, which git-pair never runs itself")
+	mustNotContain(t, res.stdout, "merge into main with ordinary git",
+		"and the screen stops handing the author a merge they have already asked somebody else to perform")
 
 	j := runIn(t, f.Dir(), "status", "--json").json(t)
 	if j["state"] != "INTEGRATING" {
@@ -46,13 +48,20 @@ func TestStatusReportsADeclaration(t *testing.T) {
 		t.Errorf("integrate_commit = %v, want %s", j["integrate_commit"], f.Short(declared))
 	}
 	next, _ := j["next_action"].(string)
-	if !strings.Contains(next, "push the branch") {
-		t.Errorf("next_action = %q, want the push and then the landing contract", next)
+	if !strings.Contains(next, "git push origin booking-transaction") {
+		t.Errorf("next_action = %q, want the push that makes the request visible", next)
 	}
-	// The landing contract is still in the sentence: the declaration does not end the author's obligations,
-	// it moves the merge to whoever owns the destination branch.
-	if !strings.Contains(next, "merge into main with ordinary git") {
-		t.Errorf("next_action = %q, want it to keep naming the merge", next)
+	// The declaration does not end the author's obligations — it moves the merge to whoever owns the
+	// destination branch — and the sentence says exactly that ("main merges what … reports ready and
+	// integrating"). What it must not do is hand the author the merge command as their own next step: that is
+	// the sentence this changeset exists to take away from the declared state.
+	if strings.Contains(next, "merge into main with ordinary git") {
+		t.Errorf("next_action = %q, still tells an author who has declared to merge it themselves", next)
+	}
+	if strings.Contains(next, "merged") {
+		// Naming the push as a command the author runs is the rule; a log line in the past tense reads as an
+		// action git-pair took (PRD §26).
+		t.Errorf("next_action = %q, reads as a completed action", next)
 	}
 	if j["abandoned"] != false {
 		t.Errorf("abandoned = %v on a declared changeset", j["abandoned"])
@@ -184,4 +193,98 @@ func TestQueueDoesNotListALandedChangesetAsAwaitingIntegration(t *testing.T) {
 	}
 	mustNotContain(t, runIn(t, f.Dir(), "queue").mustSucceed(t, "queue").stdout, "AWAITING INTEGRATION",
 		"and the human surface does not print an empty second list")
+}
+
+// The report that started this: a declared head, `git pair check` still spelling the author's own merge. The
+// gate passes, the screen says `declared:`, and the next step reads as if nothing had been asked for.
+func TestCheckNamesThePushForAnUnpublishedDeclaration(t *testing.T) {
+	f, _, _ := declaredChangeset(t)
+
+	res := runIn(t, f.Dir(), "check").mustSucceed(t, "check")
+	mustContain(t, res.stdout, "declared:", "the verdict carries the declaration beside it")
+	mustContain(t, res.stdout, "git push origin booking-transaction",
+		"so the next step is the push that makes that request visible")
+	mustNotContain(t, res.stdout, "merge into main with ordinary git",
+		"and the merge sentence is gone from a head whose merge has already been asked for")
+	mustNotContain(t, res.stdout, "or hand it to",
+		"nor is the hand-off offered again: a second declaration records nothing")
+
+	j := runIn(t, f.Dir(), "check", "--json").json(t)
+	next, _ := j["next_action"].(string)
+	if !strings.Contains(next, "git push origin booking-transaction") {
+		t.Errorf("check --json next_action = %q, want the push", next)
+	}
+	if strings.Contains(next, "\n") || strings.Contains(next, "or take it yourself") {
+		t.Errorf("check --json next_action = %q, want one instruction and no human alternative", next)
+	}
+}
+
+// Once the request is on the remote the author's part is done, and the screen says so in the shape the
+// `READY` state already uses for waiting: what you are waiting for, then the command that reads whether it
+// happened. The author's own merge stays on the screen as the other exit, so waiting is never the only thing
+// offered — and it stays off `next_action`, which is one instruction.
+func TestDeclaredScreensWaitOnceTheBranchIsPushed(t *testing.T) {
+	f, slug, declared := declaredChangeset(t)
+	f.MustGit("update-ref", "refs/remotes/origin/booking-transaction", declared)
+
+	for _, name := range []string{"status", "check"} {
+		out := runIn(t, f.Dir(), name).mustSucceed(t, name).stdout
+		mustContain(t, out, "waiting on main's owner to merge it", name+" names the wait")
+		mustContain(t, out, "git pair status --changeset "+slug,
+			name+" names the read that reports the landing, not a loop to poll")
+		mustContain(t, out, "or take it yourself: `git pair check`, then merge into main with ordinary git",
+			name+" keeps the author's own merge offered beside the wait")
+		mustNotContain(t, out, "git push origin", name+" still asks for a push that has happened")
+		mustNotContain(t, out, "or hand it to", name+" offers a declaration that would record nothing")
+
+		j := runIn(t, f.Dir(), name, "--json").json(t)
+		next, _ := j["next_action"].(string)
+		if !strings.HasPrefix(next, "waiting on main's owner to merge it") {
+			t.Errorf("%s --json next_action = %q, want the wait on its own", name, next)
+		}
+		if strings.Contains(next, "or take it yourself") || strings.Contains(next, "\n") {
+			t.Errorf("%s --json next_action = %q, want one instruction with no human alternative", name, next)
+		}
+	}
+}
+
+// `change integrate` on a head that is already declared wrote nothing, printed "nothing recorded", and
+// dropped the step it had just computed. The author was left with no next line at all.
+func TestChangeIntegrateRerunNamesTheStepItLeftOut(t *testing.T) {
+	t.Run("unpublished", func(t *testing.T) {
+		f, _, _ := declaredChangeset(t)
+		out := runIn(t, f.Dir(), "change", "integrate").mustSucceed(t, "change", "integrate").stdout
+		mustContain(t, out, "nothing recorded", "the re-run still writes nothing")
+		mustContain(t, out, "git push origin booking-transaction",
+			"and now says what is left to do")
+		mustNotContain(t, out, "or take it yourself", "the push is the step, so no alternative is offered yet")
+	})
+
+	t.Run("pushed", func(t *testing.T) {
+		f, slug, declared := declaredChangeset(t)
+		f.MustGit("update-ref", "refs/remotes/origin/booking-transaction", declared)
+		out := runIn(t, f.Dir(), "change", "integrate").mustSucceed(t, "change", "integrate").stdout
+		mustContain(t, out, "waiting on main's owner to merge it", "the re-run reports the wait")
+		mustContain(t, out, "git pair status --changeset "+slug, "with the read that settles it")
+		mustContain(t, out, "or take it yourself:", "and the other exit")
+	})
+}
+
+// A declaration is about a commit. When a commit comes under it, neither the push nor the wait is the step:
+// the request on the branch names a commit nobody is going to merge, and `check` has to say so in the words
+// `status` already uses rather than inventing a second sentence for the same fact.
+func TestCheckSaysWhenTheDeclaredHeadMoved(t *testing.T) {
+	f, slug, _ := declaredChangeset(t)
+	f.Commit("note the answer", gittest.WithFile("changesets/"+slug+"/ABOUT.md",
+		"# "+slug+"\n\nConcurrency answered.\n"))
+
+	res := runIn(t, f.Dir(), "check").mustSucceed(t, "check")
+	mustContain(t, res.stdout, "the head moved since the declaration: `git pair change integrate` to declare this head",
+		"check names the declaration that covers this head")
+	mustNotContain(t, res.stdout, "git push origin", "and does not ask for a push of a request that is out of date")
+
+	j := runIn(t, f.Dir(), "check", "--json").json(t)
+	if next, _ := j["next_action"].(string); !strings.Contains(next, "git pair change integrate") {
+		t.Errorf("check --json next_action = %q, want the re-declaration", next)
+	}
 }

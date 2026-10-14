@@ -216,9 +216,22 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	// line name the same destination. A refused verdict never reaches either, so the read stays off the path
 	// CI takes when the answer is no.
 	var lc landingContract
+	// The declared path's two facts, read on the passing verdict only, and only where the screen is going to
+	// print the `declared:` line anyway. Kept beside `lc` so the human print below can offer the alternative
+	// exit against the same destination.
+	var declared declaredPath
 	if out.Ready {
 		lc = landingContractFor(ctx, s.repo, s)
-		out.NextAction = landingNextAction(lc)
+		if g.Declared() != nil {
+			// The request is already written, so the merge sentence is not this reader's next step: they are
+			// either about to make it visible, or done and waiting. Same builder `status` and
+			// `change integrate` read, so the three cannot disagree about which of the three it is.
+			declared = declaredPath{CoversHead: alreadyDeclared(s) != "",
+				Pushed: declarationPushed(ctx, s.repo, s.cs.Branch, s.head)}
+			out.NextAction = declaredNextAction(lc, s.cs.Branch, s.cs.Slug, declared)
+		} else {
+			out.NextAction = landingNextAction(lc)
+		}
 		if g.Parent.advisesRestack() {
 			// Spelled beside the landing contract rather than inside it: `landingNextAction` is one string
 			// shared by `status`, `check`, `change ready` and `review`, and the parent's step is a different
@@ -319,7 +332,12 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	}
 	a.printRecommendations(out.Recommendations)
 	a.printf("next:  %s\n", out.NextAction)
-	if declarable(s, lc) {
+	if alt := declaredAlternative(lc, declared); alt != "" {
+		// The mirror of the hand-off line, for the state where the hand-off is already done: the wait is the
+		// next step, and the author's own merge stays offered beside it so waiting is never the only thing on
+		// the screen.
+		a.printf("       %s\n", alt)
+	} else if declarable(s, lc) {
 		// The second exit, and the human form only: `next_action` above stays one instruction. Which of the
 		// two is right is the author's and the destination owner's decision, not something git-pair can
 		// know — git-pair asks nothing about who merges, or with what (PRD §26).

@@ -97,15 +97,15 @@ the marker says.
 
 #### Tasks
 
-- [ ] Move the push sentence out of `integrate.go` into `landing_advice.go` without changing a character of
+- [x] Move the push sentence out of `integrate.go` into `landing_advice.go` without changing a character of
       it, and have `integrateNextAction` call the moved builder.
-- [ ] Add the pushed test: `refs/remotes/origin/<branch>` resolves, and the head is an ancestor of it. On any
+- [x] Add the pushed test: `refs/remotes/origin/<branch>` resolves, and the head is an ancestor of it. On any
       git error, answer not-pushed — the sentence then names a command that is harmless to re-run, which is
       the cheap direction.
-- [ ] Spell the waiting sentence in the `READY` state's shape: `waiting on <destination>'s owner to merge it:
+- [x] Spell the waiting sentence in the `READY` state's shape: `waiting on <destination>'s owner to merge it:
       \`git pair status --changeset <id>\` reports the landing`.
-- [ ] Spell the alternative line, built from `landingNextAction` so the merge sentence has one spelling.
-- [ ] Reuse `status`'s existing "the head moved since the declaration" wording from the shared path, so `check`
+- [x] Spell the alternative line, built from `landingNextAction` so the merge sentence has one spelling.
+- [x] Reuse `status`'s existing "the head moved since the declaration" wording from the shared path, so `check`
       can say it too without a second copy.
 
 #### Verification
@@ -123,13 +123,19 @@ the marker says.
 
 #### Tasks
 
-- [ ] `check.go`: where `out.NextAction` is built, branch on `alreadyDeclared(s)` before the landing
+- [x] `check.go`: where `out.NextAction` is built, branch on `alreadyDeclared(s)` before the landing
       sentence, and carry the same `lc` to the human print so the alternative line names one destination.
-- [ ] `status.go`: replace the `StateIntegrating` sentence with the shared path, keeping the stale case.
-- [ ] `integrate.go`: print `next:` on the `!res.Written` path — that path computes the action and never shows
+- [x] `status.go`: replace the `StateIntegrating` sentence with the shared path, keeping the stale case.
+- [x] `integrate.go`: print `next:` on the `!res.Written` path — that path computes the action and never shows
       it, so the author is told "nothing recorded" and left without a step.
-- [ ] Keep the hand-off line's rule untouched: it is printed where `declarable` holds, which is nowhere in the
+- [x] Keep the hand-off line's rule untouched: it is printed where `declarable` holds, which is nowhere in the
       declared path.
+
+- **Deliberately untouched:** `nextActionFor`, which is `review submit` telling the author what the review
+  outcome means ("author: `git pair check`, then merge into main with ordinary git"). It answers a different
+  question — what the reviewer just said — and a head that is approved, declared and then re-reviewed is a
+  shape where the merge sentence is still the author's own answer. The declared path belongs to the screens
+  that report the changeset, not to the one that reports the review.
 
 #### Verification
 
@@ -152,11 +158,11 @@ the marker says.
 
 #### Tasks
 
-- [ ] Add the declared-path statement to PRD §21 next to the two exits it already carries — the same section,
+- [x] Add the declared-path statement to PRD §21 next to the two exits it already carries — the same section,
       so the rule stays in one place — and point §11.3 at it as the other two screens do.
-- [ ] Update §9.9 for the re-run's next step.
-- [ ] Extend `landing_docs_test.go` with the new sentences built from the builders.
-- [ ] Check `skills/git-pair/references/integration.md`: an agent that declares and pushes needs to know the
+- [x] Update §9.9 for the re-run's next step.
+- [x] Extend `landing_docs_test.go` with the new sentences built from the builders.
+- [x] Check `skills/git-pair/references/integration.md`: an agent that declares and pushes needs to know the
       report it gives afterwards is "waiting", not "merged".
 
 #### Verification
