@@ -2,9 +2,14 @@
 #
 # One job, one command, one tree. `git pair change integrate` writes a commit whose message carries the
 # `Review-State: integrating` trailer, that commit arrives as a push, and this job answers it by building the
-# merge the destination would get, running the repository's own ladder against it, and pushing it if it passes.
-# The ladder is `mise run gates` — the same command `.github/workflows/ci.yml` runs on a pull request, and the
-# repository's definition of "done" (see that file for why the ladder is one line and not a list of steps).
+# merge the destination would get, running the repository's own suite against it, and pushing it if it passes.
+# That is the transferable rule, and it is the reason this file is shipped as a sample: the landing is
+# conditional on the tests the destination would run, whatever command produces them.
+#
+# The command in this file is `mise run gates` — this repository's value at that seam, the same one
+# `.github/workflows/ci.yml` runs on a pull request and the definition of "done" here (see that file for why
+# the ladder is one line and not a list of steps). Worth telling the two apart while reading: the shape below
+# is what to copy, and `mise` is what this repository happens to build with.
 #
 # What is deliberately not here:
 #
@@ -56,10 +61,12 @@
 #                        bypass actor of its own (a GitHub App, or a deploy key with a role) and that token in
 #                        the push remote — `git remote set-url` with it, not the checkout's default. An
 #                        unprotected trunk, which is what this repository has, needs nothing.
-#   a test command       `--verify-cmd` is what makes the merge conditional on the suite. A repository with no
-#                        such command drops the flag and the job merges on the gate alone — which is the
-#                        honest shape for a repository whose tests are somebody else's business, and the wrong
-#                        one for this file.
+#   a test command       the rule the job exists to enforce, and the one seam the shape exposes. `--verify-cmd`
+#                        is what makes the merge conditional on the suite, and its value is a per-repository
+#                        choice: `mise run gates` below is this repository's, not a requirement of the shape.
+#                        A repository with no such command drops the flag and the job merges on the gate alone
+#                        — which is the honest shape for a repository whose tests are somebody else's business,
+#                        and the wrong one for this file.
 #
 # The driver keeps `--require-ci`, `--ci-probe` and `--ci-request` for consumers that want a merge gated on a
 # forge's checks as well as (or instead of) the candidate's own run, and `scripts/gates/ci-integrate.sh`
@@ -117,10 +124,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      # `jdx/mise-action` installs mise, and with it the Go pinned in `.mise.toml`. The note on this choice —
-      # and on the `setup-go` alternative — is at the top of `.github/workflows/ci.yml`, where the ladder is
-      # defined; the same trade applies here, and this job would be the second definition if it listed the
-      # ladder's steps instead of calling the task.
+      # `jdx/mise-action` installs mise, and with it the Go pinned in `.mise.toml`. It sits at the same seam
+      # as the verify command below — this repository's toolchain, not part of the shape a consumer copies.
+      # The note on the choice, and on the `setup-go` alternative, is at the top of
+      # `.github/workflows/ci.yml`, where the ladder is defined; the same trade applies here, and this job
+      # would be the second definition if it listed the ladder's steps instead of calling the task.
       - uses: jdx/mise-action@v3
 
       # The binary this job gates with, named out loud. `mise run build` installs under the name
@@ -155,9 +163,10 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-          # One definition of green, spelled once. `gates` builds first, so the binary the gate runs is the
-          # one this tree produced — and it is the tree *after* the merge, which is the combination no run on
-          # the branch itself has ever seen.
+          # This repository's value at the one seam the shape exposes: the merge is conditional on the suite,
+          # and `mise run gates` is what green means here. `gates` builds first, so the binary the gate runs is
+          # the one this tree produced — and it is the tree *after* the merge, which is the combination no run
+          # on the branch itself has ever seen.
           VERIFY_CMD='mise run gates'
           set -- --verify-cmd "$VERIFY_CMD"
           case "$EVENT" in

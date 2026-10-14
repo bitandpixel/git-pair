@@ -19,7 +19,10 @@ The driver flag this uses, `--verify-cmd`, is the layer below (`feat-ci-verify-c
     `if:` is an allowlist — dispatch, or a push to a non-destination branch whose commit message carries
     `Review-State: integrating`. `permissions:` is `contents: write` alone. The driver is invoked with
     `--verify-cmd 'mise run gates'` and `--expect-head` from `github.event.after`. The build step names the
-    binary it gates with through `GIT_PAIR_BIN`, and the queue report stays under `if: always()`.
+    binary it gates with through `GIT_PAIR_BIN`, and the queue report stays under `if: always()`. Its header
+    separates the rule worth copying — a landing conditional on the suite the destination would run — from this
+    repository's value at that seam, `mise run gates` and `jdx/mise-action`, because this file ships as the
+    sample and the two are easy to confuse.
 -   `.github/workflows/ci.yml`: `pull_request` and `workflow_dispatch`, no branch pushes. Its header now says
     what the branch trigger was for and why that reason is gone.
 -   `scripts/gates/ci-integrate.sh`: the static section that asserted the two files name each other (6 checks)
