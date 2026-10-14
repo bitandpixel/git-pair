@@ -355,10 +355,23 @@ func (a *app) parentLanded(ctx context.Context, repo *git.Repo, c changeset.Chan
 // when the work actually left is the re-offer.
 func rewriteAdvice(cs changeset.Changeset, st parentStatus) string {
 	if st.LandingUnderHead {
-		return fmt.Sprintf("this head is already on %s, so what it now contributes was never read — re-offer it with `git pair change ready --changeset %s` and have the result reviewed again",
-			st.Landed, cs.Slug)
+		// Plain `change ready`, with no selector: the commands that act on the changeset this branch carries
+		// — `ready`, `unready`, `integrate`, `abandon`, `wait` — refuse one on purpose, because the branch-shape
+		// rule is what makes their subject unambiguous. `--changeset` is real, on `status` and `check`, and
+		// naming it here was a step that could not be run.
+		return fmt.Sprintf("this head is already on %s, so what it now contributes was never read — re-offer it with `git pair change ready` and have the result reviewed again",
+			st.Landed)
 	}
 	return fmt.Sprintf("%s and have the result reviewed again", landedParentStep(cs, st))
+}
+
+// conflictStep is the step left where the child's merge into the destination would conflict: take the
+// destination in, then offer the result. Spelled as a function beside `landedParentStep` for the same reason
+// the other sentences are — one place, several readers — and so that the check on emitted advice
+// (`TestEmittedAdviceNamesCommandsThisBuildAnswersTo`) can read the sentence without engineering a repository
+// whose merge conflicts.
+func conflictStep(destination string) string {
+	return fmt.Sprintf("git merge %s && git pair change ready", destination)
 }
 
 // landedParentStep is the step a landed parent leaves, spelled once because `status`, `check` and `queue`
@@ -597,7 +610,7 @@ func (a *app) landedApprovalStillStands(ctx context.Context, repo *git.Repo, c c
 	if same {
 		if clean, conflicts := landedMergeIsClean(ctx, repo, db, head); !clean {
 			destination := displayRef(db.LocalName())
-			st.Next = fmt.Sprintf("git merge %s && git pair change ready --changeset %s", destination, c.Slug)
+			st.Next = conflictStep(destination)
 			// The reason names its own step, as every other parent refusal does: a reader of `check` has the
 			// verdict and the way out in one line, and `status` prints the reason rather than a second field.
 			st.Reason = fmt.Sprintf("this branch would conflict with %s: %s. The content it contributes is what review %s approved; take %s in and have the result reviewed again — %s.",
