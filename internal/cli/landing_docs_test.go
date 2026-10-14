@@ -50,8 +50,9 @@ func TestDocumentsQuoteTheLandingSentencesTheCodeBuilds(t *testing.T) {
 
 	// The wording the consolidation removed, kept out on purpose. "land it first" was the child's sentence
 	// spelling the parent's step, and it is what a screen printed while `change integrate` refused the
-	// changeset it described.
-	for _, path := range []string{"../../PRD.md", "../../README.md", "../../skills/git-pair/references/cli.md", "../../skills/git-pair/SKILL.md"} {
+	// changeset it described. The sweep runs over every checked document rather than a list written here, so
+	// a new reference page is covered the day it is added — the same list the docs contract uses.
+	for _, path := range docFiles(t) {
 		text := quoteText(readDoc(t, path))
 		if strings.Contains(text, "land it first (git pair check") {
 			t.Errorf("%s restates the parent's landing inside the child's next step; the sentence refers the reader to `git pair status --changeset <parent>` instead", path)

@@ -41,6 +41,12 @@ type landingContract struct {
 	// parent's own screen for the parent's step, so the contract spells this changeset's steps and no other
 	// changeset's.
 	WaitingOn string
+	// ParentGone says the parent's screen is not reachable: its branch is gone and the destination carries no
+	// directory for it, so `git pair status --changeset <parent>` has nothing to read. Set only alongside
+	// WaitingOn. The waiting sentence points at the parent's screen for the parent's step, and a pointer to a
+	// screen that answers with an error is the advice M1 exists to remove — so this fact decides whether the
+	// sentence points, or says what is missing and names the command that resolves it.
+	ParentGone bool
 }
 
 // landingContractFor reads the two facts a landing sentence states, from the repository rather than from the
@@ -75,6 +81,11 @@ func landingContractFor(ctx context.Context, repo *git.Repo, s *session) landing
 	out := landingContract{Destination: target}
 	if below.Landed == "" {
 		out.WaitingOn = below.name()
+		// `Tip` is empty only for a parent branch this clone no longer has (`ParentOf` distinguishes that
+		// from a git error, which arrives as an error and leaves the sentence unstacked), so this is the
+		// state where the parent's screen cannot be read — and it costs nothing, because the read that gave
+		// the answer is the one that named the parent.
+		out.ParentGone = below.Tip == ""
 		return out
 	}
 	// The parent has landed, so the merge is the child's own step, and the parenthetical says where the
@@ -160,6 +171,9 @@ type stackUnder struct {
 	// Changeset is the parent's changeset id, empty when the record named a branch and no changeset — the
 	// shape `init` no longer writes and a hand-edited file still can.
 	Changeset string
+	// Tip is the parent branch's current commit, empty when the branch is gone. Same fact and same meaning as
+	// `parentStatus.Tip`: it comes from the one read that named the branch, so asking it costs nothing.
+	Tip string
 	// Landed is the commit the destination carries the parent's directory at, empty when it does not carry
 	// it. Same fact and same derivation as `parentStatus.Landed`.
 	Landed string
@@ -240,7 +254,7 @@ func stackBelow(ctx context.Context, repo *git.Repo, cs changeset.Changeset, db 
 	if err != nil || parent.Branch == "" {
 		return stackUnder{}, err
 	}
-	out := stackUnder{Branch: parent.Branch, Changeset: cs.BaseChangeset}
+	out := stackUnder{Branch: parent.Branch, Changeset: cs.BaseChangeset, Tip: parent.Tip}
 	if out.Changeset == "" || db.Ref == "" {
 		// Nothing to ask the destination about: the record names a branch and no changeset, or this clone
 		// cannot name the integration branch to ask. The parent is then read as unlanded, which is the
@@ -285,6 +299,16 @@ func landingNextAction(lc landingContract) string {
 // to another changeset — and worse than odd when the parent is approved under a feedback policy this child
 // knows nothing about, or is a grandparent several screens away. The parent's screen is the one place its
 // landing is spelled; the parent's id is the pointer to it, because ids are unique and branch names are not.
+//
+// Where the parent's screen is not reachable — its branch is gone and the destination carries no directory for
+// it — the sentence stops pointing. `git pair status --changeset <id>` answers that state with an error, and
+// advice that names a command which cannot answer is the failure M1 exists to remove, so it says what is
+// missing and names the one command that resolves it, in the words `root.go`'s unreconciled-stack note
+// already uses. The two cases are separate because the pointer is the whole content of the parent clause.
+//
+// That command appears twice on this screen — once here, once in the `stale:` note — and it is not collapsed
+// into a reference for one reason: `next_action` is read on its own in `--json`, so the field has to be
+// actionable without the reader also having read a field printed beside it.
 func waitingNextAction(lc landingContract) string {
 	parent := displayRef(lc.WaitingOn)
 	if parent == "" {
@@ -293,6 +317,10 @@ func waitingNextAction(lc landingContract) string {
 	target := displayRef(lc.Destination)
 	if target == "" {
 		target = "the base branch"
+	}
+	if lc.ParentGone {
+		return fmt.Sprintf("waiting on parent %s: its branch is gone and the destination carries no record of it, so its landing cannot be shown — choose a new base with `git pair init --parent <branch> --set-parent`, then `git pair check` and merge into %s",
+			parent, target)
 	}
 	return fmt.Sprintf("waiting on parent %s: its landing is owed first (`git pair status --changeset %s` names the step), then `git pair check` and merge into %s",
 		parent, parent, target)

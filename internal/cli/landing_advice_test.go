@@ -230,6 +230,11 @@ func TestHandoffLineNeverEntersTheMachineAnswer(t *testing.T) {
 		if strings.Contains(action, "or hand it to") {
 			t.Errorf("%s --json carries the human hand-off in next_action: %q", name, action)
 		}
+		if strings.Contains(action, "\n") {
+			// The contract in one assertion: one string, one instruction. A second sentence appended here
+			// would be a fork a consumer has to parse out of advice.
+			t.Errorf("%s --json next_action is more than one instruction: %q", name, action)
+		}
 		if !strings.Contains(action, "merge into main with ordinary git") {
 			t.Errorf("%s --json next_action is %q, want the landing sentence on its own", name, action)
 		}
@@ -420,5 +425,17 @@ func TestChildOfADeletedUnlandedParentStillGetsAStep(t *testing.T) {
 	}
 	if strings.Contains(line, "merge into alpha") {
 		t.Errorf("status offers a branch that no longer exists as a merge target: %s", line)
+	}
+	// The pointer the waiting sentence gives is a decision, and this is the state where it has to be the
+	// other one: `git pair status --changeset alpha` answers here with an error, so the sentence names the
+	// command that resolves the unreconciled stack instead of pointing at a screen that cannot answer.
+	if strings.Contains(line, "status --changeset alpha") {
+		t.Errorf("status points at its own command for a changeset it has just said is unreadable: %q", line)
+	}
+	if !strings.Contains(line, "git pair init --parent <branch> --set-parent") {
+		t.Errorf("status does not name the command that resolves a parent whose branch is gone: %q\n%s", line, res.stdout)
+	}
+	if !strings.Contains(res.stdout, "its branch is gone") {
+		t.Errorf("status does not say what is missing: %q", res.stdout)
 	}
 }

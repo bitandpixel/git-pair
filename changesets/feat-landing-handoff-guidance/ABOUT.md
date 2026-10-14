@@ -49,6 +49,8 @@ Cannot declare beta ready to integrate:
     `landingNextAction` (a changeset's own step), `waitingNextAction` (a child whose parent's landing is owed)
     and `handoffLine` (the second exit). `declarable` is the screen's half of `change integrate`'s test. All
     four are read by `status` and `check`, so both screens say the same thing about the same facts.
+    `landingContract.ParentGone` — read from the parent tip `ParentOf` already returned, so it costs no git
+    invocation — decides whether the waiting sentence points at the parent's screen or stops pointing.
 -   `internal/cli/status.go` — `statusView` gained a `handoff` field, computed after the three overrides that
     replace the next step (wrong checkout, base-is-own-branch, already landed) so a screen that is not
     offering a merge offers nothing else either, and printed indented under `Next:`.
@@ -72,6 +74,11 @@ Cannot declare beta ready to integrate:
 -   Docs — PRD §21's "The next step says which landing is owed" is now the single canonical statement: the two
     facts, "names the step and the destination, never the actor", both exits with the screen transcript, and
     the refer-don't-restate rule. The README and the agent reference quote it rather than restating it.
+    §11.1 and §11.3 print one exit in their transcripts, so each now points at §21 for the pair; §9.5
+    ("Handing the work on") names the other exit and links to §9.9; `references/integration.md` says the merge
+    belongs to *whoever* owns the destination branch — it said "the person", which names an actor the rest of
+    the guidance refuses to name — and records the automated path as one shape of that owner's decision, with
+    `scripts/ci/git-pair-integrate.sh` named as this repository's own example and no claim about a runner.
 
 ## Design decisions
 
@@ -79,6 +86,16 @@ Cannot declare beta ready to integrate:
 points at `git pair status --changeset <parent>`; `change integrate` does the same and keeps its own argument.
 The acceptance test for the consolidation is an absence — no `git pair check` anywhere in the refusal — because
 the property is that no second copy of the parent's step survives.
+
+**The pointer is dropped where the screen it points at cannot answer.** A parent whose branch is gone and whose
+record the destination never carried is the state where `git pair status --changeset <parent>` exits 2 ("no
+branch carries changeset … and main holds no directory for it either"), verified on a fixture rather than
+reasoned about. Advice that names a command which cannot answer is the failure M1 exists to remove, so in that
+state the sentence says what is missing and names the command that resolves the unreconciled stack,
+`git pair init --parent <branch> --set-parent` — the same words `root.go`'s note uses. That command then appears
+twice on one screen, once in `Next:` and once in `stale:`, and is not collapsed into a reference: `next_action`
+is read on its own in `--json`, so the field has to be actionable without the reader also reading a field
+printed beside it.
 
 **`next_action` stays one instruction.** The hand-off is printed on the human forms of `status` and `check`
 only, where a second line costs a parser nothing. Machine consumers already branch on `state`, `ready` and
@@ -128,13 +145,15 @@ assertions, which is the drift this changeset exists to stop.
     never reviewed, head moved since the approval, child of an unlanded parent, feedback instead of an
     approval, head already declared (no line, and a second `change integrate` records nothing).
 -   The machine answer: `status --json` and `check --json` carry the landing sentence in `next_action` with no
-    hand-off in it; the two human lines name one destination, read from one contract.
+    hand-off in it and no second instruction in it; the two human lines name one destination, read from one
+    contract.
 -   The advice contract test, proved against the pre-fix tree: it fails on `git pair change ready --changeset
     <id>` and passes after the correction; it resolves `status --changeset`, `check --changeset` and the
     builders' own output.
 -   The absence that is the consolidation's point: `change integrate`'s refusal contains no `git pair check`.
 -   The quote test, proved by drifting a builder one word ("its landing is owed first" → "its landing comes
-    first"): three document assertions fail, and pass again on restore.
+    first"): three document assertions fail, and pass again on restore. Its sweep for the removed wording runs
+    over `docFiles`, so a reference page added later is covered without anyone remembering to add it.
 -   The control that must not move: an unstacked approved changeset still ends its next step with
     `` `git pair check`, then merge into main with ordinary git ``, with the hand-off as the only addition.
 -   `mise run check` (gofmt, vet, the sharded suite including the docs contract and the hygiene scan) and
@@ -153,6 +172,9 @@ assertions, which is the drift this changeset exists to stop.
 -   `git pair queue` keeps its own next-step lines and its `parent_notes`. Nothing there printed the merge
     sentence, so the consolidation did not reach it; its housekeeping note is a different voice, and the plan
     leaves it alone deliberately.
+-   In the unreconciled state — parent branch gone, no record in the destination — the child's screen names
+    `git pair init --parent <branch> --set-parent` twice, once in `Next:` and once in the `stale:` note. The
+    duplication buys the ability to act on `next_action` alone.
 -   The quote test pins four sentences. A fifth copy added later by pasting prose rather than calling a
     builder is outside its reach; the defence there is the rule itself — a surface refers, or it owns.
 

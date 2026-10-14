@@ -200,6 +200,11 @@ func adviceCorpus(t *testing.T) []adviceLine {
 	add("landingNextAction/own", landingNextAction(lc))
 	add("landingNextAction/note", landingNextAction(landingContract{Destination: "main", DestinationNote: " (where alpha landed)"}))
 	add("landingNextAction/waiting", landingNextAction(waiting))
+	// The waiting sentence for the state where the parent's screen cannot answer: this one names the command
+	// that resolves the stack instead of pointing at a screen, and the flags it names on `init` are the ones
+	// the build has.
+	add("waitingNextAction/unreachable-parent",
+		waitingNextAction(landingContract{Destination: "main", WaitingOn: "booking", ParentGone: true}))
 
 	// The state sentences, which name the commands a changeset runs next.
 	for _, tc := range []struct {

@@ -870,6 +870,10 @@ git switch main && git merge booking-transaction  # …or a squash, or a cherry-
 git pair status --changeset booking-transaction   # landed at 4f2c81a, with the chain that arrived
 ```
 
+That is the exit where the author merges. The other one hands the merge over: `git pair change integrate`
+(§9.9) records the request and the author pushes, and the destination's owner performs the merge. §21 shows
+what the two exits look like on the screen that offers them, so they are spelled there once.
+
 Three properties are worth naming, because they are what the previous shape of this chapter had
 backwards:
 
@@ -1611,6 +1615,10 @@ Uncommitted changes: no
 Next: `git pair check`, then merge into main with ordinary git
 ```
 
+That `Next:` line is also what `--json` reports in `next_action`. The human screen prints one line under it
+for a changeset `git pair change integrate` would accept — handing the merge to the destination's owner — and
+§21 prints the pair together, so both exits are spelled once rather than in every transcript that shows one.
+
 Nothing durable is reported, because nothing durable exists yet: the branch holds the history, and
 git-pair writes no ref at any point before or after a landing. A changeset the destination carries reads:
 
@@ -1799,6 +1807,10 @@ NOT READY:
 - latest review outcome is blocking
 - content outside changesets/booking-transaction/ changed since 91bf204: src/booking/service.ts
 ```
+
+The passing verdict's `next:` line is the machine answer as well, and the human screen carries the hand-off
+line under it wherever `git pair change integrate` would accept the changeset — §21 shows the two lines
+together.
 
 A rewritten branch says so in the same list:
 

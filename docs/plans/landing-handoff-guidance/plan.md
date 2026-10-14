@@ -160,9 +160,16 @@ with a reason that explains what the screen should have said. See
       where there is no parent screen to point at.
 - [x] Land a decision, in a code comment, on what "its advice" means when the parent's own screen is not
       readable from here (a parent branch deleted with no landing): point at the reason the reader does have.
+      Done in the review round, because the first version of this box was ticked on a comment that was wrong:
+      `git pair status --changeset <parent>` answers that state with an error, so the sentence no longer
+      points there. `landingContract.ParentGone` is the fact — read from the parent tip `ParentOf` already
+      returned, so it costs no git invocation — and the sentence then names
+      `git pair init --parent <branch> --set-parent`, the command `root.go`'s unreconciled-stack note uses.
 - [x] Update the tests that pin the current waiting text (`landing_advice_test.go`,
-      `restack_advice_test.go`, `parent_landed_surfaces_test.go`) to the new sentence, keeping every assertion
-      that names an absence (`no "merge into alpha"`, no `git rebase` in a verdict's `next_action`).
+      `landing_advice_stale_base_test.go`, `restack_advice_test.go`, `integrate_test.go`) to the new sentence,
+      keeping every assertion that names an absence (`no "merge into alpha"`, no `git rebase` in a verdict's
+      `next_action`). `parent_landed_surfaces_test.go` needed no change: it pins the landed-parent surfaces,
+      not the waiting sentence.
 
 #### Verification
 
@@ -182,20 +189,28 @@ with a reason that explains what the screen should have said. See
 
 #### Tasks
 
-- [x] Extract the predicate `change integrate` already applies before writing a marker — verdict permits
-      integration, head not stale, nothing below unlanded, no declaration covering this head — and have both
-      `change integrate` and the screens call it. Keep it cheap: the facts a screen already holds, no gate run.
+- [x] Bring the screens and the command to one rule: `declarable` applies each reason `change integrate`
+      refuses before its gate — verdict permits integration, head not stale, not abandoned, nothing below
+      unlanded, no declaration covering this head — and shares that command's `alreadyDeclared` outright.
+      Deliberately not one function called by both: `change integrate` also runs hooks and the gate, and a
+      shared function would put the screen on the command's path. The equivalence is therefore tested from one
+      fixture rather than assumed — each state asserts the line and the command's exit code and `recorded`
+      field. Keep it cheap: the facts a screen already holds, no gate run.
 - [x] Print, as a second `Next:` line on `status` and a second line under `check`'s `next:`, the hand-off form:
       `or hand it to <destination>'s owner: `git pair change integrate`, then `git push origin <branch>``.
       The destination's name comes from the same contract the merge line uses, so the two cannot name different
       branches.
 - [x] Print nothing in the states the demonstration excluded: never reviewed, stale head, unlanded parent,
       already declared.
-- [x] Do not add the line to `change ready`'s acknowledgement, and record why in the commit: the predicate is
-      false there by construction, since a changeset that was just offered has no verdict to integrate on.
-- [x] Tests: the offer and the acceptance from one fixture (offer present ⇔ `change integrate` accepted); the
-      four excluded states; `--json` byte-unchanged on `status` and `check`; and the hand-off line passing the
-      M1 command test.
+- [x] Do not add the line to `change ready`'s acknowledgement; the reason is recorded under M3's tasks and in
+      `ABOUT.md`.
+- [x] Tests: the offer and the acceptance from one fixture (offer present ⇔ `change integrate` accepted and
+      `recorded: true`); the excluded states (never reviewed, stale head, unlanded parent, feedback, already
+      declared); `next_action` on `status` and `check` carrying no hand-off and no second instruction; and the
+      hand-off line passing the M1 command test.
+- [x] Record in `ABOUT.md` why `change ready`'s acknowledgement carries no such line — the predicate is false
+      there by construction, since a changeset just offered has no verdict to integrate on. The commit message
+      said the what; the reason belongs where a reader of the screen will find it.
 
 #### Verification
 
@@ -218,16 +233,45 @@ with a reason that explains what the screen should have said. See
       two exits, "git-pair names the step and the destination, never the actor or the tooling", and the rule
       that a surface which does not own a step refers the reader to the one that does. Fold in the sentences
       that currently repeat it — §9.5, §11.1, §11.3 keep their local claims and link instead of restating.
+      What the review round found: none of the three restated the sentence, so nothing needed folding, but two
+      of them were incomplete rather than duplicated. §11.1 and §11.3 show a `Next:` / `next:` transcript with
+      one exit, so each now carries a sentence pointing at §21, where both lines are printed; and §9.5
+      ("Handing the work on") documents only the author-merges path, so it now names the other exit and links
+      to §9.9 and §21.
 - [x] Update the three quotes of the waiting sentence (README's stack prose, `references/cli.md`, the PRD's
       fenced block) to M2's wording, and add the hand-off line where the README documents `next_action`.
 - [x] Add the quote test: for each sentence a document is expected to carry, build it from the builders and
-      require the document to contain it. Name the documents the way `docFiles` does, so a new reference page
-      is covered without anyone remembering.
+      require the document to contain it. The documents that quote are named explicitly, because a document
+      that quotes nothing must not be asserted to quote something; the sweep for the wording the consolidation
+      removed runs over `docFiles(t)`, so a new reference page is covered the day it is added.
 - [x] Record in `references/integration.md` that the automated path is one shape of the destination owner's
       decision, with the pointer to `scripts/ci/git-pair-integrate.sh` — and no new claim about what a runner
-      does.
+      does. Done in the review round, with the sentence the file had backwards: it said the merge belongs to
+      "the person who owns the destination branch", which names an actor the rest of the guidance refuses to
+      name; it now says whoever owns it, and names the two common shapes.
 
 everything is marked complete in this plan, are all the milestones in this single changeset?
+
+**Answered (review 8c8ef04).** Yes — all four milestones are delivered by commits in this one changeset, and
+the boxes above are true of the tree at HEAD. Each milestone is one commit, so a reviewer can read them in
+order:
+
+| Milestone | Commit | What it delivered |
+| --- | --- | --- |
+| M1 — advice this build answers to | `cli: make emitted advice name a command this build answers to` | `advice_contract_test.go`, the two `change ready --changeset` corrections, `conflictStep` |
+| M2 — refer, do not restate | `cli: say the landing step once, and point at it from everywhere else` | `waitingNextAction`, `unlandedParentReason` referring, tests re-pointed |
+| M3 — the hand-off line | `cli: offer the hand-off beside the author's own merge` | `declarable`, `handoffLine`, the `status`/`check` lines, the equivalence tests |
+| M4 — one statement, checked quotes | `docs: say the landing step once, and pin the documents to the wording` | PRD §21 canonical, README and `cli.md` quoting, `landing_docs_test.go` |
+
+The review round after that feedback added work the plan had claimed complete: the unreachable-parent pointer
+(M2), `references/integration.md` (M4), the pointer sentences in §9.5/§11.1/§11.3 (M4), and two box wordings
+that described an intention rather than what was built (M3's shared predicate and its `--json` claim). The
+Audit History row below records that, and the boxes were corrected rather than quietly re-ticked.
+
+What is deliberately **not** in this changeset, so a reader looking for it does not assume it is hidden in a
+box: `git pair queue`'s own next-step lines and `parent_notes` (a different voice, see Open questions),
+`change ready`'s acknowledgement, a `status --allow-feedback`, and any release tag.
+
 #### Verification
 
 - The quote test fails when a builder's wording changes and the document does not (prove it by editing one
@@ -241,6 +285,7 @@ everything is marked complete in this plan, are all the milestones in this singl
 | What does a screen that always offers the hand-off do when the declaration refuses? | `research/2026-10-14-handoff-line-when-declaration-refused.md` | answered — it offers a step that exits 1 in two states; "only when declarable" chosen |
 | Do the two `change ready --changeset` strings actually fail, and what should they say? | `research/2026-10-14-advice-that-names-a-missing-flag.md` | answered — `--changeset` is not a flag on `change ready`; plain `git pair change ready` is the correction |
 | Does `change ready` have wording for a branch carrying more than one unlanded changeset, that M1 can reuse? | same note | answered — `change stack` and `change combine` already refuse that shape with their own exits, so the advice does not need any |
+| Does `git pair status --changeset <parent>` answer when the parent's branch is deleted before its work lands? | the review round, on a fixture | answered — no: exit 2, "no branch carries changeset … and main holds no directory for it either". So the waiting sentence stops pointing there in that state and names `git pair init --parent <branch> --set-parent` instead |
 
 ## Risks
 
@@ -269,4 +314,4 @@ this plan changes.
 
 | Date | Audit | Summary |
 | --- | --- | --- |
-| — | — | none yet |
+| 2026-10-14 | review 8c8ef04 (feedback): "are all the milestones in this single changeset?" | Confirmed the four milestones against the tree: all four are here, one commit each. The audit found five boxes that overclaimed and fixed them — the unreachable-parent pointer was ticked with a comment that was factually wrong (`status --changeset <id>` exits 2 in that state; verified), `references/integration.md` was never touched, the shared-predicate box described a design the code does not use, the `--json` box promised byte-equality the test does not assert, and the file list in M2's test box named a file that needed no change while omitting two that did. Added: `ParentGone`, the pointer sentences in §9.5/§11.1/§11.3, the `integration.md` paragraph, the `docFiles` sweep, and the single-instruction assertion on `next_action`. |
