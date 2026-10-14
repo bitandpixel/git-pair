@@ -1,0 +1,3 @@
+id: feat-ci-integrate-candidate-shape
+base: feat/ci-verify-cmd
+base-changeset: feat-ci-verify-cmd

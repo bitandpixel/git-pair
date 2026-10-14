@@ -20,6 +20,13 @@ if [ ! -x "$G" ]; then
   exit 1
 fi
 T=$(mktemp -d /tmp/git-pair-e2e.XXXXXX)
+# The product reads its configuration out of the environment, so this gate takes that away before it runs
+# anything: `$G` below is the program under test, and its behaviour must not depend on the shell that started
+# the gate — a merge job exports `GIT_PAIR_DEFAULT_BRANCH` for the driver's benefit, and with it set `status`
+# explains where its comparison came from, which is a sentence this gate has no use for and asserts against.
+# `job_env` in ci-integrate.sh is the same rule for a single run; this is it for a whole gate. A scenario that
+# wants one of these names sets it itself.
+for __env in $(compgen -e | grep '^GIT_PAIR_' || true); do unset "$__env"; done
 # Every command here runs with stdin at /dev/null. `git pair init` reads a pipe as piped `--about`
 # content, so a harness that leaves stdin open — CI, an agent runner, tmux — would leave the first `init`
 # blocked in a read that never ends. Nothing in this replay pipes anything in.

@@ -1,4 +1,4 @@
-# The repository's own tests.
+# The repository's own tests, run before anything is merged.
 #
 # `mise run gates` is the repository's definition of "done", so it is what CI runs: it depends on `check`
 # (gofmt, vet, the sharded suite) and then runs the scripted replays — the PRD §29 loop, the pty TUI
@@ -6,9 +6,22 @@
 # commands here instead would put a second definition of the gate in YAML, where it can drift from the task
 # it is supposed to mirror.
 #
-# This file also has a second job: `git-pair-integrate.yml` triggers on this workflow finishing, and names it
-# by `name:` below. Renaming this workflow means renaming it there, or the merge job waits for a run that
-# will never come.
+# The other half of the pair is `.github/workflows/git-pair-integrate.yml`, which merges a declared changeset
+# onto trunk. It is a separate file because the two ask for different tokens — this one reads, that one writes
+# — and because a reader who renames one should look at the other: `scripts/ci/gh-request-ci.sh` asks the
+# destination to run *this* file by name after a merge, so renaming it moves that default too.
+#
+# Why it no longer runs on every branch push. It used to, for one reason stated in this file's own words:
+# the merge job's probe (`--require-ci`, `scripts/ci/gh-head-green.sh`) read the checks on a *branch head*,
+# and a `pull_request` run reports its checks against the PR's merge ref, so a repository that tested only
+# pull requests left that job unable to prove any head green. The merge job now answers the testing question
+# itself, by building the candidate and running this same ladder against it before it pushes
+# (`--verify-cmd`, in `scripts/ci/git-pair-integrate.sh`). Nothing reads branch-head checks any more, and a
+# branch with no declaration was paying twice for the same commits — once here, once at the merge. Billing
+# counts a job that starts, so the trigger is the lever: a feature branch that has not been declared starts no
+# run. Trunk keeps its trigger below, because a commit pushed straight to `main` has no candidate run behind
+# it. A repository that wants a check on every head can widen `branches` back to `'**'`; the merge job does not
+# need it, and `git pair change integrate` will still merge on the candidate's own green.
 #
 # `jdx/mise-action` is what installs mise, and with it the Go pinned in `.mise.toml`. If a third-party action
 # in the hot path is not wanted: `actions/setup-go@v5` with `go-version-file: go.mod`, and the replays
@@ -16,15 +29,32 @@
 name: CI
 
 on:
+  # Trunk, and only trunk. Dropping the branch pushes above would otherwise leave a commit pushed straight to
+  # `main` — the ordinary shape of a fix someone landed by hand, with no declaration and so no candidate run —
+  # covered by nothing at all.
+  #
+  # Nearly free, for the same reason the post-merge ask exists: GitHub creates no runs for events the runner's
+  # own token caused, so a merge the integrate job pushed does not start a run here. What starts one is a human
+  # push to trunk, which is rare, and it is the case worth covering. A repository that has moved off `main`
+  # edits this line — a trigger cannot read `vars`, so this is the one place the branch name is written twice.
+  #
+  # What it does not give back is a run record on trunk for a landing. That is still `--ci-request`: the push
+  # that landed the merge was a token's doing.
   push:
-    # Every branch, not just trunk. This is the trigger the merge job depends on: it reads the checks on a
-    # *branch head*, and a `pull_request` run reports its checks against the PR's merge ref rather than
-    # against the head. A repository that ran CI only on pull requests would leave that job unable to prove
-    # any head green — correctly, and silently. Branches that also carry a pull request get both runs; if
-    # the duplicate minutes matter and the repository does not take forks, drop `pull_request` below.
     branches:
-      - '**'
+      - main
+
+  # The preview: the suite on a branch before anybody declares it, for the reader who wants to see it pass
+  # first. A pull request from a fork runs here with a read-only token, which is all this job needs.
   pull_request:
+
+  # Two readers for this trigger, and both are the reason it stays.
+  #
+  #   - `scripts/ci/gh-request-ci.sh` runs this file by name after a merge. The merge is pushed with the
+  #     merging job's own token, and GitHub creates no runs for events a token caused, so trunk keeps a tip
+  #     nothing built unless somebody asks — this is that ask, and it is safe to make because this file
+  #     merges nothing.
+  #   - a person who wants the ladder on a commit they choose, without pushing anything.
   workflow_dispatch:
 
 permissions:
@@ -45,8 +75,12 @@ jobs:
 
       - uses: jdx/mise-action@v3
 
-      # The whole ladder: gofmt, vet, the sharded suite, then the three replays. The pty walkthrough is the
-      # timing-sensitive one — it needs a real terminal and it has been known to fail on a loaded machine
-      # and pass on an idle one. Re-run it before believing a failure there; if it keeps failing, the shard
-      # count in scripts/test-sharded.sh is the dial, not this gate.
+      # The whole ladder — the same command the merge job runs against the candidate, so there is one
+      # definition of green, and neither of them wrapped: the suite fixes its own environment, in `TestMain`
+      # for the Go package and `job_env` in scripts/gates/ci-integrate.sh for the driver.
+      #
+      # The pty walkthrough is the timing-sensitive one — it needs a real terminal and it
+      # has been known to fail on a loaded machine and pass on an idle one. Re-run it before believing a
+      # failure there; if it keeps failing, the shard count in scripts/test-sharded.sh is the dial, not this
+      # gate.
       - run: mise run gates

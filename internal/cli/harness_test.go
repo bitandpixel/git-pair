@@ -73,6 +73,31 @@ func (r result) mustSucceed(t *testing.T, args ...string) result {
 	return r
 }
 
+// TestMain takes away the environment the tests were not written against.
+//
+// Every test in this package asks what `git-pair` says or does, and the product reads its own configuration
+// out of the environment. So a variable in the shell that runs the tests is a second, silent input: with
+// GIT_PAIR_DEFAULT_BRANCH exported — the name a CI job exports so the merge job knows where to merge, and a
+// developer may export for the same reason — the product reports where its destination came from, and a
+// dozen tests that assert a verdict carries no such tool line fail on a tree that is fine. It took a merge
+// job running the suite in its own environment to find this, because nowhere else exports the name.
+//
+// The rule the harness follows is the one the bash gate already follows where it pins
+// `GIT_CONFIG_GLOBAL=/dev/null` before handing the binary a repository: whatever the unit under test reads,
+// the harness fixes. The whole `GIT_PAIR_` family goes, rather than a named list, so a variable added next
+// month cannot arrive already half-deciding a test. A test that wants one sets it itself with `t.Setenv`,
+// which is what `hooks_test.go` and `gittest.SpawnShim` already do — and setting is the only direction that
+// still works afterwards, so the dependency has to be stated in the test that has it.
+func TestMain(m *testing.M) {
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "GIT_PAIR_") {
+			name, _, _ := strings.Cut(kv, "=")
+			os.Unsetenv(name)
+		}
+	}
+	os.Exit(m.Run())
+}
+
 // run executes `git-pair` with the given arguments in the current working directory.
 //
 // The output streams are regular files, and stdin is /dev/null: console.Interactive()

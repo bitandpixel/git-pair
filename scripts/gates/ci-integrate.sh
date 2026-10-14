@@ -14,7 +14,8 @@
 # changeset whose branch sits outside feat/ merges like any other, and the trigger is checked for the branch
 # filter that would have stopped it; a candidate is tested against the tree the destination would become, and
 # one that fails is an error that pushes nothing and puts the local destination back; and the two workflow
-# files still name each other, so a rename fails a build instead of stalling a merge.
+# files still say what this shape needs — the merge triggered by a push with no poll and no other workflow to
+# wait for, and the ask that follows a merge pointed at a workflow that cannot merge.
 #
 # What it does not: it is not a GitHub Actions test. The workflow file is thin on purpose — build, then this
 # script — so the behaviour worth proving lives here, and the file's own claims (permissions, triggers,
@@ -34,6 +35,12 @@ fi
 exec < /dev/null
 T=$(mktemp -d /tmp/git-pair-ci-gate.XXXXXX)
 trap 'rm -rf "$T"' EXIT
+# The author-side commands driven below (`wing`) are the product as much as the driver is, so the rule
+# `job_env` applies to a single run applies to this whole script: the product reads its configuration from the
+# environment, and a check here must not be decided by the shell — or the merge job — that started it. The two
+# other gates do the same at their own start. Nothing asserts that any of the three keeps doing it; what makes
+# the rule hold is that `mise run gates` with those names exported goes red within seconds if one stops.
+for __env in $(compgen -e | grep '^GIT_PAIR_' || true); do unset "$__env"; done
 FAILED=0
 PASS=0
 
@@ -53,9 +60,21 @@ no_contains() { # no_contains <haystack> <needle> <description>
 # A job's clone has no identity of its own and nothing inherited from a developer's machine, so every CI run
 # here sets both away. The script under test is then forced to do what it claims about setting the merger's
 # identity, and no result depends on whose laptop the gate runs on.
+# job_env is the environment the driver is handed, in every run below. It starts from nothing for the same
+# reason `GIT_CONFIG_GLOBAL=/dev/null` does: a result must not depend on the shell that happened to start the
+# gate. What the driver reads out of its environment decides what it does, not only what it says —
+# `GITHUB_REPOSITORY` alone makes it ask a forge for a run, and once that name was inherited from a merge job
+# the replay dispatched six real `gh workflow run ci.yml --repo bitandpixel/git-pair --ref main` calls while
+# testing merges into scratch repositories that have nothing to do with this one. `PATH` and `HOME` are what
+# git needs; everything else the caller exported stays outside.
+#
+# Written as an array so the sites below keep naming what they add (`GIT_PAIR_BIN`, a stub's own variables)
+# beside the run, and so a new one cannot forget the pin: the assignments after `env -i` are additive, which
+# is how a harness pins an environment without hiding the parts of it a scenario is about.
+job_env=(env -i PATH="$PATH" HOME="$HOME")
 cigr() { # cigr <dir> [branch...] — the job, in a clone of the scratch origin
   local dir=$1; shift
-  ( cd "$dir" && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
+  ( cd "$dir" && "${job_env[@]}" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
       bash "$CI" "$@" 2>&1 )
 }
 # show prints what the job actually said. The assertions quote it; when one of them fails, the reader needs
@@ -200,7 +219,7 @@ step "the head has to be proven green"
 # declaration named, not about whatever the branch tip happens to be when the answer comes back.
 ci_probe_run() { # ci_probe_run <rc> <says> <dir> [job args...]
   local rc=$1 says=$2 dir=$3; shift 3
-  ( cd "$dir" && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
+  ( cd "$dir" && "${job_env[@]}" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
       PROBE_RC="$rc" PROBE_SAYS="$says" PROBE_CALLS="$T/probe-calls" \
       bash "$CI" --require-ci --ci-probe "bash $T/probe" "$@" 2>&1 )
 }
@@ -265,7 +284,7 @@ chmod +x "$T/request"
 
 ci_request_run() { # ci_request_run <rc> <says> <dir> [job args...]
   local rc=$1 says=$2 dir=$3; shift 3
-  ( cd "$dir" && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
+  ( cd "$dir" && "${job_env[@]}" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
       REQUEST_RC="$rc" REQUEST_SAYS="$says" REQUEST_CALLS="$T/request-calls" \
       bash "$CI" --ci-request "bash $T/request" "$@" 2>&1 )
 }
@@ -324,9 +343,21 @@ check "a dry run writes nothing outside the clone (exit 0)" 0 $code
 check "and asks for no run it did not make" "$n0" "$(wc -l < "$T/request-calls")"
 
 # Three static claims, in the style of the workflow-name checks below. Each is a way the ask could stop
-# existing while every run stayed green: the scope withdrawn, the helper left unexecutable so the job's own
-# `-x` test skips it, or the default deleted from the script.
-check "the merge job is granted the scope to ask for a run" 1 "$(grep -c '^  actions: write$' "$ROOT/.github/workflows/git-pair-integrate.yml")"
+# existing while every run stayed green: the scope withdrawn while the ask was still made, the helper left
+# unexecutable so the job's own `-x` test skips it, or the default deleted from the script.
+#
+# The first claim used to read `the merge job is granted the scope to ask for a run`, and asserted
+# `actions: write` was present. This file no longer asks — it tests the candidate before it pushes, so there
+# is no tip left untested for somebody else to check — so asserting the scope is there would force a wide
+# token the job does not use. What still has to be true is the pairing: a file that asks for a run has to
+# carry the scope that makes the ask, and one that does not ask has to leave the scope out. Either half
+# failing is the same bug seen from the other side, so both are checked here.
+ASKS=$(grep -v '^[[:space:]]*#' "$ROOT/.github/workflows/git-pair-integrate.yml" | grep -c -- '--ci-request')
+SCOPED=$(grep -v '^[[:space:]]*#' "$ROOT/.github/workflows/git-pair-integrate.yml" | grep -c '^  actions: write$')
+check "the merge job asks for a run only if it holds the scope to make the ask" 0 \
+  "$([ "$ASKS" -gt 0 ] && [ "$SCOPED" -eq 0 ] && echo 1 || echo 0)"
+check "and holds that scope only if it asks, so no token is wider than the job" 0 \
+  "$([ "$ASKS" -eq 0 ] && [ "$SCOPED" -gt 0 ] && echo 1 || echo 0)"
 if [ -x "$ROOT/scripts/ci/gh-request-ci.sh" ]; then
   ok "the request helper is executable, which is how the job finds it by default"
 else
@@ -495,26 +526,150 @@ else
   ok "and the refused tree is out of it, so the next changeset is merged against the real destination"
 fi
 
-step "the two workflow files still name each other"
+step "the replay cannot reach the forge"
 
-# Renaming either workflow is invisible until a merge fails to happen: `workflow_run` matches the other
-# file's `name:` string, and nothing but a push runs the pair. These are text checks of two conventions
-# rather than a YAML parse — there is no YAML parser to depend on in a gate — but they fail the build here
-# instead of leaving a merge job that quietly never fires.
-check "the test workflow declares the name the merge job triggers on" 1 "$(grep -c '^name: CI$' "$ROOT/.github/workflows/ci.yml")"
-check "and the merge job names it back" 1 "$(grep -c "^[[:space:]]*- 'CI'\$" "$ROOT/.github/workflows/git-pair-integrate.yml")"
-check "CI runs on branch pushes, whose checks are the ones on the head the probe reads" 1 "$(grep -c '^    branches:$' "$ROOT/.github/workflows/ci.yml")"
-check "and the merge job has no push trigger that would make it certify its own check run" 0 "$(grep -c '^  push:$' "$ROOT/.github/workflows/git-pair-integrate.yml")"
+# The job runs the suite, the suite runs the driver, and the driver — given a forge to name — asks it for a
+# run. Run inside the merge job, where the token can make that ask succeed, one pass of `mise run gates`
+# produced six real `gh workflow run ci.yml --repo bitandpixel/git-pair --ref main` calls against this
+# repository, each one caused by a merge into a scratch repository that has nothing to do with it. The fix is
+# `job_env` above. Both halves are asserted below, and they differ by one variable: the same baseline, with a
+# forge named and without. Without the first, the second would only be proving that `gh` was never called.
+GHSTUB=$T/ghstub
+mkdir -p "$GHSTUB"
+printf '#!/bin/sh\necho "gh $*" >> "%s/ghcalls"\nexit 0\n' "$T" > "$GHSTUB/gh"
+chmod +x "$GHSTUB/gh"
+: > "$T/ghcalls"
 
-# The check above and the step before it cover two halves of one rule, and only this one can see the trigger.
-# A branch filter in `workflow_run:` leaves every job green and every fixture passing while it stops a whole
-# family of branches from ever landing, because the trigger is evaluated before anything git-pair says. The
-# block is taken between the trigger and the next one, minus its comments, so the prose can explain the rule
-# without tripping the assertion.
-WRT=$(awk '/^  workflow_run:/{f=1;next} f&&/^  [a-z_]+:/{f=0} f' "$ROOT/.github/workflows/git-pair-integrate.yml" |
-  grep -v '^[[:space:]]*#')
-check "the trigger carries no branch allowlist to exclude a changeset from landing" 0 "$(printf '%s\n' "$WRT" | grep -Ec '^[[:space:]]*branches:')"
-check "and no denylist taking its place" 0 "$(printf '%s\n' "$WRT" | grep -Ec '^[[:space:]]*branches-ignore:')"
+forge_run() { # forge_run <dir> <branch> — the driver as a merge job has it: the harness's own baseline, plus a forge
+  local dir=$1 branch=$2
+  ( cd "$dir" && "${job_env[@]}" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
+      GITHUB_REPOSITORY=bitandpixel/git-pair GITHUB_TOKEN=forge-token PATH="$GHSTUB:$PATH" \
+      bash "$CI" "$branch" 2>&1 )
+}
+# pinned_run is the situation that produced the six calls: the gate itself running inside a job whose
+# environment names a forge, handing the driver to `cigr` like every other run in this file does. `gh` stays
+# on the PATH, so the silence below can only come from the pin taking the name away.
+pinned_run() { # pinned_run <dir> <branch> — the same driver through the harness, with a forge in the caller's environment
+  local dir=$1 branch=$2
+  (
+    export GITHUB_REPOSITORY=bitandpixel/git-pair GITHUB_TOKEN=forge-token GH_TOKEN=forge-token
+    export GIT_PAIR_DEFAULT_BRANCH=main PATH="$GHSTUB:$PATH"
+    cigr "$dir" "$branch"
+  )
+}
+count_gh() { wc -l < "$T/ghcalls" | tr -d ' '; }
+
+declare_changeset flow/forge-direct src/i.ts 'export const i = 9' || { echo "fixture: flow/forge-direct" >&2; exit 1; }
+git -C "$T/work" checkout -q flow/forge-direct && wing change integrate >/dev/null || { echo "fixture: declare flow/forge-direct" >&2; exit 1; }
+git -C "$T/work" push -q origin flow/forge-direct >/dev/null 2>&1
+OUT=$(forge_run "$(clone fd)" flow/forge-direct); show "$OUT"
+contains "$OUT" "requested: bitandpixel/git-pair will run ci.yml" \
+  "left as the job has it, the environment names a forge, and the default hook asks it for a run"
+if [ "$(count_gh)" -ge 1 ]; then
+  ok "and the ask was an outbound call, not a line of text"
+else
+  fail "the ask never reached gh, which makes the assertion below meaningless"
+fi
+
+declare_changeset flow/forge-scrubbed src/j.ts 'export const j = 10' || { echo "fixture: flow/forge-scrubbed" >&2; exit 1; }
+git -C "$T/work" checkout -q flow/forge-scrubbed && wing change integrate >/dev/null || { echo "fixture: declare flow/forge-scrubbed" >&2; exit 1; }
+git -C "$T/work" push -q origin flow/forge-scrubbed >/dev/null 2>&1
+BEFORE=$(count_gh)
+BEFORE_TIP=$(git -C "$T/origin.git" rev-parse main)
+OUT=$(pinned_run "$(clone fs)" flow/forge-scrubbed); show "$OUT"
+contains "$OUT" "no --ci-request given, no forge named" \
+  "with the harness's pin, the forge the job exported never reaches the driver, which says so instead of asking"
+if [ "$(count_gh)" = "$BEFORE" ]; then
+  ok "and nothing was dispatched: a test cannot ask the repository it is testing for a run"
+else
+  fail "the pin let $(( $(count_gh) - BEFORE )) call(s) through"
+fi
+check "and the merge still happened, so the pin removed the ask rather than the job" 1 \
+  "$( [ "$(git -C "$T/origin.git" rev-parse main)" != "$BEFORE_TIP" ] && echo 1 || echo 0 )"
+
+step "the workflow files say what this shape needs"
+
+# Text checks of conventions, not a YAML parse — there is no YAML parser to depend on in a gate. Each one
+# here fails a build for something that would otherwise show up as a merge that quietly never happened, a
+# minute spent on a run that could not have merged, or a token wider than the job uses. Comments are stripped
+# from the blocks being matched, so the file's prose can name a rule without tripping the assertion of it.
+INTEGRATE=$ROOT/.github/workflows/git-pair-integrate.yml
+CIFIKE=$ROOT/.github/workflows/ci.yml
+
+check "the merge workflow is still there to be triggered" 1 "$(grep -c '^name: git-pair integrate$' "$INTEGRATE")"
+check "and the test workflow is still there to be asked for" 1 "$(grep -c '^name: CI$' "$CIFIKE")"
+
+# The triggers this shape runs on, and the two it stopped running on. A schedule is 96 jobs a day whether or
+# not anything is waiting; a `workflow_run` merges a head some other workflow certified rather than the tree
+# the destination would become. Both are gone, and neither comes back without a decision.
+check "the merge job is triggered by a push, which is how a declaration arrives" 1 "$(grep -c '^  push:$' "$INTEGRATE")"
+check "it has no scheduled poll" 0 "$(grep -Ec '^[[:space:]]*schedule:' "$INTEGRATE")"
+check "and no run of another workflow to wait for" 0 "$(grep -Ec '^[[:space:]]*workflow_run:' "$INTEGRATE")"
+
+# A branch filter on the trigger is evaluated before anything git-pair says, so it can stop a whole family of
+# changeset branches from ever landing while every job stays green and every fixture passes. The push block is
+# read between its trigger and the next one, minus comments, for the same reason the old `workflow_run:`
+# block was: the prose may explain the rule without tripping the assertion.
+PUSH=$(awk '/^  push:/{f=1;next} f&&/^  [a-z_]+:/{f=0} f' "$INTEGRATE" | grep -v '^[[:space:]]*#')
+check "the push trigger carries no denylist to exclude a changeset from landing" 0 "$(printf '%s\n' "$PUSH" | grep -Ec '^[[:space:]]*(branches-ignore|paths-ignore|tags-ignore):')"
+check "no allowlist to do the same job" 0 "$(printf '%s\n' "$PUSH" | grep -Ec '^[[:space:]]*(branches|paths|tags):[^-]')"
+check "and it takes every branch, so a changeset named outside the usual prefixes still lands" 1 "$(printf '%s\n' "$PUSH" | grep -Ec "^[[:space:]]*-[[:space:]]*'\*\*'[[:space:]]*$")"
+
+# The condition that decides whether the merge job runs at all. It lives in the job's `if:` and not in a step
+# because a job that starts is billed: a guard step that exits early costs the minute a guard `if:` saves. Two
+# properties are worth an assertion each — that it cannot admit a trigger with no write token, and that it
+# matches the trailer the declaration writes rather than its subject line.
+IF=$(awk '/^    if: >-/{f=1;next} f&&/^    runs-on:/{f=0} f' "$INTEGRATE" | grep -v '^[[:space:]]*#')
+check "the merge job's condition is an allowlist that admits no pull request" 0 "$(printf '%s\n' "$IF" | grep -c pull_request)"
+check "it reads the declaration as a trailer, so it matches where git-pair actually writes it" 1 \
+  "$(printf '%s\n' "$IF" | grep -c "contains(github.event.head_commit.message, 'Review-State: integrating')")"
+check "it excludes the destination branch, which cannot carry a merge of itself" 1 \
+  "$(printf '%s\n' "$IF" | grep -c "github.ref_name != (vars.GIT_PAIR_BASE || 'main')")"
+check "and it leaves the manual trigger unfiltered, because that is the recovery path" 1 \
+  "$(printf '%s\n' "$IF" | grep -c "github.event_name == 'workflow_dispatch'")"
+
+# `contents: write` is the merge; the three scopes that used to sit beside it belonged to the probe and to the
+# post-merge request, and a token asks for what a job uses. The permissions block is read whole, minus
+# comments, so this file can explain what was dropped without the assertion reading the explanation as a ask.
+PERM=$(awk '/^permissions:/{f=1;next} f&&/^[a-z]/{f=0} f' "$INTEGRATE" | grep -v '^[[:space:]]*#')
+check "the job asks to write the destination" 1 "$(printf '%s\n' "$PERM" | grep -c 'contents: write')"
+check "and to make the one request that follows" 1 "$(printf '%s\n' "$PERM" | grep -c 'actions: write')"
+check "and holds nothing the probe would have needed" 0 "$(printf '%s\n' "$PERM" | grep -Ec '(checks|statuses):')"
+
+# What the job runs. `--verify-cmd` is the whole point of the shape — the merge is conditional on the suite
+# running against the candidate — and `--require-ci` must not come back into this file's own commands, because
+# a job that waits for a head-check while testing the candidate itself has two answers and no rule for which
+# one merges. These are read from the file with its comments away: the prose above is allowed to name a flag
+# it explains, the steps are not.
+INTEGRATE_CODE=$(grep -v '^[[:space:]]*#' "$INTEGRATE")
+check "the job makes the merge conditional on the suite" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c -- '--verify-cmd')" -ge 1 ] && echo 1 || echo 0 )"
+check "and does not also gate on somebody else's checks" 0 "$(printf '%s\n' "$INTEGRATE_CODE" | grep -Ec -- '--require-ci|--ci-probe')"
+
+# The request that follows a landing is house policy, not decoration. The destination's new tip is the tree
+# this job just tested, so the run adds no answer — but a trunk with no run of its own has nothing to go red
+# and nobody to notify when the merge is where the trouble was. Three things have to hold together, and each
+# has failed alone before: the ask named in the file, the scope that makes a request, and a token for the tool
+# that makes it. An ask without a token answers "cannot tell", which the driver reports and then survives —
+# the quiet version of a paper trail that was never printed.
+check "the merge reads the whole history, so an approval and a landing can be found" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'fetch-depth: 0')" -ge 1 ] && echo 1 || echo 0 )"
+check "two jobs for one declaration would race, so a merge is never cancelled midway" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'cancel-in-progress: false')" -ge 1 ] && echo 1 || echo 0 )"
+check "and the queue report runs after a failure, when it is most wanted" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'if: always()')" -ge 1 ] && echo 1 || echo 0 )"
+check "the merge job asks the destination to test what it landed" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c -- '--ci-request')" -ge 1 ] && echo 1 || echo 0 )"
+check "and names the helper rather than leaning on the driver's default" 1 \
+  "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c -- '--ci-request scripts/ci/gh-request-ci.sh')"
+check "and the tool that asks is given a token to ask with" 1 \
+  "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'GITHUB_TOKEN')" -ge 1 ] && echo 1 || echo 0 )"
+
+# The pair, in the direction that still matters. After a merge, trunk's own push trigger cannot fire — the
+# push came from a token, and GitHub makes no runs for what a token caused — so `scripts/ci/gh-request-ci.sh`
+# asks for a workflow by name. That name has to be a file that exists, and a file that cannot merge: asking
+# for a test must not be able to cause a landing. Again the file minus its prose, which names the merge file
+# in order to say the two are a pair.
+REQUESTED=$(sed -n 's/^workflow=\${GIT_PAIR_CI_REQUEST_WORKFLOW:-\(.*\)}/\1/p' "$ROOT/scripts/ci/gh-request-ci.sh")
+REQUESTED_CODE=$(grep -v '^[[:space:]]*#' "$ROOT/.github/workflows/$REQUESTED")
+check "the request hook still names a workflow that exists" 1 "$( [ -f "$ROOT/.github/workflows/$REQUESTED" ] && echo 1 || echo 0 )"
+check "and it is the test workflow, not the one that merges" 0 "$(printf '%s\n' "$REQUESTED_CODE" | grep -c '^name: git-pair integrate$')"
+check "so asking for a test cannot cause a merge" 0 "$(printf '%s\n' "$REQUESTED_CODE" | grep -Ec -- '--verify-cmd|git-pair-integrate.sh')"
 
 step "cost: what a stacked branch costs the gate"
 
