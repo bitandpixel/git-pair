@@ -118,14 +118,30 @@ func (su stackUnder) name() string {
 	return su.Branch
 }
 
-// destination is where the parent's own work says it is going, read from the parent's record — which the
-// child's merge names as its own target, because a child lands where its parent lands.
+// destination is where the parent's own work says it is going, which the child's merge names as its own
+// target, because a child lands where its parent lands.
 //
-// The record is read from whichever tree still carries it: this changeset's head, which normally carries its
-// whole stack, then the destination, which carries it once the parent has landed and been tidied. A record
-// that cannot be read costs the detail and not the sentence: the caller falls back to the integration branch.
+// Two readings answer that, and they are asked in order of how well they are evidenced.
+//
+// Where the destination already carries the parent's directory, the destination itself is the answer
+// (`Landed`, read from that tree by `stackBelow`). Nothing is read from the record: a record says where the
+// parent *said* it was going, and a branch keeps its name after the work it carried has been merged, so a
+// stack whose lower levels have landed one after the other leaves every record below naming a finished
+// changeset's stale branch. That is the reading that sent an author to merge into work already in.
+//
+// Where the parent has not landed, the record is the only statement of intent there is, and it is read from
+// whichever tree still carries it: this changeset's head, which normally carries its whole stack, then the
+// destination, which carries it once the parent has landed and been tidied. The parent's `base:` is then
+// asked as a walked value rather than a direct one (`DestinationOfParent`): nothing here resolved it, and the
+// branch it names may have been tidied away or may name a changeset that has since landed. A record that
+// cannot be read costs the detail and not the sentence: the caller falls back to the integration branch.
 func (su stackUnder) destination(ctx context.Context, repo *git.Repo, db changeset.DefaultBranchRef) string {
 	if su.Changeset == "" {
+		return db.Ref
+	}
+	if su.Landed != "" {
+		// The destination carries the parent's directory — that is what `Landed` records, read from that tree
+		// by `stackBelow` — so the child's merge targets the destination, and the record is not consulted.
 		return db.Ref
 	}
 	for _, rev := range []string{"HEAD", db.Ref} {
@@ -149,7 +165,7 @@ func (su stackUnder) destination(ctx context.Context, repo *git.Repo, db changes
 			// destination rule is what decides where that leads.
 			return db.Ref
 		}
-		dest, err := changeset.DestinationFor(ctx, repo, parent, db)
+		dest, err := changeset.DestinationOfParent(ctx, repo, parent, db)
 		if err == nil && dest.Ref != "" {
 			return dest.Ref
 		}

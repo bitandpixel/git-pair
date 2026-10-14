@@ -169,7 +169,12 @@ func TestStatusStackChainIsEmptyForAnUnstackedChangeset(t *testing.T) {
 // The chain is a read on top of a read, so its cost belongs to it: one listing of the branch names for
 // the whole walk, then two tree reads (does the destination carry the ancestor, and which commit brought
 // it in) and one `CHANGESET.yaml` read per ancestor. Measured at 10 invocations per step once the chain is
-// three deep, and flat beyond that — 90, 97, 104 for depths 3, 4 and 5 in this repository.
+// three deep, and flat beyond that — 99, 106, 113 for depths 3, 4 and 5 in this repository.
+//
+// The destination a stacked child is told comes from the destination's tree rather than from each ancestor's
+// record, which is why it costs no reads per ancestor: where the destination carries the parent's directory,
+// that is the answer, and the walk over records runs only for a parent that has not landed. A walk that read
+// a record per step would cost three to four invocations per ancestor on top of what is measured here.
 //
 // Ten rather than the five this test was written against: the content comparison a stacked child is now
 // asked for needs each ancestor's directory (so the review record can be left out of the digest), which is

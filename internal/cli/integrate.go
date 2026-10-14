@@ -325,10 +325,22 @@ func integrateNextAction(s *session, dest changeset.Destination) string {
 // destinationNote labels a destination that did not come from this changeset's own base. Short on
 // purpose: the refusal is where an explanation belongs, and a reader who merged a parent onto a release
 // branch wants to see that the child followed it rather than a word about the rule.
+//
+// The name is the nearest changeset the walk crossed, not the farthest. The claim the reader is being given is
+// about their own merge — "this is where the work you are following landed" — and the nearest parent is the
+// work they are following. The farthest one answers a different question, where the walk happened to stop:
+// a stack merged level by level has every ancestor in the destination, so naming the last one crossed tells
+// an author about the bottom of a stack they are not standing on, and puts a different changeset's name on
+// this screen than the one the next step named beside the same destination.
 func destinationNote(dest changeset.Destination) string {
 	switch dest.Why {
 	case "parent":
-		return fmt.Sprintf(" (where %s landed)", dest.Via[len(dest.Via)-1])
+		if len(dest.Via) == 0 {
+			// The reason is not nameable: the answer came from a parent's record, and no parent's name came
+			// with it. Say nothing rather than invent one.
+			return ""
+		}
+		return fmt.Sprintf(" (where %s landed)", dest.Via[0])
 	case "default":
 		if dest.Unreachable != "" {
 			return fmt.Sprintf(" (the branch %s named is gone from here)", displayRef(dest.Unreachable))
