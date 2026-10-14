@@ -71,8 +71,10 @@ the marker says.
   rather than per ancestor — `TestStatusStackChainCostsABoundedReadPerStep` bounds the stack walk, and this
   adds nothing to it.
 - **Prose in `PRD.md`, `README.md` and `skills/` is checked material**, and the push sentence is quoted in
-  `README.md` twice. Moving it into a shared builder must leave those quotes byte-identical, which is what the
-  quote test will prove.
+  `README.md` twice. Moving it into a shared builder is what keeps those two quotes equal to each other and to
+  the command's output — the quote test pins them to the builder, so a wording change moves the code and the
+  documents together or fails. Review 773b481 changed the wording of this sentence, which is the case the test
+  is there to catch rather than a case it forbids.
 
 ## Assumptions
 
@@ -88,8 +90,12 @@ the marker says.
 
 #### Deliverables
 
-- `pushNextAction(branch, destination)` holds the words `integrateNextAction` spells today, byte-identical,
-  and `integrateNextAction` calls it.
+- `pushNextAction(branch, destination)` holds the words `integrateNextAction` spells, in one place, and
+  `integrateNextAction` calls it. It said `<destination> merges what \`git pair check --json\` reports ready and
+  integrating` when this plan was written; review 773b481 asked for the merge to be described as the owner's
+  decision rather than as something the destination does, and it now says the push queues the work for the
+  destination's owner and names the two fields an automated owner gates on. The README quotes moved with it in
+  the same commit, which is the quote test doing its job.
 - `mergeWaitNextAction(lc, slug)` spells the waiting sentence for a declared, pushed head.
 - `selfMergeLine(lc)` spells the human-screen alternative for that state.
 - `declaredPathNextAction(...)` picks between those and the "declare this head" sentence, from
@@ -97,8 +103,8 @@ the marker says.
 
 #### Tasks
 
-- [x] Move the push sentence out of `integrate.go` into `landing_advice.go` without changing a character of
-      it, and have `integrateNextAction` call the moved builder.
+- [x] Move the push sentence out of `integrate.go` into `landing_advice.go` as the one place it is spelled,
+      and have `integrateNextAction` call the moved builder. The words themselves changed once, on review.
 - [x] Add the pushed test: `refs/remotes/origin/<branch>` resolves, and the head is an ancestor of it. On any
       git error, answer not-pushed — the sentence then names a command that is harmless to re-run, which is
       the cheap direction.
@@ -193,3 +199,4 @@ builders. `mise run check` for the suite, `mise run gates` including the PTY wal
 | Date | Audit | Summary |
 | --- | --- | --- |
 | 2026-10-14 | self-verification before hand-off | `mise run check` green. `mise run gates` failed once inside `e2e-29.sh` with the log lost — the command was piped through `tail`, which also masked the task's exit code, so the failure read as a pass at first. Four later full gates runs and a direct `e2e-29.sh` were clean, and the script's declared-head region pins no next-step wording. Recorded as an unreproduced failure rather than converted into a pass; the box "`mise run gates`" above means the four clean runs plus the CI job that gates the merge on the same script. |
+| 2026-10-14 | review 773b481 (feedback, non-blocking) | Two wording requests and one note about the queue. The push sentence no longer states that the destination merges — it queues the work for the destination's owner, and keeps naming the two fields an automated owner gates on; the human alternative reads "or land it yourself" rather than "or take it yourself". The queue note is answered under Open questions: the `AWAITING INTEGRATION` section already lists branch, destination, declaration and head, which is what a person merging by hand needs. Plan claims of byte-identical wording were corrected — the wording did change, by review, with the documents moved in the same commit. |

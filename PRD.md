@@ -3829,7 +3829,7 @@ sentence is nobody's next step — and neither is a second `change integrate`, w
 `check` (§11.3), `status` (§11.1) and a re-run of `change integrate` (§9.9) say the same three things in the
 same order: while the branch is not on the remote, the step is the push, because a merge somebody else
 performs can only be performed on what they can see; once it is, the step is the wait — waiting on main's owner to merge it: `git pair status --changeset booking-transaction`
-reports the landing — with the author's own merge printed beside it (or take it yourself: `git pair check`,
+reports the landing — with the author's own merge printed beside it (or land it yourself: `git pair check`,
 then merge into main with ordinary git) so waiting is never the only exit offered. Which of the two the screen picks is measured against `origin` and the branch the changeset records,
 because that is the remote and the ref the advice itself names; anything it cannot read answers unpublished,
 which costs a re-run of a harmless command. And when the newest marker is a declaration that names a commit

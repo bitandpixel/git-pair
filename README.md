@@ -262,7 +262,7 @@ Integrating: booking-transaction
   head:        0eaad3b
   declared by: 91bf204
   merge into:  main
-  next:        `git push origin booking-transaction` — main merges what `git pair check --json` reports ready and integrating
+  next:        `git push origin booking-transaction` — queues it for merging with main's owner; `git pair check --json` reports ready and integrating
 ```
 
 That is the whole command: one empty marker, no ref, no push, no merge. It runs the gate above before it
@@ -1210,7 +1210,7 @@ shape.
   "destination": "main",
   "destination_source": "base",
   "reasons": [],
-  "next_action": "`git push origin booking-transaction` — main merges what `git pair check --json` reports ready and integrating"
+  "next_action": "`git push origin booking-transaction` — queues it for merging with main's owner; `git pair check --json` reports ready and integrating"
 }
 ```
 

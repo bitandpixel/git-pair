@@ -179,6 +179,11 @@ type declaredPath struct {
 // still names the push as a command the author runs, never as one git-pair ran: publishing is not this tool's
 // verb (PRD §26), and a log line that reads like a completed action is how a tool acquires a side effect
 // nobody agreed to.
+//
+// It queues the work; it does not promise a merge. The earlier form said "<destination> merges what …", which
+// stated as fact the decision that belongs to whoever owns the branch — and a repository whose owner merges
+// nothing, or merges next Tuesday, was being told a future had been fixed. What the push does is put the
+// request where the owner can see it, and the two fields an automated owner gates on are named beside it.
 func pushNextAction(branch, target string) string {
 	if branch == "" {
 		branch = "<branch>"
@@ -186,7 +191,7 @@ func pushNextAction(branch, target string) string {
 	if target == "" {
 		target = "the destination branch"
 	}
-	return fmt.Sprintf("`git push origin %s` — %s merges what `git pair check --json` reports ready and integrating",
+	return fmt.Sprintf("`git push origin %s` — queues it for merging with %s's owner; `git pair check --json` reports ready and integrating",
 		branch, target)
 }
 
@@ -214,7 +219,7 @@ func mergeWaitNextAction(lc landingContract, slug string) string {
 // The merge sentence comes from `landingNextAction` rather than being spelled again: one spelling per step is
 // the rule this file exists to enforce.
 func selfMergeLine(lc landingContract) string {
-	return "or take it yourself: " + landingNextAction(lc)
+	return "or land it yourself: " + landingNextAction(lc)
 }
 
 // declaredAlternative is the human screen's second line for the declared path, and the empty string for every

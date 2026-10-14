@@ -34,8 +34,16 @@ other exit, never as the only one:
 
 ```console
 $ git pair check                     # declared, not yet pushed
-next:  `git push origin feat-ci-verify-cmd` — main merges what `git pair check --json` reports ready and integrating
+next:  `git push origin feat-ci-verify-cmd` — queues it for merging with main's owner; `git pair check --json` reports ready and integrating
 > I think we should avoid saying definitively that "main" will merge it. We could say this will queue it for merging with the owner of <trunk/destination>?
+
+Adopted. The sentence no longer states what the destination does — the destination's owner decides that, and a
+repository whose owner merges nothing, or merges next Tuesday, was being told a future had been fixed. It says
+what the push does (the request becomes visible to that owner) and names the two fields an automated owner
+gates on, which is the pointer the earlier clause carried. One consequence worth naming: this is the sentence
+`git pair change integrate` prints, so the change moved that command's output as well, and the two `README.md`
+transcripts moved with it in the same commit — the quote test pins the documents to the builder, so code and
+prose change together or the run fails.
 
 $ git pair check                     # declared and pushed
 next:  waiting on main's owner to merge it: `git pair status --changeset feat-ci-verify-cmd` reports the landing
@@ -51,8 +59,9 @@ feat-ci-verify-cmd is already declared ready to integrate at ff79a41 (head ff79a
 ## What changed
 
 -   `internal/cli/landing_advice.go` — the declared path, beside the landing sentence it sits next to:
-    `pushNextAction` (the words `integrateNextAction` already printed, moved unchanged), `mergeWaitNextAction`
-    (the wait), `selfMergeLine` (the human-screen alternative), `undeclaredHeadLine` (a declaration that names
+    `pushNextAction` (the words `integrateNextAction` printed, now spelled in one place; review 773b481 reworded
+    them), `mergeWaitNextAction` (the wait), `selfMergeLine` (the human-screen alternative, "or land it
+    yourself" on review), `undeclaredHeadLine` (a declaration that names
     a commit the branch left behind), `declaredNextAction` (the choice), and `declarationPushed` (whether
     `origin/<branch>` carries the head). `session.declaredPath` reads the two facts and asks neither unless the
     newest marker is a declaration.
@@ -153,3 +162,14 @@ field duplicating a sentence is a second thing to keep true. If a consumer needs
     exactly why it stays silent.
 > There could be a world in which the merge to trunk is not automated, but the agent still pushes integrating declarations. 
 The queue would be a way for the owner to identify anything that needs to be manually merged
+
+That world is the one the queue already serves, and its `AWAITING INTEGRATION` section is the list for it: each
+row gives the changeset, its branch, `merge into:` the destination, the declaration and how long ago it was
+recorded, and the head the declaration names. A person with no automated merge reads that section and has what
+they need to merge by hand — `merge into:` is the destination the walk of PRD §13.1 arrives at rather than
+`base`, precisely so the row answers the question an actor asks. What stayed open, and is still open, is only
+whether the *sentences* this changeset adds belong in that section as well; the section answers "what is waiting
+and where does it go", and the sentences answer "what do I do next", which is a screen-level question. That
+discovery path is already covered rather than assumed: the gates replay asserts `AWAITING INTEGRATION` and
+`merge into: main` on a declared changeset, and asserts that declared work does not also appear under
+`READY FOR REVIEW`.

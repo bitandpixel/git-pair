@@ -214,7 +214,7 @@ func TestCheckNamesThePushForAnUnpublishedDeclaration(t *testing.T) {
 	if !strings.Contains(next, "git push origin booking-transaction") {
 		t.Errorf("check --json next_action = %q, want the push", next)
 	}
-	if strings.Contains(next, "\n") || strings.Contains(next, "or take it yourself") {
+	if strings.Contains(next, "\n") || strings.Contains(next, "or land it yourself") {
 		t.Errorf("check --json next_action = %q, want one instruction and no human alternative", next)
 	}
 }
@@ -232,7 +232,7 @@ func TestDeclaredScreensWaitOnceTheBranchIsPushed(t *testing.T) {
 		mustContain(t, out, "waiting on main's owner to merge it", name+" names the wait")
 		mustContain(t, out, "git pair status --changeset "+slug,
 			name+" names the read that reports the landing, not a loop to poll")
-		mustContain(t, out, "or take it yourself: `git pair check`, then merge into main with ordinary git",
+		mustContain(t, out, "or land it yourself: `git pair check`, then merge into main with ordinary git",
 			name+" keeps the author's own merge offered beside the wait")
 		mustNotContain(t, out, "git push origin", name+" still asks for a push that has happened")
 		mustNotContain(t, out, "or hand it to", name+" offers a declaration that would record nothing")
@@ -242,7 +242,7 @@ func TestDeclaredScreensWaitOnceTheBranchIsPushed(t *testing.T) {
 		if !strings.HasPrefix(next, "waiting on main's owner to merge it") {
 			t.Errorf("%s --json next_action = %q, want the wait on its own", name, next)
 		}
-		if strings.Contains(next, "or take it yourself") || strings.Contains(next, "\n") {
+		if strings.Contains(next, "or land it yourself") || strings.Contains(next, "\n") {
 			t.Errorf("%s --json next_action = %q, want one instruction with no human alternative", name, next)
 		}
 	}
@@ -257,7 +257,7 @@ func TestChangeIntegrateRerunNamesTheStepItLeftOut(t *testing.T) {
 		mustContain(t, out, "nothing recorded", "the re-run still writes nothing")
 		mustContain(t, out, "git push origin booking-transaction",
 			"and now says what is left to do")
-		mustNotContain(t, out, "or take it yourself", "the push is the step, so no alternative is offered yet")
+		mustNotContain(t, out, "or land it yourself", "the push is the step, so no alternative is offered yet")
 	})
 
 	t.Run("pushed", func(t *testing.T) {
@@ -266,7 +266,7 @@ func TestChangeIntegrateRerunNamesTheStepItLeftOut(t *testing.T) {
 		out := runIn(t, f.Dir(), "change", "integrate").mustSucceed(t, "change", "integrate").stdout
 		mustContain(t, out, "waiting on main's owner to merge it", "the re-run reports the wait")
 		mustContain(t, out, "git pair status --changeset "+slug, "with the read that settles it")
-		mustContain(t, out, "or take it yourself:", "and the other exit")
+		mustContain(t, out, "or land it yourself:", "and the other exit")
 	})
 }
 
