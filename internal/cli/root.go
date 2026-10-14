@@ -24,6 +24,7 @@ import (
 
 	"gitpair/internal/changeset"
 	"gitpair/internal/git"
+	"gitpair/internal/hooks"
 	"gitpair/internal/lifecycle"
 )
 
@@ -64,6 +65,21 @@ type app struct {
 	// named the integration branch. Resolving the destination is not one call — a single command
 	// resolves it several times — and a note repeated for each would be noise rather than visibility.
 	defaultBranchEnvNoted bool
+	// hookRun holds the facts every hook point needs that are not about the point — whether hooks are switched
+	// off, and where the clone's git directory is — taken from git the first time a point asks. A command with
+	// two points (`check`: `pre-check` then `post-check`) or twelve (`git pair hooks`) would otherwise ask the
+	// same two questions once per point. See hooks.Resolution.
+	hooksRun *hooks.Resolution
+}
+
+// hookRun is this run's hook facts, resolved on first use and shared by every point the command walks. Neither
+// answer can move inside one process: the off switch is the environment plus one config value, and the git
+// directory is where it is.
+func (a *app) hookRun(repo *git.Repo) *hooks.Resolution {
+	if a.hooksRun == nil {
+		a.hooksRun = hooks.Resolve(repo)
+	}
+	return a.hooksRun
 }
 
 // NoCacheEnv is the environment form of `--no-cache`.

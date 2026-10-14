@@ -192,17 +192,75 @@ type Plan struct {
 
 // Discover finds the hooks configured for point, in run order: the tracked root first, because the
 // repository's rules are the shared baseline, then the clone root, where the client's own checks add to them.
+//
+// A command that walks more than one point should resolve once and call Resolution.Discover instead: the two
+// git questions below are properties of the run, not of the point, and asking them per point is what the cost
+// gate in scripts/gates/ci-integrate.sh counts.
 func Discover(ctx context.Context, repo *git.Repo, point Point) (Plan, error) {
+	return Resolve(repo).Discover(ctx, point)
+}
+
+// Resolution is what every hook point in one command needs beyond the point's own directory: whether hooks are
+// switched off at all, and where the clone's git directory is. Both are git reads, and both answer the same
+// question however many points the command walks — `check` runs `pre-check` and `post-check`, and a command
+// that reports hooks walks all twelve.
+//
+// The answers are taken lazily and kept, so a run that never needs them pays nothing and a run that needs them
+// twice pays once. The memo in internal/git would answer the repeat for free in normal use, but the cost gate
+// measures a formulation with the caches off, on the grounds that a bound on what a command costs cannot depend
+// on whether somebody asked the same question a minute ago — so the duplicate is charged, and asking once is
+// the fix rather than the memo. Neither answer can move inside a process: the off switch is the environment
+// plus a config value read at the start, and the git directory is where it is.
+type Resolution struct {
+	repo   *git.Repo
+	offSet bool
+	off    bool
+	offWhy string
+	dirSet bool
+	gitDir string
+	dirErr error
+}
+
+// Resolve prepares the run's answers without asking git anything; each question is asked the first time an
+// answer needs it.
+func Resolve(repo *git.Repo) *Resolution { return &Resolution{repo: repo} }
+
+// Disabled is the run's answer to the off switch, from the environment and `git-pair.hooks`.
+func (r *Resolution) Disabled(ctx context.Context) (bool, string) {
+	if !r.offSet {
+		r.off, r.offWhy = Disabled(ctx, r.repo)
+		r.offSet = true
+	}
+	return r.off, r.offWhy
+}
+
+// gitDirAt is the run's answer to where the clone's hooks and acceptance record live.
+func (r *Resolution) gitDirAt(ctx context.Context) (string, error) {
+	if !r.dirSet {
+		r.gitDir, r.dirErr = r.repo.GitDir(ctx)
+		r.dirSet = true
+	}
+	return r.gitDir, r.dirErr
+}
+
+// Discover is Discover for a run that may already have asked the two questions below.
+func (r *Resolution) Discover(ctx context.Context, point Point) (Plan, error) {
 	var plan Plan
 	plan.Hooks = []Hook{}
 	plan.UnknownPoints = []string{}
 
-	tracked := TrackedRootDir(repo.Dir)
-	trusted, err := Trusted(ctx, repo)
+	tracked := TrackedRootDir(r.repo.Dir)
+	gitDir, err := r.gitDirAt(ctx)
+	if err != nil {
+		// The directory is where the acceptance record and the per-clone root both live, so there is nothing
+		// further to read without it. The tracked root alone would be the unsafe half to run anyway.
+		return plan, err
+	}
+	state, _, _, err := TrustAt(gitDir, r.repo.Dir)
 	if err != nil {
 		return plan, err
 	}
-	plan.TrackedTrusted = trusted
+	plan.TrackedTrusted = state == TrustAccepted
 	// A clone with no tracked hooks tree needs no acceptance at all, so an absent directory is not an
 	// untrusted one: reporting `skipped-untrusted` there would tell a reader to approve something that
 	// does not exist.
@@ -219,12 +277,6 @@ func Discover(ctx context.Context, repo *git.Repo, point Point) (Plan, error) {
 	plan.Hooks = append(plan.Hooks, hooks...)
 	plan.UnknownPoints = append(plan.UnknownPoints, UnknownPointsIn(tracked)...)
 
-	gitDir, err := repo.GitDir(ctx)
-	if err != nil {
-		// Without the git directory there is no per-clone root to search, and no reason to fail a command
-		// for it: the tracked root was already read, and it is the one that carries risk.
-		return plan, nil
-	}
 	hooks, err = collect(CloneRootDir(gitDir), point, RootClone)
 	if err != nil {
 		return plan, err

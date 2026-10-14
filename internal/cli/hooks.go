@@ -142,12 +142,13 @@ func (a *app) runPoint(ctx context.Context, s *session, c hookContext, mode runM
 	if s == nil {
 		return nil, nil
 	}
-	if off, why := hooks.Disabled(ctx, s.repo); off {
+	run := a.hookRun(s.repo)
+	if off, why := run.Disabled(ctx); off {
 		// A deliberate off switch needs no commentary; the person or the job set it knowing why.
 		_ = why
 		return []hooks.Result{}, nil
 	}
-	plan, err := hooks.Discover(ctx, s.repo, c.Point)
+	plan, err := run.Discover(ctx, c.Point)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +379,7 @@ func runHooksReport(ctx context.Context, a *app, trust bool) error {
 		Hooks:       []hookEntry{},
 		Unknown:     []string{},
 	}
-	if off, why := hooks.Disabled(ctx, repo); off {
+	if off, why := a.hookRun(repo).Disabled(ctx); off {
 		rep.Disabled = why
 	}
 	state, accepted, current, err := hooks.Trust(ctx, repo)
@@ -402,7 +403,7 @@ func runHooksReport(ctx context.Context, a *app, trust bool) error {
 		found = append(found, unknownEntry{u, rep.CloneRoot})
 	}
 	for _, point := range hooks.AllPoints() {
-		plan, err := hooks.Discover(ctx, repo, point)
+		plan, err := a.hookRun(repo).Discover(ctx, point)
 		if err != nil {
 			return err
 		}
