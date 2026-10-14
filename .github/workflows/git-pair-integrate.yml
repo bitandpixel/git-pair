@@ -182,15 +182,18 @@ jobs:
           # the one this tree produced — and it is the tree *after* the merge, which is the combination no run
           # on the branch itself has ever seen.
           #
-          # `env -u` is not decoration. The candidate inherits this step's environment, and one variable in it
-          # changes what the product says: with `GIT_PAIR_DEFAULT_BRANCH` set, git-pair reports where its
-          # destination came from, and the suite has tests asserting that a verdict carries no such line. Run
-          # here, that is a failing candidate on a tree that is perfectly fine — which the job reports, and
-          # then correctly refuses to merge. The driver needs the variable; the suite must not see it. This is
-          # the general hazard of testing a candidate inside the job that merges it: the candidate's
-          # environment is the merge environment, and the suite was written against nobody's.
-          # instead of having to explicitly name each env variable to unset, could we instead give the tests a blank slate env?
-          VERIFY_CMD='env -u GIT_PAIR_DEFAULT_BRANCH mise run gates'
+          # The scrubber is not decoration, and one variable was not enough. The candidate inherits this step's
+          # environment, and two separate failures came from that distance. With `GIT_PAIR_DEFAULT_BRANCH` set,
+          # the product reports where its destination came from, and the suite's verdict tests fail on a tree
+          # that is fine. With `GITHUB_REPOSITORY` set, the driver's own replay asked the real repository for
+          # six runs of `ci.yml` — the default for a post-merge ask is the shipped hook, and it fires on that
+          # variable, so a merge into a scratch repository used for testing dispatched a real trunk run. The
+          # driver needs these variables; the tests must not see them. `scripts/ci/clean-env.sh` removes the
+          # families that describe where the code is being run rather than what the code is, and its header
+          # carries both incidents. This is the general hazard of testing a candidate inside the job that
+          # merges it: the candidate's environment is the merge environment, and the suite was written against
+          # nobody's.
+          VERIFY_CMD='scripts/ci/clean-env.sh mise run gates'
           set -- --verify-cmd "$VERIFY_CMD"
           # Named rather than left to the driver's default, because the file claims the ask in its own header:
           # a reader should see the request here, and the gate asserts this line exists beside the scope that

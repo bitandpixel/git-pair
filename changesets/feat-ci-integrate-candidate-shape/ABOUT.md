@@ -18,7 +18,7 @@ The driver flag this uses, `--verify-cmd`, is the layer below (`feat-ci-verify-c
 -   `.github/workflows/git-pair-integrate.yml`: triggers are `push: '**'` and `workflow_dispatch`. The job's
     `if:` is an allowlist — dispatch, or a push to a non-destination branch whose commit message carries
     `Review-State: integrating`. `permissions:` is `contents: write` for the merge and `actions: write` for the request that follows it. The
-driver is invoked with `--verify-cmd 'env -u GIT_PAIR_DEFAULT_BRANCH mise run gates'` and `--expect-head` from
+driver is invoked with `--verify-cmd 'scripts/ci/clean-env.sh mise run gates'` and `--expect-head` from
 `github.event.after`. The build step names the
     binary it gates with through `GIT_PAIR_BIN`, and the queue report stays under `if: always()`. Its header
     separates the rule worth copying — a landing conditional on the suite the destination would run — from this
@@ -30,10 +30,16 @@ driver is invoked with `--verify-cmd 'env -u GIT_PAIR_DEFAULT_BRANCH mise run ga
     alone. The branch pushes went, because their only justification was the probe reading branch-head checks
     and nothing does that now. Its header now says what the branch trigger was for, why that reason is gone,
     and why trunk is kept.
+-   `scripts/ci/clean-env.sh`: the ladder's environment, built from nothing. `env -i` with a named keep-list —
+    `PATH`, `HOME`, the terminal and locale names, the Go and mise settings, the certificates and proxies — so
+    that no Actions variable, no `GIT_PAIR_*`, and no `CI` reaches the tests. Both workflows run the suite
+    through it, which is also what makes the two paths test the same thing.
 -   `scripts/gates/ci-integrate.sh`: the static section that asserted the two files name each other (6 checks)
-    now asserts what this shape needs (27), and the check that required `actions: write` became a pairing — an
+    now asserts what this shape needs (29), and the check that required `actions: write` became a pairing — an
     ask only with its scope, a scope only with its ask — beside positive checks that the ask, its scope, and
-    its token are all present.
+    its token are all present. A new step, *the replay cannot reach the forge*, runs the job twice against
+    scratch remotes with a recording `gh` on the path: once as the job has the environment, where the ask must
+    really go out, and once through the scrubber, where it must not — and the merge still has to happen.
 -   `README.md`, `PRD.md` §29's pointer, and `skills/git-pair/references/integration.md`: the places that
     stated the landing facts as "approved, declared, and green on the declared head", and the sentence that
     said the merge job triggers on `workflow_run` and the schedule.
@@ -68,16 +74,28 @@ authenticate with answers "cannot tell", the driver says so and stays green, and
 there. A token asks for what the job uses, which is why the pairing is asserted in both directions rather than
 one.
 
-**The candidate's environment is the merge environment, and that is a new coupling.** The first declaration
-this shape saw on a runner (`38607720677`) refused its own merge, and the tree was fine. The step exports
-`GIT_PAIR_DEFAULT_BRANCH` because the driver needs to know the destination, and the candidate inherits the
-step's environment — so the suite ran with that variable set, and with it set the product says where its
+**The candidate's environment is the merge environment, and the tests should not see it.** The first
+declaration this shape saw on a runner (`38607720677`) refused its own merge, and the tree was fine. The step
+exports `GIT_PAIR_DEFAULT_BRANCH` because the driver needs to know the destination, and the candidate inherits
+the step's environment — so the suite ran with that variable set, and with it set the product says where its
 destination came from. Several tests assert that a verdict carries no such tool line, so they failed, and the
-job did the only honest thing with a candidate whose suite fails: it said so and pushed nothing. `env -u
-GIT_PAIR_DEFAULT_BRANCH` on the verify command separates the two — the driver keeps the variable, the suite
-sees the environment it was written against. Nothing here was wrong with `main` plus this branch; what the
-combination exposed was the job definition, which is precisely the class of thing a head-check cannot see, and
-it took 56 seconds on a runner rather than a trunk that looked green because nobody ran it.
+job did the only honest thing with a candidate whose suite fails: it said so and pushed nothing. The first fix
+named that one variable. Review asked for a blank slate instead, and a second incident said that was right:
+with `GITHUB_REPOSITORY` in the environment, one pass of the suite made six real `gh workflow run ci.yml --repo
+bitandpixel/git-pair --ref main` calls against this repository, each caused by a merge into a scratch
+repository that exists only for the test — the driver's default post-merge ask fires on that variable, and
+nothing in the suite had any business asking.
+
+So `scripts/ci/clean-env.sh` builds the environment from nothing: `env -i` plus a named keep-list, rather than
+the current environment minus a list of names. The two fail differently, and only one of those is survivable.
+A list of names to unset is wrong in advance, because the next injected variable is not in it, and the failure
+is silent — the suite is wrong on a runner and right everywhere else. A blank slate is wrong in the other
+direction: something a tool needed is missing, and it says so, loudly, in the candidate run that then refuses
+the merge. What is kept is what `mise run check` was measured to need and nothing that describes where the code
+is running. The precedent is in this repository already: `scripts/gates/pty-tui.py` deletes `CI`, `NO_COLOR`
+and `CLICOLOR_FORCE` before it launches the program under test, because termenv reads any non-empty `CI` as
+not-a-terminal — "removed rather than countered", applied one level up to the whole ladder. The driver keeps
+its own environment: it is the part that merges, and the part that asks.
 
 **The build step names its binary.** `mise run build` installs under the name `scripts/install-name.sh`
 derives from the branch, so a replay cannot quietly test a build another worktree left in the shared
@@ -91,20 +109,27 @@ gated on and rebuilds it.
 
 ## Validation
 
-`bash scripts/gates/ci-integrate.sh` → `CI-INTEGRATE: all checks passed (122 checks)`, against 90 on `main`
+`bash scripts/gates/ci-integrate.sh` → `CI-INTEGRATE: all checks passed (134 checks)`, against 90 on `main`
 and 105 on the parent layer. `mise run gates` → `E2E: all checks passed`, `PTY: all checks passed`,
-`CI-INTEGRATE: all checks passed`, exit 0 in 135s — run in a scratch worktree at the restacked tip (`018b4a9`)
-so the checkout under review was not moved. A scratch worktree needs `MISE_TRUSTED_CONFIG_PATHS=<worktree>`:
-without it mise refuses an unseen config file and the ladder fails at zero seconds with what reads like a
-build error.
+`CI-INTEGRATE: all checks passed`, exit 0 — run in the working tree through `scripts/ci/clean-env.sh`, so the
+number above is the number the blank slate produces and not the one the developer's shell produces. (A scratch
+worktree needs `MISE_TRUSTED_CONFIG_PATHS=<worktree>`; without it mise refuses an unseen config file and the
+ladder fails at zero seconds with what reads like a build error.)
 
-The environment finding is reproducible in three commands, and the third is the fix:
+Both incidents are reproducible. The first is three commands, and the third is the shape of the seam:
 
 ```bash
 GIT_PAIR_DEFAULT_BRANCH=main go test ./internal/cli -run TestChangeIntegrateRefusesWorkThatWasNeverApproved  # FAILS
 go test ./internal/cli -run TestChangeIntegrateRefusesWorkThatWasNeverApproved                                # passes
-GIT_PAIR_DEFAULT_BRANCH=main sh -c 'env -u GIT_PAIR_DEFAULT_BRANCH go test ./internal/cli -run \
-  TestChangeIntegrateRefusesWorkThatWasNeverApproved'                                                          # passes
+scripts/ci/clean-env.sh go test ./internal/cli -run TestChangeIntegrateRefusesWorkThatWasNeverApproved         # passes
+```
+
+The second needs a `gh` that records rather than calls, because it must not actually dispatch:
+
+```bash
+printf '#!/bin/sh\necho "gh $*" >> /tmp/ghcalls\nexit 0\n' > /tmp/ghstub/gh && chmod +x /tmp/ghstub/gh
+PATH=/tmp/ghstub:$PATH GITHUB_REPOSITORY=bitandpixel/git-pair bash scripts/gates/ci-integrate.sh   # six dispatches
+PATH=/tmp/ghstub:$PATH GITHUB_REPOSITORY=bitandpixel/git-pair scripts/ci/clean-env.sh bash scripts/gates/ci-integrate.sh  # none
 ```
 
 The static checks are text checks, and each one is there for a failure that would otherwise be silent: a
@@ -137,8 +162,16 @@ runner to see one is the first to complain.
      its checks were green, because `ci.yml` runs the suite in an environment without the variable that broke
      it.
    - Still unproven: that `contents: write` alone is enough to land a merge, and that the post-merge request
-     reaches `ci.yml` — both live behind a candidate that passes, which is what the `env -u` above is meant to
-     deliver. `gh run view <id> --log` is what settles each.
+     reaches `ci.yml` — both live behind a candidate that passes, which is what the clean environment above is
+     meant to deliver. `gh run view <id> --log` is what settles each.
+   - **What the runner found that no local run could.** Both environment incidents above appeared only inside
+     the merge job, and the second — a suite that dispatches real workflow runs — only appeared once the token
+     in that job could make the request succeed. The gate now asserts the pair, control and scrubbed, so the
+     class is covered rather than the two instances; but the assertion runs against a recording stub, so
+     "nothing reached the forge on the runner" remains an observation from `gh run view`, not a proof. The
+     keep-list is likewise proven only against what this repository's ladder needs, on this machine and on
+     GitHub's runner. A consumer's suite needing something the list omits fails as a red candidate, which is
+     the loud direction, and the fix is one name in `scripts/ci/clean-env.sh`.
    - Layer 1 was landed by the shape this one replaces, which is the expected order: `main` still carried the
      old file when the declaration was pushed, so run `38598069537` (`workflow_run` on `ef5fa30`, 16:26:20)
      walked the queue and produced `b5f54a4` at 16:26:42 with the probe's `--require-ci` in force.

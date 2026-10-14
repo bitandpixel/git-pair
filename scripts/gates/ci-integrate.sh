@@ -508,6 +508,63 @@ else
   ok "and the refused tree is out of it, so the next changeset is merged against the real destination"
 fi
 
+step "the replay cannot reach the forge"
+
+# The job runs the suite, the suite runs the driver, and the driver — given a forge to name — asks it for a
+# run. Run inside the merge job, where the token can make that ask succeed, one pass of `mise run gates`
+# produced six real `gh workflow run ci.yml --repo bitandpixel/git-pair --ref main` calls against this
+# repository, each one caused by a merge into a scratch repository that has nothing to do with it. The fix is
+# `scripts/ci/clean-env.sh`, and both halves are asserted here: that the ask really does happen when the
+# environment is left as the job has it, without which the assertion below would prove nothing; and that it
+# does not happen through the scrubber.
+GHSTUB=$T/ghstub
+mkdir -p "$GHSTUB"
+printf '#!/bin/sh\necho "gh $*" >> "%s/ghcalls"\nexit 0\n' "$T" > "$GHSTUB/gh"
+chmod +x "$GHSTUB/gh"
+: > "$T/ghcalls"
+
+forge_run() { # forge_run <dir> <branch> [scrub] — the job, with a forge named and a recording `gh` on PATH
+  local dir=$1 branch=$2 mode=${3:-plain}
+  (
+    cd "$dir" || exit 1
+    export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G"
+    export GITHUB_REPOSITORY=bitandpixel/git-pair GITHUB_TOKEN=forge-token PATH="$GHSTUB:$PATH"
+    if [ "$mode" = scrub ]; then
+      exec bash "$ROOT/scripts/ci/clean-env.sh" bash "$CI" "$branch" 2>&1
+    fi
+    exec bash "$CI" "$branch" 2>&1
+  )
+}
+count_gh() { wc -l < "$T/ghcalls" | tr -d ' '; }
+
+declare_changeset flow/forge-direct src/i.ts 'export const i = 9' || { echo "fixture: flow/forge-direct" >&2; exit 1; }
+git -C "$T/work" checkout -q flow/forge-direct && wing change integrate >/dev/null || { echo "fixture: declare flow/forge-direct" >&2; exit 1; }
+git -C "$T/work" push -q origin flow/forge-direct >/dev/null 2>&1
+OUT=$(forge_run "$(clone fd)" flow/forge-direct); show "$OUT"
+contains "$OUT" "requested: bitandpixel/git-pair will run ci.yml" \
+  "left as the job has it, the environment names a forge, and the default hook asks it for a run"
+if [ "$(count_gh)" -ge 1 ]; then
+  ok "and the ask was an outbound call, not a line of text"
+else
+  fail "the ask never reached gh, which makes the assertion below meaningless"
+fi
+
+declare_changeset flow/forge-scrubbed src/j.ts 'export const j = 10' || { echo "fixture: flow/forge-scrubbed" >&2; exit 1; }
+git -C "$T/work" checkout -q flow/forge-scrubbed && wing change integrate >/dev/null || { echo "fixture: declare flow/forge-scrubbed" >&2; exit 1; }
+git -C "$T/work" push -q origin flow/forge-scrubbed >/dev/null 2>&1
+BEFORE=$(count_gh)
+BEFORE_TIP=$(git -C "$T/origin.git" rev-parse main)
+OUT=$(forge_run "$(clone fs)" flow/forge-scrubbed scrub); show "$OUT"
+contains "$OUT" "no --ci-request given, no forge named" \
+  "through the scrubber the driver cannot name a forge, so it says so instead of asking"
+if [ "$(count_gh)" = "$BEFORE" ]; then
+  ok "and nothing was dispatched: a test cannot ask the repository it is testing for a run"
+else
+  fail "the scrubber let $(( $(count_gh) - BEFORE )) call(s) through"
+fi
+check "and the merge still happened, so the scrubber removed the ask rather than the job" 1 \
+  "$( [ "$(git -C "$T/origin.git" rev-parse main)" != "$BEFORE_TIP" ] && echo 1 || echo 0 )"
+
 step "the workflow files say what this shape needs"
 
 # Text checks of conventions, not a YAML parse — there is no YAML parser to depend on in a gate. Each one
@@ -566,13 +623,21 @@ INTEGRATE_CODE=$(grep -v '^[[:space:]]*#' "$INTEGRATE")
 check "the job makes the merge conditional on the suite" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c -- '--verify-cmd')" -ge 1 ] && echo 1 || echo 0 )"
 check "and does not also gate on somebody else's checks" 0 "$(printf '%s\n' "$INTEGRATE_CODE" | grep -Ec -- '--require-ci|--ci-probe')"
 
-# The candidate is run by the job that merges it, so it runs in the job's environment — and this step exports
-# a variable that changes what the product says out loud. With `GIT_PAIR_DEFAULT_BRANCH` set, git-pair names
-# where its destination came from, and the suite asserts that a verdict carries no such tool line. A
-# candidate run that way fails on a tree that is fine, and the job is right to refuse it: the only defect here
-# would be the job definition, and the suite found it on a runner in 56 seconds where no local run could.
-check "but the candidate is not run with the job's own destination in its environment" 1 \
-  "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'env -u GIT_PAIR_DEFAULT_BRANCH')" -ge 1 ] && echo 1 || echo 0 )"
+# The candidate is run by the job that merges it, so it runs in the job's environment — and that environment
+# describes where the code is being run, which is information the suite was never written against. Two failures
+# came from it, both invisible off a runner: with `GIT_PAIR_DEFAULT_BRANCH` exported the product names where its
+# destination came from and the verdict tests fail on a fine tree; and with `GITHUB_REPOSITORY` exported the
+# driver's replay asked the real repository for runs of `ci.yml` caused by merges into scratch repositories.
+# `scripts/ci/clean-env.sh` is the seam, and the step asserting it here is what stops a later edit from
+# quietly dropping it. Note which side keeps the variables: the driver still has them, because the driver is
+# the part that merges and asks.
+CI_CODE=$(grep -v '^[[:space:]]*#' "$ROOT/.github/workflows/ci.yml")
+check "and the candidate is run with the job's environment removed" 1 \
+  "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'clean-env.sh mise run gates')" -ge 1 ] && echo 1 || echo 0 )"
+check "and so is the ladder on the pull-request path, so there is one definition of green" 1 \
+  "$( [ "$(printf '%s\n' "$CI_CODE" | grep -c 'clean-env.sh mise run gates')" -ge 1 ] && echo 1 || echo 0 )"
+check "the scrubber is there and executable, since a wrapper nobody can run is a silent no-op" 1 \
+  "$( [ -x "$ROOT/scripts/ci/clean-env.sh" ] && echo 1 || echo 0 )"
 
 # The request that follows a landing is house policy, not decoration. The destination's new tip is the tree
 # this job just tested, so the run adds no answer — but a trunk with no run of its own has nothing to go red
