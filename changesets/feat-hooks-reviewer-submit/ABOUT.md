@@ -131,6 +131,17 @@ of it is readable.
     sitting on a `changed` tracked tree they never read, which is why the open question about unaccepted tracked
     hooks now names the reviewer. The two documentation rows collided with M1's new trust-state wording during
     the restack and carry both texts.
+-   Restacked onto `29f49e8`, the landing of M3, and re-run: exit 0, 90 checks, no `FAIL`, `gofmt` silent, and
+    the two-level stack still measures 49 invocations against the ceiling of 50. Two files collided, both
+    because M3 and the landing-advice work landed under this branch while it was in review. `internal/cli/review.go`
+    — the submitted-review next step now comes from the landing contract (`nextActionFor(result.Outcome, lc)`,
+    which reads where the work is going rather than trusting the recorded base), and keeps this milestone's
+    `hooks` and `overridden` keys beside it. `internal/cli/root.go` — the app carries both the per-run
+    `hooks.Resolution` M3 added and this milestone's `hookPresenter`. Neither collision changed behaviour, and
+    both texts are carried.
+-   The rewrite spent the approval that stood before it: `check` reported `review b5fc4a0 reviewed f7c7bbf,
+    which is no longer in this history`, and separately that with the parent landed the contribution "was never
+    read". The approval beside this head is the one submitted after the restack.
 
 ## Known limitations
 
