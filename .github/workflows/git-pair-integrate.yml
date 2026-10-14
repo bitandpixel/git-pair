@@ -182,18 +182,13 @@ jobs:
           # the one this tree produced — and it is the tree *after* the merge, which is the combination no run
           # on the branch itself has ever seen.
           #
-          # The scrubber is not decoration, and one variable was not enough. The candidate inherits this step's
-          # environment, and two separate failures came from that distance. With `GIT_PAIR_DEFAULT_BRANCH` set,
-          # the product reports where its destination came from, and the suite's verdict tests fail on a tree
-          # that is fine. With `GITHUB_REPOSITORY` set, the driver's own replay asked the real repository for
-          # six runs of `ci.yml` — the default for a post-merge ask is the shipped hook, and it fires on that
-          # variable, so a merge into a scratch repository used for testing dispatched a real trunk run. The
-          # driver needs these variables; the tests must not see them. `scripts/ci/clean-env.sh` removes the
-          # families that describe where the code is being run rather than what the code is, and its header
-          # carries both incidents. This is the general hazard of testing a candidate inside the job that
-          # merges it: the candidate's environment is the merge environment, and the suite was written against
-          # nobody's.
-          VERIFY_CMD='scripts/ci/clean-env.sh mise run gates'
+          # The candidate runs in this step's environment, which exports `GIT_PAIR_DEFAULT_BRANCH` and carries
+          # every Actions variable — and that changes nothing below, because the suite does not read its
+          # environment for configuration. That is a property of the tests, not of this job: `TestMain` takes
+          # the `GIT_PAIR_` family away from the Go package, and `job_env` in the gate takes it away from every
+          # driver the bash gates run, the same way they already pin `GIT_CONFIG_GLOBAL`. The pair that keeps
+          # it true is the step `the replay cannot reach the forge` in scripts/gates/ci-integrate.sh.
+          VERIFY_CMD='mise run gates'
           set -- --verify-cmd "$VERIFY_CMD"
           # Named rather than left to the driver's default, because the file claims the ask in its own header:
           # a reader should see the request here, and the gate asserts this line exists beside the scope that

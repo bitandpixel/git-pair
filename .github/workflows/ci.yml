@@ -75,13 +75,12 @@ jobs:
 
       - uses: jdx/mise-action@v3
 
-      # The whole ladder, with the job's environment removed — the same command the merge job runs against the
-      # candidate, so there is one definition of green. The suite must not inherit `GITHUB_REPOSITORY` or
-      # `GIT_PAIR_*`: the replay merges into scratch repositories, and the variables the forge is named by
-      # belong to the job, not to the tests. `scripts/ci/clean-env.sh` carries both incidents.
+      # The whole ladder — the same command the merge job runs against the candidate, so there is one
+      # definition of green, and neither of them wrapped: the suite fixes its own environment, in `TestMain`
+      # for the Go package and `job_env` in scripts/gates/ci-integrate.sh for the driver.
       #
       # The pty walkthrough is the timing-sensitive one — it needs a real terminal and it
       # has been known to fail on a loaded machine and pass on an idle one. Re-run it before believing a
       # failure there; if it keeps failing, the shard count in scripts/test-sharded.sh is the dial, not this
       # gate.
-      - run: scripts/ci/clean-env.sh mise run gates
+      - run: mise run gates

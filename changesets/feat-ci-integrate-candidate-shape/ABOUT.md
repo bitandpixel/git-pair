@@ -30,16 +30,25 @@ driver is invoked with `--verify-cmd 'scripts/ci/clean-env.sh mise run gates'` a
     alone. The branch pushes went, because their only justification was the probe reading branch-head checks
     and nothing does that now. Its header now says what the branch trigger was for, why that reason is gone,
     and why trunk is kept.
--   `scripts/ci/clean-env.sh`: the ladder's environment, built from nothing. `env -i` with a named keep-list —
-    `PATH`, `HOME`, the terminal and locale names, the Go and mise settings, the certificates and proxies — so
-    that no Actions variable, no `GIT_PAIR_*`, and no `CI` reaches the tests. Both workflows run the suite
-    through it, which is also what makes the two paths test the same thing.
--   `scripts/gates/ci-integrate.sh`: the static section that asserted the two files name each other (6 checks)
-    now asserts what this shape needs (29), and the check that required `actions: write` became a pairing — an
+-   `internal/cli/harness_test.go`: a `TestMain` that takes the `GIT_PAIR_` family out of the environment
+    before any test runs. Eleven tests in that package ask what the product says or does, and the product
+    reads its configuration from the environment, so a name in the shell that started them was a second, silent
+    input. A test that wants one of those names sets it itself, as `hooks_test.go` and `gittest.SpawnShim`
+    already do.
+-   `scripts/gates/e2e-29.sh`, `scripts/gates/pty-walkthrough.sh`, and the top of
+    `scripts/gates/ci-integrate.sh`: each takes the `GIT_PAIR_` family out of its own environment before it runs
+    the product. The first two drive the installed binary in a scratch tree, and one of them was already wrong
+    the way the Go package had been: with `GIT_PAIR_DEFAULT_BRANCH` exported by the merge job, `status`
+    explained where its comparison came from and the gate reported that the tree was wrong.
+-   `scripts/gates/ci-integrate.sh`: `job_env`, the baseline every driver run is given — `env -i` plus `PATH`
+    and `HOME`, beside the `GIT_CONFIG_GLOBAL=/dev/null` those calls already pinned — which is what keeps the
+    replay from asking a forge for a run. The static section that asserted the two files name each other (6 checks)
+    now asserts what this shape needs (26), and the check that required `actions: write` became a pairing — an
     ask only with its scope, a scope only with its ask — beside positive checks that the ask, its scope, and
-    its token are all present. A new step, *the replay cannot reach the forge*, runs the job twice against
-    scratch remotes with a recording `gh` on the path: once as the job has the environment, where the ask must
-    really go out, and once through the scrubber, where it must not — and the merge still has to happen.
+    its token are all present. A new step, *the replay cannot reach the forge*, runs the driver twice against
+    scratch remotes from the same baseline with a recording `gh` on the path: with a forge named, where the ask
+    must really go out, and without one, where it must not even though the caller exported the forge — and the
+    merge still has to happen.
 -   `README.md`, `PRD.md` §29's pointer, and `skills/git-pair/references/integration.md`: the places that
     stated the landing facts as "approved, declared, and green on the declared head", and the sentence that
     said the merge job triggers on `workflow_run` and the schedule.
@@ -74,28 +83,29 @@ authenticate with answers "cannot tell", the driver says so and stays green, and
 there. A token asks for what the job uses, which is why the pairing is asserted in both directions rather than
 one.
 
-**The candidate's environment is the merge environment, and the tests should not see it.** The first
-declaration this shape saw on a runner (`38607720677`) refused its own merge, and the tree was fine. The step
-exports `GIT_PAIR_DEFAULT_BRANCH` because the driver needs to know the destination, and the candidate inherits
-the step's environment — so the suite ran with that variable set, and with it set the product says where its
-destination came from. Several tests assert that a verdict carries no such tool line, so they failed, and the
-job did the only honest thing with a candidate whose suite fails: it said so and pushed nothing. The first fix
-named that one variable. Review asked for a blank slate instead, and a second incident said that was right:
-with `GITHUB_REPOSITORY` in the environment, one pass of the suite made six real `gh workflow run ci.yml --repo
-bitandpixel/git-pair --ref main` calls against this repository, each caused by a merge into a scratch
-repository that exists only for the test — the driver's default post-merge ask fires on that variable, and
-nothing in the suite had any business asking.
+**The tests own their environment; the job does not wrap them.** Two review rounds landed here. The first
+found the candidate failing on a tree that was fine: the step exports `GIT_PAIR_DEFAULT_BRANCH` for the
+driver, the candidate inherited the step's environment, and with that variable set the product says where its
+destination came from — which a dozen tests assert a verdict never does. The job did the only honest thing
+with a candidate whose suite fails: it said so and pushed nothing. The first fix named that one variable.
+Review asked for a blank slate rather than a list of names to unset, and measuring *that* found a second
+incident, larger than the first: with `GITHUB_REPOSITORY` in the environment, one pass of the suite made six
+real `gh workflow run ci.yml --repo bitandpixel/git-pair --ref main` calls against this repository, because
+the driver's default post-merge ask fires on that name and the replay merges into scratch repositories that
+exist only for the test.
 
-So `scripts/ci/clean-env.sh` builds the environment from nothing: `env -i` plus a named keep-list, rather than
-the current environment minus a list of names. The two fail differently, and only one of those is survivable.
-A list of names to unset is wrong in advance, because the next injected variable is not in it, and the failure
-is silent — the suite is wrong on a runner and right everywhere else. A blank slate is wrong in the other
-direction: something a tool needed is missing, and it says so, loudly, in the candidate run that then refuses
-the merge. What is kept is what `mise run check` was measured to need and nothing that describes where the code
-is running. The precedent is in this repository already: `scripts/gates/pty-tui.py` deletes `CI`, `NO_COLOR`
-and `CLICOLOR_FORCE` before it launches the program under test, because termenv reads any non-empty `CI` as
-not-a-terminal — "removed rather than countered", applied one level up to the whole ladder. The driver keeps
-its own environment: it is the part that merges, and the part that asks.
+A wrapper that ran the ladder under `env -i` with a keep-list covered both, and review called it too heavy.
+That was right, and the reason is worth recording: the keep-list existed only because the wrapper sat above
+`mise`, the Go toolchain and the pty harness at once, so it had to know what all three need. The same idea
+placed where each harness hands the program under test its environment costs three lines and no new file —
+`TestMain` for the Go package, `job_env` for the driver. It is also how this repository already works: the
+bash gates have always pinned `GIT_CONFIG_GLOBAL` per invocation, and `scripts/gates/pty-tui.py` deletes
+`CI`, `NO_COLOR` and `CLICOLOR_FORCE` before launching the TUI, because termenv reads any non-empty `CI` as
+not-a-terminal — "removed rather than countered", which is the same rule as "the test states what it depends
+on", seen from the other side.
+
+What giving up the wrapper costs is stated in Known limitations, and the counterweight there is an assertion
+rather than a mechanism.
 
 **The build step names its binary.** `mise run build` installs under the name `scripts/install-name.sh`
 derives from the branch, so a replay cannot quietly test a build another worktree left in the shared
@@ -109,28 +119,29 @@ gated on and rebuilds it.
 
 ## Validation
 
-`bash scripts/gates/ci-integrate.sh` → `CI-INTEGRATE: all checks passed (134 checks)`, against 90 on `main`
-and 105 on the parent layer. `mise run gates` → `E2E: all checks passed`, `PTY: all checks passed`,
-`CI-INTEGRATE: all checks passed`, exit 0 — run in the working tree through `scripts/ci/clean-env.sh`, so the
-number above is the number the blank slate produces and not the one the developer's shell produces. (A scratch
-worktree needs `MISE_TRUSTED_CONFIG_PATHS=<worktree>`; without it mise refuses an unseen config file and the
-ladder fails at zero seconds with what reads like a build error.)
-
-Both incidents are reproducible. The first is three commands, and the third is the shape of the seam:
+`bash scripts/gates/ci-integrate.sh` → `CI-INTEGRATE: all checks passed (131 checks)`, against 90 on `main`
+and 105 on the parent layer — and run with the forge exported, which is the shape that matters:
 
 ```bash
-GIT_PAIR_DEFAULT_BRANCH=main go test ./internal/cli -run TestChangeIntegrateRefusesWorkThatWasNeverApproved  # FAILS
-go test ./internal/cli -run TestChangeIntegrateRefusesWorkThatWasNeverApproved                                # passes
-scripts/ci/clean-env.sh go test ./internal/cli -run TestChangeIntegrateRefusesWorkThatWasNeverApproved         # passes
+PATH=/tmp/ghstub:$PATH GITHUB_REPOSITORY=bitandpixel/git-pair GITHUB_TOKEN=fake \
+  GIT_PAIR_DEFAULT_BRANCH=main CI=true bash scripts/gates/ci-integrate.sh   # 131 passed, 0 calls to gh
 ```
 
-The second needs a `gh` that records rather than calls, because it must not actually dispatch:
+`mise run gates` → `E2E: all checks passed`, `PTY: all checks passed`, `CI-INTEGRATE: all checks passed`,
+exit 0, run the same way with `GIT_PAIR_DEFAULT_BRANCH`, `GITHUB_REPOSITORY` and a token exported. Nothing
+about the command the workflows run changed: the candidate and the pull-request path both run plain
+`mise run gates`. (A scratch worktree needs `MISE_TRUSTED_CONFIG_PATHS=<worktree>`; without it mise refuses an
+unseen config file and the ladder fails at zero seconds with what reads like a build error.)
+
+Both incidents are still reproducible, and each is now fixed where it belonged:
 
 ```bash
-printf '#!/bin/sh\necho "gh $*" >> /tmp/ghcalls\nexit 0\n' > /tmp/ghstub/gh && chmod +x /tmp/ghstub/gh
-PATH=/tmp/ghstub:$PATH GITHUB_REPOSITORY=bitandpixel/git-pair bash scripts/gates/ci-integrate.sh   # six dispatches
-PATH=/tmp/ghstub:$PATH GITHUB_REPOSITORY=bitandpixel/git-pair scripts/ci/clean-env.sh bash scripts/gates/ci-integrate.sh  # none
+GIT_PAIR_DEFAULT_BRANCH=main go test ./internal/cli -count=1    # 11 failures before TestMain; passes now
 ```
+
+The second needs a `gh` that records rather than calls, because it must not actually dispatch. Before
+`job_env`, the first line made six real requests and the second made none; both are now assertions in the
+gate, and `forge_run`/`pinned_run` in that file are the two halves:
 
 The static checks are text checks, and each one is there for a failure that would otherwise be silent: a
 branch allowlist on the trigger (evaluated before anything git-pair says, so it can exclude a whole changeset
@@ -166,12 +177,17 @@ runner to see one is the first to complain.
      meant to deliver. `gh run view <id> --log` is what settles each.
    - **What the runner found that no local run could.** Both environment incidents above appeared only inside
      the merge job, and the second — a suite that dispatches real workflow runs — only appeared once the token
-     in that job could make the request succeed. The gate now asserts the pair, control and scrubbed, so the
-     class is covered rather than the two instances; but the assertion runs against a recording stub, so
-     "nothing reached the forge on the runner" remains an observation from `gh run view`, not a proof. The
-     keep-list is likewise proven only against what this repository's ladder needs, on this machine and on
-     GitHub's runner. A consumer's suite needing something the list omits fails as a red candidate, which is
-     the loud direction, and the fix is one name in `scripts/ci/clean-env.sh`.
+     in that job could make the request succeed. The gate asserts the pair now, dispatched and not dispatched,
+     from one baseline that differs by a single variable; but the recording `gh` is a stub, so "nothing reached
+     the forge from the runner" remains an observation from `gh run view` rather than a proof.
+   - **Nothing wraps the suite any more, and that is the trade.** A wrapper would have caught the *next*
+     variable the product reads, whoever added it. Without one, the coverage is the harnesses that exist: the
+     Go package's `TestMain` by family, the driver runs by `job_env`, and each of the three gates taking the
+     family away at its own start. Nothing *asserts* that last one — a text check for it would have to name
+     the string it greps for, and would then contain it, so it could never fail — and that is why the evidence
+     is a run rather than a check: `mise run gates` with `GIT_PAIR_DEFAULT_BRANCH` exported went red in e2e
+     within seconds of that gate not scrubbing. A harness added later has this paragraph and the comment at
+     each site to tell it the rule, and nothing else.
    - Layer 1 was landed by the shape this one replaces, which is the expected order: `main` still carried the
      old file when the declaration was pushed, so run `38598069537` (`workflow_run` on `ef5fa30`, 16:26:20)
      walked the queue and produced `b5f54a4` at 16:26:42 with the probe's `--require-ci` in force.

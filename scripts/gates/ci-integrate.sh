@@ -35,6 +35,12 @@ fi
 exec < /dev/null
 T=$(mktemp -d /tmp/git-pair-ci-gate.XXXXXX)
 trap 'rm -rf "$T"' EXIT
+# The author-side commands driven below (`wing`) are the product as much as the driver is, so the rule
+# `job_env` applies to a single run applies to this whole script: the product reads its configuration from the
+# environment, and a check here must not be decided by the shell — or the merge job — that started it. The two
+# other gates do the same at their own start. Nothing asserts that any of the three keeps doing it; what makes
+# the rule hold is that `mise run gates` with those names exported goes red within seconds if one stops.
+for __env in $(compgen -e | grep '^GIT_PAIR_' || true); do unset "$__env"; done
 FAILED=0
 PASS=0
 
@@ -54,9 +60,21 @@ no_contains() { # no_contains <haystack> <needle> <description>
 # A job's clone has no identity of its own and nothing inherited from a developer's machine, so every CI run
 # here sets both away. The script under test is then forced to do what it claims about setting the merger's
 # identity, and no result depends on whose laptop the gate runs on.
+# job_env is the environment the driver is handed, in every run below. It starts from nothing for the same
+# reason `GIT_CONFIG_GLOBAL=/dev/null` does: a result must not depend on the shell that happened to start the
+# gate. What the driver reads out of its environment decides what it does, not only what it says —
+# `GITHUB_REPOSITORY` alone makes it ask a forge for a run, and once that name was inherited from a merge job
+# the replay dispatched six real `gh workflow run ci.yml --repo bitandpixel/git-pair --ref main` calls while
+# testing merges into scratch repositories that have nothing to do with this one. `PATH` and `HOME` are what
+# git needs; everything else the caller exported stays outside.
+#
+# Written as an array so the sites below keep naming what they add (`GIT_PAIR_BIN`, a stub's own variables)
+# beside the run, and so a new one cannot forget the pin: the assignments after `env -i` are additive, which
+# is how a harness pins an environment without hiding the parts of it a scenario is about.
+job_env=(env -i PATH="$PATH" HOME="$HOME")
 cigr() { # cigr <dir> [branch...] — the job, in a clone of the scratch origin
   local dir=$1; shift
-  ( cd "$dir" && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
+  ( cd "$dir" && "${job_env[@]}" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
       bash "$CI" "$@" 2>&1 )
 }
 # show prints what the job actually said. The assertions quote it; when one of them fails, the reader needs
@@ -201,7 +219,7 @@ step "the head has to be proven green"
 # declaration named, not about whatever the branch tip happens to be when the answer comes back.
 ci_probe_run() { # ci_probe_run <rc> <says> <dir> [job args...]
   local rc=$1 says=$2 dir=$3; shift 3
-  ( cd "$dir" && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
+  ( cd "$dir" && "${job_env[@]}" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
       PROBE_RC="$rc" PROBE_SAYS="$says" PROBE_CALLS="$T/probe-calls" \
       bash "$CI" --require-ci --ci-probe "bash $T/probe" "$@" 2>&1 )
 }
@@ -266,7 +284,7 @@ chmod +x "$T/request"
 
 ci_request_run() { # ci_request_run <rc> <says> <dir> [job args...]
   local rc=$1 says=$2 dir=$3; shift 3
-  ( cd "$dir" && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
+  ( cd "$dir" && "${job_env[@]}" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
       REQUEST_RC="$rc" REQUEST_SAYS="$says" REQUEST_CALLS="$T/request-calls" \
       bash "$CI" --ci-request "bash $T/request" "$@" 2>&1 )
 }
@@ -514,25 +532,29 @@ step "the replay cannot reach the forge"
 # run. Run inside the merge job, where the token can make that ask succeed, one pass of `mise run gates`
 # produced six real `gh workflow run ci.yml --repo bitandpixel/git-pair --ref main` calls against this
 # repository, each one caused by a merge into a scratch repository that has nothing to do with it. The fix is
-# `scripts/ci/clean-env.sh`, and both halves are asserted here: that the ask really does happen when the
-# environment is left as the job has it, without which the assertion below would prove nothing; and that it
-# does not happen through the scrubber.
+# `job_env` above. Both halves are asserted below, and they differ by one variable: the same baseline, with a
+# forge named and without. Without the first, the second would only be proving that `gh` was never called.
 GHSTUB=$T/ghstub
 mkdir -p "$GHSTUB"
 printf '#!/bin/sh\necho "gh $*" >> "%s/ghcalls"\nexit 0\n' "$T" > "$GHSTUB/gh"
 chmod +x "$GHSTUB/gh"
 : > "$T/ghcalls"
 
-forge_run() { # forge_run <dir> <branch> [scrub] — the job, with a forge named and a recording `gh` on PATH
-  local dir=$1 branch=$2 mode=${3:-plain}
+forge_run() { # forge_run <dir> <branch> — the driver as a merge job has it: the harness's own baseline, plus a forge
+  local dir=$1 branch=$2
+  ( cd "$dir" && "${job_env[@]}" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G" \
+      GITHUB_REPOSITORY=bitandpixel/git-pair GITHUB_TOKEN=forge-token PATH="$GHSTUB:$PATH" \
+      bash "$CI" "$branch" 2>&1 )
+}
+# pinned_run is the situation that produced the six calls: the gate itself running inside a job whose
+# environment names a forge, handing the driver to `cigr` like every other run in this file does. `gh` stays
+# on the PATH, so the silence below can only come from the pin taking the name away.
+pinned_run() { # pinned_run <dir> <branch> — the same driver through the harness, with a forge in the caller's environment
+  local dir=$1 branch=$2
   (
-    cd "$dir" || exit 1
-    export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_PAIR_BIN="$G"
-    export GITHUB_REPOSITORY=bitandpixel/git-pair GITHUB_TOKEN=forge-token PATH="$GHSTUB:$PATH"
-    if [ "$mode" = scrub ]; then
-      exec bash "$ROOT/scripts/ci/clean-env.sh" bash "$CI" "$branch" 2>&1
-    fi
-    exec bash "$CI" "$branch" 2>&1
+    export GITHUB_REPOSITORY=bitandpixel/git-pair GITHUB_TOKEN=forge-token GH_TOKEN=forge-token
+    export GIT_PAIR_DEFAULT_BRANCH=main PATH="$GHSTUB:$PATH"
+    cigr "$dir" "$branch"
   )
 }
 count_gh() { wc -l < "$T/ghcalls" | tr -d ' '; }
@@ -554,15 +576,15 @@ git -C "$T/work" checkout -q flow/forge-scrubbed && wing change integrate >/dev/
 git -C "$T/work" push -q origin flow/forge-scrubbed >/dev/null 2>&1
 BEFORE=$(count_gh)
 BEFORE_TIP=$(git -C "$T/origin.git" rev-parse main)
-OUT=$(forge_run "$(clone fs)" flow/forge-scrubbed scrub); show "$OUT"
+OUT=$(pinned_run "$(clone fs)" flow/forge-scrubbed); show "$OUT"
 contains "$OUT" "no --ci-request given, no forge named" \
-  "through the scrubber the driver cannot name a forge, so it says so instead of asking"
+  "with the harness's pin, the forge the job exported never reaches the driver, which says so instead of asking"
 if [ "$(count_gh)" = "$BEFORE" ]; then
   ok "and nothing was dispatched: a test cannot ask the repository it is testing for a run"
 else
-  fail "the scrubber let $(( $(count_gh) - BEFORE )) call(s) through"
+  fail "the pin let $(( $(count_gh) - BEFORE )) call(s) through"
 fi
-check "and the merge still happened, so the scrubber removed the ask rather than the job" 1 \
+check "and the merge still happened, so the pin removed the ask rather than the job" 1 \
   "$( [ "$(git -C "$T/origin.git" rev-parse main)" != "$BEFORE_TIP" ] && echo 1 || echo 0 )"
 
 step "the workflow files say what this shape needs"
@@ -622,22 +644,6 @@ check "and holds nothing the probe would have needed" 0 "$(printf '%s\n' "$PERM"
 INTEGRATE_CODE=$(grep -v '^[[:space:]]*#' "$INTEGRATE")
 check "the job makes the merge conditional on the suite" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c -- '--verify-cmd')" -ge 1 ] && echo 1 || echo 0 )"
 check "and does not also gate on somebody else's checks" 0 "$(printf '%s\n' "$INTEGRATE_CODE" | grep -Ec -- '--require-ci|--ci-probe')"
-
-# The candidate is run by the job that merges it, so it runs in the job's environment — and that environment
-# describes where the code is being run, which is information the suite was never written against. Two failures
-# came from it, both invisible off a runner: with `GIT_PAIR_DEFAULT_BRANCH` exported the product names where its
-# destination came from and the verdict tests fail on a fine tree; and with `GITHUB_REPOSITORY` exported the
-# driver's replay asked the real repository for runs of `ci.yml` caused by merges into scratch repositories.
-# `scripts/ci/clean-env.sh` is the seam, and the step asserting it here is what stops a later edit from
-# quietly dropping it. Note which side keeps the variables: the driver still has them, because the driver is
-# the part that merges and asks.
-CI_CODE=$(grep -v '^[[:space:]]*#' "$ROOT/.github/workflows/ci.yml")
-check "and the candidate is run with the job's environment removed" 1 \
-  "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'clean-env.sh mise run gates')" -ge 1 ] && echo 1 || echo 0 )"
-check "and so is the ladder on the pull-request path, so there is one definition of green" 1 \
-  "$( [ "$(printf '%s\n' "$CI_CODE" | grep -c 'clean-env.sh mise run gates')" -ge 1 ] && echo 1 || echo 0 )"
-check "the scrubber is there and executable, since a wrapper nobody can run is a silent no-op" 1 \
-  "$( [ -x "$ROOT/scripts/ci/clean-env.sh" ] && echo 1 || echo 0 )"
 
 # The request that follows a landing is house policy, not decoration. The destination's new tip is the tree
 # this job just tested, so the run adds no answer — but a trunk with no run of its own has nothing to go red

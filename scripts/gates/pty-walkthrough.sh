@@ -27,6 +27,11 @@ fi
 DRIVER="$HERE/pty-tui.py"
 PLAIN="$HERE/pty-plain.py"
 T=$(mktemp -d /tmp/git-pair-pty.XXXXXX)
+# Same rule as `job_env` in ci-integrate.sh, applied to a whole gate: the binary and the TUI under it read
+# their configuration from the environment, and a scenario must not be decided by the shell that started this
+# one. `pty-tui.py` pins what the terminal needs (`TERM`, `COLUMNS`, and the colour switches it removes); this
+# pins what the product reads.
+for __env in $(compgen -e | grep '^GIT_PAIR_' || true); do unset "$__env"; done
 # A failed scenario is worth more kept than re-run: the transcripts are the only record of what the
 # terminal actually received, and a check that fails once in twenty does not reproduce on demand.
 trap 'if [ "${FAILED:-0}" = 1 ]; then echo "PTY: transcripts kept for inspection in $T"; else rm -rf "$T"; fi' EXIT
