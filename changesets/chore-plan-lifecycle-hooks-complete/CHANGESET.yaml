@@ -1,0 +1,3 @@
+id: chore-plan-lifecycle-hooks-complete
+base: feat/hooks-declined-state
+base-changeset: feat-hooks-declined-state
