@@ -1,0 +1,13 @@
+name = "gh-cli"
+source = "library"       # this library owns the file; install copies it
+default_scope = "machine"
+
+[install]
+repo = "cp .dev-profiles/capabilities/gh-cli/SKILL.md .agents/skills/gh-cli/SKILL.md"
+machine = "cp .dev-profiles/capabilities/gh-cli/SKILL.md $HOME/.agents/skills/gh-cli/SKILL.md"
+
+[drift]
+kind = "diff"
+source_path = ".dev-profiles/capabilities/{name}/SKILL.md"
+target_repo = ".agents/skills/{name}/SKILL.md"
+target_machine = "$HOME/.agents/skills/{name}/SKILL.md"

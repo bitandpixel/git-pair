@@ -1,0 +1,19 @@
+# What the record a reviewer reads has to answer — the same standard for a git-pair ABOUT.md and a PR body.
+#
+# The source is a reference, not a file in this directory: the guidance is one document that the two entry skills
+# point at, and a copy of it is what agents actually load. Keeping the prose in `references/` and pointing the
+# `diff` rule at it means there is one file to review and one byte-for-byte check, instead of a reference and a
+# skill that drift apart.
+name = "change-description"
+source = "library"       # this library owns the file; install copies it
+default_scope = "repo"
+
+[install]
+repo = "mkdir -p .agents/skills/{name} && cp .dev-profiles/references/change-description.md .agents/skills/{name}/SKILL.md"
+machine = "mkdir -p $HOME/.agents/skills/{name} && cp .dev-profiles/references/change-description.md $HOME/.agents/skills/{name}/SKILL.md"
+
+[drift]
+kind = "diff"
+source_path = ".dev-profiles/references/change-description.md"
+target_repo = ".agents/skills/{name}/SKILL.md"
+target_machine = "$HOME/.agents/skills/{name}/SKILL.md"

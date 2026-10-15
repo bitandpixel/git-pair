@@ -1,0 +1,5 @@
+# Machine-readable facts about this profile, read by `dev-profiles doctor` and `install`.
+name = "plain-git"
+summary = "No review protocol: branch, commit, push, and ask before the forge records anything."
+
+housekeeping = ""

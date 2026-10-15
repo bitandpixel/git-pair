@@ -1,0 +1,1219 @@
+#!/usr/bin/env bash
+# dev-profiles — resolve, install, and verify the development workflow this repository declares.
+#
+# Usage:
+#   dev-profiles status [--json]     what applies here, and whether it agrees with itself
+#   dev-profiles install [--dry-run] write the materialized copies the profile requires
+#   dev-profiles doctor [--json]     every check, all of them, not the first failure
+#   dev-profiles diff                installed copies vs the library
+#   dev-profiles command <name>      print the command the consumer named for a role the profile demands
+#
+# Exit codes:
+#   0  clean, or the requested action succeeded
+#   1  something needs attention (doctor), or a drift was found (status)
+#   2  unusable: no marker, no profile, bad invocation
+#
+# Design notes worth keeping:
+#
+# - The repository marker (.dev-profiles.toml) is the only workflow signal. It names a profile and the
+#   capabilities required; every command, flag and scope word that belongs to a tool lives in that tool's
+#   capability manifest instead. That is why no function below mentions git-pair or gh.
+# - doctor reports every check rather than the first failure, so one run answers "what is wrong here"
+#   completely. A profile declares its own housekeeping command; a report is not a failure, because
+#   housekeeping is a commit and a commit is somebody's decision.
+# - install queries before it writes. An existing current copy is never duplicated into a second copy that
+#   can drift on its own.
+# - A profile demands a role with [[require]] and offers one with [[optional]]. Only one thing differs: an
+#   unanswered demand fails the check and an unanswered offer is reported. Same answer key in [commands], same
+#   inspection of the answer, same rule that a name the profiles never declared is a failure at the handoff — the
+#   difference between "nothing to build here" and a misspelled build must not be something a job discovers.
+# - Dependencies: git, jq, diff, and /bin/sh for commands a manifest declares. Nothing else.
+
+set -uo pipefail
+
+CMD="${1:-}"
+shift 2>/dev/null || true
+JSON=0
+DRY=0
+ARG=""
+SCOPE_FILTER=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --json) JSON=1 ;;
+    --dry-run) DRY=1 ;;
+    --scope) SCOPE_FILTER=${2:-}; shift ;;
+    --scope=*) SCOPE_FILTER=${1#--scope=} ;;
+    # `command` is the one subcommand that takes a name, and the caller is usually the merge job rather than a
+    # person, so a positional here is not sloppiness to reject. Anything else stays an unknown option.
+    *) if [ "$CMD" = command ] && [ -z "$ARG" ]; then ARG=$1
+       else printf 'dev-profiles: unknown option %s\n' "$1" >&2; exit 2; fi ;;
+  esac
+  shift
+done
+case "$SCOPE_FILTER" in ""|repo|machine) : ;; *) printf 'dev-profiles: --scope takes repo|machine, not %s\n' "$SCOPE_FILTER" >&2; exit 2 ;; esac
+
+RESULTS=()
+FAIL=0
+
+# ---------------------------------------------------------------- toml (the subset this repo emits)
+# Emits dotted key=value lines. Supports top-level keys, [a.b] sections, [[a]] array tables, quoted
+# strings, bare numbers and booleans, and single-line arrays. Comments are stripped.
+toml() {
+  awk '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*$/ { next }
+    /^\[\[[^]]+\]\][[:space:]]*$/ {
+      s=$0; sub(/^\[\[/,"",s); sub(/\]\].*$/,"",s); gsub(/[[:space:]]/,"",s)
+      n[s]++; prefix = s "." n[s] "."; next
+    }
+    /^\[[^]]+\][[:space:]]*$/ {
+      s=$0; sub(/^\[/,"",s); sub(/\].*$/,"",s); gsub(/[[:space:]]/,"",s)
+      prefix = s "."; next
+    }
+    /=/ {
+      key=$0; val=$0
+      sub(/=.*/,"",key); gsub(/[[:space:]]/,"",key)
+      sub(/^[^=]*=/,"",val)
+      sub(/[[:space:]]#.*$/,"",val)
+      gsub(/^[[:space:]]+|[[:space:]]+$/,"",val)
+      gsub(/\\"/, "\"", val)                     # unescape inner quotes: "say \"hi\"" -> "say "hi""
+      gsub(/^"|"$/,"",val)
+      if (val ~ /^\[.*\]$/) { gsub(/[\[\]"]/,"",val); gsub(/,/,  " ", val); gsub(/[[:space:]]+/, " ", val); gsub(/^ | $/,"",val) }
+      if (key != "") print prefix key "=" val
+    }
+  ' "$1"
+}
+
+mkv() { toml "$1" | grep -m1 -- "^$2=" | cut -d= -f2- ; }
+
+# Which entries a repeated table has, by index. Enumerating the *keys* rather than one key's presence is the point:
+# an entry that declares a reason and no name is a mistake the driver should say something about, and a loop over
+# `name` keys never sees it.
+table_indexes() { # table_indexes <file> <table>
+  toml "$1" | sed -n "s/^$2\.\([0-9]\+\)\.[^=]*=.*/\1/p" | sort -n -u
+}
+
+# ---------------------------------------------------------------- discovery
+ROOT=$(git -C "${PWD}" rev-parse --show-toplevel 2>/dev/null) || {
+  printf 'dev-profiles: not inside a git repository\n' >&2; exit 2; }
+
+MARKER="$ROOT/.dev-profiles.toml"
+[ -f "$MARKER" ] || { printf 'dev-profiles: no .dev-profiles.toml in %s — run dev-profiles init, or declare a profile\n' "$ROOT" >&2; exit 2; }
+
+# The repository declares the workflows it adopts, one `[[profile]]` table each:
+#
+#   [[profile]]
+#   name    = "git-pair-workflow"
+#   version = 4
+#
+# Two things live in that shape. The version beside a name is the version this repository accepted, which is the
+# changelog gate: doctor fails when that profile's VERSION in the library has moved past it, and the only way to
+# clear it is to read that profile's changelog and move the number. And the order of the tables is the precedence —
+# the first profile listed owns a skill or CI path that a later one also ships. A repository can adopt one more
+# workflow without what it already installed changing underneath it, which matters because installed copies are
+# committed and byte-compared: appending a profile may add, it may not rewrite.
+DECL_NAMES=(); DECL_VERSIONS=()
+for idx in $(toml "$MARKER" | sed -n 's/^profile\.\([0-9]\+\)\.name=.*/\1/p' | sort -n); do
+  DECL_NAMES+=("$(mkv "$MARKER" "profile.$idx.name")")
+  DECL_VERSIONS+=("$(mkv "$MARKER" "profile.$idx.version")")
+done
+# The shape from before a repository could declare several: one `profile =` and one `version =`. Read so the report
+# can name the migration rather than report that nothing is declared.
+LEGACY_PROFILE=$(mkv "$MARKER" profile)
+LIBRARY=$(mkv "$MARKER" library)
+read -r -a FORBIDDEN <<<"$(mkv "$MARKER" forbidden)"
+# Profile skills this repository does not want. A profile ships one skill per shape of work, and a repository
+# is not obliged to have every shape: `pair-preview-pr` describes deploying a preview environment, and a library
+# has none. Exclusion is declared here rather than achieved by deleting the skill directory, because a consumer
+# adopts the library with `git archive … | tar -x` — a deletion in the vendored copy is undone by the next
+# adoption, silently, and nothing in the tree would say the skill was ever declined.
+read -r -a EXCLUDED <<<"$(mkv "$MARKER" exclude_skills)"
+if [ "${#DECL_NAMES[@]}" = 0 ]; then
+  if [ -n "$LEGACY_PROFILE" ]; then
+    printf 'dev-profiles: %s declares one profile with profile = "%s"; this version reads [[profile]] tables — write one per workflow, each with the version this repository accepted\n' "$MARKER" "$LEGACY_PROFILE" >&2
+  else
+    printf 'dev-profiles: %s declares no profile — add a [[profile]] table with a name and the version this repository accepted\n' "$MARKER" >&2
+  fi
+  exit 2
+fi
+[ -n "$LIBRARY" ] || { printf 'dev-profiles: marker is missing library\n' >&2; exit 2; }
+[ "${LIBRARY:0:1}" = "/" ] || LIBRARY="$ROOT/$LIBRARY"
+# Which ref counts as the destination. Two ways this goes wrong, and they are the same fact: a checkout has no
+# authoritative record of what the forge calls the default branch. actions/checkout leaves no
+# refs/remotes/origin/HEAD, and a clone that never ran `git remote set-head` has none either — the identical
+# blank that made `git-pair queue` refuse between origin/main and origin/master. So the caller that does know
+# (a CI workflow, which read it from configuration) says so, and the local guess stays a guess.
+DEFAULT_BRANCH=${DEV_PROFILES_BASE:-}
+DEFAULT_BRANCH=${DEFAULT_BRANCH#origin/}
+[ -n "$DEFAULT_BRANCH" ] || DEFAULT_BRANCH=$(git -C "$ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|.*origin/||')
+# Not the current branch. The branch under review is the thing being checked, and comparing the destination to
+# it is how every "is it on main yet" check starts passing the very case it was written for.
+CI_REF="origin/$DEFAULT_BRANCH"
+git -C "$ROOT" rev-parse --verify -q "$CI_REF" >/dev/null || CI_REF="$DEFAULT_BRANCH"
+git -C "$ROOT" rev-parse --verify -q "$CI_REF" >/dev/null || CI_REF="HEAD"
+
+CAP_NAMES=(); CAP_SCOPES=(); CAP_REQUIRED=(); CAP_HARNESSES=()
+for idx in $(toml "$MARKER" | sed -n 's/^capability\.\([0-9]\+\)\.name=.*/\1/p' | sort -n); do
+  CAP_NAMES+=("$(mkv "$MARKER" "capability.$idx.name")")
+  CAP_SCOPES+=("$(mkv "$MARKER" "capability.$idx.scope")")
+  CAP_REQUIRED+=("$(mkv "$MARKER" "capability.$idx.required")")
+  CAP_HARNESSES+=("$(mkv "$MARKER" "capability.$idx.options.harness")")
+done
+
+# Commands the profile demands the consumer name. This is the profile's shape, not the library's: the `git-pair`
+# profile ships a merge job and so demands the validation that job is conditional on, while `plain-git` ships no
+# job and demands nothing. A rule the driver inferred — "every profile needs a validation script" — would tell a
+# repository that merges by hand, or on the forge, that something is missing when nothing is.
+#
+# As many roles as the profile wants, each with its own reason. The names are the profile's vocabulary and the
+# driver attaches no meaning to any of them — `verify` here, `integrate`, `cleanup`, or whatever a profile calls
+# the thing it runs next. One limit is worth stating where the declaration is read: a role is only worth demanding
+# if something in the profile actually asks for it. `verify` is asked for by `doctor` and by the merge job; a role
+# nobody runs is a string in a consumer's marker that doctor reports as OK, which is the same reason the library
+# does not invent roles on a profile's behalf.
+#
+# The profile names the role; the consumer says what runs for it, in its own marker:
+#
+#   [commands]
+#   verify = "scripts/ci/verify-candidate.sh"
+#
+# The pointer lives in the consumer's file for two reasons. It is the only file a consumer may write, and the
+# value has more than one reader: `doctor` asks whether it is set, and the merge job runs it. The workflow is the
+# profile's bytes by then — byte-compared, so a per-consumer path cannot be written into it — which is why both
+# readers ask the same function below rather than each holding a copy of the answer. The day this was written the
+# path appeared twice in the workflow and once on disk, with nothing asserting the three agreed.
+# The names are the profile's vocabulary and the driver attaches no meaning to any of them — `verify` here,
+# `integrate`, `cleanup`, or whatever a profile calls the thing it runs next. A demand is `[[require]]`; an offer is
+# `[[optional]]`: the same shape, the same answer in `[commands]`, the same checks on that answer, and the only
+# difference being whether silence is a failure or a line in the report.
+PROFILE_DIRS=(); PROFILE_NAMES=(); PROFILE_ACCEPTED=()
+REQUIRE_NAMES=(); REQUIRE_REASONS=(); REQUIRE_OWNERS=()
+# The seams a profile offers without demanding them — the same table shape as a demand, the same answer in
+# `[commands]`. Declaring an offer, rather than inventing a convention the consumer has to guess, is what lets
+# doctor tell "this repository has nothing to build" apart from "this repository misspelled its build".
+OPTIONAL_NAMES=(); OPTIONAL_REASONS=(); OPTIONAL_OWNERS=()
+# The entry points the pointer stanza is made of: the skill, the reason the profile gives for reading it, and who
+# named it. Same precedence as everything else derived from the declared set — the first profile to name it owns
+# the line, because AGENTS.md has one place for a skill and one sentence beside it.
+ROUTER_SKILLS=(); ROUTER_REASONS=(); ROUTER_OWNERS=()
+
+# The declared set, in the order the repository wrote it, and everything derived from it. Built per command rather
+# than at startup, so `dev-profiles command verify` — which needs the marker and nothing else — still answers on a
+# checkout whose declarations are broken.
+build_profile_view() {
+  PROFILE_DIRS=(); PROFILE_NAMES=(); PROFILE_ACCEPTED=()
+  REQUIRE_NAMES=(); REQUIRE_REASONS=(); REQUIRE_OWNERS=()
+  OPTIONAL_NAMES=(); OPTIONAL_REASONS=(); OPTIONAL_OWNERS=()
+  ROUTER_SKILLS=(); ROUTER_REASONS=(); ROUTER_OWNERS=()
+  local i j idx name reason dup dir seen_here rskill seen_r rc_here
+  for i in "${!DECL_NAMES[@]}"; do
+    name=${DECL_NAMES[$i]}
+    if [ -z "$name" ]; then
+      record FAIL profile "the [[profile]] table at position $((i + 1)) names no profile"
+      continue
+    fi
+    dup=0
+    for j in "${!PROFILE_NAMES[@]}"; do [ "${PROFILE_NAMES[$j]}" = "$name" ] && dup=1; done
+    if [ "$dup" = 1 ]; then
+      record FAIL profile "'$name' is declared twice — one [[profile]] table per profile, so the version this repository accepted has one place to live"
+      continue
+    fi
+    PROFILE_DIRS+=("$LIBRARY/$name"); PROFILE_NAMES+=("$name"); PROFILE_ACCEPTED+=("${DECL_VERSIONS[$i]}")
+    [ -d "$LIBRARY/$name" ] || continue      # named by check_profiles, with the library path in the sentence
+
+    # Requirements merge by role, and the first profile to demand a role owns it — the same precedence as a skill
+    # name, for the same reason. The same role demanded by a second profile is not a contradiction (two workflows
+    # can gate on one thing for two reasons); it is a shadowed reason, and worth one line of report.
+    dir="$LIBRARY/$name/profile.toml"
+    seen_here=' '
+    for idx in $(table_indexes "$dir" require); do
+      name=$(mkv "$dir" "require.$idx.name")
+      [ -n "$name" ] || continue
+      # Two entries in one profile for one role is a bug rather than a union: the marker holds a single answer, and
+      # only one of the two reasons can be printed.
+      case $seen_here in
+        *" $name "*) record FAIL "require:$name" "$name is demanded twice by profile '${PROFILE_NAMES[$i]}' — the marker holds one answer for it, and only one reason can be printed"; continue ;;
+      esac
+      seen_here+="$name "
+      dup=0
+      for j in "${!REQUIRE_NAMES[@]}"; do [ "${REQUIRE_NAMES[$j]}" = "$name" ] && dup=1; done
+      if [ "$dup" = 1 ]; then
+        record NOTE "require:$name" "also demanded by '${PROFILE_NAMES[$i]}' — the first profile to demand it owns the reason printed here"
+        continue
+      fi
+      REQUIRE_NAMES+=("$name"); REQUIRE_REASONS+=("$(mkv "$dir" "require.$idx.reason")"); REQUIRE_OWNERS+=("${PROFILE_NAMES[$i]}")
+    done
+
+    # The seams this profile offers without demanding them. Same precedence as a demand: the first profile to offer a
+    # role owns the reason printed beside it, and a second offer of the same role is a shadowed reason rather than a
+    # contradiction — two workflows can both find a build step useful, for two reasons.
+    for idx in $(table_indexes "$dir" optional); do
+      name=$(mkv "$dir" "optional.$idx.name")
+      [ -n "$name" ] || { record FAIL "optional:#$idx" "an [[optional]] entry in '${PROFILE_NAMES[$i]}' names no role — an offer nobody can take"; continue; }
+      dup=0
+      for j in "${!OPTIONAL_NAMES[@]}"; do [ "${OPTIONAL_NAMES[$j]}" = "$name" ] && dup=1; done
+      if [ "$dup" = 1 ]; then
+        record NOTE "optional:$name" "also offered by '${PROFILE_NAMES[$i]}' — the first profile to offer it owns the reason printed here"
+        continue
+      fi
+      OPTIONAL_NAMES+=("$name"); OPTIONAL_REASONS+=("$(mkv "$dir" "optional.$idx.reason")"); OPTIONAL_OWNERS+=("${PROFILE_NAMES[$i]}")
+    done
+
+    # The pointer's content, entry by entry. A profile says which of its skills an agent should open and why, and the
+    # driver writes those lines instead of reciting guidance it did not author — the same shape as a demanded role,
+    # for the same reason: the answer belongs to the profile, and the driver only prints it.
+    if [ -n "$(mkv "$dir" router)" ]; then
+      record FAIL "router:${PROFILE_NAMES[$i]}" "'${PROFILE_NAMES[$i]}' still declares router = \"…\" — the pointer reads [[router]] name + reason now, one table per entry skill"
+    fi
+    seen_r=' '; rc_here=0
+    for idx in $(toml "$dir" | sed -n 's/^router\.\([0-9]\+\)\.name=.*/\1/p' | sort -n); do
+      rskill=$(mkv "$dir" "router.$idx.name")
+      [ -n "$rskill" ] || continue
+      case $seen_r in
+        *" $rskill "*) record FAIL "router:$rskill" "'$rskill' is a router entry twice in '${PROFILE_NAMES[$i]}' — AGENTS.md would carry the same skill twice, and only one reason can be printed"; continue ;;
+      esac
+      seen_r+="$rskill "; rc_here=$((rc_here + 1))
+      if [ -z "$(mkv "$dir" "router.$idx.reason")" ]; then
+        record FAIL "router:$rskill" "'$rskill' is named as an entry point with no reason — a line that does not say why the agent should open it is the line it skips"
+        continue
+      fi
+      dup=0
+      for j in "${!ROUTER_SKILLS[@]}"; do [ "${ROUTER_SKILLS[$j]}" = "$rskill" ] && dup=1; done
+      if [ "$dup" = 1 ]; then
+        record NOTE "router:$rskill" "also an entry point for '${PROFILE_NAMES[$i]}' — the first profile to name it owns the line printed in AGENTS.md"
+        continue
+      fi
+      ROUTER_SKILLS+=("$rskill"); ROUTER_REASONS+=("$(mkv "$dir" "router.$idx.reason")"); ROUTER_OWNERS+=("${PROFILE_NAMES[$i]}")
+    done
+    if [ "$rc_here" = 0 ] && [ -n "$(find "$LIBRARY/${PROFILE_NAMES[$i]}/skills" -name SKILL.md -print 2>/dev/null | head -1)" ]; then
+      record FAIL "router:${PROFILE_NAMES[$i]}" "'${PROFILE_NAMES[$i]}' ships skills and names no entry point — an installed skill nothing points at is a file, not guidance"
+    fi
+    name=${DECL_NAMES[$i]}
+  done
+}
+declared_has() { local p; for p in "${PROFILE_NAMES[@]:-}"; do [ "$p" = "$1" ] && return 0; done; return 1; }
+
+# Everything below reads the declared set with the same rule: the first profile that declares a thing owns it.
+# Lists are space-separated, like the single-line arrays the toml subset produces; a path with a space in it is
+# outside what this driver reads anywhere.
+profile_list() { # profile_list <key> -> words, first declaration first, deduped
+  local key=$1 i out='' seen=' ' item v
+  for (( i=0; i<${#PROFILE_DIRS[@]}; i++ )); do
+    v=$(mkv "${PROFILE_DIRS[$i]}/profile.toml" "$key")
+    [ -n "$v" ] || continue
+    for item in $v; do
+      case $seen in *" $item "*) continue ;; esac
+      seen+="$item "; out+="$item "
+    done
+  done
+  printf '%s' "${out% }"
+}
+
+profile_skills() { # -> skill directory names across the declared profiles, first declaration first
+  local i d s seen=' ' out=''
+  for (( i=0; i<${#PROFILE_DIRS[@]}; i++ )); do
+    for d in "${PROFILE_DIRS[$i]}"/skills/*/; do
+      [ -d "$d" ] || continue
+      s=$(basename "$d")
+      case $seen in *" $s "*) continue ;; esac
+      seen+="$s "; out+="$s "
+    done
+  done
+  printf '%s' "${out% }"
+}
+
+# Whose bytes a name is, and which profile to blame for them. Two functions because the report needs the name and
+# the comparison needs the directory: comparing an installed copy against a profile that does not own it reports a
+# correct checkout as stale, and `install` then rewrites a file that was already right.
+skill_src() { local n=$1 i d; for (( i=0; i<${#PROFILE_DIRS[@]}; i++ )); do d="${PROFILE_DIRS[$i]}/skills/$n"; [ -d "$d" ] && { printf '%s' "$d"; return 0; }; done; return 1; }
+skill_owner() { local n=$1 i; for (( i=0; i<${#PROFILE_DIRS[@]}; i++ )); do [ -d "${PROFILE_DIRS[$i]}/skills/$n" ] && { printf '%s' "${PROFILE_NAMES[$i]}"; return 0; }; done; return 1; }
+ci_src()    { local p=$1 i f; for (( i=0; i<${#PROFILE_DIRS[@]}; i++ )); do f="${PROFILE_DIRS[$i]}/ci/$p"; [ -f "$f" ] && { printf '%s' "$f"; return 0; }; done; return 1; }
+ci_owner()  { local p=$1 i; for (( i=0; i<${#PROFILE_DIRS[@]}; i++ )); do [ -f "${PROFILE_DIRS[$i]}/ci/$p" ] && { printf '%s' "${PROFILE_NAMES[$i]}"; return 0; }; done; return 1; }
+
+# Which profile *asked for* a path, as against whose bytes it is. A missing CI file has two different people to
+# tell: the profile that shipped a file nobody declared is nobody's problem, and the one that declared a file it
+# does not ship is a library bug — so the report names the profile that wrote the declaration.
+declared_in() { # declared_in <key> <value> -> first profile declaring it
+  local key=$1 want=$2 i v
+  for (( i=0; i<${#PROFILE_DIRS[@]}; i++ )); do
+    v=$(mkv "${PROFILE_DIRS[$i]}/profile.toml" "$key")
+    case " $v " in *" $want "*) printf '%s' "${PROFILE_NAMES[$i]}"; return 0 ;; esac
+  done
+  return 1
+}
+
+# Every profile that ships a skill of this name, in declaration order, first one first. The owner is the head of
+# the list; the rest are what the consumer does not get, and says so in the report.
+skill_shippers() { # skill_shippers <name> -> profile names, space separated
+  local n=$1 i out=''
+  for (( i=0; i<${#PROFILE_DIRS[@]}; i++ )); do
+    [ -d "${PROFILE_DIRS[$i]}/skills/$n" ] && out+="${PROFILE_NAMES[$i]} "
+  done
+  printf '%s' "${out% }"
+}
+
+marker_command_keys() { toml "$MARKER" | sed -n 's/^commands\.\([^=.][^=]*\)=.*/\1/p' | paste -sd' ' -; }
+
+# One resolution, two readers. Prints the command the marker names for a role and nothing else, so a workflow can
+# use it as $(dev-profiles command verify). A pointer that resolves nowhere has to fail the same way in the pull
+# request job and in the merge job — a value that passes one and fails the other is how a marker typo becomes a
+# red run at 2am instead of a red doctor at the handoff.
+resolve_command() { # resolve_command <name> [reason]
+  local name=$1 reason=${2:-} value keys i
+  value=$(mkv "$MARKER" "commands.$name")
+  if [ -z "$value" ]; then
+    # An unanswered *offer* is not a failure, and the caller has to be able to tell that apart from a broken marker:
+    # exit 0 with nothing printed, so the step that offered the seam can skip it while still failing on a real
+    # problem. Silent on purpose for the offered case — the report says which seams are open, not this line.
+    if [ "${#OPTIONAL_NAMES[@]}" -gt 0 ]; then
+      for i in "${!OPTIONAL_NAMES[@]}"; do [ "${OPTIONAL_NAMES[$i]}" = "$name" ] && return 0; done
+    fi
+    printf 'dev-profiles: %s names no command for %s' "$MARKER" "$name" >&2
+    [ -n "$reason" ] && printf ' — the profile demands one: %s' "$reason" >&2
+    keys=$(marker_command_keys)
+    [ -n "$keys" ] && printf ' (the marker defines: %s)' "$keys" >&2
+    printf '\n' >&2
+    return 2
+  fi
+  printf '%s\n' "$value"
+}
+
+# ---------------------------------------------------------------- results
+record() { RESULTS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAIL=1; return 0; }
+subst() { printf '%s' "$1" | sed -e "s|{name}|$2|g" -e "s|{harness}|$3|g" -e "s|{scope}|$4|g"; }
+
+# ---------------------------------------------------------------- capability state
+# Prints current | stale | absent for one capability at one scope, using the manifest's own drift rule.
+cap_state() { # cap_state <manifest> <name> <scope> <harness>
+  local manifest=$1 name=$2 scope=$3 harness=$4
+  local kind cmd srepo smachine spath trep tmach target
+  kind=$(mkv "$manifest" drift.kind)
+  # A tool-sourced capability is verified by asking the tool. When the tool is not installed — a CI runner,
+  # a fresh machine — the question cannot be asked, and "absent" would be a lie: the committed copy is right
+  # there. So the answer becomes unverifiable, and only the copy's presence is claimed.
+  local needs; needs=$(mkv "$manifest" drift.requires)
+  if [ "$kind" = command ] && [ -n "$needs" ] && ! command -v "$needs" >/dev/null 2>&1; then
+    local tkey="drift.target_repo"; [ "$scope" = machine ] && tkey="drift.target_machine"
+    local tpath; tpath=$(mkv "$manifest" "$tkey")
+    if [ -n "$tpath" ]; then
+      tpath=$(subst "$tpath" "$name" "$harness" "$scope")
+      tpath=$(eval printf '%s' "$tpath" 2>/dev/null)
+      if [ -e "$tpath" ] || [ -e "$ROOT/$tpath" ]; then printf 'unverifiable'; return 0; fi
+    fi
+    printf 'absent'; return 0
+  fi
+  if [ "$kind" = "command" ]; then
+    cmd=$(mkv "$manifest" drift.command)
+    srepo=$(mkv "$manifest" drift.scope_repo); srepo=${srepo:-repo}
+    smachine=$(mkv "$manifest" drift.scope_machine); smachine=${smachine:-user}
+    local tool_scope=$srepo; [ "$scope" = machine ] && tool_scope=$smachine
+    local out
+    out=$(subst "$cmd" "$name" "$harness" "$tool_scope" | sh 2>/dev/null | tr -d '[:space:]')
+    case "$out" in
+      current|stale|absent) printf '%s' "$out" ;;
+      "") printf 'absent' ;;                       # no target row at all means nothing is installed there
+      *) printf 'stale' ;;                         # an answer we do not recognize is not a pass
+    esac
+    return 0
+  fi
+  # kind = diff
+  spath=$(mkv "$manifest" drift.source_path); trep=$(mkv "$manifest" drift.target_repo)
+  tmach=$(mkv "$manifest" drift.target_machine)
+  spath=$(subst "$spath" "$name" "$harness" "$scope")
+  target=$([ "$scope" = machine ] && subst "$tmach" "$name" "$harness" "$scope" || subst "$trep" "$name" "$harness" "$scope")
+  target=$(eval printf '%s' "$target" 2>/dev/null)
+  [ -e "$ROOT/$spath" ] || { printf 'absent'; return 0; }
+  if [ ! -e "$target" ]; then printf 'absent'; return 0; fi
+  if diff -rq "$ROOT/$spath" "$target" >/dev/null 2>&1; then printf 'current'; else printf 'stale'; fi
+}
+
+# The changelog entries the repository has not read yet. A marker behind the library means somebody has not
+# been told what changed, so the answer belongs next to the verdict rather than in a file they must open and
+# interpret. Prints each missing entry's heading and first paragraph — enough to know whether to stop and read.
+changelog_missing() { # changelog_missing <file> <from exclusive> <to inclusive>
+  local file=$1 from=$2 to=$3
+  [ -f "$file" ] || return 0
+  awk -v from="$from" -v to="$to" '
+    /^## / {
+      ver = $0; sub(/^##[[:space:]]*/, "", ver); ver = ver + 0
+      keep = (ver > from && ver <= to)
+      if (keep) { print $0; para = 0 }
+      next
+    }
+    keep {
+      if ($0 ~ /^[[:space:]]*$/) { if (para) keep = 0; next }
+      if ($0 ~ /^[[:space:]]*#/) next
+      print $0; para = 1
+    }
+  ' "$file"
+}
+
+# ---------------------------------------------------------------- checks
+profiles_summary() { # "`a` v4, `b` v1" in declaration order — the same words the stanza and the header use
+  local i out=''
+  for (( i=0; i<${#PROFILE_NAMES[@]}; i++ )); do
+    out+="${out:+, }\`${PROFILE_NAMES[$i]}\` v${PROFILE_ACCEPTED[$i]}"
+  done
+  printf '%s' "$out"
+}
+
+check_profiles() {
+  local i dir name want have missing line nidx nneed
+  for i in "${!PROFILE_DIRS[@]}"; do
+    dir=${PROFILE_DIRS[$i]}; name=${PROFILE_NAMES[$i]}; want=${PROFILE_ACCEPTED[$i]}
+    if [ ! -d "$dir" ]; then
+      record FAIL profile "'$name' not found under $LIBRARY"
+      continue
+    fi
+    record OK profile "'$name' at $dir"
+    if [ -z "$want" ]; then
+      record FAIL "version:$name" "$name is declared with no version — the version is what makes adopting a profile a decision, so an absent one accepts whatever the library happens to ship"
+      continue
+    fi
+    have=$(cat "$dir/VERSION" 2>/dev/null | tr -d '[:space:]')
+    if [ -z "$have" ]; then
+      record FAIL "version:$name" "$name has no VERSION"
+    elif [ "$have" != "$want" ]; then
+      record FAIL "version:$name" "this repository uses $name v$want, the library has v$have — read $dir/CHANGELOG.md, then move the version in .dev-profiles.toml"
+      missing=$(changelog_missing "$dir/CHANGELOG.md" "$want" "$have")
+      if [ -n "$missing" ]; then
+        while IFS= read -r line; do [ -n "$line" ] && record NOTE "changelog:$name" "$line"; done <<<"$missing"
+      elif [ "$want" -gt "$have" ] 2>/dev/null; then
+        # Ahead, not behind: the checkout claims a workflow the vendored library has never heard of. Usually a
+        # partial checkout of the branch that bumped it, and the fix is the library, not the marker.
+        record NOTE "changelog:$name" "the marker is ahead of the library for $name — restore .dev-profiles/ from the default branch"
+      fi
+    else
+      record OK "version:$name" "$name v$want, matching the library"
+    fi
+  done
+
+  # A profile that is incomplete without another one says so by name:
+  #
+  #   [[needs]]
+  #   name = "git-pair-loop"
+  #
+  # Name only, with no version constraint, because a consumer cannot lag: the gate above fails for any profile whose
+  # VERSION has moved past what the repository accepted, so the combination is never silently stale. A minimum would
+  # only restate a failure the marker already reports, and would put a number in the library that somebody has to
+  # keep correct. Content comes from what the consumer declared; `needs` says what else has to be declared.
+  for i in "${!PROFILE_DIRS[@]}"; do
+    dir="${PROFILE_DIRS[$i]}/profile.toml"; name=${PROFILE_NAMES[$i]}
+    for nidx in $(toml "$dir" | sed -n 's/^needs\.\([0-9]\+\)\.name=.*/\1/p' | sort -n); do
+      nneed=$(mkv "$dir" "needs.$nidx.name")
+      if [ -z "$nneed" ]; then
+        record FAIL "needs:$name" "a [[needs]] entry in $name names no profile"
+      elif [ "$nneed" = "$name" ]; then
+        record FAIL "needs:$name" "$name needs itself"
+      elif ! declared_has "$nneed"; then
+        record FAIL "needs:$name" "$name needs profile '$nneed', which this repository does not declare — add a [[profile]] table for it, or stop declaring $name"
+      else
+        record OK "needs:$name" "$name has the profile it needs: $nneed"
+      fi
+    done
+  done
+}
+
+is_excluded() { local e; for e in "${EXCLUDED[@]}"; do [ "$e" = "$1" ] && return 0; done; return 1; }
+
+check_marker_shape() {
+  # A key written below a table line is a key nothing reads: the parser qualifies it with the table path, and the
+  # top-level reader never looks there. For `exclude_skills` that failure is silent in the worst direction — the
+  # skill stays installed and the marker still says it was declined. The suite has now been caught by this twice,
+  # both times by appending to the end of the file, which is the obvious thing to do and lands the key inside
+  # whichever table happens to be last. So the report names that table, instead of advice that was only true while
+  # `[[capability]]` was the only one.
+  local flat k where
+  flat=$(toml "$MARKER")
+  for k in library forbidden exclude_skills; do
+    where=$(printf '%s\n' "$flat" | sed -n "s|^\(.*\)\.${k}=.*|\1|p" | head -1)
+    [ -n "$where" ] || continue
+    record FAIL "marker:$k" "$k is inside the [$where] table, where nothing reads it — put it above the first table line"
+  done
+  # Two things the move to [[profile]] tables made possible, both silent in the wrong direction.
+  #
+  # A top-level `version` sitting next to the tables: the reader of that number is gone, so it is a statement about
+  # no profile, and it reads as the changelog gate somebody moved. Name it rather than leave it as a comment.
+  if [ "${#DECL_NAMES[@]}" -gt 0 ] && printf '%s\n' "$flat" | grep -q '^version='; then
+    record FAIL "marker:version" "the marker carries a top-level version as well as [[profile]] tables — the version this repository accepted belongs beside the profile it accepts"
+  fi
+  # And the duplicate that appending to the end of the file now produces: a second `version` inside whichever
+  # [[profile]] table is last. The reader takes the first match, so the number somebody just wrote does nothing
+  # while looking like the decision was made. The reader is right to take the first; the report is what makes the
+  # second one visible.
+  local dupkey
+  for dupkey in $(printf '%s\n' "$flat" | sed -n 's/^\(profile\.[0-9]*\.\(name\|version\)\)=.*/\1/p' | sort | uniq -d); do
+    record FAIL "marker:$dupkey" "is written twice in one [[profile]] table — the first is what gets read, so the second is a number that does nothing"
+  done
+}
+
+check_skills() {
+  local name src target owner shippers
+  for name in $(profile_skills); do
+    src=$(skill_src "$name") || continue
+    owner=$(skill_owner "$name")
+    target="$ROOT/.agents/skills/$name"
+    if is_excluded "$name"; then
+      if [ -d "$target" ]; then
+        record FAIL "skill:$name" "installed, and this repository excludes it — dev-profiles install"
+      else
+        record OK "skill:$name" "excluded by this repository's declaration"
+      fi
+      continue
+    fi
+    if [ ! -d "$target" ]; then
+      record FAIL "skill:$name" "not installed (.agents/skills/$name absent) — dev-profiles install"
+    elif ! diff -rq "$src" "$target" >/dev/null 2>&1; then
+      record FAIL "skill:$name" "differs from the copy in $owner — dev-profiles install"
+    else
+      record OK "skill:$name" "installed, matches the copy in $owner"
+    fi
+    # Declaring a profile that also ships a name somebody else already owns is legal, and the consumer should see
+    # that they did not get the copy they just added: installed copies are committed, so the shadowed one is the
+    # text they will not read, and the only sign it exists is this line.
+    shippers=$(skill_shippers "$name")
+    if [ "$(printf '%s' "$shippers" | wc -w)" -gt 1 ]; then
+      record NOTE "skill:$name" "$owner owns these bytes (declared first); also shipped by ${shippers#* } and not installed"
+    fi
+  done
+  [ -n "$(profile_skills)" ] || record FAIL skills "the declared profiles ship no skills"
+
+  # Every exclusion has to name something a declared profile ships, and must not name a skill the pointer sends an
+  # agent to read. Both mistakes fail open: a typo leaves the skill installed and reports nothing, and excluding a
+  # router leaves AGENTS.md pointing at a file nothing installs.
+  local e r routers
+  routers=$(router_list)
+  for e in "${EXCLUDED[@]}"; do
+    if ! skill_src "$e" >/dev/null 2>&1; then
+      record FAIL "exclude_skills:$e" "excludes a skill no declared profile ships — a typo leaves it installed and says nothing"
+    else
+      for r in $routers; do
+        [ "$r" = "$e" ] && record FAIL "exclude_skills:$e" "excludes a skill AGENTS.md points at — a profile does not demand reading what it declines"
+      done
+    fi
+  done
+}
+
+# The command that fixes a capability, printed next to the verdict. The manifest owns it, and the person
+# reading doctor cannot know it: a tool-sourced capability is reinstalled by its tool, not by a commit here.
+cap_hint() { # cap_hint <manifest> <name> <scope> <harness>
+  local cmd; cmd=$(mkv "$1" "install.$3")
+  [ -n "$cmd" ] && printf ' — run: %s' "$(subst "$cmd" "$2" "$4" "$3")"
+}
+
+check_capabilities() {
+  local i manifest name scope req harness state other
+  for i in "${!CAP_NAMES[@]}"; do
+    name=${CAP_NAMES[$i]}; scope=${CAP_SCOPES[$i]}; req=${CAP_REQUIRED[$i]}; harness=${CAP_HARNESSES[$i]}
+    harness=${harness:-agents}
+    if [ -n "$SCOPE_FILTER" ] && [ "$scope" != "$SCOPE_FILTER" ]; then
+      record NOTE "capability:$name" "scope=$scope, not evaluated (--scope $SCOPE_FILTER): a runner has no developer home"
+      continue
+    fi
+    manifest="$LIBRARY/../capabilities/$name/capability.toml"
+    if [ ! -f "$manifest" ]; then
+      record FAIL "capability:$name" "no manifest at ${manifest#$ROOT/}"
+      continue
+    fi
+    if [ "$scope" = either ]; then
+      state=$(cap_state "$manifest" "$name" repo "$harness")
+      other=$(cap_state "$manifest" "$name" machine "$harness")
+      if [ "$state" = current ] || [ "$other" = current ]; then
+        local where=repo; [ "$state" = current ] || where=machine
+        record OK "capability:$name" "current at $where (scope=either; repo=$state machine=$other)"
+      elif [ "$req" = true ]; then
+        record FAIL "capability:$name" "MISSING: required, absent or stale at both scopes (repo=$state machine=$other)$(cap_hint "$manifest" "$name" repo "$harness")"
+      else
+        record NOTE "capability:$name" "absent at both scopes (optional)"
+      fi
+      continue
+    fi
+    state=$(cap_state "$manifest" "$name" "$scope" "$harness")
+    case "$state" in
+      current) record OK "capability:$name" "current at $scope" ;;
+      unverifiable) record NOTE "capability:$name" "committed copy present at $scope; $(mkv "$manifest" drift.requires) is not installed here, so drift cannot be asked"
+                    ;;
+      stale)   record FAIL "capability:$name" "stale at $scope — a stale copy reads as a promise$(cap_hint "$manifest" "$name" "$scope" "$harness")" ;;
+      *)       if [ "$req" = true ]; then
+                 record FAIL "capability:$name" "MISSING: required at $scope, nothing installed there$(cap_hint "$manifest" "$name" "$scope" "$harness")"
+               else
+                 record NOTE "capability:$name" "absent at $scope (optional)"
+               fi ;;
+    esac
+    local unwanted; unwanted=repo; [ "$scope" = repo ] && unwanted=machine
+    if [ "$(cap_state "$manifest" "$name" "$unwanted" "$harness")" = current ]; then
+      record NOTE "capability:$name" "also current at $unwanted — left alone, the marker asked for $scope"
+    fi
+  done
+}
+
+check_forbidden() {
+  local name dir hit home_hit
+  for name in "${FORBIDDEN[@]:-}"; do
+    [ -n "$name" ] || continue
+    hit=""
+    # Repo scope asks only what the checkout can guarantee. A copy in a developer's home is a machine-scope
+    # fact, and CI is exactly the caller that passes --scope repo: a runner has no developer home, so failing
+    # on one would report a condition the job can neither see nor fix — and one global skill on one laptop
+    # would redden every merge. The same reasoning the capability checks already follow.
+    for dir in "$ROOT/.agents/skills/$name" "$ROOT/.pi/skills/$name" \
+               $([ "$SCOPE_FILTER" = repo ] || printf '%s\n%s' "$HOME/.agents/skills/$name" "$HOME/.pi/agent/skills/$name"); do
+      [ -f "$dir/SKILL.md" ] && hit="${hit:+$hit, }${dir/#$HOME/~}"
+    done
+    if [ -n "$hit" ]; then
+      record FAIL "forbidden:$name" "discoverable at $hit — a second standard competing for this repository"
+      continue
+    fi
+    # Under --scope repo a home copy is still worth saying once, as information: the repository is clean, the
+    # machine is not, and the developer is the only one who can act on that.
+    if [ "$SCOPE_FILTER" = repo ]; then
+      home_hit=""
+      for dir in "$HOME/.agents/skills/$name" "$HOME/.pi/agent/skills/$name"; do
+        [ -f "$dir/SKILL.md" ] && home_hit="${home_hit:+$home_hit, }${dir/#$HOME/~}"
+      done
+      if [ -n "$home_hit" ]; then
+        record NOTE "forbidden:$name" "present at $home_hit, not evaluated (--scope repo): a developer home is not this repository's promise"
+        continue
+      fi
+    fi
+    record OK "forbidden:$name" "not discoverable"
+  done
+}
+
+# The lines the driver owns inside the stanza: the sentence naming the declared profiles and the versions this
+# repository accepted, and one line per skill a profile says to read. Both come from one pair of functions so the
+# check and the rewrite cannot drift into wanting different text — a pointer check whose idea of correct differs
+# from what install writes fails every repository forever.
+pointer_head() {
+  local i out=''
+  for (( i=0; i<${#PROFILE_NAMES[@]}; i++ )); do
+    out+="${out:+, }\`${PROFILE_NAMES[$i]}\` v${PROFILE_ACCEPTED[$i]}"
+  done
+  printf 'This repository declares %s in `.dev-profiles.toml`. Read the installed skills before committing:' "$out"
+}
+
+# Which skills an agent is sent to read, and the sentence that says why. Named by the profiles rather than guessed, so
+# the pointer stays true when a profile renames its entry skill, and a repository adopting a second workflow gets that
+# workflow's entry skill in the same stanza instead of behind the first.
+router_list() { local s; for s in "${ROUTER_SKILLS[@]:-}"; do [ -n "$s" ] && printf '%s\n' "$s"; done; }
+
+router_lines() {
+  local i
+  for (( i=0; i<${#ROUTER_SKILLS[@]}; i++ )); do
+    printf -- '- `%s`: %s (`.agents/skills/%s/SKILL.md`)\n' "${ROUTER_SKILLS[$i]}" "${ROUTER_REASONS[$i]}" "${ROUTER_SKILLS[$i]}"
+  done
+}
+
+agents_pointer_block() {
+  printf '<!-- dev-profiles:profile -->\n## Development workflow\n\n%s\n\n' "$(pointer_head)"
+  router_lines
+  printf '<!-- /dev-profiles:profile -->\n'
+}
+
+# Rewrite only what the driver owns, wherever it sits in the stanza, and copy everything else through: the rest of
+# the block is guidance the driver never authored, and a rewrite that swallowed it would make the tool the thing
+# that deletes a person's paragraph. The run after the first must produce the same file, so the blank and the old
+# skill lines that followed the previous head sentence are swallowed and exactly one blank is put back after the
+# block — an install that adds a line every time makes the tool's own output untrustworthy.
+rewrite_pointer_lines() { # rewrite_pointer_lines <output-file>
+  local want; want=$(mktemp)
+  router_lines > "$want"
+  awk -v head="$(pointer_head)" -v wantfile="$want" '
+    function emit(   i) {
+      if (done) return
+      done = 1
+      if (!lastblank) print ""
+      print head; print ""
+      for (i = 1; i <= n; i++) print W[i]
+      lastblank = 0
+    }
+    BEGIN {
+      while ((getline l < wantfile) > 0) {
+        n++; W[n] = l; ours[l] = 1
+        nm = l                                              # the skill this line belongs to, from between the backticks
+        if (nm ~ /^- `[^`]+`:.*\(`\.agents\/skills\//) { sub(/^- `/, "", nm); sub(/`.*$/, "", nm); RN[nm] = 1 }
+      }
+      close(wantfile)
+    }
+    /<!--[[:space:]]*dev-profiles:profile -->/   { inside = 1; print; lastblank = 0; next }
+    /<!--[[:space:]]*\/dev-profiles:profile -->/ { if (inside) emit(); inside = 0; print; lastblank = 0; next }
+    inside && ours[$0] { next }
+    # The previous form of a router line, and the three sentences the driver used to append to every stanza. Both are
+    # text the driver wrote, so the rewrite may take them away; a person who reworded one of them has written a line the
+    # driver does not recognise, and that paragraph survives. Leaving the old forms in place would put two sentences
+    # beside each skill and let the stanza keep telling a repository what its hand-off is after the profile stopped
+    # saying so.
+    # A line the driver wrote for a skill it points at, whatever the reason said. Comparing the line by its exact text
+    # would strand the previous sentence whenever a profile reworded its reason: the new line goes in, nothing owns
+    # the old one, and AGENTS.md ends up saying two different things about the same skill. The line is written in the
+    # driver format and the profile owns its content, so a person who wants a sentence of their own writes it in the
+    # part of the stanza the driver does not touch.
+    inside && /^- `[^`]+`: .* \(`\.agents\/skills\/[^\/]+\/SKILL\.md`\)$/ {
+      nm = $0; sub(/^- `/, "", nm); sub(/`.*$/, "", nm)
+      if (nm in RN) next
+    }
+    inside && /^- `[^`]+`: the skill that governs this part of the work \(`\.agents\/skills\// { next }
+    inside && /^- The handoff is a command, not a prose request\./ { next }
+    inside && /^- The gate and the merge are different acts\./ { next }
+    inside && /^- `dev-profiles doctor` says whether what is installed still matches the profile\.$/ { next }
+    # The continuation of the head sentence as stanzas written before this change had it: two lines, the second
+    # naming the skill. Rewriting the first and leaving that one would strand a fragment in an early adopter.
+    inside && /^`[A-Za-z0-9_-]+` skill before committing: / { next }
+    inside && /^This repository declares .* in `\.dev-profiles\.toml`/ {
+      done = 1; print head; print ""; for (i = 1; i <= n; i++) print W[i]; skip = 1; lastblank = 0; next
+    }
+    skip && /^[[:space:]]*$/ { next }
+    skip && !/^[[:space:]]*$/ { skip = 0; if (!lastblank) print ""; print; lastblank = 0; next }
+    { print; lastblank = ($0 ~ /^[[:space:]]*$/) }
+  ' "$ROOT/AGENTS.md" > "$1"
+  rm -f "$want"
+}
+
+check_pointer() {
+  # The stanza is the contract on both counts. A skill the profiles demand and the stanza does not name reads as
+  # current to a person and is not: the agent stops reading the thing that governs the part of the work it is about
+  # to do. And a stanza still announcing a version the marker has moved past tells the first reader of the file to
+  # expect a workflow the repository no longer runs — which is the one sentence a version bump guarantees to break.
+  #
+  # The head sentence is compared whole rather than parsed. The driver writes it, the check compares it, and a check
+  # that tried to read the versions out of prose would accept a stanza that reads fine to a person and never matches.
+  local r want missing=''
+  if [ ! -f "$ROOT/AGENTS.md" ]; then
+    record FAIL pointer "AGENTS.md absent"
+    return 0
+  fi
+  if ! grep -q '<!-- dev-profiles:profile -->' "$ROOT/AGENTS.md"; then
+    record FAIL pointer "AGENTS.md has no profile pointer stanza — dev-profiles install"
+    return 0
+  fi
+  want=$(pointer_head)
+  grep -qxF "$want" "$ROOT/AGENTS.md" || missing="$missing the profile sentence"
+  for r in $(router_list); do
+    grep -qF ".agents/skills/$r/SKILL.md" "$ROOT/AGENTS.md" || missing="$missing \`$r\`"
+  done
+  if [ -n "$missing" ]; then
+    record FAIL pointer "AGENTS.md stanza is missing$missing — dev-profiles install"
+  else
+    record OK pointer "AGENTS.md carries the pointer stanza"
+  fi
+}
+
+check_ci() {
+  # `ci_files` is a promise about the destination as well as about ownership: these jobs run there, which is what makes
+  # "CI performs the merge" true. The tree is what *becomes* the destination, so the tree is what gets checked and
+  # the destination ref only labels the answer. The other way round is wrong in both directions, and was: a branch
+  # that **deletes** a promised workflow reads as clean, because the file it removed is still sitting in main, and
+  # the branch that **introduces** one can never be green, because the only place it exists is the branch.
+  local files f ref="$CI_REF" broken=0 landed=0 arriving=0
+  read -r -a files <<<"$(profile_list ci_files)"
+  if [ "${#files[@]}" = 0 ]; then
+    record NOTE ci "the declared profiles declare no CI files — nothing lands from CI"
+    return 0
+  fi
+  for f in "${files[@]}"; do
+    if [ ! -f "$ROOT/$f" ]; then
+      broken=1
+      record FAIL ci "$f is promised by $(declared_in ci_files "$f" 2>/dev/null || printf 'the profile') and absent from this checkout — if this lands, the promise is false"
+      continue
+    fi
+    if git -C "$ROOT" cat-file -e "$ref:$f" 2>/dev/null; then
+      landed=$((landed + 1))
+    elif [ "$ref" = HEAD ]; then
+      arriving=$((arriving + 1))
+      record NOTE ci "$f present here; the destination was not resolvable from this checkout — pass DEV_PROFILES_BASE on a runner"
+    else
+      arriving=$((arriving + 1))
+      record NOTE ci "$f present here, not on $ref yet — it arrives with this change"
+    fi
+  done
+  [ "$broken" = 1 ] && return 0
+  if [ "$arriving" = 0 ]; then
+    local note=''
+    [ "$ref" = HEAD ] && note=" (the destination ref was not resolvable here)"
+    record OK ci "all $landed declared CI files on $ref$note"
+  else
+    record OK ci "$landed of $((landed + arriving)) declared CI files on $ref; $arriving arrive with this change"
+  fi
+  return 0
+}
+
+# What the profile demands the consumer run, and what the consumer said it runs. The demanded thing is a command
+# line rather than a path, because the profile that demands it cannot know what green means in someone else's
+# repository — `mise run gates`, `./gradlew check`, `make verify` are all answers, and forcing one layout buys a
+# shim whose only job is to point at the real thing.
+#
+# So most of this check is honesty about what it cannot check. It asserts the marker names something, quotes the
+# profile's reason on the OK line too (a reader who finds an odd `[commands]` stanza in a marker they did not
+# write deserves to learn who asked), and inspects the value only in the one case where inspecting it is sound.
+check_command_answer() { # check_command_answer <name> <value> <reason>
+  local name=$1 value=$2 reason=${3:-} cisrc
+  # A single token naming a path in this repository is the one value this driver may say anything about: it is run
+  # directly, so the file has to exist and carry the mode, and a merge that cannot exec its own condition is the
+  # worst place in the design to discover it. Anything with a space in it (`mise run gates`) is a shell line, and the
+  # only proof of that is the run — claiming otherwise here would be a check that passes nothing.
+  if [[ $value != *[[:space:]]* && $value != /* && $value == */* ]]; then
+    # The two ownership rules meet here: what a profile asks the consumer to run cannot also be a file some declared
+    # profile installs, since install would erase on each run the thing the profile asks the consumer to own.
+    if cisrc=$(ci_src "$value"); then
+      record FAIL "command:$name" "runs $value, which $(ci_owner "$value") ships under ci/ — install would overwrite what it demands you own"
+    elif [ ! -f "$ROOT/$value" ]; then
+      record FAIL "command:$name" "runs $value, named in the marker, and that file is absent — author it, or point [commands] $name somewhere else"
+    elif [ ! -x "$ROOT/$value" ]; then
+      record FAIL "command:$name" "runs $value and it is not executable, so the merge cannot run what it is conditional on — chmod +x $value"
+    else
+      record OK "command:$name" "runs $value${reason:+ — $reason}"
+    fi
+  else
+    record OK "command:$name" "runs \`$value\`, not inspected (a command line is the consumer's own words for what green means)${reason:+ — $reason}"
+  fi
+}
+
+check_required_commands() {
+  local i name value reason keys owner known
+  # Empty lists are the normal case, not an edge one: `plain-git` and `forge-pr` declare neither demands nor offers.
+  # Guarded on the length rather than on `:-`, which hands back one empty word and then indexes the array with it.
+  for i in "${!REQUIRE_NAMES[@]}"; do
+    name=${REQUIRE_NAMES[$i]}; reason=${REQUIRE_REASONS[$i]}; owner=${REQUIRE_OWNERS[$i]}
+    [ -n "$name" ] || { record FAIL "require:#$i" "declares no name — the entry demands nothing, so nothing is required"; continue; }
+    # A role name has to survive two readers: it becomes a key in `[commands]`, and then a lookup path through the
+    # dotted-key parser. `verify cmd` or `build.prod` is a role the consumer cannot answer, and the failure would
+    # surface as "the marker names none" — blamed on the consumer for a line the profile wrote.
+    if [[ ! $name =~ ^[A-Za-z0-9_-]+$ ]]; then
+      record FAIL "require:$name" "$name is not a name the consumer can answer — a [commands] key is one bare word, with no space or dot"
+      continue
+    fi
+    value=$(mkv "$MARKER" "commands.$name")
+    if [ -z "$value" ]; then
+      keys=$(marker_command_keys)
+      record FAIL "command:$name" "the profile demands one and the marker names none — ${reason:-required by profile '$owner'}${keys:+; it does name: $keys}"
+      continue
+    fi
+    check_command_answer "$name" "$value" "$reason"
+  done
+
+  # An offered seam may go unanswered — that is the whole difference between an offer and a demand — but not
+  # silently. The line carries the reason the profile wrote, so a reader can tell "nothing to build here" from a
+  # misspelling, which is the failure an optional step invites: the job skips its own preparation and reports green.
+  for i in "${!OPTIONAL_NAMES[@]}"; do
+    name=${OPTIONAL_NAMES[$i]}; reason=${OPTIONAL_REASONS[$i]}; owner=${OPTIONAL_OWNERS[$i]}
+    [ -n "$name" ] || continue
+    if [[ ! $name =~ ^[A-Za-z0-9_-]+$ ]]; then
+      record FAIL "optional:$name" "$name is not a name the consumer can answer — a [commands] key is one bare word, with no space or dot"
+      continue
+    fi
+    value=$(mkv "$MARKER" "commands.$name")
+    if [ -z "$value" ]; then
+      record NOTE "optional:$name" "offered by '$owner' and unanswered — ${reason:-no reason given}; nothing runs it"
+    else
+      check_command_answer "$name" "$value" "$reason"
+    fi
+  done
+
+  # An answer to a role nobody declared matches nothing: the profile offers `toolchain`, the marker says
+  # `toolchaun`, and the candidate merges without its build. Checked only where a profile declares roles at all,
+  # because a repository on a profile that declares none keeps `[commands]` for its own reasons.
+  known="${REQUIRE_NAMES[*]:-} ${OPTIONAL_NAMES[*]:-}"
+  if [ -n "${known// /}" ]; then
+    for name in $(marker_command_keys); do
+      case " $known " in
+        *" $name "*) ;;
+        *) record FAIL "command:$name" "the marker answers a role no declared profile demands or offers — they name:$known" ;;
+      esac
+    done
+  fi
+}
+
+# The profile's own CI scripts, installed the way skills are. The consumer commits the copy, so the only thing
+# that makes a committed copy trustworthy is knowing whether it still matches what the library implements — the
+# same byte equality `check_skills` applies, and for the same reason a reformat in the library is *supposed* to
+# break every consumer's check until it re-installs.
+check_ci_files() {
+  local files f src hit p owner
+  read -r -a files <<<"$(profile_list ci_files)"
+  for f in "${files[@]:-}"; do
+    [ -n "$f" ] || continue
+    owner=$(declared_in ci_files "$f")
+    src=$(ci_src "$f") || src="${PROFILE_DIRS[0]}/ci/$f"   # reported as not shipped a few lines below
+    # The two halves fail differently, and the reader needs to know which one to fix: a profile that declares a
+    # file it does not ship is a library bug, and saying "dev-profiles install" next to it would send somebody
+    # to repair a checkout that is already correct.
+    if [ ! -f "$src" ]; then
+      record FAIL "ci-file:$f" "declared by $owner and not shipped under ci/$f — that profile is wrong, not this checkout"
+      continue
+    fi
+    if [ ! -f "$ROOT/$f" ]; then
+      record FAIL "ci-file:$f" "not installed ($f absent) — dev-profiles install"
+      continue
+    fi
+    if ! cmp -s "$src" "$ROOT/$f"; then
+      record FAIL "ci-file:$f" "differs from the library — dev-profiles install"
+      continue
+    fi
+    # The mode is part of the file. A copy that lost the bit — extracted from an archive, rewritten by an
+    # editor — reads correctly and fails at the moment the merge tries to run it, which is the worst place in
+    # the whole design to discover it.
+    if [ -x "$src" ] && [ ! -x "$ROOT/$f" ]; then
+      record FAIL "ci-file:$f" "matches the library but is not executable, as the profile's copy is — dev-profiles install"
+      continue
+    fi
+    record OK "ci-file:$f" "installed, matches the library"
+  done
+
+  # There is one list, `ci_files`, and it carries both obligations: the profile owns these bytes in the consumer tree,
+  # and the destination is obliged to keep them. A file the profile does *not* own but the workflow cannot do without
+  # is not this list's job — that is a `[[require]]` role, whose answer the consumer writes in `[commands]`.
+}
+
+check_housekeeping() {
+  # Each declared profile runs its own. Housekeeping is the profile noticing something in this checkout that needs
+  # a commit — landed changesets to tidy, plans to archive, scratch to clear — and one profile's idea of what to
+  # look at is not another's, so the nearest one winning would silence the rest of them.
+  local i cmd out lines name
+  if [ "${#PROFILE_DIRS[@]}" = 0 ]; then
+    record NOTE housekeeping "no profile is declared"
+    return 0
+  fi
+  for (( i=0; i<${#PROFILE_DIRS[@]}; i++ )); do
+    name=${PROFILE_NAMES[$i]}
+    cmd=$(mkv "${PROFILE_DIRS[$i]}/profile.toml" housekeeping)
+    if [ -z "$cmd" ]; then
+      record NOTE "housekeeping:$name" "declares no housekeeping command"
+      continue
+    fi
+    out=$(cd "$ROOT" && sh -c "$cmd" 2>/dev/null) || out=""
+    lines=$(printf '%s' "$out" | grep -c . || true)
+    if [ "${lines:-0}" = 0 ]; then
+      record OK "housekeeping:$name" "nothing pending"
+    else
+      record REPORT "housekeeping:$name" "$name's command printed $lines lines (not a failure: housekeeping is a commit, and a commit is somebody's decision)"
+    fi
+  done
+}
+
+run_checks() {
+  build_profile_view
+  check_profiles
+  check_marker_shape
+  check_skills
+  check_capabilities
+  check_forbidden
+  check_pointer
+  check_ci
+  check_ci_files
+  check_required_commands
+  check_housekeeping
+}
+
+print_results() {
+  if [ "$JSON" = 1 ]; then
+    local out="[]" r sev name detail
+    for r in "${RESULTS[@]:-}"; do
+      [ -n "$r" ] || continue
+      sev=${r%%|*}; rest=${r#*|}; name=${rest%%|*}; detail=${rest#*|}
+      out=$(printf '%s' "$out" | jq -c --arg s "$sev" --arg n "$name" --arg d "$detail" '. + [{severity:$s,name:$n,detail:$d}]')
+    done
+    jq -n --arg profile "$(profiles_summary)" --argjson checks "$out" --argjson fail "$FAIL" \
+      '{profile:$profile, failing:($fail==1), checks:$checks}'
+    return 0
+  fi
+  printf 'profiles: %s   library: %s\n\n' "$(profiles_summary)" "$LIBRARY"
+  local r sev name detail
+  for r in "${RESULTS[@]:-}"; do
+    [ -n "$r" ] || continue
+    sev=${r%%|*}; rest=${r#*|}; name=${rest%%|*}; detail=${rest#*|}
+    printf '%-7s %-26s %s\n' "$sev" "$name" "$detail"
+  done
+}
+
+# ---------------------------------------------------------------- install
+do_install() {
+  local name src target
+  build_profile_view
+  if [ "$DRY" = 1 ]; then printf 'dry run: nothing written\n'; fi
+  for name in $(profile_skills); do
+    src=$(skill_src "$name") || continue
+    target="$ROOT/.agents/skills/$name"
+    if is_excluded "$name"; then
+      printf 'skill      %-20s exclude — declared by this repository\n' "$name"
+      [ "$DRY" = 1 ] && continue
+      # Bounded by the loop: the name is the basename of a directory this profile ships, and the target is
+      # always this checkout's own skills directory.
+      rm -rf "$target"
+      continue
+    fi
+    if diff -rq "$src" "$target" >/dev/null 2>&1; then
+      printf 'skill      %-20s unchanged\n' "$name"
+      continue
+    fi
+    printf 'skill      %-20s install -> .agents/skills/%s\n' "$name" "$name"
+    [ "$DRY" = 1 ] && continue
+    rm -rf "$target"; mkdir -p "$target"; cp -R "$src/." "$target/"
+  done
+
+  # The profile's CI scripts, in the same shape as the skills above: the consumer commits these, so install is
+  # the command that makes a committed copy true again. The verify script is deliberately absent from this loop —
+  # install writes what the library owns, and the consumer's own validation is not the library's to write.
+  local cfiles f cisrc citarget
+  read -r -a cfiles <<<"$(profile_list ci_files)"
+  for f in "${cfiles[@]:-}"; do
+    [ -n "$f" ] || continue
+    cisrc=$(ci_src "$f") || cisrc=""; citarget="$ROOT/$f"
+    if [ -z "$cisrc" ] || [ ! -f "$cisrc" ]; then
+      printf 'ci-file    %-40s no declared profile ships a copy, skipped\n' "$f"
+      FAIL=1; continue
+    fi
+    if [ -f "$citarget" ] && cmp -s "$cisrc" "$citarget" &&
+       { [ ! -x "$cisrc" ] || [ -x "$citarget" ]; }; then
+      printf 'ci-file    %-40s unchanged\n' "$f"
+      continue
+    fi
+    # A consumer that already has a file at this path may have written it by hand — which is exactly the
+    # situation layer B creates when a private copy moves into the profile. Say which of the two happened:
+    # `install` for a file that was never there, `overwrite` for one that was and differs, so a hand-written
+    # script is never replaced by output that reads the same either way.
+    if [ -f "$citarget" ] && ! cmp -s "$cisrc" "$citarget"; then
+      printf 'ci-file    %-40s overwrite -> %s (this checkout holds a different copy)\n' "$f" "$f"
+    else
+      printf 'ci-file    %-40s install -> %s\n' "$f" "$f"
+    fi
+    [ "$DRY" = 1 ] && continue
+    mkdir -p "$(dirname "$citarget")"
+    rm -f "$citarget"
+    # -p carries the mode across, and the mode is part of the file: this is a script the merge job runs.
+    cp -p "$cisrc" "$citarget"
+  done
+
+  local i rname rvalue
+  if [ "${#REQUIRE_NAMES[@]}" -gt 0 ]; then
+    for i in "${!REQUIRE_NAMES[@]}"; do
+      rname=${REQUIRE_NAMES[$i]}; [ -n "$rname" ] || continue
+      rvalue=$(mkv "$MARKER" "commands.$rname")
+      printf 'command    %-12s %s\n' "$rname" \
+        "${rvalue:-NOT SET — author what runs and name it as [commands] $rname in .dev-profiles.toml}"
+    done
+  fi
+  if [ "${#OPTIONAL_NAMES[@]}" -gt 0 ]; then
+    for i in "${!OPTIONAL_NAMES[@]}"; do
+      rname=${OPTIONAL_NAMES[$i]}; [ -n "$rname" ] || continue
+      rvalue=$(mkv "$MARKER" "commands.$rname")
+      printf 'optional   %-12s %s\n' "$rname" "${rvalue:-offered, unanswered — nothing runs it}"
+    done
+  fi
+
+  local i manifest scope harness state cmd
+  for i in "${!CAP_NAMES[@]}"; do
+    name=${CAP_NAMES[$i]}; scope=${CAP_SCOPES[$i]}; harness=${CAP_HARNESSES[$i]}; harness=${harness:-agents}
+    manifest="$LIBRARY/../capabilities/$name/capability.toml"
+    [ -f "$manifest" ] || { printf 'capability %-20s no manifest, skipped\n' "$name"; continue; }
+    if [ "$scope" = either ]; then
+      if [ "$(cap_state "$manifest" "$name" repo "$harness")" = current ] ||
+         [ "$(cap_state "$manifest" "$name" machine "$harness")" = current ]; then
+        printf 'capability %-20s already satisfied (scope=either), nothing written\n' "$name"
+        continue
+      fi
+      scope=$(mkv "$manifest" default_scope); scope=${scope:-repo}
+    fi
+    state=$(cap_state "$manifest" "$name" "$scope" "$harness")
+    if [ "$state" = current ]; then
+      printf 'capability %-20s current at %s, nothing written\n' "$name" "$scope"
+      continue
+    fi
+    cmd=$(mkv "$manifest" "install.$scope")
+    # `--scope repo` is a promise about the machine, not just about the report. A runner, or an author who has
+    # decided what their home directory holds, must be able to materialize a checkout without anyone writing
+    # into $HOME — and install is the command that does the writing, so the filter belongs here and not only in
+    # doctor's report.
+    if [ -n "$SCOPE_FILTER" ] && [ "$scope" != "$SCOPE_FILTER" ]; then
+      printf 'capability %-20s scope=%s, not installed (--scope %s)\n' "$name" "$scope" "$SCOPE_FILTER"
+      continue
+    fi
+    if [ -z "$cmd" ]; then
+      printf 'capability %-20s no install command for scope %s\n' "$name" "$scope"
+      FAIL=1; continue
+    fi
+    printf 'capability %-20s %s at %s: %s\n' "$name" "$([ "$state" = stale ] && echo reinstall || echo install)" "$scope" "$(subst "$cmd" "$name" "$harness" "$scope")"
+    [ "$DRY" = 1 ] && continue
+    if [ "$scope" = machine ]; then
+      case "$(mkv "$manifest" drift.kind)" in
+        diff) mkdir -p "$(dirname "$(eval printf '%s' "$(subst "$(mkv "$manifest" drift.target_machine)" "$name" "$harness" "$scope")")")" ;;
+      esac
+    fi
+    (cd "$ROOT" && eval "$(subst "$cmd" "$name" "$harness" "$scope")") || { printf '  failed\n'; FAIL=1; }
+  done
+
+  # Two different repairs, because they fail differently. A repository with no stanza has never been pointed at
+  # a workflow, so install writes one. A repository with a stanza naming an older version has a sentence that
+  # has gone stale — and only that sentence, because the rest of the block carries hand-written guidance that
+  # install never authored and must not overwrite.
+  if [ -f "$ROOT/AGENTS.md" ] && ! grep -q '<!-- dev-profiles:profile -->' "$ROOT/AGENTS.md"; then
+    printf 'pointer     append to AGENTS.md\n'
+    if [ "$DRY" != 1 ]; then
+      { printf '\n'; agents_pointer_block; } >> "$ROOT/AGENTS.md"
+    fi
+  elif [ -f "$ROOT/AGENTS.md" ]; then
+    local pbefore pafter
+    pbefore=$(mktemp); pafter=$(mktemp)
+    cp "$ROOT/AGENTS.md" "$pbefore"
+    rewrite_pointer_lines "$pafter"
+    if cmp -s "$pbefore" "$pafter"; then
+      printf 'pointer     AGENTS.md already carries the stanza\n'
+    else
+      printf 'pointer     AGENTS.md refreshed: the profile sentence and the skills to read\n'
+      [ "$DRY" = 1 ] || cp "$pafter" "$ROOT/AGENTS.md"
+    fi
+    rm -f "$pbefore" "$pafter"
+  fi
+}
+
+do_diff() {
+  local src name target rc=0 cfiles f cisrc
+  build_profile_view
+  for name in $(profile_skills); do
+    src=$(skill_src "$name") || continue
+    target="$ROOT/.agents/skills/$name"
+    [ -d "$target" ] || { printf 'absent   .agents/skills/%s\n' "$name"; rc=1; continue; }
+    if ! diff -rq "$src" "$target"; then rc=1; fi
+  done
+
+  # The same question for the CI scripts: `diff` is what a person runs before believing a committed copy, so a
+  # class that install writes has to be a class that diff can see.
+  read -r -a cfiles <<<"$(profile_list ci_files)"
+  for f in "${cfiles[@]:-}"; do
+    [ -n "$f" ] || continue
+    cisrc=$(ci_src "$f")
+    [ -n "$cisrc" ] || { printf 'absent   profile copy ci/%s\n' "$f"; rc=1; continue; }
+    [ -f "$ROOT/$f" ] || { printf 'absent   %s\n' "$f"; rc=1; continue; }
+    if ! cmp -s "$cisrc" "$ROOT/$f"; then
+      printf 'differs  %s\n' "$f"
+      rc=1
+    fi
+  done
+  return $rc
+}
+
+# ---------------------------------------------------------------- main
+case "$CMD" in
+  status) run_checks; print_results; [ "$FAIL" = 1 ] && exit 1; exit 0 ;;
+  doctor) run_checks; print_results; [ "$FAIL" = 1 ] && exit 1; exit 0 ;;
+  install) do_install; exit "$FAIL" ;;
+  diff) do_diff; exit $? ;;
+  # What the consumer said runs, printed for whoever has to run it — the merge job, mostly. Same resolution
+  # `doctor` checks, so the two cannot disagree about whether the pointer is set.
+  command)
+    [ -n "$ARG" ] || { printf 'usage: dev-profiles command <name>\n' >&2; exit 2; }
+    build_profile_view
+    reason=''
+    if [ "${#REQUIRE_NAMES[@]}" -gt 0 ]; then
+      for idx in "${!REQUIRE_NAMES[@]}"; do
+        [ "${REQUIRE_NAMES[$idx]}" = "$ARG" ] && { reason=${REQUIRE_REASONS[$idx]}; break; }
+      done
+    fi
+    if [ -z "$reason" ] && [ "${#OPTIONAL_NAMES[@]}" -gt 0 ]; then
+      for idx in "${!OPTIONAL_NAMES[@]}"; do
+        [ "${OPTIONAL_NAMES[$idx]}" = "$ARG" ] && { reason=${OPTIONAL_REASONS[$idx]}; break; }
+      done
+    fi
+    resolve_command "$ARG" "$reason"; exit $? ;;
+  "") printf 'usage: dev-profiles {status|install|doctor|diff|command} [--json|--dry-run]\n' >&2; exit 2 ;;
+  *) printf 'dev-profiles: unknown command %s\n' "$CMD" >&2; exit 2 ;;
+esac

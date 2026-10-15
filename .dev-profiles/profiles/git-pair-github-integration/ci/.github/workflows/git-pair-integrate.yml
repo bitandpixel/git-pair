@@ -1,0 +1,239 @@
+# The merge a declaration asks for.
+#
+# One job, one command, one tree. `git pair change integrate` writes a commit whose message carries the
+# `Review-State: integrating` trailer, that commit arrives as a push, and this job answers it by building the merge
+# the destination would get, running the consumer's own suite against that tree, and pushing it if it passes. The
+# rule that makes this the whole design: **the only green that lands work is this job's own.** There is no probe, no
+# allowlist of check-run names, and no head whose reputation is read from somebody else's run.
+#
+# What it buys besides simplicity: the branch head's green was always an assumption about the merge. Trunk moves,
+# and the combination nobody ran is exactly what the destination receives. Now the destination only ever receives a
+# tree a runner saw, in the shape it is about to acquire.
+#
+# The pull-request check is not here. It lives in `.github/workflows/git-pair-check.yml`, it certifies nothing, and
+# this job never reads its result — so a check that was skipped, cancelled or never configured cannot certify a head
+# and cannot block one either. Keeping the two jobs apart is also what lets that file be dispatched by the forge ask
+# below: the file the ask pokes merges nothing, by construction rather than by convention.
+#
+# Two things this file opens, both answered by the consumer's own marker and resolved by the one resolver `doctor`
+# checks, so no repository has to edit a file the profile owns and byte-compares:
+#
+#   toolchain    what prepares the tree before it is tested — a compiler, a toolchain, a build. Unanswered is legal
+#                and means the runner needs nothing; misspelled fails at the handoff rather than at the run.
+#   ci-request   a script that asks the forge to run the destination branch after a landing, by dispatching that
+#                check file. Unanswered means the trunk gets no run of its own, which `doctor` reports instead of
+#                hiding.
+#
+# Three things this file deliberately does not have:
+#
+#   no schedule       the poll was 96 started jobs a day whether or not anyone was working, and a job that tests
+#                     before it pushes needs nobody to come back and check on it. The retry for a red or half-run
+#                     merge is re-running the run: the driver is idempotent and says so.
+#   no workflow_run   the merge no longer waits on a separate test workflow, so there is nothing to be told about.
+#                     (And a spawned job costs a plan minute whatever it decides, which is why "make the poll cheap
+#                     by adding a cheap job in front of it" does not exist here.)
+#   no dispatch to the destination after a landing   GitHub starts no `push` workflow for a commit pushed with a
+#                     job token, and this file used to work around that by dispatching CI at the destination. It no
+#                     longer has to: the tree it just pushed is the tree it just tested. The ask that remains is the
+#                     consumer's choice, and it pokes the check file.
+#
+# The rules that span this file and the check job — why the triggers are what they are, what the timeout is for and
+# why its override is a repository variable, what each scope is for and why the ask's scope is always granted — are
+# in the profile's `git-pair-github-integration` skill. Read that once; this header is what a reader standing in
+# front of this file needs.
+name: git-pair integrate
+
+on:
+  push:
+    # Every branch. A push that is not a declaration starts no job — the `if:` below is evaluated before a runner is
+    # requested, and a skipped job costs nothing — so being asked about every push is free, and being asked about the
+    # one that matters cannot depend on a label someone else chose.
+    branches: ['**']
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'branch to integrate; blank asks the queue for everything declared'
+        required: false
+        type: string
+
+# One merge at a time per ref: two jobs that both saw the same declaration would make two attempts, and the second
+# would fail after its merge commit already existed locally. `cancel-in-progress: false` because a job that has
+# merged has to finish its push; a job superseded mid-merge leaves a destination half-written and a log that says
+# nothing. The check file cancels its superseded runs freely — that is the opposite answer to the opposite question.
+concurrency:
+  group: git-pair-integrate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    # The declaration is the trigger, and it is read from the trailer rather than from the subject: `git-pair:
+    # integrate <branch>` is the library's wording and can change without this file changing, while
+    # `Review-State: integrating` is the contract.
+    #
+    # The trailer has to be on the head, because the declaration is written on top of everything already
+    # committed. That has one exception a person can walk into: a commit after the declaration that touches only
+    # `changesets/<id>/` keeps the gate's answer true while moving the tip off the marker, and then nothing here
+    # fires. `git pair queue` shows the wait, and `workflow_dispatch` with the branch named merges it with no
+    # fresh approval — the gate decides, not this expression. Re-running is not the same as re-declaring, and
+    # `git pair change unready` to force one costs a review.
+    #
+    # Two events, both named, and no third. Nothing here fires on a workflow finishing: `workflow_run` — the event
+    # that says "another workflow just completed" — is deliberately absent, and the suite fails if it comes back.
+    # `workflow_dispatch` is the opposite direction: a person pressing "Run workflow" or `gh workflow run`, which is
+    # how the silent case below gets cleared. And a push that is not a declaration is refused by this expression
+    # before GitHub asks a runner for anything, so it reports `skipped` and bills nothing — the unit of billing is
+    # a started job, which is why the filter lives here rather than in a guard job in front of it. The skill carries
+    # the measurement behind both halves of that sentence: a refused job's `duration_ms` is 0, and a started job's
+    # executed time rounds up to a whole minute.
+    #
+    # Comments belong above `if:`. Inside a folded block scalar a `#` is not a comment, it is expression text, and
+    # GitHub would fail the job over it; the suite asserts no such line survives.
+    #
+    # A pull request cannot reach this job, and no longer merely because of this expression: the trigger above does
+    # not admit the event at all. A merge would otherwise run against a tree GitHub assembled for review, and the
+    # author's branch is the thing the gate cleared.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      ( github.event_name == 'push' &&
+        github.ref_name != vars.GIT_PAIR_BASE &&
+        github.ref_name != 'main' &&
+        contains(github.event.head_commit.message, 'Review-State: integrating') )
+    runs-on: ubuntu-latest
+    # The profile's ceiling, overridable per repository by a variable — `vars` is the only context GitHub lets this
+    # key read, so the marker cannot hold it, and the default is the profile's so no consumer can turn the ceiling
+    # off. A hung candidate is the expensive failure on a metered plan: a job is billed from the moment it starts,
+    # and nothing here finishes on its own. Full reasoning in the skill.
+    timeout-minutes: ${{ vars.GIT_PAIR_TIMEOUT || '30' }}
+    # `contents: write` because the merge is an ordinary commit on the destination branch, and this repository's
+    # `main` has no branch protection on the available plan — so the runner's token can push it as an ordinary
+    # commit and no ruleset bypass actor is needed. `actions: write` has exactly one user: the optional forge ask
+    # below, which asks the forge to run the tree this job just landed. Nothing wider still — `checks` and `statuses`
+    # have no user here, because there is no probe to read them with.
+    #
+    # The ask is a seam a consumer may leave unanswered, and job permissions are static YAML: no expression reaches
+    # them, no `if:` reads them and no step may declare its own, so the scope cannot appear only when the marker
+    # answers the role. Making it conditional would mean the file's contents depending on the consumer's answer —
+    # rendered at install, or two shipped variants — and the only thing that would buy is a narrower grant on a job
+    # whose grant cannot be narrowed this way. `contents: write` on a destination this job is meant to push to
+    # already lets it land a commit that rewrites this file and declares any scope it likes; `actions: write` is not
+    # the grant that widens its reach, the push is. On its own this scope buys disabling workflows, deleting run
+    # history and dispatching runs with chosen inputs — real, and subordinate to that.
+    #
+    # A protected destination does not make this reasoning expire. A job that merges to a protected branch has to be
+    # named in that protection — a bypass actor, or an allowed pusher — and then the write grant dominates the more
+    # plainly. Where a repository will not name it, this profile is the wrong declaration: a reviewer merges by hand,
+    # and that is what git-pair-manual-integration is for. There is no configuration where this job runs and this
+    # scope is the widest thing on it.
+    #
+    # The alternative that avoids the grant today — a second, narrowly-permissioned job — would duplicate the ask
+    # outside the driver, lose the refusal the driver reports inline, and cost a started job on every landing.
+    #
+    # This is the grant, not a request: the repository default is the narrow one, and a workflow that declares a
+    # scope still receives it.
+    permissions:
+      contents: write
+      actions: write
+    env:
+      # Set once for the job so every step inherits it, including steps added later. actions/checkout never
+      # records refs/remotes/origin/HEAD, so a bare `git-pair` has to infer the destination from the refs it can
+      # see — and refuses rather than guess when more than one is credible. The value is this repository's
+      # variable, so no step can settle on a branch nobody chose.
+      GIT_PAIR_DEFAULT_BRANCH: ${{ vars.GIT_PAIR_BASE || 'main' }}
+    steps:
+      # Full history. The gate reads the approval out of the source's history and a landing out of the
+      # destination's; a shallow clone answers "no review" about work that was reviewed.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: install git-pair
+        env:
+          GIT_PAIR_VERSION: ${{ vars.GIT_PAIR_VERSION }}
+        run: scripts/ci/install-git-pair.sh
+
+      # The consumer's toolchain, if it has one. `toolchain` is a seam the profile offers rather than demands, so an
+      # empty answer is legal: a repository whose suite needs nothing beyond the runner answers nothing, says so in the
+      # log, and moves on. A *misspelled* answer is not legal, and `doctor` fails it at the handoff — the resolver
+      # prints nothing and exits 0 for an unanswered offer, and exits 2 for a role nobody declared, which is what lets
+      # one step tell "nothing to prepare" apart from a typo instead of quietly skipping the preparation.
+      #
+      # It sits after the pinned install on purpose. A repository that builds the tool from the tree being merged
+      # replaces what the installer put there; a step before it would have its build overwritten by a published release
+      # that cannot contain the change under review.
+      #
+      # The command runs with `$GITHUB_ENV` in reach, so an answer that has to hand something to the steps after it — a
+      # built binary's name, a PATH entry — can write it, and `GIT_PAIR_BIN` among them: the driver and the report
+      # below ask for the tool by that name, so a consumer that builds git-pair from the tree under review lands and
+      # reports on its own build rather than on the release the installer fetched. The check file runs this same
+      # step, so a check and a candidate can never be answered about differently built trees.
+      - name: toolchain
+        run: |
+          set -uo pipefail
+          toolchain=$(.dev-profiles/bin/dev-profiles command toolchain) || {
+            printf 'the toolchain answer in .dev-profiles.toml could not be resolved\n' >&2
+            exit 2
+          }
+          if [ -z "$toolchain" ]; then
+            printf 'no toolchain answered — nothing to prepare\n'
+          else
+            eval "$toolchain"
+          fi
+
+      - name: gate it, build it, verify it, push it
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          CHOSEN: ${{ inputs.branch }}
+          # The tip this push produced, on the push path only. Nothing is merged that is not this commit, so a
+          # branch that moved while the job was starting is skipped rather than landed on an older head's
+          # reputation — the same guard the old design got from a finished test workflow, now from the push
+          # itself. It is empty on a dispatch, which is the point of a dispatch: merge what the branch declares
+          # now.
+          PUSHED: ${{ github.event.after }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          # The merge commit is authored by this job. Saying so in the identity is honest: the approval author is
+          # in the review markers, and the merger is the one that did the merge.
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          branch=$REF_NAME
+          [ "$EVENT" = workflow_dispatch ] && branch=${CHOSEN:-}
+          set --
+          if [ -n "$branch" ] && [ "$branch" != "$GIT_PAIR_DEFAULT_BRANCH" ]; then
+            set -- "$@" "$branch"
+            # Only when a branch was named. --expect-head is checked against every changeset the run considers,
+            # and a blank dispatch asks the queue, where nothing is the commit this event produced.
+            [ -n "$PUSHED" ] && set -- "$@" --expect-head "$PUSHED"
+          fi
+          # The candidate is tested here, inside the driver, between the merge commit and the push: a failing
+          # suite leaves the destination untouched and the run red, which is the only signal an author gets
+          # once nothing runs on their commits. The command is the consumer's, resolved from its marker by the one
+          # resolver `doctor` checks — and missing is fatal, because this job runs without `set -e` and a merge
+          # that silently skipped its own condition would be indistinguishable from a merge that passed it.
+          VERIFY=$(.dev-profiles/bin/dev-profiles command verify) || {
+            printf 'no verify command named in .dev-profiles.toml — nothing merges without its condition\n' >&2
+            exit 2
+          }
+          # The ask is optional in the same sense the toolchain is: the profile offers the role, and a repository that
+          # wants a run of its own on the tree it just landed answers it with a script of its own. Refusal is a note
+          # rather than a failure, because this is paper trail and not evidence — the tree the destination keeps is
+          # the tree this job tested a moment ago. Nothing here waits on the run the ask produces, and the file it
+          # asks for is the one that merges nothing.
+          REQUEST=$(.dev-profiles/bin/dev-profiles command ci-request) || {
+            printf 'the ci-request answer in .dev-profiles.toml could not be resolved\n' >&2
+            exit 2
+          }
+          [ -n "$REQUEST" ] && set -- "$@" --ci-request "$REQUEST"
+          scripts/ci/git-pair-integrate.sh --verify-cmd "$VERIFY" "$@"
+
+      # The log a human reads. After the run it answers the two questions that matter here: what is still waiting,
+      # and what landed without a review. A green run that merged nothing used to be normal; now it has a reason,
+      # and this step is where to look for it. Named, not hardcoded to `git-pair`: the toolchain answer may have
+      # built this tree's own binary and exported where it landed, and the report should ask the tool that decided
+      # the merge rather than the release the installer fetched.
+      - name: what the queue says now
+        if: always()
+        run: '"${GIT_PAIR_BIN:-git-pair}" queue'

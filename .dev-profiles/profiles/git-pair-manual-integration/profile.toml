@@ -1,0 +1,19 @@
+# Machine-readable facts about this profile, read by `dev-profiles doctor` and `install`.
+name = "git-pair-manual-integration"
+summary = "A person performs the merge. The gate is git-pair's own; there is no job and no CI payload."
+
+# No `ci` and no `ci_files`: this profile promises nothing about the destination's workflows, and doctor would be
+# wrong to fail a repository for a promise it never made. No `[[require]]` either — a demanded role is a command
+# something runs, and with no job there is nothing to run it. The person merging is told, in the skill, that they
+# are the only check between a red suite and trunk.
+#
+# It composes with the loop the way every other profile does: the consumer declares both, in that order. Nothing
+# here pulls the loop in, because content comes only from what the consumer declared.
+
+# The line AGENTS.md gets for this profile: the skill an agent should open, and the reason it should open it. The
+# driver used to append three sentences of its own to every stanza; they belonged to whichever profile governed the
+# hand-off, and a repository adopting a second workflow got them anyway. A profile that ships skills must name at
+# least one entry point, and every entry point needs a reason.
+[[router]]
+name = "git-pair-manual-integration"
+reason = "the last step of a `git-pair-loop`: how a reviewer can verify and merge the change by hand, with no job in between"

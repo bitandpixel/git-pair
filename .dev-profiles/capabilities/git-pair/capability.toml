@@ -1,0 +1,26 @@
+name = "git-pair"
+source = "tool"          # the skill ships inside the git-pair binary; never copy it by hand
+# One copy per machine, written by the tool. Committing a copy into a repository gives that repository a
+# second skill to keep current, and `git pair` upgrades independently of it — so the committed copy goes
+# stale quietly, which is what this check exists to catch.
+default_scope = "machine"
+
+[install]
+repo = "git pair skill install --harness {harness} --scope repo"
+machine = "git pair skill install --harness {harness} --scope user"
+
+[drift]
+kind = "command"
+# Prints current | stale | absent for one (harness, scope) target. Verified shape:
+#   git pair skill list --json  ->  .targets[] { harness, scope, path, state }
+# The values go to jq through the environment so the filter needs no quoting gymnastics.
+command = "git pair skill list --json 2>/dev/null | DEV_WF_HARNESS={harness} DEV_WF_SCOPE={scope} jq -r '.targets[] | select(.harness==env.DEV_WF_HARNESS and .scope==env.DEV_WF_SCOPE) | .state'"
+scope_repo = "repo"
+scope_machine = "user"
+
+# The command whose presence makes the drift question answerable at all. On a machine (or a CI runner)
+# without it, the copy's presence is still knowable from these paths and drift is reported as unverifiable
+# rather than as absent.
+requires = "git-pair"
+target_repo = ".agents/skills/{name}"
+target_machine = "$HOME/.agents/skills/{name}"

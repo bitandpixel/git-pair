@@ -1,0 +1,15 @@
+# The preview loop: open a draft pull request for one reason, to deploy a running preview environment.
+#
+# It sits apart from git-pair deliberately. A preview environment is a property of how a repository deploys, not of
+# how a change gets reviewed, and a package or a library has none — so the choice is made once, by whether a repository
+# declares this profile at all, rather than by every consumer declining a skill the loop profile pushed at it.
+name = "preview-pr"
+summary = "Open a draft pull request to deploy a preview environment; never as the review route or the merge route."
+
+# The line AGENTS.md gets for this profile: the skill an agent should open, and the reason it should open it. The
+# driver used to append three sentences of its own to every stanza; they belonged to whichever profile governed the
+# hand-off, and a repository adopting a second workflow got them anyway. A profile that ships skills must name at
+# least one entry point, and every entry point needs a reason.
+[[router]]
+name = "pair-preview-pr"
+reason = "when this repository deploys a preview from a pull request: open a draft to deploy it; review and merge belong to whatever profile governs them here"

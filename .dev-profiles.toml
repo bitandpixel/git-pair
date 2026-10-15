@@ -1,0 +1,53 @@
+# Which development workflow this repository uses. `dev-profiles doctor` reads this file.
+#
+# This marker is the only workflow signal anything outside .dev-profiles/ reads. Names that belong to one
+# profile — `changesets/`, ABOUT.md, Review-State trailers, git pair commands — must not appear here or in
+# any generic layer. They do not appear here for one reason: this file is written for the library, and a
+# consumer that has to special-case one repository is a consumer that cannot be adopted by the next.
+library = ".dev-profiles/profiles"
+
+# Skills matching these names must not be discoverable while the declared profiles are active. Only standards
+# belong here: a standard prescribes one route for every repository, which is the conflict this file settles.
+# Capabilities (git-pair, gh-cli) are tools and stay available.
+forbidden = ["git-workflow"]
+
+# The loop: branch, commit, changeset, review, hand-off. This repository runs it — `changesets/`, the
+# Review-State trailers and the approval commits are its own product's workflow, dogfooded here.
+#
+# There is no merge profile, and that is a decision rather than an omission. The only profile that promises a
+# verified merge (`git-pair-github-integration`) also *ships* the job: the workflow, the integrate driver and
+# the installer, installed and byte-compared. Here those three paths are product code — `.github/workflows/`
+# and `scripts/ci/` are what this repository builds, tests and releases. Its integrate job builds the tool
+# from the tree being merged (`mise run build`, then `--expect-head`), which a job that installs a published
+# release cannot do: the release does not contain the change under review. Declaring the profile would have
+# `install` overwrite the repository's own job with a consumer's copy, and then certify that copy as what this
+# repository promises.
+#
+# What that leaves undeclared is real, and it is the gap the library should close: nothing here states that a
+# job verifies the merge candidate before it pushes. `[[require]]` asks for a *command* the consumer defines,
+# and `[commands]` answers it; there is no way yet to promise a workflow file the repository owns and the
+# profile does not. Until there is, `.github/workflows/git-pair-integrate.yml` is guarded by this repository's
+# own suite (`scripts/gates/`) and by review, and `doctor` is silent about it.
+[[profile]]
+name = "git-pair-loop"
+version = 2
+
+# Which capabilities this repository needs, and where each lives. No commands here: the capability's manifest
+# owns those, so the marker states a requirement and the capability answers how to satisfy it.
+[[capability]]
+name = "git-pair"
+# The tool owns this skill and installs it (`git pair skill install`). Committing a copy here would give this
+# repository a second skill to keep current, and the tool upgrades independently of it. In this repository the
+# drift check compares the machine copy against the *released* binary, while `mise run build` installs one
+# named after the branch — so the check answers a question about the developer's machine, not about the tree.
+scope = "machine"
+required = true
+[capability.options]
+harness = "agents"
+
+[[capability]]
+name = "change-description"
+# The change-record standard, installed into the checkout: a reviewer reads it in this repository's changesets,
+# so it is this repository's promise and not a per-developer one.
+scope = "repo"
+required = true
