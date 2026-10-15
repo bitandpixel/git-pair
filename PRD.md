@@ -1133,10 +1133,14 @@ twice holding a fact and no instruction.
 Exit codes: `0` declared or already declared, `1` refused, `2` usage, `3` git failed (§22).
 
 Nothing here performs the merge, and the product is not where a merge lives (§26). A repository that wants a
-pipeline to perform it can copy one: `.github/workflows/git-pair-integrate.yml` for the trigger, the
-permissions, and the command the candidate is tested with, `scripts/ci/git-pair-integrate.sh` for the
-sequence, and `scripts/gates/ci-integrate.sh` to replay that job against scratch remotes. Its shape is an example; what a job gates on is §11.3's two fields,
-and what makes a landing a fact is §13: the destination carrying the directory.
+pipeline to perform it declares the `git-pair-github-integration` profile in `dev-profiles`, which ships the
+trigger file, the permissions, the candidate command resolved from the consumer's marker, and the shell
+sequence — `scripts/ci/git-pair-integrate.sh` — that carries it. This repository installs that profile, so those
+paths are installed bytes here and not product code, which is the same act any other consumer performs. What
+stays the consumer's own is the proof: `scripts/gates/ci-integrate.sh` replays that job against scratch bare
+remotes as part of `mise run gates`, and it is this repository's file, because a replay someone else owns cannot
+fail this repository's build. The shape is an example; what a job gates on is §11.3's two fields, and what makes
+a landing a fact is §13: the destination carrying the directory.
 
 ---
 

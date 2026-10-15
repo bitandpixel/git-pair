@@ -2,8 +2,8 @@
 go = "1.27.1"
 # The release packager, pinned beside Go so `mise run release:*` and the Release workflow agree on one
 # goreleaser. `.goreleaser.yaml` says `version: 2`, which an older binary would reject, and a workflow
-# that installed its own would be a second definition of the release — the same rule `ci.yml` states for
-# the gate. It costs every checkout a download; the alternative, ad-hoc `mise x` in each task, hides the
+# that installed its own would be a second definition of the release — the same rule the check workflow
+# states for the gate. It costs every checkout a download; the alternative, ad-hoc `mise x` in each task, hides the
 # version from anyone reading this file.
 goreleaser = "2.18.2"
 
