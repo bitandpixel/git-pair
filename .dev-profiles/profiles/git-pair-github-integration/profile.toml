@@ -13,10 +13,14 @@ summary = "The merge a declaration asks for: a job verifies the merge candidate 
 # the destination is obliged to keep: `doctor` checks each path against the destination branch and reports the rest as
 # arriving with this change, because "a job verifies the merge candidate" is void if the job is not there to run.
 #
+# Two workflow files, because they answer opposite questions and share nothing but the resolver: the check cancels
+# its superseded runs and holds no write scope, the merge cancels nothing and pushes. Splitting them is also what lets
+# the forge ask poke a file that cannot land work — see the skill for the reasoning that spans both.
+#
 # A file the profile needs but does not own does not belong here. It is a `[[require]]` role, whose answer the consumer
 # writes in `[commands]`; `doctor` refuses a demanded command that points at something this profile ships, so the two
 # mechanisms cannot both claim the same path.
-ci_files = [".github/workflows/git-pair-integrate.yml", "scripts/ci/git-pair-integrate.sh", "scripts/ci/install-git-pair.sh"]
+ci_files = [".github/workflows/git-pair-check.yml", ".github/workflows/git-pair-integrate.yml", "scripts/ci/git-pair-integrate.sh", "scripts/ci/install-git-pair.sh"]
 
 
 # This profile is incomplete on its own. It ships the merge side of the workflow and nothing about how work gets
@@ -39,6 +43,19 @@ name = "git-pair-loop"
 [[require]]
 name = "verify"
 reason = "the validation the merge is conditional on: run what the destination's own CI runs, every check even after one fails"
+
+# Two seams the consumer answers in its own `[commands]` table, so that no repository has to edit — and then keep
+# edited — a file this profile owns and byte-compares. An offer differs from the demand above in exactly one thing:
+# leaving it unanswered is a report rather than a failure, because "this repository has nothing to build" is a
+# sentence a consumer is entitled to say. Answering one wrongly is still a failure, and `doctor` names the seams left
+# standing open.
+[[optional]]
+name = "toolchain"
+reason = "what prepares the tree before it is tested; answer `true` where the runner needs nothing"
+
+[[optional]]
+name = "ci-request"
+reason = "a script that asks the forge to run the destination branch after a landing; unanswered means trunk gets no run of its own"
 
 # The line AGENTS.md gets for this profile: the skill an agent should open, and the reason it should open it. The
 # driver used to append three sentences of its own to every stanza; they belonged to whichever profile governed the

@@ -1,6 +1,48 @@
 # git-pair-github-integration profile changelog
 
 
+## 5 — 2026-10-15
+
+The shipped job is two files now, and the file the forge ask pokes can no longer land work.
+
+- `.github/workflows/git-pair-check.yml` holds the check: the pull-request preview, the run a hand push to the
+  destination gets, and the dispatched run the ask makes. It holds `contents: read` and nothing else, so it cannot
+  certify a head and cannot be required-and-absent in the way the old check-run allowlist was written to catch.
+  `.github/workflows/git-pair-integrate.yml` keeps the merge alone, with its own `concurrency` answer: a superseded
+  check cancels freely, a superseded merge never does.
+- Splitting them is what makes the ask safe by construction. The ask runs a workflow by name, and the file it names
+  now merges nothing rather than merely agreeing not to. The alternative was a `mode` input on one file, which puts
+  that safety on something somebody types.
+- Neither job needs the other's trigger, and separating the trigger sets saves a started job per pull request: the
+  merge job is no longer started and skipped beside every check. A branch push still costs two skipped jobs, as
+  before, because a trigger cannot read `vars` and the destination branch is a variable.
+- The post-merge report asks `"${GIT_PAIR_BIN:-git-pair}" queue` rather than `git-pair queue`. The driver already
+  honoured that variable, so a consumer that builds the tool from the tree under review was merging with its own
+  build and then reporting from the release the installer had fetched.
+- The reasoning that spans both files — the triggers, the timeout and its variable, what each scope is for and why
+  the ask's is always granted — moved into the profile's skill, where it is written once.
+
+`install` writes a new file and rewrites the existing one; commit both. A consumer that runs its own check workflow
+can now delete it, which is the reason this lands before that repository declares the profile.
+
+## 4 — 2026-10-14
+
+- The integrate workflow gained two seams a consumer answers from its own marker, and a ceiling on how long it may run.
+  Both seams exist because this profile owns those bytes and byte-compares them, so a repository that differed could
+  only fork the file — which is what the tool's own repository had ended up doing.
+- `toolchain` is what prepares the tree before it is tested. It runs in both jobs, after the pinned install, so a
+  repository that builds the tool from the tree under review is not overwritten by a published release that cannot
+  contain it. The empty answer is legal and says so in the log; a misspelled answer fails `doctor` at the handoff,
+  because the failure an optional step invites is the job skipping its own preparation and reporting green.
+- `ci-request` asks the forge to run the destination branch after a landing, and the merge job now holds
+  `actions: write` for it — the only new scope. Job permissions are static YAML, so the scope is granted whether the
+  role is answered or not; the alternative was a second job, which would have duplicated the ask outside the driver,
+  lost the refusal the driver reports inline, and cost a started job on every landing.
+- `timeout-minutes` defaults to 30, overridable per repository by the `GIT_PAIR_TIMEOUT` variable. The default belongs
+  to the profile so that no consumer can turn the ceiling off — an overnight hang is the one thing that turns an
+  unused automation into a bill. It is a variable rather than a marker key because GitHub compiles the job before any
+  step runs, and `vars` is the only context that key may read.
+
 ## 3 — 2026-10-14
 
 - `git-pair-github-integration` is now declared as a `[[router]]` entry with a `reason`, and the entry line in `AGENTS.md` carries

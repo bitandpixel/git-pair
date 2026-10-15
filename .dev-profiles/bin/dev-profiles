@@ -23,6 +23,10 @@
 #   housekeeping is a commit and a commit is somebody's decision.
 # - install queries before it writes. An existing current copy is never duplicated into a second copy that
 #   can drift on its own.
+# - A profile demands a role with [[require]] and offers one with [[optional]]. Only one thing differs: an
+#   unanswered demand fails the check and an unanswered offer is reported. Same answer key in [commands], same
+#   inspection of the answer, same rule that a name the profiles never declared is a failure at the handoff — the
+#   difference between "nothing to build here" and a misspelled build must not be something a job discovers.
 # - Dependencies: git, jq, diff, and /bin/sh for commands a manifest declares. Nothing else.
 
 set -uo pipefail
@@ -81,6 +85,13 @@ toml() {
 }
 
 mkv() { toml "$1" | grep -m1 -- "^$2=" | cut -d= -f2- ; }
+
+# Which entries a repeated table has, by index. Enumerating the *keys* rather than one key's presence is the point:
+# an entry that declares a reason and no name is a mistake the driver should say something about, and a loop over
+# `name` keys never sees it.
+table_indexes() { # table_indexes <file> <table>
+  toml "$1" | sed -n "s/^$2\.\([0-9]\+\)\.[^=]*=.*/\1/p" | sort -n -u
+}
 
 # ---------------------------------------------------------------- discovery
 ROOT=$(git -C "${PWD}" rev-parse --show-toplevel 2>/dev/null) || {
@@ -172,9 +183,15 @@ done
 # readers ask the same function below rather than each holding a copy of the answer. The day this was written the
 # path appeared twice in the workflow and once on disk, with nothing asserting the three agreed.
 # The names are the profile's vocabulary and the driver attaches no meaning to any of them — `verify` here,
-# `integrate`, `cleanup`, or whatever a profile calls the thing it runs next.
+# `integrate`, `cleanup`, or whatever a profile calls the thing it runs next. A demand is `[[require]]`; an offer is
+# `[[optional]]`: the same shape, the same answer in `[commands]`, the same checks on that answer, and the only
+# difference being whether silence is a failure or a line in the report.
 PROFILE_DIRS=(); PROFILE_NAMES=(); PROFILE_ACCEPTED=()
 REQUIRE_NAMES=(); REQUIRE_REASONS=(); REQUIRE_OWNERS=()
+# The seams a profile offers without demanding them — the same table shape as a demand, the same answer in
+# `[commands]`. Declaring an offer, rather than inventing a convention the consumer has to guess, is what lets
+# doctor tell "this repository has nothing to build" apart from "this repository misspelled its build".
+OPTIONAL_NAMES=(); OPTIONAL_REASONS=(); OPTIONAL_OWNERS=()
 # The entry points the pointer stanza is made of: the skill, the reason the profile gives for reading it, and who
 # named it. Same precedence as everything else derived from the declared set — the first profile to name it owns
 # the line, because AGENTS.md has one place for a skill and one sentence beside it.
@@ -186,6 +203,7 @@ ROUTER_SKILLS=(); ROUTER_REASONS=(); ROUTER_OWNERS=()
 build_profile_view() {
   PROFILE_DIRS=(); PROFILE_NAMES=(); PROFILE_ACCEPTED=()
   REQUIRE_NAMES=(); REQUIRE_REASONS=(); REQUIRE_OWNERS=()
+  OPTIONAL_NAMES=(); OPTIONAL_REASONS=(); OPTIONAL_OWNERS=()
   ROUTER_SKILLS=(); ROUTER_REASONS=(); ROUTER_OWNERS=()
   local i j idx name reason dup dir seen_here rskill seen_r rc_here
   for i in "${!DECL_NAMES[@]}"; do
@@ -208,7 +226,7 @@ build_profile_view() {
     # can gate on one thing for two reasons); it is a shadowed reason, and worth one line of report.
     dir="$LIBRARY/$name/profile.toml"
     seen_here=' '
-    for idx in $(toml "$dir" | sed -n 's/^require\.\([0-9]\+\)\.name=.*/\1/p' | sort -n); do
+    for idx in $(table_indexes "$dir" require); do
       name=$(mkv "$dir" "require.$idx.name")
       [ -n "$name" ] || continue
       # Two entries in one profile for one role is a bug rather than a union: the marker holds a single answer, and
@@ -224,6 +242,21 @@ build_profile_view() {
         continue
       fi
       REQUIRE_NAMES+=("$name"); REQUIRE_REASONS+=("$(mkv "$dir" "require.$idx.reason")"); REQUIRE_OWNERS+=("${PROFILE_NAMES[$i]}")
+    done
+
+    # The seams this profile offers without demanding them. Same precedence as a demand: the first profile to offer a
+    # role owns the reason printed beside it, and a second offer of the same role is a shadowed reason rather than a
+    # contradiction — two workflows can both find a build step useful, for two reasons.
+    for idx in $(table_indexes "$dir" optional); do
+      name=$(mkv "$dir" "optional.$idx.name")
+      [ -n "$name" ] || { record FAIL "optional:#$idx" "an [[optional]] entry in '${PROFILE_NAMES[$i]}' names no role — an offer nobody can take"; continue; }
+      dup=0
+      for j in "${!OPTIONAL_NAMES[@]}"; do [ "${OPTIONAL_NAMES[$j]}" = "$name" ] && dup=1; done
+      if [ "$dup" = 1 ]; then
+        record NOTE "optional:$name" "also offered by '${PROFILE_NAMES[$i]}' — the first profile to offer it owns the reason printed here"
+        continue
+      fi
+      OPTIONAL_NAMES+=("$name"); OPTIONAL_REASONS+=("$(mkv "$dir" "optional.$idx.reason")"); OPTIONAL_OWNERS+=("${PROFILE_NAMES[$i]}")
     done
 
     # The pointer's content, entry by entry. A profile says which of its skills an agent should open and why, and the
@@ -326,9 +359,15 @@ marker_command_keys() { toml "$MARKER" | sed -n 's/^commands\.\([^=.][^=]*\)=.*/
 # request job and in the merge job — a value that passes one and fails the other is how a marker typo becomes a
 # red run at 2am instead of a red doctor at the handoff.
 resolve_command() { # resolve_command <name> [reason]
-  local name=$1 reason=${2:-} value keys
+  local name=$1 reason=${2:-} value keys i
   value=$(mkv "$MARKER" "commands.$name")
   if [ -z "$value" ]; then
+    # An unanswered *offer* is not a failure, and the caller has to be able to tell that apart from a broken marker:
+    # exit 0 with nothing printed, so the step that offered the seam can skip it while still failing on a real
+    # problem. Silent on purpose for the offered case — the report says which seams are open, not this line.
+    if [ "${#OPTIONAL_NAMES[@]}" -gt 0 ]; then
+      for i in "${!OPTIONAL_NAMES[@]}"; do [ "${OPTIONAL_NAMES[$i]}" = "$name" ] && return 0; done
+    fi
     printf 'dev-profiles: %s names no command for %s' "$MARKER" "$name" >&2
     [ -n "$reason" ] && printf ' — the profile demands one: %s' "$reason" >&2
     keys=$(marker_command_keys)
@@ -806,11 +845,33 @@ check_ci() {
 # So most of this check is honesty about what it cannot check. It asserts the marker names something, quotes the
 # profile's reason on the OK line too (a reader who finds an odd `[commands]` stanza in a marker they did not
 # write deserves to learn who asked), and inspects the value only in the one case where inspecting it is sound.
+check_command_answer() { # check_command_answer <name> <value> <reason>
+  local name=$1 value=$2 reason=${3:-} cisrc
+  # A single token naming a path in this repository is the one value this driver may say anything about: it is run
+  # directly, so the file has to exist and carry the mode, and a merge that cannot exec its own condition is the
+  # worst place in the design to discover it. Anything with a space in it (`mise run gates`) is a shell line, and the
+  # only proof of that is the run — claiming otherwise here would be a check that passes nothing.
+  if [[ $value != *[[:space:]]* && $value != /* && $value == */* ]]; then
+    # The two ownership rules meet here: what a profile asks the consumer to run cannot also be a file some declared
+    # profile installs, since install would erase on each run the thing the profile asks the consumer to own.
+    if cisrc=$(ci_src "$value"); then
+      record FAIL "command:$name" "runs $value, which $(ci_owner "$value") ships under ci/ — install would overwrite what it demands you own"
+    elif [ ! -f "$ROOT/$value" ]; then
+      record FAIL "command:$name" "runs $value, named in the marker, and that file is absent — author it, or point [commands] $name somewhere else"
+    elif [ ! -x "$ROOT/$value" ]; then
+      record FAIL "command:$name" "runs $value and it is not executable, so the merge cannot run what it is conditional on — chmod +x $value"
+    else
+      record OK "command:$name" "runs $value${reason:+ — $reason}"
+    fi
+  else
+    record OK "command:$name" "runs \`$value\`, not inspected (a command line is the consumer's own words for what green means)${reason:+ — $reason}"
+  fi
+}
+
 check_required_commands() {
-  local i name value reason keys owner
-  # An empty list is the normal case, not an edge one: `plain-git` and `forge-pr` demand nothing. Guarded on the
-  # length rather than on `:-`, which hands back one empty word and then indexes the array with it.
-  [ "${#REQUIRE_NAMES[@]}" = 0 ] && return 0
+  local i name value reason keys owner known
+  # Empty lists are the normal case, not an edge one: `plain-git` and `forge-pr` declare neither demands nor offers.
+  # Guarded on the length rather than on `:-`, which hands back one empty word and then indexes the array with it.
   for i in "${!REQUIRE_NAMES[@]}"; do
     name=${REQUIRE_NAMES[$i]}; reason=${REQUIRE_REASONS[$i]}; owner=${REQUIRE_OWNERS[$i]}
     [ -n "$name" ] || { record FAIL "require:#$i" "declares no name — the entry demands nothing, so nothing is required"; continue; }
@@ -827,29 +888,39 @@ check_required_commands() {
       record FAIL "command:$name" "the profile demands one and the marker names none — ${reason:-required by profile '$owner'}${keys:+; it does name: $keys}"
       continue
     fi
-    # A single token naming a path in this repository is the one value this driver may say anything about: it is
-    # run directly, so the file has to exist and carry the mode, and a merge that cannot exec its own condition is
-    # the worst place in the design to discover it. Anything with a space in it (`mise run gates`) is a shell line,
-    # and the only proof of that is the run — claiming otherwise here would be a check that passes nothing.
-    if [[ $value != *[[:space:]]* && $value != /* && $value == */* ]]; then
-      # The two ownership rules meet here: what the profile demands the consumer run cannot also be a file the
-      # profile installs, since install would erase on each run the thing the profile requires the consumer to own.
-      # The two ownership rules meet here: what a profile demands the consumer run cannot also be a file some
-      # declared profile installs, since install would erase on each run the thing the profile requires the
-      # consumer to own.
-      if cisrc=$(ci_src "$value"); then
-        record FAIL "command:$name" "runs $value, which $(ci_owner "$value") ships under ci/ — install would overwrite what it demands you own"
-      elif [ ! -f "$ROOT/$value" ]; then
-        record FAIL "command:$name" "runs $value, named in the marker, and that file is absent — author it, or point [commands] $name somewhere else"
-      elif [ ! -x "$ROOT/$value" ]; then
-        record FAIL "command:$name" "runs $value and it is not executable, so the merge cannot run what it is conditional on — chmod +x $value"
-      else
-        record OK "command:$name" "runs $value${reason:+ — $reason}"
-      fi
+    check_command_answer "$name" "$value" "$reason"
+  done
+
+  # An offered seam may go unanswered — that is the whole difference between an offer and a demand — but not
+  # silently. The line carries the reason the profile wrote, so a reader can tell "nothing to build here" from a
+  # misspelling, which is the failure an optional step invites: the job skips its own preparation and reports green.
+  for i in "${!OPTIONAL_NAMES[@]}"; do
+    name=${OPTIONAL_NAMES[$i]}; reason=${OPTIONAL_REASONS[$i]}; owner=${OPTIONAL_OWNERS[$i]}
+    [ -n "$name" ] || continue
+    if [[ ! $name =~ ^[A-Za-z0-9_-]+$ ]]; then
+      record FAIL "optional:$name" "$name is not a name the consumer can answer — a [commands] key is one bare word, with no space or dot"
+      continue
+    fi
+    value=$(mkv "$MARKER" "commands.$name")
+    if [ -z "$value" ]; then
+      record NOTE "optional:$name" "offered by '$owner' and unanswered — ${reason:-no reason given}; nothing runs it"
     else
-      record OK "command:$name" "runs \`$value\`, not inspected (a command line is the consumer's own words for what green means)${reason:+ — $reason}"
+      check_command_answer "$name" "$value" "$reason"
     fi
   done
+
+  # An answer to a role nobody declared matches nothing: the profile offers `toolchain`, the marker says
+  # `toolchaun`, and the candidate merges without its build. Checked only where a profile declares roles at all,
+  # because a repository on a profile that declares none keeps `[commands]` for its own reasons.
+  known="${REQUIRE_NAMES[*]:-} ${OPTIONAL_NAMES[*]:-}"
+  if [ -n "${known// /}" ]; then
+    for name in $(marker_command_keys); do
+      case " $known " in
+        *" $name "*) ;;
+        *) record FAIL "command:$name" "the marker answers a role no declared profile demands or offers — they name:$known" ;;
+      esac
+    done
+  fi
 }
 
 # The profile's own CI scripts, installed the way skills are. The consumer commits the copy, so the only thing
@@ -1021,6 +1092,13 @@ do_install() {
         "${rvalue:-NOT SET — author what runs and name it as [commands] $rname in .dev-profiles.toml}"
     done
   fi
+  if [ "${#OPTIONAL_NAMES[@]}" -gt 0 ]; then
+    for i in "${!OPTIONAL_NAMES[@]}"; do
+      rname=${OPTIONAL_NAMES[$i]}; [ -n "$rname" ] || continue
+      rvalue=$(mkv "$MARKER" "commands.$rname")
+      printf 'optional   %-12s %s\n' "$rname" "${rvalue:-offered, unanswered — nothing runs it}"
+    done
+  fi
 
   local i manifest scope harness state cmd
   for i in "${!CAP_NAMES[@]}"; do
@@ -1128,6 +1206,11 @@ case "$CMD" in
     if [ "${#REQUIRE_NAMES[@]}" -gt 0 ]; then
       for idx in "${!REQUIRE_NAMES[@]}"; do
         [ "${REQUIRE_NAMES[$idx]}" = "$ARG" ] && { reason=${REQUIRE_REASONS[$idx]}; break; }
+      done
+    fi
+    if [ -z "$reason" ] && [ "${#OPTIONAL_NAMES[@]}" -gt 0 ]; then
+      for idx in "${!OPTIONAL_NAMES[@]}"; do
+        [ "${OPTIONAL_NAMES[$idx]}" = "$ARG" ] && { reason=${OPTIONAL_REASONS[$idx]}; break; }
       done
     fi
     resolve_command "$ARG" "$reason"; exit $? ;;

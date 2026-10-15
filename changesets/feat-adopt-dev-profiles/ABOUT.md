@@ -10,8 +10,13 @@ the cheapest place to find out what a real consumer finds awkward.
 
 ## What was done
 
-- Vendored `.dev-profiles/` from dev-profiles `52ba773` (`git archive … | tar -x`), which is the adoption command the
-  README states, used here as written.
+- Vendored `.dev-profiles/` from dev-profiles `60567f4` (`git archive … | tar -x`), which is the adoption command the
+  README states, used here as written. That is 31 commits ahead of the `52ba773` this branch first carried, and the
+  difference is what makes the rest of this stack possible: `git-pair-github-integration` is at v5, it ships two
+  workflow files rather than one, and it offers two seams — `toolchain` and `ci-request` — that a consumer answers
+  from its own tree. The changed paths are the driver, that profile's manifest, changelog, skill and integrate
+  workflow, plus the new `git-pair-check.yml`; the installed copies this repository commits are unchanged, because
+  only the loop profile is declared here.
 - `.dev-profiles.toml` declares `git-pair-loop` v2, requires the `git-pair` capability at machine scope and
   `change-description` at repo scope, and forbids the `git-workflow` standard.
 - `AGENTS.md` is written by this repository with a four-line project header; the `dev-profiles:profile` stanza inside it
@@ -21,27 +26,31 @@ the cheapest place to find out what a real consumer finds awkward.
 
 ## What was considered and rejected
 
-**Declaring `git-pair-github-integration` too.** Rejected, and the reason is the substance of this change record. That
-profile does not only promise a verified merge — it *ships* the job: the workflow, the integrate driver and the
-installer, installed and byte-compared. In this repository those three paths are product code. The integrate job here
-builds the tool from the tree under review (`mise run build`, then `git-pair-integrate.sh --expect-head "$PUSHED"`), so
-a job that installs a published release could not merge anything reviewed here: the release does not contain the change.
-`install` would have overwritten `.github/workflows/git-pair-integrate.yml` — 211 lines of product code against the
-profile's 199 — and `doctor` would then have certified the consumer's copy as what this repository promises. The
-integrate driver is identical (`scripts/ci/git-pair-integrate.sh`, 415 lines against 415, no difference), which is what
-the verbatim-carry was for; the workflow and the installer are not, and neither belongs in a repository that owns them.
+**Declaring `git-pair-github-integration` too.** Not in this layer, and when this branch was first offered that was a
+rejection rather than a sequence. The argument was sound then and is worth keeping in plain sight, because it is the
+reason the library grew what it grew: that profile does not only promise a verified merge, it *ships* the job — the
+workflow, the integrate driver, the installer — and byte-compares them. The paths it ships are product code here. And
+the integrate job in this repository builds the tool from the tree under review (`mise run build`, then
+`git-pair-integrate.sh --expect-head "$PUSHED"`), which a job that installs a published release cannot do: the release
+does not contain the change under review.
+
+What has changed is upstream, not this repository's needs. The profile now runs the consumer's own build step after the
+pinned install and before the suite, in both jobs, from an answer the consumer gives at the `toolchain` seam — so the
+binary that gates the merge is the one the tree produced, and the release the installer put there is simply what gets
+replaced. That is the whole objection, answered at the seam the objection defined. Declaring the profile is therefore
+the next layer in this stack, where it can be reviewed as the decision it is; this layer only moves the bytes that make
+it possible. The driver this repository vendors and the driver the profile ships remain byte-identical
+(`scripts/ci/git-pair-integrate.sh`, 415 lines against 415).
 
 **Adopting `preview-pr`.** No preview environment deploys from a pull request here.
 
-## What this leaves undeclared, which the library should fix
+## What this layer leaves, and what the next one takes
 
-Nothing here states that a job verifies the merge candidate before it pushes. The mechanism for "the consumer provides
-this and the profile does not own the bytes" is `[[require]]`, answered in `[commands]` — and that answers a *command*,
-not a workflow file. A repository that owns its integration job therefore has no way to make `doctor` watch the promise
-it depends on: `.github/workflows/git-pair-integrate.yml` is guarded today only by this repository's own
-`scripts/gates/` suite and by review. The marker records the gap where a reader will look for it; a follow-up change in
-dev-profiles should close it, most likely by letting a profile demand a path it does not own, distinct from shipping
-one.
+`doctor` says it in one line, and the line is accurate for this layer: *the declared profiles declare no CI files —
+nothing lands from CI*. So the promise that a job verifies the merge candidate before it pushes is still carried by
+this repository's own `.github/workflows/` files, watched by `scripts/gates/ci-integrate.sh` and by review, and not by
+`doctor`. The layer after this one moves that promise to the profile, which is what `ci_files` and the byte comparison
+are for, and the marker paragraph that explains the gap goes away with it.
 
 ## What you can run
 
