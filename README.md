@@ -1453,14 +1453,23 @@ halves — the stanza for every harness, and the installed skill for the ones th
 ## Landing a declared change from CI
 
 `git pair change integrate` asks for a merge. Somebody still performs it, and a repository can decide that
-its pipeline performs it on the destination branch's behalf. This repository carries one shape of that, as
-an example — no git-pair command merges anything, and none of this is one:
+its pipeline performs it on the destination branch's behalf. No git-pair command merges anything, and none of
+what follows is one.
 
-| file | role |
-| --- | --- |
-| `.github/workflows/git-pair-integrate.yml` | the triggers, the permissions, the command the candidate is tested with — nothing else |
-| `scripts/ci/git-pair-integrate.sh` | the sequence, in shell, so it can be replayed without a runner |
-| `scripts/gates/ci-integrate.sh` | the replay: that job against scratch bare remotes, part of `mise run gates` |
+This repository runs that pipeline, and it does not own it. The two workflow files and the two scripts under
+`scripts/ci/` are installed by `dev-profiles` from its `git-pair-github-integration` profile, and
+`dev-profiles doctor` byte-compares them against what the library implements. A repository that wants this shape
+should declare the profile rather than copy a file: the copy is the thing that goes stale, and the reasoning
+behind the triggers, the scopes and the deliberate absences lives in the profile's own skill, where it is
+versioned and has a changelog.
+
+| file | whose | role |
+| --- | --- | --- |
+| `.github/workflows/git-pair-check.yml` | the profile's | the ladder a commit gets, and the run a person asks for; it merges nothing and holds no write scope, which is what makes it safe for the merge job to ask for |
+| `.github/workflows/git-pair-integrate.yml` | the profile's | the triggers, the permissions, the command the candidate is tested with — nothing else |
+| `scripts/ci/git-pair-integrate.sh` | the profile's | the sequence, in shell, so it can be replayed without a runner |
+| `scripts/ci/install-git-pair.sh` | the profile's | the pinned install both jobs run first, so neither one silently tests a build nobody published |
+| `scripts/gates/ci-integrate.sh` | this repository's | the replay: that job against scratch bare remotes, part of `mise run gates` |
 
 Run it by hand from any clone, on one branch or on everything the queue reports:
 
@@ -2179,11 +2188,14 @@ its own namespaced name, rather than a build another worktree left behind. See
 `scripts/install-name.sh`. `scripts/gates/install-sh.sh` takes a `dist/` directory instead, and defaults to
 the one `mise run release:snapshot` writes.
 
-`.github/workflows/ci.yml` runs `mise run gates` on pull requests and when somebody asks for it — one line,
-because the task is the definition. `.github/workflows/git-pair-integrate.yml` triggers instead on the push
-that declares a changeset, runs the same task against the merge candidate, and performs the landing if it
-passes (§Landing a declared change from CI). Neither waits on the other and neither runs on a schedule: the
-merge job tests what it is about to push, so there is no finished run to wait for and no queue to poll.
+`.github/workflows/git-pair-check.yml` runs `mise run gates` on pull requests and when somebody asks for it,
+and `.github/workflows/git-pair-integrate.yml` triggers on the push that declares a changeset, runs the same
+task against the merge candidate, and performs the landing if it passes (§Landing a declared change from CI).
+One definition of green serves both: neither file repeats the command, each resolves it from
+`.dev-profiles.toml`, and both run this repository's `toolchain` answer first — `scripts/ci/prepare-toolchain.sh`
+— which builds the binary the job then gates with. Neither waits on the other and neither runs on a schedule:
+the merge job tests what it is about to push, so there is no finished run to wait for and no queue to poll.
+Both files arrive from the profile, so this paragraph describes behaviour and not who maintains the YAML.
 
 The installer replay is not in `gates`. That ladder is what every change pays for, and the replay needs
 goreleaser, a cross-compile of four targets, and a listening socket — none of which matters until a tag is
