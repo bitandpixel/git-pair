@@ -103,7 +103,14 @@ jobs:
     # key read, so the marker cannot hold it, and the default is the profile's so no consumer can turn the ceiling
     # off. A hung candidate is the expensive failure on a metered plan: a job is billed from the moment it starts,
     # and nothing here finishes on its own. Full reasoning in the skill.
-    timeout-minutes: ${{ vars.GIT_PAIR_TIMEOUT || '30' }}
+    #
+    # `fromJSON` is what makes the line legal. A repository variable arrives as text and this key wants a number, and
+    # GitHub does not coerce the two — it fails the run before creating any job, so the symptom is a red run with no
+    # job, no steps and no log to read. That is how this line shipped wrong once: the merge job could not be
+    # scheduled at all, while the check job — refused by its `if:` on the same push, so its identical expression was
+    # never evaluated — reported `skipped` and looked healthy. A `GIT_PAIR_TIMEOUT` that is not an integer fails the
+    # same way on purpose: a ceiling is not something to guess at.
+    timeout-minutes: ${{ fromJSON(vars.GIT_PAIR_TIMEOUT || '30') }}
     # `contents: write` because the merge is an ordinary commit on the destination branch, and this repository's
     # `main` has no branch protection on the available plan — so the runner's token can push it as an ordinary
     # commit and no ruleset bypass actor is needed. `actions: write` has exactly one user: the optional forge ask

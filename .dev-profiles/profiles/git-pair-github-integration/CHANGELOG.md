@@ -1,6 +1,37 @@
 # git-pair-github-integration profile changelog
 
 
+## 7 — 2026-10-15
+
+`install-git-pair.sh` tells the release installer where to write. It chose a directory, fetched the pinned release's
+installer into it, and ran that installer with no destination — so the installer wrote the binary to its own default,
+`~/.local/bin`, and the next line exec'd `$INSTALL_DIR/git-pair --version`, a file that had never been written
+there: exit 127, before the gate ever ran. Passing `--install-dir "$INSTALL_DIR"` makes the two halves name one
+path. No text assertion could see it — one of them reads the version line and is satisfied by its wording — because
+the command was correctly written and the file it execs was simply elsewhere.
+
+`tests/ci-integrate/run.sh` now drives the script with `curl` stubbed and `$HOME` moved into the scratch directory,
+against an installer that honours `--install-dir` and one that ignores it: the first must leave the binary where the
+script says and print its version, the second must make the script fail rather than report a version it never
+installed. Both defects in this changelog were found the same way — the first consumer to run the job for real, on a
+repository that could afford to.
+
+
+## 6 — 2026-10-15
+
+Both jobs can be scheduled. `timeout-minutes` read `${{ vars.GIT_PAIR_TIMEOUT || '30' }}`; a repository variable
+arrives as text, that key wants a number, and GitHub does not coerce the two — it fails the run before creating any
+job. On a push carrying a declaration that meant the merge job, the one that has to start, died with no job, no
+steps and no log, while the check job on the same push was refused by its `if:` — so its identical expression was
+never evaluated — reported `skipped`, and looked healthy. `fromJSON(… )` makes the value a number. A
+`GIT_PAIR_TIMEOUT` that is not an integer now fails the run rather than being coerced into a ceiling nobody chose.
+
+The first consumer to run these files outside the library's fixtures is what found it: a repository declaring this
+profile got a merge job that could never start, and no case in the suite could see it, because every existing
+assertion read the file as text and none validated it the way GitHub does. `tests/ci-integrate/run.sh` now runs
+`actionlint` over both files when the machine has it installed, and prints the reason it skipped when it does not.
+
+
 ## 5 — 2026-10-15
 
 The shipped job is two files now, and the file the forge ask pokes can no longer land work.

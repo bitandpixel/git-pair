@@ -41,7 +41,14 @@ if ! command -v gh >/dev/null 2>&1; then
   printf 'cannot tell: no gh on PATH to ask %s for a run on %s\n' "$GITHUB_REPOSITORY" "$ref"
   exit 2
 fi
-workflow=${GIT_PAIR_CI_REQUEST_WORKFLOW:-ci.yml}
+# The file to ask for, by path under `.github/workflows/`. `git-pair-check.yml` is the one the
+# `git-pair-github-integration` profile installs, and it is the file that merges nothing — which is exactly what
+# makes it safe to ask for. An ask aimed at a file that could land work would be asking somebody else to answer the
+# question this job answers itself, about the candidate it built. Named by file rather than by the display name in
+# its `name:` key: `gh workflow run` takes either, and the two differ here — the file is `git-pair-check.yml`, the
+# name is `git-pair check`. The path is the address that cannot drift when somebody rewords a header. Override with
+# GIT_PAIR_CI_REQUEST_WORKFLOW when a repository keeps the ladder somewhere else.
+workflow=${GIT_PAIR_CI_REQUEST_WORKFLOW:-git-pair-check.yml}
 
 # One line of the forge's answer goes into whatever the job prints, because "refused" without the reason is
 # the kind of log line that gets a reader guessing. `gh workflow run` exits non-zero on a 4xx, so anything
