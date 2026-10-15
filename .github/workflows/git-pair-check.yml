@@ -1,0 +1,112 @@
+# The check a commit gets, and the run a person asks for.
+#
+# One job, and it merges nothing. That is not a modest claim: it is the property the rest of the profile is built
+# on. The only green that lands work is the merge job's own, in `.github/workflows/git-pair-integrate.yml`, which
+# builds the tree the destination would become and tests that. What this file reports is an opinion about a head —
+# useful to a human reading a pull request, and worth nothing to the gate. So it holds no write scope, and a
+# required check that never ran cannot hold a merge hostage, which is the failure the old check-run allowlist was
+# written to catch and the reason a probe used to live here.
+#
+# Three readers, which is why three triggers:
+#
+#   pull_request      the preview — the suite on a branch before anybody declares it. A pull request from a fork
+#                     reaches this job with a read-only token, which is exactly what it needs and all it gets.
+#   a push to the
+#   destination       the ordinary shape of a fix landed by hand, with no declaration and so no candidate run.
+#                     Rare, and the case worth covering. A merge this profile pushed does not start a run here:
+#                     GitHub creates no `push` workflow for a commit pushed with a job token.
+#   workflow_dispatch two readers, and the reason the trigger stays. The forge ask from the merge job runs this
+#                     file by name — safe precisely because this file merges nothing — and a person who wants the
+#                     ladder on a commit they choose does the same thing by hand.
+#
+# The filter lives in the job's `if:` rather than in the trigger, for one reason: a trigger cannot read `vars`, and
+# the destination branch is a variable. A `push` to any branch therefore starts a run whose job is refused before a
+# runner is requested: the unit of billing is a started job, and a refused one bills nothing — the skill carries the
+# measurement, and the rounding rule that makes a started job cost a minute whatever it then does.
+#
+# The rules that span this file and the merge job — why there is no schedule, no `workflow_run`, no probe; what the
+# timeout is for and why its override is a repository variable; what each scope is for — are in the profile's
+# `git-pair-github-integration` skill. Read that once; this header is only what a reader standing in front of this
+# file needs.
+name: git-pair check
+
+on:
+  pull_request:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+jobs:
+  check:
+    # A pull request and a dispatch always run; a push runs only on the destination. See the header.
+    #
+    # Comments belong above `if:`. Inside a folded block scalar a `#` is not a comment, it is expression text, and
+    # GitHub fails the job over it; the suite asserts no such line survives.
+    if: >-
+      github.event_name != 'push' ||
+      github.ref_name == vars.GIT_PAIR_BASE ||
+      github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    # The profile's ceiling, overridable per repository by a variable — `vars` is the only context GitHub lets this
+    # key read, so the marker cannot hold it. Full reasoning in the skill.
+    timeout-minutes: ${{ vars.GIT_PAIR_TIMEOUT || '30' }}
+    # Cancelling a superseded check is safe precisely because it certifies nothing. The merge job never cancels, and
+    # it lives in the other file.
+    concurrency:
+      group: check-${{ github.ref }}
+      cancel-in-progress: true
+    # The narrowest answer in the profile. No write scope, so no way to land work: `checks` and `statuses` are
+    # absent because there is nothing here that reads a forge's verdict, and nothing here may have one.
+    permissions:
+      contents: read
+    steps:
+      # Full history, so `doctor` can resolve the destination and answer whether the promised workflow is on it.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The same pinned tool the merge job installs, so the two cannot drift into answering "green" about different
+      # suites: the library's suite has cases that run git-pair, and they skip rather than fail when it is absent. A
+      # green pull-request run and a red candidate over nothing but an installed binary is a meaningless difference.
+      - name: install git-pair
+        env:
+          GIT_PAIR_VERSION: ${{ vars.GIT_PAIR_VERSION }}
+        run: scripts/ci/install-git-pair.sh
+
+      # The consumer's toolchain, if it has one. `toolchain` is a seam the profile offers rather than demands, so an
+      # empty answer is legal: a repository whose suite needs nothing beyond the runner answers nothing, says so in
+      # the log, and moves on. A *misspelled* answer is not legal, and `doctor` fails it at the handoff.
+      #
+      # After the pinned install on purpose: a repository that builds the tool from the tree under review replaces
+      # what the installer put there, rather than being overwritten by a release that cannot contain the change. The
+      # command runs with `$GITHUB_ENV` in reach, so an answer that has to hand something to the steps after it — a
+      # built binary's name, a PATH entry — can write it. The merge job runs this same step, so a check and a
+      # candidate can never be answered about differently built trees.
+      - name: toolchain
+        run: |
+          set -uo pipefail
+          toolchain=$(.dev-profiles/bin/dev-profiles command toolchain) || {
+            printf 'the toolchain answer in .dev-profiles.toml could not be resolved\n' >&2
+            exit 2
+          }
+          if [ -z "$toolchain" ]; then
+            printf 'no toolchain answered — nothing to prepare\n'
+          else
+            eval "$toolchain"
+          fi
+
+      - name: suite
+        # Resolved, not written here. The consumer names what green means (`.dev-profiles.toml`, `[commands]
+        # verify`) and the merge job asks the same question of the same file, so the definition lives in one place:
+        # two copies of this path used to live in this file, and nothing asserted they agreed.
+        #
+        # Two lines, because an empty answer has to be fatal. `cmd=$(…)` takes the substitution's exit status, so an
+        # unresolvable pointer stops the step; `eval "$(…)"` would eval an empty string and go green, which is the
+        # one outcome this job exists to make impossible.
+        run: |
+          set -uo pipefail
+          cmd=$(.dev-profiles/bin/dev-profiles command verify) || {
+            printf 'no verify command named in .dev-profiles.toml — nothing can be certified green here\n' >&2
+            exit 2
+          }
+          eval "$cmd"

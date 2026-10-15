@@ -353,7 +353,7 @@ check "and asks for no run it did not make" "$n0" "$(wc -l < "$T/request-calls")
 # carry the scope that makes the ask, and one that does not ask has to leave the scope out. Either half
 # failing is the same bug seen from the other side, so both are checked here.
 ASKS=$(grep -v '^[[:space:]]*#' "$ROOT/.github/workflows/git-pair-integrate.yml" | grep -c -- '--ci-request')
-SCOPED=$(grep -v '^[[:space:]]*#' "$ROOT/.github/workflows/git-pair-integrate.yml" | grep -c '^  actions: write$')
+SCOPED=$(grep -v '^[[:space:]]*#' "$ROOT/.github/workflows/git-pair-integrate.yml" | grep -c '^ *actions: write$')
 check "the merge job asks for a run only if it holds the scope to make the ask" 0 \
   "$([ "$ASKS" -gt 0 ] && [ "$SCOPED" -eq 0 ] && echo 1 || echo 0)"
 check "and holds that scope only if it asks, so no token is wider than the job" 0 \
@@ -563,7 +563,13 @@ declare_changeset flow/forge-direct src/i.ts 'export const i = 9' || { echo "fix
 git -C "$T/work" checkout -q flow/forge-direct && wing change integrate >/dev/null || { echo "fixture: declare flow/forge-direct" >&2; exit 1; }
 git -C "$T/work" push -q origin flow/forge-direct >/dev/null 2>&1
 OUT=$(forge_run "$(clone fd)" flow/forge-direct); show "$OUT"
-contains "$OUT" "requested: bitandpixel/git-pair will run ci.yml" \
+# The name the hook asks for is read out of the hook rather than repeated here. When the fixture repeats a value and
+# the value is wrong, the two move together and the assertion stays green — which is what happened the first time
+# this line ran against the profile's file: a default naming a workflow that does not exist passed here and failed
+# only at `the request hook still names a workflow that exists`, which derives the name instead. Pairing the two is
+# what makes the claim: the log says what the script says, and what the script says is a file that is there.
+ASKED=$(sed -n 's/^workflow=\${GIT_PAIR_CI_REQUEST_WORKFLOW:-\(.*\)}/\1/p' "$ROOT/scripts/ci/gh-request-ci.sh")
+contains "$OUT" "requested: bitandpixel/git-pair will run $ASKED" \
   "left as the job has it, the environment names a forge, and the default hook asks it for a run"
 if [ "$(count_gh)" -ge 1 ]; then
   ok "and the ask was an outbound call, not a line of text"
@@ -593,11 +599,16 @@ step "the workflow files say what this shape needs"
 # here fails a build for something that would otherwise show up as a merge that quietly never happened, a
 # minute spent on a run that could not have merged, or a token wider than the job uses. Comments are stripped
 # from the blocks being matched, so the file's prose can name a rule without tripping the assertion of it.
+#
+# Both files below are installed from the `git-pair-github-integration` profile rather than written here, so what
+# follows asserts the rules the shape needs and not the layout this repository happened to use when it owned
+# them. Where a rule can be written two ways — a scope granted at the top of the file or on the job, a branch
+# filter in flow style or as a block list — the assertion accepts either and fails on the meaning.
 INTEGRATE=$ROOT/.github/workflows/git-pair-integrate.yml
-CIFIKE=$ROOT/.github/workflows/ci.yml
+CHECK=$ROOT/.github/workflows/git-pair-check.yml
 
 check "the merge workflow is still there to be triggered" 1 "$(grep -c '^name: git-pair integrate$' "$INTEGRATE")"
-check "and the test workflow is still there to be asked for" 1 "$(grep -c '^name: CI$' "$CIFIKE")"
+check "and the test workflow is still there to be asked for" 1 "$(grep -c '^name: git-pair check$' "$CHECK")"
 
 # The triggers this shape runs on, and the two it stopped running on. A schedule is 96 jobs a day whether or
 # not anything is waiting; a `workflow_run` merges a head some other workflow certified rather than the tree
@@ -612,8 +623,13 @@ check "and no run of another workflow to wait for" 0 "$(grep -Ec '^[[:space:]]*w
 # block was: the prose may explain the rule without tripping the assertion.
 PUSH=$(awk '/^  push:/{f=1;next} f&&/^  [a-z_]+:/{f=0} f' "$INTEGRATE" | grep -v '^[[:space:]]*#')
 check "the push trigger carries no denylist to exclude a changeset from landing" 0 "$(printf '%s\n' "$PUSH" | grep -Ec '^[[:space:]]*(branches-ignore|paths-ignore|tags-ignore):')"
-check "no allowlist to do the same job" 0 "$(printf '%s\n' "$PUSH" | grep -Ec '^[[:space:]]*(branches|paths|tags):[^-]')"
-check "and it takes every branch, so a changeset named outside the usual prefixes still lands" 1 "$(printf '%s\n' "$PUSH" | grep -Ec "^[[:space:]]*-[[:space:]]*'\*\*'[[:space:]]*$")"
+# The every-branch answer, in either shape YAML offers: the flow list `branches: ['**']` or the block list
+# `- '**'`. Anything else written against `branches:`, `paths:` or `tags:` is a filter, and a filter is what
+# silently stops a family of changeset branches from ever landing while every job stays green.
+EVERY=$(printf '%s\n' "$PUSH" | grep -Ec "^[[:space:]]*(branches:[[:space:]]*\['\*\*'\]|-[[:space:]]*'\*\*')[[:space:]]*$")
+FILTERED=$(printf '%s\n' "$PUSH" | grep -E '^[[:space:]]*(branches|paths|tags):' | grep -vc "\['\*\*'\]")
+check "no filter on the push trigger other than the one that names every branch" 0 "$FILTERED"
+check "and it takes every branch, so a changeset named outside the usual prefixes still lands" 1 "$EVERY"
 
 # The condition that decides whether the merge job runs at all. It lives in the job's `if:` and not in a step
 # because a job that starts is billed: a guard step that exits early costs the minute a guard `if:` saves. Two
@@ -623,15 +639,22 @@ IF=$(awk '/^    if: >-/{f=1;next} f&&/^    runs-on:/{f=0} f' "$INTEGRATE" | grep
 check "the merge job's condition is an allowlist that admits no pull request" 0 "$(printf '%s\n' "$IF" | grep -c pull_request)"
 check "it reads the declaration as a trailer, so it matches where git-pair actually writes it" 1 \
   "$(printf '%s\n' "$IF" | grep -c "contains(github.event.head_commit.message, 'Review-State: integrating')")"
-check "it excludes the destination branch, which cannot carry a merge of itself" 1 \
-  "$(printf '%s\n' "$IF" | grep -c "github.ref_name != (vars.GIT_PAIR_BASE || 'main')")"
+# The destination may be named once, as `(vars.GIT_PAIR_BASE || 'main')`, or as two comparisons beside the
+# trailer match — the same rule, and which one the shipped file uses is the library's formatting decision, not
+# this repository's. Both halves have to be there: a condition that forgets the variable merges into a branch
+# nobody chose, and one that forgets the fallback merges into nothing on a repository with no variables set.
+check "it excludes the destination branch, which cannot carry a merge of itself" 0 \
+  "$( [ "$(printf '%s\n' "$IF" | grep -c 'vars\.GIT_PAIR_BASE')" -ge 1 ] && [ "$(printf '%s\n' "$IF" | grep -c "'main'")" -ge 1 ] && echo 0 || echo 1 )"
 check "and it leaves the manual trigger unfiltered, because that is the recovery path" 1 \
   "$(printf '%s\n' "$IF" | grep -c "github.event_name == 'workflow_dispatch'")"
 
 # `contents: write` is the merge; the three scopes that used to sit beside it belonged to the probe and to the
 # post-merge request, and a token asks for what a job uses. The permissions block is read whole, minus
 # comments, so this file can explain what was dropped without the assertion reading the explanation as a ask.
-PERM=$(awk '/^permissions:/{f=1;next} f&&/^[a-z]/{f=0} f' "$INTEGRATE" | grep -v '^[[:space:]]*#')
+# Either place is accepted — a scope can be granted once for the file or per job, and a job that carries its own
+# is narrower than the file, which is the direction the shipped file went.
+PERM=$(awk '/^permissions:/{f=1;next} f&&/^[a-z]/{f=0} f
+            /^    permissions:/{g=1;next} g&&/^    [a-z]/{g=0} g' "$INTEGRATE" | grep -v '^[[:space:]]*#')
 check "the job asks to write the destination" 1 "$(printf '%s\n' "$PERM" | grep -c 'contents: write')"
 check "and to make the one request that follows" 1 "$(printf '%s\n' "$PERM" | grep -c 'actions: write')"
 check "and holds nothing the probe would have needed" 0 "$(printf '%s\n' "$PERM" | grep -Ec '(checks|statuses):')"
@@ -655,8 +678,14 @@ check "the merge reads the whole history, so an approval and a landing can be fo
 check "two jobs for one declaration would race, so a merge is never cancelled midway" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'cancel-in-progress: false')" -ge 1 ] && echo 1 || echo 0 )"
 check "and the queue report runs after a failure, when it is most wanted" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'if: always()')" -ge 1 ] && echo 1 || echo 0 )"
 check "the merge job asks the destination to test what it landed" 1 "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c -- '--ci-request')" -ge 1 ] && echo 1 || echo 0 )"
-check "and names the helper rather than leaning on the driver's default" 1 \
-  "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c -- '--ci-request scripts/ci/gh-request-ci.sh')"
+# The helper is named in the marker now, not in the job: the profile offers `ci-request` as a role and the
+# consumer answers it, which is what lets the shipped file stay one file for every repository. Two claims, in
+# the order that makes the pair — the job must ask the resolver rather than hard-code a path, and the answer it
+# resolves to must be a script this repository actually has and can execute.
+check "and it asks the resolver for the helper rather than hard-coding one into the job" 1 \
+  "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'dev-profiles command ci-request')"
+check "and the marker answers that role with a helper that exists" 1 \
+  "$( [ "$(grep -cE '^ci-request = "scripts/ci/gh-request-ci.sh"' "$ROOT/.dev-profiles.toml")" -ge 1 ] && [ -x "$ROOT/scripts/ci/gh-request-ci.sh" ] && echo 1 || echo 0 )"
 check "and the tool that asks is given a token to ask with" 1 \
   "$( [ "$(printf '%s\n' "$INTEGRATE_CODE" | grep -c 'GITHUB_TOKEN')" -ge 1 ] && echo 1 || echo 0 )"
 

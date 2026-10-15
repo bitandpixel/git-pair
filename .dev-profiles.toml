@@ -14,23 +14,59 @@ forbidden = ["git-workflow"]
 # The loop: branch, commit, changeset, review, hand-off. This repository runs it — `changesets/`, the
 # Review-State trailers and the approval commits are its own product's workflow, dogfooded here.
 #
-# There is no merge profile, and that is a decision rather than an omission. The only profile that promises a
-# verified merge (`git-pair-github-integration`) also *ships* the job: the workflow, the integrate driver and
-# the installer, installed and byte-compared. Here those three paths are product code — `.github/workflows/`
-# and `scripts/ci/` are what this repository builds, tests and releases. Its integrate job builds the tool
-# from the tree being merged (`mise run build`, then `--expect-head`), which a job that installs a published
-# release cannot do: the release does not contain the change under review. Declaring the profile would have
-# `install` overwrite the repository's own job with a consumer's copy, and then certify that copy as what this
-# repository promises.
+# The merge side of the workflow, declared. This profile is the one that promises a verified merge, and it is also
+# the one that *ships* the job: `.github/workflows/git-pair-check.yml`, `.github/workflows/git-pair-integrate.yml`,
+# `scripts/ci/git-pair-integrate.sh` and `scripts/ci/install-git-pair.sh` are the profile's bytes in this tree —
+# `install` writes them, `doctor` byte-compares them and their exec bits, and a committed copy matching neither is a
+# stray. They are not product code here any more, and a reader who wants the annotated account of why there are two
+# files, what each scope is for, and why nothing runs on a timer opens the profile's `git-pair-github-integration`
+# skill rather than a workflow header.
 #
-# What that leaves undeclared is real, and it is the gap the library should close: nothing here states that a
-# job verifies the merge candidate before it pushes. `[[require]]` asks for a *command* the consumer defines,
-# and `[commands]` answers it; there is no way yet to promise a workflow file the repository owns and the
-# profile does not. Until there is, `.github/workflows/git-pair-integrate.yml` is guarded by this repository's
-# own suite (`scripts/gates/`) and by review, and `doctor` is silent about it.
+# What made this adoptable is the `toolchain` seam answered below, and it is worth being exact about why. This
+# repository's merge cannot be gated by a published release: the release does not contain the change under review, so
+# the job has to build the tool from the tree. The profile installs the pinned release first and then runs the
+# consumer's own build, in both jobs, so the binary that gates the merge is the one this tree produced and the
+# installer's copy is what gets replaced. Before that seam there was no way to hold both "the profile owns this file"
+# and "this repository builds what the file tests", so both files stayed product code and `doctor` stayed silent
+# about the promise they carry.
+#
+# Three repository variables steer these files, and none of them is a decision about the shape — which is why they are
+# variables rather than edits to installed bytes. `GIT_PAIR_BASE` names the destination branch, and the files fall
+# back to `main`; `GIT_PAIR_VERSION` pins the release `install-git-pair.sh` fetches, which is what keeps a runner from
+# testing trunk's development binary instead of a named one; `GIT_PAIR_TIMEOUT` is the ceiling both jobs run under,
+# where the profile's default is 30 and this repository wants the 20 it set before, because `gates` is a ladder of
+# suites and a hung replay should stop rather than run to the ceiling. `vars` is the only context GitHub lets
+# `timeout-minutes` read, so the marker cannot hold it and the variable is where a tuning dial belongs.
 [[profile]]
 name = "git-pair-loop"
 version = 2
+
+[[profile]]
+name = "git-pair-github-integration"
+version = 5
+
+# The three answers those files ask for, with one definition of green behind all of them. `verify` is required — a
+# merge conditional on nothing is the shape with its point removed — while `toolchain` and `ci-request` are offers:
+# leaving one unanswered is legal and the job says so in the log, whereas a misspelled key fails `doctor` at the
+# handoff instead of quietly becoming "nothing to do".
+#
+# `verify` is `mise run gates`, which is what `.github/workflows/git-pair-check.yml` runs on a pull request, what the
+# merge job runs against the tree the destination would become, and what `scripts/gates/` drives in its replays — one
+# copy of "done", in `.mise.toml`.
+#
+# `toolchain` is a script rather than a line because it has three things to do and one of them is handing the next
+# step a value: it installs mise and the Go `.mise.toml` pins, builds, and exports `GIT_PAIR_BIN` as the branch-named
+# binary `scripts/install-name.sh` derives. That export is what makes the driver and the queue report at the end of
+# the merge job ask the tool this tree built rather than the release the installer left behind, and it is the reason
+# the step sits after the install and not before it.
+#
+# `ci-request` names the helper that asks for a run of the destination's new tip. The file it asks for is
+# `git-pair-check.yml` — by path, not by the display name in its `name:` key — which merges nothing, and that is what
+# makes the ask safe to grant.
+[commands]
+verify = "mise run gates"
+toolchain = "scripts/ci/prepare-toolchain.sh"
+ci-request = "scripts/ci/gh-request-ci.sh"
 
 # Which capabilities this repository needs, and where each lives. No commands here: the capability's manifest
 # owns those, so the marker states a requirement and the capability answers how to satisfy it.
