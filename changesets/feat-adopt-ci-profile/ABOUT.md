@@ -47,7 +47,7 @@ which is what keeps a pull-request green and a candidate red from meaning two di
 
 ## How it was implemented, and why this way
 
-**The marker** declares `git-pair-github-integration` v5 beside `git-pair-loop` v2 and answers the three roles the
+**The marker** declares `git-pair-github-integration` v7 beside `git-pair-loop` v2 and answers the three roles the
 profile asks about: `verify`, and the two offers `toolchain` and `ci-request`. The paragraph that recorded the
 non-adoption is replaced by one that records the adoption, including the three repository variables that steer these
 files (`GIT_PAIR_BASE`, `GIT_PAIR_VERSION`, `GIT_PAIR_TIMEOUT`) and why a tuning dial belongs in a variable rather
@@ -96,6 +96,29 @@ steps after it and export `GIT_PAIR_BIN`. A marker line can do both and a reader
 byte-compared, so re-formatting them to suit one consumer's grep is the wrong direction, and the assertions were
 measuring layout anyway.
 
+## What adopting found
+
+This is the part the change exists to produce, so it goes in the record rather than the chat log. Running the
+profile's shipped files as this repository's real CI surfaced two defects in them, neither reachable by the
+library's 263 cases, and both are fixed upstream (dev-profiles v6 and v7, which is why this branch declares v7):
+
+- **`timeout-minutes` was a string.** Both jobs read `${{ vars.GIT_PAIR_TIMEOUT || '30' }}`; the key wants a
+  number and GitHub does not coerce it — it fails the run before creating a job. The check job, refused by its
+  `if:` on the same push, never evaluated its identical expression and reported `skipped`, so the run looked
+  healthy while the merge job could not exist. Run `38687055232` here is the measurement; `actionlint` names it
+  in one line, and the library's suite now runs `actionlint` over both files.
+- **`install-git-pair.sh` never told the release installer where to write.** With the timeout fixed, the job
+  scheduled, installed, and died at `line 46: …/git-pair-bin/git-pair: No such file or directory` (exit 127,
+  run `38687629592`): the installer had written the tool to its own default, `~/.local/bin`. One flag at the
+  call site, and a suite case that runs the script against a stub installer that honours `--install-dir` and one
+  that ignores it.
+
+The library's own merge job then landed its own fix — `4044376` on `dev-profiles` `main`, merged by
+`.github/workflows/git-pair-integrate.yml` after running that repository's suites against the merge candidate,
+with `no toolchain answered — nothing to prepare` in the log where this repository's answer will go. That is the
+first end-to-end run of the shape this branch adopts, and it is the reason the assertions retargeted above are
+being pointed at bytes worth pointing at.
+
 ## What is deliberately not changing
 
 `scripts/ci/git-pair-integrate.sh` is the same 415 lines it was — the merge driver's behaviour is untouched, and
@@ -106,7 +129,7 @@ arguing about documentation wording.
 
 One wording item is visible and left alone because the text is the driver's, not this repository's: the stanza
 `install` writes into `AGENTS.md` joins the declared profiles with a comma — "declares `git-pair-loop` v2,
-`git-pair-github-integration` v5 in `.dev-profiles.toml`" — where "and" would read better. Editing the file by hand
+`git-pair-github-integration` v7 in `.dev-profiles.toml`" — where "and" would read better. Editing the file by hand
 would put a consumer's bytes out of step with the thing that byte-compares them, so it belongs in the library.
 
 ## Where to look hardest
@@ -138,7 +161,7 @@ installed files — the seven retargeted ones above are among them, along with t
 against scratch bare remotes. `doctor` reports all four `ci_files` installed and byte-matching, the three roles resolved
 (`command:verify` → `mise run gates`, `command:toolchain` → `scripts/ci/prepare-toolchain.sh`, `command:ci-request` →
 `scripts/ci/gh-request-ci.sh`), `needs:git-pair-github-integration` satisfied by the declared loop profile, and both
-versions matching the library at v2 and v5. The full ladder — gofmt, vet, the sharded Go suite, the PRD §29 replay,
+versions matching the library at v2 and v7. The full ladder — gofmt, vet, the sharded Go suite, the PRD §29 replay,
 the pty walkthrough and the CI merge replay — passes end to end.
 
 One defect was found before this was offered, and found by the gate rather than by me: the ask's default named

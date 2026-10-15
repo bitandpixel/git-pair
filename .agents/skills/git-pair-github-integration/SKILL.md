@@ -91,10 +91,17 @@ Four rules span both files, written once here rather than twice:
   that starts: each job's executed time rounds up to a whole minute, so a five-second job is a minute. That is the
   arithmetic behind putting a condition in `if:` rather than in a guard step, and behind never adding a schedule to
   come back later. The retry for a merge that died mid-run is re-running the run.
-- **`timeout-minutes` is the profile's, its override is yours:** the same expression on both jobs, defaulting to 30
-  and raised by the `GIT_PAIR_TIMEOUT` repository variable. `vars` is the only context GitHub lets that key read, so
-  the ceiling cannot live in the marker; keeping the default in the profile means no consumer can turn it off, and a
-  value that is not a number fails the job before the driver starts.
+- **`timeout-minutes` is the profile's, its override is yours:** the same expression on both jobs,
+  `fromJSON(vars.GIT_PAIR_TIMEOUT || '30')` — 30 by default, raised or lowered by the `GIT_PAIR_TIMEOUT` repository
+  variable. `vars` is the only context GitHub lets that key read, so the ceiling cannot live in the marker, and
+  keeping the default in the profile means no consumer can turn it off. The `fromJSON` is the part that is easy to
+  lose and expensive to get wrong: a repository variable arrives as text, this key wants a number, and GitHub does
+  not coerce them — it fails the run *before creating a job*, so the symptom is a red run with no job, no steps and
+  no log to read. It once shipped without it, and a push that declared a changeset produced a merge job that could
+  never be scheduled while the check job on the same push — refused by its `if:`, so its identical expression was
+  never evaluated — reported `skipped` and looked healthy. `actionlint` names the defect
+  (`type of expression … must be number but found type string`), and `tests/ci-integrate/run.sh` runs it over both
+  files when the machine has it.
 - **Each scope is what its job uses, and the ask's scope is always granted.** `actions: write` has one user: the
   `ci-request` hook, which asks the forge to run the tree that just landed, and an ask is a `workflow_dispatch`. Job
   permissions are static YAML — no expression reaches them, and no step may declare its own — so the scope sits

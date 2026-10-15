@@ -43,7 +43,7 @@ version = 2
 
 [[profile]]
 name = "git-pair-github-integration"
-version = 5
+version = 7
 
 # The three answers those files ask for, with one definition of green behind all of them. `verify` is required — a
 # merge conditional on nothing is the shape with its point removed — while `toolchain` and `ci-request` are offers:

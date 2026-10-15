@@ -48,8 +48,12 @@ jobs:
       github.ref_name == 'main'
     runs-on: ubuntu-latest
     # The profile's ceiling, overridable per repository by a variable — `vars` is the only context GitHub lets this
-    # key read, so the marker cannot hold it. Full reasoning in the skill.
-    timeout-minutes: ${{ vars.GIT_PAIR_TIMEOUT || '30' }}
+    # key read, so the marker cannot hold it. Full reasoning in the skill. `fromJSON` is load-bearing, not ceremony: a
+    # repository variable arrives as text, this key wants a number, and GitHub settles the disagreement by failing the
+    # run before it creates any job at all — a red run with nothing in it, which is the quietest possible way for a
+    # ceiling to be wrong. Set `GIT_PAIR_TIMEOUT` to a plain integer; a value that is not one fails the same way,
+    # deliberately, rather than being coerced into a ceiling nobody chose.
+    timeout-minutes: ${{ fromJSON(vars.GIT_PAIR_TIMEOUT || '30') }}
     # Cancelling a superseded check is safe precisely because it certifies nothing. The merge job never cancels, and
     # it lives in the other file.
     concurrency:

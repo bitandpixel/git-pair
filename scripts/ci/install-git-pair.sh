@@ -39,7 +39,14 @@ curl -fsSL --retry 3 -o "$INSTALL_DIR/install.sh" "$base/install.sh"
 
 # Non-zero here means the archive did not match checksums.txt, or the release does not exist. Either way this
 # exits before the gate runs, and the gate never runs on an unverified tool.
-sh "$INSTALL_DIR/install.sh" --force --quiet
+#
+# The destination has to be said out loud. `install.sh` writes wherever it was told, and told nothing it writes to
+# its own default, `~/.local/bin` — which on a runner is a directory nobody added to `GITHUB_PATH`, and a binary
+# the step below cannot find. That is how this line shipped broken: the installer exited 0, the fetch and checksum
+# were fine, and the very next command exec'd `$INSTALL_DIR/git-pair`, which had never been written there. The
+# flag is what makes the two halves of this script agree on one path; the installer has honoured it since the
+# release this profile pins.
+sh "$INSTALL_DIR/install.sh" --force --quiet --install-dir "$INSTALL_DIR"
 
 # Report the version of the binary this step verified, by path. Resolving `git-pair` by name would report
 # whatever the machine already had, which is a different claim from the one being made.
