@@ -101,6 +101,9 @@ and `go test ./...` on its own.
   the gate while a `pre-check` hook is broken (and the same run without the flag carries the hook's refusal), the
   same command still refuses for a tree nobody recorded, and `change integrate --no-hooks` declares an approved
   head whose `pre-integrate` hook refuses.
+- The pair refusal now runs over `change ready`, `check` and `change integrate` in
+  `TestTrustOnceRunsTheUnrecordedTreeAndRecordsNothing`: eight commands carry both flags, and one rule in
+  `PersistentPreRunE` is what has to hold them all.
 
 
 ## Also asked for in review: `--no-hooks` on the gate and the declaration
@@ -124,7 +127,6 @@ Two things did not move with it:
   READY and still names `git pair hooks --trust` and `--decline`. The off switch says a machine does not want to
   run scripts today and says nothing about what those scripts do; that rule is why the flag is not a way through
   the position, on any command.
-> would --no-hooks plus --trust-hooks-once allow getting through this? do they work together like that?
 - **Nothing is quiet.** Every skipped hook arrives as `status: "skipped-by-flag"` in `hooks[]` and on stderr, so a
   verdict that ran nothing reads as one that ran nothing. `ready` itself is unchanged: the run says what it
   checked, and the array says what it did not.
@@ -132,3 +134,29 @@ Two things did not move with it:
 The agent-facing rule is written into the skill beside the one for `GIT_PAIR_HOOKS=0`: an agent that cannot get the
 gate to pass reports that, and does not skip the scripts until it does. That is the risk this widening actually
 adds, and it is the one worth reading the skill text for.
+
+### Can the two flags be combined to get past the position?
+
+> would --no-hooks plus --trust-hooks-once allow getting through this? do they work together like that?
+
+No. The pair is a usage error — exit 2, before the command body runs — with a message naming the opposition: one
+runs none of them, the other runs the ones this clone has not recorded. It is refused in `hookOverridesAgree`, in
+`PersistentPreRunE`, which is one rule for the eight commands that now carry both flags rather than eight rules; the
+case now runs over `change ready`, `check` and `change integrate`, because the widening made the pair reachable on
+the last two. `git pair hooks --trust --decline` is refused for the same reason — opposite positions about the same
+scripts.
+
+What the combination would have bought is the one state this feature exists to refuse: nothing running, and nobody
+on record saying why. A run that executed no scripts cannot answer "did anybody read these", and answering it with
+a second flag would produce a hand-off that looks checked and is not. The three positions that are offered, and
+what each leaves behind:
+
+| you want | you type | what it leaves behind |
+| --- | --- | --- |
+| the scripts to run, this once, though unrecorded | `--trust-hooks-once` | nothing; the next command asks again, and the hooks that ran carry `"consent": "once"` |
+| to stop being asked, having read them | `git pair hooks --decline` | a position recorded against the content hash, readable by the next person with `git pair hooks` |
+| this one command to run nothing, the question still standing | `--no-hooks` | a report naming every hook that did not run |
+
+The request the question implies — the third row, and no question — is the combination the tool declines to offer.
+`--decline` is worth having precisely because a person wrote it down; a flag that reached the same state without
+that act would remove the only thing the record carries.

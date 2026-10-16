@@ -190,16 +190,30 @@ func TestTrustOnceRunsTheUnrecordedTreeAndRecordsNothing(t *testing.T) {
 		}
 	})
 
-	t.Run("the two flags together are a usage error", func(t *testing.T) {
+	t.Run("the two flags together are a usage error, wherever both are offered", func(t *testing.T) {
 		f, _ := newChangeset(t, "checkout-flow", "main")
 		putHook(t, f, "tracked", "pre-ready", "01-suite", passHook)
 
-		res := runIn(t, f.Dir(), "change", "ready", "--no-hooks", "--trust-hooks-once")
-		if res.code != exitUsage {
-			t.Fatalf("exit = %d, want %d\nstdout: %s\nstderr: %s", res.code, exitUsage, res.stdout, res.stderr)
-		}
-		if !strings.Contains(res.stdout+res.stderr, "opposite") {
-			t.Errorf("the refusal says what is wrong: %s", res.stderr)
+		// Every command that runs the repository's scripts now carries both flags, so the pair has to be refused in
+		// one place rather than eight — which is what `hookOverridesAgree` in `PersistentPreRunE` is. It answers
+		// before any command body runs, so the gate and the declaration are refused here as ordinary commands are:
+		// nobody buys a cleared position by asking to run nothing. `check` and `change integrate` are the cases the
+		// widening made reachable, so they are in the list.
+		for _, args := range [][]string{
+			{"change", "ready"},
+			{"check"},
+			{"change", "integrate"},
+		} {
+			withFlags := append(append([]string{}, args...), "--no-hooks", "--trust-hooks-once")
+			res := runIn(t, f.Dir(), withFlags...)
+			if res.code != exitUsage {
+				t.Errorf("%v: exit = %d, want %d\nstdout: %s\nstderr: %s",
+					args, res.code, exitUsage, res.stdout, res.stderr)
+				continue
+			}
+			if !strings.Contains(res.stdout+res.stderr, "opposite") {
+				t.Errorf("%v: the refusal says what is wrong: %s", args, res.stderr)
+			}
 		}
 	})
 }
