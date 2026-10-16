@@ -123,9 +123,22 @@ shape: `check --json` exits 0 and carries the verdict in `ready`; the human form
 ## Trust
 
 A tracked file is code that runs on a clone, which is why git keeps its hooks under `.git/` and refuses to
-clone them. git-pair's tracked hooks are committable because consent is taken by content: the path, mode and
-bytes of the tracked hooks tree are hashed, and the hash is recorded per clone in
-`<git-dir>/git-pair/trusted-hooks`.
+clone them. git-pair's tracked hooks are committable because consent is taken by content: the path, the
+executable bit, and the bytes of the tracked hooks tree are hashed, and the hash is added to the set of content
+this clone has taken a position on, recorded in `<git-common-dir>/git-pair/trusted-hooks` (and
+`declined-hooks` beside it).
+
+**The record belongs to the clone, not to one working directory.** What it answers for is content, and every
+worktree of the clone checks the same content out; recording it per worktree made a person who keeps a dozen
+worktrees read the same dozen lines a dozen times, and the tenth reading is not consent. One `--trust` or
+`--decline` covers every worktree of the clone, including ones cut afterwards, and a record an older git-pair
+wrote beside a single worktree is still read where it lies.
+
+**Each entry answers for the content it names.** Two worktrees can stand on two versions of the directory — one
+on trunk, one on the branch that edits the suite — and each keeps its own entry, so recording a position in one
+does not invalidate the other's. Only the executable bit of the mode is hashed: an executable script is a
+different thing to run, while the rest of the permission set is whatever the machine's umask and the writer chose,
+and two checkouts of one commit would otherwise hash apart.
 
 An unaccepted tree does not run at all, and the skipped hooks are named on stderr, so a clone is never surprised
 by an unreviewed script and never silently left without the checks it thinks it has. Editing a hook changes the
