@@ -2,6 +2,8 @@ package hooks
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -354,5 +356,138 @@ func TestRecordBesideAWorktreeIsInert(t *testing.T) {
 	if state != TrustUnrecorded || accepted != "" || current != hash {
 		t.Errorf("a record beside the worktree changed the answer: state=%s accepted=%q current=%q, want unrecorded at %q",
 			state, accepted, current, hash)
+	}
+}
+
+// What cannot run must not invalidate a position, and what can run must not hide from one.
+//
+// The identity used to be a recursive walk of `.git-pair/hooks/`, while discovery ran the entries a hooks directory
+// holds that a reader would call a hook. Two rules, drifting apart in both directions — and the direction that
+// reached a person was the wrong one. Opening a hook in vim leaves `.pre-ready.swp` beside it, the walk counted it,
+// the clone lost its position, and the refusal named content nobody had edited. Both sides read hookFiles now, so
+// the two tests below are one sentence said twice.
+func TestTreeHashIgnoresWhatDiscoveryWouldNotRun(t *testing.T) {
+	f, _, _ := hooksRepo(t, "#!/bin/sh\nexit 0\n")
+	repo := &git.Repo{Dir: f.Dir(), Env: f.Env()}
+
+	before, names, err := TreeHash(repo.Dir)
+	if err != nil || before == "" {
+		t.Fatalf("TreeHash: %q, %v", before, err)
+	}
+	if len(names) != 1 || names[0] != "pre-ready/01-suite" {
+		t.Fatalf("names = %v, want the one hook the directory holds", names)
+	}
+
+	for _, rel := range []string{
+		".git-pair/hooks/.pre-ready.swp",          // a vim swap file beside the point directory
+		".git-pair/hooks/pre-ready/.01-suite.swp", // and one inside it
+		".git-pair/hooks/pre-ready/01-suite~",     // an editor's backup of the hook
+		".git-pair/hooks/pre-ready/README.md",     // a note about the suite
+		".git-pair/hooks/pre-ready/02-off.sample", // git's own "no hook here" convention
+		".git-pair/hooks/pre-ready/sub/deep",      // discovery looks one level down, not through a tree
+		".git-pair/hooks/stray",                   // beside the points, where no point ever looks
+	} {
+		dropFile(t, f, rel, "not a hook\n")
+	}
+
+	after, namesAfter, err := TreeHash(repo.Dir)
+	if err != nil {
+		t.Fatalf("TreeHash: %v", err)
+	}
+	if after != before {
+		t.Errorf("an entry that cannot run moved the identity: %q then %q — the clone would lose a position nobody earned", before, after)
+	}
+	if len(namesAfter) != 1 || namesAfter[0] != "pre-ready/01-suite" {
+		t.Errorf("names = %v, want only the hook that can run", namesAfter)
+	}
+}
+
+// The other half of the same rule is the half that keeps the mechanism honest: a script discovery would run has to
+// sit inside the hash, or a repository could ship a new check that ran with nobody having read it. An identity that
+// was merely *narrower* than the run would be worse than the walk it replaces.
+func TestTreeHashCoversEveryHookDiscoveryRuns(t *testing.T) {
+	f, _, _ := hooksRepo(t, "#!/bin/sh\nexit 0\n")
+	repo := &git.Repo{Dir: f.Dir(), Env: f.Env()}
+	ctx := context.Background()
+
+	dropFile(t, f, ".git-pair/hooks/pre-ready/02-lint", "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(filepath.Join(f.Dir(), ".git-pair/hooks/pre-ready/02-lint"), 0o755); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	dropFile(t, f, ".git-pair/hooks/pre-ready/README.md", "# not a hook\n")
+
+	_, hashNames, err := TreeHash(repo.Dir)
+	if err != nil {
+		t.Fatalf("TreeHash: %v", err)
+	}
+
+	plan, err := Discover(ctx, repo, PreReady)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	var runs []string
+	for _, h := range plan.Hooks {
+		if h.Root == RootTracked {
+			runs = append(runs, filepath.Join(PreReady.String(), h.Name))
+		}
+	}
+	if strings.Join(runs, ",") != strings.Join(hashNames, ",") {
+		t.Errorf("discovery runs %v while the identity covers %v — a person cannot accept a set they cannot see", runs, hashNames)
+	}
+
+	// And the set is live: a new runnable script is new content, whether or not anybody told the hash about it.
+	if _, _, err := Accept(ctx, repo); err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	dropFile(t, f, ".git-pair/hooks/pre-ready/03-unread", "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(filepath.Join(f.Dir(), ".git-pair/hooks/pre-ready/03-unread"), 0o755); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	state, _, _, err := Trust(ctx, repo)
+	if err != nil {
+		t.Fatalf("Trust: %v", err)
+	}
+	if state != TrustChanged {
+		t.Errorf("after a new runnable hook appeared: state=%s, want changed — an unread script must not inherit an old acceptance", state)
+	}
+}
+
+// Upgrading must not ask a clean clone to read its hooks again. For a tree holding nothing but hooks, the new
+// identity is the old one byte for byte, so a position recorded under the previous release still answers for the
+// same content. The formula below is the walk's, spelled out rather than called, so the equality says something.
+func TestTreeHashUnchangedForATreeWithOnlyHooks(t *testing.T) {
+	body := "#!/bin/sh\nexit 0\n"
+	f, _, hook := hooksRepo(t, body)
+	repo := &git.Repo{Dir: f.Dir(), Env: f.Env()}
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	sum := sha256.Sum256([]byte(body))
+	line := fmt.Sprintf("pre-ready/01-suite\t1\t%s", hex.EncodeToString(sum[:]))
+	h := sha256.New()
+	h.Write([]byte(line))
+	h.Write([]byte{0})
+	want := hex.EncodeToString(h.Sum(nil)[:16])
+
+	got, _, err := TreeHash(repo.Dir)
+	if err != nil {
+		t.Fatalf("TreeHash: %v", err)
+	}
+	if got != want {
+		t.Errorf("TreeHash = %q, want the walk's %q — a release that only changes what gets ignored should not ask a clean clone to re-read its hooks", got, want)
+	}
+}
+
+// dropFile writes one file under the fixture, making whatever directories it needs. It is for the entries that
+// appear beside a hooks tree without ever being committed: an editor's droppings, a note, a template.
+func dropFile(t *testing.T, f *gittest.Fixture, rel, body string) {
+	t.Helper()
+	abs := filepath.Join(f.Dir(), rel)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(abs), err)
+	}
+	if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", abs, err)
 	}
 }

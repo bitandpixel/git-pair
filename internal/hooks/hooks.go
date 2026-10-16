@@ -335,11 +335,35 @@ func (r *Resolution) Discover(ctx context.Context, point Point) (Plan, error) {
 	return plan, nil
 }
 
-// collect reads one root for one point. A directory holds one hook per entry, in lexicographic order; a file
-// is the single-hook form. Entries a reader would not call a hook — a directory, a dot-file, git's own
-// `*.sample` convention — are passed over; everything else has to be executable, because a hook nobody made
-// executable is the most likely way a repository ends up believing it runs a check it never runs.
+// collect reads one root for one point, in the order the hooks run. The list itself comes from hookFiles: the one
+// rule that decides what runs, read the same way by the two things that have to agree.
 func collect(rootDir string, point Point, kind RootKind) ([]Hook, error) {
+	paths, err := hookFiles(rootDir, point)
+	if err != nil {
+		return nil, err
+	}
+	hooks := make([]Hook, 0, len(paths))
+	for _, p := range paths {
+		// The single-script form's file carries the point as its name, so a report reads the same for both forms:
+		// one event, one hook, named for the event it answers.
+		hooks = append(hooks, Hook{Point: point, Name: filepath.Base(p), Path: p, Root: kind})
+	}
+	return hooks, nil
+}
+
+// hookFiles lists the files under one root that answer one point: the single-script form as one path, or the
+// directory form's entries in lexicographic order. Entries a reader would not call a hook — a directory, a
+// dot-file, git's own `*.sample` convention, an editor's backup, a note — are passed over, and so is anything
+// that is not a regular file, since nothing runnable is there.
+//
+// This is the single answer to "what runs here", and it has two consumers that must never disagree. Discovery
+// executes exactly this list. The trust identity hashes exactly this list, because what a person is asked to
+// accept is the set of scripts that will execute on their machine: a swap file is not content anybody read, so it
+// has no business switching a check off, and a new script that would run has no business sitting outside the
+// acceptance that lets it run. Deriving the two independently is how they drift — and they had drifted, which is
+// the defect this answers. Hashing a recursive directory walk meant a `.pre-ready.swp` left beside a hook
+// invalidated the clone's position with a refusal that pointed at content nobody had edited.
+func hookFiles(rootDir string, point Point) ([]string, error) {
 	target := filepath.Join(rootDir, point.String())
 	info, err := os.Stat(target)
 	if errors.Is(err, os.ErrNotExist) {
@@ -349,9 +373,7 @@ func collect(rootDir string, point Point, kind RootKind) ([]Hook, error) {
 		return nil, fmt.Errorf("reading %s: %w", target, err)
 	}
 	if !info.IsDir() {
-		// The single-script form. The name is the point rather than the path, so a report reads the same for
-		// both forms: one event, one hook, named for the event it answers.
-		return []Hook{{Point: point, Name: point.String(), Path: target, Root: kind}}, nil
+		return []string{target}, nil
 	}
 	entries, err := os.ReadDir(target)
 	if err != nil {
@@ -359,21 +381,22 @@ func collect(rootDir string, point Point, kind RootKind) ([]Hook, error) {
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() || ignored(e.Name()) {
 			continue
 		}
-		if ignored(e.Name()) {
+		// An entry whose metadata cannot be read cannot be run either, so it is passed over rather than made
+		// fatal: discovery must not start failing because a file went away mid-enumeration.
+		if i, err := e.Info(); err != nil || !i.Mode().IsRegular() {
 			continue
 		}
 		names = append(names, e.Name())
 	}
 	sort.Strings(names)
-	hooks := make([]Hook, 0, len(names))
+	paths := make([]string, 0, len(names))
 	for _, n := range names {
-		p := filepath.Join(target, n)
-		hooks = append(hooks, Hook{Point: point, Name: n, Path: p, Root: kind})
+		paths = append(paths, filepath.Join(target, n))
 	}
-	return hooks, nil
+	return paths, nil
 }
 
 // ignored names the entries a hooks directory may hold that are not themselves hooks.

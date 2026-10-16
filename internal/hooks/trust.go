@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -140,7 +139,13 @@ func isTreeHash(s string) bool {
 	return true
 }
 
-// TreeHash hashes the tracked hooks tree: every regular file's path, whether it is executable, and its content.
+// TreeHash hashes the tracked hooks tree: the path of every file the runner would execute, whether it is
+// executable, and its content. "The files the runner would execute" is hookFiles — the same list discovery runs,
+// so one rule decides and two things read it: what a person is asked to accept is exactly what can run. The
+// recursive directory walk this replaces counted things that never run. An editor's `.pre-ready.swp` beside a hook
+// moved the hash, the clone lost its position, and the refusal named content nobody had edited; nested directories
+// and stray entries under the root counted too, though no point ever runs them. Both halves of that came from
+// asking the question twice.
 //
 // The executable bit is in the hash because it is part of what a hook is — making a script executable, or removing
 // it, changes what the repository is asking to run. Nothing else about the permission set is. git checks a file out
@@ -154,44 +159,39 @@ func isTreeHash(s string) bool {
 func TreeHash(workTree string) (string, []string, error) {
 	root := TrackedRootDir(workTree)
 	var files []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
+	for _, point := range allPoints {
+		paths, err := hookFiles(root, point)
 		if err != nil {
-			return err
+			return "", nil, err
 		}
-		if d.IsDir() {
-			return nil
+		for _, path := range paths {
+			info, err := os.Stat(path)
+			if errors.Is(err, os.ErrNotExist) {
+				// Gone between listing and reading. Nothing can run it, so it belongs to neither the run nor the
+				// acceptance, and a transient is not a reason to refuse a hand-off.
+				continue
+			}
+			if err != nil {
+				return "", nil, fmt.Errorf("reading %s: %w", path, err)
+			}
+			data, err := os.ReadFile(path)
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return "", nil, fmt.Errorf("reading %s: %w", path, err)
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return "", nil, err
+			}
+			content := sha256.Sum256(data)
+			executable := "0"
+			if info.Mode()&0o100 != 0 {
+				executable = "1"
+			}
+			files = append(files, fmt.Sprintf("%s\t%s\t%s", filepath.ToSlash(rel), executable, hex.EncodeToString(content[:])))
 		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		content := sha256.Sum256(data)
-		executable := "0"
-		if info.Mode()&0o100 != 0 {
-			executable = "1"
-		}
-		files = append(files, fmt.Sprintf("%s\t%s\t%s", filepath.ToSlash(rel), executable, hex.EncodeToString(content[:])))
-		return nil
-	})
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil, nil
-	}
-	if err != nil {
-		return "", nil, fmt.Errorf("reading %s: %w", root, err)
 	}
 	if len(files) == 0 {
 		return "", nil, nil
