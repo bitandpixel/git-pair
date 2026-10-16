@@ -93,17 +93,27 @@ would redirect every hook point, silently disabling whatever else a clone runs t
 unstaged half into the commit. It names the files and both ways out instead. When Prettier is not installed the
 commit proceeds with a warning, because the hook is the convenience and `check` is the rule.
 
-**Merging `main` in, and what conflicted.** `feat/hooks-position-scope` landed while this was open and rewrote
-the two hook-flag rows in README's command table and in `references/cli.md` and `references/hooks.md` — the
-same tables this pass pads, so all three conflicted. The merge keeps that change's wording and lets the
-formatter re-pad it, so nothing from either side is dropped; the record that arrived with it,
-`changesets/feat-hooks-position-scope/ABOUT.md`, is unformatted on `main` and this gate formats it. A merge
-rather than a rebase, because the changeset is declared: a rebase would rewrite the marker and leave a
-declaration naming history this branch no longer carries.
+**Merging `main` in, twice, and what conflicted both times.** `feat/hooks-position-scope` landed while this was
+open and rewrote the two hook-flag rows in README's command table and in `references/cli.md` and
+`references/hooks.md` — the same tables this pass pads, so all three conflicted, one region each. The merge
+keeps that change's wording and lets the formatter re-pad it, so nothing from either side is dropped. Then
+`chore/file-finished-plans` landed and moved nine finished plan directories from `docs/plans/` into
+`docs/plans/completed/`; four of those files conflicted because this pass had repadded them at the old path and
+git followed the rename into a content conflict. Both merges take main's text at main's path and let the
+formatter re-pad it. Each run also brought a record that is unformatted on `main`
+(`changesets/feat-hooks-position-scope/ABOUT.md`, then `changesets/chore-file-finished-plans/ABOUT.md`), which
+this gate formats — a landed change's record is tracked markdown like any other. A merge rather than a rebase
+each time, because the changeset is declared: a rebase would rewrite the marker and leave a declaration naming
+history this branch no longer carries.
+
+Each resolved file was then checked against main with an independent markdown parser at three levels — same
+tree shape, same sequence of top-level blocks, same normalized text — so "the formatter only re-padded it" is a
+checked claim rather than an assumption. One file needed more than that: see the note under Pay attention about
+`base-changeset-collapse/plan.md`.
 
 ## Pay attention
 
-Five documents were hand-repaired because their markdown was already malformed in a way the formatter made
+Six documents were hand-repaired because their markdown was already malformed in a way the formatter made
 worse. Each is a quoted sentence containing inline code, written as a single-backtick span nested in a
 single-backtick span — which markdown cannot express. Before, the inner backticks were swallowed at render and
 Prettier dropped the spaces around them; `TestDocumentsQuoteTheLandingSentencesTheCodeBuilds` was the thing that
@@ -113,13 +123,15 @@ visible, the way the builder prints it:
 - `README.md`, the stacked child's waiting sentence (§near "A parent that has not landed yet").
 - `skills/git-pair/references/cli.md`, the same sentence — here the inner backticks were already missing from
   the rendered text.
-- `docs/plans/base-changeset-collapse/plan.md`, `docs/plans/completed/declared-next-step/plan.md`,
-  `docs/plans/completed/landing-handoff-guidance/plan.md`, `docs/plans/publish-the-records/plan.md` — a code
-  span wrapped across a line break inside a list item, which Prettier re-prints differently on each pass, so
-  the file never converges and `format:check` fails it forever. The second one also used `\`` escapes inside a
-  code span, which do not work there.
+- `docs/plans/completed/base-changeset-collapse/plan.md`, `docs/plans/completed/declared-next-step/plan.md`,
+  `docs/plans/completed/landing-handoff-guidance/plan.md`, `docs/plans/completed/publish-the-records/plan.md` — a
+  code span wrapped across a line break inside a list item, which Prettier re-prints differently on each pass, so
+  one `mise run format` is not enough and `format:check` fails the file forever. The second one also used `\``
+escapes inside a code span, which do not work there. The first moved into `completed/` with the second merge and
+  needed the repair again there: taking main's copy of a moved file brings the defect back with it, which is why
+  the rule is written in README and not only in a commit message.
 
-Review those five diffs by hand. The rest of the pass is machine output.
+Review those six diffs by hand. The rest of the pass is machine output.
 
 Also worth a decision of your own: `.mise.toml` now installs node and prettier on every checkout and every CI
 run, and the hook is installed into the clone's shared hook directory (it is installed on this machine now,
@@ -132,8 +144,8 @@ which is why these commits came out formatted).
 - `mise run check` green: format, gofmt, vet, the sharded suite. The document contract tests are the ones that
   could have caught a formatter rewriting a sentence, and they pass:
   `go test ./internal/cli/ -run 'TestDocumentsQuoteTheLandingSentencesTheCodeBuilds|TestCommandsNamedInTheDocsExist|TestEveryCommandIsNamedInTheDocs|TestTheCommandTreeIsTheCommandSet|TestStackedExamplesShowTheWrittenPair|TestSkillFrontmatterIsLoadable|TestDefaultBranchEnvIsTheNameTheDocsTeach|TestNoDocNamesADurableRef'`
-- `mise run gates` green twice: at the head this was offered at (86s) and again at the merged head after `main`
-  came in (185s). That is `dev-profiles command verify` — what
+- `mise run gates` green three times: at the head this was offered at (86s), at the merged head after `main` came
+  in (185s), and again after the second merge (96s). That is `dev-profiles command verify` — what
   `.github/workflows/git-pair-check.yml` runs on a pull request, and what the merge job runs against the tree it
   is about to land: `E2E: all checks passed`, `PTY: all checks passed`, and
   `CI-INTEGRATE: all checks passed (132 checks)`. The replays build their own scratch repositories, so the hook
