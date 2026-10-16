@@ -202,6 +202,9 @@ type Resolution struct {
 	dirSet   bool
 	gitDir   string
 	dirErr   error
+	recSet   bool
+	recDirs  []string
+	recErr   error
 	trustSet bool
 	state    TrustState
 	accepted string
@@ -235,17 +238,32 @@ func (r *Resolution) gitDirAt(ctx context.Context) (string, error) {
 	return r.gitDir, r.dirErr
 }
 
+// recordDirsAt is the run's answer to where the clone's positions on the tracked hooks live, asked once for the
+// whole run for the same reason gitDirAt is asked once: the state decides whether the scripts run and whether
+// the gate calls a changeset ready, and neither question should walk the filesystem again per hook point.
+func (r *Resolution) recordDirsAt(ctx context.Context) ([]string, error) {
+	if !r.recSet {
+		gitDir, err := r.gitDirAt(ctx)
+		if err == nil {
+			r.recDirs = recordDirs(gitDir)
+		}
+		r.recErr = err
+		r.recSet = true
+	}
+	return r.recDirs, r.recErr
+}
+
 // Trust is TrustAt for a run that may already have asked the questions above, answered once for the whole
 // run. The state decides two things at once now — whether the tracked scripts run, and whether the gate will
 // call a changeset ready while they did not — so a run that asked it per hook point would walk the same
 // directory for every point and answer the same question each time.
 func (r *Resolution) Trust(ctx context.Context) (TrustState, string, string, error) {
 	if !r.trustSet {
-		gitDir, err := r.gitDirAt(ctx)
+		dirs, err := r.recordDirsAt(ctx)
 		if err != nil {
 			r.trustErr = err
 		} else {
-			r.state, r.accepted, r.current, r.trustErr = TrustAt(gitDir, r.repo.Dir)
+			r.state, r.accepted, r.current, r.trustErr = TrustAt(dirs, r.repo.Dir)
 		}
 		r.trustSet = true
 	}
@@ -257,11 +275,11 @@ func (r *Resolution) Trust(ctx context.Context) (TrustState, string, string, err
 // sentence beside a skipped run needs the recorded value itself, including the case where it no longer matches.
 func (r *Resolution) DeclinedHash(ctx context.Context) (string, error) {
 	if !r.declineSet {
-		gitDir, err := r.gitDirAt(ctx)
+		dirs, err := r.recordDirsAt(ctx)
 		if err != nil {
 			r.declineErr = err
 		} else {
-			r.declined, r.declineErr = DeclinedAt(gitDir)
+			r.declined, r.declineErr = DeclinedAt(dirs)
 		}
 		r.declineSet = true
 	}

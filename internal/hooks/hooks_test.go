@@ -306,11 +306,20 @@ func TestDeclineStates(t *testing.T) {
 		t.Errorf("Declined = %q (%v) after the new version, want the stale %q to stay reportable", got, err, want)
 	}
 
-	// The two records clear each other, in both directions. An acceptance beside an older decline would let a
-	// position about different content answer for this content, and a decline beside an older acceptance would
-	// report content the person has just declined as `changed` — telling them to re-read what they just read.
+	// The two positions still cancel each other, in both directions — but they cancel the hash being answered
+	// for, not the whole record. Accepting content you had declined, or declining content you had accepted, is one
+	// person changing their mind about the same bytes, and the other record must not go on saying otherwise.
+	//
+	// The direction that changed is the older acceptance. It used to be cleared, because with a single slot the
+	// mere presence of an acceptance made the content read as `changed`, which would tell a person to re-read what
+	// they had just read. Membership replaced that reading — a hash answers for the content it names and for no
+	// other — so the state below is decided by whether this tree is in the declined set, and the older acceptance
+	// is a fact about different content rather than a claim about this one. Clearing the file is not free any more
+	// either: the record is shared by every worktree of the clone, and a person declining the branch they are
+	// standing on would otherwise switch off the check a colleague's checkout had accepted on trunk.
 	writeHook("#!/bin/sh\nexit 0\n")
-	if _, _, err := Accept(ctx, repo); err != nil {
+	acceptedHash, _, err := Accept(ctx, repo)
+	if err != nil {
 		t.Fatalf("Accept after the decline: %v", err)
 	}
 	if got, err := Declined(ctx, repo); err != nil || got != "" {
@@ -330,7 +339,8 @@ func TestDeclineStates(t *testing.T) {
 	if state != TrustDeclined {
 		t.Errorf("state = %s after declining, want declined", state)
 	}
-	if accepted != "" {
-		t.Errorf("accepted = %q after declining, want the cleared record: the older acceptance must not make this content read as changed", accepted)
+	if accepted != acceptedHash {
+		t.Errorf("accepted = %q after declining, want the older acceptance %q to survive: it names content somebody did read, and another worktree may be standing on it",
+			accepted, acceptedHash)
 	}
 }

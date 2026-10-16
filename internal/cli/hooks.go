@@ -361,6 +361,10 @@ The tracked tree is trusted by content, not by a flag: any edit to any hook inva
 because the thing that was approved was that content. Four states describe a clone's relation to it —
 ` + "`accepted`" + `, ` + "`declined`" + `, ` + "`changed`" + `, ` + "`unrecorded`" + `. Only ` + "`accepted`" + ` runs the scripts.
 
+The record lives with the clone rather than with one working directory, so reading the scripts once covers every
+worktree cut from the repository — including ones cut later — and it holds one entry per version, so the branch
+that edits the suite does not invalidate what trunk's checkout accepted.
+
 The commands that start or advance work refuse while the tree is ` + "`changed`" + ` or ` + "`unrecorded`" + `: ` + "`init`" + ` before a
 changeset exists, ` + "`change ready`" + ` before the hand-off, ` + "`review submit`" + ` before the reviewer's content is
 staged, and the gate behind ` + "`check`" + ` and ` + "`change integrate`" + ` before a merge. A hand-off, a verdict and a
@@ -640,7 +644,9 @@ func acceptHooks(ctx context.Context, a *app, repo *git.Repo, gitDir string) err
 	for _, n := range names {
 		a.printf("  %s\n", n)
 	}
-	a.printf("recorded %s at %s\n", hash, displayPath(filepath.Join(gitDir, "git-pair", "trusted-hooks")))
+	// The path is printed because it is the file a reader deletes to undo this, and the answer belongs to the
+	// clone rather than the worktree: one reading here covers every worktree cut from this repository.
+	a.printf("recorded %s for this clone at %s\n", hash, displayPath(hooks.TrustedRecordPath(gitDir)))
 	return nil
 }
 
@@ -659,7 +665,7 @@ func declineHooks(ctx context.Context, a *app, repo *git.Repo, gitDir string) er
 	for _, n := range names {
 		a.printf("  %s\n", n)
 	}
-	a.printf("recorded %s at %s\n", hash, displayPath(filepath.Join(gitDir, "git-pair", "declined-hooks")))
+	a.printf("recorded %s for this clone at %s\n", hash, displayPath(hooks.DeclinedRecordPath(gitDir)))
 	a.printf("they will not run; a new version the repository commits is unrecorded again, not declined\n")
 	return nil
 }

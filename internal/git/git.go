@@ -273,6 +273,33 @@ func (r *Repo) GitDir(ctx context.Context) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// CommonDir is the git directory a clone shares with every worktree cut from it, and whether the directory
+// handed to it is a linked worktree's at all.
+//
+// The question exists because a worktree's own git directory (`.git/worktrees/<name>`) is where `--absolute-git-dir`
+// points, and data that is a fact about the *clone* — a person's position on the repository's tracked hooks, for
+// example — would otherwise be asked and answered once per worktree. git writes the answer itself into
+// `<gitdir>/commondir` when it creates a worktree and reads it back the same way, so the worktree case costs one
+// file read beside the files a command already reads and the plain clone costs nothing: it has no such file,
+// because its git directory *is* the common directory, and `false` says so instead of making the caller guess.
+//
+// The file is git's bookkeeping, one line, relative to the git directory or absolute. A caller that gets `false`
+// loses nothing: the directory it already holds is the right place to keep clone data.
+func CommonDir(gitDir string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(gitDir, "commondir"))
+	if err != nil {
+		return "", false
+	}
+	rel := strings.TrimSpace(string(data))
+	if rel == "" {
+		return "", false
+	}
+	if filepath.IsAbs(rel) {
+		return filepath.Clean(rel), true
+	}
+	return filepath.Clean(filepath.Join(gitDir, rel)), true
+}
+
 func (r *Repo) RevParse(ctx context.Context, rev string) (string, error) {
 	out, err := r.Git(ctx, "rev-parse", "--verify", "--quiet", rev)
 	if err != nil {

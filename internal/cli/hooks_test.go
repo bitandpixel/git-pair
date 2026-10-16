@@ -554,3 +554,37 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(data)
 }
+
+// The behaviour this exists for, at the surface a person with several worktrees actually stands at: read the
+// repository's checks once, and every worktree of the clone — including ones cut afterwards — is quiet.
+//
+// Before the record lived with the clone, each worktree asked the same question about the same bytes, and every
+// command that creates or advances work refused until somebody read the same dozen lines again. The tenth reading
+// is not a safety check, so the tenth worktree does not get to demand one.
+func TestHookTrustIsRecordedForTheWholeClone(t *testing.T) {
+	f := newRepo(t)
+	putHook(t, f, "tracked", "pre-ready", "01-suite", "#!/bin/sh\nexit 0\n")
+	first := filepath.Join(t.TempDir(), "first")
+	f.MustGit("worktree", "add", "-q", "-b", "hooks-first", first, "HEAD")
+
+	res := runIn(t, first, "hooks", "--trust").mustSucceed(t, "hooks --trust in a worktree")
+	mustContain(t, res.stdout, "for this clone", "the acceptance has to say whose answer it is, not this directory's")
+
+	// The checkout that was never asked. This is the one that used to answer `unrecorded` and refuse.
+	main := runIn(t, f.Dir(), "hooks", "--json").mustSucceed(t, "hooks --json in the main checkout")
+	mustContain(t, main.stdout, `"trust_state": "accepted"`, "the main checkout sees the position taken in a worktree")
+	mustContain(t, main.stdout, `"trusted": true`, "and runs the scripts on the strength of it")
+
+	// A worktree cut after the reading, which is the ordinary shape of the complaint: nobody asks about the
+	// first worktree, and every new one used to ask.
+	second := filepath.Join(t.TempDir(), "second")
+	f.MustGit("worktree", "add", "-q", "-b", "hooks-second", second, "HEAD")
+	next := runIn(t, second, "hooks", "--json").mustSucceed(t, "hooks --json in a later worktree")
+	mustContain(t, next.stdout, `"trust_state": "accepted"`, "a worktree created after the reading inherits it")
+
+	// The record is git-directory data, so no tree gets dirtied by recording it — and a record that landed in a
+	// working tree would be refused by the clean-tree check on the way to a hand-off.
+	if out := strings.TrimSpace(f.MustGit("status", "--porcelain")); out != "" {
+		t.Errorf("recording the position dirtied the working tree:\n%s", out)
+	}
+}
