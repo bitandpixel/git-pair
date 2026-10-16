@@ -163,7 +163,7 @@ func runChangeIntegrate(ctx context.Context, a *app, opts *integrateOptions) err
 		return err
 	}
 
-	g, err := a.integrationGate(ctx, s, opts.allowFeedback)
+	g, err := a.integrationGate(ctx, s, opts.allowFeedback, hooks.PreIntegrate, hooks.PostIntegrate)
 	if err != nil {
 		return err
 	}

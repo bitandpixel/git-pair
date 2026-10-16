@@ -112,7 +112,14 @@ func runChangeReady(ctx context.Context, a *app, opts *readyOptions) error {
 	// The repository's own scripts, before the hand-off rather than after it. The gate still asks — content can
 	// move under a recorded position — but the hand-off is where a reviewer is asked to spend their attention,
 	// and a queue that can fill up with work whose suite never ran is the thing the reviewer cannot see.
-	if err := a.hooksPositionRefusal(ctx, s.repo); err != nil {
+	// The repository's own scripts, on the way to the queue. This is the half nothing else can do: the built-in
+	// checks can only ask what git already knows — a clean tree, an existing ABOUT.md, a standing approval — so
+	// until here the first moment a changeset's content was ever verified was CI, after the hand-off. A pre-hook's
+	// nonzero exit refuses the operation, and it refuses it as exit 1: the invocation was right and the repository
+	// said no. The question is asked about the two points this command runs, so a repository whose only hook is
+	// `pre-check` does not stop a hand-off over a script no hand-off executes.
+	hooksPosition := []hooks.Point{hooks.PreReady, hooks.PostReady}
+	if err := a.hooksPositionRefusal(ctx, s.repo, hooksPosition...); err != nil {
 		return err
 	}
 

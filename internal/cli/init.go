@@ -125,12 +125,13 @@ func runChangeInit(ctx context.Context, a *app, opts *initOptions) error {
 	if opts.parent != "" && opts.parent == branch {
 		return &usageError{fmt.Errorf("--parent %s is the branch this changeset lives on, so the stack would move with every commit. Name the branch you branched off", branch)}
 	}
-	// The repository's own scripts, asked before anything exists to describe the work. A changeset is the unit
-	// the team's checks are measured against, so the earliest useful moment to say "this repository ships hooks
-	// and this clone has not answered about them" is the moment before you start one. Nothing has been written
-	// yet, so the refusal leaves no half-created changeset behind, and `git pair hooks` is never gated — reading
-	// the scripts is always available, including from here.
-	if err := a.hooksPositionRefusal(ctx, repo); err != nil {
+	// The repository's own scripts, said out loud before anything exists to describe the work. A changeset is the
+	// unit the team's checks are measured against, so the earliest useful moment to say "this repository ships
+	// hooks and this clone has not answered about them" is the moment before you start one. It is a warning and
+	// not a refusal: init runs no hook, so it has no check of its own resting on silence, and a block here would
+	// stop a changeset over a script it may never run. The refusal arrives with the first command that would run
+	// one, and `git pair hooks` is never gated — reading the scripts is always available, including from here.
+	if err := a.hooksUnrecordedNotice(ctx, repo); err != nil {
 		return err
 	}
 	base := opts.base

@@ -122,15 +122,18 @@ func TestTrustOnceRunsTheUnrecordedTreeAndRecordsNothing(t *testing.T) {
 		}
 	})
 
-	// The reported trap, end to end: the changeset under review is the one that rewrote the hook.
+	// The reported trap, end to end: the changeset under review is the one that rewrote the reviewer's own
+	// submission checks. A hook at some other point no longer blocks a submission at all — that is the scoping
+	// rule, pinned in `TestThePositionIsAskedOnlyWhereTheCommandRuns` — so this is the case the flag is for.
 	t.Run("the reviewer of a hook change can submit", func(t *testing.T) {
 		f, _ := newChangeset(t, "tighten-hooks", "main")
-		putHook(t, f, "tracked", "pre-ready", "01-suite", passHook)
+		putHook(t, f, "tracked", "pre-submit", "01-policy", passHook)
 		trustHooks(t, f)
 		ready(t, f)
 
-		// The repository ships a new version of the suite. The clone's position is about the old content.
-		putHook(t, f, "tracked", "pre-ready", "01-suite", "#!/bin/sh\nexit 0\n# rewritten\n")
+		// The changeset rewrites the script the submission is about to run. The clone's position is about the
+		// old content.
+		putHook(t, f, "tracked", "pre-submit", "01-policy", "#!/bin/sh\nexit 0\n# rewritten\n")
 
 		blocked := runIn(t, f.Dir(), "review", "submit", "--feedback", "-m", "the rewritten hook is wrong")
 		if blocked.code == 0 {
@@ -159,15 +162,10 @@ func TestTrustOnceRunsTheUnrecordedTreeAndRecordsNothing(t *testing.T) {
 		dir := scratch(t)
 		putHook(t, f, "tracked", "pre-check", "01-suite", touch(dir, "RAN_CHECK"))
 
-		// The route the flag is made for: each command runs the unrecorded checks for itself and records
-		// nothing, so the next one asks again. Committing the hook after an approval would be a different
-		// refusal — the gate would name content that moved since the verdict — so it comes first.
-		runIn(t, f.Dir(), "change", "ready", "--trust-hooks-once").mustSucceed(t, "change", "ready", "--trust-hooks-once")
-		if res := runIn(t, f.Dir(), "review", "submit", "--approve"); res.code == 0 {
-			t.Fatalf("the submission went through with no position recorded, so this case proves nothing\n%s", res.stderr)
-		}
-		runIn(t, f.Dir(), "review", "submit", "--approve", "--trust-hooks-once").
-			mustSucceed(t, "review", "submit", "--approve", "--trust-hooks-once")
+		// The hand-off and the submission run no script from this tree at all, so neither asks — see
+		// `TestThePositionIsAskedOnlyWhereTheCommandRuns`. The gate is the command that does.
+		ready(t, f)
+		submit(t, f, "approve")
 
 		if res := runIn(t, f.Dir(), "check", "--json"); res.json(t)["ready"] != false {
 			t.Fatalf("check answered ready with no position recorded, so this case proves nothing")

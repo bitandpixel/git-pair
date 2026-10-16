@@ -186,7 +186,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	if err != nil {
 		return err
 	}
-	g, err := a.integrationGate(ctx, s, allowFeedback)
+	g, err := a.integrationGate(ctx, s, allowFeedback, hooks.PreCheck, hooks.PostCheck)
 	if err != nil {
 		return err
 	}
@@ -446,7 +446,7 @@ func (g integrationGate) Declared() *lifecycle.Event {
 	return nil
 }
 
-func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback bool) (*integrationGate, error) {
+func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback bool, points ...hooks.Point) (*integrationGate, error) {
 	// The tree question — is the reviewed content still what HEAD carries? — is the one `status` asks
 	// observationally and the gate has to answer as a verdict. Asking it through the same derivation is
 	// what keeps the two from disagreeing about what drift is.
@@ -519,8 +519,11 @@ func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback boo
 	// branch, and the one a green verdict used to hide. It lives in the gate rather than in the report beside it
 	// because the difference is the verdict — `check` used to answer "ready" while the checks the repository
 	// asked for were skipped for want of a recorded position, and a pipeline that merged on that answer merged
-	// work the team's own suite never saw.
-	hooksReason, err := a.hooksPositionReason(ctx, s.repo)
+	// work the team's own suite never saw. The caller names the points it runs, because the gate is shared and
+	// the two commands do not run the same ones: `check` runs `pre-check` and `post-check`, and a declaration
+	// runs `pre-integrate` and `post-integrate`. Asking about both from both would stop a merge over a script
+	// neither command executes.
+	hooksReason, err := a.hooksPositionReason(ctx, s.repo, points...)
 	if err != nil {
 		return nil, err
 	}

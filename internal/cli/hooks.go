@@ -654,11 +654,19 @@ func reportUnknown(a *app, rep hooksReport, found []unknownEntry) {
 // scripts: a tracked hooks tree this clone has recorded no position on carries checks that have not run, and
 // git-pair does not build on top of that silence.
 //
-// The reviewer asked for it as early as it can be asked — "it should be obvious as early as possible that there
-// are hooks that repo owner wants run" — so it is met at `init`, before a directory exists, at `change ready`,
-// before the hand-off, at `review submit`, before the reviewer's content is staged, and at the gate, where
-// `check` and `change integrate` refuse the merge. One sentence on every surface, because a person who meets it
-// twice should read the same words and the same two ways out, not a different refusal each time.
+// The question is asked about the points the caller names — the ones that command runs. A repository that ships
+// only a `pre-ready` suite is not a reason to stop `git pair check`, which runs `pre-check` and `post-check` and
+// would otherwise ask a person to read a script this command cannot execute. Proportionality is what keeps the
+// demand answerable: `Trust` still decides over the whole tree, because a position is about content and a check
+// nobody has read is still what `accepted` and `declined` exist to answer. A team that adds a second script to a
+// point you already accepted changes the hash, and you are asked again — at the command that runs it.
+//
+// The reviewer asked for the existence of the checks to be obvious as early as it can be — "it should be obvious
+// as early as possible that there are hooks that repo owner wants run". `init` meets that with a warning rather
+// than a refusal, because it runs no point at all and a refusal there can only mean "proceed without anybody
+// reading them". `change ready` asks before the hand-off, `review submit` before the reviewer's content is
+// staged, and the gate before a merge — always the same sentence, because a person who meets it twice should read
+// the same words and the same two ways out, not a different refusal each time.
 //
 // `accepted` answers it by running the scripts. `declined` answers it differently: a person read them and chose
 // not to run them here, which is a position rather than an absence, and is what lets the tool ask for one without
@@ -674,11 +682,20 @@ func reportUnknown(a *app, rep hooksReport, found []unknownEntry) {
 // The off switch is not an answer either. `GIT_PAIR_HOOKS=0` and `git-pair.hooks=false` say a machine does not
 // want to run scripts right now, which says nothing about what those scripts do; the position is
 // `git pair hooks --decline`, written down where the next reader can see it was taken.
-func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo) (string, error) {
+func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo, points ...hooks.Point) (string, error) {
 	if a.hooksTrustOnce {
 		// The question the refusal asks is whether the repository's checks are resting on silence, and under
 		// `--trust-hooks-once` they are not: the scripts run for this command, and their own verdicts arrive as
 		// results and reasons. What the flag does not do is leave a position behind, so the next command asks again.
+		return "", nil
+	}
+	scripts, err := hooks.TrackedHooksAt(repo.Dir, points...)
+	if err != nil {
+		return "", err
+	}
+	if len(scripts) == 0 {
+		// Nothing this command runs comes from the repository's scripts, so nothing this command reports rests on
+		// their silence. Asking for a position here would be asking a person to read what cannot execute.
 		return "", nil
 	}
 	state, accepted, current, err := a.hookRun(repo).Trust(ctx)
@@ -706,11 +723,40 @@ func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo) (string, 
 		root, once), nil
 }
 
+// hooksUnrecordedNotice is what `git pair init` says, and only says, about a tracked hooks tree this clone has
+// taken no position on.
+//
+// init runs no hooks, so it has no point to ask about, and a refusal there could only mean "start nothing until
+// somebody reads these": a block before anything is at stake, on content the changeset may never touch. What init
+// does instead is make the checks obvious at the earliest moment a person meets the repository, which is the
+// reviewer's own requirement. The refusal arrives with the first command that would run one of them, and
+// `git pair hooks` prints them from here.
+func (a *app) hooksUnrecordedNotice(ctx context.Context, repo *git.Repo) error {
+	state, _, _, err := a.hookRun(repo).Trust(ctx)
+	if err != nil {
+		return err
+	}
+	if state == hooks.TrustAccepted || state == hooks.TrustDeclined {
+		return nil
+	}
+	scripts, err := hooks.TrackedHooksAt(repo.Dir, hooks.AllPoints()...)
+	if err != nil || len(scripts) == 0 {
+		return err
+	}
+	root := displayPath(hooks.TrackedRootDir(repo.Dir))
+	what := fmt.Sprintf("ships %d hook(s) under %s that this clone has not read", len(scripts), root)
+	if state == hooks.TrustChanged {
+		what = fmt.Sprintf("changed %d hook(s) under %s since this clone read them", len(scripts), root)
+	}
+	a.warn("git-pair: warning: this repository %s; `git pair hooks` prints them, and the first command that runs one asks for a position\n", what)
+	return nil
+}
+
 // hooksPositionRefusal is the same question as an error, for the commands that refuse rather than report. It is a
 // business refusal (exit 1) like a dirty tree or a failing pre-hook: the invocation was right, and the clone has
 // a step to take. Nothing is written before it, so a refusal leaves the repository as it was found.
-func (a *app) hooksPositionRefusal(ctx context.Context, repo *git.Repo) error {
-	reason, err := a.hooksPositionReason(ctx, repo)
+func (a *app) hooksPositionRefusal(ctx context.Context, repo *git.Repo, points ...hooks.Point) error {
+	reason, err := a.hooksPositionReason(ctx, repo, points...)
 	if err != nil {
 		return err
 	}
