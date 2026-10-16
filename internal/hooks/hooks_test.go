@@ -436,3 +436,46 @@ func TestGuardValueSwitchesHooksOff(t *testing.T) {
 		}
 	}
 }
+
+// What a command would run from the tracked root, and nothing else.
+//
+// This list is the boundary of the position question: a command asks a person to read scripts only when one of
+// them is about to execute. Listing the whole tree would stop `git pair check` over a `pre-ready` suite no check
+// runs, and listing the clone's own root would ask for consent that was never owed — the per-clone scripts
+// arrived on this machine by this person's own hand.
+func TestTrackedHooksAtNamesOnlyThePointsAskedFor(t *testing.T) {
+	f, _, path := hooksRepo(t, "#!/bin/sh\nexit 0\n")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("fixture hook missing: %v", err)
+	}
+	// A second point, and the clone's own root, which must never appear.
+	f.Commit("a reviewer's own check", gittest.WithFile(".git-pair/hooks/pre-check/01-clone-side", "#!/bin/sh\nexit 0\n"))
+	gitDir := strings.TrimSpace(f.MustGit("rev-parse", "--absolute-git-dir"))
+	if err := os.MkdirAll(filepath.Join(gitDir, "git-pair", "hooks", "pre-ready"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "git-pair", "hooks", "pre-ready", "mine"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	got, err := TrackedHooksAt(f.Dir(), PreReady)
+	if err != nil {
+		t.Fatalf("TrackedHooksAt: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "01-suite" || got[0].Root != RootTracked {
+		t.Errorf("pre-ready = %+v, want the one tracked hook", got)
+	}
+	if got, err := TrackedHooksAt(f.Dir(), PreCheck); err != nil || len(got) != 1 || got[0].Name != "01-clone-side" {
+		t.Errorf("pre-check = %+v (%v), want the one tracked hook", got, err)
+	}
+	if got, err := TrackedHooksAt(f.Dir(), PreSubmit); err != nil || len(got) != 0 {
+		t.Errorf("pre-submit = %+v (%v), want nothing: this repository configures none there", got, err)
+	}
+	if got, err := TrackedHooksAt(f.Dir()); err != nil || len(got) != 0 {
+		t.Errorf("no points = %+v (%v), want nothing", got, err)
+	}
+	// Both points, in the order the caller asked for them.
+	if got, err := TrackedHooksAt(f.Dir(), PreCheck, PreReady); err != nil || len(got) != 2 || got[0].Point != PreCheck {
+		t.Errorf("both = %+v (%v), want two hooks starting with pre-check", got, err)
+	}
+}

@@ -62,6 +62,7 @@ Exit codes: 0 integration-ready, 1 not ready, 2 usage, 3 git failed.`,
 		Example: `  git pair check
   git pair check --allow-feedback
   git pair check --trust-hooks-once
+  git pair check --no-hooks
   git pair check --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -70,10 +71,14 @@ Exit codes: 0 integration-ready, 1 not ready, 2 usage, 3 git failed.`,
 	}
 	cmd.Flags().BoolVar(&allowFeedback, "allow-feedback", false,
 		"accept non-blocking feedback as sufficient for integration")
-	// `--trust-hooks-once` and not `--no-hooks`: this is the verdict a merge runs on, and a flag one keystroke from
-	// "the repository's checks did not run" is the thing the gate exists to refuse. Running the checks the
-	// clone has not recorded is the opposite direction, so it is offered.
+	// Both hook flags are on the verdict, in opposite directions. `--trust-hooks-once` runs the scripts the clone
+	// has not recorded, which is more checking. `--no-hooks` runs none of them, which is less, and is here because
+	// this verdict is what a person reads to find out what is wrong: a hook that fails or misbehaves should not
+	// also stop the gate from answering the other questions. It does not buy a clear gate from an unread tree —
+	// the position refusal stands, because the off switch says nothing about what the scripts do — and what it did
+	// is reported, hook by hook, as `skipped-by-flag`. The integrate job runs `git pair check` without either flag.
 	trustHooksOnceFlag(cmd, a)
+	noHooksFlag(cmd, a)
 	return cmd
 }
 
@@ -186,7 +191,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	if err != nil {
 		return err
 	}
-	g, err := a.integrationGate(ctx, s, allowFeedback)
+	g, err := a.integrationGate(ctx, s, allowFeedback, hooks.PreCheck, hooks.PostCheck)
 	if err != nil {
 		return err
 	}
@@ -446,7 +451,7 @@ func (g integrationGate) Declared() *lifecycle.Event {
 	return nil
 }
 
-func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback bool) (*integrationGate, error) {
+func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback bool, points ...hooks.Point) (*integrationGate, error) {
 	// The tree question — is the reviewed content still what HEAD carries? — is the one `status` asks
 	// observationally and the gate has to answer as a verdict. Asking it through the same derivation is
 	// what keeps the two from disagreeing about what drift is.
@@ -519,8 +524,11 @@ func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback boo
 	// branch, and the one a green verdict used to hide. It lives in the gate rather than in the report beside it
 	// because the difference is the verdict — `check` used to answer "ready" while the checks the repository
 	// asked for were skipped for want of a recorded position, and a pipeline that merged on that answer merged
-	// work the team's own suite never saw.
-	hooksReason, err := a.hooksPositionReason(ctx, s.repo)
+	// work the team's own suite never saw. The caller names the points it runs, because the gate is shared and
+	// the two commands do not run the same ones: `check` runs `pre-check` and `post-check`, and a declaration
+	// runs `pre-integrate` and `post-integrate`. Asking about both from both would stop a merge over a script
+	// neither command executes.
+	hooksReason, err := a.hooksPositionReason(ctx, s.repo, points...)
 	if err != nil {
 		return nil, err
 	}

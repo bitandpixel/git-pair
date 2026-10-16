@@ -93,6 +93,14 @@ would redirect every hook point, silently disabling whatever else a clone runs t
 unstaged half into the commit. It names the files and both ways out instead. When Prettier is not installed the
 commit proceeds with a warning, because the hook is the convenience and `check` is the rule.
 
+**Merging `main` in, and what conflicted.** `feat/hooks-position-scope` landed while this was open and rewrote
+the two hook-flag rows in README's command table and in `references/cli.md` and `references/hooks.md` — the
+same tables this pass pads, so all three conflicted. The merge keeps that change's wording and lets the
+formatter re-pad it, so nothing from either side is dropped; the record that arrived with it,
+`changesets/feat-hooks-position-scope/ABOUT.md`, is unformatted on `main` and this gate formats it. A merge
+rather than a rebase, because the changeset is declared: a rebase would rewrite the marker and leave a
+declaration naming history this branch no longer carries.
+
 ## Pay attention
 
 Five documents were hand-repaired because their markdown was already malformed in a way the formatter made
@@ -124,7 +132,8 @@ which is why these commits came out formatted).
 - `mise run check` green: format, gofmt, vet, the sharded suite. The document contract tests are the ones that
   could have caught a formatter rewriting a sentence, and they pass:
   `go test ./internal/cli/ -run 'TestDocumentsQuoteTheLandingSentencesTheCodeBuilds|TestCommandsNamedInTheDocsExist|TestEveryCommandIsNamedInTheDocs|TestTheCommandTreeIsTheCommandSet|TestStackedExamplesShowTheWrittenPair|TestSkillFrontmatterIsLoadable|TestDefaultBranchEnvIsTheNameTheDocsTeach|TestNoDocNamesADurableRef'`
-- `mise run gates` green in 86s. That is `dev-profiles command verify` — what
+- `mise run gates` green twice: at the head this was offered at (86s) and again at the merged head after `main`
+  came in (185s). That is `dev-profiles command verify` — what
   `.github/workflows/git-pair-check.yml` runs on a pull request, and what the merge job runs against the tree it
   is about to land: `E2E: all checks passed`, `PTY: all checks passed`, and
   `CI-INTEGRATE: all checks passed (132 checks)`. The replays build their own scratch repositories, so the hook

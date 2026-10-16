@@ -182,8 +182,9 @@ func (a *app) runPoint(ctx context.Context, s *session, c hookContext, mode runM
 		// The person asked for no scripts in this command. Everything configured is still reported, as the
 		// outcomes that did not run: a hand-off that skipped the suite has to be distinguishable from one that
 		// ran it, in the same array a machine already reads. `--no-hooks` is the per-command form of the off
-		// switch, so it goes as far as the off switch goes — it never answers for the tracked tree, which is
-		// what the commands that ask for a position refuse.
+		// switch and it goes one step further than the environment variable: because the person asked about this
+		// command and the report names every hook that did not run, it also answers the position question for this
+		// invocation. `hooksPositionReason` is where that decision, and what it gives up, are written down.
 		results := plan.SkippedByFlag()
 		a.warn("git-pair: --no-hooks: %d hook(s) at %s did not run\n", len(results), c.Point)
 		for _, r := range results {
@@ -336,10 +337,14 @@ func hookReasons(results []hooks.Result) []string {
 // flag means the same thing everywhere it appears, and a person who meets it on two commands should read the
 // same sentence rather than wonder whether the second one skips less than the first.
 //
-// It is offered on the commands that can be undone — the hand-off, the withdrawal, the ending, the submission —
-// and not on the two that declare a merge. `check` and `change integrate` are where a green answer has to mean
-// the repository's checks ran, and a flag one keystroke away from that answer is the thing the gate exists to
-// refuse.
+// It is offered on every command that runs the repository's scripts, the gate and the declaration included. It
+// was once kept off `check` and `change integrate` on the grounds that a green verdict must not sit one keystroke
+// from "the checks did not run". That ground turned out to be a local verdict nothing lands on: what lands work is
+// the integrate job's own verification of the merged tree, which runs `git pair check` without this flag and
+// cannot be talked out of it, and the scripts a person skips locally are the same scripts that job declines to
+// take on trust. What the flag does to a local answer stays visible rather than quiet — every configured hook
+// arrives as `status: "skipped-by-flag"`, on stderr and in `hooks[]` — and it still does not answer the position
+// question, because declining to run a script is not the same as having read one.
 func noHooksFlag(cmd *cobra.Command, a *app) {
 	cmd.Flags().BoolVar(&a.hooksOff, "no-hooks", false,
 		"run none of this repository's or this clone's hooks for this command, and report that none ran")
@@ -350,10 +355,10 @@ func noHooksFlag(cmd *cobra.Command, a *app) {
 // scripts, for this one invocation — because a flag called "trust" that a person reads as a general trust
 // decision would be the wrong instrument to reach for.
 //
-// It is offered where it makes checking more likely — the hand-off, the submission, the gate, the declaration —
-// and never where it would make checking less likely, which is why it sits beside `--no-hooks` on two commands
-// and alone on the other two. `git pair hooks --trust` is still the answer for a team that wants the scripts to
-// run regularly: it records that somebody read them, which is the part a flag cannot do on a person's behalf.
+// It is offered where it makes checking more likely — the hand-off, the submission, the gate, the declaration.
+// It travels the opposite way from `--no-hooks`, which makes checking less likely: both are a person's decision
+// about one invocation, and neither records the position that `git pair hooks --trust` exists to record, which is
+// the part a flag cannot do on a person's behalf.
 func trustHooksOnceFlag(cmd *cobra.Command, a *app) {
 	cmd.Flags().BoolVar(&a.hooksTrustOnce, "trust-hooks-once", false,
 		"run this repository's tracked hooks for this command without recording a position on them")
@@ -436,12 +441,16 @@ The record lives with the clone rather than with one working directory, so readi
 worktree cut from the repository — including ones cut later — and it holds one entry per version, so the branch
 that edits the suite does not invalidate what trunk's checkout accepted.
 
-The commands that start or advance work refuse while the tree is ` + "`changed`" + ` or ` + "`unrecorded`" + `: ` + "`init`" + ` before a
-changeset exists, ` + "`change ready`" + ` before the hand-off, ` + "`review submit`" + ` before the reviewer's content is
-staged, and the gate behind ` + "`check`" + ` and ` + "`change integrate`" + ` before a merge. A hand-off, a verdict and a
-merge should not rest on checks that never ran. What still works with nothing recorded is this command, and
-the two that take work out of the queue — ` + "`change unready`" + ` and ` + "`change abandon`" + `: reading the scripts and
-putting the work down are what you do because you have not decided yet.
+The commands that run the repository's scripts refuse while the tree is ` + "`changed`" + ` or ` + "`unrecorded`" + ` — but only
+the scripts *they* run. ` + "`change ready`" + ` asks about ` + "`pre-ready`" + ` and ` + "`post-ready`" + `, ` + "`review submit`" + ` about ` + "`pre-submit`" + ` and
+` + "`post-submit`" + `, ` + "`check`" + ` about ` + "`pre-check`" + ` and ` + "`post-check`" + `, and ` + "`change integrate`" + ` about ` + "`pre-integrate`" + ` and
+` + "`post-integrate`" + `. A hand-off, a verdict and a merge should not rest on checks that never ran; a command that
+runs none of them has nothing to rest on, so a repository whose only hook is a ` + "`pre-ready`" + ` suite does not stop
+` + "`git pair check`" + `. The position itself is always about the whole tree — the record is one hash of what can
+execute, and a script added later is a new question, asked where it runs. ` + "`init`" + ` runs no hook, so it warns
+instead of refusing, and the refusal arrives with the first command that would execute one. What still works with
+nothing recorded is this command, and the two that take work out of the queue — ` + "`change unready`" + ` and
+` + "`change abandon`" + `: reading the scripts and putting the work down are what you do because you have not decided yet.
 
 ` + "`--decline`" + ` is the other position a person can take: read the scripts, choose not to run them here. It is
 recorded against the same content hash as an acceptance, so the next version the repository ships is
@@ -654,11 +663,19 @@ func reportUnknown(a *app, rep hooksReport, found []unknownEntry) {
 // scripts: a tracked hooks tree this clone has recorded no position on carries checks that have not run, and
 // git-pair does not build on top of that silence.
 //
-// The reviewer asked for it as early as it can be asked — "it should be obvious as early as possible that there
-// are hooks that repo owner wants run" — so it is met at `init`, before a directory exists, at `change ready`,
-// before the hand-off, at `review submit`, before the reviewer's content is staged, and at the gate, where
-// `check` and `change integrate` refuse the merge. One sentence on every surface, because a person who meets it
-// twice should read the same words and the same two ways out, not a different refusal each time.
+// The question is asked about the points the caller names — the ones that command runs. A repository that ships
+// only a `pre-ready` suite is not a reason to stop `git pair check`, which runs `pre-check` and `post-check` and
+// would otherwise ask a person to read a script this command cannot execute. Proportionality is what keeps the
+// demand answerable: `Trust` still decides over the whole tree, because a position is about content and a check
+// nobody has read is still what `accepted` and `declined` exist to answer. A team that adds a second script to a
+// point you already accepted changes the hash, and you are asked again — at the command that runs it.
+//
+// The reviewer asked for the existence of the checks to be obvious as early as it can be — "it should be obvious
+// as early as possible that there are hooks that repo owner wants run". `init` meets that with a warning rather
+// than a refusal, because it runs no point at all and a refusal there can only mean "proceed without anybody
+// reading them". `change ready` asks before the hand-off, `review submit` before the reviewer's content is
+// staged, and the gate before a merge — always the same sentence, because a person who meets it twice should read
+// the same words and the same two ways out, not a different refusal each time.
 //
 // `accepted` answers it by running the scripts. `declined` answers it differently: a person read them and chose
 // not to run them here, which is a position rather than an absence, and is what lets the tool ask for one without
@@ -671,14 +688,37 @@ func reportUnknown(a *app, rep hooksReport, found []unknownEntry) {
 // rather than putting it in, and a person who cannot run the checks is exactly the person who needs to put the
 // work down. Refusing them would turn the safety mechanism into a trap.
 //
-// The off switch is not an answer either. `GIT_PAIR_HOOKS=0` and `git-pair.hooks=false` say a machine does not
-// want to run scripts right now, which says nothing about what those scripts do; the position is
-// `git pair hooks --decline`, written down where the next reader can see it was taken.
-func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo) (string, error) {
+// The environment off switch is not an answer. `GIT_PAIR_HOOKS=0` and `git-pair.hooks=false` are ambient — a shell
+// profile or a CI image sets one and every command in the clone goes quiet about scripts it never ran — and they
+// report nothing, so they still refuse. `--no-hooks` is deliberate, one command at a time, and names every hook it
+// skipped in the report the command already produces; that is the difference that lets it answer the question and
+// leaves the off switch out.
+//
+// The decision to let `--no-hooks` answer it was the destination owner's, on the grounds that skipping the scripts
+// has to stay an escape someone can always reach. What it gives up is the only forcing function the question had:
+// while a refusal stood in the way, reading the scripts was the cheapest way through, and now nothing requires it.
+// The argument set aside is in this changeset's record under "Skipping is an escape hatch", so the line below can
+// be re-read against it if the state of a clone's hooks ever turns out to matter more than expected.
+func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo, points ...hooks.Point) (string, error) {
+	// `--trust-hooks-once` answers the question by running the scripts: their own verdicts arrive as results and
+	// reasons, so the command does not rest on silence. It leaves no position behind, so the next command asks again.
 	if a.hooksTrustOnce {
-		// The question the refusal asks is whether the repository's checks are resting on silence, and under
-		// `--trust-hooks-once` they are not: the scripts run for this command, and their own verdicts arrive as
-		// results and reasons. What the flag does not do is leave a position behind, so the next command asks again.
+		return "", nil
+	}
+	// `--no-hooks` answers it by being the escape hatch, and writes nothing: `git pair hooks` still reports the
+	// tree as unrecorded, and each configured hook still arrives as `skipped-by-flag`, so the run says what it did
+	// not do. The clone's position is untouched, which is what keeps this different from `git pair hooks --trust`
+	// and `--decline` rather than a cheaper way to take one.
+	if a.hooksOff {
+		return "", nil
+	}
+	scripts, err := hooks.TrackedHooksAt(repo.Dir, points...)
+	if err != nil {
+		return "", err
+	}
+	if len(scripts) == 0 {
+		// Nothing this command runs comes from the repository's scripts, so nothing this command reports rests on
+		// their silence. Asking for a position here would be asking a person to read what cannot execute.
 		return "", nil
 	}
 	state, accepted, current, err := a.hookRun(repo).Trust(ctx)
@@ -697,7 +737,7 @@ func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo) (string, 
 	// that would otherwise end in a flag nobody thought to look for. `git pair hooks --trust` and `--decline` are
 	// named here too, and are nobody's flag to type on their behalf either; who may type what is the skill's rule,
 	// not something this sentence can enforce.
-	const once = "; if you are reading them in order to review a change to the scripts themselves, `--trust-hooks-once` runs them for this command alone and records nothing"
+	const once = "; if you are reading them in order to review a change to the scripts themselves, `--trust-hooks-once` runs them for this command alone; `--no-hooks` skips them for this command alone. Either way nothing is recorded, and the next command asks again"
 	if state == hooks.TrustChanged {
 		return fmt.Sprintf("the repository's tracked hooks under %s changed since this clone recorded them (recorded %s, the tree is now %s): the checks they carry have not run on this content — read what moved, then `git pair hooks --trust` to run it or `git pair hooks --decline` to record that you read it and chose not to%s",
 			root, short(accepted), short(current), once), nil
@@ -706,11 +746,40 @@ func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo) (string, 
 		root, once), nil
 }
 
+// hooksUnrecordedNotice is what `git pair init` says, and only says, about a tracked hooks tree this clone has
+// taken no position on.
+//
+// init runs no hooks, so it has no point to ask about, and a refusal there could only mean "start nothing until
+// somebody reads these": a block before anything is at stake, on content the changeset may never touch. What init
+// does instead is make the checks obvious at the earliest moment a person meets the repository, which is the
+// reviewer's own requirement. The refusal arrives with the first command that would run one of them, and
+// `git pair hooks` prints them from here.
+func (a *app) hooksUnrecordedNotice(ctx context.Context, repo *git.Repo) error {
+	state, _, _, err := a.hookRun(repo).Trust(ctx)
+	if err != nil {
+		return err
+	}
+	if state == hooks.TrustAccepted || state == hooks.TrustDeclined {
+		return nil
+	}
+	scripts, err := hooks.TrackedHooksAt(repo.Dir, hooks.AllPoints()...)
+	if err != nil || len(scripts) == 0 {
+		return err
+	}
+	root := displayPath(hooks.TrackedRootDir(repo.Dir))
+	what := fmt.Sprintf("ships %d hook(s) under %s that this clone has not read", len(scripts), root)
+	if state == hooks.TrustChanged {
+		what = fmt.Sprintf("changed %d hook(s) under %s since this clone read them", len(scripts), root)
+	}
+	a.warn("git-pair: warning: this repository %s; `git pair hooks` prints them, and the first command that runs one asks for a position\n", what)
+	return nil
+}
+
 // hooksPositionRefusal is the same question as an error, for the commands that refuse rather than report. It is a
 // business refusal (exit 1) like a dirty tree or a failing pre-hook: the invocation was right, and the clone has
 // a step to take. Nothing is written before it, so a refusal leaves the repository as it was found.
-func (a *app) hooksPositionRefusal(ctx context.Context, repo *git.Repo) error {
-	reason, err := a.hooksPositionReason(ctx, repo)
+func (a *app) hooksPositionRefusal(ctx context.Context, repo *git.Repo, points ...hooks.Point) error {
+	reason, err := a.hooksPositionReason(ctx, repo, points...)
 	if err != nil {
 		return err
 	}

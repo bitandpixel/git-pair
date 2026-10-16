@@ -370,6 +370,30 @@ func (r *Resolution) Discover(ctx context.Context, point Point) (Plan, error) {
 	return plan, nil
 }
 
+// TrackedHooksAt lists the hooks the tracked root would run for these points, in the order they would run.
+//
+// It is what the position question asks about, because the question has to be proportional to the demand. A
+// command that runs none of the repository's scripts has no checks resting on silence, and stopping it to ask a
+// person to read scripts that cannot execute here is exactly the pressure that makes people accept without
+// reading — the failure mode the consent design exists to avoid. The per-clone root is not in the answer: those
+// scripts arrived on this machine by this person's own hand and were never a consent question.
+//
+// The record stays what it always was — a position on the whole tracked tree, hashed over every point. Scoping
+// this list scopes the *question*, not the answer: a team that adds a second script to a point you accepted
+// changes the hash, and you are asked again, at the command that runs it.
+func TrackedHooksAt(workTree string, points ...Point) ([]Hook, error) {
+	root := TrackedRootDir(workTree)
+	out := []Hook{}
+	for _, p := range points {
+		hooks, err := collect(root, p, RootTracked)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, hooks...)
+	}
+	return out, nil
+}
+
 // collect reads one root for one point, in the order the hooks run. The list itself comes from hookFiles: the one
 // rule that decides what runs, read the same way by the two things that have to agree.
 func collect(rootDir string, point Point, kind RootKind) ([]Hook, error) {
