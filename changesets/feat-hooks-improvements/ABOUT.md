@@ -35,9 +35,11 @@ git pair change ready --trust-once     # run the tracked ones with no position r
 
 `--no-hooks` is the per-command form of the off switch and goes exactly as far: it never clears the refusal for an
 `unrecorded` or `changed` tree, and it is absent from `check` and `change integrate`, so a green verdict is never
-one flag from "the repository's checks did not run". `--trust-once` goes the other way — it clears the position
+one flag from "the repository's checks did not run". `--trust-hooks-once` goes the other way — it clears the position
 refusal and runs the scripts, and it does not let a failing hook pass. Neither is quiet: a skipped set arrives in
 the `hooks[]` array as `status: "skipped-by-flag"`, and a hook that ran unrecorded carries `"consent": "once"`.
+^ let's rename the flag to be clear that the trust-once applies specifically to hooks. And should (or is it already) a 
+hint in the error message when trying to run `git pair change ready` when there are untrusted hooks?
 
 The reviewer's case works:
 
