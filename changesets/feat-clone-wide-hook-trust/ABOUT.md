@@ -72,6 +72,7 @@ gets the old behaviour, which is the correct fallback rather than a guess.
 **The worktree's own record is read and not written.** People who recorded under the old path keep their answer;
 relocating the file is no reason to make them read the same scripts again. Writes go only to the shared directory,
 because a second copy to keep in step would reintroduce the question of which one wins.
+we dont really have adoption yet so you can simplify and remove this read fallback
 
 **The record is bounded at 32 entries, oldest trimmed.** The state machine asks only about the tree in front of it,
 so the entries that matter are the current one and the versions a team has actually run. Unbounded would mean a
@@ -136,8 +137,10 @@ reviewer believes they are running, and nothing about this complaint needs it.
 - Should the per-clone root move to the shared directory too, with a worktree-local directory still searched
   first? It would be consistent, and it would let someone attach a reviewer check once per clone. It also changes
   which scripts run in a checkout, which is a different promise from the one this changeset makes.
+yes that makes sense to me, for it to be shared by the whole clone
 - Should `hooks --json` report the whole set (`accepted_hashes`) rather than the newest? Nothing reads it today;
   the field's absence would also be the honest answer to "which version did this clone actually read".
 - When two versions are on the record, is `changed` the right state for a third, or should the report distinguish
   "your worktree moved" from "another worktree recorded something newer"? The current sentence is defensible and
   the second is clearer.
+recorded newer seems best
