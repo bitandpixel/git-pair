@@ -2021,16 +2021,27 @@ into "nobody has to read the scripts in this directory again", which is the oppo
 stale decline stays reportable, because "declined 3f1a…, the tree is now 82b0…" is the sentence that tells a
 person the script they refused has been replaced.
 
-**The commands that start or advance work ask for a position.** `git pair init` refuses before a changeset
-directory exists, `git pair change ready` before the hand-off, `git pair review submit` before the reviewer's
-content is staged, and the gate refuses the merge: `git pair check`, and `git pair change integrate` with it.
-One sentence on every surface, because a person who meets the refusal twice should read the same words. It names
-`git pair hooks --trust` and `git pair hooks --decline`, and it names `--trust-hooks-once` in a clause addressed to
-the person whose task is to read the scripts in order to review a change to them: that reviewer is refused over the
-content they are being asked to judge, and finding the way through should not require reading the manual. Whoever
-runs the command, it is a refusal — naming a command in it is not an instruction to run it. The reviewer asked for it this way — the existence of the repository's own checks should be obvious as
-early as it can be, and the hand-off is where a reviewer is asked to spend attention, so a queue that can fill with
-work whose suite never ran is the failure they cannot see.
+**The commands that run the repository's own scripts ask for a position, about those scripts.** Each asks about
+the points it runs: `git pair change ready` about `pre-ready` and `post-ready`, `git pair review submit` about
+`pre-submit` and `post-submit`, `git pair check` about `pre-check` and `post-check`, and `git pair change
+integrate` about `pre-integrate` and `post-integrate` — which is why the gate is shared as code and not as a
+constant, since the two commands that call it run different points. A command that runs none of the repository's
+scripts asks nothing: a repository whose only hook is a `pre-ready` suite has no reason to stop a merge over a
+script no merge executes, and stopping it there asks a person to read what cannot run here — the pressure that
+makes people accept without reading, which is the failure the consent design exists to avoid.
+
+The position itself is about the whole tree. The record is one hash of what can execute, so a team that adds a
+second script to a point somebody accepted is a new question, asked at the command that runs it. `git pair init`
+runs no hook, so it warns rather than refuses — a refusal before a changeset exists can only mean "start nothing
+until somebody reads these", on content the changeset may never touch — and the refusal arrives with the first
+command that would execute one. The reviewer asked for the existence of the checks to be obvious as early as it
+can be — "it should be obvious as early as possible that there are hooks that repo owner wants run" — and a
+warning at the first command a newcomer runs meets that without a block that belongs to no command.
+The hand-off, the verdict and the gate refuse with one sentence, because a person who meets it twice should read the
+same words. It names `git pair hooks --trust` and `git pair hooks --decline`, and it names `--trust-hooks-once` in a
+clause addressed to the person whose task is to read the scripts in order to review a change to them: that reviewer
+is refused over the content they are being asked to judge, and finding the way through should not require reading
+the manual. Whoever runs the command, it is a refusal — naming a command in it is not an instruction to run it.
 `accepted` passes because the scripts ran and `declined` passes because a person answered a question about them;
 what neither is, is silence. The decline is what makes the demand fair — without it, a gate that refuses until
 scripts are approved asks every clone to either execute code it does not want or stay permanently red, and a team

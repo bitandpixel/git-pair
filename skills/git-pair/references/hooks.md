@@ -161,15 +161,18 @@ and the third needs nobody — but check the hash beside it, because a new versi
 unrecorded, not declined, and the report shows both hashes so you can tell which you have. Accepting whatever is
 there because a note asked you to is how a repository ends up running a check nobody read.
 
-**The commands that start or advance work ask for a position.** While the tracked tree is `unrecorded` or
-`changed`, `git pair init` refuses before the changeset directory exists, `git pair change ready` before the
-hand-off, `git pair review submit` before the reviewer's content is staged, and the gate refuses the merge —
-`git pair check`, and `git pair change integrate` with it. Each says the same sentence and names the ways out —
-`git pair hooks --trust`, `git pair hooks --decline`, and, in a clause addressed to the person whose task is to
-read the scripts in order to review a change to them, `--trust-hooks-once` — so
-meeting it twice is not two different problems. None of it is an obstacle to route around: the checks the
-repository asked for have not run. `accepted` and `declined` both clear it — one because the scripts ran, one
-because a person answered a question about them.
+**The commands that run the repository's scripts ask for a position, about those scripts.** Each asks about the
+points it runs: `git pair change ready` about `pre-ready`/`post-ready`, `git pair review submit` about
+`pre-submit`/`post-submit`, `git pair check` about `pre-check`/`post-check`, and `git pair change integrate` about
+`pre-integrate`/`post-integrate`. A command that runs none of them asks nothing — a repository whose only hook is a
+`pre-ready` suite does not stop `git pair check` over a script no merge executes. The position is still about the
+whole tree: the record is one hash of what can execute, and a script added later is a new question, asked where it
+runs. `git pair init` runs no hook, so it warns instead of refusing, and the refusal arrives with the first command
+that would execute one. Each refusal says the same sentence and names the ways out — `git pair hooks --trust`, `git pair hooks --decline`,
+and, in a clause addressed to the person whose task is to read the scripts in order to review a change to them,
+`--trust-hooks-once` — so meeting it twice is not two different problems. None of it is an obstacle to route around: the checks the repository asked for have not
+run. `accepted` and `declined` both clear it — one because the scripts ran, one because a person answered a
+question about them.
 
 Two doors stay open with nothing recorded, on purpose. `change unready` and `change abandon` work, because they
 take work out of the queue and a person who cannot run the checks still has to be able to put the work down. And
@@ -190,8 +193,9 @@ git pair hooks --decline  # a person's act: records it as read and chosen not to
 **`--trust` and `--decline` are a person's decisions, not an agent's.** The first says "I read this script and I
 allow it to run on my machine"; the second says "I read this script and I am choosing not to run it here." Either
 way the sentence is about what a person read, so an agent cannot truthfully say it. When tracked hooks have no
-position recorded — which you will now find at the first command you run, because `init` and `change ready` ask as
-well as the gate — report the state, print the refusal as it came, and name both commands. That is the whole of
+position recorded — which you will meet at the first command that would run one, since `init` only warns and a
+command with no hook at its own points asks nothing — report the state, print the refusal as it came, and name both
+commands. That is the whole of
 your part, and it is a stop, not a detour: an agent that records a position has said something about what it read. Do not run either one yourself, and do not reach for `GIT_PAIR_HOOKS=0` to get a green answer: that
 switch belongs to the person whose machine it is, for the moment their own script is misbehaving, and it is not a
 position — the verdict refuses with hooks switched off, because the off switch says a machine does not want to run

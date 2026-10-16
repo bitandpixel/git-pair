@@ -721,12 +721,17 @@ six commands plus `check` and `change integrate`. It clears the position refusal
 runs and exits nonzero still refuses. Neither flag is named in the refusal itself, because both are a person's
 decision to run or not run somebody's script, and an agent that types one has made that decision for them.
 
-**The commands that start or advance work ask for a position.** While the tracked tree is `unrecorded` or
-`changed`, `git pair init` refuses before the changeset directory exists, `change ready` before the hand-off,
-`review submit` before your content is staged, and the gate refuses the merge — `check`, and `change integrate`
-with it. The same sentence on every surface, naming `git pair hooks --trust` and `git pair hooks --decline`, and
-naming `--trust-hooks-once` in a clause addressed to the person whose task is to read the scripts in order to
-review a change to them. `accepted` passes because the scripts ran and
+**The commands that run the repository's scripts ask for a position — about those scripts.** While the tracked
+tree is `unrecorded` or `changed`, each command asks about the points it runs: `change ready` about `pre-ready` and
+`post-ready`, `review submit` about `pre-submit` and `post-submit`, `check` about `pre-check` and `post-check`,
+`change integrate` about `pre-integrate` and `post-integrate`. A command that runs none of them asks nothing, so a
+repository whose only hook is a `pre-ready` suite does not stop `git pair check` over a script no merge executes.
+The position itself is always about the whole tree — one hash of what can execute — and a script added later is a
+new question, asked where it runs. `git pair init` runs no hook, so it warns instead of refusing and the refusal
+arrives with the first command that would execute one. The same sentence on every surface, naming `git pair hooks --trust` and `git pair hooks --decline`, and
+naming `--trust-hooks-once` in a clause addressed to the person whose task is to read the scripts in order
+to review a change to them.
+`accepted` passes because the scripts ran and
 `declined` passes because a person answered a question about them, which is what makes the demand fair: without a
 decline, a gate that waits on approval asks every clone to either execute code it does not want or stay red
 forever. Two commands deliberately keep working with nothing recorded — `change unready` and `change abandon` take

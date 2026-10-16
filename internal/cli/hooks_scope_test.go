@@ -68,7 +68,7 @@ func TestThePositionIsAskedOnlyWhereTheCommandRuns(t *testing.T) {
 		t.Run("says nothing about pre-ready", func(t *testing.T) {
 			f, _ := newChangeset(t, "checkout-flow", "main")
 			putHook(t, f, "tracked", "pre-ready", "01-suite", passHook)
-			runIn(t, f.Dir(), "change", "ready", "--trust-once").mustSucceed(t, "change", "ready")
+			runIn(t, f.Dir(), "change", "ready", "--trust-hooks-once").mustSucceed(t, "change", "ready")
 			free(t, runIn(t, f.Dir(), "review", "submit", "--approve"), "review submit")
 		})
 	})
@@ -82,8 +82,8 @@ func TestThePositionIsAskedOnlyWhereTheCommandRuns(t *testing.T) {
 			f, _ := newChangeset(t, "checkout-flow", "main")
 			putHook(t, f, "tracked", point, "01-suite", passHook)
 			// The hand-off asks only if the hook is at its own point; anywhere else it walks free.
-			runIn(t, f.Dir(), "change", "ready", "--trust-once").mustSucceed(t, "change", "ready")
-			runIn(t, f.Dir(), "review", "submit", "--approve", "--trust-once").
+			runIn(t, f.Dir(), "change", "ready", "--trust-hooks-once").mustSucceed(t, "change", "ready")
+			runIn(t, f.Dir(), "review", "submit", "--approve", "--trust-hooks-once").
 				mustSucceed(t, "review", "submit", "--approve")
 			return f
 		}

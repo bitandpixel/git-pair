@@ -436,12 +436,16 @@ The record lives with the clone rather than with one working directory, so readi
 worktree cut from the repository — including ones cut later — and it holds one entry per version, so the branch
 that edits the suite does not invalidate what trunk's checkout accepted.
 
-The commands that start or advance work refuse while the tree is ` + "`changed`" + ` or ` + "`unrecorded`" + `: ` + "`init`" + ` before a
-changeset exists, ` + "`change ready`" + ` before the hand-off, ` + "`review submit`" + ` before the reviewer's content is
-staged, and the gate behind ` + "`check`" + ` and ` + "`change integrate`" + ` before a merge. A hand-off, a verdict and a
-merge should not rest on checks that never ran. What still works with nothing recorded is this command, and
-the two that take work out of the queue — ` + "`change unready`" + ` and ` + "`change abandon`" + `: reading the scripts and
-putting the work down are what you do because you have not decided yet.
+The commands that run the repository's scripts refuse while the tree is ` + "`changed`" + ` or ` + "`unrecorded`" + ` — but only
+the scripts *they* run. ` + "`change ready`" + ` asks about ` + "`pre-ready`" + ` and ` + "`post-ready`" + `, ` + "`review submit`" + ` about ` + "`pre-submit`" + ` and
+` + "`post-submit`" + `, ` + "`check`" + ` about ` + "`pre-check`" + ` and ` + "`post-check`" + `, and ` + "`change integrate`" + ` about ` + "`pre-integrate`" + ` and
+` + "`post-integrate`" + `. A hand-off, a verdict and a merge should not rest on checks that never ran; a command that
+runs none of them has nothing to rest on, so a repository whose only hook is a ` + "`pre-ready`" + ` suite does not stop
+` + "`git pair check`" + `. The position itself is always about the whole tree — the record is one hash of what can
+execute, and a script added later is a new question, asked where it runs. ` + "`init`" + ` runs no hook, so it warns
+instead of refusing, and the refusal arrives with the first command that would execute one. What still works with
+nothing recorded is this command, and the two that take work out of the queue — ` + "`change unready`" + ` and
+` + "`change abandon`" + `: reading the scripts and putting the work down are what you do because you have not decided yet.
 
 ` + "`--decline`" + ` is the other position a person can take: read the scripts, choose not to run them here. It is
 recorded against the same content hash as an acceptance, so the next version the repository ships is
