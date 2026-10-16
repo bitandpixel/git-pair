@@ -693,11 +693,13 @@ nothing was undone, so judge it by that line rather than by the exit code. At `c
 verdict instead, because `check` writes nothing to undo: a failing `pre-check` or `post-check` appends a
 reason and sets `ready: false`, so one command and one answer still cover the repository's own conditions.
 
-Consent is by content: the path, the executable bit and the bytes of the tracked hooks tree are hashed, and the
-hash joins the set of content the clone has taken a position on, recorded in
+Consent is by content: the path, the executable bit and the bytes of the files the runner would run are hashed, and
+the hash joins the set of content the clone has taken a position on, recorded in
 `<git-common-dir>/git-pair/trusted-hooks` — so an edit after acceptance is a new acceptance, and one reading
-covers every worktree of the clone rather than asking each directory `git worktree add` made for its own. An
-unaccepted tree runs no hooks and says so on stderr. Four states describe what a clone has done about that tree:
+covers every worktree of the clone rather than asking each directory `git worktree add` made for its own. The hashed
+set and the set that executes are the same list, decided once: an entry the runner skips is outside the identity too,
+so a swap file left beside a hook cannot revoke a position, and an entry the runner would run is inside it, so an
+unread script cannot inherit somebody else's acceptance. An unaccepted tree runs no hooks and says so on stderr. Four states describe what a clone has done about that tree:
 `unrecorded` is one where nobody has recorded anything, `changed` is one whose accepted version the repository
 replaced — the team shipped a new check, and this clone is now running without it — and `declined` is one where a
 person read the scripts and chose not to run them. A decline is recorded beside the acceptance, in
