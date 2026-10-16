@@ -409,3 +409,30 @@ func TestResolutionReadsTheTrustRecordAgainEachTime(t *testing.T) {
 		}
 	})
 }
+
+// The guard is the off switch, handed to the child.
+//
+// `Disabled` and `GuardValue` are two facts in two places, and the run-time guard only exists if they agree.
+// They did not: the value a hook was given was `1`, which `Disabled` reads as "run them", so the documented
+// recursion guard — "a nested `git pair` runs no hooks" — guarded nothing, and a `pre-ready` hook that shelled
+// out to `git pair check` fired `pre-check`. The end-to-end case is pinned in `internal/cli`; this pins the
+// half that is easy to break from here, which is a change to either side of the pair.
+func TestGuardValueSwitchesHooksOff(t *testing.T) {
+	t.Setenv(EnvDisable, GuardValue)
+	off, why := Disabled(context.Background(), nil)
+	if !off {
+		t.Errorf("a hook inheriting %s=%q runs hooks; Disabled must read the guard as off", EnvDisable, GuardValue)
+	}
+	if why != "$"+EnvDisable {
+		t.Errorf("why = %q, want $%s", why, EnvDisable)
+	}
+
+	// The other side of the pair: the two spellings that mean "run them", so a person who exports the
+	// variable for their own shell is not switched off by the value they typed to keep hooks on.
+	for _, on := range []string{"1", "true", "TRUE"} {
+		t.Setenv(EnvDisable, on)
+		if off, _ := Disabled(context.Background(), nil); off {
+			t.Errorf("%s=%q switches hooks off, want it to leave them on", EnvDisable, on)
+		}
+	}
+}

@@ -462,9 +462,22 @@ func Disabled(ctx context.Context, repo *git.Repo) (bool, string) {
 	return false, ""
 }
 
-// EnvDisable is the environment form of the off switch. A hook that shells out to `git pair` inherits it,
-// which is the recursion guard: a `pre-check` hook running the gate must not fire the gate's hooks.
+// EnvDisable is the environment form of the off switch. Anything other than nothing, `1`, or `true` switches
+// hooks off for the run; an unrecognised value switches off rather than runs, because a typo in the switch that
+// decides whether a stranger's script executes must not read as permission.
+//
+// The value a hook is given is the disabling one — see GuardValue — which is the recursion guard: a script that
+// shells out to `git pair` (the `pre-ready` hook that runs the gate, the notify hook that reads `git pair status`)
+// inherits the switch, and the nested command fires nothing. A script that genuinely wants the nested hooks runs
+// the command with the variable removed, `env -u GIT_PAIR_HOOKS git pair check`.
 const EnvDisable = "GIT_PAIR_HOOKS"
+
+// GuardValue is what a hook receives for EnvDisable, so that a `git pair` the hook itself starts runs no hooks.
+//
+// It has to be a value `Disabled` reads as off. The guard is not a second mechanism beside the off switch, it is
+// the off switch handed to the child, so an inherited value that reads as on guards nothing and every hook that
+// calls `git pair` re-enters the point that is running it.
+const GuardValue = "0"
 
 // EchoOutputEnv asks for every hook's output to be replayed to stderr, not only a failing hook's. It exists
 // because a passing suite that printed the interesting warning is the one whose output people want.

@@ -35,9 +35,10 @@ type hookContext struct {
 
 func (c hookContext) env() map[string]string {
 	env := map[string]string{
-		// The marker this run is running hooks under. A hook that shells out to `git pair` inherits it,
-		// which is the recursion guard: a hook that runs the gate must not fire the gate's hooks.
-		hooks.EnvDisable:      "1",
+		// The off switch, at the value that switches hooks off. A hook that shells out to `git pair` inherits
+		// it, so the nested command fires no hooks: a `pre-ready` hook that runs the gate does not fire the
+		// gate's hooks. hooks.GuardValue and hooks.Disabled are the two halves, and they have to agree.
+		hooks.EnvDisable:      hooks.GuardValue,
 		"GIT_PAIR_HOOK_POINT": c.Point.String(),
 		"GIT_PAIR_CHANGESET":  c.Slug,
 		"GIT_PAIR_BRANCH":     c.Branch,

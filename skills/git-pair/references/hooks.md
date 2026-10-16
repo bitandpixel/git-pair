@@ -66,7 +66,7 @@ reimplement rules that live in this binary.
 | `GIT_PAIR_HEAD` | the current head commit |
 | `GIT_PAIR_DEFAULT_BRANCH` | the destination, when known |
 | `GIT_PAIR_HOOK_ROOT` | `worktree` or `clone` |
-| `GIT_PAIR_HOOKS` | `1`, inherited by anything the hook runs — a nested `git pair` runs no hooks |
+| `GIT_PAIR_HOOKS` | `0`, inherited by anything the hook runs — a nested `git pair` runs no hooks, and `env -u GIT_PAIR_HOOKS git pair …` opts back in |
 
 The submission points add three, because a verdict has content of its own:
 

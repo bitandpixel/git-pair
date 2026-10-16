@@ -2059,7 +2059,7 @@ input on stdin. It receives the resolution the command already made, so it never
 | `GIT_PAIR_HEAD` | the current head commit |
 | `GIT_PAIR_DEFAULT_BRANCH` | the destination, when known |
 | `GIT_PAIR_HOOK_ROOT` | `worktree` or `clone` |
-| `GIT_PAIR_HOOKS` | `1`, inherited by anything the hook runs — a nested `git pair` runs no hooks |
+| `GIT_PAIR_HOOKS` | `0`, inherited by anything the hook runs — a nested `git pair` runs no hooks, and `env -u GIT_PAIR_HOOKS git pair …` opts back in |
 
 The two submission points add three more, because a submission is a verdict with content of its own:
 
