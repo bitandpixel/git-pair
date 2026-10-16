@@ -178,6 +178,23 @@ func (a *app) runPoint(ctx context.Context, s *session, c hookContext, mode runM
 	if len(plan.Hooks) == 0 {
 		return []hooks.Result{}, nil
 	}
+	if a.hooksOff {
+		// The person asked for no scripts in this command. Everything configured is still reported, as the
+		// outcomes that did not run: a hand-off that skipped the suite has to be distinguishable from one that
+		// ran it, in the same array a machine already reads. `--no-hooks` is the per-command form of the off
+		// switch, so it goes as far as the off switch goes — it never answers for the tracked tree, which is
+		// what the commands that ask for a position refuse.
+		results := plan.SkippedByFlag()
+		a.warn("git-pair: --no-hooks: %d hook(s) at %s did not run\n", len(results), c.Point)
+		for _, r := range results {
+			if a.hookPresenter != nil {
+				a.hookPresenter(r)
+				continue
+			}
+			a.replayHookOutput(r)
+		}
+		return results, nil
+	}
 	env := c.env()
 	var results []hooks.Result
 	runnable := plan.Hooks
@@ -227,7 +244,7 @@ func (a *app) runPoint(ctx context.Context, s *session, c hookContext, mode runM
 // $GIT_PAIR_HOOK_OUTPUT asks for it, because a suite that prints 400 lines on success would make every handoff
 // unreadable.
 func hookOutputLines(r hooks.Result) []string {
-	if r.Status == hooks.StatusSkippedUntrusted {
+	if r.Status == hooks.StatusSkippedUntrusted || r.Status == hooks.StatusSkippedByFlag {
 		return nil
 	}
 	if !r.Blocking() && !hooks.EchoOutput() {
@@ -298,6 +315,19 @@ func hookReasons(results []hooks.Result) []string {
 		}
 	}
 	return out
+}
+
+// noHooksFlag registers `--no-hooks` on a command that runs hooks. Registered through one helper because the
+// flag means the same thing everywhere it appears, and a person who meets it on two commands should read the
+// same sentence rather than wonder whether the second one skips less than the first.
+//
+// It is offered on the commands that can be undone — the hand-off, the withdrawal, the ending, the submission —
+// and not on the two that declare a merge. `check` and `change integrate` are where a green answer has to mean
+// the repository's checks ran, and a flag one keystroke away from that answer is the thing the gate exists to
+// refuse.
+func noHooksFlag(cmd *cobra.Command, a *app) {
+	cmd.Flags().BoolVar(&a.hooksOff, "no-hooks", false,
+		"run none of this repository's or this clone's hooks for this command, and report that none ran")
 }
 
 // hooksForJSON renders the results for a `--json` verdict. The array is `[]` when nothing is configured,

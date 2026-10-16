@@ -112,7 +112,12 @@ const (
 	StatusFailed           Status = "failed"
 	StatusTimeout          Status = "timeout"
 	StatusSkippedUntrusted Status = "skipped-untrusted"
-	StatusNotExecutable    Status = "not-executable"
+	// StatusSkippedByFlag is the other "nothing ran": the person running this one command asked for no
+	// hooks. It is distinct from `skipped-untrusted` because the two have different fixes — one is a
+	// conversation about content that is still ahead of this command, the other is a decision about this
+	// invocation and is already over.
+	StatusSkippedByFlag Status = "skipped-by-flag"
+	StatusNotExecutable Status = "not-executable"
 )
 
 // Result is one hook's outcome. Stdout and Stderr are captured rather than inherited, because a hook's
@@ -145,7 +150,7 @@ func (r Result) Ran() bool {
 // consent.
 func (r Result) Blocking() bool {
 	switch r.Status {
-	case StatusPassed, StatusSkippedUntrusted:
+	case StatusPassed, StatusSkippedUntrusted, StatusSkippedByFlag:
 		return false
 	}
 	return true
@@ -660,6 +665,21 @@ func (p Plan) SkippedUntrusted() []Result {
 		if h.Root == RootTracked {
 			out = append(out, Result{Hook: h, Status: StatusSkippedUntrusted})
 		}
+	}
+	return out
+}
+
+// SkippedByFlag reports every configured hook as an outcome that stopped it running, for the run where the
+// person asked for no hooks at all with `--no-hooks`.
+//
+// Unlike SkippedUntrusted this covers the clone's own root as well, because the two answer different questions.
+// An unaccepted tree is a consent problem, and the clone's own scripts were never part of it. The flag is "no
+// scripts in this command", and listing only half of what did not run would leave a reader counting a suite
+// they believe ran.
+func (p Plan) SkippedByFlag() []Result {
+	out := []Result{}
+	for _, h := range p.Hooks {
+		out = append(out, Result{Hook: h, Status: StatusSkippedByFlag})
 	}
 	return out
 }

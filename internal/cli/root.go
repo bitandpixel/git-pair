@@ -75,6 +75,19 @@ type app struct {
 	// in that window is repainted over, and the reviewer would be left holding a refusal that names the hook
 	// and not the reason. The presenter decides where the text is shown instead.
 	hookPresenter func(hooks.Result)
+	// hooksOff is `--no-hooks`: this command runs none of them, from either root, on either side of the
+	// transition. It is the per-command form of the off switch, so it follows the same rule — a person saying
+	// their machine should not run scripts today says nothing about what those scripts do, and does not answer
+	// for the tracked tree. What the commands that ask for a position refuse, this flag does not clear.
+	//
+	// The flag exists because the off switch is a process-wide thing a person sets for their machine, and "not
+	// this one time" has no spelling in it. Both are reported; neither is invisible.
+	hooksOff bool
+	// hooksTrustOnce is `--trust-once`: run the tracked hooks for this command although this clone has
+	// recorded no position on them, and record nothing. It goes the other way from hooksOff — the checks the
+	// repository asked for do run — which is why it is a separate flag rather than a second meaning of the
+	// first. What it clears is the refusal for an unread tree, not a hook that ran and said no.
+	hooksTrustOnce bool
 }
 
 // hookRun is this run's hook facts, resolved on first use and shared by every point the command walks. Neither
