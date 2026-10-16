@@ -129,6 +129,14 @@ Open every `path:line` it reports and address, respond to, remove, or consciousl
 then run `git pair change ready --allow-surviving-review-additions`. The override states that you
 verified the surviving lines; it is not a way past a check you have not read.
 
+### Reviewer text in ABOUT.md
+
+`ABOUT.md` is your account of the change, so a reviewer's sentence left inside it blocks the hand-off the
+same way a comment in your source does. Keep the description you want: remove their lines, or rewrite the
+point as your own text — the check compares lines exactly, so a rewrite reads as yours. Acknowledge rather
+than rewrite only when you meant to keep their wording. Answer the point in the thread; do not settle it by
+leaving their text standing in your description.
+
 ### Reviewer text in an implementation file
 
 A comment a reviewer left in a file outside `changesets/<id>/` is a request written into your source. It is

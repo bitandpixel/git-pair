@@ -3473,9 +3473,16 @@ Landing has no command of its own (§13), so the question the second bullet used
 exists: there is no recorder left to run the diagnostic as a final check, and one point in the lifecycle
 remains where a survivor is acknowledged — the offer for review. Two reasons kept it out of the gate:
 
-- `git pair check` (§11.3) cannot pass a changeset whose content moved after the review that permits it,
-  so it does not need this diagnostic to stop unreviewed work reaching a merge — and a gate with no
-  override flag is the wrong place to acknowledge a surviving addition, because the flag would have to exist there too.
+- `git pair check` (§11.3) cannot pass a changeset whose implementation content moved after the review
+  that permits it, so it does not need this diagnostic to stop unreviewed work reaching a merge — and a
+  gate with no override flag is the wrong place to acknowledge a surviving addition, because the flag
+  would have to exist there too.
+
+What that leaves unguarded is worth stating rather than leaving to inference. The gate's drift test
+excludes `changesets/<id>/` (§11.3), so a survivor the author acknowledged at §19.2, and a reviewer's
+line written into `ABOUT.md` by the submission that approved, can both reach the destination as they
+are. The gate promises that the reviewed implementation is what lands; it is not a second reading of the
+description, and the acknowledgement above is recorded nowhere a gate could read.
 
 ## 19.4 Rationale
 
@@ -3489,12 +3496,17 @@ The invariant is:
 
 ## 19.5 Resolving a surviving addition
 
-§19.2 forces inspection. What an author should then do with a reviewer comment inside an implementation file
-— a path outside `changesets/<id>/`, which is the boundary §19 uses for blocking versus non-blocking — is
-policy, and the policy is:
+§19.2 forces inspection. What an author should then do with a reviewer comment inside an implementation
+file, or with a reviewer's text inside `ABOUT.md` — the paths §19 treats as blocking, against the
+conversation files under `changesets/<id>/` that it reports and forgives — is policy, and the policy is:
 
 - The author applies the feedback and then removes the reviewer's inline text, in the same commit. A
   comment that outlives the work it asked for is feedback the repository has not finished consuming.
+- The author writes the description themselves. `ABOUT.md` is the author's account of the change (§6),
+  not a page two people write, so reviewer text added to it blocks with the code. Settling it means
+  keeping the description the author wants — removing the reviewer's lines, or rewriting the point as
+  the author's own — and the §19.2 flag is for the one case that is not a settlement: the author meant
+  to keep the reviewer's wording. The check is an exact line match, so a rewrite counts.
 - The author does not copy the comment before deleting it. Git history already holds the exchange: the
   review commit introduced the line (§19.1) and a later commit removed it.
 - The author records the substance when it needs further discussion, elaboration, or collaboration, and not

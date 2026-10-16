@@ -386,45 +386,64 @@ func TestCheckEmptyReviewDiff(t *testing.T) {
 }
 
 // Plan decision D3: surviving additions inside `changesets/` are reported as review
-// artifacts and never block, while surviving additions anywhere else block.
+// artifacts and never block, while surviving additions anywhere else block. The one
+// exception is ABOUT.md, which is the description rather than the conversation, so
+// reviewer text in it blocks with the code (PRD §19.5).
 func TestCheckChangesetArtifactsAreNonBlockingAndCodeBlocks(t *testing.T) {
 	x := newFixture(t)
 
 	const threadLine = "I'm not convinced the test makes these overlap."
 	const codeLine = "// Please use a transaction here"
+	const aboutHeading = "## Review note"
+	const aboutLine = "Please document the lock scope."
 	about := x.f.ChangesetFile(slug, "ABOUT.md")
 	review := x.f.CommitReviewMarker(slug, "block", gittest.WithFiles(map[string]string{
 		"changesets/" + slug + "/concurrency-tests.md": "# Concurrency tests\n\n" + threadLine + "\n",
-		"changesets/" + slug + "/ABOUT.md":             about + "\n## Review note\n\nPlease document the lock scope.\n",
+		"changesets/" + slug + "/ABOUT.md":             about + "\n" + aboutHeading + "\n\n" + aboutLine + "\n",
 		"service.go":                                   "package main\n\n" + codeLine + "\nfunc Lock() {}\n",
 	}))
 
 	report := x.check(t, review)
-	if len(report.Artifacts) < 2 {
-		t.Fatalf("Artifacts = %+v, want the thread and ABOUT.md additions", report.Artifacts)
+	if len(report.Artifacts) == 0 {
+		t.Fatalf("Artifacts is empty, want the thread's added lines: %+v", report.Artifacts)
+	}
+	for _, a := range report.Artifacts {
+		if strings.HasSuffix(a.Path, "/ABOUT.md") {
+			t.Errorf("Artifacts includes %s: reviewer text in the description blocks instead", a.Path)
+		}
 	}
 	if _, ok := findAddition(report.Artifacts, "changesets/"+slug+"/concurrency-tests.md", threadLine); !ok {
 		t.Errorf("Artifacts = %+v, want the reviewer's thread line", report.Artifacts)
 	}
-	if len(report.Code) != 1 || report.Code[0].Path != "service.go" {
-		t.Fatalf("Code = %+v, want only the source comment", report.Code)
+	if _, ok := findAddition(report.Code, "service.go", codeLine); !ok {
+		t.Errorf("Code = %+v, want the source comment", report.Code)
+	}
+	// The description blocks alongside the code rather than being reported and
+	// forgiven, and each line of it blocks on its own.
+	for _, want := range []string{aboutHeading, aboutLine} {
+		if _, ok := findAddition(report.Code, "changesets/"+slug+"/ABOUT.md", want); !ok {
+			t.Errorf("Code = %+v, want the reviewer's ABOUT.md line %q to block", report.Code, want)
+		}
 	}
 	if report.Clean() {
 		t.Error("Clean = true, want false while a source comment survives")
 	}
 
-	// Resolving the code line unblocks even though every artifact line still
-	// survives: a thread answered by appending keeps the reviewer's text (this is
-	// exactly the false-positive the findings document measured).
-	x.f.Commit("respond in the thread and fix the code", gittest.WithFiles(map[string]string{
-		"service.go": "package main\n\nfunc Lock() { transaction() }\n",
+	// Resolving the code and settling the description unblocks even though every
+	// conversation line still survives: a thread answered by appending keeps the
+	// reviewer's text (this is exactly the false-positive the findings document
+	// measured). The description is settled by taking an exit of each kind — one
+	// reviewer line removed, the other rewritten as the author's own.
+	x.f.Commit("respond in the thread, fix the code, and rewrite the note", gittest.WithFiles(map[string]string{
+		"service.go":                       "package main\n\nfunc Lock() { transaction() }\n",
+		"changesets/" + slug + "/ABOUT.md": about + "\nThe lock scope is the booking row, taken before the capacity read.\n",
 		"changesets/" + slug + "/concurrency-tests.md": "# Concurrency tests\n\n" + threadLine +
 			"\n\n## Response\n\nI synchronise both transactions before the read.\n",
 	}))
 
 	after := x.check(t, review)
 	if !after.Clean() {
-		t.Errorf("Clean = false after resolving the code: Code = %+v", after.Code)
+		t.Errorf("Clean = false after resolving the code and the description: Code = %+v", after.Code)
 	}
 	if len(after.Artifacts) == 0 {
 		t.Error("Artifacts is empty: surviving reviewer text must still be reported, not silenced")
@@ -462,20 +481,34 @@ func TestCheckOnlyReportsTheReviewItWasGiven(t *testing.T) {
 	}
 }
 
-// Reviewer additions to ABOUT.md alone must not block `change ready`: PRD §6 makes
-// ABOUT.md the shared description the reviewer and author both edit.
-func TestCheckAboutOnlySurvivalDoesNotBlock(t *testing.T) {
+// Reviewer additions to ABOUT.md block `change ready` on their own. ABOUT.md is the
+// author's account of the change (PRD §6), so text the reviewer put into it is feedback
+// to settle rather than conversation to keep, and PRD §19.5 gives it the same duty as a
+// comment in an implementation file. The rule reads the file name rather than the
+// directory, so a description belonging to another changeset blocks too instead of
+// opening a hole the shape of the tree decides.
+func TestCheckAboutOnlySurvivalBlocks(t *testing.T) {
 	x := newFixture(t)
 
 	about := x.f.ChangesetFile(slug, "ABOUT.md")
-	review := x.f.CommitReviewMarker(slug, "feedback", gittest.WithFile(
-		"changesets/"+slug+"/ABOUT.md", about+"\n## Review note\n\nRename Lock for clarity.\n"))
+	const mine = "Rename Lock for clarity."
+	const other = "Rename Unlock too."
+	review := x.f.CommitReviewMarker(slug, "feedback", gittest.WithFiles(map[string]string{
+		"changesets/" + slug + "/ABOUT.md": about + "\n## Review note\n\n" + mine + "\n",
+		"changesets/offline-mode/ABOUT.md": "# offline-mode\n\n## Summary\n\n" + other + "\n",
+	}))
 
 	report := x.check(t, review)
-	if !report.Clean() {
-		t.Errorf("Clean = false for an ABOUT.md-only review: Code = %+v", report.Code)
+	if report.Clean() {
+		t.Fatalf("Clean = true for a review whose only edits are descriptions: Artifacts = %+v", report.Artifacts)
 	}
-	if len(report.Artifacts) == 0 {
-		t.Error("the surviving ABOUT.md additions were not reported at all")
+	if _, ok := findAddition(report.Code, "changesets/"+slug+"/ABOUT.md", mine); !ok {
+		t.Errorf("Code = %+v, want the reviewer's line in this changeset's description", report.Code)
+	}
+	if _, ok := findAddition(report.Code, "changesets/offline-mode/ABOUT.md", other); !ok {
+		t.Errorf("Code = %+v, want the reviewer's line in another changeset's description", report.Code)
+	}
+	if len(report.Artifacts) != 0 {
+		t.Errorf("Artifacts = %+v, want nothing: no conversation file was touched", report.Artifacts)
 	}
 }
