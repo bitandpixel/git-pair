@@ -19,9 +19,10 @@ import (
 // read a repository's checks once per directory `git worktree add` made, and the tenth reading of the same dozen
 // lines is not a safety check; it is the pressure that teaches people to run `--trust` without reading.
 //
-// These tests hold the two halves of the answer. The record belongs to the clone, so one reading covers the
-// worktrees cut from it. And it is a set, so covering them does not mean overwriting them: two worktrees standing
-// on two versions of the directory keep a position about each.
+// These tests hold the three halves of the answer. The record belongs to the clone, so one reading covers the
+// worktrees cut from it. It is a set, so covering them does not mean overwriting them: two worktrees standing on
+// two versions of the directory keep a position about each. And the client's own hooks root is the clone's for the
+// same reason — a check attached to a machine is attached once, not once per checkout.
 
 // hooksRepo builds a repository with one committed hook, and returns the fixture, a repo for its main checkout,
 // and the path of the hook inside it. The hook is committed rather than dropped in, because a worktree only sees
@@ -178,35 +179,6 @@ func TestWorktreesOnDifferentVersionsBothKeepTheirPosition(t *testing.T) {
 	}
 }
 
-// A clone that recorded its position under the per-worktree path keeps it. Relocating where the record lives is
-// not a reason to make somebody read the same scripts a second time.
-func TestLegacyPerWorktreeRecordStillAnswers(t *testing.T) {
-	ctx := context.Background()
-	f, _, _ := hooksRepo(t, "#!/bin/sh\nexit 0\n")
-	wt := addWorktree(t, f, "feature", "feature/hooks")
-
-	hash, _, err := TreeHash(wt.Dir)
-	if err != nil || hash == "" {
-		t.Fatalf("TreeHash = %q (%v), want a hash to record", hash, err)
-	}
-	wtDir, err := wt.GitDir(ctx)
-	if err != nil {
-		t.Fatalf("worktree git dir: %v", err)
-	}
-	recordFile(t, wtDir, trustedRecordName, hash+"\n")
-
-	state, accepted, current, err := Trust(ctx, wt)
-	if err != nil {
-		t.Fatalf("Trust: %v", err)
-	}
-	if state != TrustAccepted || accepted != hash || current != hash {
-		t.Errorf("legacy record: state=%s accepted=%q current=%q, want accepted at %q", state, accepted, current, hash)
-	}
-	if _, err := os.Stat(filepath.Join(wtDir, "git-pair", trustedRecordName)); err != nil {
-		t.Errorf("the legacy record was moved out of the way: %v", err)
-	}
-}
-
 // The record is a set. A position about other content survives, the hash being answered for leaves the other
 // record, and a line that is not a tree hash is ignored rather than believed.
 func TestPositionsCancelOneHashAndIgnoreJunk(t *testing.T) {
@@ -214,7 +186,7 @@ func TestPositionsCancelOneHashAndIgnoreJunk(t *testing.T) {
 	dir := t.TempDir()
 	recordFile(t, dir, declinedRecordName, strings.Join([]string{h1, h2, junk, ""}, "\n"))
 
-	if err := recordPosition([]string{dir}, dir, trustedRecordName, declinedRecordName, h1); err != nil {
+	if err := recordPosition(dir, trustedRecordName, declinedRecordName, h1); err != nil {
 		t.Fatalf("recordPosition: %v", err)
 	}
 	if got := recordLines(t, recordPath(dir, trustedRecordName)); len(got) != 1 || got[0] != h1 {
@@ -228,7 +200,7 @@ func TestPositionsCancelOneHashAndIgnoreJunk(t *testing.T) {
 	// Junk never decides anything. The record is content a person read, and a half-written line is not content,
 	// so an unrecorded tree has to stay unrecorded rather than become an acceptance nobody holds.
 	recordFile(t, dir, trustedRecordName, junk+"\n\n")
-	if _, accepted, current, err := TrustAt([]string{dir}, dir); err != nil || accepted != "" {
+	if _, accepted, current, err := TrustAt(dir, dir); err != nil || accepted != "" {
 		t.Errorf("accepted = %q (%v) from a file of junk, want nothing accepted beside the tree %q", accepted, err, current)
 	}
 }
@@ -238,7 +210,7 @@ func TestPositionsCancelOneHashAndIgnoreJunk(t *testing.T) {
 func TestRecordStaysBounded(t *testing.T) {
 	dir := t.TempDir()
 	for i := 0; i < maxRecordedPositions+12; i++ {
-		if err := recordPosition([]string{dir}, dir, trustedRecordName, declinedRecordName, hashAt(i)); err != nil {
+		if err := recordPosition(dir, trustedRecordName, declinedRecordName, hashAt(i)); err != nil {
 			t.Fatalf("recordPosition %d: %v", i, err)
 		}
 	}
@@ -301,5 +273,86 @@ func TestTreeHashCoversContentAndExecutabilityOnly(t *testing.T) {
 	}
 	if state != TrustChanged {
 		t.Errorf("after an edit to the bytes: state=%s, want changed", state)
+	}
+}
+
+// The client's own root is the clone's, in the same sense the record is. A reviewer attaches a check to a
+// repository they may not edit; making them attach it again for every worktree they cut asks for the same act
+// twice, and the second act protects nothing that the first one did not.
+func TestCloneRootIsSharedByEveryWorktree(t *testing.T) {
+	ctx := context.Background()
+	f, main, _ := hooksRepo(t, "#!/bin/sh\nexit 0\n")
+	wt := addWorktree(t, f, "feature", "feature/hooks")
+
+	wtDir, err := wt.GitDir(ctx)
+	if err != nil {
+		t.Fatalf("worktree git dir: %v", err)
+	}
+	common, ok := git.CommonDir(wtDir)
+	if !ok {
+		t.Fatalf("CommonDir(%q) says this is not a linked worktree", wtDir)
+	}
+	if want := CloneRootDir(wtDir); want != filepath.Join(common, "git-pair", "hooks") {
+		t.Errorf("CloneRootDir for a worktree = %q, want the directory the clone shares", want)
+	}
+	if got := CloneRootDir(wtDir); got != CloneRootDir(mustGitDir(t, ctx, main)) {
+		t.Errorf("the two checkouts disagree about where the client's hooks live: %q vs %q", got, CloneRootDir(mustGitDir(t, ctx, main)))
+	}
+
+	// Attaching a check from one worktree makes it a check the other one runs.
+	attached := filepath.Join(CloneRootDir(wtDir), string(PreReady), "01-reviewer-check")
+	if err := os.MkdirAll(filepath.Dir(attached), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(attached), err)
+	}
+	if err := os.WriteFile(attached, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write %s: %v", attached, err)
+	}
+	plan, err := Discover(ctx, main, PreReady)
+	if err != nil {
+		t.Fatalf("Discover in the main checkout: %v", err)
+	}
+	var found []string
+	for _, h := range plan.Hooks {
+		found = append(found, h.Path)
+	}
+	if !containsHash(found, attached) {
+		t.Errorf("the main checkout did not find the check attached from the worktree: %v", found)
+	}
+}
+
+func mustGitDir(t *testing.T, ctx context.Context, repo *git.Repo) string {
+	t.Helper()
+	dir, err := repo.GitDir(ctx)
+	if err != nil {
+		t.Fatalf("git dir: %v", err)
+	}
+	return dir
+}
+
+// One place, one rule. The record read is the shared directory and nothing else, which is what makes the
+// simplification safe to state: a file left beside one worktree's git directory is inert, so there is no second
+// answer that a reader has to know about to predict what `check` will say.
+func TestRecordBesideAWorktreeIsInert(t *testing.T) {
+	ctx := context.Background()
+	f, _, _ := hooksRepo(t, "#!/bin/sh\nexit 0\n")
+	wt := addWorktree(t, f, "feature", "feature/hooks")
+
+	hash, _, err := TreeHash(wt.Dir)
+	if err != nil || hash == "" {
+		t.Fatalf("TreeHash = %q (%v), want a hash to record", hash, err)
+	}
+	wtDir, err := wt.GitDir(ctx)
+	if err != nil {
+		t.Fatalf("worktree git dir: %v", err)
+	}
+	recordFile(t, wtDir, trustedRecordName, hash+"\n")
+
+	state, accepted, current, err := Trust(ctx, wt)
+	if err != nil {
+		t.Fatalf("Trust: %v", err)
+	}
+	if state != TrustUnrecorded || accepted != "" || current != hash {
+		t.Errorf("a record beside the worktree changed the answer: state=%s accepted=%q current=%q, want unrecorded at %q",
+			state, accepted, current, hash)
 	}
 }

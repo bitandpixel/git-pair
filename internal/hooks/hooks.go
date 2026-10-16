@@ -9,11 +9,12 @@
 // Two roots are searched, in this order:
 //
 //	<worktree>/.git-pair/hooks/<point>   tracked, shared, must be trusted
-//	<gitdir>/git-pair/hooks/<point>      per-clone, never shared, trusted by construction
+//	<clone gitdir>/git-pair/hooks/       the client's own, never shared, trusted by construction
 //
 // The second root is what makes this a client-control feature rather than repository policy: a reviewer
 // attaches their own checks to a repository they may not edit. It follows git's own division, where
-// `.git/hooks` is yours and `core.hooksPath` is somebody's choice.
+// `.git/hooks` is yours and `core.hooksPath` is somebody's choice — including the part where the directory is
+// the clone's, so one attachment covers every worktree cut from it rather than being repeated per checkout.
 //
 // At each root `<point>` is either an executable file or a directory whose executable entries run in
 // lexicographic order. One rule covers the single-script case and the several-scripts case without a config
@@ -156,10 +157,15 @@ func TrackedRootDir(workTree string) string {
 	return filepath.Join(workTree, ".git-pair", "hooks")
 }
 
-// CloneRootDir is the per-clone hooks directory, under the git directory beside the other two stores
+// CloneRootDir is the hooks directory the client owns, under the git directory beside the other two stores
 // (`<gitdir>/git-pair/cache`, `<gitdir>/git-pair/marks/<slug>`).
+//
+// It is the clone's, in the same sense the trust record is: a linked worktree gets the same directory as its
+// repository, so a check somebody attaches to their own machine is attached once rather than once per checkout.
+// It stays outside the working tree and is never shared with anyone else, which is why it needs no acceptance —
+// the person who put the script there is the person who is running it.
 func CloneRootDir(gitDir string) string {
-	return filepath.Join(gitDir, "git-pair", "hooks")
+	return filepath.Join(RecordDir(gitDir), "git-pair", "hooks")
 }
 
 // Plan is what discovery found for one point.
@@ -203,7 +209,7 @@ type Resolution struct {
 	gitDir   string
 	dirErr   error
 	recSet   bool
-	recDirs  []string
+	recDir   string
 	recErr   error
 	trustSet bool
 	state    TrustState
@@ -238,19 +244,19 @@ func (r *Resolution) gitDirAt(ctx context.Context) (string, error) {
 	return r.gitDir, r.dirErr
 }
 
-// recordDirsAt is the run's answer to where the clone's positions on the tracked hooks live, asked once for the
+// recordDirAt is the run's answer to where the clone's positions on the tracked hooks live, asked once for the
 // whole run for the same reason gitDirAt is asked once: the state decides whether the scripts run and whether
 // the gate calls a changeset ready, and neither question should walk the filesystem again per hook point.
-func (r *Resolution) recordDirsAt(ctx context.Context) ([]string, error) {
+func (r *Resolution) recordDirAt(ctx context.Context) (string, error) {
 	if !r.recSet {
 		gitDir, err := r.gitDirAt(ctx)
 		if err == nil {
-			r.recDirs = recordDirs(gitDir)
+			r.recDir = RecordDir(gitDir)
 		}
 		r.recErr = err
 		r.recSet = true
 	}
-	return r.recDirs, r.recErr
+	return r.recDir, r.recErr
 }
 
 // Trust is TrustAt for a run that may already have asked the questions above, answered once for the whole
@@ -259,11 +265,11 @@ func (r *Resolution) recordDirsAt(ctx context.Context) ([]string, error) {
 // directory for every point and answer the same question each time.
 func (r *Resolution) Trust(ctx context.Context) (TrustState, string, string, error) {
 	if !r.trustSet {
-		dirs, err := r.recordDirsAt(ctx)
+		recordDir, err := r.recordDirAt(ctx)
 		if err != nil {
 			r.trustErr = err
 		} else {
-			r.state, r.accepted, r.current, r.trustErr = TrustAt(dirs, r.repo.Dir)
+			r.state, r.accepted, r.current, r.trustErr = TrustAt(recordDir, r.repo.Dir)
 		}
 		r.trustSet = true
 	}
@@ -275,11 +281,11 @@ func (r *Resolution) Trust(ctx context.Context) (TrustState, string, string, err
 // sentence beside a skipped run needs the recorded value itself, including the case where it no longer matches.
 func (r *Resolution) DeclinedHash(ctx context.Context) (string, error) {
 	if !r.declineSet {
-		dirs, err := r.recordDirsAt(ctx)
+		recordDir, err := r.recordDirAt(ctx)
 		if err != nil {
 			r.declineErr = err
 		} else {
-			r.declined, r.declineErr = DeclinedAt(dirs)
+			r.declined, r.declineErr = DeclinedAt(recordDir)
 		}
 		r.declineSet = true
 	}

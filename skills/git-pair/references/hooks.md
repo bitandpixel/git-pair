@@ -18,7 +18,7 @@ Two roots, consulted in this order:
 | Root | Path | Who it is for | Consent |
 | --- | --- | --- | --- |
 | `worktree` | `.git-pair/hooks/<point>/` | the repository's rules, committed and reviewed | runs only after a person accepts the content with `git pair hooks --trust` |
-| `clone` | `<git-dir>/git-pair/hooks/<point>/` | your own checks, on your own machine | none — it is your file, never committed |
+| `clone` | `<git-common-dir>/git-pair/hooks/<point>/` | your own checks, on your own machine — one directory per clone, so a worktree does not need its own | none — it is your file, never committed |
 
 The tracked root runs first, then the per-clone root: the repository's rules are the baseline and the client
 adds to them. Under a point, either a directory of scripts or one file named for the point is accepted.
@@ -131,8 +131,8 @@ this clone has taken a position on, recorded in `<git-common-dir>/git-pair/trust
 **The record belongs to the clone, not to one working directory.** What it answers for is content, and every
 worktree of the clone checks the same content out; recording it per worktree made a person who keeps a dozen
 worktrees read the same dozen lines a dozen times, and the tenth reading is not consent. One `--trust` or
-`--decline` covers every worktree of the clone, including ones cut afterwards, and a record an older git-pair
-wrote beside a single worktree is still read where it lies.
+`--decline` covers every worktree of the clone, including ones cut afterwards. There is no second place to look:
+nothing ever shipped a per-worktree record, so there is none to migrate and none to keep in step.
 
 **Each entry answers for the content it names.** Two worktrees can stand on two versions of the directory — one
 on trunk, one on the branch that edits the suite — and each keeps its own entry, so recording a position in one

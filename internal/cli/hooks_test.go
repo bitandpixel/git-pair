@@ -284,7 +284,7 @@ func TestHookTrustGatesTheTrackedRoot(t *testing.T) {
 		}
 
 		human := runIn(t, f.Dir(), "hooks").mustSucceed(t, "hooks")
-		mustContain(t, human.stderr, "CHANGED since you accepted them", "the note has to name the move, not just the absence")
+		mustContain(t, human.stderr, "CHANGED since this clone recorded them", "the note has to name the move, not just the absence")
 		mustContain(t, human.stderr, accepted, "and show the hash that was approved beside the one that would run")
 		mustContain(t, human.stderr, tree, "along with the tree's current hash")
 	})

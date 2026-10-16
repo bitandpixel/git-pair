@@ -1959,7 +1959,7 @@ Hooks live in two roots, consulted in this order:
 | Root | Path | Trust |
 | --- | --- | --- |
 | tracked | `<worktree>/.git-pair/hooks/<point>/` | committed, therefore content that arrived from somewhere; runs only after `git pair hooks --trust`, and the verdict asks this clone for a position — `--trust` or `--decline` — before it will call the work ready |
-| per-clone | `<git-dir>/git-pair/hooks/<point>/` | the person's own file under their own git directory, never committed, runs directly |
+| per-clone | `<git-common-dir>/git-pair/hooks/<point>/` | the person's own file under the git directory the clone shares — one per clone, not one per worktree — never committed, runs directly |
 
 The tracked root is a deliberate departure from git's own model, where `.git/hooks` is not cloned and a team
 vendors a script into every checkout. Vendoring buys one execution surface and costs a second copy of the

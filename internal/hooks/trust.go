@@ -40,6 +40,9 @@ import (
 // worktrees of one clone can stand on two different versions of the directory — one on trunk, one on the branch
 // that edits the suite — so the record has to hold a position about each. Membership is what decides a state;
 // order only decides which hash a report prints.
+//
+// Nothing shipped a per-worktree record, so there is no migration to make and no second place to read: this is
+// the release that first asks the question.
 const (
 	trustedRecordName  = "trusted-hooks"
 	declinedRecordName = "declined-hooks"
@@ -69,6 +72,10 @@ func DeclinedRecordPath(gitDir string) string {
 // so the answer belongs to the clone. Recording it per worktree instead asked a person who keeps ten worktrees to
 // read the same dozen lines ten times, and the tenth reading is not a safety check — it is the tax that teaches
 // people to run `--trust` without reading.
+//
+// There is no reading of a record written beside a single worktree, which is a choice rather than an oversight:
+// no release ever wrote one there, so the only people holding such a file are running a checkout of this
+// repository. The cost of a second location is that every reader of this code has to work out which one answers.
 func RecordDir(gitDir string) string {
 	if common, ok := git.CommonDir(gitDir); ok {
 		return common
@@ -76,42 +83,26 @@ func RecordDir(gitDir string) string {
 	return gitDir
 }
 
-// recordDirs is every directory a position may be found in, oldest first: the worktree's own git directory,
-// which is where git-pair up to v0.5.0 wrote, and the clone's shared directory, which is where this version
-// writes. Both are read and their answers join, because a person who read the scripts under the old path has
-// read them, and relocating the file is no reason to make them read it again. The worktree's own directory goes
-// first so that "the newest recorded position" means the same thing in either layout: the last entry of the
-// directory this version writes to.
-func recordDirs(gitDir string) []string {
-	if common := RecordDir(gitDir); common != gitDir {
-		return []string{gitDir, common}
+// readPositions reads one record and returns the hashes it holds, oldest first. An absent file and a blank line
+// both mean "no position", and a line that is not a tree hash is skipped rather than fatal: the record is a set of
+// content a person read, and one corrupt line is not a reason to stop a hand-off.
+func readPositions(dir, name string) ([]string, error) {
+	data, err := os.ReadFile(recordPath(dir, name))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
 	}
-	return []string{gitDir}
-}
-
-// readPositions reads one record from every directory it may live in and returns the hashes it holds, oldest
-// first, with a hash repeated across directories kept once. An absent file and a blank line both mean "no
-// position", and a line that is not a tree hash is skipped rather than fatal: the record is a set of content a
-// person read, and one corrupt line is not a reason to stop a hand-off.
-func readPositions(dirs []string, name string) ([]string, error) {
+	if err != nil {
+		return nil, fmt.Errorf("reading the hook %s record: %w", name, err)
+	}
 	var out []string
 	seen := map[string]bool{}
-	for _, dir := range dirs {
-		data, err := os.ReadFile(recordPath(dir, name))
-		if errors.Is(err, os.ErrNotExist) {
+	for _, line := range strings.Split(string(data), "\n") {
+		hash := strings.TrimSpace(line)
+		if hash == "" || !isTreeHash(hash) || seen[hash] {
 			continue
 		}
-		if err != nil {
-			return nil, fmt.Errorf("reading the hook %s record: %w", name, err)
-		}
-		for _, line := range strings.Split(string(data), "\n") {
-			hash := strings.TrimSpace(line)
-			if hash == "" || !isTreeHash(hash) || seen[hash] {
-				continue
-			}
-			seen[hash] = true
-			out = append(out, hash)
-		}
+		seen[hash] = true
+		out = append(out, hash)
 	}
 	return out, nil
 }
@@ -258,7 +249,7 @@ func Trust(ctx context.Context, repo *git.Repo) (TrustState, string, string, err
 	if err != nil {
 		return TrustUnrecorded, "", "", err
 	}
-	return TrustAt(recordDirs(gitDir), repo.Dir)
+	return TrustAt(RecordDir(gitDir), repo.Dir)
 }
 
 // Trusted reports whether the tracked hooks tree matches what was accepted. A tree that does not exist is
@@ -269,7 +260,7 @@ func Trusted(ctx context.Context, repo *git.Repo) (bool, error) {
 }
 
 // TrustAt is Trust for a caller that already knows where the records live. The state itself is read from
-// the filesystem — the tree hash and the two records beside it — so the directories are the only git question in
+// the filesystem — the tree hash and the two records beside it — so the directory is the only git question in
 // it, and a run that asks it once can answer this for every hook point it walks.
 //
 // The two records are asked in one order, and the order is the safety property. An acceptance of the current
@@ -280,8 +271,8 @@ func Trusted(ctx context.Context, repo *git.Repo) (bool, error) {
 //
 // Membership decides all four of those, not recency: a record that holds the version of the suite a worktree is
 // standing on answers for it, and the versions beside it answer for nothing. Recency only decides which hash
-// gets printed, so the sentence beside `changed` can say what this clone last accepted.
-func TrustAt(dirs []string, workTree string) (TrustState, string, string, error) {
+// gets printed, so the sentence beside `changed` can say what the clone last recorded.
+func TrustAt(recordDir, workTree string) (TrustState, string, string, error) {
 	current, _, err := TreeHash(workTree)
 	if err != nil {
 		return TrustUnrecorded, "", "", err
@@ -289,11 +280,11 @@ func TrustAt(dirs []string, workTree string) (TrustState, string, string, error)
 	if current == "" {
 		return TrustAccepted, "", "", nil
 	}
-	accepted, err := readPositions(dirs, trustedRecordName)
+	accepted, err := readPositions(recordDir, trustedRecordName)
 	if err != nil {
 		return TrustUnrecorded, "", current, err
 	}
-	declined, err := readPositions(dirs, declinedRecordName)
+	declined, err := readPositions(recordDir, declinedRecordName)
 	if err != nil {
 		return TrustUnrecorded, "", current, err
 	}
@@ -309,13 +300,12 @@ func TrustAt(dirs []string, workTree string) (TrustState, string, string, error)
 	}
 }
 
-// AcceptedAt is Accepted with the directories the records live under already resolved. It reports the newest
-// accepted hash, or "" when nobody has accepted anything: the set is what the state machine consults, and by the
-// time a caller wants a value to print, membership has already been answered. Printing the newest rather than an
-// arbitrary entry is what makes "accepted 3f1a…, the tree is now 82b0…" the same number the person saw when they
-// approved it.
-func AcceptedAt(dirs []string) (string, error) {
-	list, err := readPositions(dirs, trustedRecordName)
+// AcceptedAt is Accepted with the record directory already resolved. It reports the newest accepted hash, or ""
+// when nobody has accepted anything: the set is what the state machine consults, and by the time a caller wants a
+// value to print, membership has already been answered. Printing the newest rather than an arbitrary entry is what
+// makes "accepted 3f1a…, the tree is now 82b0…" the same number the person saw when they approved it.
+func AcceptedAt(recordDir string) (string, error) {
+	list, err := readPositions(recordDir, trustedRecordName)
 	if err != nil {
 		return "", err
 	}
@@ -328,13 +318,13 @@ func Accepted(ctx context.Context, repo *git.Repo) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return AcceptedAt(recordDirs(gitDir))
+	return AcceptedAt(RecordDir(gitDir))
 }
 
-// DeclinedAt is Declined with the directories the records live under already resolved. An absent file and an
-// empty one both mean no decline has been recorded, which is the same answer a reader needs.
-func DeclinedAt(dirs []string) (string, error) {
-	list, err := readPositions(dirs, declinedRecordName)
+// DeclinedAt is Declined with the record directory already resolved. An absent file and an empty one both mean no
+// decline has been recorded, which is the same answer a reader needs.
+func DeclinedAt(recordDir string) (string, error) {
+	list, err := readPositions(recordDir, declinedRecordName)
 	if err != nil {
 		return "", err
 	}
@@ -349,7 +339,7 @@ func Declined(ctx context.Context, repo *git.Repo) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return DeclinedAt(recordDirs(gitDir))
+	return DeclinedAt(RecordDir(gitDir))
 }
 
 // Accept records the current tracked hooks tree as approved and returns the hash and the file names that
@@ -368,7 +358,7 @@ func Accept(ctx context.Context, repo *git.Repo) (string, []string, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	if err := recordPosition(recordDirs(gitDir), RecordDir(gitDir), trustedRecordName, declinedRecordName, hash); err != nil {
+	if err := recordPosition(RecordDir(gitDir), trustedRecordName, declinedRecordName, hash); err != nil {
 		return "", nil, err
 	}
 	return hash, names, nil
@@ -393,14 +383,14 @@ func Decline(ctx context.Context, repo *git.Repo) (string, []string, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	if err := recordPosition(recordDirs(gitDir), RecordDir(gitDir), declinedRecordName, trustedRecordName, hash); err != nil {
+	if err := recordPosition(RecordDir(gitDir), declinedRecordName, trustedRecordName, hash); err != nil {
 		return "", nil, err
 	}
 	return hash, names, nil
 }
 
-// recordPosition adds one hash to a position record and removes that hash from the other, reading across every
-// directory a record may live in and writing to the one the clone shares.
+// recordPosition adds one hash to a position record and removes that hash from the other, both in the directory
+// the clone shares.
 //
 // The two positions still cancel each other — accepting content you had declined, or declining content you had
 // accepted, is one person changing their mind about the same bytes — but they cancel *that hash*, not the whole
@@ -409,13 +399,10 @@ func Decline(ctx context.Context, repo *git.Repo) (string, []string, error) {
 // nobody is standing on, which is the difference between "this clone read four versions of the suite" and "this
 // clone read one". The safety property the state machine needs is untouched either way: an entry answers for the
 // content it names and for no other, so an acceptance cannot stretch over a version nobody read and a decline
-// cannot inherit across versions.
-//
-// Writing goes to the shared directory only, and a worktree's own legacy record is left alone for the hashes this
-// command did not touch — so a repository whose worktrees were recorded by two versions of git-pair still reads
-// as the union of what its people actually recorded.
-func recordPosition(dirs []string, writeDir, name, other, hash string) error {
-	list, err := readPositions(dirs, name)
+// cannot inherit across versions — and clearing the file would let one worktree's decline switch off, clone-wide,
+// a check somebody else had accepted.
+func recordPosition(recordDir, name, other, hash string) error {
+	list, err := readPositions(recordDir, name)
 	if err != nil {
 		return err
 	}
@@ -425,37 +412,36 @@ func recordPosition(dirs []string, writeDir, name, other, hash string) error {
 	if len(list) > maxRecordedPositions {
 		list = list[len(list)-maxRecordedPositions:]
 	}
-	path := recordPath(writeDir, name)
+	path := recordPath(recordDir, name)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("creating %s: %w", filepath.Dir(path), err)
 	}
 	if err := os.WriteFile(path, []byte(strings.Join(list, "\n")+"\n"), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
-	for _, dir := range dirs {
-		others, err := readPositions([]string{dir}, other)
-		if err != nil {
-			return err
+
+	others, err := readPositions(recordDir, other)
+	if err != nil {
+		return err
+	}
+	var kept []string
+	for _, h := range others {
+		if h != hash {
+			kept = append(kept, h)
 		}
-		var kept []string
-		for _, h := range others {
-			if h != hash {
-				kept = append(kept, h)
-			}
+	}
+	if len(kept) == len(others) {
+		return nil
+	}
+	otherPath := recordPath(recordDir, other)
+	if len(kept) == 0 {
+		if err := os.Remove(otherPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("clearing %s: %w", otherPath, err)
 		}
-		if len(kept) == len(others) {
-			continue
-		}
-		otherPath := recordPath(dir, other)
-		if len(kept) == 0 {
-			if err := os.Remove(otherPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("clearing %s: %w", otherPath, err)
-			}
-			continue
-		}
-		if err := os.WriteFile(otherPath, []byte(strings.Join(kept, "\n")+"\n"), 0o644); err != nil {
-			return fmt.Errorf("writing %s: %w", otherPath, err)
-		}
+		return nil
+	}
+	if err := os.WriteFile(otherPath, []byte(strings.Join(kept, "\n")+"\n"), 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", otherPath, err)
 	}
 	return nil
 }
