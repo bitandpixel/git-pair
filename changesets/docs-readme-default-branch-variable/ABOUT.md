@@ -12,8 +12,8 @@ on the way that this variable's reader was somewhere other than where the README
 
 ## What changed
 
-| File | Change |
-| --- | --- |
+| File        | Change                                                                                                                                                                                                                                                                                                                                                               |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `README.md` | In the paragraph on what the runner has to provide, replaced "the integration branch named — `GIT_PAIR_DEFAULT_BRANCH` or `--default-branch` on each call" with the flag named as git-pair's interface, and a following sentence stating that the variable is the merge job's, where it comes from, and that a `git pair` command outside that script needs the flag |
 
 No code changed. No behaviour changed.

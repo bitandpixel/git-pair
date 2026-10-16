@@ -12,11 +12,11 @@ combination no run on the branch has ever seen, and it is exactly what the desti
 
 ## What changed
 
--   `scripts/ci/git-pair-integrate.sh`: `--verify-cmd <cmd>`, with `GIT_PAIR_CI_VERIFY_CMD` for a whole
-    process. The usage block is the `--help` text, so the flag is documented where the job is documented;
-    the §29 sequence list gains a `verify candidate` entry between `merge --no-ff` and `push`, and the
-    exit-code paragraph says what a failing candidate costs.
--   `scripts/gates/ci-integrate.sh`: one scenario, 15 checks.
+- `scripts/ci/git-pair-integrate.sh`: `--verify-cmd <cmd>`, with `GIT_PAIR_CI_VERIFY_CMD` for a whole
+  process. The usage block is the `--help` text, so the flag is documented where the job is documented;
+  the §29 sequence list gains a `verify candidate` entry between `merge --no-ff` and `push`, and the
+  exit-code paragraph says what a failing candidate costs.
+- `scripts/gates/ci-integrate.sh`: one scenario, 15 checks.
 
 `--require-ci`, `--ci-probe`, `--ci-request` and both helper scripts are untouched, and the scenarios that
 cover them are unchanged.
@@ -60,28 +60,28 @@ it. `mise run gates` runs the same ladder as CI: `E2E: all checks passed`, `PTY:
 The scenario drives the real driver against a scratch bare remote in one run over two declared branches, with
 a verify command that fails only for the tree carrying one of them, so both verdicts come from a single job:
 
--   with no `--verify-cmd` the job merges on the gate alone and tests no candidate;
--   the command was asked about the tree that has trunk's newest move — trunk gains `moved.txt` *after* the
-    branches are cut, so a command run at the branch head cannot see it, which is what makes "it ran at the
-    merge commit" a checked thing rather than an asserted one — and it had two parents;
--   the refused candidate made the run red, named itself, and its own words reached the log;
--   nothing of it reached the destination, not even `src/nope.ts`, while the passing one landed in the same
-    run;
--   the local destination was back at the remote's tip and no longer held the refused tree. Those two
-    assertions are what fails if the reset is removed.
+- with no `--verify-cmd` the job merges on the gate alone and tests no candidate;
+- the command was asked about the tree that has trunk's newest move — trunk gains `moved.txt` _after_ the
+  branches are cut, so a command run at the branch head cannot see it, which is what makes "it ran at the
+  merge commit" a checked thing rather than an asserted one — and it had two parents;
+- the refused candidate made the run red, named itself, and its own words reached the log;
+- nothing of it reached the destination, not even `src/nope.ts`, while the passing one landed in the same
+  run;
+- the local destination was back at the remote's tip and no longer held the refused tree. Those two
+  assertions are what fails if the reset is removed.
 
 ## Known limitations
 
--   Nothing in this repository calls the flag yet. The shipped job still gates on `--require-ci`; the caller
-    lands one layer up. Until then the flag is exercised only by the replay.
--   The command runs in the job's clone with the job's token, so a suite that needs secrets gets them the way
-    a test workflow gives them today, and artefacts it writes stay in that clone — per-job and discarded, but
-    a suite that *commits* would leave the clone dirty for later changesets in the same run.
--   No timeout of its own: a suite that hangs hangs the job. The driver has never owned timeouts and the probe
-    and request hooks have the same property; the workflow's `timeout-minutes` is where the bound lives.
+- Nothing in this repository calls the flag yet. The shipped job still gates on `--require-ci`; the caller
+  lands one layer up. Until then the flag is exercised only by the replay.
+- The command runs in the job's clone with the job's token, so a suite that needs secrets gets them the way
+  a test workflow gives them today, and artefacts it writes stay in that clone — per-job and discarded, but
+  a suite that _commits_ would leave the clone dirty for later changesets in the same run.
+- No timeout of its own: a suite that hangs hangs the job. The driver has never owned timeouts and the probe
+  and request hooks have the same property; the workflow's `timeout-minutes` is where the bound lives.
 
 ## Open questions
 
--   Should the reset also `git clean -fd` the destination worktree? A suite that leaves untracked files behind
-    could have them visible to the next candidate in the same run. The reset covers tracked state, which is
-    what the merge and the gate read; untracked contamination is possible and has not been seen.
+- Should the reset also `git clean -fd` the destination worktree? A suite that leaves untracked files behind
+  could have them visible to the next candidate in the same run. The reset covers tracked state, which is
+  what the merge and the gate read; untracked contamination is possible and has not been seen.

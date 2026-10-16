@@ -51,7 +51,7 @@ per-clone question and belongs in resolution, where it can follow what this clon
 **Only the integration branch switches, and `Fetched()` is the guard.** A stack's parent branch is the other
 answer rule 1 gives, and preferring its remote copy would be backwards: that work is written on a branch of
 this clone, where the local branch is ahead of anything pushed. The condition is therefore "the base names the
-integration branch *and* this clone reaches it through a fetch ref". Where there is no fetch ref — a local-only
+integration branch _and_ this clone reaches it through a fetch ref". Where there is no fetch ref — a local-only
 repository, or a clone that has never fetched — the recorded name is the whole answer and nothing changes.
 
 **Measured from a fetch ref even when both copies are the same commit.** The alternative is a rule that
@@ -68,7 +68,7 @@ derived bases and already carried the sentence, so the new case rides the same f
 third spelling of the base anywhere.
 
 **`--default-branch` is the escape hatch, and it is deliberately not base-only.** Naming `main` states which
-ref *is* the integration branch for that command, so the diff and the landed test both move back to the local
+ref _is_ the integration branch for that command, so the diff and the landed test both move back to the local
 copy; `--base-ref=main` pins one span without answering the branch question at all. A flag that moved the
 measurement and left "has this landed?" where it was would put back the two-answer disagreement this rule
 removes, and a config entry would make it a per-clone fact — which PRD §4 already refuses, because two clones
@@ -92,7 +92,7 @@ git pair diff  ->  a.txt  changesets/demo/*
 `status --json` beside it: `base` stays `main`, `base_ref` is `refs/remotes/origin/main`, `base_why` carries
 the sentence, and `span` reads `origin/main...current`.
 
-- `internal/changeset/base_test.go` — the rebase case end to end (`changedBetween` asserts the *files*, not the
+- `internal/changeset/base_test.go` — the rebase case end to end (`changedBetween` asserts the _files_, not the
   ref string), the same repository with no fetch ref, a stack that keeps its parent branch when trunk is
   fetched, and `MeasureBase` against `BaseFor` plus both fallbacks.
 - `internal/span/span_test.go` — the label, and that the checkpoint still keeps the qualified ref.

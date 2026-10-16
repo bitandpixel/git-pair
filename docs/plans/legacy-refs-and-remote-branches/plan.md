@@ -66,7 +66,7 @@ answered about every branch the clone can name, local or remote-tracking.
 - Nothing moves or deletes a durable ref. `CreateOnly` stays create-only; a retired ref is left exactly
   where it is.
 - `reviewref.Taken` keeps refusing to reserve a name only a retired ref holds (`internal/cli/id_test.go:83`
-  pins it). Two families being the only *records* does not make a retired path free to reuse.
+  pins it). Two families being the only _records_ does not make a retired path free to reuse.
 
 ## Assumptions
 
@@ -74,7 +74,7 @@ answered about every branch the clone can name, local or remote-tracking.
   `refs/remotes/origin/*` is ordinary git rather than git-pair's doing. If a clone maps a second remote,
   the branch-name keying rule below still gives one candidate per branch name; which remote wins is then
   the local-before-remote rule.
-- Nobody has a *live* workflow that depends on a retired `integration` ref counting. Verified here: no
+- Nobody has a _live_ workflow that depends on a retired `integration` ref counting. Verified here: no
   retired ref on `origin`, none locally.
 
 ## Milestones
@@ -103,7 +103,7 @@ Tasks
 - `internal/cli/landed.go:52,66`: the comments about the layout "not being uniform" describe history;
   rewrite them to describe the code.
 - Invert `TestQueueAcceptsALandingTheRetiredLayoutRecorded` to what now happens, and keep the retired ref
-  in the fixture so the *other* claim is still pinned: a retired ref is not evidence of a missing fetch.
+  in the fixture so the _other_ claim is still pinned: a retired ref is not evidence of a missing fetch.
 - `internal/reviewref/reviewref_test.go`, `internal/cli/id_test.go`, `internal/cli/cost_test.go`: update to
   the two-family reading; keep the "reserves no name" case.
 - PRD §13.4, README:510, README:727, `internal/cli/docs_contract_test.go`. The whitelist entry for the
@@ -114,7 +114,7 @@ Verification (done)
 
 - `mise run check` clean.
 - `TestQueueReportsALandingTheRetiredLayoutMissed` holds both halves: a retired `integration` ref now puts
-  the landing in `LANDED, UNRECORDED`, and the report says "none *in this clone*" rather than the
+  the landing in `LANDED, UNRECORDED`, and the report says "none _in this clone_" rather than the
   "holds no refs/git-pair/* refs at all" hint.
 - `TestListKeepsARetiredOnlyNamespaceNonEmpty` pins the same fact one layer down, and
   `TestQueueSaysOnceThatTheNamespaceIsAbsent` still passes, so the empty-namespace report is intact.
@@ -128,7 +128,7 @@ Deliverables
   one candidate.
 - Destinations are excluded by branch name, so `main` excludes `origin/main` even when the remote-tracking
   copy is stale.
-- The ambiguity refusal still fires, and still names every candidate, when two *different* branches carry
+- The ambiguity refusal still fires, and still names every candidate, when two _different_ branches carry
   the directory.
 
 Tasks
@@ -138,7 +138,7 @@ Tasks
   `HEAD`, and the exclude-by-key for destinations.
 - Keep the exclusion of the destination's commit: a destination's tip is already excluded by SHA and stays.
 - New `internal/cli` test: a clone with the changeset branch only as `refs/remotes/origin/<branch>` derives
-  the pair with no flags. Add one where both spellings exist and the fetched copy is *behind* the local one
+  the pair with no flags. Add one where both spellings exist and the fetched copy is _behind_ the local one
   (one candidate, and the local tip recorded — keyed on the commit these would be two carriers and a
   refusal) and one where a stale `refs/remotes/origin/main` carries the directory after `main` moved on
   past it (excluded, because no SHA exclusion reaches that commit).
@@ -165,7 +165,7 @@ Verification (done)
   look like two carriers. Mitigation: key by branch name, local first; pinned by test before the widened
   ask is used by anything.
 - **A remote-tracking ref can be stale in the other direction** — fetched before the review commit, so its
-  tip was never reviewed. This is why the derivation keeps recording the *branch tip it can see* and the
+  tip was never reviewed. This is why the derivation keeps recording the _branch tip it can see_ and the
   record stays verifiable: the source's history still has to carry the changeset's markers, which is
   `checkSourceCarriesTheChangeset` and the marker rule. A stale remote-tracking copy fails there rather than
   writing a wrong record quietly.
@@ -180,5 +180,5 @@ two facts are different. `mise run check` per milestone. The pty walkthrough rec
 
 ## Audit History
 
-| Date       | Audit | Summary |
-| ---------- | ----- | ------- |
+| Date | Audit | Summary |
+| ---- | ----- | ------- |

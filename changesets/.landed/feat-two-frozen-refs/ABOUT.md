@@ -38,7 +38,7 @@ naming. M7-M8 follow — stacked parent tracking and the agent contract.
   `--json` and its fifth condition, and prints the head it cleared. `integration record` derives the
   changeset from the directories `--source` carries and trunk does not, and writes both refs. `status`
   reports `integration_ref` beside `integrated`. The next-action strings across `check`, `status`, `change
-  wait` and `review submit` are one function now.
+wait` and `review submit` are one function now.
 - `internal/changeset/resolve.go` — candidates come from trees alone. Ordering between two of them is the
   newest commit touching `changesets/<id>/`, computed only when two survive; `Candidate` lost `Review` and
   `Terminal`.
@@ -59,7 +59,7 @@ naming. M7-M8 follow — stacked parent tracking and the agent contract.
   `approve`, or `feedback` with the recorder's new `--allow-feedback`. `verifyLandingReachable` puts the
   landing in the destination's history, the destination being `--target` or, when unnamed, the changeset's
   own `base:` then the default branch. The fourth check is the first-parent transition: the commit must
-  *add* `changesets/<id>/`, not merely carry it. `lifecycle.ScanLineage` is the walk all of that reads;
+  _add_ `changesets/<id>/`, not merely carry it. `lifecycle.ScanLineage` is the walk all of that reads;
   `reviewref.RecordedPair` and `Conflict` are the record read back before any check runs.
 - `internal/reviewref` — `RecordedPair` reads both halves with absent ones as the empty string, and
   `Conflict` returns the write's own conflict error without writing, so the refusal a retry hears is the
@@ -71,7 +71,7 @@ naming. M7-M8 follow — stacked parent tracking and the agent contract.
 - Naming (M6, plan P3) — `git pair queue` and `git pair init` are the spellings, hard-renamed with no
   aliases; the two commands moved into `init.go` and `queue.go` because top-level commands live one per
   file. Historical documents keep the old names: they record what was true when they were written.
-- Stacked changesets (M7) — a child records `parent:` (which *is* its base) and `parent-changeset:`
+- Stacked changesets (M7) — a child records `parent:` (which _is_ its base) and `parent-changeset:`
   (the durable half, readable after the parent's branch is gone); `init --parent` writes them and
   `--set-parent` restacks explicitly. A review submission for a stacked changeset records the
   parent's tip as `Review-Parent-Head`, and the conservative rule (PRD §21) — any parent movement
@@ -134,6 +134,7 @@ records the trailer); the cost of the compat hole is a rule with an exception in
 the gate does not complicate a refusal the author already understands with a second one about ancestry.
 The two ways the head can be missing get two reasons, because a rewritten branch and a clone that has
 not fetched are different things to fix.
+
 - **The recorder asks for the newest verdict, not for an approval somewhere.** The plan's wording was "an
   approving marker exists"; a superseded approval is not the reviewer's answer, and `change unready` or
   `change abandon` after an approval must take the head out of the recordable set. So the newest marker

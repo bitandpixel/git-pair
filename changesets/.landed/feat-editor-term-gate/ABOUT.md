@@ -17,7 +17,7 @@ No behaviour change: `EditorCommand` still asks git and still falls back the sam
   `TERM=` from the fixture environment the way it already drops `GIT_EDITOR`/`VISUAL`/`EDITOR`, and
   appends the requested value once. `TestEditorPrecedenceMatchesGit` gains a `term` column and two
   rows: `VISUAL is skipped on a dumb terminal` (`VISUAL=vs EDITOR=ed` resolves `ed`) and `core.editor
-  still wins on a dumb terminal`. `TestFallsBackWhereADumbTerminalLeavesGitRefusing` pins the case
+still wins on a dumb terminal`. `TestFallsBackWhereADumbTerminalLeavesGitRefusing` pins the case
   where git prints nothing and exits `1`: the fallback still resolves `VISUAL`.
 - `internal/console/console.go` — the comment above `EditorCommand` names the `TERM` gate, cites
   `is_terminal_dumb()`, states git's refusal on a dumb terminal with nothing configured, and says
@@ -55,7 +55,7 @@ behaviour decision this changeset deliberately does not make.
 
 - `go test -count=1 ./internal/console/` green with `TERM` unset, `TERM=dumb`, and `TERM` naming a
   usable terminal. The pre-fix repro is `env -u TERM go test -count=1 ./internal/console/ -run
-  TestEditorPrecedence`, which failed with `resolved "ed", want "vs"` — the CI failure, on git
+TestEditorPrecedence`, which failed with `resolved "ed", want "vs"` — the CI failure, on git
   2.43.0, without a runner.
 - `-run 'TestEditorPrecedence|TestFallsBack' -v`: six precedence rows and two fallback tests, all
   passing under each `TERM` condition.

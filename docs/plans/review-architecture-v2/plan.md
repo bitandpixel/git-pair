@@ -94,39 +94,39 @@ What exists now, on `origin/main`:
 **D1 — Scope is the local loop.** Six entry points: `change init`, `change ready`, `review *`,
 `change wait`, `change feedback` + `change ready`, and landing. Remote and CI stay a door: the two refs are
 append-only so publishing them is a refspec, and `integration record` already accepts two SHAs from a
-caller that has them. *Rejected: a distributed queue registry; a continuously synced remote changeset ref.*
+caller that has them. _Rejected: a distributed queue registry; a continuously synced remote changeset ref._
 
 **D2 — Two refs, both create-only, both written at landing.**
 `refs/git-pair/integrations/<id>` → the commit that introduced the changeset into the destination branch;
 `refs/git-pair/archive/<id>` → the real unsquashed, unrebased tip. Written in that order by one
-`integration record` invocation. *Rejected: the moving archive ref (a mutable coordination ref, and the
+`integration record` invocation. _Rejected: the moving archive ref (a mutable coordination ref, and the
 thing this spec exists to remove); one ref with the lineage left to per-review anchors (durability would
 depend on another clone having published its anchors); a metadata commit or annotated tag for the
 seven-field record (the pair of refs plus the tree rule already answer all seven, and PRD §13.2's
-"an object id and nothing else" survives).*
+"an object id and nothing else" survives)._
 
 **D3 — No `land` command.** git-pair performs no merge. The contract is `git pair check` → an ordinary
 git merge or squash, performed by the agent on human instruction → `git pair integration record`.
-*Rejected: `git pair land` performing the merge in a temporary worktree — it needs a PRD §26 change, a
+_Rejected: `git pair land` performing the merge in a temporary worktree — it needs a PRD §26 change, a
 hygiene carve-out for `merge`, and a worktree policy, and it buys no determinism that M3 does not already
-provide.*
+provide._
 
 **D4 — Record before tidy, by convention, and detection as the backstop.** The agent contract puts
 `integration record` before any commit that could disturb the tree evidence. The appearance detector in
-M4 is the human-facing backstop. *Rejected: a deletion-path detector for changeset directories removed by a
+M4 is the human-facing backstop. _Rejected: a deletion-path detector for changeset directories removed by a
 landing commit — this project has no practice of tidying `changesets/` before landing, so the case is
-hypothetical and its detection is the expensive kind.*
+hypothetical and its detection is the expensive kind._
 
 **D5 — Unrecorded landings are a reported state.** Directory present in the destination branch, no
 `integrations/<id>` ⇒ `landed, unrecorded`, printed by `status` and as its own `queue` section, guarded by
-namespace presence so an unfetched clone gets one fetch message instead of N warnings. *Rejected: git hooks
-and background checks; changing an exit code because of someone else's merge.*
+namespace presence so an unfetched clone gets one fetch message instead of N warnings. _Rejected: git hooks
+and background checks; changing an exit code because of someone else's merge._
 
 **D6 — `Review-Head` carries the rebase rule; per-review anchors are deferred.** A review commit records
 the commit it spoke about, and an approval counts only while that commit is an ancestor of HEAD. Rebase
 rewrites the commit but preserves its message, so the rewritten marker still names the pre-rebase head and
-the ancestry test refuses it. *Rejected: keeping `refs/git-pair/reviews/*` now — it is a third namespace,
-and allocating `123` is a read-modify-write across clones, which is the coordination this spec bans.*
+the ancestry test refuses it. _Rejected: keeping `refs/git-pair/reviews/*` now — it is a third namespace,
+and allocating `123` is a read-modify-write across clones, which is the coordination this spec bans._
 The consequence is stated in R5 below: after a rebase the original review commit is reflog-only, so
 "inspect it exactly as submitted" is deferred with the anchors. Two details settled during M2: the
 condition is asked only where the outcome permits integration, so a `block` stays a `block` with one
@@ -147,7 +147,7 @@ merge turns out to break check 4 (see Spike S1), check 4 becomes a warning for m
 one changeset in the transition, and that exception gets its own test rather than a general relaxation.
 
 **P2 — `CHANGESET.yaml` stack shape.** `parent: <branch>` and `parent-changeset: <id>` become the stacked
-form, and `parent:` *is* the base: a file that sets both `parent:` and `base:` is refused at read time the
+form, and `parent:` _is_ the base: a file that sets both `parent:` and `base:` is refused at read time the
 way `ErrIDMismatch` and `ErrBaseConflict` refuse inconsistent metadata today. The `base:` spelling that
 names a deleted namespace (`refs/git-pair/changesets/<x>/archive`) stops being accepted.
 
@@ -173,30 +173,30 @@ repository. Deferred with the anchors unless a concrete need appears during impl
 **Tasks**
 
 - [x] Split `internal/reviewref` into the two flat families. Delete `Update`, `ErrArchiveFrozen`,
-  `RefuseIntegrated`, `Namespace`, the `<id>/<child>` parser in `ChangesetID`, and the leaf/namespace
-  comment block that only the old nesting needed (`reviewref.go:15`, `:106-125`).
-  `RefuseIntegrated` moved rather than disappeared: the refusal of a recorded changeset belongs with the
-  thing that writes markers, so it is exported from `internal/marker` and called by `Commit`/`CommitPaths`
-  and by the three `change` commands before their no-op paths. `Taken` checks the two exact paths, so a
-  nested legacy name reserves nothing.
+      `RefuseIntegrated`, `Namespace`, the `<id>/<child>` parser in `ChangesetID`, and the leaf/namespace
+      comment block that only the old nesting needed (`reviewref.go:15`, `:106-125`).
+      `RefuseIntegrated` moved rather than disappeared: the refusal of a recorded changeset belongs with the
+      thing that writes markers, so it is exported from `internal/marker` and called by `Commit`/`CommitPaths`
+      and by the three `change` commands before their no-op paths. `Taken` checks the two exact paths, so a
+      nested legacy name reserves nothing.
 - [x] Make create-only tolerant of an identical re-create: same target is a no-op, different target is the
-  refusal. `CreateRefIfAbsent` (`reviewref.go:195`) is the shared primitive — and it lives in
-  `internal/git` now, as the atomic `update-ref <ref> <sha> <zero-oid>`, because that is the layer that
-  owns git invocations. `reviewref.CreateOnly` and `CreatePair` are its two callers.
+      refusal. `CreateRefIfAbsent` (`reviewref.go:195`) is the shared primitive — and it lives in
+      `internal/git` now, as the atomic `update-ref <ref> <sha> <zero-oid>`, because that is the layer that
+      owns git invocations. `reviewref.CreateOnly` and `CreatePair` are its two callers.
 - [x] Delete the write sites: `change.go:547` (ready), `:675` (unready), `:785` (abandon), `:990` (archive),
-  `reviewops.go:67` (submit). `git.UpdateRef` is deleted too, so there is no API left that could move a
-  ref; the hygiene test asserts one `update-ref` in shipped code and that its old-value is the zero oid.
+      `reviewops.go:67` (submit). `git.UpdateRef` is deleted too, so there is no API left that could move a
+      ref; the hygiene test asserts one `update-ref` in shipped code and that its old-value is the zero oid.
 - [x] Delete `change archive` (`newChangeArchiveCommand`, `change.go:859`) and move its two gates — surviving additions and
-  drift — behind the `check` path that already runs them; its squash-safety output moves to M5.
+      drift — behind the `check` path that already runs them; its squash-safety output moves to M5.
 - [x] Point `Present`, `Taken`, `FetchRefspec` and `FetchCommand` at `refs/git-pair`; return both families from
-  `List` in the single existing `for-each-ref` pass. `FetchRefspec` carries no `+`, because a fetch that can
-  clobber a create-only ref is a way around the rule.
+      `List` in the single existing `for-each-ref` pass. `FetchRefspec` carries no `+`, because a fetch that can
+      clobber a create-only ref is a way around the rule.
 - [x] Replace the state reads in `candidateFor` (`resolve.go:388-401`, `:485`): candidate ordering and
-  terminality come from the markers on the branch, not from a ref tip. Ordering is the newest commit
-  touching `changesets/<id>/`, computed only when two candidates survive; `Candidate` lost `Review` and
-  `Terminal`.
+      terminality come from the markers on the branch, not from a ref tip. Ordering is the newest commit
+      touching `changesets/<id>/`, computed only when two candidates survive; `Candidate` lost `Review` and
+      `Terminal`.
 - [x] Rewrite `e2e-29.sh`, `pty-walkthrough.sh`, the `gittest` fixtures, and PRD §3, §9.5-§9.7, §12, §13 and
-  README's Quickstart transcript, which currently prints an archive-ref line.
+      README's Quickstart transcript, which currently prints an archive-ref line.
 
 **What landed differently**
 
@@ -229,11 +229,11 @@ repository. Deferred with the anchors unless a concrete need appears during impl
 - [x] `mise run check`.
 - [x] New unit tests: create-only idempotency, conflicting re-create refusal, `Taken` across both families.
 - [x] Integration tests asserting that `change ready`, `change unready`, `change abandon` and `review submit`
-  leave `refs/git-pair/*` empty — one test per command, so a future write site fails a named test
-  (`internal/cli/in_flight_refs_test.go`).
+      leave `refs/git-pair/*` empty — one test per command, so a future write site fails a named test
+      (`internal/cli/in_flight_refs_test.go`).
 - [x] The TUI passes `pty-walkthrough.sh`. M1 removed the TUI's only git-pair ref, so the session code
-  that tolerates vanished commits (`tui/session.go:242`) is exercised by the branch-drift scenario and the
-  existing span tests rather than a new one; its comment is M2's to rewrite.
+      that tolerates vanished commits (`tui/session.go:242`) is exercised by the branch-drift scenario and the
+      existing span tests rather than a new one; its comment is M2's to rewrite.
 
 ### M2 — `Review-Head` and the rebase rule — done 2026-09-21
 
@@ -247,18 +247,18 @@ repository. Deferred with the anchors unless a concrete need appears during impl
 **Tasks**
 
 - [x] Add a `Review-Head` trailer written by `reviewops.Submit` and read by `lifecycle.parseEvent`
-  (`lifecycle.go:198-230`); carry it on `lifecycle.Event` and expose it in `status` and `review history`.
+      (`lifecycle.go:198-230`); carry it on `lifecycle.Event` and expose it in `status` and `review history`.
 - [x] Add the ancestry condition with `IsAncestor` (`git.go:246`, `merge-base --is-ancestor`), which the hygiene
-  test already permits.
+      test already permits.
 - [x] Reverse the two comments that currently defend rewrite-tolerance (`change.go:977-980` and, in the TUI,
-  `session.go:242`) so they describe the new rule instead of the old one.
+      `session.go:242`) so they describe the new rule instead of the old one.
 - [x] PRD §12 and §11.3 updated for the new condition; README's rebase guidance rewritten.
 
 **Verification**
 
 - [x] Table-driven tests: linear rebase → refused; tree-identical rebase → refused (this fails today and is the
-  headline case); fast-forward → accepted; amend of an unreviewed commit → unaffected; approval followed by
-  a metadata-only commit → accepted.
+      headline case); fast-forward → accepted; amend of an unreviewed commit → unaffected; approval followed by
+      a metadata-only commit → accepted.
 - [x] `check --json` carries the approved head and the verdict reason; contract tests pin the shape.
 
 **What landed differently**
@@ -295,14 +295,14 @@ repository. Deferred with the anchors unless a concrete need appears during impl
 **Tasks**
 
 - [x] Discover the changeset from content: directories in `--source`'s tree minus the destination branch's
-  (`changeset.DirsAt`), cross-checked against `Review-Changeset` in `--source`'s lineage. Agreement is
-  required; disagreement refuses.
+      (`changeset.DirsAt`), cross-checked against `Review-Changeset` in `--source`'s lineage. Agreement is
+      required; disagreement refuses.
 - [x] Verify, refusing by default per P1: the changeset is named by both readings; an approving marker exists
-  in `--source`'s lineage; `--commit` is reachable from the destination branch (`--target` stops being optional
-  wherever the branch is available); `--commit` adds `changesets/<id>/` over its first parent.
+      in `--source`'s lineage; `--commit` is reachable from the destination branch (`--target` stops being optional
+      wherever the branch is available); `--commit` adds `changesets/<id>/` over its first parent.
 - [x] Derive both tips when the flags are absent: archive tip from the changeset branch HEAD or the newest
-  `Review-Head`; integration tip from the first-parent transition rule in
-  `research/2026-09-21-landing-transition.md`.
+      `Review-Head`; integration tip from the first-parent transition rule in
+      `research/2026-09-21-landing-transition.md`.
 - [x] Write archive first, integration second; re-run completes a half-written pair.
 - [x] Rewrite the command's long help, which currently promises CI-only semantics and single-ref output.
 - [x] PRD §11.4 and §16 rewritten; README's CI block rewritten, including the fetch line for the new roots.
@@ -310,8 +310,8 @@ repository. Deferred with the anchors unless a concrete need appears during impl
 **Verification**
 
 - [x] Integration tests for merge, squash and cherry-pick landings; for the derivation of both tips; for the
-  archive-then-integration ordering; for completion after a simulated partial write; and for each of the
-  four refusals.
+      archive-then-integration ordering; for completion after a simulated partial write; and for each of the
+      four refusals.
 - [x] A test proving an unreviewed head cannot be recorded as integrated.
 - [x] The gate scripts land the same changeset twice, the second time proving the no-op.
 
@@ -328,7 +328,7 @@ each asserting nothing was written), `TestIntegrationRecordRefusesACommitThatDid
 - The first half of M3 — both refs written, create-only, in archive-then-integration order, with discovery
   from content — landed in M1, because retiring `change archive` left the recorder as the only write point.
   What landed now is the verification in front of the write.
-- Check 2 asks for the *newest* verdict, not for an approval anywhere in the history: a superseded approval
+- Check 2 asks for the _newest_ verdict, not for an approval anywhere in the history: a superseded approval
   is not the reviewer's answer (§10.6), and `change unready` or `change abandon` after an approval take the
   head out of the recordable set. This is the same reading `check` makes of the same history, which is why
   the recorder carries `--allow-feedback` too: two commands run one after the other must not disagree about
@@ -340,11 +340,11 @@ each asserting nothing was written), `TestIntegrationRecordRefusesACommitThatDid
   empty), because "cannot say where work lands" and "did not land where said" are different facts and only
   the second refuses.
 - The record is read before the checks run. An already-recorded pair answers "already recorded" without
-  verifying, and a *different* pair is refused with what is on the record — a second landing into a branch
+  verifying, and a _different_ pair is refused with what is on the record — a second landing into a branch
   that already carries the directory also fails check 4, and the reader needs the answer about the record,
   not the incidental complaint about the tree. `reviewref.Conflict` returns the same error the write returns,
   so the two cannot drift apart in wording.
-- Check 4 is the transition rather than the presence: the commit must *add* `changesets/<id>/` over its first
+- Check 4 is the transition rather than the presence: the commit must _add_ `changesets/<id>/` over its first
   parent. Presence passes for a follow-up commit on the destination branch, which is the wrong thing to
   record as a landing. P1's merge-commit exception has not been needed: landing a stack as one merge adds
   both directories over the first parent, so each record passes.
@@ -352,8 +352,8 @@ each asserting nothing was written), `TestIntegrationRecordRefusesACommitThatDid
   single-id filter `Summarize` applies (the disagreement between the directory and the markers is the
   refusal), and over the whole ancestry rather than `base..source`, because after a merge landing the
   reviewed head is inside the destination branch and such a range is empty exactly when a record is written.
-- The plan's "PRD §16" is the draft PRD's numbering; the CI text in this repository is README's *Recording
-  the landing* and *Fetching the durable refs*, plus PRD §11.4 and §9.5, and all four moved.
+- The plan's "PRD §16" is the draft PRD's numbering; the CI text in this repository is README's _Recording
+  the landing_ and _Fetching the durable refs_, plus PRD §11.4 and §9.5, and all four moved.
 - The flagless flow derives both tips and guesses at neither. The landing is the first-parent transition
   (a new `git.Repo.FirstParentLine`, because the rule is about the destination's own line and not the
   ancestry a `--no-ff` merge dragged in); the reviewed head is the branch still carrying the directory,
@@ -386,22 +386,22 @@ each asserting nothing was written), `TestIntegrationRecordRefusesACommitThatDid
 **Tasks**
 
 - [x] Compute `dirsInTrunk − integrationRefIDs` inside the existing resolver, from the single `List` pass — no
-  new git invocation.
+      new git invocation.
 - [x] `queue` gains a `LANDED, UNRECORDED` section printing the `integration record` invocation; `status`
-  prints the same finding when run on a branch that carries no changeset of its own, keeping exit 2 on the
-  `ErrNoChangeset` path (`root.go:386`).
+      prints the same finding when run on a branch that carries no changeset of its own, keeping exit 2 on the
+      `ErrNoChangeset` path (`root.go:386`).
 - [x] Guard with the existing `Present` discipline (`reviewref.go:70`): empty namespace → one fetch message;
-  otherwise the wording keeps both readings alive — "not recorded, or not recorded here". The guard comes
-  from the same `List` that answers the question, so hedging costs nothing and `Present` stays reserved for
-  runs that have already failed.
+      otherwise the wording keeps both readings alive — "not recorded, or not recorded here". The guard comes
+      from the same `List` that answers the question, so hedging costs nothing and `Present` stays reserved for
+      runs that have already failed.
 - [x] Cap the list and count the remainder.
 
 **Verification**
 
 - [x] Tests for all four states: recorded, unrecorded, never-a-changeset, and unfetched namespace.
 - [x] A test pinning the cost: the resolver issues the same number of git invocations as before this
-  milestone — and the queue now issues *fewer* than it did, because the report is not the only thing that
-  stopped asking per changeset.
+      milestone — and the queue now issues _fewer_ than it did, because the report is not the only thing that
+      stopped asking per changeset.
 - [x] `queue --json` contract test for the new section, with `reasons`-style arrays never `null`.
 
 The tests that carry the above: `TestQueueAndStatusReportALandingNobodyRecorded`,
@@ -454,18 +454,18 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
 **Tasks**
 
 - [x] `status`'s `NextAction` gains the approved case: merge into `<base>`, then `git pair integration record`
-  (`status.go:138`, alongside the existing integrated line at `:221`). `check`'s success path prints the same
-  next step.
+      (`status.go:138`, alongside the existing integrated line at `:221`). `check`'s success path prints the same
+      next step.
 - [x] Move `change archive`'s squash-safety reporting into `status`/`check`; delete the command's flag set
-  (`--allow-surviving-review-additions`, `--allow-unreviewed-changes`) or relocate the flags to `check`
-  where the corresponding check lives.
+      (`--allow-surviving-review-additions`, `--allow-unreviewed-changes`) or relocate the flags to `check`
+      where the corresponding check lives.
 - [x] `change unready` and `change abandon` documented as marker-only; PRD §9.6, §9.7 and §29 updated.
 
 **Verification**
 
 - [x] Snapshot/contract tests for `status --json` and `check --json` in the approved state.
 - [x] `pty-walkthrough.sh` replays the PRD §29 loop end to end: init → ready → review → feedback → ready →
-  approve → merge → record → branch deleted → `status` and `queue` on trunk read correctly.
+      approve → merge → record → branch deleted → `status` and `queue` on trunk read correctly.
 
 **What landed differently**
 
@@ -503,17 +503,17 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
 **Tasks**
 
 - [x] Key `runReviewQueue` by branch instead of by slug (`review.go:441-486`); drop the merged `branches[]` and
-  the "best of" choice in `readyEntry` (`:609`).
+      the "best of" choice in `readyEntry` (`:609`).
 - [x] Rename `review queue` → `queue` and `change init` → `init`, with no aliases; update the help text,
-  README's command table, and every test that names the old spellings.
+      README's command table, and every test that names the old spellings.
 - [x] PRD §10.6 and README's command table updated.
 
 **Verification**
 
 - [x] A fixture with one changeset on two branches in different states yields two rows — with a note below
-  on what "two distinct states" can mean in a queue that lists only READY branches.
+      on what "two distinct states" can mean in a queue that lists only READY branches.
 - [x] `--json` contract test for the per-row branch field; every existing test that invoked the old
-  spellings fails and is updated in the same commit.
+      spellings fails and is updated in the same commit.
 
 **What landed differently**
 
@@ -542,7 +542,6 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
   looking for the queue will look, and the `change` and `review` group help no longer claim the two moved
   commands.
 
-
 ### M7 — Stacked changesets
 
 **Deliverables**
@@ -554,25 +553,25 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
 **Tasks**
 
 - [x] Add `parent:` and `parent-changeset:` to `CHANGESET.yaml` per P2; refuse `parent:` with `base:`. (The
-  dead `refs/git-pair/changesets/<x>/archive` spelling in `parentID` went with M1; `parentID` is now one
-  `TrimPrefix`.)
+      dead `refs/git-pair/changesets/<x>/archive` spelling in `parentID` went with M1; `parentID` is now one
+      `TrimPrefix`.)
 - [x] Record the parent tip the child was approved against (`Review-Parent-Head`, beside `Review-Head`)
-  and compare it in `status`, `queue` and `check`.
+      and compare it in `status`, `queue` and `check`.
 - [x] Classify the movement into implementation commit / review commit / approval / rebase / merge, and put
-  the classification in the reason. Without it the rule reads as arbitrary and people stop trusting `check`.
+      the classification in the reason. Without it the rule reads as arbitrary and people stop trusting `check`.
 - [x] Parent integrated: resolve through `integrations/<parent>` and say where the work went. Parent
-  abandoned: refuse with "unreconciled — choose a new base", and accept an explicit re-parent. Never
-  reparent implicitly.
+      abandoned: refuse with "unreconciled — choose a new base", and accept an explicit re-parent. Never
+      reparent implicitly.
 - [x] Document that a child landed without rebasing has an archive chain that contains the parent's
-  unsquashed history, and that this is expected.
+      unsquashed history, and that this is expected.
 - [x] PRD §5 and §9.1 updated for the new metadata (§4 is the core-rules section; the metadata lives in
-  §5), §21 rewritten; `stacked_parent_test.go` added beside the existing `stacked_test.go`, which still
-  covers what it always covered.
+      §5), §21 rewritten; `stacked_parent_test.go` added beside the existing `stacked_test.go`, which still
+      covers what it always covered.
 
 **Verification**
 
 - [x] One test per movement class, each asserting the specific reason fragment, plus the gone-parent and
-  landed-parent cases.
+      landed-parent cases.
 - [x] A test for parent-integrated resolution against a real squash landing.
 
 **What landed differently**
@@ -601,14 +600,13 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
   READY changeset has no approval to invalidate — a review submission would have made the newest
   marker that review and removed the row. What the queue can honestly report is that the parent is
   ahead of the branch about to be reviewed, so that is the note it prints.
-- A parent whose branch is gone with *no* integration record cannot be measured, and `check` fails
+- A parent whose branch is gone with _no_ integration record cannot be measured, and `check` fails
   with exit 2 rather than a NOT READY verdict. The verdict would be a guess; the message names the
   parent, says the stack is unreconciled, and names the command that decides.
 - `init` grew `--parent` / `--set-parent` rather than making `--base` smarter. Two spellings of one
   intent is how `base:` got a meaning that depends on which branch you are on.
 - The movement class comes from trailers, not subjects: a commit with two parents is a merge whatever
   its message claims, and a subject line is editable prose.
-
 
 ### M8 — The agent contract and the deferred list
 
@@ -620,24 +618,24 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
 **Tasks**
 
 - [x] Record the three-step contract — `check`, ordinary git merge by the agent, `integration record` — in PRD
-  §29 (as "The landing contract") and README, with record-before-tidy stated as the ordering rule (D4).
+      §29 (as "The landing contract") and README, with record-before-tidy stated as the ordering rule (D4).
 - [x] Add to Deferred: per-review anchors and what they cost (R5), publishing the two ref families and the
-  namespace-protected variants of them, patch-equivalent approval carry-forward, reviewer identity and
-  thread resolution state — each with the cost that kept it out.
+      namespace-protected variants of them, patch-equivalent approval carry-forward, reviewer identity and
+      thread resolution state — each with the cost that kept it out.
 - [x] Decide in this milestone, not before: whether this repository carries a `skills/git-pair/` surface —
-  decided **no**, recorded below. The
-  sibling repository `bitandpixel/pi-git-pair` carries one already, and it documents a namespace this code
-  never used (`refs/reviews/archive/<slug>/<sha>`), a command this code removed (`review close`), and a pi
-  command surface (`/pair-review`, `/pair-wait`) that does not exist here at all — evidence both that the
-  contract is wanted and that it rots when it lives beside the code rather than in the spec. If one is
-  created here, it points at the requirements rather than replacing them.
+      decided **no**, recorded below. The
+      sibling repository `bitandpixel/pi-git-pair` carries one already, and it documents a namespace this code
+      never used (`refs/reviews/archive/<slug>/<sha>`), a command this code removed (`review close`), and a pi
+      command surface (`/pair-review`, `/pair-wait`) that does not exist here at all — evidence both that the
+      contract is wanted and that it rots when it lives beside the code rather than in the spec. If one is
+      created here, it points at the requirements rather than replacing them.
 
 **Verification**
 
 - [x] The PRD §29 loop and the agent contract agree line for line with observed command output, checked by
-  replaying `pty-walkthrough.sh` against the prose.
+      replaying `pty-walkthrough.sh` against the prose.
 - [x] A test that every ref path and command name appearing in PRD.md and README.md exists in the code — the
-  cheapest thing that keeps this from drifting again (`docs_contract_test.go`).
+      cheapest thing that keeps this from drifting again (`docs_contract_test.go`).
 
 **What landed differently**
 
@@ -657,11 +655,11 @@ recording it, reads the finding out of `queue` and `status`, records it, and che
 
 ## Spikes / Research
 
-| ID | Question | Needed before |
-| --- | --- | --- |
-| Done | Does the first-parent transition rule hold when one merge lands several changesets at once, and when a child is landed before its parent? Yes for the merge — one landing commit adds two directories and each is recorded from its own source (`integration_verify_test.go`); yes for the child, which records against its own base and is told where its parent went when the parent lands after (§21). | M3 |
-| Done | Does folding integration refs into the existing `List` pass really cost zero git invocations in `queue`? Yes — the namespace is read once per run and `TestReviewQueueCostDoesNotGrowWithUnrecordedLandings` pins it. | M4 |
-| Done | Does the transition rule identify the landing commit for `--no-ff` merges and squashes? Yes, measured — `research/2026-09-21-landing-transition.md`. | — |
+| ID   | Question                                                                                                                                                                                                                                                                                                                                                                                                  | Needed before |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| Done | Does the first-parent transition rule hold when one merge lands several changesets at once, and when a child is landed before its parent? Yes for the merge — one landing commit adds two directories and each is recorded from its own source (`integration_verify_test.go`); yes for the child, which records against its own base and is told where its parent went when the parent lands after (§21). | M3            |
+| Done | Does folding integration refs into the existing `List` pass really cost zero git invocations in `queue`? Yes — the namespace is read once per run and `TestReviewQueueCostDoesNotGrowWithUnrecordedLandings` pins it.                                                                                                                                                                                     | M4            |
+| Done | Does the transition rule identify the landing commit for `--no-ff` merges and squashes? Yes, measured — `research/2026-09-21-landing-transition.md`.                                                                                                                                                                                                                                                      | —             |
 
 ## Risks
 
@@ -681,7 +679,7 @@ after the parent settles.
 **R4 — Migration.** Repositories holding `refs/git-pair/changesets/<id>/{archive,integration}` were
 expected to show every past landing as unrecorded, and `Taken` was expected to keep the old ids reserved.
 M4 resolved both differently: `List` reports the retired paths under kinds of their own and a legacy
-*integration* ref counts as the record it is, so an upgrade is quiet — a report that fires on every
+_integration_ ref counts as the record it is, so an upgrade is quiet — a report that fires on every
 changeset in the repository is a report that gets ignored. `Taken` does not reserve legacy names. What
 remains of the migration is opt-in: `integration record` for a legacy changeset writes the new pair beside
 the old refs, and the old ones are left alone because nothing in git-pair moves or deletes a ref.
@@ -714,6 +712,6 @@ never-`null` array rule, because those shapes are agent contracts rather than im
 
 ## Audit History
 
-| Date | Audit | Summary |
-| --- | --- | --- |
-| — | — | No audits yet. |
+| Date | Audit | Summary        |
+| ---- | ----- | -------------- |
+| —    | —     | No audits yet. |

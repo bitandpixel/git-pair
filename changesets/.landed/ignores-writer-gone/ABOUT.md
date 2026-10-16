@@ -24,10 +24,10 @@ to settle a branch no longer exists to settle.
 
 ## Evidence
 
-| Fixture | Result |
-|---|---|
+| Fixture                                                    | Result                                                                                                                                               |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `TestADeclaredCohabitantStillSelectsTheDeclaringChangeset` | a file carrying `ignores: booking-tests` still makes `booking` the branch's changeset - asserted from the `Review-Changeset` trailer the offer wrote |
-| `TestTheAmbiguityRefusalNamesTheTwoExits` | the undecided-branch error names both ids, `--changeset`, `git pair change stack --base` and `git pair change combine --into` |
+| `TestTheAmbiguityRefusalNamesTheTwoExits`                  | the undecided-branch error names both ids, `--changeset`, `git pair change stack --base` and `git pair change combine --into`                        |
 
 Nothing else in the suite changed. `use_test.go` is deleted as the only file whose subject was the removed command;
 no other test called `SetIgnores` or `WithIgnores`, and the full run is green with those two files gone.

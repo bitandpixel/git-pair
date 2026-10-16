@@ -68,7 +68,7 @@ and the surfaces after the move; and the empty list as an empty array.
 for the move. The plan's "it rides its own changeset" is left to the author, which is also how `change
 integrate` works.
 
-The commit is a rename of a directory tree. `git log --follow` on a *file* inside it continues to work; a
+The commit is a rename of a directory tree. `git log --follow` on a _file_ inside it continues to work; a
 tool that pinned a path in an older commit sees the old path, which is what the old path was.
 
 ## Discussion

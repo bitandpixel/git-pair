@@ -33,16 +33,16 @@ subtraction's remainder.
 
 `internal/changeset/set_operation_test.go`, the eight shapes from `probe/setop-selection`:
 
-| Fixture | Result |
-|---|---|
-| `TestTheSetOperationDecidesALinearStack` — three levels, each naming the one below | `[feature-c]`. **Fails without the subtraction** |
-| `TestTheSetOperationIsNotMovedByALaterEditToTheParent` — child stacked, parent edited last | `[booking-tests]`. **Fails without the subtraction** |
-| `TestMutualBaseChangesetRecordsLeaveTheCandidatesStanding` | ambiguous, both standing. **Fails without the subtraction** |
-| `TestALegacyStackWithoutARecordedIdFallsToTheRanking` | child selected, both directories reported |
-| `TestAStackOnALandedParentLosesNothing` — the middle level landed, the child records its id | child selected, child and grandparent reported |
-| `TestACandidateNamingItselfIsNotItsOwnParent` | `[selfish]`, selected |
-| `TestTheDeclarationStillOutranksTheSetOperation` — `ignores:` on the parent, the child records it below | `booking` selected, one candidate |
-| `TestSiblingsWithNoRecordsAreOrderedByCreation` | later-created selected, both reported |
+| Fixture                                                                                                 | Result                                                      |
+| ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `TestTheSetOperationDecidesALinearStack` — three levels, each naming the one below                      | `[feature-c]`. **Fails without the subtraction**            |
+| `TestTheSetOperationIsNotMovedByALaterEditToTheParent` — child stacked, parent edited last              | `[booking-tests]`. **Fails without the subtraction**        |
+| `TestMutualBaseChangesetRecordsLeaveTheCandidatesStanding`                                              | ambiguous, both standing. **Fails without the subtraction** |
+| `TestALegacyStackWithoutARecordedIdFallsToTheRanking`                                                   | child selected, both directories reported                   |
+| `TestAStackOnALandedParentLosesNothing` — the middle level landed, the child records its id             | child selected, child and grandparent reported              |
+| `TestACandidateNamingItselfIsNotItsOwnParent`                                                           | `[selfish]`, selected                                       |
+| `TestTheDeclarationStillOutranksTheSetOperation` — `ignores:` on the parent, the child records it below | `booking` selected, one candidate                           |
+| `TestSiblingsWithNoRecordsAreOrderedByCreation`                                                         | later-created selected, both reported                       |
 
 Three of the eight catch the subtraction's absence; the other five are the guards and the cases the rule must not
 break, and they hold with the rule removed as well as with it in. Saying which is which is the point of porting all

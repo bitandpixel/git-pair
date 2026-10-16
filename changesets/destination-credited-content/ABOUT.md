@@ -4,13 +4,13 @@
 
 Two rules stop charging the author for content they did not write.
 
--   The identity an approval records becomes two hashes in one trailer — `Review-Diff-Id: 2:<raw>+<patch>` — and a
-    stacked child that has taken the destination in keeps its approval when the *patch* half is unchanged and
-    the branch still merges cleanly. Today the whole-file blob OIDs move when trunk edits a file the child
-    also edits, however far the line is, and the approval dies.
--   The rule that counts content the review never saw stops counting the destination's own content. A path is
-    not the author's when head's copy is byte-identical to the destination's, and drift is suppressed entirely
-    when head's tree is what `git merge-tree` produces from the reviewed state and the destination.
+- The identity an approval records becomes two hashes in one trailer — `Review-Diff-Id: 2:<raw>+<patch>` — and a
+  stacked child that has taken the destination in keeps its approval when the _patch_ half is unchanged and
+  the branch still merges cleanly. Today the whole-file blob OIDs move when trunk edits a file the child
+  also edits, however far the line is, and the approval dies.
+- The rule that counts content the review never saw stops counting the destination's own content. A path is
+  not the author's when head's copy is byte-identical to the destination's, and drift is suppressed entirely
+  when head's tree is what `git merge-tree` produces from the reviewed state and the destination.
 
 Both were measured before being written down; the numbers are under `What was measured`.
 
@@ -53,13 +53,13 @@ keeps H cheap.
 
 Measured semantics of the patch half, from controlled inputs:
 
-| what differs | patch value |
-| --- | --- |
-| `@@` line numbers (a trunk line landed above the hunk) | unchanged — this is what keeps H's approval |
-| `index <oid>..<oid>` for a file that has hunks | unchanged |
-| `index <oid>..<oid>` for a file with no hunks (binary) | moves — binary payloads are visible |
-| file path, `old mode`/`new mode`, `new file`/`deleted file` | moves |
-| a whitespace-only added line | moves (with `--stable` it did not) |
+| what differs                                                | patch value                                 |
+| ----------------------------------------------------------- | ------------------------------------------- |
+| `@@` line numbers (a trunk line landed above the hunk)      | unchanged — this is what keeps H's approval |
+| `index <oid>..<oid>` for a file that has hunks              | unchanged                                   |
+| `index <oid>..<oid>` for a file with no hunks (binary)      | moves — binary payloads are visible         |
+| file path, `old mode`/`new mode`, `new file`/`deleted file` | moves                                       |
+| a whitespace-only added line                                | moves (with `--stable` it did not)          |
 
 The raw half is unchanged from the previous changeset, and stays the primary claim: `patch-id`'s algorithm is
 git's, its documentation says it may change, and the table above shows behaviour that depends on whether a
@@ -69,25 +69,25 @@ the same rule as an absent trailer.
 Two things had to be true for the second half to cost nothing to the approvals already written, and both are
 tested rather than argued:
 
--   Adding `-U3` and `--default-prefix` does not move the raw half. git puts one further NUL between the last
-    name-status record and the patch, the raw section is everything before it, and hashing exactly those
-    bytes reproduces the value the previous version wrote — `TestDiffIdentityRawHalfIsTheShippedDigest` holds
-    the two implementations against each other, so a `2:` marker can be compared with a `1:` one.
--   The version accepts both spellings. This build writes `2:`; a `1:` value is read as a content identity
-    with no rendered half, so an approval written before this change is compared on what it recorded rather
-    than treated as unreadable (`TestAnIdentityFromTheFirstVersionComparesOnItsHalf`, and at the gate
-    `TestAnApprovalFromTheFirstVersionDoesNotRelaxOnTheRenderedHalf`, which is the conservative side of the
-    same fact: no rendered half, no relaxation).
+- Adding `-U3` and `--default-prefix` does not move the raw half. git puts one further NUL between the last
+  name-status record and the patch, the raw section is everything before it, and hashing exactly those
+  bytes reproduces the value the previous version wrote — `TestDiffIdentityRawHalfIsTheShippedDigest` holds
+  the two implementations against each other, so a `2:` marker can be compared with a `1:` one.
+- The version accepts both spellings. This build writes `2:`; a `1:` value is read as a content identity
+  with no rendered half, so an approval written before this change is compared on what it recorded rather
+  than treated as unreadable (`TestAnIdentityFromTheFirstVersionComparesOnItsHalf`, and at the gate
+  `TestAnApprovalFromTheFirstVersionDoesNotRelaxOnTheRenderedHalf`, which is the conservative side of the
+  same fact: no rendered half, no relaxation).
 
 ## What the surface gains
 
 Two values, both readings of a verdict rather than new verdicts:
 
--   `parent_comparison` gains `contribution-patch`: the content half moved, the rendered half did not, and the
-    branch still merges into the destination cleanly. A reader who does not believe the pass can see which of
-    the two halves answered (PRD §21.1).
--   `check --json` gains `drift_credited`, the paths the destination was credited for when the unreviewed-content
-    rule let a merge through. What it refused stays in `reasons` (PRD §11.3).
+- `parent_comparison` gains `contribution-patch`: the content half moved, the rendered half did not, and the
+  branch still merges into the destination cleanly. A reader who does not believe the pass can see which of
+  the two halves answered (PRD §21.1).
+- `check --json` gains `drift_credited`, the paths the destination was credited for when the unreviewed-content
+  rule let a merge through. What it refused stays in `reasons` (PRD §11.3).
 
 The PRD carries the rules in §10.4 (the compound value and its versions), §11.3 (the credit, and the field),
 §21.1 (what each half covers, and why `--verbatim`), and §27 (the sibling rule this takes).
@@ -96,10 +96,10 @@ The PRD carries the rules in §10.4 (the compound value and its versions), §11.
 
 `ReconcileStaleness` compared the reviewed tree with head and called every difference the author's. Now:
 
--   a path is not drift when head's blob equals the destination's blob — that content is in the destination,
-    was reviewed in its own changeset, and the author did not write it;
--   drift is suppressed when head's tree equals `git merge-tree --write-tree <reviewed marker> <destination>`
-    — head is then the reviewed state with trunk mechanically merged in, so nothing beyond a merge entered.
+- a path is not drift when head's blob equals the destination's blob — that content is in the destination,
+  was reviewed in its own changeset, and the author did not write it;
+- drift is suppressed when head's tree equals `git merge-tree --write-tree <reviewed marker> <destination>`
+  — head is then the reviewed state with trunk mechanically merged in, so nothing beyond a merge entered.
 
 The second clause is what lets the first do its job on a shared file: `config.yaml` at head is nobody's copy
 but the child's own, and it is still just what `git merge main` produced.
@@ -111,13 +111,13 @@ absent`, refused.
 
 ## What was measured
 
-| scenario | raw | patch (`--verbatim`) | merge | verdict |
-| --- | --- | --- | --- | --- |
-| H — trunk edited the same file, 14 lines away | moves | equal | clean | **stands** |
-| J — trunk edited a line inside the reviewed hunk's context | moves | moves | clean | refused |
-| Makefile recipe line, tab → spaces | moves | moves | clean | refused |
-| L — child merged trunk, trunk holds the parent's new file | — | — | clean | **stands** |
-| K — same file, parent unlanded | — | — | clean | refused |
+| scenario                                                   | raw   | patch (`--verbatim`) | merge | verdict    |
+| ---------------------------------------------------------- | ----- | -------------------- | ----- | ---------- |
+| H — trunk edited the same file, 14 lines away              | moves | equal                | clean | **stands** |
+| J — trunk edited a line inside the reviewed hunk's context | moves | moves                | clean | refused    |
+| Makefile recipe line, tab → spaces                         | moves | moves                | clean | refused    |
+| L — child merged trunk, trunk holds the parent's new file  | —     | —                    | clean | **stands** |
+| K — same file, parent unlanded                             | —     | —                    | clean | refused    |
 
 ## Cost
 
@@ -135,10 +135,10 @@ ancestor here and before it (budget 10).
 
 ## Risks named
 
--   `git patch-id --verbatim` is newer than the rest of the invocation. An older git that rejects the flag
-    makes the patch half absent, which returns the gate to strict raw comparison rather than refusing.
--   If git changes what `--verbatim` keeps, the value moves for everyone and every landed-parent comparison
-    reads as absence. That is the conservative direction, and the version prefix is what makes it read that
-    way rather than as a content difference.
--   Crediting the destination trusts trunk's own review and CI. An unlanded parent's content is not credited,
-    which is why K stays refused.
+- `git patch-id --verbatim` is newer than the rest of the invocation. An older git that rejects the flag
+  makes the patch half absent, which returns the gate to strict raw comparison rather than refusing.
+- If git changes what `--verbatim` keeps, the value moves for everyone and every landed-parent comparison
+  reads as absence. That is the conservative direction, and the version prefix is what makes it read that
+  way rather than as a content difference.
+- Crediting the destination trusts trunk's own review and CI. An unlanded parent's content is not credited,
+  which is why K stays refused.

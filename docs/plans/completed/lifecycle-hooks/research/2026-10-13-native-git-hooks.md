@@ -20,12 +20,12 @@ A fixture repository with logging `pre-commit`, `prepare-commit-msg`, `commit-ms
 Results at a marker-shaped commit (`git commit --allow-empty -m "git-pair: ready feat-demo"` with
 `Review-State: ready` trailers):
 
-| Hook | Arguments received | Message visible | Index visible | stdin a tty |
-| --- | --- | --- | --- | --- |
-| `pre-commit` | none (`argv: 0`) | no | yes | no |
-| `prepare-commit-msg` | `.git/COMMIT_EDITMSG`, `message` | yes | yes | no |
-| `commit-msg` | `.git/COMMIT_EDITMSG` | yes | yes | no |
-| `post-commit` | none | yes (file still there) | no (consumed) | no |
+| Hook                 | Arguments received               | Message visible        | Index visible | stdin a tty |
+| -------------------- | -------------------------------- | ---------------------- | ------------- | ----------- |
+| `pre-commit`         | none (`argv: 0`)                 | no                     | yes           | no          |
+| `prepare-commit-msg` | `.git/COMMIT_EDITMSG`, `message` | yes                    | yes           | no          |
+| `commit-msg`         | `.git/COMMIT_EDITMSG`            | yes                    | yes           | no          |
+| `post-commit`        | none                             | yes (file still there) | no (consumed) | no          |
 
 Two consequences. The `pre-submit` reviewer case works natively: `reviewops.Submit` stages at
 `reviewops.go:54` before the commit, so the hook sees the reviewer's staged edits and comments. And
@@ -73,10 +73,10 @@ verdict reads nothing at all.
 
 ### 4. `--no-verify` is the override, for free
 
-| Invocation | Hooks that ran |
-| --- | --- |
-| `git commit -m one` | pre-commit, prepare-commit-msg, commit-msg, post-commit |
-| `git commit -m two --no-verify` | prepare-commit-msg, post-commit |
+| Invocation                      | Hooks that ran                                          |
+| ------------------------------- | ------------------------------------------------------- |
+| `git commit -m one`             | pre-commit, prepare-commit-msg, commit-msg, post-commit |
+| `git commit -m two --no-verify` | prepare-commit-msg, post-commit                         |
 
 `--no-verify` skips exactly the two blocking hooks and keeps the two non-blocking ones. `Repo.Commit` takes
 `extra ...string`, so `--allow-hook-failure` is a pass-through rather than a new mechanism.

@@ -52,12 +52,12 @@ scan. They were read on 2026-09-24 from:
 If one of those documents changes, the table in `internal/cli/skill.go` changes with it — the same date and
 sources are recorded in that file's `skillHarness` comment.
 
-| Harness | Per repository | Per machine |
-| --- | --- | --- |
-| Codex CLI | `.agents/skills/`, in every directory from the working directory up to the repository root | `~/.agents/skills/` |
-| pi | `.pi/skills/`, `.agents/skills/` in the working directory and its ancestors up to the repository root; `~/.agents/skills/` | `~/.pi/agent/skills/`, `~/.agents/skills/` |
-| Claude Code | `.claude/skills/` in the starting directory and every parent up to the repository root | `~/.claude/skills/` |
-| Anything else that reads a directory of skills | `--dest <dir>` | `--dest <dir>` |
+| Harness                                        | Per repository                                                                                                             | Per machine                                |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| Codex CLI                                      | `.agents/skills/`, in every directory from the working directory up to the repository root                                 | `~/.agents/skills/`                        |
+| pi                                             | `.pi/skills/`, `.agents/skills/` in the working directory and its ancestors up to the repository root; `~/.agents/skills/` | `~/.pi/agent/skills/`, `~/.agents/skills/` |
+| Claude Code                                    | `.claude/skills/` in the starting directory and every parent up to the repository root                                     | `~/.claude/skills/`                        |
+| Anything else that reads a directory of skills | `--dest <dir>`                                                                                                             | `--dest <dir>`                             |
 
 `--harness agents` writes `.agents/skills/`, which Codex CLI and pi both read, so it is the default and
 the cheapest thing to commit. `--harness pi` uses pi's own `.pi/skills/` and `~/.pi/agent/skills/`;

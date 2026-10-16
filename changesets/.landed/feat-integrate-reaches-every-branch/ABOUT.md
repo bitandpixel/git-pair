@@ -25,13 +25,13 @@ the declared head completed green at 18:39:14. No integrate run was created, the
 supposed to catch a missed event had not run since 15:07 - scheduled workflows are best-effort on GitHub's side, so
 the fallback is not a safety net.
 
-| Check | Result |
-|---|---|
-| `a changeset under a branch name the trigger used to exclude` - approved, declared, green on `docs/notes` | merged, destination moved |
-| `the trigger carries no branch allowlist to exclude a changeset from landing` | passes with the filter removed |
-| the same check with the allowlist put back into the YAML | **FAIL**, and the run goes red |
-| `and no denylist taking its place` | passes; fails on a `branches-ignore:` the same way |
-| the existing 60 checks | unchanged and green |
+| Check                                                                                                     | Result                                             |
+| --------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `a changeset under a branch name the trigger used to exclude` - approved, declared, green on `docs/notes` | merged, destination moved                          |
+| `the trigger carries no branch allowlist to exclude a changeset from landing`                             | passes with the filter removed                     |
+| the same check with the allowlist put back into the YAML                                                  | **FAIL**, and the run goes red                     |
+| `and no denylist taking its place`                                                                        | passes; fails on a `branches-ignore:` the same way |
+| the existing 60 checks                                                                                    | unchanged and green                                |
 
 The two halves are worth telling apart. The merge step passes with or without the allowlist, because the job script
 has never filtered on a branch name - it is there to state the fact the fixture used to prove by accident, through

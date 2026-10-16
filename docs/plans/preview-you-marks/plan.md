@@ -87,7 +87,7 @@ wrote them: the pane moves lines to where they belong and reorders nothing.
 ## Assumptions
 
 - "The reviewer's edits" means edits in the working tree that are not in the span's head — the case the
-  note already admits to. Lines a reviewer edited in an earlier *submitted* review and that are now inside
+  note already admits to. Lines a reviewer edited in an earlier _submitted_ review and that are now inside
   the file at the span's head stay unmarked: distinguishing them needs a review-relative diff for the path
   and a rule about which submission owns which line, which is a second change.
 - Every changed region of the working patch carries an `@@` header, so the numbers `lineNumbers` returns
@@ -189,7 +189,7 @@ Tasks
 - Tests: the section paints above the span, two changed lines give two markers and the context line between
   them none, the first screen already holds your lines, paging still reaches the span below, and the count is
   pinned beside the name rather than anywhere in the line.
-- `pty-walkthrough.sh`: the same walkthrough onto the file the span *modifies*, expecting the caption, the
+- `pty-walkthrough.sh`: the same walkthrough onto the file the span _modifies_, expecting the caption, the
   typed line, one marker, the author's span below, and the reviewer's line before it.
 
 Verification
@@ -208,7 +208,7 @@ Deliverables
 - A single file's patch is drawn without git's per-file rows: `diff --git`, `index`, `--- a/…`, `+++ b/…`, the
   mode/rename metadata. A directory's patch keeps all of it, because there the reader is looking at several
   files at once and needs the boundaries.
-- `@@` hunk headers stay: they are the only row saying which lines are *not* on screen.
+- `@@` hunk headers stay: they are the only row saying which lines are _not_ on screen.
 - The reviewer's rows take the pane's own colours — blue for a line they added, purple for a line the span
   added that they then deleted, amber for a pre-existing line they deleted — and purple leads with `×` where
   git would have drawn `-`.
@@ -221,16 +221,16 @@ Tasks
   the model's session files rather than from the patch: a directory holding one file carries one `diff --git` in
   its patch, and a rule that counted them would strip the chrome that names the file from the one pane that
   needs it. The same rule decides the colours, so the directory pane keeps git's rendering by the rule that
-  strips the file's. *(This replaced the plan's `singleFilePatch`: the shape of a patch cannot tell a file from
-  a directory holding one, and the test the plan proposed would have stripped the wrong pane.)*
+  strips the file's. _(This replaced the plan's `singleFilePatch`: the shape of a patch cannot tell a file from
+  a directory holding one, and the test the plan proposed would have stripped the wrong pane.)_
 - `spanAdditions`: the head-file line numbers the span put there. The span's `+` rows and the reviewer's `-`
   rows are both numbered against the head file, so "the reviewer deleted a line the span added" is a lookup in
   that set — arithmetic on the numbers git already printed, no comparison of content.
 - `youText` colours one of the reviewer's rows and swaps the sign where the state asks for it; `laidOut.marked`
   still puts `← you` beside it, which stays the one place the marker is appended. The row keeps git's bytes in
-  `line`, so a search matches `-` while the drawn sign is `×`. *(The plan's `laidOut.you` would have put the
+  `line`, so a search matches `-` while the drawn sign is `×`. _(The plan's `laidOut.you` would have put the
   colour where the marker is painted; `patchRows` already decides which rows are the reviewer's, so the colour
-  belongs with that decision.)*
+  belongs with that decision.)_
 - `youEditedNote` is the header's `· you edited it +N −M`, asked for by the text pane and the diff pane alike
   now that no caption carries those counts.
 
@@ -258,7 +258,7 @@ Deliverables
 
 Tasks
 
-- Walk both patches by head-file number: your deletion of a line the span shows as an addition *replaces* that
+- Walk both patches by head-file number: your deletion of a line the span shows as an addition _replaces_ that
   row rather than landing beside it; your other deletions replace the context row for that line where the span
   has one, and stand alone where it has none; your additions go after the row they follow.
 - A reviewer edit outside every hunk the span has has no row to sit in: it is drawn where its number puts it,
@@ -300,14 +300,16 @@ untouched, which is what `e2e-29.sh` keeps pinned.
 
 ## Audit History
 
-| Date       | Audit | Summary |
-| ---------- | ----- | ------- |
-| —          | —     | Plan written before implementation. |
-| 2026-09-24 | M1–M3 executed; M4 added from review feedback | The merge, the pane and the documents are in. The review pass looked at the diff pane too and asked for the reviewer's section there to lead and to be marked, which is M4; the count's slot moved with it. |
-| 2026-09-24 | M4 executed | `previewEditsBody` marks `head..working` rows only — the author's span, the context lines and git's `---`/`+++` rows carry no mark — and the section paints above the span. `mise run gates` green, including the walkthrough's new diff-pane scenario. |
-| 2026-09-24 | M6 executed | The reviewer's rows are drawn into the author's patch by head-file number: a
+| Date       | Audit                                         | Summary                                                                                                                                                                                                                                                 |
+| ---------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| —          | —                                             | Plan written before implementation.                                                                                                                                                                                                                     |
+| 2026-09-24 | M1–M3 executed; M4 added from review feedback | The merge, the pane and the documents are in. The review pass looked at the diff pane too and asked for the reviewer's section there to lead and to be marked, which is M4; the count's slot moved with it.                                             |
+| 2026-09-24 | M4 executed                                   | `previewEditsBody` marks `head..working` rows only — the author's span, the context lines and git's `---`/`+++` rows carry no mark — and the section paints above the span. `mise run gates` green, including the walkthrough's new diff-pane scenario. |
+| 2026-09-24 | M6 executed                                   | The reviewer's rows are drawn into the author's patch by head-file number: a                                                                                                                                                                            |
+
       deletion takes the author's row of that line, an addition follows its anchor, the reviewer's duplicate
       context rows go, and a hunk outside the author's stands where its number puts it. `rowPositions` replaced
       `lineNumbers`, because the merge needs git's number and the head-file position — the pane that reads a
       file as text reads its placements off the same walk now. |
+
 | 2026-09-24 | M5 executed | Git's per-file rows come off a file's pane, `@@` stays, the caption is gone with its counts moved to the header, and the reviewer's rows take the pane's three colours and the `×` sign. Two plan tasks moved: `singleFilePatch` → `paneView`, because a patch's shape cannot tell a file from a directory holding one file, and `laidOut.you` → `youText`, beside where `patchRows` already decides whose a row is. `mise run gates` green. |

@@ -16,9 +16,9 @@ docs/plans/landing-handoff-guidance/            → docs/plans/completed/landing
 
 ## What changed
 
--   The three files above, moved with `git mv`. Nothing inside them was rewritten.
--   One closing row in the plan's Audit History table: the landing commit, and the reason the move happened
-    here rather than as the last commit of the changeset it belongs to.
+- The three files above, moved with `git mv`. Nothing inside them was rewritten.
+- One closing row in the plan's Audit History table: the landing commit, and the reason the move happened
+  here rather than as the last commit of the changeset it belongs to.
 
 ## Design decisions
 
@@ -39,18 +39,18 @@ before the move.
 
 ## Validation
 
--   `mise run check` — gofmt, vet, and the sharded suite, which includes the docs contract test and the prose
-    hygiene scan over `PRD.md`, the README and the skill. Nothing there reads `docs/plans/`, so this is a
-    regression check rather than a test of the change.
--   `mise run gates` — the scripted CI integration, the PTY walkthrough, and the issue-29 scenarios.
--   `git pair status --changeset chore-complete-landing-handoff-plan` after landing, which is how the move
-    itself is verified: the directory is in the destination, with the chain that carried it.
+- `mise run check` — gofmt, vet, and the sharded suite, which includes the docs contract test and the prose
+  hygiene scan over `PRD.md`, the README and the skill. Nothing there reads `docs/plans/`, so this is a
+  regression check rather than a test of the change.
+- `mise run gates` — the scripted CI integration, the PTY walkthrough, and the issue-29 scenarios.
+- `git pair status --changeset chore-complete-landing-handoff-plan` after landing, which is how the move
+  itself is verified: the directory is in the destination, with the chain that carried it.
 
 ## Known limitations
 
--   The plan's Audit History row names commits by hash. If `main` is ever rewritten, the hashes stop
-    resolving while the row stays true in substance. The same convention is used by every other completed
-    plan in the directory.
+- The plan's Audit History row names commits by hash. If `main` is ever rewritten, the hashes stop
+  resolving while the row stays true in substance. The same convention is used by every other completed
+  plan in the directory.
 
 ## Open questions
 

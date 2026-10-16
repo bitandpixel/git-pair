@@ -33,7 +33,7 @@ refs/git-pair/changesets/one/archive
 refs/git-pair/changesets/two/archive
 ```
 
-Two changesets pointing at one commit is *not* reachable by ordinary use, which the first reading of
+Two changesets pointing at one commit is _not_ reachable by ordinary use, which the first reading of
 this spike got wrong. Branches can share a head — a child with no commits of its own sits on its
 parent's head — but archive refs cannot, because every command that moves one commits something first:
 `marker.Commit` calls `repo.Commit` and returns the new head (`internal/marker/marker.go:108`), and
@@ -97,7 +97,7 @@ records and stay as written. The live gates are the ones that must move with the
 ## Open question left standing
 
 `SlugFromBranch` (`internal/changeset/changeset.go:73`) already matches §2.1's example exactly, so the
-default is unchanged by this plan. What is *not* decided by the spec: whether an explicit `--id` must
+default is unchanged by this plan. What is _not_ decided by the spec: whether an explicit `--id` must
 also be the directory name. The plan takes the position that it must (§4's diagram says
 `changesets/<id>/`), which makes `id:` in `CHANGESET.yaml` a cross-check rather than a second source,
 and gives §6's mutability rule something concrete to reject.

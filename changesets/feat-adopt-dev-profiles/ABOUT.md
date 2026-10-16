@@ -28,7 +28,7 @@ the cheapest place to find out what a real consumer finds awkward.
 
 **Declaring `git-pair-github-integration` too.** Not in this layer, and when this branch was first offered that was a
 rejection rather than a sequence. The argument was sound then and is worth keeping in plain sight, because it is the
-reason the library grew what it grew: that profile does not only promise a verified merge, it *ships* the job — the
+reason the library grew what it grew: that profile does not only promise a verified merge, it _ships_ the job — the
 workflow, the integrate driver, the installer — and byte-compares them. The paths it ships are product code here. And
 the integrate job in this repository builds the tool from the tree under review (`mise run build`, then
 `git-pair-integrate.sh --expect-head "$PUSHED"`), which a job that installs a published release cannot do: the release
@@ -46,8 +46,8 @@ it possible. The driver this repository vendors and the driver the profile ships
 
 ## What this layer leaves, and what the next one takes
 
-`doctor` says it in one line, and the line is accurate for this layer: *the declared profiles declare no CI files —
-nothing lands from CI*. So the promise that a job verifies the merge candidate before it pushes is still carried by
+`doctor` says it in one line, and the line is accurate for this layer: _the declared profiles declare no CI files —
+nothing lands from CI_. So the promise that a job verifies the merge candidate before it pushes is still carried by
 this repository's own `.github/workflows/` files, watched by `scripts/gates/ci-integrate.sh` and by review, and not by
 `doctor`. The layer after this one moves that promise to the profile, which is what `ci_files` and the byte comparison
 are for, and the marker paragraph that explains the gap goes away with it.

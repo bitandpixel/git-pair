@@ -9,9 +9,9 @@ sees them as open work. This moves them to `changesets/.landed/` in one reviewed
 
 One commit of renames (`git-pair: tidy 3 landed changesets`, 6 files, 0 insertions, 0 deletions):
 
--   `changesets/fix-installer-pinned-version/` → `changesets/.landed/fix-installer-pinned-version/`
--   `changesets/fix-pty-gate-verdict/` → `changesets/.landed/fix-pty-gate-verdict/`
--   `changesets/fix-ci-prove-destination/` → `changesets/.landed/fix-ci-prove-destination/`
+- `changesets/fix-installer-pinned-version/` → `changesets/.landed/fix-installer-pinned-version/`
+- `changesets/fix-pty-gate-verdict/` → `changesets/.landed/fix-pty-gate-verdict/`
+- `changesets/fix-ci-prove-destination/` → `changesets/.landed/fix-ci-prove-destination/`
 
 Plus this directory, which is the changeset that carries the move.
 
@@ -33,10 +33,10 @@ sit, and `changesets/.landed/` is git-pair's own name that no changeset may clai
 
 ## Validation
 
--   `git pair change tidy <the three ids>` reported each move and committed them; `git show --stat` confirms all
-    six files are renames with no content change.
--   A changeset that another branch still recorded as its base would have been named by the run; it named none.
--   `mise run gates`: all gates green, run from this tree and the binary built from this branch.
+- `git pair change tidy <the three ids>` reported each move and committed them; `git show --stat` confirms all
+  six files are renames with no content change.
+- A changeset that another branch still recorded as its base would have been named by the run; it named none.
+- `mise run gates`: all gates green, run from this tree and the binary built from this branch.
 
 Expected effect once merged, from `git pair change tidy --help`: `queue` and `status` stop listing these three
 under `LANDED UNREVIEWED`, because the destination then carries the record filed away. `git pair status
@@ -45,12 +45,12 @@ the shelf it sat on changed.
 
 ## Known limitations
 
--   This changeset's own directory will be the next one needing a tidy, once it lands. The command is not
-    idempotent in a single pass: it files what has landed, and this one has not landed yet.
--   The fifteen-odd older directories stay in place, deliberately, and are a decision rather than an oversight.
+- This changeset's own directory will be the next one needing a tidy, once it lands. The command is not
+  idempotent in a single pass: it files what has landed, and this one has not landed yet.
+- The fifteen-odd older directories stay in place, deliberately, and are a decision rather than an oversight.
 
 ## Open questions
 
--   Should the integrate job tidy as part of a merge, or is filing records properly a human act? Nothing here
-    argues for automating it — a merge job that also deletes history from view is a job whose mistakes are hard
-    to see — but the question recurs every few changesets, which is data.
+- Should the integrate job tidy as part of a merge, or is filing records properly a human act? Nothing here
+  argues for automating it — a merge job that also deletes history from view is a job whose mistakes are hard
+  to see — but the question recurs every few changesets, which is data.

@@ -50,12 +50,12 @@ still holding those refs is written out rather than left to be discovered.
 
 - `TestQueueReportsALandingTheRetiredLayoutMissed` replaces `TestQueueAcceptsALandingTheRetiredLayoutRecorded`
   and holds both halves: the retired ref now produces `LANDED, UNRECORDED`, and the hedge offered is "none
-  *in this clone*", not the "holds no refs/git-pair/* refs at all" hint.
+  _in this clone_", not the "holds no refs/git-pair/* refs at all" hint.
 - `TestListKeepsARetiredOnlyNamespaceNonEmpty` pins the same fact one layer down;
   `TestListClassifiesTheTwoFamiliesAndReportsTheRest` asserts the retired paths come back unclassified
   rather than dropped.
 - `TestIntegrationRecordDerivesFromARemoteTrackingBranch`,
-  `TestIntegrationRecordCountsOneBranchUnderBothSpellings` (the fetched copy deliberately *behind* the local
+  `TestIntegrationRecordCountsOneBranchUnderBothSpellings` (the fetched copy deliberately _behind_ the local
   one, so a commit-keyed implementation would refuse), and
   `TestIntegrationRecordExcludesTheDestinationsRemoteSpelling` (`main` moved past the fetched copy, so no
   SHA exclusion reaches it). Each fails alone: dropping the remote ask fails the first, dropping the dedupe

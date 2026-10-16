@@ -34,15 +34,15 @@ branch, what chain does that history carry.
   `git pair status --changeset <id>`.
   The findings ride `status`'s exit-2 error on stderr, and `queue --json` carries `landed_unreviewed`.
 - `next_action` for a ready head is one sentence — `` `git pair check`, then merge into main with ordinary
-  git `` — because there is no step after the merge. `contract_test.go` pins that string, and
+git `` — because there is no step after the merge. `contract_test.go` pins that string, and
   `TestNoActionNamesADeletedCommand` pins the general rule.
 - `status`'s `Stack:` block reads each ancestor's landing from the destination and prints `landed:` rather
   than `record:`; `stack[].integration` in `--json` is `stack[].landed_commit`. `parent.landed_in_default_branch`
   is deleted: it was true whenever `parent.landed` was, and the index it came from is gone.
 - `change integrate` refuses a stacked child whose parent is not landed, and the reason names what to do
   (`git pair check`, then merge with ordinary git) instead of a record to write.
-we had discussed the mechanism being a "queued" integration, where the integration intent is recorded and when the
-parent lands, if the git pair check still passes, the child would be landed automatically. Can we support this?
+  we had discussed the mechanism being a "queued" integration, where the integration intent is recorded and when the
+  parent lands, if the git pair check still passes, the child would be landed automatically. Can we support this?
 - A changeset whose branch is gone is read from the destination's chain, and that read names its base as
   derived (`base_why`: the run the chain carries) rather than printing a bare object id. It reports no
   parent when `base:` is the integration branch: the commit the chain sits on is a measurement point, not a

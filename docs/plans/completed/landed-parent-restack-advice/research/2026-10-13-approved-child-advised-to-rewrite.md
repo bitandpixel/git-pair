@@ -51,11 +51,11 @@ fail. Nothing in between asks whether following the advice costs anything.
 
 ## Where the two halves live
 
-| Piece | Where | What it does |
-| --- | --- | --- |
-| The advice | `internal/cli/stacked.go` `parentLanded` → `landedParentStep` | When the parent's branch is still present and the head is not on the landing, the note carries the rebase command. No content question is asked. |
+| Piece          | Where                                                                         | What it does                                                                                                                                                                                                                                                         |
+| -------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The advice     | `internal/cli/stacked.go` `parentLanded` → `landedParentStep`                 | When the parent's branch is still present and the head is not on the landing, the note carries the rebase command. No content question is asked.                                                                                                                     |
 | The comparison | same file, `parentGone` → `landedApprovalStillStands` → `landedWorkUnchanged` | When the parent's branch is **gone**, the child's contribution above the landing is measured and compared with the identity the approval recorded; equal and clean-merging means a note and **no step**, different means a reason and the rebase-and-re-review step. |
-| The print | `internal/cli/check.go:210-216` and `:280-285` | On a ready verdict, appends `landedParentStep` to `next_action` whenever `owesLandingStep()`; and on the printed verdict, the `parent: … landed as …` line prints the step, which also displaces the `parent.Note` that the comparison wrote. |
+| The print      | `internal/cli/check.go:210-216` and `:280-285`                                | On a ready verdict, appends `landedParentStep` to `next_action` whenever `owesLandingStep()`; and on the printed verdict, the `parent: … landed as …` line prints the step, which also displaces the `parent.Note` that the comparison wrote.                        |
 
 The asymmetry is the finding: the case where the parent's branch has been deleted asks "does the content
 still measure the same" before advising a rewrite, and the case where the branch is still here — the more
@@ -66,7 +66,7 @@ Two consequences follow from the print site rather than the read:
 
 - `check`'s `next_action` can contain a self-invalidating instruction while reporting `ready: true`.
 - When the parent has landed, the comparison sentence the read carefully composed (`"measured above the
-  landing, this branch still contributes the content review <sha> approved"`) never reaches the human
+landing, this branch still contributes the content review <sha> approved"`) never reaches the human
   output, because the `parent: … landed as …` branch prints the step instead of the note.
 
 ## What the correct answers were

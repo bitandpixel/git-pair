@@ -17,7 +17,7 @@ declared: ff79a41 (`git pair change integrate`)
 next:  `git pair check`, then merge into main with ordinary git
 ```
 
-The head *was* the declaration commit — `Review-State: integrating`, `Review-Head` naming it — so the request
+The head _was_ the declaration commit — `Review-State: integrating`, `Review-Head` naming it — so the request
 had already been written. The next step still read as if nothing had been asked for, and the screen that
 printed `declared:` underneath had no line telling the author what a declaration obliges them to do next.
 
@@ -53,8 +53,8 @@ Three facts the last changeset established, which this one builds on rather than
 - `next_action` is a machine contract, one instruction per field. Anything with two exits is a human-screen
   line, and the pattern is established: `or hand it to <destination>'s owner: …`.
 
-`status` already half-knows this. Its `StateIntegrating` case says *"push the branch so whoever merges can see
-the request; then <landing sentence>"* — which is right about the push and wrong twice over: it says it
+`status` already half-knows this. Its `StateIntegrating` case says _"push the branch so whoever merges can see
+the request; then <landing sentence>"_ — which is right about the push and wrong twice over: it says it
 whether or not the branch is pushed, and it ends by naming the author's own merge as the only way the work
 gets taken. `check` does not handle the declared state at all: its next step is `landingNextAction` whatever
 the marker says.
@@ -108,8 +108,8 @@ the marker says.
 - [x] Add the pushed test: `refs/remotes/origin/<branch>` resolves, and the head is an ancestor of it. On any
       git error, answer not-pushed — the sentence then names a command that is harmless to re-run, which is
       the cheap direction.
-- [x] Spell the waiting sentence in the `READY` state's shape: `waiting on <destination>'s owner to merge it:
-      \`git pair status --changeset <id>\` reports the landing`.
+- [x] Spell the waiting sentence in the `READY` state's shape:
+      ``waiting on <destination>'s owner to merge it: (`git pair status --changeset <id>` reports the landing``.
 - [x] Spell the alternative line, built from `landingNextAction` so the merge sentence has one spelling.
 - [x] Reuse `status`'s existing "the head moved since the declaration" wording from the shared path, so `check`
       can say it too without a second copy.
@@ -146,7 +146,7 @@ the marker says.
 #### Verification
 
 - One fixture, three surfaces: declared-not-pushed prints the push sentence and no `merge into <dest> with
-  ordinary git` anywhere in the next step; declared-and-pushed prints the waiting sentence, and the human
+ordinary git` anywhere in the next step; declared-and-pushed prints the waiting sentence, and the human
   screens carry the author's own merge as the second line.
 - The machine answer: `check --json` and `status --json` carry one instruction with no newline, and neither
   carries the alternative line.
@@ -196,8 +196,8 @@ builders. `mise run check` for the suite, `mise run gates` including the PTY wal
 
 ## Audit History
 
-| Date | Audit | Summary |
-| --- | --- | --- |
-| 2026-10-14 | self-verification before hand-off | `mise run check` green. `mise run gates` failed once inside `e2e-29.sh` with the log lost — the command was piped through `tail`, which also masked the task's exit code, so the failure read as a pass at first. Four later full gates runs and a direct `e2e-29.sh` were clean, and the script's declared-head region pins no next-step wording. Recorded as an unreproduced failure rather than converted into a pass; the box "`mise run gates`" above means the four clean runs plus the CI job that gates the merge on the same script. |
+| Date       | Audit                                   | Summary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-14 | self-verification before hand-off       | `mise run check` green. `mise run gates` failed once inside `e2e-29.sh` with the log lost — the command was piped through `tail`, which also masked the task's exit code, so the failure read as a pass at first. Four later full gates runs and a direct `e2e-29.sh` were clean, and the script's declared-head region pins no next-step wording. Recorded as an unreproduced failure rather than converted into a pass; the box "`mise run gates`" above means the four clean runs plus the CI job that gates the merge on the same script.                                                                                                           |
 | 2026-10-14 | review 773b481 (feedback, non-blocking) | Two wording requests and one note about the queue. The push sentence no longer states that the destination merges — it queues the work for the destination's owner, and keeps naming the two fields an automated owner gates on; the human alternative reads "or land it yourself" rather than "or take it yourself". The queue note is answered under Open questions: the `AWAITING INTEGRATION` section already lists branch, destination, declaration and head, which is what a person merging by hand needs. Plan claims of byte-identical wording were corrected — the wording did change, by review, with the documents moved in the same commit. |
-| 2026-10-14 | approved and landed | Approved at `e877979`, declared at `c68eaaa`, merged into `main` as `8c8f267` by the repository's own integrate job. Everything above is in the destination, and `git pair status --changeset fix-declared-next-step-names-the-push` reads "landed at 8c8f267 in origin/main: nothing further to do". The plan moved to `docs/plans/completed/` in the housekeeping changeset that followed, because moving it while the approval stood would have made that approval stale — the plan file sits outside `changesets/<id>/`, which is the one directory the gate's comparison ignores. |
+| 2026-10-14 | approved and landed                     | Approved at `e877979`, declared at `c68eaaa`, merged into `main` as `8c8f267` by the repository's own integrate job. Everything above is in the destination, and `git pair status --changeset fix-declared-next-step-names-the-push` reads "landed at 8c8f267 in origin/main: nothing further to do". The plan moved to `docs/plans/completed/` in the housekeeping changeset that followed, because moving it while the approval stood would have made that approval stale — the plan file sits outside `changesets/<id>/`, which is the one directory the gate's comparison ignores.                                                                  |

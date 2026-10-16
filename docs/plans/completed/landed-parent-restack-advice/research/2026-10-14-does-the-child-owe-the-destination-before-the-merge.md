@@ -25,13 +25,13 @@ For each: `check --json` before the step; the tree at the child's head; the tree
 
 ## What came out
 
-| Landing | `ready` before | Rebase changed the tree? | The only new reason after the rebase | Merge of the un-restacked child | Merge of the restacked child |
-| --- | --- | --- | --- | --- | --- |
-| `--no-ff` merge | true | no | rewritten history | `bc7667a02a36` | `bc7667a02a36` |
-| `--no-ff` merge, trunk moved first | true | yes — trunk's new file | rewritten history | `624c35cbd7fe` | `624c35cbd7fe` |
-| `--no-ff` merge, same file in both | true | no | rewritten history | `eed9e91a4bd4` | `eed9e91a4bd4` |
-| `--squash` | true | no | rewritten history, **and** the diff differs from the approval | `bc7667a02a36` | `bc7667a02a36` |
-| `rebase` + `--ff-only` | true | no (already on the landing) | none | `bc7667a02a36` | `bc7667a02a36` |
+| Landing                            | `ready` before | Rebase changed the tree?    | The only new reason after the rebase                          | Merge of the un-restacked child | Merge of the restacked child |
+| ---------------------------------- | -------------- | --------------------------- | ------------------------------------------------------------- | ------------------------------- | ---------------------------- |
+| `--no-ff` merge                    | true           | no                          | rewritten history                                             | `bc7667a02a36`                  | `bc7667a02a36`               |
+| `--no-ff` merge, trunk moved first | true           | yes — trunk's new file      | rewritten history                                             | `624c35cbd7fe`                  | `624c35cbd7fe`               |
+| `--no-ff` merge, same file in both | true           | no                          | rewritten history                                             | `eed9e91a4bd4`                  | `eed9e91a4bd4`               |
+| `--squash`                         | true           | no                          | rewritten history, **and** the diff differs from the approval | `bc7667a02a36`                  | `bc7667a02a36`               |
+| `rebase` + `--ff-only`             | true           | no (already on the landing) | none                                                          | `bc7667a02a36`                  | `bc7667a02a36`               |
 
 Both questions answered, and the plan's predicate stands as designed.
 

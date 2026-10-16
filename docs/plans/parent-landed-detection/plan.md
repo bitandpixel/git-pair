@@ -61,7 +61,7 @@ over the reviewer's objection and is no longer a non-goal — see the thread
 `changesets/feat-parent-landed-detection/measurement-base-when-the-parent-lands.md`.
 
 - **The relink trigger is open, not settled.** The reviewer's finding (review `a87ae0b`) is that the branch
-  deletion moves the base anyway, so the current trigger decides only *when*, and the delay is what makes a
+  deletion moves the base anyway, so the current trigger decides only _when_, and the delay is what makes a
   rebased child's diff show the parent's work and trunk's work as the child's own. Measured in a scratch
   repository: `c.txt p.txt trunk.txt` for a base of the parent's branch tip against `c.txt` for the
   integration ref. Milestone 4 carries it; `relinkStacks` (`internal/changeset/resolve.go:535-549`) is
@@ -71,7 +71,7 @@ over the reviewer's objection and is no longer a non-goal — see the thread
   pointing `parent:` at `refs/git-pair/integrations/<id>` would destroy the tellability PRD §21 protects
   ("the branch name stays recorded in the changeset, so the two cases remain tellable apart") and would
   make the child unresolvable in a clone that never fetched the namespace.
-- **No approval invalidation in milestones 1–3.** PRD §21's conservative rule is about the parent *branch*
+- **No approval invalidation in milestones 1–3.** PRD §21's conservative rule is about the parent _branch_
   moving. A landing is not that, and treating it as one would drop approvals whose diff content is identical.
   Milestone 4 reopens exactly this question, because relinking changes what `Review-Parent-Head` is compared
   against, and it has to be answered before that trigger moves.
@@ -82,12 +82,12 @@ over the reviewer's objection and is no longer a non-goal — see the thread
 
 The landing facts already exist and are already read elsewhere:
 
-| question | answer comes from | already used by |
-|---|---|---|
-| did the parent land, as what | `refs/git-pair/integrations/<parent>` (`reviewref.ResolveIntegration`) | `parentGone` (`stacked.go:110-141`), `check` (`check.go:140-143`) |
-| did that reach trunk, and where does it sit | `describeLanding` (`internal/cli/integration.go:761`) | `status`' own integration fields (`status.go:412`) |
-| is it in trunk with no record at all | directory in the destination tree, no integration ref | `indexDurableRefs`/`unrecordedLandings`/`unrecordedHedge` (`internal/cli/landed.go:65-173`) |
-| is the child already sitting on it | `git merge-base --is-ancestor <landing> <head>` | nothing yet |
+| question                                    | answer comes from                                                      | already used by                                                                             |
+| ------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| did the parent land, as what                | `refs/git-pair/integrations/<parent>` (`reviewref.ResolveIntegration`) | `parentGone` (`stacked.go:110-141`), `check` (`check.go:140-143`)                           |
+| did that reach trunk, and where does it sit | `describeLanding` (`internal/cli/integration.go:761`)                  | `status`' own integration fields (`status.go:412`)                                          |
+| is it in trunk with no record at all        | directory in the destination tree, no integration ref                  | `indexDurableRefs`/`unrecordedLandings`/`unrecordedHedge` (`internal/cli/landed.go:65-173`) |
+| is the child already sitting on it          | `git merge-base --is-ancestor <landing> <head>`                        | nothing yet                                                                                 |
 
 `parentGone` already produces the sentence this plan wants ("the parent `%s` landed as `%s` — rebase onto
 `%s` and have the result reviewed again"); it is reached only when `refs/heads/<parent>` fails to resolve.
@@ -100,10 +100,10 @@ asserts the cost follows branches, not changesets) and `landed.go`'s `refIndex`.
 
 Landed state this plan is checked against, in the repository at `4c89685`:
 
-| changeset | archive | integration | branch still present |
-|---|---|---|---|
-| `fix-for-each-ref-glob` | `851df62` | `4c89685` (= trunk) | yes, `fix/for-each-ref-glob` |
-| `feat-publish-the-records` | `6e1200c` | `816af32` (on its parent branch, carried into trunk by `ba921b0`) | its branch is gone |
+| changeset                  | archive   | integration                                                       | branch still present         |
+| -------------------------- | --------- | ----------------------------------------------------------------- | ---------------------------- |
+| `fix-for-each-ref-glob`    | `851df62` | `4c89685` (= trunk)                                               | yes, `fix/for-each-ref-glob` |
+| `feat-publish-the-records` | `6e1200c` | `816af32` (on its parent branch, carried into trunk by `ba921b0`) | its branch is gone           |
 
 ## Constraints
 
@@ -318,12 +318,12 @@ come out of one table, and every layer answers "which commits" from graph facts.
 ```
 
 Layer 2 is the fast-forward and the rebase-merge, where trunk holds the chain itself. It is licensed by a
-marker and checked by `Review-Head` ancestry, because a squash can carry the marker *text* into its own
+marker and checked by `Review-Head` ancestry, because a squash can carry the marker _text_ into its own
 message — `parseTrailers` (`internal/lifecycle/lifecycle.go:552-569`) matches any `Review-*:` line and
 `git merge --squash` copies the branch's marker commit bodies — while it cannot carry the reviewed head, which
 is the commit a squash deliberately keeps out of trunk.
 
-The layers fix *which commits*. A second defect in the same command fixes *which changeset*, and it is what made
+The layers fix _which commits_. A second defect in the same command fixes _which changeset_, and it is what made
 the reported session need five invocations. The recorder asks that question twice, with different filters, and
 the weaker answer wins:
 
@@ -352,9 +352,9 @@ named a `--source` and not for the flagless flow, where nothing tells the caller
 Deliverables
 
 - A fast-forward landing records with no flags and says it derived a fast-forward, with `archive ==
-  integration` naming the reviewed chain's tip. `reviewref.CreatePair` already permits equal shas.
+integration` naming the reviewed chain's tip. `reviewref.CreatePair` already permits equal shas.
 - A merge landing records with `archive` at the introduced side's tip (`tip^2`, or `git rev-list tip --not
-  tip^1`) so a landing can be recorded after its branch is deleted — for merge landings only. Squash and
+tip^1`) so a landing can be recorded after its branch is deleted — for merge landings only. Squash and
   cherry-pick still need the branch or `--source`, because nothing else holds the chain.
 - Re-running `integration record` on a recorded changeset is a no-op that exits 0, whatever the branch set
   looks like.
@@ -410,18 +410,19 @@ Tasks
   destinations searched and pointing at `--target <ref>` for a landing on a branch git-pair did not search.
 - The exit code is the one rule this settles, and it is 2. Four rows describe the command:
 
-  | identified | state | exit | output |
-  | --- | --- | --- | --- |
-  | one changeset (named, or the only candidate) | pair complete | 0 | `already recorded ... nothing changed` |
-  | one changeset | half-pair | 0 | `completed the record for ...` |
-  | none | a directory is unrecorded | 2 | the unrecorded ids, unchanged |
-  | none | everything recorded | 2 | no ids; the destinations searched |
+  | identified                                   | state                     | exit | output                                 |
+  | -------------------------------------------- | ------------------------- | ---- | -------------------------------------- |
+  | one changeset (named, or the only candidate) | pair complete             | 0    | `already recorded ... nothing changed` |
+  | one changeset                                | half-pair                 | 0    | `completed the record for ...`         |
+  | none                                         | a directory is unrecorded | 2    | the unrecorded ids, unchanged          |
+  | none                                         | everything recorded       | 2    | no ids; the destinations searched      |
 
   The two `none` rows are siblings: "no changeset directory on <dests>, so there is nothing here to record"
   (`integration.go:328-331`) is already a usage error, and giving the second one a different code would make the
   distinction arbitrary. Idempotency stays where the contract already pins it — the directed retry, which exits 0
   with `already_recorded: true` (`internal/cli/integration_test.go:117-131`) — and a pipeline that wants it passes
   `--changeset`, which it can: it made the changeset.
+
 - Rewrite `changesetToDerive`'s comment (`integration.go:281-287`) to that table. Its current promise — a second
   CI run "must hear `already recorded` rather than a usage error" — is what the code over-reached to satisfy, and
   it is only true of a run that identified one changeset.
@@ -465,7 +466,7 @@ Verification
 
 ### M6 — `base:` names a branch, not a ref (separable)
 
-Kept separate because it changes what git-pair *writes* into committed content, which reaches every future
+Kept separate because it changes what git-pair _writes_ into committed content, which reaches every future
 changeset, every fresh clone and every CI job, while milestone 5 changes only reads.
 
 Deliverables
@@ -543,10 +544,10 @@ Manual verification is the copy-paste test in M3: the printed commands must be t
 
 ## Audit history
 
-| Date | Audit | Summary |
-|---|---|---|
-| 2026-09-23 | review `a87ae0b` | The reviewer rejected the "no relink while the branch exists" non-goal: deleting the branch moves the base anyway. The probe showed the delay is what makes a rebased child's diff carry the parent's and trunk's work. Non-goal withdrawn, thread opened, milestone 4 added. |
-| 2026-09-23 | review `f443b7c` | PRD §21 settled in the thread: an approval survives a relink when the diff is identical. The clone disagreement is accepted, with two guards — `Review-Parent-Head` stays the branch tip, and a base under `refs/git-pair/` is never a derived `--target`. Milestone 4 unblocked. |
+| Date       | Audit                    | Summary                                                                                                                                                                                                                                                                                                               |
+| ---------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-09-23 | review `a87ae0b`         | The reviewer rejected the "no relink while the branch exists" non-goal: deleting the branch moves the base anyway. The probe showed the delay is what makes a rebased child's diff carry the parent's and trunk's work. Non-goal withdrawn, thread opened, milestone 4 added.                                         |
+| 2026-09-23 | review `f443b7c`         | PRD §21 settled in the thread: an approval survives a relink when the diff is identical. The clone disagreement is accepted, with two guards — `Review-Parent-Head` stays the branch tip, and a base under `refs/git-pair/` is never a derived `--target`. Milestone 4 unblocked.                                     |
 | 2026-09-23 | session, `pi-heartthrob` | A fast-forward landing and a stale `refs/remotes/origin/main` produced an `integration record` failure that asked for a `--source` the command never uses. Milestones 5 and 6 added from the findings: four derivation layers, the not-downstream candidate rule, the recorder ordering, and `base:` naming a branch. |
 
 ## Execution status
@@ -554,14 +555,14 @@ Manual verification is the copy-paste test in M3: the printed commands must be t
 Implemented on `feat/parent-landed-impl` in one changeset (`feat-parent-landed-impl`), one commit per
 milestone, 2026-09-24. `mise run check` green at every milestone and at handoff; `mise run gates` at handoff.
 
-| Milestone | Commit | Outcome |
-|---|---|---|
-| M1 — the read, in `status` | `76017e7` | Done. `parentStatus` gained `Landed`, `LandedInDefaultBranch`, `LandedReach`, `StaleBranch`, `ParentWorktree`; the read runs for every state, and the refusal for an unapproved child became a note. |
-| M2 — `check`, `queue`, and the destination branch | `5776851` | Done. Exit codes unchanged; the destination branch now runs the published comparison before its usage error. |
-| M3 — the printed remedy | `56a79c2` | Done. `landedParentStep` names the rebase or the delete, and the worktree when one holds the branch. |
-| M4 — relink on the parent's record | `c679e25` | Done. Approval survival decided by `landedBaseIsTheSameWork`, conservatively. |
-| M5 — record derivation and discovery | `8867a02` | Done, with the deviations below. `ffChainTip` is the fast-forward layer; the flagless all-recorded run exits 2. |
-| M6 — `init` records a branch | `9effa7c` | Done, with the fallback below. |
+| Milestone                                         | Commit    | Outcome                                                                                                                                                                                              |
+| ------------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M1 — the read, in `status`                        | `76017e7` | Done. `parentStatus` gained `Landed`, `LandedInDefaultBranch`, `LandedReach`, `StaleBranch`, `ParentWorktree`; the read runs for every state, and the refusal for an unapproved child became a note. |
+| M2 — `check`, `queue`, and the destination branch | `5776851` | Done. Exit codes unchanged; the destination branch now runs the published comparison before its usage error.                                                                                         |
+| M3 — the printed remedy                           | `56a79c2` | Done. `landedParentStep` names the rebase or the delete, and the worktree when one holds the branch.                                                                                                 |
+| M4 — relink on the parent's record                | `c679e25` | Done. Approval survival decided by `landedBaseIsTheSameWork`, conservatively.                                                                                                                        |
+| M5 — record derivation and discovery              | `8867a02` | Done, with the deviations below. `ffChainTip` is the fast-forward layer; the flagless all-recorded run exits 2.                                                                                      |
+| M6 — `init` records a branch                      | `9effa7c` | Done, with the fallback below.                                                                                                                                                                       |
 
 Deviations from the plan, each stated in its commit message:
 

@@ -29,17 +29,17 @@ looks like.
 
 ## What changed
 
-| file | what it does now |
-| --- | --- |
-| `internal/changeset/chain.go` | `Chain.Squash` becomes `Chain.ArrivedInOneCommit`, derived from the landing commit (`parents == 1`, not a merge) instead of from `Head == landing`; the type comment says why `Head` stays at the destination's tip |
-| `internal/cli/landed.go` | new `carriedNoReviewRecord(chain, summary)` — the arrival shape **and** `summary.Marker == nil`; `chainRange`, `unreviewedReason` and `landingLicence` take the summary instead of a pre-extracted verdict so all three can ask it; `landingView` summarises before it decides whether to name a range |
-| `internal/factcache/factcache.go` | `format` `"1"` → `"2"`: the cached landing record's `reason` wording changed, and an entry holding a sentence this build no longer prints is read through the right struct and still says the wrong thing |
-| `internal/changeset/chain_test.go` | the merge landing asserts the arrival is *not* one commit; the fast-forward landing asserts that it *is*, and that `Head` is still the destination's tip; new `TestAOneCommitArrivalSurvivesTheDestinationMovingOn` reads one squash landing before and after two trunk commits |
-| `internal/cli/landed_test.go` | new `TestASquashLandingKeepsItsReasonAfterTheDestinationMovesOn` and `TestAFastForwardLandingThatCarriedItsReviewIsNotAOneCommitRecord` |
-| `scripts/gates/e2e-29.sh` | after the two findings appear, two ordinary commits land on `main` and the queue is read again: each keeps the sentence that is true for it |
-| `PRD.md` | §4 "Landed, unreviewed", §10.6, §11.1, §13.3 (the table's `rebase-merge` row, and the rule that empties `chain_base`/`chain_head`) |
-| `README.md` | the `status` field notes, the squash walkthrough, the `queue` section, the troubleshooting reason list |
-| `skills/git-pair/references/integration.md` | "what survives a landing" names the pair that decides the empty chain |
+| file                                        | what it does now                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `internal/changeset/chain.go`               | `Chain.Squash` becomes `Chain.ArrivedInOneCommit`, derived from the landing commit (`parents == 1`, not a merge) instead of from `Head == landing`; the type comment says why `Head` stays at the destination's tip                                                                                    |
+| `internal/cli/landed.go`                    | new `carriedNoReviewRecord(chain, summary)` — the arrival shape **and** `summary.Marker == nil`; `chainRange`, `unreviewedReason` and `landingLicence` take the summary instead of a pre-extracted verdict so all three can ask it; `landingView` summarises before it decides whether to name a range |
+| `internal/factcache/factcache.go`           | `format` `"1"` → `"2"`: the cached landing record's `reason` wording changed, and an entry holding a sentence this build no longer prints is read through the right struct and still says the wrong thing                                                                                              |
+| `internal/changeset/chain_test.go`          | the merge landing asserts the arrival is _not_ one commit; the fast-forward landing asserts that it _is_, and that `Head` is still the destination's tip; new `TestAOneCommitArrivalSurvivesTheDestinationMovingOn` reads one squash landing before and after two trunk commits                        |
+| `internal/cli/landed_test.go`               | new `TestASquashLandingKeepsItsReasonAfterTheDestinationMovesOn` and `TestAFastForwardLandingThatCarriedItsReviewIsNotAOneCommitRecord`                                                                                                                                                                |
+| `scripts/gates/e2e-29.sh`                   | after the two findings appear, two ordinary commits land on `main` and the queue is read again: each keeps the sentence that is true for it                                                                                                                                                            |
+| `PRD.md`                                    | §4 "Landed, unreviewed", §10.6, §11.1, §13.3 (the table's `rebase-merge` row, and the rule that empties `chain_base`/`chain_head`)                                                                                                                                                                     |
+| `README.md`                                 | the `status` field notes, the squash walkthrough, the `queue` section, the troubleshooting reason list                                                                                                                                                                                                 |
+| `skills/git-pair/references/integration.md` | "what survives a landing" names the pair that decides the empty chain                                                                                                                                                                                                                                  |
 
 The reason sentence is reworded:
 
@@ -57,11 +57,11 @@ commit`, which the gate and three tests grep for.
 
 - **The literal fix — set `Chain.Head` to the landing commit — is wrong, and two tests say so.** Applied to
   `main` and run, it fails `TestLandedChainOfAFastForwardLanding` (`Head = 07d4ebd4, want 6829de82: the chain
-  tip is trunk's tip here`; `chain range is missing the work commit`) and
+tip is trunk's tip here`; `chain range is missing the work commit`) and
   `TestAReplayedLandingIsUnreviewedBecauseTheApprovedCommitsDidNotArrive` (`chain_head = `, `state = WORKING,
-  want APPROVED`, and the reason becomes the squash sentence, so the reader cannot tell a replay from a
+want APPROVED`, and the reason becomes the squash sentence, so the reader cannot tell a replay from a
   squash). The reason is the shape of a linear landing: the commit that adds `changesets/<id>/` is the first of
-  the run, and the ready marker and the review submissions come *after* it as empty commits that touch no file,
+  the run, and the ready marker and the review submissions come _after_ it as empty commits that touch no file,
   so a path listing cannot see them and a range ending at the landing loses the verdict. `Head` is the bound the
   marker walk needs; narrowing it does not report the landing more honestly, it reports a reviewed
   fast-forward landing as a changeset nobody looked at.
@@ -94,11 +94,12 @@ commit`, which the gate and three tests grep for.
   ok: the landing that carried no history still says so after the destination moved on
         on main at b8d8ddc: the landing carried the directory in one commit, and the chain carries no review markers
   ```
+
 - Scratch repository, the scenario from the report: a reviewed changeset squashed onto `main`, then two
   unrelated commits. `queue` before and after prints the same `one commit` reading, `chain` stays empty, and
   `status --changeset alpha` says `chain: none — the landing carried the directory in one commit` with
   `reviewed: false` in `--json`. The same script against the pre-change binary prints `the chain carries no
-  review verdict` and a chain range after the destination moves.
+review verdict` and a chain range after the destination moves.
 
 ## Known limitations
 

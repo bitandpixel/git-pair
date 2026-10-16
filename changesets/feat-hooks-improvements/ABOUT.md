@@ -107,12 +107,12 @@ The commits are four separable layers; reviewing them in order is easier than re
 
 1. `Read the hook record again while the process is open` — the memo. The judgement to check is the cost: the
    trust answer is now recomputed per call, which is `sha256` over a handful of small files per point (`git pair
-   hooks` walks twelve). It costs no git subprocesses, which is what `TestCheckAsksTheHookQuestionsOncePerRun`
+hooks` walks twelve). It costs no git subprocesses, which is what `TestCheckAsksTheHookQuestionsOncePerRun`
    measures, but it is a filesystem read that used to happen once.
 2. `Make the hook recursion guard guard` — one value and the two spec sentences that disagreed about it.
 3. / 4. The two flags. The boundary decisions are the part worth arguing with: `--no-hooks` not clearing the
    position refusal, and `--trust-hooks-once` being offered on `check` and `change integrate` where `--no-hooks` is not.
-5. The docs, including the skill's rule that neither flag is an agent's to type, and the sentence in the position
+4. The docs, including the skill's rule that neither flag is an agent's to type, and the sentence in the position
    refusal that names the flag anyway.
 
 The open question is whether a skipped or once-run set should also leave a trace in history. This changeset
@@ -131,7 +131,7 @@ The behaviours are pinned where they can fail:
 - `TestResolutionReadsTheTrustRecordAgainEachTime` — a position recorded in another terminal, content moved under
   a recorded position, and a decline recorded in another terminal. All three answered from the memo before this.
 - `TestGuardValueSwitchesHooksOff` (the pair) and `TestHooksSwitches/a hook calling git pair fires no hooks of its
-  own` (the consequence, plus `env -u GIT_PAIR_HOOKS` as the way back).
+own` (the consequence, plus `env -u GIT_PAIR_HOOKS` as the way back).
 - `TestNoHooksSkipsTheRunAndSaysSo` — both roots, both halves, the JSON entry, and the refusal it does not clear.
 - `TestTrustOnceRunsTheUnrecordedTreeAndRecordsNothing` — the reviewer of a hook change submitting, the failing
   hook still refusing, the gate running the unrecorded checks, nothing written to the record, and the two flags

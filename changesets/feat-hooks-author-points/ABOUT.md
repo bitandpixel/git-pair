@@ -13,18 +13,18 @@ stacked on the hook runner in `feat-hooks-runner`.
 
 ## What changed
 
--   `internal/hooks/hooks.go` — `RunAll` beside `Run`, `Result.Ran()`, and the active set now naming the eight
-    author points.
--   `internal/cli/hooks.go` — `runHooks` split into `runPre` and `runPost` over a shared `runPoint` with an
-    explicit `runMode`; `firstFailure`, `executedHooks`, and `refuseIfHooksDirtiedTree` (which `change ready`
-    now uses too, instead of its own inline copy).
--   `internal/cli/change.go` — `runChangeUnready` and `runChangeAbandon` wired; `post-ready` wired into
-    `runChangeReady`; `postHookError`, `stateAfterPoint`, `warnIfHooksMovedHead`.
--   `internal/cli/integrate.go` — `pre-integrate` after the gate, `post-integrate` after the marker, and the
-    `hooks` array beside `reasons` in that command's JSON.
--   Docs: PRD §11.4, the README command table, and the skill's `cli.md`.
--   Tests: `internal/cli/hooks_points_test.go` asks the same four questions of each of the four transitions,
-    plus the idempotent-run rule and the tracked-root trust rule at a non-ready point.
+- `internal/hooks/hooks.go` — `RunAll` beside `Run`, `Result.Ran()`, and the active set now naming the eight
+  author points.
+- `internal/cli/hooks.go` — `runHooks` split into `runPre` and `runPost` over a shared `runPoint` with an
+  explicit `runMode`; `firstFailure`, `executedHooks`, and `refuseIfHooksDirtiedTree` (which `change ready`
+  now uses too, instead of its own inline copy).
+- `internal/cli/change.go` — `runChangeUnready` and `runChangeAbandon` wired; `post-ready` wired into
+  `runChangeReady`; `postHookError`, `stateAfterPoint`, `warnIfHooksMovedHead`.
+- `internal/cli/integrate.go` — `pre-integrate` after the gate, `post-integrate` after the marker, and the
+  `hooks` array beside `reasons` in that command's JSON.
+- Docs: PRD §11.4, the README command table, and the skill's `cli.md`.
+- Tests: `internal/cli/hooks_points_test.go` asks the same four questions of each of the four transitions,
+  plus the idempotent-run rule and the tracked-root trust rule at a non-ready point.
 
 ## Design decisions
 
@@ -85,51 +85,51 @@ that true: the same consent rule, and the same silence until somebody reads the 
 
 ## Validation
 
--   `go build ./...` clean; `gofmt -l internal cmd` empty.
--   `go test ./internal/cli/` green, which includes `internal/hooks` and the four-point table: per transition,
-    a pre-hook refusal writes no marker and names the hook and the point; a post-hook failure exits nonzero
-    with the marker still standing; a post-hook that commits is noticed by name; and every hook after a
-    failure still runs. Plus the JSON carrying both sides in order, the post-hook context naming the marker as
-    head, the three idempotent runs firing nothing, and the tracked-root rule at a non-ready point.
--   `TestTrackedRootAtTheIntegratePoint` covers the tracked root at the declaration point, installed the way a
-    repository ships it. Unaccepted the hook is skipped and the consent command is named; accepted it blocks the
-    declaration with no marker written; and installed after the approval, the refusal names the hook file as
-    content the approval never covered — it is not a message about the hook at all.
--   `go test ./internal/hooks/` green, including the active-point table, which is the assertion that `git pair
-    hooks` cannot lie about what this build runs.
--   `go test ./internal/cli/ -run Docs` and `-run TestTheCommandTreeIsTheCommandSet` green.
--   `mise run check` exited 0. On the implementation commit it reported **36 test shards ok, 1 served from
-    cache**, no `FAIL`, and the gate's own `gofmt -l internal cmd` step reported nothing — almost nothing was
-    cached, which is what changing `internal/hooks` and `internal/cli` should do. Re-run on every tree since —
-    this file, and the branch restacked twice onto M1's answers to the reviewer (the two questions, then the
-    `trust_state` work that came out of the vendoring discussion) — each time 36 shards ok, no `FAIL`, `gofmt`
-    silent.
--   The reviewer's questions reach this milestone as a fact rather than a change. Hooks run sequentially and the
-    run stops at the first blocking result, which is what `runPre` relies on to skip the rest of a suite; and
-    the trust state changes what `git pair hooks` reports, not when a hook fires. Both of M1's documentation
-    rows collided with its new trust-state wording during the restack, in `README.md` and
-    `references/cli.md`; the resolution carries both texts, so the row states the point set and the three
-    acceptance states.
+- `go build ./...` clean; `gofmt -l internal cmd` empty.
+- `go test ./internal/cli/` green, which includes `internal/hooks` and the four-point table: per transition,
+  a pre-hook refusal writes no marker and names the hook and the point; a post-hook failure exits nonzero
+  with the marker still standing; a post-hook that commits is noticed by name; and every hook after a
+  failure still runs. Plus the JSON carrying both sides in order, the post-hook context naming the marker as
+  head, the three idempotent runs firing nothing, and the tracked-root rule at a non-ready point.
+- `TestTrackedRootAtTheIntegratePoint` covers the tracked root at the declaration point, installed the way a
+  repository ships it. Unaccepted the hook is skipped and the consent command is named; accepted it blocks the
+  declaration with no marker written; and installed after the approval, the refusal names the hook file as
+  content the approval never covered — it is not a message about the hook at all.
+- `go test ./internal/hooks/` green, including the active-point table, which is the assertion that `git pair
+hooks` cannot lie about what this build runs.
+- `go test ./internal/cli/ -run Docs` and `-run TestTheCommandTreeIsTheCommandSet` green.
+- `mise run check` exited 0. On the implementation commit it reported **36 test shards ok, 1 served from
+  cache**, no `FAIL`, and the gate's own `gofmt -l internal cmd` step reported nothing — almost nothing was
+  cached, which is what changing `internal/hooks` and `internal/cli` should do. Re-run on every tree since —
+  this file, and the branch restacked twice onto M1's answers to the reviewer (the two questions, then the
+  `trust_state` work that came out of the vendoring discussion) — each time 36 shards ok, no `FAIL`, `gofmt`
+  silent.
+- The reviewer's questions reach this milestone as a fact rather than a change. Hooks run sequentially and the
+  run stops at the first blocking result, which is what `runPre` relies on to skip the rest of a suite; and
+  the trust state changes what `git pair hooks` reports, not when a hook fires. Both of M1's documentation
+  rows collided with its new trust-state wording during the restack, in `README.md` and
+  `references/cli.md`; the resolution carries both texts, so the row states the point set and the three
+  acceptance states.
 
 ## Known limitations
 
--   The gate and the reviewer's points are not wired: `pre-check`, `post-check`, `pre-submit`, `post-submit`
-    are configured-but-inert, and `git pair hooks` reports them as such. M3 and M4 run them.
--   There is still no results store, so `git pair hooks` reports configuration rather than the last result of
-    each hook, as in M1.
--   `executedHooks` is the guard that keeps the clean-tree re-check cheap, and it is a heuristic in one narrow
-    place: a hook that exits 0 is assumed to have been able to write files, and a hook that never started is
-    not. A hook that `chmod`s a file without changing tracked content is not detected as the cause of a dirty
-    tree; it is refused as one, which is the safe direction.
--   The HEAD-move warning compares HEAD before and after the whole post-hook group. It cannot say which hook
-    committed, and it does not claim to.
+- The gate and the reviewer's points are not wired: `pre-check`, `post-check`, `pre-submit`, `post-submit`
+  are configured-but-inert, and `git pair hooks` reports them as such. M3 and M4 run them.
+- There is still no results store, so `git pair hooks` reports configuration rather than the last result of
+  each hook, as in M1.
+- `executedHooks` is the guard that keeps the clean-tree re-check cheap, and it is a heuristic in one narrow
+  place: a hook that exits 0 is assumed to have been able to write files, and a hook that never started is
+  not. A hook that `chmod`s a file without changing tracked content is not detected as the cause of a dirty
+  tree; it is refused as one, which is the safe direction.
+- The HEAD-move warning compares HEAD before and after the whole post-hook group. It cannot say which hook
+  committed, and it does not claim to.
 
 ## Open questions
 
--   Whether a post-hook failure should also be visible in `status` and the queue, or whether the exit code and
-    stderr are the whole contract. Nothing here persists it.
--   M1 asks the same question about an untrusted tracked tree refusing outright once a repository has committed
-    hooks. It stays open.
+- Whether a post-hook failure should also be visible in `status` and the queue, or whether the exit code and
+  stderr are the whole contract. Nothing here persists it.
+- M1 asks the same question about an untrusted tracked tree refusing outright once a repository has committed
+  hooks. It stays open.
 
 ## Addressed feedback
 
@@ -154,11 +154,11 @@ named), and installed after the approval (the refusal above, and the hook never 
 
 Two things this corrected in the plan, both kept in the deviation note rather than dropped:
 
--   The note said the obstacle was the head comparison — that installing after the approval "moves the head
-    `change integrate`'s gate reads". It is the content comparison instead, and that is a better reason: the
-    gate objects to unreviewed content, not to a sha moving. The wording now says so, with the message it
-    actually prints.
--   The tracked root is no longer proven only at a non-ready point; it is proven at the declaration point too.
+- The note said the obstacle was the head comparison — that installing after the approval "moves the head
+  `change integrate`'s gate reads". It is the content comparison instead, and that is a better reason: the
+  gate objects to unreviewed content, not to a sha moving. The wording now says so, with the message it
+  actually prints.
+- The tracked root is no longer proven only at a non-ready point; it is proven at the declaration point too.
 
 The table of author points still installs at the per-clone root. That is not a limitation of the runner — it is
 so the four transitions read identically and none of them depends on a consent step, which belongs to the root

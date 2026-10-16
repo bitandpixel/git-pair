@@ -32,7 +32,7 @@ made after the rebase, had its own.
 - `internal/git`: `LogFields` asks for `--topo-order`. Its callers read the list as the order the
   commits happened and `lifecycle.derive` takes its last entry as the newest marker, so the walk has to
   keep a commit after the one it marks. git's default order promises only reverse chronology, and the
-  new test's fixture met it: with the dates tied, a marker came back *before* its own parent.
+  new test's fixture met it: with the dates tied, a marker came back _before_ its own parent.
 - `internal/tui`: `timeline` sorts by `Position`; `pickerItem.when` is gone. A submission the walk did
   not see goes above the rows it did see.
 - `internal/gittest`: `WithAuthorDate` and `WithCommitterDate`, so a fixture can build the history a

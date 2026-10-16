@@ -12,11 +12,11 @@ The core design goal is:
 
 A review may consist naturally of:
 
--   direct edits to source code,
--   ordinary source-code comments,
--   edits to a changeset's high-level `ABOUT.md`,
--   creation or modification of focused Markdown discussion threads,
--   an explicit review outcome such as blocked, feedback-only, or approved.
+- direct edits to source code,
+- ordinary source-code comments,
+- edits to a changeset's high-level `ABOUT.md`,
+- creation or modification of focused Markdown discussion threads,
+- an explicit review outcome such as blocked, feedback-only, or approved.
 
 The Git commit boundary provides the primary semantics. A commit identified as a review commit means that changes introduced by that commit should be interpreted as review feedback.
 
@@ -30,10 +30,10 @@ The Git commit boundary provides the primary semantics. A commit identified as a
 
 It should use:
 
--   Git for versioning, commits, branches, diffs, and refs.
--   Git's configured editor (git's own resolution: `$GIT_EDITOR`, `core.editor`, `$VISUAL`, `$EDITOR`) for text editing.
--   configured Git difftools for code review.
--   GitHub, GitLab, Forgejo, etc. only as optional remote/CI/merge systems.
+- Git for versioning, commits, branches, diffs, and refs.
+- Git's configured editor (git's own resolution: `$GIT_EDITOR`, `core.editor`, `$VISUAL`, `$EDITOR`) for text editing.
+- configured Git difftools for code review.
+- GitHub, GitLab, Forgejo, etc. only as optional remote/CI/merge systems.
 
 `git-pair` should not implement its own source-code editor or full diff renderer for the MVP.
 
@@ -148,13 +148,13 @@ A review submission establishes a durable review boundary.
 
 Files within the active changeset directory, including:
 
--   `ABOUT.md`
--   changeset metadata
--   Markdown review threads
+- `ABOUT.md`
+- changeset metadata
+- Markdown review threads
 
 ## Landed
 
-A changeset is **landed** when the branch it asks to land on — its *destination*, §13 — carries
+A changeset is **landed** when the branch it asks to land on — its _destination_, §13 — carries
 `changesets/<id>/`. That directory in that tree is the whole record of the landing: git-pair writes no ref
 anywhere in a lifecycle, so nothing has to be told that the work arrived and nothing can be out of date
 about it.
@@ -255,7 +255,7 @@ landed.
 `refs/remotes/origin/main` — because `git clone` records the remote's default branch in
 `refs/remotes/origin/HEAD` and that is the answer the resolution above prefers, so the ref it returns is
 usually a fetch ref even in a clone with a local trunk. The name is the better thing to write: `base:` is a
-line other machines read, and a fetch ref written there reads as a different destination — and says *fetched*
+line other machines read, and a fetch ref written there reads as a different destination — and says _fetched_
 about a change that has never been pushed. Where the name resolves to nothing, which is a clone holding the
 integration branch only under the fetch root, the qualified ref is recorded instead: a base that does not
 resolve fails every command, and `cannot resolve changeset base` is the worse outcome.
@@ -274,7 +274,7 @@ this clone has no fetch ref, the recorded name is the whole answer. `status` pri
 the record, `base_ref` and `base_why` the measurement and the rule behind it — and a span is named by what it
 measured against, which is how `origin/main...current` gets onto the screen.
 
-The local copy stays reachable whenever someone needs it. `--default-branch main` states which ref *is* the
+The local copy stays reachable whenever someone needs it. `--default-branch main` states which ref _is_ the
 integration branch for that command, so the diff and the landed test move together — which is why there is one
 knob rather than a second one for the base alone; a flag that moved the measurement and left "has this
 landed?" behind would recreate the disagreement this rule exists to end. One span can be pinned to any ref
@@ -287,7 +287,7 @@ and pushes nothing (§26): measured from origin's copy, what only this clone's t
 change until someone pushes it.
 
 The consequence worth knowing: if someone merges your unlanded changeset into their branch and
-lands *that*, your changeset reads as landed on your own branch too, because your directory is
+lands _that_, your changeset reads as landed on your own branch too, because your directory is
 now in the integration branch's tree. That is the rule working as intended — the work is in
 trunk — and it is why a changeset's branch is expected to land its own content.
 
@@ -338,7 +338,7 @@ Three properties the wording has to hold:
   exit code of the command that found it.
 - **The reason says which reading applies.** `the chain carries no review verdict` means the chain came
   along and holds no marker to read. `the newest verdict is feedback (<sha>), which does not license a
-  merge` and `the newest verdict is a block (<sha>)` name the verdict that was newest. A record that came
+merge` and `the newest verdict is a block (<sha>)` name the verdict that was newest. A record that came
   alone — `the landing carried the directory in one commit, and the chain carries no review markers` —
   brought the content and left the history on a branch that may already be gone, which is what a squash or a
   cherry-pick leaves (§13). The two halves belong together and neither stands alone: the shape is a fact about
@@ -346,9 +346,9 @@ Three properties the wording has to hold:
   landing whose record happened to be committed once — what tells that one from a squash is the markers in the
   chain, which is the other half of the sentence. Then the strict
   half, in its own words: `the approval (<sha>) names <commit>, which the destination does not carry: the
-  landing replayed the run, so what was approved is not what landed` is a rebase merge, or an amend the
+landing replayed the run, so what was approved is not what landed` is a rebase merge, or an amend the
   author made under an approval; `the approval (<sha>) names no commit, so the destination cannot be
-  checked against it` is a marker whose `Review-Head` trailer was lost. Both say one thing about a
+checked against it` is a marker whose `Review-Head` trailer was lost. Both say one thing about a
   destination that cannot show its approval: the record arrived, and what it licensed did not.
 
 - **A directory the destination has filed away is asked about and not reported.** `git pair change tidy`
@@ -356,7 +356,7 @@ Three properties the wording has to hold:
   destination through review like any other change. A destination that carries only that spelling stops
   naming the changeset in `queue` and `status`. Two facts make that safe to read as an acknowledgement: the
   statement costs a reviewed commit rather than a flag, and the finding survives it — `git pair status
-  --changeset <id>` reads the same chain and answers `reviewed: false` for a filed landing exactly as it did
+--changeset <id>` reads the same chain and answers `reviewed: false` for a filed landing exactly as it did
   before. A tidy that has not been merged silences nothing, because the destination still carries the
   directory in place. The rule is also what keeps §13.3's advice from contradicting this heading: a
   repository that squashes sees it on every landing, and tidying is what §13.5 tells that repository to do.
@@ -463,14 +463,14 @@ The author/agent should create and populate it before requesting review.
 
 It serves a similar purpose to a good pull-request description and may contain:
 
--   summary,
--   motivation,
--   implementation overview,
--   significant design decisions,
--   important files/components,
--   tests and validation,
--   known limitations,
--   open questions.
+- summary,
+- motivation,
+- implementation overview,
+- significant design decisions,
+- important files/components,
+- tests and validation,
+- known limitations,
+- open questions.
 
 Example:
 
@@ -657,14 +657,14 @@ or the current branch is refused, because neither is a stack.
 
 Requirements:
 
--   determine current Git branch,
--   determine the changeset ID: `--id` when given, otherwise the branch name normalised (§4),
--   create deterministic changeset directory,
--   create metadata,
--   create `ABOUT.md`,
--   accept `--base`,
--   should be safe/idempotent where practical,
--   should not destroy existing changeset data.
+- determine current Git branch,
+- determine the changeset ID: `--id` when given, otherwise the branch name normalised (§4),
+- create deterministic changeset directory,
+- create metadata,
+- create `ABOUT.md`,
+- accept `--base`,
+- should be safe/idempotent where practical,
+- should not destroy existing changeset data.
 
 `--id` chooses the identity rather than accepting the default (§4). Three rules follow from
 that:
@@ -694,8 +694,9 @@ that:
    the branch you were created from is the same changeset seen from a second branch, so `init`
    reports it as already initialised instead of refusing a collision between a changeset and
    itself.
+
 3. **It does not change.** The ID of a directory that exists is never rewritten, and a
-   changeset that has landed keeps its ID for good (§5). Starting a *second* changeset on
+   changeset that has landed keeps its ID for good (§5). Starting a _second_ changeset on
    a branch that already carries one is allowed when the record says so — that is what a stacked branch
    that begins its own work looks like — and `init` refuses a second directory that ties to nothing, because
    a branch carries one changeset plus the ones it is stacked on (§4). `git pair change stack --base <branch>`
@@ -725,15 +726,15 @@ Signals that the current implementation is ready for human review.
 
 Requirements:
 
--   changeset must exist,
--   working tree should be clean,
--   `ABOUT.md` should exist,
--   run the surviving-review-additions diagnostic described below,
--   fail non-interactively by default if surviving review additions are detected,
--   create a review marker commit only if validation succeeds or an explicit override is supplied,
--   write nothing outside the marker commit: no ref is created or moved while work is in flight, and
-    the branch is what holds the history until landing (§13),
--   make the branch discoverable by `git pair queue`.
+- changeset must exist,
+- working tree should be clean,
+- `ABOUT.md` should exist,
+- run the surviving-review-additions diagnostic described below,
+- fail non-interactively by default if surviving review additions are detected,
+- create a review marker commit only if validation succeeds or an explicit override is supplied,
+- write nothing outside the marker commit: no ref is created or moved while work is in flight, and
+  the branch is what holds the history until landing (§13),
+- make the branch discoverable by `git pair queue`.
 
 Suggested commit:
 
@@ -813,10 +814,10 @@ git pair change feedback
 
 Requirements:
 
--   diff `latest-review^..latest-review`, using ordinary Git diff output,
--   include the review's changeset artifacts (threads, `ABOUT.md` edits) and any direct code edits the reviewer made,
--   support `--stat` and `--name-only`,
--   exit non-zero with a clear message when the changeset has no review submission yet.
+- diff `latest-review^..latest-review`, using ordinary Git diff output,
+- include the review's changeset artifacts (threads, `ABOUT.md` edits) and any direct code edits the reviewer made,
+- support `--stat` and `--name-only`,
+- exit non-zero with a clear message when the changeset has no review submission yet.
 
 This is the author's answer to "what did the reviewer just tell me?".
 
@@ -834,16 +835,16 @@ git pair change wait --fetch --timeout 2h --json
 
 Requirements:
 
--   exit successfully when the effective state moves from `ready` to `blocked`, `feedback`, or `approved`,
--   report immediately, without waiting, when the changeset is already in one of those states,
--   exit non-zero when the changeset is `working`: the author is not waiting on anyone,
--   poll local review state by default,
--   with `--fetch`, run `git fetch` against the configured remotes before each check, so a review submitted in another clone becomes visible through `refs/remotes/...`,
--   `--interval` sets the polling interval (default 10s),
--   `--timeout` gives up after a duration instead of waiting forever,
--   `--json` prints `previous_state`, `state`, `review_commit`, `ref`, `fetches`, `waited_seconds`, `timed_out` and `next_action`, with state names spelled as `git pair status --json` spells them,
--   a wait that ends because of `--timeout` exits non-zero,
--   waiting never writes to the repository: no commits, no refs, no index changes.
+- exit successfully when the effective state moves from `ready` to `blocked`, `feedback`, or `approved`,
+- report immediately, without waiting, when the changeset is already in one of those states,
+- exit non-zero when the changeset is `working`: the author is not waiting on anyone,
+- poll local review state by default,
+- with `--fetch`, run `git fetch` against the configured remotes before each check, so a review submitted in another clone becomes visible through `refs/remotes/...`,
+- `--interval` sets the polling interval (default 10s),
+- `--timeout` gives up after a duration instead of waiting forever,
+- `--json` prints `previous_state`, `state`, `review_commit`, `ref`, `fetches`, `waited_seconds`, `timed_out` and `next_action`, with state names spelled as `git pair status --json` spells them,
+- a wait that ends because of `--timeout` exits non-zero,
+- waiting never writes to the repository: no commits, no refs, no index changes.
 
 The command is non-interactive and must be safe for an agent to run unattended.
 
@@ -877,18 +878,18 @@ what the two exits look like on the screen that offers them, so they are spelled
 Three properties are worth naming, because they are what the previous shape of this chapter had
 backwards:
 
--   **A review is a judgement; landing is a decision.** `approve` says the code is good enough. The
-    author decides what to take forward and where, and git-pair reads that decision from the destination
-    instead of anticipating it. Nothing about a changeset is preserved before it lands, which is why there is no
-    `change archive`: the history a later reader needs is the history the merge carried, and where the
-    merge carried none, git-pair says so rather than inventing one.
--   **A merge is not a git-pair operation.** It is not derived, reported as state, or gated (§12).
-    git-pair neither runs one nor needs one to have happened in a particular shape: it asks the destination
-    whether the directory is there, and names the commit that brought it in. None of that is a decision
-    about whether the work should have landed.
--   **A landing cannot be re-done, because it is not an operation.** There is no flag to re-run and no
-    value to correct: a landing that needs correcting is corrected in git, and a changeset the destination
-    carries is refused by every command that writes markers (§12).
+- **A review is a judgement; landing is a decision.** `approve` says the code is good enough. The
+  author decides what to take forward and where, and git-pair reads that decision from the destination
+  instead of anticipating it. Nothing about a changeset is preserved before it lands, which is why there is no
+  `change archive`: the history a later reader needs is the history the merge carried, and where the
+  merge carried none, git-pair says so rather than inventing one.
+- **A merge is not a git-pair operation.** It is not derived, reported as state, or gated (§12).
+  git-pair neither runs one nor needs one to have happened in a particular shape: it asks the destination
+  whether the directory is there, and names the commit that brought it in. None of that is a decision
+  about whether the work should have landed.
+- **A landing cannot be re-done, because it is not an operation.** There is no flag to re-run and no
+  value to correct: a landing that needs correcting is corrected in git, and a changeset the destination
+  carries is refused by every command that writes markers (§12).
 
 `approve` and landing are intentionally separate concepts:
 
@@ -899,7 +900,6 @@ approve
 the merge
     the author's decision about where the work goes, with ordinary git
 ```
-
 
 ## 9.6 `git pair change unready`
 
@@ -950,10 +950,10 @@ answer about the branch rather than about the work being finished.
 Records that the changeset will not be taken forward.
 
 Two endings exist, and git-pair records both of them — differently, because they are different claims.
-Landing the work (*merged*) is recorded by the destination branch itself: its tree carrying
+Landing the work (_merged_) is recorded by the destination branch itself: its tree carrying
 `changesets/<id>/` is the fact, read wherever it matters (§3, §13), because only the person doing the
 landing knows where the work went and git is what says so. Abandoning
-(*not coming back*) is recorded by a marker on the branch, because the author knows that the moment
+(_not coming back_) is recorded by a marker on the branch, because the author knows that the moment
 they decide it and there is nothing to point at. Without a command for it, the only way to say so
 would be to delete the branch, which destroys the history that explains why — and what that history is
 worth is a different question for changeset nobody is going to land than for one somebody is.
@@ -1062,19 +1062,19 @@ git pair change integrate
 
 Requirements:
 
--   the changeset must exist and its working tree be clean — the declaration is a commit, so a dirty tree
-    is the blocker `change ready` treats it as (§9.2): repository state, not bad arguments,
--   run the gate of `git pair check` (§11.3) first, as the same code rather than an imitation of it, and
-    name every failed condition in one run,
--   refuse a changeset the destination already carries: the work has landed, and a declaration on
-    top of it would ask for a second merge,
--   refuse a stacked child whose parent is not landed — see the rule below,
--   write the marker commit and nothing else: no ref — git-pair writes none, anywhere — no config, no
-    network (§26),
--   succeed and record nothing when this head is already declared, so a script can declare
-    unconditionally,
--   keep `git pair check` as the gate a merge runs. This command requests a merge; it never performs one,
-    and it never certifies one.
+- the changeset must exist and its working tree be clean — the declaration is a commit, so a dirty tree
+  is the blocker `change ready` treats it as (§9.2): repository state, not bad arguments,
+- run the gate of `git pair check` (§11.3) first, as the same code rather than an imitation of it, and
+  name every failed condition in one run,
+- refuse a changeset the destination already carries: the work has landed, and a declaration on
+  top of it would ask for a second merge,
+- refuse a stacked child whose parent is not landed — see the rule below,
+- write the marker commit and nothing else: no ref — git-pair writes none, anywhere — no config, no
+  network (§26),
+- succeed and record nothing when this head is already declared, so a script can declare
+  unconditionally,
+- keep `git pair check` as the gate a merge runs. This command requests a merge; it never performs one,
+  and it never certifies one.
 
 Suggested commit:
 
@@ -1207,14 +1207,14 @@ command spelled two ways. `open` stays because a reader of the command tree look
 
 Responsibilities:
 
--   identify current changeset,
--   determine review span,
--   display changed files,
--   display local reviewed/unreviewed progress,
--   provide shortcuts to external editor/difftool,
--   expose `ABOUT.md`,
--   expose review threads,
--   allow user to mark files done/undone.
+- identify current changeset,
+- determine review span,
+- display changed files,
+- display local reviewed/unreviewed progress,
+- provide shortcuts to external editor/difftool,
+- expose `ABOUT.md`,
+- expose review threads,
+- allow user to mark files done/undone.
 
 The TUI is an orchestration interface rather than a source editor.
 
@@ -1273,11 +1273,11 @@ changesets/booking-transaction/concurrency-tests.md
 
 Requirements:
 
--   slugify title,
--   avoid accidental duplicate threads where possible,
--   if an existing matching thread exists, open it,
--   if no title is supplied in an interactive terminal, prompt for one,
--   open using the editor git resolves.
+- slugify title,
+- avoid accidental duplicate threads where possible,
+- if an existing matching thread exists, open it,
+- if no title is supplied in an interactive terminal, prompt for one,
+- open using the editor git resolves.
 
 Thread files should remain ordinary Markdown.
 
@@ -1301,11 +1301,11 @@ Meaning:
 
 The commit may include:
 
--   source-code edits,
--   source-code comments,
--   ABOUT edits,
--   new thread files,
--   thread responses/changes.
+- source-code edits,
+- source-code comments,
+- ABOUT edits,
+- new thread files,
+- thread responses/changes.
 
 ### `--feedback`
 
@@ -1362,7 +1362,7 @@ head — modes, pre- and post-image blob OIDs, statuses and paths — with the r
 changeset's directory and every ancestor's, in both of their homes, because the record lives there and a
 reply to a review thread must not change the identity of the approval that reply is written into, and because
 a landing is a move of that record before it is a change of code (§21.1). The second half, where it exists,
-is the identity of the same diff *as rendered*: `git patch-id --verbatim` over the `-U3` patch that the same
+is the identity of the same diff _as rendered_: `git patch-id --verbatim` over the `-U3` patch that the same
 `git diff` prints beside those records, which is what changed and where.
 
 One invocation produces both halves, so they cannot disagree about the ground, the exclusions or the moment
@@ -1372,7 +1372,7 @@ other — the first is the identity of the content, the second of the hunks — 
 when.
 
 The two trailers are written together and mean different
-things: the base names where the diff started, which is what lets a refusal say *which* side moved and what
+things: the base names where the diff started, which is what lets a refusal say _which_ side moved and what
 to do about it, and the identity names the content, which is the one comparison the gate makes when it asks
 whether the diff under test is the diff that was approved (§21, §21.1).
 
@@ -1465,7 +1465,7 @@ branches and trunk gives the same queue as a clone with everything (§13).
 
 Work that reached the destination with **no approval the destination can show** is the opposite case, and the queue
 is where it is reported: its own `LANDED UNREVIEWED` heading, naming each changeset and printing the
-read that goes and looks (§4's *Landed, unreviewed*). It is not a skip note, because "nothing to do" is
+read that goes and looks (§4's _Landed, unreviewed_). It is not a skip note, because "nothing to do" is
 the wrong reading of a merge whose review never reached the destination, and it names no command, because
 no command closes it. A landing the destination carries filed away under `changesets/.landed/` is not in it:
 the tidy commit that moved it there is the acknowledgement, and it is a fact about the destination's tree
@@ -1654,7 +1654,7 @@ after `git branch -D` says `Branch: none (read from the landed chain)` rather th
 read reports follows the rule above: the chain in the destination tells what the branch claimed before it
 disappeared, and is not a second source of state. So `state` stays what the span says (`WORKING`, beside
 `landed`), while the reviews are read from the landed chain rather than from the span — after a merge
-landing the reviewed head sits *below* the base, which makes `base..head` empty for exactly the changeset
+landing the reviewed head sits _below_ the base, which makes `base..head` empty for exactly the changeset
 whose verdicts matter most, and "no reviews yet" about a head a reviewer approved is a wrong answer, not a
 harmless one. `reason` says the read was of the landed chain instead of reciting a span nobody asked
 about, and `review history` reports the same submissions as `status`. The stack above a landed changeset
@@ -1733,7 +1733,7 @@ raises.
 
 On a branch that carries no changeset of its own the command has nothing to report, and the answer is a
 usage refusal. When that branch is the integration branch the refusal also names the landings it carries
-that hold no approval of what they carry, as the `LANDED UNREVIEWED` finding (§4's *Landed, unreviewed*):
+that hold no approval of what they carry, as the `LANDED UNREVIEWED` finding (§4's _Landed, unreviewed_):
 "this branch holds no work in progress" and "work landed here with no review behind it" are two halves of
 one situation, and a reader told only the first goes looking for a branch they forgot rather than at the
 merge in front of them. It names no command, because none closes it, and it names no landing the destination
@@ -1786,7 +1786,7 @@ The conditions, all of them reported rather than the first:
    case the condition exists to catch (§12),
 5. the content that review looked at is still what `HEAD` carries: the tree is compared between the
    marker and `HEAD`, ignoring `changesets/<changeset>/`, the same comparison `status` makes,
-5. the changeset has not already landed (§13.2) — the destination carrying the directory says the review is over, so
+6. the changeset has not already landed (§13.2) — the destination carrying the directory says the review is over, so
    this is the other single-reason verdict, and it comes first.
 
 Conditions 4 and 5 are different questions, and a rewrite is what separates them. A rebase that
@@ -1840,7 +1840,7 @@ The content condition **credits the destination**. A branch that took the integr
 files since its marker, and none of that content is the author's: the reviewer had no reason to read trunk,
 and the destination vouches for what it carries. So a path is not drift where head carries the destination's
 content there, and a whole merge is not drift where head is what `git merge-tree` would make of the reviewed
-commit and the destination. That last reading is why a resolution written by hand after a conflict *is* drift:
+commit and the destination. That last reading is why a resolution written by hand after a conflict _is_ drift:
 the merge git would have produced does not contain it. Content from an ancestor that has not landed belongs
 to the author until the destination carries it, and is refused (§21, and
 `TestAnAncestorsFileIsCreditedOnlyWhenTheDestinationCarriesIt`). `check --json` reports the paths it credited
@@ -1919,16 +1919,16 @@ without matching on the wording of a reason.
 
 Two absences are decisions rather than gaps:
 
--   **No `--changeset`.** This is the check a forge runs *on* a revision. Naming a second changeset
-    would make the verdict ambiguous about what was gated, so the flag does not exist here even
-    though `status` and `diff` take it.
--   **No surviving-review-additions diagnostic.** §19 lists that check among readiness
-    conditions, but `change ready` is where the decision is made and acknowledged, and conditions 2
-    and 4 here already guarantee nothing has moved since the marker. Re-deriving it in `check`
-    re-litigates a decision the author already took, in a command with no override flag to take it
-    again.
+- **No `--changeset`.** This is the check a forge runs _on_ a revision. Naming a second changeset
+  would make the verdict ambiguous about what was gated, so the flag does not exist here even
+  though `status` and `diff` take it.
+- **No surviving-review-additions diagnostic.** §19 lists that check among readiness
+  conditions, but `change ready` is where the decision is made and acknowledged, and conditions 2
+  and 4 here already guarantee nothing has moved since the marker. Re-deriving it in `check`
+  re-litigates a decision the author already took, in a command with no override flag to take it
+  again.
 
--   **No ref to be holding.** The verdict does not depend on any git-pair ref existing — there are none — so a clone that fetched the branch and the destination gives the same answer as a clone with everything else. The landing test reads the destination's tree (§13); there is no namespace to fetch before a gate can be trusted.
+- **No ref to be holding.** The verdict does not depend on any git-pair ref existing — there are none — so a clone that fetched the branch and the destination gives the same answer as a clone with everything else. The landing test reads the destination's tree (§13); there is no namespace to fetch before a gate can be trusted.
 
 The assertion is about the commit, not the checkout: uncommitted changes are not in `HEAD` and
 cannot invalidate a review of it, so a dirty working tree does not change the answer. `status`
@@ -1949,17 +1949,17 @@ script. This is the same relationship as git's own hooks and `core.hooksPath`, a
 allowed to run commands git-pair itself never invokes (§26): what that clause binds is what this tool runs of
 its own choosing, not what a person installs in their own checkout. It follows that a hook is not a control
 against the person working in the clone — they wrote it, and they can delete it. What it guarantees is that
-*nobody* hands work on over a failing check, and that the author sees the failure in the same words the CI
+_nobody_ hands work on over a failing check, and that the author sees the failure in the same words the CI
 job will use.
 
 ### Configuration
 
 Hooks live in two roots, consulted in this order:
 
-| Root | Path | Trust |
-| --- | --- | --- |
-| tracked | `<worktree>/.git-pair/hooks/<point>/` | committed, therefore content that arrived from somewhere; runs only after `git pair hooks --trust`, and the verdict asks this clone for a position — `--trust` or `--decline` — before it will call the work ready |
-| per-clone | `<git-common-dir>/git-pair/hooks/<point>/` | the person's own file under the git directory the clone shares — one per clone, not one per worktree — never committed, runs directly |
+| Root      | Path                                       | Trust                                                                                                                                                                                                              |
+| --------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| tracked   | `<worktree>/.git-pair/hooks/<point>/`      | committed, therefore content that arrived from somewhere; runs only after `git pair hooks --trust`, and the verdict asks this clone for a position — `--trust` or `--decline` — before it will call the work ready |
+| per-clone | `<git-common-dir>/git-pair/hooks/<point>/` | the person's own file under the git directory the clone shares — one per clone, not one per worktree — never committed, runs directly                                                                              |
 
 The tracked root is a deliberate departure from git's own model, where `.git/hooks` is not cloned and a team
 vendors a script into every checkout. Vendoring buys one execution surface and costs a second copy of the
@@ -2060,7 +2060,7 @@ cannot move inside a process: the off switch, and where the clone's git director
 Two commands deliberately do not ask: `change unready` and `change abandon`. Both take work out of the queue
 rather than putting it in, and the person who cannot run the repository's checks is exactly the person who needs to
 put the work down; refusing them would make the safety mechanism a trap. `git pair hooks` is never gated either —
-reading the scripts is what you do *because* you have not decided, so it cannot be behind the decision.
+reading the scripts is what you do _because_ you have not decided, so it cannot be behind the decision.
 
 A clone in the changed state has a third option besides accepting or working without: it can keep running the
 version it did read, by copying that content into the per-clone root, which needs no acceptance. git-pair does
@@ -2072,23 +2072,23 @@ current content and content the person chose, and which one ran is visible from 
 A hook is executed directly, never through a shell, with the repository root as its working directory and no
 input on stdin. It receives the resolution the command already made, so it never has to re-derive it:
 
-| Variable | Meaning |
-| --- | --- |
-| `GIT_PAIR_HOOK_POINT` | the point that fired, e.g. `pre-ready` |
-| `GIT_PAIR_CHANGESET` | the resolved changeset id |
-| `GIT_PAIR_BRANCH` | the branch holding the work |
-| `GIT_PAIR_BASE` | the base branch |
-| `GIT_PAIR_HEAD` | the current head commit |
-| `GIT_PAIR_DEFAULT_BRANCH` | the destination, when known |
-| `GIT_PAIR_HOOK_ROOT` | `worktree` or `clone` |
-| `GIT_PAIR_HOOKS` | `0`, inherited by anything the hook runs — a nested `git pair` runs no hooks, and `env -u GIT_PAIR_HOOKS git pair …` opts back in |
+| Variable                  | Meaning                                                                                                                           |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `GIT_PAIR_HOOK_POINT`     | the point that fired, e.g. `pre-ready`                                                                                            |
+| `GIT_PAIR_CHANGESET`      | the resolved changeset id                                                                                                         |
+| `GIT_PAIR_BRANCH`         | the branch holding the work                                                                                                       |
+| `GIT_PAIR_BASE`           | the base branch                                                                                                                   |
+| `GIT_PAIR_HEAD`           | the current head commit                                                                                                           |
+| `GIT_PAIR_DEFAULT_BRANCH` | the destination, when known                                                                                                       |
+| `GIT_PAIR_HOOK_ROOT`      | `worktree` or `clone`                                                                                                             |
+| `GIT_PAIR_HOOKS`          | `0`, inherited by anything the hook runs — a nested `git pair` runs no hooks, and `env -u GIT_PAIR_HOOKS git pair …` opts back in |
 
 The two submission points add three more, because a submission is a verdict with content of its own:
 
-| Variable | Meaning |
-| --- | --- |
-| `GIT_PAIR_REVIEW_OUTCOME` | `approve`, `block`, or `feedback` |
-| `GIT_PAIR_REVIEW_HEAD` | the commit being reviewed, which is the head the review commit will name |
+| Variable                    | Meaning                                                                                               |
+| --------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `GIT_PAIR_REVIEW_OUTCOME`   | `approve`, `block`, or `feedback`                                                                     |
+| `GIT_PAIR_REVIEW_HEAD`      | the commit being reviewed, which is the head the review commit will name                              |
 | `GIT_PAIR_REVIEW_BODY_FILE` | a file holding the review body, so a hook can read the reviewer's reasoning without a quoting problem |
 
 Its stdout and stderr are captured and never written to git-pair's own stdout, which is where `--json`
@@ -2172,8 +2172,7 @@ pre-submit     clone   .git/git-pair/hooks/pre-submit/01-body-policy
 
 The columns are the point, the root (`worktree` or `clone`), and the path, with a note in parentheses for a
 script that is not executable. An unaccepted tracked tree puts one line above all of this: `tracked hooks are
-NOT trusted: they will not run until \`git pair hooks --trust\` records them`. `--json` answers with
-`tracked_root`, `clone_root`, `trusted`, `accepted` (the hash), `hooks[]` and `unknown[]`.
+NOT trusted: they will not run until \`git pair hooks --trust\` records them`. `--json`answers with`tracked_root`, `clone_root`, `trusted`, `accepted`(the hash),`hooks[]`and`unknown[]`.
 
 The points are the six actions a changeset meets, on both sides: `pre-ready` and `post-ready`, `pre-integrate`
 and `post-integrate`, `pre-unready` and `post-unready`, `pre-abandon` and `post-abandon`, `pre-check` and
@@ -2262,11 +2261,11 @@ a different repository.
 `git pair skill list` prints the skill this binary carries and every directory a harness would read it
 from, each marked with one state:
 
-| State | Means |
-| --- | --- |
-| `current` | the installed bytes equal this binary's |
-| `stale` | a skill of the same name is installed there and its bytes differ |
-| `absent` | the `git-pair` directory is not there |
+| State         | Means                                                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `current`     | the installed bytes equal this binary's                                                                                                    |
+| `stale`       | a skill of the same name is installed there and its bytes differ                                                                           |
+| `absent`      | the `git-pair` directory is not there                                                                                                      |
 | `unavailable` | the location has no home here — a repository-scoped row run outside any repository, or a user-scoped row with no home directory to resolve |
 
 An existing directory holding anything other than this byte-for-byte set is `stale`, including a directory
@@ -2286,13 +2285,13 @@ says so on stderr.
 `references/` beside `SKILL.md`. A skills directory is the container a harness scans, and the argument is
 always that container:
 
-| Flag | Default | Rule |
-| --- | --- | --- |
-| `--harness` | `agents` | one of `agents`, `pi`, `claude`; `codex` is accepted as a spelling of `agents`, because Codex CLI reads the `.agents/skills` locations. Anything else is a usage error naming what git-pair knows and pointing at `--dest`. The two directories per harness are those harnesses' documented discovery rules — the documents and the date they were read are recorded with `skillHarness` in `internal/cli/skill.go` and cited in the skill's install reference |
-| `--scope` | `repo` inside a git repository, `user` outside one | `repo` writes under the repository root, `user` under the home directory. `--scope repo` with no repository is a usage error with both ways out in the message |
-| `--dest` | none | the container to write into, for a harness git-pair has no row for. It names the destination outright, so combining it with `--harness` or `--scope` is a usage error rather than a precedence rule |
-| `--dry-run` | off | resolve the destination and report what would be written, writing nothing. It makes the same refusal a real install would make, which is what makes it a preflight rather than a different command |
-| `--force` | off | replace installed files that differ |
+| Flag        | Default                                            | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--harness` | `agents`                                           | one of `agents`, `pi`, `claude`; `codex` is accepted as a spelling of `agents`, because Codex CLI reads the `.agents/skills` locations. Anything else is a usage error naming what git-pair knows and pointing at `--dest`. The two directories per harness are those harnesses' documented discovery rules — the documents and the date they were read are recorded with `skillHarness` in `internal/cli/skill.go` and cited in the skill's install reference |
+| `--scope`   | `repo` inside a git repository, `user` outside one | `repo` writes under the repository root, `user` under the home directory. `--scope repo` with no repository is a usage error with both ways out in the message                                                                                                                                                                                                                                                                                                 |
+| `--dest`    | none                                               | the container to write into, for a harness git-pair has no row for. It names the destination outright, so combining it with `--harness` or `--scope` is a usage error rather than a precedence rule                                                                                                                                                                                                                                                            |
+| `--dry-run` | off                                                | resolve the destination and report what would be written, writing nothing. It makes the same refusal a real install would make, which is what makes it a preflight rather than a different command                                                                                                                                                                                                                                                             |
+| `--force`   | off                                                | replace installed files that differ                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 An install never deletes. Files that match this binary are left alone and reported unchanged; files that
 differ are refused — exit 1, naming each one — until `--force` says otherwise; files git-pair did not
@@ -2478,7 +2477,7 @@ rather than guessed once for the repository:
    `master`.
 
 If none resolves the command refuses rather than inventing a trunk (§22's exit 2). A merge into a branch
-that is *not* the destination is not a landing for these rules, and the changeset keeps reading as live
+that is _not_ the destination is not a landing for these rules, and the changeset keeps reading as live
 work: the queue lists it, `status` offers a next action, and no command will move its directory. That is
 not a bug to work around with a record — there is nothing to record — it is the answer to the question the
 checkout asked. The remedy is to tell git-pair which branch is the destination (`--default-branch
@@ -2524,12 +2523,12 @@ a bounded number of git reads per step, which is what keeps `status` cheap as a 
 
 A landing keeps what the merge carried:
 
-| shape | chain | `reviewed` |
-| --- | --- | --- |
-| merge (`--no-ff`) | the reviewed chain, inside the merge commit | what the chain says |
-| fast-forward | the destination's own line carries it | what the chain says |
-| rebase-merge | the destination's own line carries it, to the destination's tip | `false` where the run it replayed is not in the destination |
-| squash, cherry-pick | none: `chain_base` and `chain_head` are `""` | `false` |
+| shape               | chain                                                           | `reviewed`                                                  |
+| ------------------- | --------------------------------------------------------------- | ----------------------------------------------------------- |
+| merge (`--no-ff`)   | the reviewed chain, inside the merge commit                     | what the chain says                                         |
+| fast-forward        | the destination's own line carries it                           | what the chain says                                         |
+| rebase-merge        | the destination's own line carries it, to the destination's tip | `false` where the run it replayed is not in the destination |
+| squash, cherry-pick | none: `chain_base` and `chain_head` are `""`                    | `false`                                                     |
 
 The empty chain is the report's way of saying the record came alone: the directory arrived in one commit that
 is not a merge, and the chain holds no marker for the changeset. Both halves are needed, and the pair is read
@@ -2542,7 +2541,7 @@ A squash brings the content and destroys the ancestry, so the approval, the inte
 the fix commits are gone from the destination — and they are gone from the destination's history, not from
 the clone, which means no fetch recovers them. git-pair reports that as `reviewed: false` with an empty
 chain. It does not guess a landing from a patch ID or a diff comparison: a tool that inferred integration
-from content would be confidently wrong about every squash, and confidently *right* is the failure mode
+from content would be confidently wrong about every squash, and confidently _right_ is the failure mode
 here.
 
 This is the honest limit of the model, stated rather than papered over:
@@ -2739,7 +2738,7 @@ files nobody has opened. `Space` on a directory marks every file under it, folde
 a way of looking at the list, not a statement about what has been read — and the next press clears
 them. This is the file-level state one level up rather than a second kind of state: nothing is stored
 about a directory, marks keep their per-file keys, and a marked directory that quits and reopens is
-the same answers it always was. `d` on a directory is git's own answer to *diff this package*: the
+the same answers it always was. `d` on a directory is git's own answer to _diff this package_: the
 pathspec expands into every file the span changed under it, and the preview pane shows that subtree
 with the subtree's counts. The tree is a view, so it folds over a read-only span like anything else
 a reviewer reads, and shows no marks there.
@@ -2757,10 +2756,10 @@ then print escaped.
 Two cells of the row carry it. The name of a row whose subject has an uncommitted change is drawn in the
 colour this screen already spends on what the reviewer wrote — magenta, with weight, so a terminal with no
 colour to give still sees the difference. The gutter wears `✱` in place of `○` or `◐` where the row is not
-reviewed all the way through. A file that is reviewed *and* written into keeps its tick: the tick is what
+reviewed all the way through. A file that is reviewed _and_ written into keeps its tick: the tick is what
 the reviewed counter is made of, and the name is what says whose change it is. `✱` is not a third kind of
 state — marks stay marks, keyed as they always were — it is the empty mark with "and something has been
-written here" on top of it. Where a file's own name could go faint (a file the span deleted) *and* carries
+written here" on top of it. Where a file's own name could go faint (a file the span deleted) _and_ carries
 an uncommitted change, the change wins the name, and what the span did is still on the row in the sign
 after it.
 
@@ -2780,7 +2779,7 @@ A path the working tree holds a change at and the span does not mention is on th
 who stops reading and writes into a file, or opens a new one to write a note in, has made a change this screen
 is the only place they will see it: it is in no span, so it is in no `diff --name-status`, and a change with no
 row is a change nobody comes back for. It sits in path order among the span's files with the same magenta name
-and the same `✱`, and it is in none of the counts — the reviewed counter says how much of the *span* has been
+and the same `✱`, and it is in none of the counts — the reviewed counter says how much of the _span_ has been
 read, and a file with no patch in the span has nothing to have read. `Space` refuses such a row, and refuses a
 directory whose every file is one of these, rather than ticking a row the counter will not count. The row
 carries no sign, because `Change` is git's answer about the span and the honest answer about these is that the
@@ -2804,13 +2803,13 @@ the band does not. A message about the last keystroke is drawn over the bar rath
 the list does not reflow to make room for it and the keys the reviewer is reading for stay where they
 were. Dismissal follows what the message asked of the reviewer:
 
--   a **note** reports what just happened — the span `v` landed on, what `r` cost, marks resumed at
-    startup — and fades after a few seconds, because reading it is a courtesy rather than a
-    requirement, and the shortcut bar is worth the rows it was using;
--   a **refusal or a failure** explains why a key did nothing, or what went wrong, and stays until
-    the reviewer presses something or dismisses it with `Esc`: the next key depends on having read
-    it, and a clock that retires it would retire the instruction with it;
--   the **drift warning** is not a message the reviewer caused, so nothing they type can clear it.
+- a **note** reports what just happened — the span `v` landed on, what `r` cost, marks resumed at
+  startup — and fades after a few seconds, because reading it is a courtesy rather than a
+  requirement, and the shortcut bar is worth the rows it was using;
+- a **refusal or a failure** explains why a key did nothing, or what went wrong, and stays until
+  the reviewer presses something or dismisses it with `Esc`: the next key depends on having read
+  it, and a clock that retires it would retire the instruction with it;
+- the **drift warning** is not a message the reviewer caused, so nothing they type can clear it.
 
 `Esc` dismisses whatever is in the band. Only one thing is shown at a time, in that order of need: a
 prompt the reviewer is typing into, then what the last key did, then the drift warning. A message
@@ -3290,9 +3289,9 @@ similar-looking "current" targets when only one of them can be edited.
 
 The head decides the mode:
 
-| Head         | Mode       | Diff | Edit code | Edit review artifacts | Mark reviewed | Submit review |
-| ------------ | ---------- | ---: | --------: | --------------------: | ------------: | ------------: |
-| Working Tree | live       |  yes |       yes |                   yes |           yes |           yes |
+| Head          | Mode       | Diff | Edit code | Edit review artifacts | Mark reviewed | Submit review |
+| ------------- | ---------- | ---: | --------: | --------------------: | ------------: | ------------: |
+| Working Tree  | live       |  yes |       yes |                   yes |           yes |           yes |
 | anything else | historical |  yes |        no |                    no |            no |            no |
 
 A ref used as the base with a working-tree head stays live: pinning an endpoint is not the same
@@ -3320,10 +3319,10 @@ There are no mixed span semantics in the MVP.
 
 The same range applies uniformly to:
 
--   source files,
--   `ABOUT.md`,
--   review threads,
--   other review artifacts.
+- source files,
+- `ABOUT.md`,
+- review threads,
+- other review artifacts.
 
 ---
 
@@ -3404,10 +3403,10 @@ A surviving review addition is a line introduced by the **most recent review sub
 
 Examples may include:
 
--   inline review comments,
--   direct reviewer code edits,
--   additions to `ABOUT.md`,
--   review thread text.
+- inline review comments,
+- direct reviewer code edits,
+- additions to `ABOUT.md`,
+- review thread text.
 
 The diagnostic should operate on additions from the latest review commit only.
 
@@ -3417,9 +3416,9 @@ Before allowing the author to mark the changeset ready, run the surviving-review
 
 If surviving additions exist:
 
--   print their file/location/content,
--   fail with non-zero exit status,
--   do not create the ready marker.
+- print their file/location/content,
+- fail with non-zero exit status,
+- do not create the ready marker.
 
 Example:
 
@@ -3456,9 +3455,9 @@ Landing has no command of its own (§13), so the question the second bullet used
 exists: there is no recorder left to run the diagnostic as a final check, and one point in the lifecycle
 remains where a survivor is acknowledged — the offer for review. Two reasons kept it out of the gate:
 
--   `git pair check` (§11.3) cannot pass a changeset whose content moved after the review that permits it,
-    so it does not need this diagnostic to stop unreviewed work reaching a merge — and a gate with no
-    override flag is the wrong place to acknowledge a surviving addition, because the flag would have to exist there too.
+- `git pair check` (§11.3) cannot pass a changeset whose content moved after the review that permits it,
+  so it does not need this diagnostic to stop unreviewed work reaching a merge — and a gate with no
+  override flag is the wrong place to acknowledge a surviving addition, because the flag would have to exist there too.
 
 ## 19.4 Rationale
 
@@ -3476,16 +3475,16 @@ The invariant is:
 — a path outside `changesets/<id>/`, which is the boundary §19 uses for blocking versus non-blocking — is
 policy, and the policy is:
 
--   The author applies the feedback and then removes the reviewer's inline text, in the same commit. A
-    comment that outlives the work it asked for is feedback the repository has not finished consuming.
--   The author does not copy the comment before deleting it. Git history already holds the exchange: the
-    review commit introduced the line (§19.1) and a later commit removed it.
--   The author records the substance when it needs further discussion, elaboration, or collaboration, and not
-    otherwise. There are two homes: an `Addressed feedback` section of `ABOUT.md` (§6), and a new thread
-    (§7). The choice follows the content — a thread is a conversation, `ABOUT.md` describes the change — and
-    neither is a requirement to fill in. `init` does not scaffold the section.
--   An addition the author keeps is not resolved by deletion. It survives, and §19.2's override acknowledges
-    it. That is the normal outcome for a direct code edit (§20) the author accepts.
+- The author applies the feedback and then removes the reviewer's inline text, in the same commit. A
+  comment that outlives the work it asked for is feedback the repository has not finished consuming.
+- The author does not copy the comment before deleting it. Git history already holds the exchange: the
+  review commit introduced the line (§19.1) and a later commit removed it.
+- The author records the substance when it needs further discussion, elaboration, or collaboration, and not
+  otherwise. There are two homes: an `Addressed feedback` section of `ABOUT.md` (§6), and a new thread
+  (§7). The choice follows the content — a thread is a conversation, `ABOUT.md` describes the change — and
+  neither is a requirement to fill in. `init` does not scaffold the section.
+- An addition the author keeps is not resolved by deletion. It survives, and §19.2's override acknowledges
+  it. That is the normal outcome for a direct code edit (§20) the author accepts.
 
 Nothing enforces the removal. Deleting an addressed comment makes the addition disappear from `HEAD`, so the
 diagnostic stops reporting it, and an author can delete a comment without doing the work it asked for. The
@@ -3505,10 +3504,10 @@ That is intentional.
 
 The agent must consciously decide whether to:
 
--   retain the edit and use the override,
--   modify the edit,
--   remove it,
--   otherwise resolve it.
+- retain the edit and use the override,
+- modify the edit,
+- remove it,
+- otherwise resolve it.
 
 Do not attempt to distinguish review comments from reviewer-authored implementation code in MVP.
 
@@ -3557,11 +3556,11 @@ recommends the same declaration for a changeset whose file predates this; it rec
 
 Each branch has:
 
--   its own `ABOUT.md`,
--   its own threads,
--   its own review history,
--   its own review outcome,
--   its own landing, read from the destination when it has one (§13).
+- its own `ABOUT.md`,
+- its own threads,
+- its own review history,
+- its own review outcome,
+- its own landing, read from the destination when it has one (§13).
 
 There is no shared review content between stacked branches in MVP.
 
@@ -3617,7 +3616,7 @@ was not written, which is not evidence that the parent moved. `status` says what
 answer is given when neither parent tip nor measured base was written — the content question cannot be
 asked of an approval that named no starting point, and "cannot ask" is reported rather than refused.
 
-The rule is about a parent **branch** moving. A parent that *lands* is a different event, and it is
+The rule is about a parent **branch** moving. A parent that _lands_ is a different event, and it is
 judged on content rather than on movement — see "When the parent lands" below.
 
 ## 21.1 What the content comparison measures
@@ -3632,14 +3631,14 @@ The hard half is which commit the contribution is measured from, and the answer 
 The contribution is what this branch adds **above the ground its work sits on**, and the ground is the
 newest of these candidates that is still an ancestor of the head:
 
--   the commit the approval recorded measuring from (`Review-Base-Head`), which is the ground the
-    reviewer read across, and the only candidate that survives a parent squashed into the destination;
--   the merge base of the recorded base with the head, which is the fork point while the parent is still
-    a branch — the parent taking commits of its own does not move where the child's work starts;
--   the merge base of the parent's landing with the head, which is the parent's own tip after a merge
-    landing and the landing itself after a rebase onto it;
--   the merge base of the destination with the head, which is the newest of the four once the child has
-    taken the destination in.
+- the commit the approval recorded measuring from (`Review-Base-Head`), which is the ground the
+  reviewer read across, and the only candidate that survives a parent squashed into the destination;
+- the merge base of the recorded base with the head, which is the fork point while the parent is still
+  a branch — the parent taking commits of its own does not move where the child's work starts;
+- the merge base of the parent's landing with the head, which is the parent's own tip after a merge
+  landing and the landing itself after a rebase onto it;
+- the merge base of the destination with the head, which is the newest of the four once the child has
+  taken the destination in.
 
 Every candidate enters through a merge base with the head rather than as an endpoint of the diff, so a
 commit outside the head's history can never be chosen. Each of the four is right for one shape of the
@@ -3691,22 +3690,22 @@ rewrites its post-image blob and moves the value, and a mode, a rename, a path, 
 target are each hashed fields — nothing a reviewer reads can leave the digest alone. Three questions it does
 not answer, each answered elsewhere:
 
--   **Whether two changes conflict.** A digest of committed content between two commits says nothing about
-    whether they merge. The section below is the answer, not a cleverer digest.
--   **Whose line is whose.** The value hashes whole-file blob OIDs, so a change that arrives from another
-    branch inside a file this branch also changes is inside the child's post-image even when it is a line
-    nowhere near the child's, and the identity moves. The rendered half above is what answers that case, and
-    does it only where the hunks themselves did not move: a trunk line inside the three lines of context the
-    reviewer read moves the rendered value too, and the approval goes back for review
-    (`TestContributionIsUnmovedByTakingTheDestinationIn`,
-    `TestContributionCountsATrunkEditToAFileTheChildAlsoChanges`, and at the gate
-    `TestTrunkEditingTheSameFileKeepsTheApprovalOnTheRenderedHalf` and
-    `TestTrunkEditingAReviewedContextLineRefusesTheChild`). Nor can either value be read as evidence about one
-    line: `git pair change ready --allow-single-line` asks whether a line is
-    load-bearing, which is a judgement about meaning a digest cannot make (§24).
--   **How far the world has moved.** A reading of that kind is offered nowhere in the gate. It would expire
-    an approval on a commit that touched neither end of the comparison, which is the mistake §21 used to make
-    about the parent branch.
+- **Whether two changes conflict.** A digest of committed content between two commits says nothing about
+  whether they merge. The section below is the answer, not a cleverer digest.
+- **Whose line is whose.** The value hashes whole-file blob OIDs, so a change that arrives from another
+  branch inside a file this branch also changes is inside the child's post-image even when it is a line
+  nowhere near the child's, and the identity moves. The rendered half above is what answers that case, and
+  does it only where the hunks themselves did not move: a trunk line inside the three lines of context the
+  reviewer read moves the rendered value too, and the approval goes back for review
+  (`TestContributionIsUnmovedByTakingTheDestinationIn`,
+  `TestContributionCountsATrunkEditToAFileTheChildAlsoChanges`, and at the gate
+  `TestTrunkEditingTheSameFileKeepsTheApprovalOnTheRenderedHalf` and
+  `TestTrunkEditingAReviewedContextLineRefusesTheChild`). Nor can either value be read as evidence about one
+  line: `git pair change ready --allow-single-line` asks whether a line is
+  load-bearing, which is a judgement about meaning a digest cannot make (§24).
+- **How far the world has moved.** A reading of that kind is offered nowhere in the gate. It would expire
+  an approval on a commit that touched neither end of the comparison, which is the mistake §21 used to make
+  about the parent branch.
 
 ### The merge the gate can see coming
 
@@ -3721,7 +3720,7 @@ This is `git merge-tree --write-tree`, which writes objects and nothing else: no
 untouched, the working tree is untouched, and no commit exists at the end of it. It is not a merge in the
 sense §26 forbids; it is a read of what a merge would produce, which is why it is cached as a pure read.
 An answer git will not give — a git too old for the command, a destination this clone cannot name — adds
-no refusal. §2's conservative direction is about the question that *grants* an approval, and this is a
+no refusal. §2's conservative direction is about the question that _grants_ an approval, and this is a
 condition that only ever adds one: refusing without evidence would block merges that are perfectly good.
 
 ## When the parent lands
@@ -3732,31 +3731,31 @@ destination. That is the case the tip comparison cannot see: `Recorded == Tip` r
 in the one moment where the work finished. The record is the fact, and the branch is where the record used
 to live, so:
 
--   the child's measurement base becomes the destination while the parent's branch is still present, not
-    only after it is deleted: the destination carries `changesets/<parent>/`, and naming it answers the same
-    question the parent's ref used to. Where the diff starts has not moved — every caller takes the base to
-    its merge base with the head before diffing (`span.Resolve`), and `base..head` names the same commits for
-    the destination as for that merge base — so naming the destination rather than the commit it resolves to
-    changes what a reader is shown, not what is measured. A destination this clone cannot read keeps the
-    branch base and says which half is missing,
-    rather than failing with `unknown revision` on a base another clone wrote down.
-    approval yet. Without an approval it is a note and never a reason: a changeset that has not been
-    offered has nothing for a parent to invalidate. `status --json` carries `parent.landed`,
-    `parent.landed_commit`, `parent.landed_in_default_branch`, `parent.stale_branch`,
-    `parent.head_carries_landing`, `parent.measured_base`, `parent.comparison` and `parent.step`;
-    `check --json`
-    carries `parent_landed`, `parent_landed_commit`, `parent_stale_branch`,
-    `parent_head_carries_landing`, `parent_measured_base`, `parent_comparison` and
-    `parent_approval_survives_landing`. The last two of those are one reading reported
-    twice, because they are statements about two different things: `stale_branch` is about the parent's
-    branch still being here to delete, and `head_carries_landing` is about this head sitting on the landing
-    commit, which is the half that survives the branch being deleted and the half that decides whether any
-    rebase is owed.
--   the step is printed as the command, because "rebase onto it" is a sentence the author has to translate
-    into three arguments and gets wrong: `git rebase --onto <landing> <parent-branch> <child-branch>` while
-    the child's head does not carry the landing, and `git branch -D <parent-branch>` once it does — with the
-    worktree named, and `git worktree remove <path>` as text, when another worktree holds that branch and the
-    delete would stop there. git-pair runs neither (§26).
+- the child's measurement base becomes the destination while the parent's branch is still present, not
+  only after it is deleted: the destination carries `changesets/<parent>/`, and naming it answers the same
+  question the parent's ref used to. Where the diff starts has not moved — every caller takes the base to
+  its merge base with the head before diffing (`span.Resolve`), and `base..head` names the same commits for
+  the destination as for that merge base — so naming the destination rather than the commit it resolves to
+  changes what a reader is shown, not what is measured. A destination this clone cannot read keeps the
+  branch base and says which half is missing,
+  rather than failing with `unknown revision` on a base another clone wrote down.
+  approval yet. Without an approval it is a note and never a reason: a changeset that has not been
+  offered has nothing for a parent to invalidate. `status --json` carries `parent.landed`,
+  `parent.landed_commit`, `parent.landed_in_default_branch`, `parent.stale_branch`,
+  `parent.head_carries_landing`, `parent.measured_base`, `parent.comparison` and `parent.step`;
+  `check --json`
+  carries `parent_landed`, `parent_landed_commit`, `parent_stale_branch`,
+  `parent_head_carries_landing`, `parent_measured_base`, `parent_comparison` and
+  `parent_approval_survives_landing`. The last two of those are one reading reported
+  twice, because they are statements about two different things: `stale_branch` is about the parent's
+  branch still being here to delete, and `head_carries_landing` is about this head sitting on the landing
+  commit, which is the half that survives the branch being deleted and the half that decides whether any
+  rebase is owed.
+- the step is printed as the command, because "rebase onto it" is a sentence the author has to translate
+  into three arguments and gets wrong: `git rebase --onto <landing> <parent-branch> <child-branch>` while
+  the child's head does not carry the landing, and `git branch -D <parent-branch>` once it does — with the
+  worktree named, and `git worktree remove <path>` as text, when another worktree holds that branch and the
+  delete would stop there. git-pair runs neither (§26).
 
 **The verdict does not advise a rewrite that costs the approval it rests on.** The step above is a fact about
 where commits sit, and `status` and `queue` print it on that reading: neither carries a verdict, so nothing
@@ -3767,17 +3766,17 @@ the very commits the approval names — the tree comes out byte-identical and th
 rewritten history, because what the reviewer certified was a commit (§21). So `check` prints the command only
 where following it costs nothing standing:
 
--   a head already on the landing keeps its step: what is left there is deleting a branch, which invalidates
-    nothing;
--   a changeset with no verdict in front of the gate — WORKING, READY, or a FEEDBACK verdict read under
-    `--allow-feedback` — keeps its step, because nothing is standing for the rewrite to cost;
--   an approval whose comparison could not be reached keeps its step, and the verdict says the step is given
-    unverified: silence about a step is worse than a step the reader can decline, and an unknown is not the
-    knowledge that the rewrite is safe;
--   an approval that is standing, on content the comparison found unchanged and a branch that still merges
-    cleanly into the destination, is given no command. The verdict prints the comparison sentence in its
-    place — the parent landed, this head is still measured on it, and nothing is owed until the merge happens
-    — and `parent_approval_survives_landing` is the same fact for a reader of `--json`.
+- a head already on the landing keeps its step: what is left there is deleting a branch, which invalidates
+  nothing;
+- a changeset with no verdict in front of the gate — WORKING, READY, or a FEEDBACK verdict read under
+  `--allow-feedback` — keeps its step, because nothing is standing for the rewrite to cost;
+- an approval whose comparison could not be reached keeps its step, and the verdict says the step is given
+  unverified: silence about a step is worse than a step the reader can decline, and an unknown is not the
+  knowledge that the rewrite is safe;
+- an approval that is standing, on content the comparison found unchanged and a branch that still merges
+  cleanly into the destination, is given no command. The verdict prints the comparison sentence in its
+  place — the parent landed, this head is still measured on it, and nothing is owed until the merge happens
+  — and `parent_approval_survives_landing` is the same fact for a reader of `--json`.
 
 The restack is withheld, not forbidden: it stays in `status` and `queue`, and it can run after the merge, on
 a branch nobody had to certify. The refusal after a rewrite stays exactly as it was — the gate's half of that
@@ -3816,7 +3815,7 @@ a destination — and it is why the destination is read from the tree instead.
 
 So the destination is read from the tree instead. The landing commit carries the parent's
 own `CHANGESET.yaml`, and the base written there is the branch the parent's work was measured against — the
-branch the parent *said* it was going to. The same rule is applied at each level, so a three-deep stack ends
+branch the parent _said_ it was going to. The same rule is applied at each level, so a three-deep stack ends
 on the branch under all of it; the walk is bounded and cycle-guarded, because that yaml is committed content.
 It appears as `destination` in `git pair change integrate` (§9.9) and `queue --json` (§10.6), with the note
 beside the answer saying the destination came from the branch its landed parent was based on.
@@ -4031,7 +4030,7 @@ that is what the finding is for. A changeset directory in the destination with n
 either a squash that left the review on a branch that no longer exists, a merge that arrived without one, or
 a landing that replayed the run and so carried the approval without the commits it named. `git pair queue` prints it under
 `LANDED UNREVIEWED`, and `git pair status` says the same on a branch
-carrying no work of its own (§4's *Landed, unreviewed*). A supervisor agent that runs the queue between
+carrying no work of its own (§4's _Landed, unreviewed_). A supervisor agent that runs the queue between
 steps sees a landing whose review did not reach the destination instead of a changeset that quietly
 disappeared, which is what makes the sequence above a contract rather than an expectation. A filed landing is
 not in that list: a `change tidy` commit that reached the destination is the one act that ends the report,
@@ -4092,11 +4091,11 @@ longer contains (§12).
 
 This enables future automation such as:
 
--   desktop notifications,
--   Zulip/Slack notifications,
--   cron jobs,
--   agent supervisors,
--   developer dashboards.
+- desktop notifications,
+- Zulip/Slack notifications,
+- cron jobs,
+- agent supervisors,
+- developer dashboards.
 
 The machine-readable interface should be sufficient for external automation:
 
@@ -4114,15 +4113,15 @@ The author's side of notification is `git pair change wait` (§9.4): it polls lo
 
 GitHub or another forge remains useful for:
 
--   canonical remote hosting,
--   CI,
--   branch protection,
--   required checks,
--   merge queues,
--   security scanning,
--   deployment,
--   squash merging,
--   human collaboration outside this workflow.
+- canonical remote hosting,
+- CI,
+- branch protection,
+- required checks,
+- merge queues,
+- security scanning,
+- deployment,
+- squash merging,
+- human collaboration outside this workflow.
 
 Detailed code review does not need to occur in the forge.
 
@@ -4149,26 +4148,26 @@ it (§13.3).
 
 The MVP should explicitly not attempt to:
 
--   implement a source-code editor,
--   implement a full custom diff renderer,
--   replace Vim/Neovim,
--   replace Git difftool,
--   replace Git,
--   replace GitHub/GitLab,
--   create or manage pull requests,
--   merge branches,
--   squash branches,
--   run coding agents,
--   run CI/CD,
--   implement inline-comment databases,
--   implement GitHub-style comment anchoring,
--   make per-file review checkmarks part of the review record; they persist locally to resume a review (§16),
--   model multi-reviewer permissions,
--   model multi-author review semantics,
--   model complex stacked-branch graphs,
--   semantically distinguish human code edits from human comments,
--   implement notifications directly,
--   implement remote review-ref enforcement initially.
+- implement a source-code editor,
+- implement a full custom diff renderer,
+- replace Vim/Neovim,
+- replace Git difftool,
+- replace Git,
+- replace GitHub/GitLab,
+- create or manage pull requests,
+- merge branches,
+- squash branches,
+- run coding agents,
+- run CI/CD,
+- implement inline-comment databases,
+- implement GitHub-style comment anchoring,
+- make per-file review checkmarks part of the review record; they persist locally to resume a review (§16),
+- model multi-reviewer permissions,
+- model multi-author review semantics,
+- model complex stacked-branch graphs,
+- semantically distinguish human code edits from human comments,
+- implement notifications directly,
+- implement remote review-ref enforcement initially.
 
 There is no carve-out. **git-pair may not push anything**, at any point in a lifecycle. There used to be
 one, for a namespace of landing records, and it existed because that memory was local: a record that never
@@ -4202,56 +4201,57 @@ Potential later enhancements include:
 ## Deferred by review-architecture-v2
 
 Explicitly given up while the durable-ref layer was being taken out, each with what it would cost:
--   **Per-review anchors.** Attaching threads and marks to a specific review submission rather than
-    to the changeset. Cost: the anchor has to survive the rewrite it describes — a rebase renames
-    every commit around it — so it means either a content hash beside the anchor or a rule about
-    which anchors die, and both are user-visible in the middle of a review.
--   **A durable memory of a landing of its own** — a forge-protected ref family, or an out-of-band notes
-    ref, holding the reviewed chain beside the work. Under this model there is no local memory of a
-    landing to publish, so the question is whether git-pair should keep one at all. Cost: the layer this
-    design just removed — create-only rules, publication consent, half-written pairs, unfetched
-    namespaces, and a carve-out in §26 for the one command allowed to push. If chains lost to squash
-    merges become the problem that justifies it, `change tidy` (§13.5) answers it with commits.
--   **Patch-equivalent carry-forward of approvals.** Letting a child's approval survive its parent
-    landing when the child's diff against the new base is provably the diff that was reviewed
-    (§21). Taken for the gate: the landed-parent rule asks the question directly, against the identity
-    the approval recorded (§10.4), from whichever commit is the ground the child's work now sits on, and
-    guards the pass with a check that the branch still merges into the destination (§21.1). The two cases
-    the older two-base comparison could not answer — a squash landing, and a child that has taken the
-    destination in — are answered, and the parent's own movement is a note rather than a reason. What
-    was still deferred beside it is taken now too: the rule that counts content the review never saw
-    credits the destination, so a branch that merged the integration branch in keeps its approval where
-    the content it took is the destination's own (§11.3), and the rendered half of `Review-Diff-Id` keeps
-    the landed-parent approval where a destination edit sits in the same file but nowhere near the
-    reviewed hunks (§21.1). What those two readings still refuse is content the destination does not
-    carry — an ancestor that has not landed, somebody else's branch, a conflict resolution written by
-    hand — which is the boundary
-    `TestMergingInWorkThatIsNotTheDestinationsIsRefused` and
-    `TestAHandResolvedConflictIsContentTheReviewNeverSaw` pin.
--   **Reviewer identity and thread resolution state.** Per-reviewer permissions, "who is this
-    comment from" as data, and resolved/unresolved threads. Cost: identity is not in git's commit
-    model in any way git-pair can enforce, and thread state is state — it wants a ref, a file, or a
-    server, all of which this product's thesis refuses while the commits can carry the answer.
+
+- **Per-review anchors.** Attaching threads and marks to a specific review submission rather than
+  to the changeset. Cost: the anchor has to survive the rewrite it describes — a rebase renames
+  every commit around it — so it means either a content hash beside the anchor or a rule about
+  which anchors die, and both are user-visible in the middle of a review.
+- **A durable memory of a landing of its own** — a forge-protected ref family, or an out-of-band notes
+  ref, holding the reviewed chain beside the work. Under this model there is no local memory of a
+  landing to publish, so the question is whether git-pair should keep one at all. Cost: the layer this
+  design just removed — create-only rules, publication consent, half-written pairs, unfetched
+  namespaces, and a carve-out in §26 for the one command allowed to push. If chains lost to squash
+  merges become the problem that justifies it, `change tidy` (§13.5) answers it with commits.
+- **Patch-equivalent carry-forward of approvals.** Letting a child's approval survive its parent
+  landing when the child's diff against the new base is provably the diff that was reviewed
+  (§21). Taken for the gate: the landed-parent rule asks the question directly, against the identity
+  the approval recorded (§10.4), from whichever commit is the ground the child's work now sits on, and
+  guards the pass with a check that the branch still merges into the destination (§21.1). The two cases
+  the older two-base comparison could not answer — a squash landing, and a child that has taken the
+  destination in — are answered, and the parent's own movement is a note rather than a reason. What
+  was still deferred beside it is taken now too: the rule that counts content the review never saw
+  credits the destination, so a branch that merged the integration branch in keeps its approval where
+  the content it took is the destination's own (§11.3), and the rendered half of `Review-Diff-Id` keeps
+  the landed-parent approval where a destination edit sits in the same file but nowhere near the
+  reviewed hunks (§21.1). What those two readings still refuse is content the destination does not
+  carry — an ancestor that has not landed, somebody else's branch, a conflict resolution written by
+  hand — which is the boundary
+  `TestMergingInWorkThatIsNotTheDestinationsIsRefused` and
+  `TestAHandResolvedConflictIsContentTheReviewNeverSaw` pin.
+- **Reviewer identity and thread resolution state.** Per-reviewer permissions, "who is this
+  comment from" as data, and resolved/unresolved threads. Cost: identity is not in git's commit
+  model in any way git-pair can enforce, and thread state is state — it wants a ref, a file, or a
+  server, all of which this product's thesis refuses while the commits can carry the answer.
 
 ## Review progress
 
 File-level progress is delivered: marks are remembered per commit and stop applying when a file's
 diff changes (§16). What remains is the hunk-level half:
 
--   hunk-level reviewed/unreviewed state,
--   fold reviewed hunks,
--   jump to next unreviewed hunk,
--   automatic invalidation when hunks change.
+- hunk-level reviewed/unreviewed state,
+- fold reviewed hunks,
+- jump to next unreviewed hunk,
+- automatic invalidation when hunks change.
 
 ## Vim/Neovim integration
 
 A review UI inspired by `vimdiff` with:
 
--   changed-file navigator,
--   regular Vim folding,
--   ability to fold changed/reviewed hunks,
--   direct editing of current-side working-tree buffers,
--   review progress indicators.
+- changed-file navigator,
+- regular Vim folding,
+- ability to fold changed/reviewed hunks,
+- direct editing of current-side working-tree buffers,
+- review progress indicators.
 
 ## Multi-user support
 
@@ -4280,14 +4280,14 @@ governs branches; the durable refs this section was written against are gone (§
 is the family of mechanisms that would make git-pair responsible for a forge or a server rather than for a
 repository:
 
--   pre-push hooks, in the sense of git-pair installing or running one of its own: the tool still invokes no
-    push and owns no hook of that kind, and what lifecycle hooks (§11.4) close is the other half — a client
-    can now attach their own script to a lifecycle event and have it run, which is where a push check belongs
-    if a team wants one. Server-side enforcement stays deferred below.
--   server-side validation,
--   forge-level protection of anything outside `refs/heads/*` and `refs/tags/*`,
--   protection against destructive rewrites of a changeset that has landed: the client refuses to write
-    markers on one, and refuses to force or rewrite anything, which is not the same as being unable to.
+- pre-push hooks, in the sense of git-pair installing or running one of its own: the tool still invokes no
+  push and owns no hook of that kind, and what lifecycle hooks (§11.4) close is the other half — a client
+  can now attach their own script to a lifecycle event and have it run, which is where a push check belongs
+  if a team wants one. Server-side enforcement stays deferred below.
+- server-side validation,
+- forge-level protection of anything outside `refs/heads/*` and `refs/tags/*`,
+- protection against destructive rewrites of a changeset that has landed: the client refuses to write
+  markers on one, and refuses to force or rewrite anything, which is not the same as being unable to.
 
 ## Forge projection
 
@@ -4355,10 +4355,10 @@ git pair init --base main
 
 Agent:
 
--   implements feature,
--   populates `ABOUT.md`,
--   commits implementation,
--   runs:
+- implements feature,
+- populates `ABOUT.md`,
+- commits implementation,
+- runs:
 
 ```bash
 git pair change ready
@@ -4373,13 +4373,13 @@ git pair review open
 
 Within the review:
 
--   traverses changed files,
--   opens files in Vim/vimdiff,
--   directly edits implementation where useful,
--   adds normal source comments,
--   edits `ABOUT.md`,
--   creates Markdown review threads,
--   marks files reviewed.
+- traverses changed files,
+- opens files in Vim/vimdiff,
+- directly edits implementation where useful,
+- adds normal source comments,
+- edits `ABOUT.md`,
+- creates Markdown review threads,
+- marks files reviewed.
 
 Then:
 
@@ -4389,7 +4389,7 @@ git pair review submit --block
 
 Agent:
 
--   waits for the review:
+- waits for the review:
 
 ```bash
 git pair change wait --fetch --json
@@ -4397,7 +4397,7 @@ git pair change wait --fetch --json
 
 which exits once the submission makes the changeset actionable and names the review commit,
 
--   reads what the reviewer said:
+- reads what the reviewer said:
 
 ```bash
 git pair change feedback
@@ -4405,9 +4405,9 @@ git pair change feedback
 
 which shows the submission itself: the threads, the `ABOUT.md` edits, and the code the reviewer edited directly,
 
--   addresses review comments and direct edits,
--   responds in code/ABOUT/threads,
--   commits changes.
+- addresses review comments and direct edits,
+- responds in code/ABOUT/threads,
+- commits changes.
 
 If any additions from the review submission still survive unchanged:
 
@@ -4445,9 +4445,9 @@ git pair check
 
 At this point:
 
--   the branch carries the complete unsquashed history, and holds it until the work lands,
--   the branch can safely be pushed and squash-merged,
--   `main` can retain a single clean feature commit.
+- the branch carries the complete unsquashed history, and holds it until the work lands,
+- the branch can safely be pushed and squash-merged,
+- `main` can retain a single clean feature commit.
 
 The owner lands it with ordinary git, and the destination branch is the record of where it went:
 
@@ -4463,7 +4463,7 @@ Landing is three steps, in this order, and nothing else:
 2.  `git pair change integrate` — the author declares this head ready to be merged (§9.9), on the branch,
     in a commit. A repository that keeps a person in the loop can skip it and nothing else changes; a merge
     performed without it is a merge nobody asked for, which is why CI's gate is `jq -e '.ready and
-    .integrating'` rather than `ready` alone.
+.integrating'` rather than `ready` alone.
 3.  The landing itself, with **ordinary git**: merge, squash-merge, or whatever forge button the
     repository uses. git-pair writes no merge, no ref, and nothing afterwards.
 

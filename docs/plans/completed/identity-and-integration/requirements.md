@@ -15,12 +15,12 @@ This document specifies three related parts of `git-pair`:
 
 The goals are:
 
-* preserve a durable identity for a changeset independently of branch naming,
-* preserve the complete unsquashed author/reviewer history,
-* unambiguously link that history to the commit that eventually lands in the target branch,
-* support squash, rebase, merge-commit, cherry-pick, or other integration strategies,
-* provide simple non-interactive commands suitable for CI,
-* avoid forge-specific assumptions in the core `git-pair` protocol.
+- preserve a durable identity for a changeset independently of branch naming,
+- preserve the complete unsquashed author/reviewer history,
+- unambiguously link that history to the commit that eventually lands in the target branch,
+- support squash, rebase, merge-commit, cherry-pick, or other integration strategies,
+- provide simple non-interactive commands suitable for CI,
+- avoid forge-specific assumptions in the core `git-pair` protocol.
 
 ---
 
@@ -48,10 +48,10 @@ However:
 
 This matters because:
 
-* branch names may collide,
-* branches may be renamed,
-* users may intentionally want a different changeset identity,
-* integration tooling should not need to infer changeset identity from branch names.
+- branch names may collide,
+- branches may be renamed,
+- users may intentionally want a different changeset identity,
+- integration tooling should not need to infer changeset identity from branch names.
 
 ---
 
@@ -150,9 +150,9 @@ The changeset ID should be treated as stable after the changeset begins producin
 
 For MVP:
 
-* before durable refs exist, manually changing the ID may be tolerated,
-* once an archive ref exists, direct ID mutation should be rejected or treated as unsupported,
-* a future explicit rename/migration command may safely move all related metadata and refs.
+- before durable refs exist, manually changing the ID may be tolerated,
+- once an archive ref exists, direct ID mutation should be rejected or treated as unsupported,
+- a future explicit rename/migration command may safely move all related metadata and refs.
 
 Do not attempt transparent ID migration in MVP.
 
@@ -170,10 +170,10 @@ to identify the current changeset.
 
 Such a file creates unnecessary conflicts, particularly with:
 
-* stacked branches,
-* parallel changesets,
-* rebases,
-* merges.
+- stacked branches,
+- parallel changesets,
+- rebases,
+- merges.
 
 Durable changeset discovery for integration should instead use Git Pair refs.
 
@@ -221,13 +221,13 @@ The archive ref preserves the complete unsquashed changeset history.
 
 It includes:
 
-* implementation commits,
-* ready lifecycle commits,
-* review commits,
-* review feedback,
-* agent responses,
-* approval commits,
-* close lifecycle commits where applicable.
+- implementation commits,
+- ready lifecycle commits,
+- review commits,
+- review feedback,
+- agent responses,
+- approval commits,
+- close lifecycle commits where applicable.
 
 Example:
 
@@ -271,9 +271,9 @@ This means approval commonly leaves the archive already current.
 
 An author may sometimes add non-implementation commits after a review, for example:
 
-* responding in a review thread,
-* updating `ABOUT.md`,
-* making other review-artifact-only changes.
+- responding in a review thread,
+- updating `ABOUT.md`,
+- making other review-artifact-only changes.
 
 A command may be provided to safely advance the archive ref without inventing a new lifecycle state.
 
@@ -349,8 +349,8 @@ refs/git-pair/changesets/booking-transaction/integration
 
 Where:
 
-* `A` is the final unsquashed changeset/review stack,
-* `B` is the resulting commit in the integrated target history.
+- `A` is the final unsquashed changeset/review stack,
+- `B` is the resulting commit in the integrated target history.
 
 ---
 
@@ -362,10 +362,10 @@ Squash merges, rebases, and cherry-picks rewrite commit identity.
 
 Do not attempt to determine permanent integration status primarily through:
 
-* patch IDs,
-* tree similarity,
-* diff equivalence,
-* commit-message heuristics.
+- patch IDs,
+- tree similarity,
+- diff equivalence,
+- commit-message heuristics.
 
 These may be useful for diagnostics or recovery, but not as the canonical protocol.
 
@@ -467,9 +467,9 @@ The command must fail.
 
 This may mean:
 
-* archive refs were not fetched,
-* the changeset was never properly archived,
-* the wrong source SHA was supplied.
+- archive refs were not fetched,
+- the changeset was never properly archived,
+- the wrong source SHA was supplied.
 
 ---
 
@@ -670,12 +670,12 @@ A changeset is integration-ready when Git Pair's integration policy is satisfied
 
 At minimum this includes:
 
-* changeset is not closed,
-* latest relevant review outcome permits integration,
-* review applies to the current source state,
-* archive ref is current and points at the intended source SHA,
-* no implementation change has invalidated that review,
-* required review-addition validations have been resolved or explicitly accepted.
+- changeset is not closed,
+- latest relevant review outcome permits integration,
+- review applies to the current source state,
+- archive ref is current and points at the intended source SHA,
+- no implementation change has invalidated that review,
+- required review-addition validations have been resolved or explicitly accepted.
 
 Exact policy may vary regarding `FEEDBACK`.
 
@@ -695,10 +695,10 @@ Meaning:
 
 This command is intended primarily for:
 
-* required CI checks,
-* pre-integration automation,
-* merge gates,
-* agent automation.
+- required CI checks,
+- pre-integration automation,
+- merge gates,
+- agent automation.
 
 ---
 
@@ -968,15 +968,15 @@ under normal Git Pair operations.
 
 Do not require the MVP to:
 
-* infer integration from patch equivalence,
-* automatically support every forge,
-* automatically configure GitHub/GitLab required checks,
-* rewrite integration records after force-pushes,
-* migrate/rename changeset IDs after refs exist,
-* garbage-collect archived changesets,
-* store a root-level active-changeset pointer,
-* create separate refs for every lifecycle state,
-* use branch names as permanent identity.
+- infer integration from patch equivalence,
+- automatically support every forge,
+- automatically configure GitHub/GitLab required checks,
+- rewrite integration records after force-pushes,
+- migrate/rename changeset IDs after refs exist,
+- garbage-collect archived changesets,
+- store a root-level active-changeset pointer,
+- create separate refs for every lifecycle state,
+- use branch names as permanent identity.
 
 ---
 

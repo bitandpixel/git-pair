@@ -53,18 +53,18 @@ rough edges this plan picks up.
 Every place a landing or a restack step is spelled today. "Restates" means the surface writes out a command
 belonging to another changeset or another screen; "owns" means it is the one place.
 
-| Where | What it spells | Today |
-| --- | --- | --- |
-| `landingNextAction` (`landing_advice.go`) | this changeset's own merge, with its destination and provenance note | owns it |
-| `landingNextAction`, waiting form | the **parent's** `check` and merge, spelled in full | restates |
-| `unlandedParentReason` (`integrate.go`) | the **parent's** "Land the parent first: `git pair check`, then merge with ordinary git" | restates, differently |
-| `stackUnderStep` (`stacked.go`) | the child's restack command | owns it |
-| `parentLanded` notes and reasons (`stacked.go`) | "parent landed as …; rebase onto …", the comparison finding | owns the finding |
-| `queue` parent note (`queue.go`) | the landed-parent housekeeping line | owns its housekeeping voice |
-| PRD §21 "The next step says which landing is owed" | the waiting sentence, quoted in a fenced block | quotes it |
-| README's stack prose | the waiting sentence, inline | quotes it |
-| `skills/git-pair/references/cli.md` | the waiting sentence again | quotes it |
-| `skills/git-pair/SKILL.md` | the order ("land the bottom of the stack first") | prose, no command |
+| Where                                              | What it spells                                                                           | Today                       |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------- |
+| `landingNextAction` (`landing_advice.go`)          | this changeset's own merge, with its destination and provenance note                     | owns it                     |
+| `landingNextAction`, waiting form                  | the **parent's** `check` and merge, spelled in full                                      | restates                    |
+| `unlandedParentReason` (`integrate.go`)            | the **parent's** "Land the parent first: `git pair check`, then merge with ordinary git" | restates, differently       |
+| `stackUnderStep` (`stacked.go`)                    | the child's restack command                                                              | owns it                     |
+| `parentLanded` notes and reasons (`stacked.go`)    | "parent landed as …; rebase onto …", the comparison finding                              | owns the finding            |
+| `queue` parent note (`queue.go`)                   | the landed-parent housekeeping line                                                      | owns its housekeeping voice |
+| PRD §21 "The next step says which landing is owed" | the waiting sentence, quoted in a fenced block                                           | quotes it                   |
+| README's stack prose                               | the waiting sentence, inline                                                             | quotes it                   |
+| `skills/git-pair/references/cli.md`                | the waiting sentence again                                                               | quotes it                   |
+| `skills/git-pair/SKILL.md`                         | the order ("land the bottom of the stack first")                                         | prose, no command           |
 
 Two consequences. The parent's step exists twice, in two wordings, so a change to the landing contract has to
 be made in both or it silently disagrees with itself. And the waiting sentence's quote is repeated three times
@@ -98,7 +98,7 @@ with a reason that explains what the screen should have said. See
 
 ## Assumptions
 
-- Declarability for a *screen* is the state the screen already has (a verdict that permits integration, the
+- Declarability for a _screen_ is the state the screen already has (a verdict that permits integration, the
   head not stale, nothing below unlanded, no declaration covering this head) and not a fresh gate run. The
   hand-off line follows the `git pair check` the same sentence already names, so a check that would refuse is
   covered by the step in front of it. If that proves too subtle in use, the fallback is to print the line only
@@ -151,9 +151,8 @@ with a reason that explains what the screen should have said. See
 #### Tasks
 
 - [x] Rewrite the waiting form in `landingNextAction` to
-      `waiting on parent <name>: its landing is owed first (`git pair status --changeset <name>` names the step),
-      then `git pair check` and merge into <destination>`. Keep one clause for the parent, one for this
-      changeset, and no `git rebase`.
+      ``waiting on parent <name>: its landing is owed first (`git pair status --changeset <name>` names the step), then `git pair check` and merge into <destination>``.
+      Keep one clause for the parent, one for this changeset, and no `git rebase`.
 - [x] Rewrite `unlandedParentReason` to name the parent and point at its advice, keeping the two things the
       refusal owns and the sentence does not: why a declaration is refused where `check` is not, and that the
       human path stays open. Keep the `--set-parent` clause for the parent-with-no-recorded-changeset case,
@@ -256,12 +255,12 @@ everything is marked complete in this plan, are all the milestones in this singl
 the boxes above are true of the tree at HEAD. Each milestone is one commit, so a reviewer can read them in
 order:
 
-| Milestone | Commit | What it delivered |
-| --- | --- | --- |
-| M1 — advice this build answers to | `cli: make emitted advice name a command this build answers to` | `advice_contract_test.go`, the two `change ready --changeset` corrections, `conflictStep` |
-| M2 — refer, do not restate | `cli: say the landing step once, and point at it from everywhere else` | `waitingNextAction`, `unlandedParentReason` referring, tests re-pointed |
-| M3 — the hand-off line | `cli: offer the hand-off beside the author's own merge` | `declarable`, `handoffLine`, the `status`/`check` lines, the equivalence tests |
-| M4 — one statement, checked quotes | `docs: say the landing step once, and pin the documents to the wording` | PRD §21 canonical, README and `cli.md` quoting, `landing_docs_test.go` |
+| Milestone                          | Commit                                                                  | What it delivered                                                                         |
+| ---------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| M1 — advice this build answers to  | `cli: make emitted advice name a command this build answers to`         | `advice_contract_test.go`, the two `change ready --changeset` corrections, `conflictStep` |
+| M2 — refer, do not restate         | `cli: say the landing step once, and point at it from everywhere else`  | `waitingNextAction`, `unlandedParentReason` referring, tests re-pointed                   |
+| M3 — the hand-off line             | `cli: offer the hand-off beside the author's own merge`                 | `declarable`, `handoffLine`, the `status`/`check` lines, the equivalence tests            |
+| M4 — one statement, checked quotes | `docs: say the landing step once, and pin the documents to the wording` | PRD §21 canonical, README and `cli.md` quoting, `landing_docs_test.go`                    |
 
 The review round after that feedback added work the plan had claimed complete: the unreachable-parent pointer
 (M2), `references/integration.md` (M4), the pointer sentences in §9.5/§11.1/§11.3 (M4), and two box wordings
@@ -280,12 +279,12 @@ box: `git pair queue`'s own next-step lines and `parent_notes` (a different voic
 
 ## Spikes and research
 
-| Question | Where | Status |
-| --- | --- | --- |
-| What does a screen that always offers the hand-off do when the declaration refuses? | `research/2026-10-14-handoff-line-when-declaration-refused.md` | answered — it offers a step that exits 1 in two states; "only when declarable" chosen |
-| Do the two `change ready --changeset` strings actually fail, and what should they say? | `research/2026-10-14-advice-that-names-a-missing-flag.md` | answered — `--changeset` is not a flag on `change ready`; plain `git pair change ready` is the correction |
-| Does `change ready` have wording for a branch carrying more than one unlanded changeset, that M1 can reuse? | same note | answered — `change stack` and `change combine` already refuse that shape with their own exits, so the advice does not need any |
-| Does `git pair status --changeset <parent>` answer when the parent's branch is deleted before its work lands? | the review round, on a fixture | answered — no: exit 2, "no branch carries changeset … and main holds no directory for it either". So the waiting sentence stops pointing there in that state and names `git pair init --parent <branch> --set-parent` instead |
+| Question                                                                                                      | Where                                                          | Status                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What does a screen that always offers the hand-off do when the declaration refuses?                           | `research/2026-10-14-handoff-line-when-declaration-refused.md` | answered — it offers a step that exits 1 in two states; "only when declarable" chosen                                                                                                                                         |
+| Do the two `change ready --changeset` strings actually fail, and what should they say?                        | `research/2026-10-14-advice-that-names-a-missing-flag.md`      | answered — `--changeset` is not a flag on `change ready`; plain `git pair change ready` is the correction                                                                                                                     |
+| Does `change ready` have wording for a branch carrying more than one unlanded changeset, that M1 can reuse?   | same note                                                      | answered — `change stack` and `change combine` already refuse that shape with their own exits, so the advice does not need any                                                                                                |
+| Does `git pair status --changeset <parent>` answer when the parent's branch is deleted before its work lands? | the review round, on a fixture                                 | answered — no: exit 2, "no branch carries changeset … and main holds no directory for it either". So the waiting sentence stops pointing there in that state and names `git pair init --parent <branch> --set-parent` instead |
 
 ## Risks
 
@@ -312,7 +311,7 @@ this plan changes.
 
 ## Audit History
 
-| Date | Audit | Summary |
-| --- | --- | --- |
+| Date       | Audit                                                                         | Summary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-10-14 | review 8c8ef04 (feedback): "are all the milestones in this single changeset?" | Confirmed the four milestones against the tree: all four are here, one commit each. The audit found five boxes that overclaimed and fixed them — the unreachable-parent pointer was ticked with a comment that was factually wrong (`status --changeset <id>` exits 2 in that state; verified), `references/integration.md` was never touched, the shared-predicate box described a design the code does not use, the `--json` box promised byte-equality the test does not assert, and the file list in M2's test box named a file that needed no change while omitting two that did. Added: `ParentGone`, the pointer sentences in §9.5/§11.1/§11.3, the `integration.md` paragraph, the `docFiles` sweep, and the single-instruction assertion on `next_action`. |
-| 2026-10-14 | approved and landed | Approved at `fd2880a`, declared at `3bd4bba`, merged into `main` as `4ae3125` by the repository's own integrate job. Everything above is in the destination. The plan moved to `docs/plans/completed/` in the housekeeping changeset that followed, because moving it while the approval stood would have made that approval stale — the plan file sits outside `changesets/<id>/`, which is the one directory the gate's comparison ignores. |
+| 2026-10-14 | approved and landed                                                           | Approved at `fd2880a`, declared at `3bd4bba`, merged into `main` as `4ae3125` by the repository's own integrate job. Everything above is in the destination. The plan moved to `docs/plans/completed/` in the housekeeping changeset that followed, because moving it while the approval stood would have made that approval stale — the plan file sits outside `changesets/<id>/`, which is the one directory the gate's comparison ignores.                                                                                                                                                                                                                                                                                                                       |

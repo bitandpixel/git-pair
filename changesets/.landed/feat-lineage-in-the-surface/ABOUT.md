@@ -21,7 +21,7 @@ invisible.
 **A commit that carries the record is not a second landing** (`internal/cli/integration.go`). The durable
 write stays create-only. The refusal is now conditioned on what the asked-for commit contains: when the
 integration ref already exists, its archive is the same `--source`, the asked commit is a descendant of the
-recorded integration, and that commit's *first parent* is not already a descendant of it, the command
+recorded integration, and that commit's _first parent_ is not already a descendant of it, the command
 succeeds, reports the ref it did not write, and writes nothing. A backport of the same commit onto the same
 branch keeps its first parent on that branch, so it stays the refusal it was — the distinction is whether the
 commit was made to carry the record or merely contains it. The archive is not re-verified on that path: the
@@ -41,7 +41,7 @@ against it, and the records are the stack as this clone can still read it.
 `internal/cli/status.go`). The stale "(`git pair integration record`)" hint is gone from the `Integrated:`
 block — it was unreachable anyway, set exactly where the ref was known to exist. The reviews a record read
 reports come from `lifecycle.ReviewsInLineage`, the whole archived ancestry, because after a merge landing
-the archived head sits *below* the base and `base..head` is empty for exactly the changeset whose verdicts
+the archived head sits _below_ the base and `base..head` is empty for exactly the changeset whose verdicts
 matter most. `reason` says the read was of the durable refs instead of reciting an empty span. `state` is
 untouched, so `status` and `review history` agree and PRD §13.4's rule holds.
 
@@ -79,7 +79,7 @@ Two fixes fell out of dogfooding against the real repository rather than out of 
 
 - The record-read path built its base straight from `parent:`, so `status --changeset <id>` **refused
   outright** once the parent branch had been tidied away: `cannot resolve changeset base "alpha": unknown
-  revision`. Reading a landed child after tidy is the normal case, so the read relinks the base to the
+revision`. Reading a landed child after tidy is the normal case, so the read relinks the base to the
   parent's integration ref exactly as `changeset.relinkStacks` does on the branch path — kept as a ref rather
   than resolved to a sha, so the provenance stays visible in `Base:`, with the branch name still in
   `ParentBranch` so "landed" and "merely moved" stay tellable apart.

@@ -57,7 +57,7 @@ to everything the destination gained after that commit; `merge-base` does not. `
 asserts the child's own commits are the whole span, which is the behaviour the durable ref could not give.
 
 **An approval is a claim about content, not about a base.** The rule in PRD §21 is unchanged, and the property
-is sameness of *diff content*, not of file names: `check` passes while `base...head` is the same diff under the
+is sameness of _diff content_, not of file names: `check` passes while `base...head` is the same diff under the
 old base and the new one. Head is the same commit on both readings, so the two diffs carry the same content
 exactly when the two merge bases carry the same tree — which is the test `landedBaseIsTheSameWork` makes, at two
 `merge-base` calls and two `rev-parse`s of `^{tree}` rather than two diffs and a patch id. Same file names

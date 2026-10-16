@@ -6,7 +6,6 @@ ring) and the rewrite of Scenario A. Two places are knowingly superseded rather 
 §30 still describe `v` as a two-state toggle, which §8.1 replaces, and they stay as received so the
 handoff remains legible against the decision log.
 
-
 > **Renamed after archiving (2026-09-17).** `gitpr` in this document is today's **`git-pair`** — binary
 > `git-pair`, invoked `git pair …`, module `gitpair` — and the marker trailers it specifies,
 > `GitPR-State` / `GitPR-Outcome` / `GitPR-Changeset`, are today's `Review-State` / `Review-Outcome` /
@@ -28,10 +27,10 @@ committed on `gitpr/init-commits`, and the closing audit
 ([audits/2026-09-16-completion.md](audits/2026-09-16-completion.md)) found no milestone incomplete. It
 found three defects in shipped behaviour, which the audit recorded rather than fixed; all three are now
 fixed in `9b5a877` (marks across a span round trip), `d0ceee7` (the header's span name) and `1575437`
-(the read-only `ABOUT.md` write), each with a test that fails without the fix. See *Known gaps*.
+(the read-only `ABOUT.md` write), each with a test that fails without the fix. See _Known gaps_.
 
 The plan was archived to `docs/plans/completed/review-span-selection/` when the audit closed. Evidence
-marked *pty* below means it was run in a real terminal. Those hand runs are scripted now:
+marked _pty_ below means it was run in a real terminal. Those hand runs are scripted now:
 `docs/plans/completed/gitpr-mvp/artifacts/pty-walkthrough.sh` drives the installed binary through a
 pty and checks the read-only historical screen, the `V` picker's endpoints, the `v` ring's position
 note, the drift banner and `r` with a ref moved by another process, a mark surviving `v` away and
@@ -44,14 +43,14 @@ Evidence column otherwise names is a test.
 The audit's own verification claims are checkable against the tree: milestone commits, test names and
 suite counts are listed below and were re-counted by a second, independent pass.
 
-| Milestone | State | Commit | Evidence |
-| --------- | ----- | ------ | -------- |
-| M1 checkpoints and a nameable head | done | `cc7dc6c` | `internal/span` checkpoint/drift tests; CLI flag tests in `internal/cli` |
-| M2 read-only historical mode | done | `8b9dd9d` | `internal/tui/readonly_internal_test.go` (a refusal per mutating key), pty walkthrough |
-| M3 the `V` picker | done | `efd9474` | `internal/tui/picker_internal_test.go`, `internal/git` commit/ref-tip tests, pty |
-| M3b `v` walks the session's spans | done | `2bc714e` | `TestSessionStepSpan*`, `TestVStepsThrough*`, `TestStepSpanStopsShort*`, pty |
-| M4 drift and `r` | done | `ebaeccd` | `internal/tui/drift_internal_test.go`, `TestRefreshDrift*`, `TestSessionStaysOnTheRefItPinned`, pty with a branch moved mid-session |
-| M5 base-side CLI flags | done | `eeb0919` | `TestDiffBaseCheckpoints`, `internal/cli/contract_test.go` |
+| Milestone                          | State | Commit    | Evidence                                                                                                                            |
+| ---------------------------------- | ----- | --------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| M1 checkpoints and a nameable head | done  | `cc7dc6c` | `internal/span` checkpoint/drift tests; CLI flag tests in `internal/cli`                                                            |
+| M2 read-only historical mode       | done  | `8b9dd9d` | `internal/tui/readonly_internal_test.go` (a refusal per mutating key), pty walkthrough                                              |
+| M3 the `V` picker                  | done  | `efd9474` | `internal/tui/picker_internal_test.go`, `internal/git` commit/ref-tip tests, pty                                                    |
+| M3b `v` walks the session's spans  | done  | `2bc714e` | `TestSessionStepSpan*`, `TestVStepsThrough*`, `TestStepSpanStopsShort*`, pty                                                        |
+| M4 drift and `r`                   | done  | `ebaeccd` | `internal/tui/drift_internal_test.go`, `TestRefreshDrift*`, `TestSessionStaysOnTheRefItPinned`, pty with a branch moved mid-session |
+| M5 base-side CLI flags             | done  | `eeb0919` | `TestDiffBaseCheckpoints`, `internal/cli/contract_test.go`                                                                          |
 
 Suite at audit: 14 packages, 328 test functions, `mise run check` (build, vet, gofmt, test) green,
 and `internal/hygiene` still proving nothing pushes, merges, rebases or resets.
@@ -66,18 +65,18 @@ Observable outcomes, not implementation details:
 - A span whose head is not the working tree opens **read-only**: no marking, no submitting, no
   editing of product files or `ABOUT.md`, no new threads, and the screen says so. **Met** since
   `1575437`; before that a historical span could recreate a missing `ABOUT.md` and open it for
-  editing. See *Known gaps*.
+  editing. See _Known gaps_.
 - Both ends of a span can be named by review index, commit id, or ref, from the CLI and from the `V`
   picker; all of them resolve through one implementation shared by CLI and TUI. **Met** since
   `d0ceee7`; before that the header printed `span: unreviewed` for any span based at a review and
   headed at the working tree, so `--since-review=-3` announced itself as the unreviewed span. See
-  *Known gaps*.
+  _Known gaps_.
 - A ref chosen as a checkpoint keeps its name on screen, diffs against the commit it pointed at when
   chosen, reports drift without acting on it, and changes only when the reviewer says so.
 - Reviewed marks are not carried across a span change — a mark made in one span does not silently
   mark a file in another — and they are still there when the span comes back. **Met** since `9b5a877`,
   which is also what makes the first half worth keeping a test for: before it, both halves failed in
-  the same direction. See *Known gaps*.
+  the same direction. See _Known gaps_.
 
 ## Context
 
@@ -122,7 +121,7 @@ One consequence of "live only when the head is the working tree", adopted delibe
 - PRD §3: no diff renderer, no DAG. The commit and ref pickers are filtered lists; the pane keeps
   printing git's bytes.
 - Review state stays Git-native and forge-independent; marks stay local, keyed on commits.
-- A key must not change meaning with mode: `s`, `Space`, `e`, `a`, `t` are *refused* in historical
+- A key must not change meaning with mode: `s`, `Space`, `e`, `a`, `t` are _refused_ in historical
   mode, not silently repurposed.
 - The pane's row arithmetic must keep holding: rows padded to width, frame exactly terminal height.
 
@@ -299,11 +298,11 @@ Verification:
 - [x] Walking with a custom span chosen: a whole turn returns to it.
 - [x] Rescans add no stops; choosing the same span twice is one stop.
 - [x] A stop whose checkpoint no longer resolves leaves the span, the ring and the position alone,
-      and works again once it resolves. This line originally said *"whose ref was deleted"*; after
+      and works again once it resolves. This line originally said _"whose ref was deleted"_; after
       M4 a deleted ref still resolves to its pin, so `TestStepSpanStopsShortWhenAStopNoLongerResolves`
       now breaks the stop by deleting a tag that a typed `Commit…` endpoint named — the realistic
       case anyway, since the drill takes typed revisions.
-- [x] From a read-only span `v` lands on a live one — and on the *last live* one, not merely a
+- [x] From a read-only span `v` lands on a live one — and on the _last live_ one, not merely a
       live one, which is the difference between getting back to work and being sent to a preset.
 - [x] Two-stop sessions say `span <label>` with no position.
 
@@ -368,7 +367,7 @@ Verification:
 ## Correction after archiving: `v` was cycling in place
 
 M3b's rule — "from a read-only span, `v` goes back to the last span you could review" — was applied
-to *every* step out of a historical span. Two historical spans on the ring therefore could not be
+to _every_ step out of a historical span. Two historical spans on the ring therefore could not be
 reached from each other: the walk closed a loop between the last reviewable stop and the first
 historical one, and the second was unreachable by any number of presses. The report was "v gets stuck
 cycling through… first to last and back to first".
@@ -385,7 +384,7 @@ still one keystroke of intention — it is simply a different key from the one t
 message was changed to match (`V chooses a span you can review`, not `v opens`).
 
 A second defect in the same corner, found while fixing the first and still there: a stop whose endpoint
-had stopped resolving (a deleted tag, a force-pushed branch) stopped the walk *entirely* — every press
+had stopped resolving (a deleted tag, a force-pushed branch) stopped the walk _entirely_ — every press
 failed the same way and `V` was the only way past. `v` now steps over such stops and names them, reason
 included (`StepResult.Skipped`, worded by `skippedNote`), and the stop stays on the ring so it returns
 with the ref. Where nothing else resolves either, the press says so and moves nothing.
@@ -412,11 +411,11 @@ choosing for. Test: `TestSelectedLineNamesTheSpanTheRestOfTheAppNames`.
 On the owner's request (2026-09-17, branch `gitpr/span-labels`) the endpoint vocabulary moved, so a
 reader of everything above should translate as they go:
 
-| Endpoint | Was | Now |
-| --- | --- | --- |
-| working-tree head, live span | `HEAD` | `current` |
-| newest review | `review -1`, picker row `Review -1` | `last review`, picker row `Last Review` |
-| any other review | `(after review N)` from the resolved index | the index as entered: `review -2`, `review 0` |
+| Endpoint                     | Was                                        | Now                                           |
+| ---------------------------- | ------------------------------------------ | --------------------------------------------- |
+| working-tree head, live span | `HEAD`                                     | `current`                                     |
+| newest review                | `review -1`, picker row `Review -1`        | `last review`, picker row `Last Review`       |
+| any other review             | `(after review N)` from the resolved index | the index as entered: `review -2`, `review 0` |
 
 `main...HEAD` is now `main...current`; the unreviewed span's `8ab932f..HEAD (after review 0)` is
 `last review..current`. Three consequences for reading this plan:
@@ -465,12 +464,12 @@ gone. Cause, in the order it bites:
   longer match, so the mark is dropped.
 - `Session.persisted` is read once, in `NewSession`, for the commit the session opened on. A span
   change never re-reads it and a toggle never updates it.
-- `toggleMark` writes the *whole* current set through `SaveMarks`. So the next toggle after a round
+- `toggleMark` writes the _whole_ current set through `SaveMarks`. So the next toggle after a round
   trip persists the emptied set, and a later `review open` on the same commit resumes without marks
   that an earlier session had recorded.
 
 Fixed in `9b5a877`, which took the third bullet more literally than either suggestion did. A mark is
-a fact about a path *and* a diff key, so the store now keeps several keys per path and `Save` replaces
+a fact about a path _and_ a diff key, so the store now keeps several keys per path and `Save` replaces
 only the `(path, key)` pairs it is handed — the two spans a reviewer toggles between most often, full
 changeset and unreviewed, both end at HEAD, and one span's save had been erasing the other's marks from
 disk while both were still on screen. On top of that the session reads the store for the commit the
@@ -485,7 +484,7 @@ for the span label on that answer. So `review open --since-review=-3`, `review o
 --base-review=-3`, and the picker's `Review -3` base all print `span: unreviewed` for a span that
 begins three submissions back. It contradicts Success Criterion 3 and requirement §17 (the current
 span should always be visible), and no test pinned it: `Unreviewed()` was asserted once, for the real
-unreviewed span. Fixed in `d0ceee7`: the predicate is now the *newest* review — head is the
+unreviewed span. Fixed in `d0ceee7`: the predicate is now the _newest_ review — head is the
 working tree, base is a review, and that review is the last one in the changeset — and a span based
 further back keeps the label it resolved to, which already names the review it starts after
 (`bb0f343..HEAD (after review 0)`). `TestUnreviewedMeansTheNewestReview` and
@@ -508,7 +507,7 @@ Things execution taught that the plan did not know when it was written.
 
 - **Where a pin is taken matters more than where it is stored.** The picker's ref list is a snapshot,
   but the pin is taken when the reviewer applies the span. In the pty walkthrough that ordering was
-  visible: a branch moved *before* `Enter` is not drift, and the span is honestly labelled with the
+  visible: a branch moved _before_ `Enter` is not drift, and the span is honestly labelled with the
   commit it chose (`probe@43915ed..HEAD`). A drift demo has to move the branch after the apply, which
   is what a reviewer with a second window open actually experiences.
 - **A banner in the list column loses its key.** `⚠ probe moved …  [r] refresh` in a 24-to-48-column
@@ -527,8 +526,8 @@ Things execution taught that the plan did not know when it was written.
   frame invariants; no nested program.
 - **Pinned refs and the reviewed marks disagreeing after `r`.** Marks are keyed on the end commit, so
   a refreshed base simply matches nothing; the report tells the reviewer why the counter dropped.
-  Realised, and behaved as designed. The same keying bit a different way on span *navigation*, where
-  the marks were expected to come back — fixed in `9b5a877`, see *Known gaps*.
+  Realised, and behaved as designed. The same keying bit a different way on span _navigation_, where
+  the marks were expected to come back — fixed in `9b5a877`, see _Known gaps_.
 - **`gitpr diff`'s meaning drifting.** `gitpr diff` with no flags is base → pinned HEAD, exactly as
   today; the `you` section belongs to the preview, not to `diff`.
 
@@ -541,7 +540,7 @@ per acceptance scenario in the requirements, with the raw bytes checked rather t
 
 ## Audit History
 
-| Date       | Audit                                                      | Summary |
-| ---------- | ---------------------------------------------------------- | ------- |
-| 2026-09-16 | `9b5a877`, `d0ceee7`, `1575437` | The three defects the audit recorded, fixed in the order it listed them: marks across a span round trip, then the header's span name, then the read-only `ABOUT.md` write. Each fix was falsified by running its test against the code before it. Coverage the audit recommended and these commits did not take on: a multi-ref drift case, a `review open` flag-registration test, and criterion 1 at the session level. |
-| 2026-09-16 | [audits/2026-09-16-completion.md](audits/2026-09-16-completion.md) | Completion audit, run twice — one pass per reviewer, findings merged. M1–M5 verified against the branch; no milestone incomplete. Plan corrected for five stale or false claims (the `V`/`r` note; a `--base` flag that never existed; a broken-span-stop claim overtaken by pinning; requirements-file departures that were under-described; a flattened M1 task line), two orphaned bullets moved to *Discoveries*, evidence labelled honestly where it was a hand run rather than a test, and criteria 1–3 and 5 qualified where the claim outran the proof. Three shipped defects recorded under *Known gaps* and not fixed: marks lost on a span round trip, `span: unreviewed` shown for any review-based span, and `ABOUT.md` recreation reachable in read-only mode. Plan archived to `docs/plans/completed/`. |
+| Date       | Audit                                                              | Summary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-09-16 | `9b5a877`, `d0ceee7`, `1575437`                                    | The three defects the audit recorded, fixed in the order it listed them: marks across a span round trip, then the header's span name, then the read-only `ABOUT.md` write. Each fix was falsified by running its test against the code before it. Coverage the audit recommended and these commits did not take on: a multi-ref drift case, a `review open` flag-registration test, and criterion 1 at the session level.                                                                                                                                                                                                                                                                                                                                                                                              |
+| 2026-09-16 | [audits/2026-09-16-completion.md](audits/2026-09-16-completion.md) | Completion audit, run twice — one pass per reviewer, findings merged. M1–M5 verified against the branch; no milestone incomplete. Plan corrected for five stale or false claims (the `V`/`r` note; a `--base` flag that never existed; a broken-span-stop claim overtaken by pinning; requirements-file departures that were under-described; a flattened M1 task line), two orphaned bullets moved to _Discoveries_, evidence labelled honestly where it was a hand run rather than a test, and criteria 1–3 and 5 qualified where the claim outran the proof. Three shipped defects recorded under _Known gaps_ and not fixed: marks lost on a span round trip, `span: unreviewed` shown for any review-based span, and `ABOUT.md` recreation reachable in read-only mode. Plan archived to `docs/plans/completed/`. |

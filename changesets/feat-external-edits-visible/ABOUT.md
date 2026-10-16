@@ -41,7 +41,7 @@ tracked.
   - `fileAction` and `openFile` take the untracked fact, so Enter opens a file git has never seen in the
     editor.
   - `previewNotice` says which empty case the pane is in (`nothing in the working tree to show`, `new files
-    git has not been told about`), with `newFilesUnder` and `previewFileUntracked` as the two questions.
+git has not been told about`), with `newFilesUnder` and `previewFileUntracked` as the two questions.
 - Tests: seven new cases in `internal/tui/dirty_internal_test.go`, the Enter table in
   `internal/tui/change_internal_test.go`, and the working-tree scenario in
   `scripts/gates/pty-walkthrough.sh` extended with a tracked file the branch never touched and an untracked
@@ -80,7 +80,7 @@ header lines come out the same as a real add's, so the pane strips them the same
 
 **Enter goes to the editor for such a file, and `d` keeps its meaning.** A file in no commit and no index
 entry has no left side, so the difftool opens a window on nothing — the same reason a file the span added, and
-a document the changeset invented, already go to the editor. A file outside the span that git *does* track
+a document the changeset invented, already go to the editor. A file outside the span that git _does_ track
 keeps the difftool: its comparison is the reviewer's own typing against the revision under review, which is
 worth opening. `d` still means "ask git for the diff" on every row, the way it does on a span-added file
 whose patch is all `+`.
@@ -125,11 +125,11 @@ not part of what is on screen — the rule that already drops the pane's working
 ## Known limitations
 
 - A directory whose only new content is untracked shows no diff and says `new files git has not been told
-  about`. The files are readable one row down; the pane will not assemble their patches itself.
+about`. The files are readable one row down; the pane will not assemble their patches itself.
 - Nothing here attributes an uncommitted line to the reviewer, and this change does not claim to. The rule
   stays what the pane already says: the tree under review is the reviewer's, and a tree holding the author's
   uncommitted work is outside this screen's model.
-- The rows appear on a live span only. A file whose change is *staged* is a row like any other — `status`
+- The rows appear on a live span only. A file whose change is _staged_ is a row like any other — `status`
   counts staged, unstaged and untracked alike — so a reviewer who stages their own edit before coming back
   still sees it.
 - `Space` refusing is the whole of the interaction design for these rows: there is no key that says "I have

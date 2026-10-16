@@ -31,11 +31,11 @@ silently, which is the same failure with better manners.
 
 ## Evidence
 
-| Break | Result |
-|---|---|
-| `│   ├── use` added back under `change` | "PRD.md's command tree lists `change use`, which the CLI does not have" |
-| `│   ├── stack` removed | "PRD.md's command tree omits `change stack`" |
-| the block's `git-pair` line renamed | "no command tree in the reference documents: the tree is a checked surface, and a document set that lost it would stop being checked without saying so" |
+| Break                                   | Result                                                                                                                                                  |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `│   ├── use` added back under `change` | "PRD.md's command tree lists `change use`, which the CLI does not have"                                                                                 |
+| `│   ├── stack` removed                 | "PRD.md's command tree omits `change stack`"                                                                                                            |
+| the block's `git-pair` line renamed     | "no command tree in the reference documents: the tree is a checked surface, and a document set that lost it would stop being checked without saying so" |
 
 The tree's contents were read from the binary, not remembered: `git pair --help`, `git pair change --help`,
 `git pair review --help`, `git pair skill --help`.

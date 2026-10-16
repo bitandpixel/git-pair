@@ -18,13 +18,13 @@ workflow kept as a door rather than a feature.
 
 Six entry points, and only these:
 
-| Step | Command | Today |
-| --- | --- | --- |
-| initialize a changeset | `git pair init` | `change init` |
-| publish it for review | `git pair change ready` | unchanged |
-| review it | `review open` / `about` / `thread` / `submit` | unchanged |
-| wait for review | `git pair change wait` | unchanged; `--fetch` is the remote door |
-| iterate on review | `change feedback` → fix → `change ready` | unchanged |
+| Step                              | Command                                                                     | Today                                                       |
+| --------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| initialize a changeset            | `git pair init`                                                             | `change init`                                               |
+| publish it for review             | `git pair change ready`                                                     | unchanged                                                   |
+| review it                         | `review open` / `about` / `thread` / `submit`                               | unchanged                                                   |
+| wait for review                   | `git pair change wait`                                                      | unchanged; `--fetch` is the remote door                     |
+| iterate on review                 | `change feedback` → fix → `change ready`                                    | unchanged                                                   |
 | land it on the destination branch | the agent merges with ordinary git, then runs `git pair integration record` | **no new verb** — the contract is agent instructions (§0.8) |
 
 There is **no `land` command.** git-pair performs no merge, squash or rebase, so the posture in PRD §26 and the hygiene test is untouched, no working tree is entered, and no branch pointer git-pair does not own is moved. Landing is ordinary git performed by the agent, followed by one git-pair command that writes the record.
@@ -36,10 +36,10 @@ drift, the freeze refusal, squash-safety reporting) move to `check`/`status`. `c
 
 ### 0.2 Two refs, both created at landing, both frozen
 
-| Ref | Points at | Written by | Moved | Deleted |
-| --- | --- | --- | --- | --- |
-| `refs/git-pair/integrations/<changeset-id>` | the commit that introduced the changeset into the destination branch | `integration record` | never | never |
-| `refs/git-pair/archive/<changeset-id>` | the real unsquashed, unrebased tip — implementation and review interleaved | the same invocation | never | never |
+| Ref                                         | Points at                                                                  | Written by           | Moved | Deleted |
+| ------------------------------------------- | -------------------------------------------------------------------------- | -------------------- | ----- | ------- |
+| `refs/git-pair/integrations/<changeset-id>` | the commit that introduced the changeset into the destination branch       | `integration record` | never | never   |
+| `refs/git-pair/archive/<changeset-id>`      | the real unsquashed, unrebased tip — implementation and review interleaved | the same invocation  | never | never   |
 
 **One command writes both, and it already takes both.** `integration record`'s existing flags are exactly the two facts: `--source` is the value the archive ref holds, `--commit` is the value the integration ref holds. The current implementation discovers the changeset from the archive ref that points at `--source` (D9) and writes one ref; under this model it verifies the pair and writes two. The argument shape predicted the design, which is why no new verb is needed and why the local flow and the CI door are the same command.
 
@@ -51,7 +51,7 @@ Create-only, both, in one transaction (`CreateRefIfAbsent` for each). What that 
 - **No force-push is ever needed.** Both refs are append-only by construction, so publishing them is a
   refspec, not a protocol, and there is no `+` in any configuration — which is also what makes the
   remote door cheap (§0.5).
-- **The record is complete at the moment the fact is created** — in the local flow, because the same agent that performed the merge runs the command while both SHAs are in its context. Note this is now a *prose* guarantee rather than a transactional one; §0.8 is what makes it enforceable.
+- **The record is complete at the moment the fact is created** — in the local flow, because the same agent that performed the merge runs the command while both SHAs are in its context. Note this is now a _prose_ guarantee rather than a transactional one; §0.8 is what makes it enforceable.
 - Pre-integration, only the branch holds the chain. The accepted loss window is **"branch deleted before `integration record` runs"**, which with a human-or-agent-performed merge has a second form: **merge done, record never written**. §0.8 covers detection for that case.
 
 ### 0.3 Why two refs beat one
@@ -63,7 +63,7 @@ removes the durability transfer that the one-ref design depended on — the trai
 if some other clone's anchors were published.
 
 It also restores the draft's invariant 12 almost verbatim, with the pair rather than one ref doing the
-anchoring, and it means the archive ref keeps the *full* chain including the post-approval metadata
+anchoring, and it means the archive ref keeps the _full_ chain including the post-approval metadata
 tail that the drift gate allows and that review anchors would have missed.
 
 ### 0.4 What "only two refs" costs the draft
@@ -74,7 +74,7 @@ invariants 6 and 7 — is **dropped to Deferred**.
 What still holds without it:
 
 - **Invariant 8, rebase invalidates approval.** A review commit records the head it spoke about
-  (`Review-Head`, D4). After a rebase the rewritten review commit still carries the *original*
+  (`Review-Head`, D4). After a rebase the rewritten review commit still carries the _original_
   `Review-Head` value in its message, and that commit is no longer an ancestor of `HEAD`, so the check
   "`Review-Head` is an ancestor of HEAD" fails and the approval is refused. No anchors required.
 - Everything branch-derived, which is most of the design.
@@ -93,7 +93,7 @@ The posture does not change and the hygiene test stays exactly as it is (no `pus
 `reset`):
 
 - Publishing both refs is one refspec over `refs/git-pair/*`, append-only, `+`-free.
-- `integration record --source --commit [--target]` survives as the *remote* form of the landing
+- `integration record --source --commit [--target]` survives as the _remote_ form of the landing
   record: it writes the two refs and performs no merge, which is what a forge pipeline needs.
 - `change wait --fetch` stays ordinary `git fetch`; the moment it needs the namespace it must pass the
   refspec (`git.Fetch`, `git.go:514`, takes none today).
@@ -152,7 +152,7 @@ trail, so the command should refuse rather than trust:
 - "ref already exists pointing at exactly this SHA" is a **no-op**, not an error. Today
   `CreateIntegration` (`reviewref.go:195-202`) refuses any re-create, which makes a re-run after a partial
   failure unrecoverable without deleting a ref — and deleting is not something this design does.
-  Create-only still means *never moved*: same target is fine, different target is the refusal.
+  Create-only still means _never moved_: same target is fine, different target is the refusal.
 
 ### 0.8 The agent contract is now a product surface
 
@@ -174,7 +174,7 @@ have to accept:
    drifts. Treat the agent instructions as a documented surface with the same change discipline as the
    CLI help, and keep the canonical wording in the requirements with the skill pointing at it.
 2. **A skipped record step must be detectable, or the contract is unenforced.** Today the tree rule makes
-   a landed changeset *silently disappear* from `status` and `queue`: the directory is in the destination
+   a landed changeset _silently disappear_ from `status` and `queue`: the directory is in the destination
    branch, so it is landed work, and no integration ref exists to say it was recorded. That is exactly the
    state in which the paper trail is lost. New derived condition — **directory present in the destination
    branch, no integration ref ⇒ "landed, unrecorded"**, reported by `status` and by `queue` as its own
@@ -186,39 +186,39 @@ have to accept:
 Everything else in the draft is compatible with the current design or additive. This is the change
 that has to be settled first, because it moves five commands, one gate, and two namespaces:
 
-| | Today | Draft |
-| --- | --- | --- |
-| What holds review history during work | `refs/git-pair/changesets/<id>/archive`, **moved on every lifecycle step** | nothing; "there is no continuously updated remote changeset ref" |
-| What holds it permanently | same archive ref, plus `…/integration` naming the landing commit | two create-only refs written at landing: `refs/git-pair/integrations/<id>` (the landing commit) and `refs/git-pair/archive/<id>` (the unsquashed chain) — §0.2 |
-| Per-review durability | none (the review is a commit; its SHA is its only name) | `refs/git-pair/reviews/<review-id>`, created once, never moved |
-| Who can be wrong about state | the branch (refs are "never a source of state", PRD §12) | the branch, explicitly — and the draft strengthens that |
+|                                       | Today                                                                      | Draft                                                                                                                                                          |
+| ------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What holds review history during work | `refs/git-pair/changesets/<id>/archive`, **moved on every lifecycle step** | nothing; "there is no continuously updated remote changeset ref"                                                                                               |
+| What holds it permanently             | same archive ref, plus `…/integration` naming the landing commit           | two create-only refs written at landing: `refs/git-pair/integrations/<id>` (the landing commit) and `refs/git-pair/archive/<id>` (the unsquashed chain) — §0.2 |
+| Per-review durability                 | none (the review is a commit; its SHA is its only name)                    | `refs/git-pair/reviews/<review-id>`, created once, never moved                                                                                                 |
+| Who can be wrong about state          | the branch (refs are "never a source of state", PRD §12)                   | the branch, explicitly — and the draft strengthens that                                                                                                        |
 
-So the draft does **not** simply delete the archive ref — it retires the *moving* part of it, and the
+So the draft does **not** simply delete the archive ref — it retires the _moving_ part of it, and the
 agreed model keeps the name. The draft's own text is ambiguous about which end the durable ref names
 (its diagram points at `D`, the historical tip; its field list wants both ends), and §0.2 resolves that
 by writing **one ref per end**, both at landing, both frozen. Nothing moves; the record is complete the
 moment the fact exists. See D10.
 
-What genuinely disappears either way: a ref that moves *while work is active*. Five write sites.
+What genuinely disappears either way: a ref that moves _while work is active_. Five write sites.
 
 ## 2. Disposition map
 
-| Draft concept | Current implementation | Action |
-| --- | --- | --- |
-| Active branch is the review surface | already true: state derives from `Review-*` markers on the branch (`lifecycle.Summarize`), refs are read for reporting | keep |
-| Changeset identity independent of branch | already true: `changesets/<id>/` dir name is the id; `change init --id` overrides the branch-derived default; `ErrIDMismatch` guards it | keep |
-| Interleaved history, one history | already true: markers are commits on the branch; `KindImplementation` is the absence of a marker | keep |
-| Review commits + artifacts in `changesets/<id>/` | already true: `ABOUT.md`, `CHANGESET.yaml`, `*.md` threads; `git log/show/diff`, `rg` all work | keep |
-| Implementation state as a derived view | **partly implemented, under two different definitions** (D6) | formalize |
-| Immutable review anchors `refs/git-pair/reviews/<id>` | absent | **new** |
-| Rebase invalidates approval | **contradicted by current behavior** (D3) | reversal |
-| Integration record with 7 metadata fields | ref stores "an object id and nothing else" (PRD §13.2) by explicit decision | **rework** (D10) |
-| Queue is branch-oriented, no collapsing by id | queue **collapses by slug** (`review.go:441-486`) | rework (D7) |
-| `git pair init`, `git pair queue` | `git pair change init`, `git pair review queue` | rename? (D13) |
-| Stacked: structured `parent: {branch, changeset}` + invalidation rules | single `base:` field; **no parent-movement invalidation exists** | **largest new feature** (D11) |
-| Agent memory / historical search | satisfied by construction (files + commits); no index | keep, document |
-| Cryptography deferred | already absent | keep |
-| No distributed mutable state / no queue registry | already true | keep |
+| Draft concept                                                          | Current implementation                                                                                                                  | Action                        |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| Active branch is the review surface                                    | already true: state derives from `Review-*` markers on the branch (`lifecycle.Summarize`), refs are read for reporting                  | keep                          |
+| Changeset identity independent of branch                               | already true: `changesets/<id>/` dir name is the id; `change init --id` overrides the branch-derived default; `ErrIDMismatch` guards it | keep                          |
+| Interleaved history, one history                                       | already true: markers are commits on the branch; `KindImplementation` is the absence of a marker                                        | keep                          |
+| Review commits + artifacts in `changesets/<id>/`                       | already true: `ABOUT.md`, `CHANGESET.yaml`, `*.md` threads; `git log/show/diff`, `rg` all work                                          | keep                          |
+| Implementation state as a derived view                                 | **partly implemented, under two different definitions** (D6)                                                                            | formalize                     |
+| Immutable review anchors `refs/git-pair/reviews/<id>`                  | absent                                                                                                                                  | **new**                       |
+| Rebase invalidates approval                                            | **contradicted by current behavior** (D3)                                                                                               | reversal                      |
+| Integration record with 7 metadata fields                              | ref stores "an object id and nothing else" (PRD §13.2) by explicit decision                                                             | **rework** (D10)              |
+| Queue is branch-oriented, no collapsing by id                          | queue **collapses by slug** (`review.go:441-486`)                                                                                       | rework (D7)                   |
+| `git pair init`, `git pair queue`                                      | `git pair change init`, `git pair review queue`                                                                                         | rename? (D13)                 |
+| Stacked: structured `parent: {branch, changeset}` + invalidation rules | single `base:` field; **no parent-movement invalidation exists**                                                                        | **largest new feature** (D11) |
+| Agent memory / historical search                                       | satisfied by construction (files + commits); no index                                                                                   | keep, document                |
+| Cryptography deferred                                                  | already absent                                                                                                                          | keep                          |
+| No distributed mutable state / no queue registry                       | already true                                                                                                                            | keep                          |
 
 ## 3. Major discrepancies
 
@@ -250,6 +250,7 @@ documented in README breaks.
 the `archive`/`archive_current` JSON contract (§5.4), and the two state reads `resolve.go` makes off the
 ref (`Distance` ordering at `:388-399`, `Terminal` at `:485`), which have no successor and must move
 onto the branch.
+
 ### D2. Reachability hole: who holds the chain before integration?
 
 A ref pointing at review commit `R2` keeps `A B C R1 R2` reachable, because reachability is
@@ -274,12 +275,12 @@ recoverable only while the branch exists. Three places this has to be stated rat
 - `classifyOrphan` (`review.go:546-580`) and the no-branch fallback (`root.go:250-272`) lose the data
   they read today. Both must degrade to an honest "no record" rather than the current "never anchored
   means never offered, so the directory is a leftover": under the new model a directory with no branch
-  and no integration ref is *either* a leftover or lost work, and git-pair can no longer tell which.
+  and no integration ref is _either_ a leftover or lost work, and git-pair can no longer tell which.
   Reporting it as a leftover would be a false statement about deleted work.
 - `refIsTerminal` (`resolve.go:485`) and the anchor read in `terminalRecord` (`change.go:823`) go
   away, so "was this abandoned?" becomes branch-local knowledge. See D12.
 
-**Resolved for the post-landing case by §0.2:** the archive ref names the real tip, so the post-approval tail the drift gate allows is preserved. Case 1 stays open only *before* landing, which is the accepted window (§0.6).
+**Resolved for the post-landing case by §0.2:** the archive ref names the real tip, so the post-approval tail the drift gate allows is preserved. Case 1 stays open only _before_ landing, which is the accepted window (§0.6).
 
 ### D3. Rebase behavior inverts
 
@@ -305,7 +306,8 @@ mechanism that makes invariant 8 implementable, so D1/D3 want deciding together.
 trailer plus one ancestry test. What must be written into the requirements is the loss §0.4 names — the
 pre-rebase review commit is reflog-only — and the current tolerant comments (`change.go:977-980`,
 `tui/session.go:242`) have to be reversed, not just left unused.
-### D4. Nothing records *what* was approved
+
+### D4. Nothing records _what_ was approved
 
 The reviewed head is implicit — the review commit's first parent. That is the exact value a rebase
 changes, so invariants 8 and 10 and the draft's "stable comparison point for detecting rewritten or
@@ -318,14 +320,15 @@ altered review history" all need it recorded explicitly. Today's trailers are `R
 
 **Required by §0.4.** `Review-Head` is now the mechanism behind invariant 8, so it is not optional and
 it is the first piece of the plan that changes the review protocol (milestone 2).
+
 ### D5. Review ids: allocating `refs/git-pair/reviews/<review-id>` is a distributed-state problem
 
 The draft's example is `refs/git-pair/reviews/123`, which implies a counter. A counter is a
 read-modify-write across clones; two clones allocating `123` for different commits is the
-last-pusher-wins hazard, and `CreateRefIfAbsent` (`reviewref.go:195`) only makes it *loud*, not
+last-pusher-wins hazard, and `CreateRefIfAbsent` (`reviewref.go:195`) only makes it _loud_, not
 correct. This is the one place the draft reintroduces the coordination it otherwise bans.
 
-**Now load-bearing under §0:** the changeset id has to be a *path component* of the anchor —
+**Now load-bearing under §0:** the changeset id has to be a _path component_ of the anchor —
 `refs/git-pair/reviews/<changeset-id>/<sha>` — so the reviewed lineage is findable from the changeset
 alone (`for-each-ref refs/git-pair/reviews/<id>/`) with no index and no metadata blob. A flat
 `refs/git-pair/reviews/<n>` would strand the lineage behind a lookup only the integration record
@@ -337,16 +340,17 @@ could answer.
 
 **Closed by §0.4:** the per-review namespace is dropped to Deferred, so the allocation problem leaves
 with it. Keep the analysis for when anchors return — a counter is still the wrong answer.
+
 ### D6. "Git-pair-owned metadata paths" is currently defined two different ways
 
 The draft's derived view is `base...HEAD` minus git-pair metadata. The code already does this twice,
 inconsistently:
 
-- drift (`lifecycle.go:93`, `:346`) excludes only `changesets/<slug>/` — the *own* changeset dir;
+- drift (`lifecycle.go:93`, `:346`) excludes only `changesets/<slug>/` — the _own_ changeset dir;
 - survival (`survival.go:151`) excludes all of `changesets/`.
 
 And a third category exists outside the tree entirely: markers live in commit messages, so a
-metadata-only review commit that changes *only* the trailer set is invisible to tree comparison.
+metadata-only review commit that changes _only_ the trailer set is invisible to tree comparison.
 
 **Needed:** one definition of the metadata path set (all `changesets/**`? `CHANGESET.yaml` +
 `ABOUT.md` + `*.md` threads only?), owned by the `changeset` package, used by drift, survival, spans,
@@ -355,14 +359,15 @@ path set — invariant 10's conservative rule is currently written in terms of r
 avoid having to name it (see D11).
 
 **Elevated by decision 4:** landed changeset directories now accumulate in trunk, so the metadata path
-set is load-bearing for the derived view from day one. Deferred is the *fingerprint*, not the *set*.
+set is load-bearing for the derived view from day one. Deferred is the _fingerprint_, not the _set_.
+
 ### D7. The queue must stop collapsing by changeset id
 
 Draft invariant 5 + "Git-pair should not automatically collapse those branches into one queue entry
 solely because they share a changeset ID."
 
 `runReviewQueue` (`review.go:419-486`) does the opposite: it keys a map by `cs.Slug`, appends every
-branch carrying that slug (`:466`), then asks `readyEntry` over *all* of them (`:486`, `:609`) and
+branch carrying that slug (`:466`), then asks `readyEntry` over _all_ of them (`:486`, `:609`) and
 emits one row. So a changeset in two branches today yields one row with a merged `branches[]` and a
 "best" state — a lossy choice between two branch-local states.
 
@@ -371,8 +376,8 @@ step 3 ("skip integrated") already exists via `ResolveIntegration` (`:478`).
 
 ### D8. The trunk-tree rule is not mentioned in the draft, and it is doing real work
 
-PRD §4 ("Which changeset a revision is working on") decides activity by *tree comparison against
-trunk*: a `changesets/<id>/` directory present here and absent in trunk is in-progress work; a
+PRD §4 ("Which changeset a revision is working on") decides activity by _tree comparison against
+trunk_: a `changesets/<id>/` directory present here and absent in trunk is in-progress work; a
 directory already in trunk is landed and drops out. `DirsAt`/`newResolver` (`resolve.go:198-212`)
 implement it, and PRD §4 insists `status`, `review queue` and CI all ask it the same way. The draft's
 queue step 2-3 instead says "determine whether each branch contains an active changeset" and "skip
@@ -388,7 +393,7 @@ and CI still needs the `--default-branch`/trunk fetch that PRD §13.4 documents.
 single-derivation rule survives, so the draft's queue steps 2-3 need rewording to
 "tree-recognition, then skip by integration ref"; CI keeps the default-branch fetch PRD §13.4
 documents; `changesets/<id>/` directories live in trunk permanently once landed; and the integration
-ref becomes a skip signal *beside* the tree rule rather than a replacement for it — the one place
+ref becomes a skip signal _beside_ the tree rule rather than a replacement for it — the one place
 "one derivation everywhere" now needs an explicit carve-out (tree decides activity, ref decides that
 activity is over).
 
@@ -419,17 +424,18 @@ commit carries no changeset directory", which a wrong `--source` causes rather t
 **Closed twice over by §0.7:** content-based discovery is the mechanism, and for the local flow
 `git pair land` does not need discovery at all — it knows both SHAs because it made one and is standing
 on the other. Discovery matters only for `integration record`, the remote/CI door.
+
 ### D10. The integration record's payload contradicts a decision PRD §13.2 made on purpose
 
 Draft metadata: `changeset-id`, `historical branch tip`, `reviewed implementation state`,
 `integration target`, `integrated commit`, `integration method`, `terminal status`.
 
-PRD §13.2 stores an object id *and nothing else*, and rejects naming the target branch
+PRD §13.2 stores an object id _and nothing else_, and rejects naming the target branch
 deliberately: "hanging a name on the ref by pointing it at an annotated tag object would put a peel
 in front of every reader of the ref and break the exact-object matching §11.4's discovery depends
 on". Also note the current split: archive → historical tip, integration → landing commit. The
 draft's ASCII diagram shows `refs/git-pair/integrations/<id>` pointing at **D, the historical tip**,
-while its field list wants both the historical tip *and* the integrated commit. Two readings:
+while its field list wants both the historical tip _and_ the integrated commit. Two readings:
 
 - **(a) role swap** — `integrations/<id>` points at the historical tip (invariant 12: the ref
   "permanently anchors the completed implementation and review history"), landing commit + method +
@@ -442,7 +448,7 @@ while its field list wants both the historical tip *and* the integrated commit. 
 
 That leaves the draft's seven-field record **optional rather than required**: changeset id, the
 lineage and the landing are all recoverable from the two create-only ref families plus the tree rule.
-What is genuinely not recoverable is `integration method`, and the *name* of the historical branch
+What is genuinely not recoverable is `integration method`, and the _name_ of the historical branch
 once the branch is gone — both cheap to record at `integration record` time if anyone wants them, and
 a better fit for `git pair status` output than for durable storage.
 
@@ -461,6 +467,7 @@ deferred), so it must be stored as "the reviewed head commit" and labelled as su
 metadata-home question never arises. The draft's seven-field record becomes derived `status` output;
 the two fields that are genuinely unrecoverable (`integration method`, and the historical branch name
 once the branch is gone) can be stored when someone asks for them.
+
 ### D11. Stacked changesets are the largest new feature, and the conservative rule has a product cost
 
 Current stack support is one field: `base:` in `CHANGESET.yaml`, whose `parentID` parser accepts an
@@ -477,7 +484,7 @@ for orphaned-by-abandonment children.
 Flag the interaction: the draft says stacked validity must not be raw-tip equality because review
 commits move the parent tip, then defers the implementation-state relaxation, and sets the initial
 rule as "any change to the parent branch after a child is approved invalidates the child's approval".
-In the workflow this tool creates, *every parent review* moves the parent tip. So a stacked child
+In the workflow this tool creates, _every parent review_ moves the parent tip. So a stacked child
 cannot remain approved while its parent is under review at all. That may be acceptable as a v1 rule,
 but it should be a stated, deliberate consequence rather than an accident — it effectively means
 "rebase and re-approve the child only after the parent has settled".
@@ -490,7 +497,7 @@ draft assumes, because the parent and child are usually in the same clone:
    a namespace this design deletes — so the parser and its tests change here.
 2. **Record the parent tip the child was approved against**, as a trailer beside `Review-Head`, and
    compare it in `status`/`queue`/`check`. Today there is no parent comparison at all.
-3. **Name the invalidation instead of just reporting it.** Invariant 10 trips on *every* parent review
+3. **Name the invalidation instead of just reporting it.** Invariant 10 trips on _every_ parent review
    commit, because review commits move the parent tip — so the reason has to distinguish "parent
    implementation moved" from "parent review conversation moved" from "parent rebased" from "parent
    integrated", even though all four invalidate. Without that, the rule reads as arbitrary and pushes
@@ -500,12 +507,13 @@ draft assumes, because the parent and child are usually in the same clone:
    "parent integrated as X; rebase onto <destination>" rather than today's silent base failure.
 5. **Abandoned parent:** the child's parent branch is gone with no integration ref, so `check` refuses
    with "unreconciled: choose a new base" and `init`/`use` accept an explicit re-parent. Never
-   reparent silently (draft requirement) — and under this design nothing *can* reparent silently,
+   reparent silently (draft requirement) — and under this design nothing _can_ reparent silently,
    because there is no ref to quietly follow.
 6. **A stacked child's archive ref is a superset.** If the child is landed without being rebased onto
    trunk first, its archive chain contains the parent's unsquashed history too. Expected, harmless, and
    worth one sentence in the requirements so nobody files it as duplication — and it is the reason a
    child landed first preserves the parent's chain even if nobody ever landed the parent.
+
 ### D12. `change archive` loses its subject; `unready` and `abandon` lose their durable effect
 
 PRD §9.5/§9.6/§9.7 are written as ref moves. With no active ref:
@@ -515,7 +523,7 @@ a command. Its checks (surviving additions, drift, the freeze refusal, squash-sa
 `check`/`status`, which already share the same derivation.
 
 - `change archive` (README: "advances the archive ref onto the reviewed HEAD and reports
-  squash-safety") has no ref to advance. Its *checks* still matter: the surviving-review-additions
+  squash-safety") has no ref to advance. Its _checks_ still matter: the surviving-review-additions
   gate (`survival`), the drift gate (`ReconcileStaleness`), the integrated-freeze refusal
   (`reviewref.RefuseIntegrated`), and squash-safety reporting. These need a home — most plausibly
   `check`/`status`, which already share the same derivation.
@@ -533,7 +541,7 @@ Named in the draft: `git pair init`, `git pair queue`, and the two ref namespace
 all: `change ready`, `change unready`, `change abandon`, `change feedback`, `change wait`, `change
 use`, `change archive`, `review open|about|thread|submit|history`, `status`, `diff`, `check`,
 `integration record` — all of which exist and are spec'd (PRD §9-§11), and invariants 8 and 10 are
-*about* approval validity, which is lifecycle.
+_about_ approval validity, which is lifecycle.
 
 The blocking ambiguity is `ready`. Draft queue step 6 says "include branches that are ready for
 review", which reads either as:
@@ -591,6 +599,7 @@ fallback's ref target also changes namespace, and must stop implying "the" archi
 `refs/git-pair/archive/<id>`, both flat leaves, so `ChangesetID`'s `<id>/<child>` parser and the whole
 "a ref cannot be both a leaf and a namespace" argument in PRD §13.1 and `reviewref.go:15` are deleted
 rather than rewritten — one of the few places this design removes complexity instead of moving it.
+
 ### D16. Additions that are cheap but need deciding
 
 - **Reviewer identity as an artifact field.** Draft lists `reviewer` among review-commit contents;
@@ -602,7 +611,7 @@ rather than rewritten — one of the few places this design removes complexity i
   resolution is recorded (thread file front matter? a trailer?) and whether `check` gates on open
   threads — that is a gate that does not exist today and would change every team's `check` verdict.
 - **Deferred list vs PRD §26/§27.** Aligned in substance; needs re-filing, and two items move in the
-  *opposite* direction from current README "What it is not": queue `--all` over already-fetched
+  _opposite_ direction from current README "What it is not": queue `--all` over already-fetched
   remote-tracking branches, and per-review ref publication.
 
 ## 4. What carries over untouched
@@ -664,4 +673,3 @@ Each milestone is independently shippable and leaves the suite green.
    surface if this repo adopts one) moves with this: the three-step integration contract, the deferred
    additions from §0.4, and PRD §2.3, §3, §9.5-9.7, §10.6, §11.3, §11.4, §12, all of §13, §16, §24-§27.
    Docs describing refs should move with milestone 1 rather than wait.
-

@@ -54,11 +54,11 @@ contracts, and the publishing section, and `skills/git-pair/references/cli.md`'s
 to the review's question, which was whether anything nudges a user toward setting this up. `record` did
 already; `publish` and the read path did not, and now do:
 
-| Surface | What it says |
-| --- | --- |
-| `integration record` | the `configure:` line naming both keys — the two refspecs it did not write |
-| `integration publish` | the `configure:` line naming `remote.<name>.push` alone, printed after a run that sent or confirmed a pair |
-| `status`, `queue` | the "nothing here can say whether a record reached `<remote>`" note ends with the `--fetch` that asks once *and* `git pair integration configure`, which stops the asking |
+| Surface               | What it says                                                                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `integration record`  | the `configure:` line naming both keys — the two refspecs it did not write                                                                                                |
+| `integration publish` | the `configure:` line naming `remote.<name>.push` alone, printed after a run that sent or confirmed a pair                                                                |
+| `status`, `queue`     | the "nothing here can say whether a record reached `<remote>`" note ends with the `--fetch` that asks once _and_ `git pair integration configure`, which stops the asking |
 
 Each is silent where the line is already written, which is what keeps a repeated pipeline run readable.
 `publish` prints nothing on a run that sent nothing and nothing on the failure path, where the report is
@@ -76,7 +76,7 @@ nothing asks for that combination yet.
 **The push refspec carries no `+`,** which contradicts PRD §13.4's previous hand-typed recipe and the PRD now
 says so. A forced refspec in `remote.<name>.push` would let a plain `git push` overwrite a remote durable
 ref that disagrees — the one thing §13.3's create-only rule exists to prevent, and something no git-pair
-command can do. Unforced, a repository gets automatic publishing *and* git's own rejection of the
+command can do. Unforced, a repository gets automatic publishing _and_ git's own rejection of the
 disagreement; `TestConfiguredPushSendsTheRecordsAndNeverMovesOne` asserts both halves of that with a real
 push and a real remote.
 
@@ -101,7 +101,7 @@ finishes it; a swallowed error would leave a clone half-configured with a log li
   `+`, and the deliberate equality with `FetchRefspec`.
 - Rewritten: `internal/cli/configure_test.go` — that `record` writes no config and names the command; that
   `configure` appends both lines and leaves the clone's own refspecs intact; the JSON shape and the
-  `already_configured` transition; a second run leaving the config *file* byte-identical; `--fetch-only`
+  `already_configured` transition; a second run leaving the config _file_ byte-identical; `--fetch-only`
   writing one key and omitting the other half from JSON; `--remote` writing the named remote and refusing an
   unknown one; the no-remote refusal writing nothing; the configured-clone comparison test, now driven by
   the command rather than by hand-typed `git config`; and the push test above.

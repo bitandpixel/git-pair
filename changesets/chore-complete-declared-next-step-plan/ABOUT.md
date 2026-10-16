@@ -15,9 +15,9 @@ docs/plans/declared-next-step/            → docs/plans/completed/declared-next
 
 ## What changed
 
--   The two files above, moved with `git mv`. Nothing inside them was rewritten.
--   One closing row in the plan's Audit History table: the approval, declaration and landing commits, and the
-    reason the move happens here rather than as the last commit of the changeset it belongs to.
+- The two files above, moved with `git mv`. Nothing inside them was rewritten.
+- One closing row in the plan's Audit History table: the approval, declaration and landing commits, and the
+  reason the move happens here rather than as the last commit of the changeset it belongs to.
 
 ## Design decisions
 
@@ -38,21 +38,21 @@ confirmed before the move.
 
 ## Validation
 
--   `mise run check` — gofmt, vet, and the sharded suite, which includes the docs contract test and the prose
-    hygiene scan over `PRD.md`, the README and the skill. Nothing there reads `docs/plans/`, so this is a
-    regression check rather than a test of the change.
--   `mise run gates` — the scripted CI integration, the PTY walkthrough, and the issue-29 scenarios.
--   `git pair status --changeset chore-complete-declared-next-step-plan` after landing, which is how the move
-    itself is verified: the directory is in the destination, with the chain that carried it.
+- `mise run check` — gofmt, vet, and the sharded suite, which includes the docs contract test and the prose
+  hygiene scan over `PRD.md`, the README and the skill. Nothing there reads `docs/plans/`, so this is a
+  regression check rather than a test of the change.
+- `mise run gates` — the scripted CI integration, the PTY walkthrough, and the issue-29 scenarios.
+- `git pair status --changeset chore-complete-declared-next-step-plan` after landing, which is how the move
+  itself is verified: the directory is in the destination, with the chain that carried it.
 
 ## Known limitations
 
--   The plan's Audit History rows name commits by hash. If `main` is ever rewritten, the hashes stop resolving
-    while the rows stay true in substance. Every other completed plan in that directory uses the same
-    convention.
--   Two other plans in `docs/plans/` may be finished in the same sense and have not been checked against their
-    changesets: `derive-destination-from-tree` and `parent-landed-detection` are the ones I would look at first.
-    That is a survey, not a claim — it comes from a directory listing, not from reading them.
+- The plan's Audit History rows name commits by hash. If `main` is ever rewritten, the hashes stop resolving
+  while the rows stay true in substance. Every other completed plan in that directory uses the same
+  convention.
+- Two other plans in `docs/plans/` may be finished in the same sense and have not been checked against their
+  changesets: `derive-destination-from-tree` and `parent-landed-detection` are the ones I would look at first.
+  That is a survey, not a claim — it comes from a directory listing, not from reading them.
 
 ## Open questions
 

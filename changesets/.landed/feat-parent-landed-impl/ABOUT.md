@@ -46,7 +46,7 @@ deletes, and `git pair init` records a base that reads the same on every machine
   first-parent line and that marker's `Review-Head` is an ancestor of it (`ffChainTip`); otherwise the branch,
   then `--source`. A branch downstream of the landing is never a source candidate. The two discovery passes
   now answer one question — pass 1's settled id is threaded into pass 2, which honours `--target` and
-  `--default-branch` and subtracts landed *and* already-recorded ids. "Unfinished" means a missing integration
+  `--default-branch` and subtracts landed _and_ already-recorded ids. "Unfinished" means a missing integration
   or a half-pair. A flagless run where everything is recorded exits 2 with `nothing to record` and names no
   candidates; a run that can name one changeset still exits 0 with `already_recorded`. README and PRD §11.4
   changed in the same commit. Tests: `internal/cli/record_derivation_test.go`.
@@ -61,7 +61,7 @@ deletes, and `git pair init` records a base that reads the same on every machine
 - **Detection first, then the base move.** M1–3 change no measurement; M4 changes the measurement and is the
   commit that can change a verdict. Keeping them separate is what makes the second reviewable.
 - **A note is not a reason.** These findings go to `a.warn` and to JSON, never into `check`'s `reasons`,
-  because `reasons` means *do not integrate this* and a landed parent means the opposite. Every surface keeps
+  because `reasons` means _do not integrate this_ and a landed parent means the opposite. Every surface keeps
   its exit code; a child whose parent landed with an unchanged diff still passes.
 - **`landingNextAction` is untouched.** It spells the landing contract for four commands and takes only a
   base. The parent's step is a separate note beside it, not a second meaning inside it.
@@ -79,7 +79,7 @@ deletes, and `git pair init` records a base that reads the same on every machine
 - **Deliberate deviations, all recorded in their commit messages.** M1: the `Span:` label keeps the ref name
   (`Span: refs/git-pair/integrations/alpha...current`) rather than the landing commit, and the fetch remedy
   for a clone that lacks the record prints in the `Stack:` section instead of the `Base:` line. M5: the
-  `Review-Head` ancestry requirement was *not* added to `verifyReviewedSource`, so a caller who names
+  `Review-Head` ancestry requirement was _not_ added to `verifyReviewedSource`, so a caller who names
   `--source` is not newly refused; the guard is applied in the layer that derives the head, which is where a
   copied marker could otherwise produce a record nobody approved. M2's JSON keys are `unpublished` and
   `landed_unrecorded`, not the plan's `unrecorded`, to match the words the human surface prints.
@@ -97,7 +97,7 @@ deletes, and `git pair init` records a base that reads the same on every machine
   recorded after `git branch -D` with the archive read from the merge's second parent; the flagless run over
   three landed changesets recording the one that needed it and refusing with `nothing to record` when all
   three were finished; `init` writing `base: main` and printing the divergence note with `1 here that origin
-  does not have`.
+does not have`.
 - Gate scripts (`scripts/gates/e2e-29.sh`, `scripts/gates/pty-walkthrough.sh`) run at handoff; their output is
   in the review thread.
 

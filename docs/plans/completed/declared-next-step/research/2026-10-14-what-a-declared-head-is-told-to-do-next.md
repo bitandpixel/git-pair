@@ -55,11 +55,11 @@ over. The absence was correct, and it is a tested state
 
 Nothing on the screen said what a declared head is waiting for. Three surfaces, three answers:
 
-| Surface | Declared head | Correct? |
-| --- | --- | --- |
-| `git pair check` | `` `git pair check`, then merge into main with ordinary git `` | no — the marker says the request is written; the step is the push |
-| `git pair status` | `push the branch so whoever merges can see the request; then <landing sentence>` | half — the push is named whether or not the branch is on the remote, and it ends on the author's own merge |
-| `git pair change integrate` (re-run) | prints `already declared … nothing recorded` and no next step | no — it computes `out.NextAction` and drops it on that path |
+| Surface                              | Declared head                                                                    | Correct?                                                                                                   |
+| ------------------------------------ | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `git pair check`                     | `` `git pair check`, then merge into main with ordinary git ``                   | no — the marker says the request is written; the step is the push                                          |
+| `git pair status`                    | `push the branch so whoever merges can see the request; then <landing sentence>` | half — the push is named whether or not the branch is on the remote, and it ends on the author's own merge |
+| `git pair change integrate` (re-run) | prints `already declared … nothing recorded` and no next step                    | no — it computes `out.NextAction` and drops it on that path                                                |
 
 `grep` put the declared-path logic in two of the three files:
 

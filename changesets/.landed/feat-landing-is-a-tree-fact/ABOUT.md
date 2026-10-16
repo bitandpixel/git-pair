@@ -33,7 +33,7 @@ This is milestone M2 of `docs/plans/completed/simplify-architecture/plan.md`, st
 - `landingLicence` (`internal/cli/landed.go`) is the single answer to that question, used by `queue`'s
   finding and by `status`'s `reviewed` field so one read cannot report the two apart. It asks the chain what
   it recorded, then asks `merge-base --is-ancestor` whether the destination holds the commit the approval
-  names — of the destination's *tip*, not of `landed_commit`, which is the first commit of the run that
+  names — of the destination's _tip_, not of `landed_commit`, which is the first commit of the run that
   carried the directory and usually sits behind the approval it is checked against. The reason line names
   which of the three findings it is, and a reason that cannot be checked says so instead of implying that no
   one looked.
@@ -59,7 +59,7 @@ as `merge into:`). Pointing the write gate at the destination would retire a cha
 merge, which is the behaviour this milestone rejects.
 
 **A chain read reports the state the chain's markers derive.** A landed merge landing now prints `APPROVED`.
-PRD §13.4's rule that the archive is not a second source of state was about walking a ref *outside* the span
+PRD §13.4's rule that the archive is not a second source of state was about walking a ref _outside_ the span
 and reporting it as live work; the chain is the span, so there is one source. What keeps the printed state
 safe is the gate, which refuses on the landing before it asks the drift question.
 
@@ -154,13 +154,13 @@ round 2 is review ef0bc65.
 ### Round 1
 
 > what will the end status be for a changeset that's been squash-merged into trunk?
-**Answer, measured against a scratch repository with this branch's binary.** `status --changeset <id>` reports
-`landed: true`, `landed_commit` the commit that carried the directory in, `landed_branch: main`,
-`chain_base` and `chain_head` empty, `reviewed: false`, and `next_action` "landed at `<sha>` in main: nothing
-further is recorded for a changeset that has landed". `queue` lists it under `LANDED UNREVIEWED` with the
-reason "the landing carried the directory in one commit, so no review markers came with it". `check` run on a
-branch that still carries the directory exits 2 with the landed sentence and the `status --changeset`
-pointer.
+> **Answer, measured against a scratch repository with this branch's binary.** `status --changeset <id>` reports
+> `landed: true`, `landed_commit` the commit that carried the directory in, `landed_branch: main`,
+> `chain_base` and `chain_head` empty, `reviewed: false`, and `next_action` "landed at `<sha>` in main: nothing
+> further is recorded for a changeset that has landed". `queue` lists it under `LANDED UNREVIEWED` with the
+> reason "the landing carried the directory in one commit, so no review markers came with it". `check` run on a
+> branch that still carries the directory exits 2 with the landed sentence and the `status --changeset`
+> pointer.
 
 `state` is `WORKING`, and that is the part of the answer worth arguing about. `state` is derived from the
 markers in the chain, and a squash carries none, so the honest derivation has nothing to report. The fields
@@ -172,26 +172,26 @@ on this branch". Both are true of the derivation and neither reads well alone; t
 which rewrites this surface again, so it is not changed here.
 
 > is this cost per-changeset? or for the whole report?
-**Per landed changeset, on top of a fixed cost for the report.** The test runs `queue --json` twice over one
-repository — once with an empty destination, once with the destination carrying 300 landed directories — and
-bounds `(withDirs - empty) / 300`. The number under the bound is the marginal cost of one landing; `empty` is
-the report's own cost and is deliberately not bounded, because it does not grow with the landings. Measured:
-11 invocations per landing in this repository's fixture and 10.0 in a smaller scratch one, bounded at 14;
-the report itself cost 18 invocations in the same scratch run. So a destination with fifty landings costs
-roughly 570 invocations, which is the price of the answer being true in a clone that fetched nothing but the
-destination.
+> **Per landed changeset, on top of a fixed cost for the report.** The test runs `queue --json` twice over one
+> repository — once with an empty destination, once with the destination carrying 300 landed directories — and
+> bounds `(withDirs - empty) / 300`. The number under the bound is the marginal cost of one landing; `empty` is
+> the report's own cost and is deliberately not bounded, because it does not grow with the landings. Measured:
+> 11 invocations per landing in this repository's fixture and 10.0 in a smaller scratch one, bounded at 14;
+> the report itself cost 18 invocations in the same scratch run. So a destination with fifty landings costs
+> roughly 570 invocations, which is the price of the answer being true in a clone that fetched nothing but the
+> destination.
 
 > could we have a REVIEW DISCARDED status that's derivable?
-**Not derivable in the sense this plan requires.** What the destination proves is that the chain behind the
-directory carries no permitting verdict. At least three histories produce exactly that tree: never reviewed;
-reviewed and squash-merged; reviewed, merged, and then rewritten away. `REVIEW DISCARDED` would name the
-second of the three, and the destination cannot tell them apart — that is the limit PRD §13.3 states in the
-milestone that deletes the refs.
+> **Not derivable in the sense this plan requires.** What the destination proves is that the chain behind the
+> directory carries no permitting verdict. At least three histories produce exactly that tree: never reviewed;
+> reviewed and squash-merged; reviewed, merged, and then rewritten away. `REVIEW DISCARDED` would name the
+> second of the three, and the destination cannot tell them apart — that is the limit PRD §13.3 states in the
+> milestone that deletes the refs.
 
-It *is* derivable in one narrower case: the branch is still here, so its own markers still carry the approval.
+It _is_ derivable in one narrower case: the branch is still here, so its own markers still carry the approval.
 That is precisely the class of answer this plan retires — true in the clone that did the merge, false in a
 fresh clone that fetched only the destination — and the queue's answer has to be the same in both. So the
-finding stays the disjunction, and the reason line says which shape the *landing* is: a chain that carries no
+finding stays the disjunction, and the reason line says which shape the _landing_ is: a chain that carries no
 verdict, or no chain at all. Where the distinction is worth keeping, the fix is upstream of the read:
 `--no-ff` keeps the chain in the destination, and `change tidy` (M4) moves the directory on a branch that
 still holds it.
@@ -210,7 +210,7 @@ And can you move all these reviewer notes and answers to a Discussion section be
 > And can you move all these reviewer notes and answers to a Discussion section below?
 
 **A rebase-merge keeps the review. Measured with this branch's binary, in two shapes.** A rebase replays the
-branch's commits, and the markers *are* commits, so `review: approve` arrives on the destination as a commit
+branch's commits, and the markers _are_ commits, so `review: approve` arrives on the destination as a commit
 with its trailer intact and the chain walk finds it. Rebase, fast-forward the destination, delete the branch:
 `state: APPROVED`, `landed: true`, `chain_base` and `chain_head` both naming the replayed run,
 `reviewed: true`, and `queue` reports no `LANDED UNREVIEWED`. Repeated with a rebase onto a `main` that had
@@ -230,7 +230,7 @@ work. Identity runs on the name: `lifecycle` admits a marker only when `Review-C
 the chain selects commits by whether the tree carries `changesets/<id>/`. Nothing selects by SHA, and
 `reviewedHead` checks the trailer's shape without resolving it, so a rewrite cannot detach a verdict from
 its changeset — which is the whole reason the answer above comes out `reviewed: true`. The drift question
-runs on the SHA, and there the rewrite is fatal on purpose: rebase a *live* branch after an approval, without
+runs on the SHA, and there the rewrite is fatal on purpose: rebase a _live_ branch after an approval, without
 landing it, and `check` refuses — "review `<sha>` reviewed `<head>`, which is no longer in this history: the
 branch was rewritten since the review, so the approval does not license integration". Measured both ways:
 landed, the verdict reads in a fresh `--no-local` clone where the commit `Review-Head` names is not even

@@ -32,17 +32,17 @@ must live inside the module).
 Each row is a fixture built with real commits and real refs, and the resolution the
 rules produce. All six ran as specified.
 
-| Fixture | Result | Notes |
-| --- | --- | --- |
-| Stacked child branch, parent readied and archived, child readied | resolves to the **child** | §18's nearest-tip rule works as intended |
-| Parent branch and child branch both advance after branching | parent branch resolves to **uninitialized** | see 1 |
-| Two changesets landed by a merge commit, no integration recorded | **AMBIGUOUS** (`[one@3 two@3]`) | see 2 |
-| Same, with `git pair integration record` run for both | resolves to the later one | recording is load-bearing |
-| Two changesets landed by squash, no integration recorded | resolves to the later one | see 3 |
-| `change init` run on trunk and never abandoned | trunk **and every branch off it** resolve to it | see 4 |
+| Fixture                                                          | Result                                          | Notes                                    |
+| ---------------------------------------------------------------- | ----------------------------------------------- | ---------------------------------------- |
+| Stacked child branch, parent readied and archived, child readied | resolves to the **child**                       | §18's nearest-tip rule works as intended |
+| Parent branch and child branch both advance after branching      | parent branch resolves to **uninitialized**     | see 1                                    |
+| Two changesets landed by a merge commit, no integration recorded | **AMBIGUOUS** (`[one@3 two@3]`)                 | see 2                                    |
+| Same, with `git pair integration record` run for both            | resolves to the later one                       | recording is load-bearing                |
+| Two changesets landed by squash, no integration recorded         | resolves to the later one                       | see 3                                    |
+| `change init` run on trunk and never abandoned                   | trunk **and every branch off it** resolve to it | see 4                                    |
 
 **1. One movable ref cannot describe two lines of development.** The requirement makes
-`change init` *continue* an ancestor changeset by default (§17), so a branch off an
+`change init` _continue_ an ancestor changeset by default (§17), so a branch off an
 active changeset shares its archive ref — and then both branches run `change ready`,
 each moving the shared ref to its own marker commit. Whever moved it last owns it, and
 the other branch reports `uninitialized` while its `changesets/<id>/` directory, its
@@ -54,14 +54,14 @@ but contradicts §17's own default, and only fixes the branch that remembers to 
 
 **2. A merge commit that lands two changesets is ambiguous until integration is
 recorded.** The refs of both changesets are ancestors of the merge, at equal distance,
-so rule 4 fires and `status` refuses on *every* branch created afterwards, including
+so rule 4 fires and `status` refuses on _every_ branch created afterwards, including
 branches that have nothing to do with either changeset. Recording integration for both
 clears it. So `integration record` is not an optional reporting step in this model: a
 merge-commit landing with unrecorded changesets breaks the repository for new work.
 
 **3. Squash integration is invisible.** Squashed commits do not contain the archived
 commits, so no archive ref is an ancestor and the branch resolves to whatever else
-matches. That is *convenient* — it never triggers 2 — but it means discovery's answer
+matches. That is _convenient_ — it never triggers 2 — but it means discovery's answer
 depends on which integration strategy the repo used, which §15 explicitly claims it does
 not ("This works independently of the integration strategy").
 
@@ -103,14 +103,14 @@ distance and to spot terminal records — but they are not the oracle.
 
 All six fixtures pass under it, measured rather than reasoned:
 
-| Fixture | Rules as written | Tree rule |
-| --- | --- | --- |
-| Stacked child branch | child ✓ | child ✓ |
-| Diverged parent and child | parent `uninitialized` ✗ | both branches resolve to the shared changeset ✓ |
-| Merge landing, integration unrecorded | **AMBIGUOUS** ✗ | `uninitialized` ✓ |
-| Squash landing, integration unrecorded | resolves, by accident | `uninitialized` ✓ — the same answer as the merge |
-| Forgotten `change init` on trunk | owns every descendant ✗ | `uninitialized` ✓ |
-| A clone with no archive refs at all | `uninitialized` ✗ | resolves ✓ |
+| Fixture                                | Rules as written         | Tree rule                                        |
+| -------------------------------------- | ------------------------ | ------------------------------------------------ |
+| Stacked child branch                   | child ✓                  | child ✓                                          |
+| Diverged parent and child              | parent `uninitialized` ✗ | both branches resolve to the shared changeset ✓  |
+| Merge landing, integration unrecorded  | **AMBIGUOUS** ✗          | `uninitialized` ✓                                |
+| Squash landing, integration unrecorded | resolves, by accident    | `uninitialized` ✓ — the same answer as the merge |
+| Forgotten `change init` on trunk       | owns every descendant ✗  | `uninitialized` ✓                                |
+| A clone with no archive refs at all    | `uninitialized` ✗        | resolves ✓                                       |
 
 Its cost is also independent of how many changesets have ever existed: **8 git
 invocations against 1,802** for the same fixture with 300 archive refs. It satisfies §7
@@ -139,7 +139,7 @@ Verified with the shipped binary rather than by reading:
   accepts it, and the "base is the current branch" guard does not false-positive
   because `rev-parse --symbolic-full-name` returns the archive ref itself, not
   `refs/heads/...`.
-- **The value cannot be ambiguous with a branch name.** A branch *typed* as
+- **The value cannot be ambiguous with a branch name.** A branch _typed_ as
   `refs/git-pair/changesets/booking/archive` is stored at
   `refs/heads/refs/git-pair/changesets/booking/archive`, so exact-name resolution finds
   the archive ref and only the archive ref.
@@ -151,9 +151,9 @@ Two costs come with it:
 - **A ref-shaped base makes fetched refs load-bearing for ordinary reads.** In a clone
   that has not fetched the namespace, every read of a stacked changeset fails:
   `cannot resolve changeset base "refs/git-pair/changesets/booking/archive": unknown
-  revision`. Today `base: main` resolves in any clone. §24's refspec moves from
+revision`. Today `base: main` resolves in any clone. §24's refspec moves from
   "recommended, needed for integration" to "required, needed to open a stacked
-  changeset at all", and CI setup that skips it breaks *before* it gets to
+  changeset at all", and CI setup that skips it breaks _before_ it gets to
   `git pair check`.
 - **The base of a historical commit becomes time-dependent.** `base:` in a commit's
   metadata names a moving ref, so the span for an old commit resolves against wherever
@@ -167,19 +167,19 @@ Two costs come with it:
 Rules 1–3 as written need, per archive ref, an ancestry test, a terminal-record test and
 a distance: six `git` invocations each. Measured, with 300 archive refs:
 
-| Setup | Measurement |
-| --- | --- |
-| 300 refs, 301-commit history | **1,802 git invocations** for one resolution (the prototype, counted) |
-| 300 refs, 20,000-commit history | 300 × `merge-base --is-ancestor` = **9,065 ms**; with a commit-graph 2,036 ms |
-| same | 300 × `rev-list --count <ref>..HEAD` = **9,089 ms**; with a commit-graph 2,339 ms |
-| same | one `git rev-list HEAD` = **83 ms**; with a commit-graph **28 ms** |
+| Setup                           | Measurement                                                                       |
+| ------------------------------- | --------------------------------------------------------------------------------- |
+| 300 refs, 301-commit history    | **1,802 git invocations** for one resolution (the prototype, counted)             |
+| 300 refs, 20,000-commit history | 300 × `merge-base --is-ancestor` = **9,065 ms**; with a commit-graph 2,036 ms     |
+| same                            | 300 × `rev-list --count <ref>..HEAD` = **9,089 ms**; with a commit-graph 2,339 ms |
+| same                            | one `git rev-list HEAD` = **83 ms**; with a commit-graph **28 ms**                |
 
 Read literally, the rules cost about eleven seconds per `status` in a large repository
 with a year of landed changesets — and they run on every read, including `queue`, which
 would multiply it by the number of branches.
 
 The same answers are available in three invocations: one `rev-list HEAD` (or
-`rev-list --parents`) gives ancestry *and* depth for every commit at once, one
+`rev-list --parents`) gives ancestry _and_ depth for every commit at once, one
 `cat-file --batch` reads the candidate commits' messages for terminal trailers, one
 `for-each-ref` lists the candidates. That is the shape the implementation must have; the
 per-ref formulation in the requirements is not implementable as written. Note that

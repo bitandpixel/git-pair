@@ -85,7 +85,7 @@ not travelled is reported (`RECORDED, NOT PUBLISHED`), publishing is a command w
 
 ## The bug M2 found in M1
 
-`git fetch --prune` prunes the destination subtree of *every* refspec in the command. M1's single fetch
+`git fetch --prune` prunes the destination subtree of _every_ refspec in the command. M1's single fetch
 carried `refs/git-pair/*:refs/git-pair/*` alongside the mirror refspec, so a clone that had recorded a
 landing and not yet published it fetched, and git deleted the records it had come to read — the exact state
 M2 exists to report. The M2 fixture found it by recording, fetching, and then reporting its own record as
@@ -162,7 +162,7 @@ invocation and touches nothing.
 
 ## What M4's own gates caught
 
-The first draft wrote the config line *before* the refs, reasoning that an additive config line is the
+The first draft wrote the config line _before_ the refs, reasoning that an additive config line is the
 reversible half. The pty walkthrough's fixture — whose changeset ends its scenarios blocked — made `record`
 refuse, and the config line was written anyway: a refused record mutating the clone's fetch behaviour. Now
 the flag is preflighted (no remote is a refusal with an exit code, before anything is written) and the write

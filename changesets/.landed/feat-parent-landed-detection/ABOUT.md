@@ -20,7 +20,7 @@ landing as parent movement are each considered and each refused, with the reason
 that could have done it.
 
 The first round argued with the fourth one. Review `a87ae0b` objected that the relink trigger only decides
-*when* the base moves, since deleting the parent branch moves it regardless, and measuring it showed the delay
+_when_ the base moves, since deleting the parent branch moves it regardless, and measuring it showed the delay
 costs more than a label: a child rebased onto trunk, read against the parent's branch tip, reports the
 parent's own work and unrelated trunk work as the child's change. That non-goal is withdrawn, the argument is
 in the thread, and the trigger is milestone 4.
@@ -56,7 +56,7 @@ destination answers "reached trunk" and "landed unrecorded" (`internal/cli/lande
 either into `CHANGESET.yaml` creates a second source of truth, and a `parent:` that names an integration ref
 would break the case `parent:` is defined as a branch and destroy the tellability PRD §21 protects.
 
-**A landing is not parent movement.** PRD §21's conservative rule is about the parent *branch* moving, and a
+**A landing is not parent movement.** PRD §21's conservative rule is about the parent _branch_ moving, and a
 landing does not move it. Applying the rule to landings would drop approvals whose diff content is identical.
 
 **Notes, not refusals.** New statements go to `a.warn` and to JSON fields. `reasons` means "do not integrate

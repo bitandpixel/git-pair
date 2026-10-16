@@ -45,18 +45,18 @@ directories - and this makes it a rule someone has to keep rather than a coincid
 
 ## Evidence
 
-| Fixture | Result |
-|---|---|
-| `TestChangeStackRecordsTheLinkTheBranchWasMissing` | both keys printed old and new, child's file rewritten, commit touched exactly one path inside `changesets/`, then `change ready` succeeds |
-| `TestChangeStackWritesTheDeepestLinkOnAThirdLevel` | the child records `feature/auth-tests`, not the grandparent it had to exclude |
-| `TestChangeStackRefusesWhenTheBaseBranchRecordsNoChain` | exit 2, both candidates named, "level below first" |
-| `TestChangeStackRefusesABaseThatSharesNothing` | exit 2, both sets named, `main` named as the answer |
-| `TestChangeStackRefusesABranchCarryingTwoOfItsOwn` | exit 2, both own ids named, `change combine` named |
-| `TestChangeStackRefusesItsOwnBranch` | exit 2, says to branch, and wrote nothing |
-| `TestChangeCombineArchivesTheDisappearedChangeset` | archive whole at `.combined/lexer/`, survivor's `base: main` intact, ABOUT line present, then offerable |
-| `TestChangeCombineCopiesThreadsUnderTheDisappearedID` | `lexer-scope.md` copied, archived original stays, the survivor's own thread untouched |
-| `TestChangeCombineRefusesWhileEitherChangesetIsOffered` | exit 2 naming the changeset and `change unready`, and moved nothing |
-| `TestAnArchiveUnderCombinedAnswersNoID`, `TestAnArchiveIsNotAThreadOfItsHost`, `TestArchivesNestedInAnArchiveStayInert` | inert to `Resolve`, `ActiveIDs`, `LandedIDs`, and `Threads` |
+| Fixture                                                                                                                 | Result                                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `TestChangeStackRecordsTheLinkTheBranchWasMissing`                                                                      | both keys printed old and new, child's file rewritten, commit touched exactly one path inside `changesets/`, then `change ready` succeeds |
+| `TestChangeStackWritesTheDeepestLinkOnAThirdLevel`                                                                      | the child records `feature/auth-tests`, not the grandparent it had to exclude                                                             |
+| `TestChangeStackRefusesWhenTheBaseBranchRecordsNoChain`                                                                 | exit 2, both candidates named, "level below first"                                                                                        |
+| `TestChangeStackRefusesABaseThatSharesNothing`                                                                          | exit 2, both sets named, `main` named as the answer                                                                                       |
+| `TestChangeStackRefusesABranchCarryingTwoOfItsOwn`                                                                      | exit 2, both own ids named, `change combine` named                                                                                        |
+| `TestChangeStackRefusesItsOwnBranch`                                                                                    | exit 2, says to branch, and wrote nothing                                                                                                 |
+| `TestChangeCombineArchivesTheDisappearedChangeset`                                                                      | archive whole at `.combined/lexer/`, survivor's `base: main` intact, ABOUT line present, then offerable                                   |
+| `TestChangeCombineCopiesThreadsUnderTheDisappearedID`                                                                   | `lexer-scope.md` copied, archived original stays, the survivor's own thread untouched                                                     |
+| `TestChangeCombineRefusesWhileEitherChangesetIsOffered`                                                                 | exit 2 naming the changeset and `change unready`, and moved nothing                                                                       |
+| `TestAnArchiveUnderCombinedAnswersNoID`, `TestAnArchiveIsNotAThreadOfItsHost`, `TestArchivesNestedInAnArchiveStayInert` | inert to `Resolve`, `ActiveIDs`, `LandedIDs`, and `Threads`                                                                               |
 
 The M6 fixtures that asserted the described ways out (`--set-base`, `git restore`) now assert the command names, so
 the message cannot rot back into naming nothing.

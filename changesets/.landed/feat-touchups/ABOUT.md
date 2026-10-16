@@ -54,7 +54,7 @@ Nothing in this repository reads the key: the only readers are README's example,
 as whoever ran it. A trailer naming the reviewer would be a second answer to one question, free to disagree
 with the commit it travels with, and the first would have to win anyway.
 
-**`REVIEWER` sits beside the verdict, not beside the subject.** The column answers *who said this*, so it
+**`REVIEWER` sits beside the verdict, not beside the subject.** The column answers _who said this_, so it
 belongs with `OUTCOME`; `SUBJECT` stays last because it is the only field of unbounded length.
 
 ## Validation

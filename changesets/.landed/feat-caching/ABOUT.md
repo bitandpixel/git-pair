@@ -9,10 +9,10 @@ a read-only command to be slow at.
 
 Two caches are added, each with a different key and therefore a different lifetime:
 
-| layer | key | lives for | why that is safe |
-| --- | --- | --- | --- |
-| read memo (`internal/git`) | a git invocation's argv and stdin | one command run | arguments name refs, and refs move — so only a run that changes nothing may reuse an answer |
-| derived-fact cache (`internal/factcache`) | the commit ids the answer was derived from | until deleted | git objects are immutable, so the answer cannot go stale; a branch that moved is a different key |
+| layer                                     | key                                        | lives for       | why that is safe                                                                                 |
+| ----------------------------------------- | ------------------------------------------ | --------------- | ------------------------------------------------------------------------------------------------ |
+| read memo (`internal/git`)                | a git invocation's argv and stdin          | one command run | arguments name refs, and refs move — so only a run that changes nothing may reuse an answer      |
+| derived-fact cache (`internal/factcache`) | the commit ids the answer was derived from | until deleted   | git objects are immutable, so the answer cannot go stale; a branch that moved is a different key |
 
 Warm, `queue` is 87 subprocesses and 0.27s against 2.24s on `main` — 8.4×. The landings path in `status`
 went from 537 subprocesses to 10. The output is byte-identical to the run that ignores both caches, on stdout
@@ -20,33 +20,33 @@ and on stderr.
 
 ## What changed
 
-| file | what it does now |
-| --- | --- |
-| `internal/git/memo.go` | new. Classifies each invocation `pureRead` / `liveRead` / `mutation`, memoizes the first, clears on the last |
-| `internal/git/git.go` | `run` splits into the memo decision and `spawn`; `Repo` carries both caches and the two switches |
-| `internal/factcache/` | new. JSON entries under `<gitdir>/git-pair/cache`, one file per derived fact, pruned by mtime |
-| `internal/changeset/chain.go` | `LandedChain` resolves the destination to a commit first and derives from it, then caches |
-| `internal/lifecycle/lifecycle.go` | `Summarize` resolves `base` and `headRef` to commits and caches the derivation |
-| `internal/cli/landed.go` | the landings report caches one record per landed changeset against the destination commit |
-| `internal/cli/root.go` | `loadRepo` turns both caches on for a command run; `--no-cache` turns both off |
-| `internal/tui/session.go` | the review session turns the memo off and keeps the fact cache |
-| `internal/cli/change.go` | `change wait` drops the memo before each poll round |
-| `internal/gittest/spawn.go` | `SpawnShim` turns both caches off, so an invocation count is a cold measurement of the algorithm |
-| `scripts/gates/ci-integrate.sh` | `count_calls` sets `GIT_PAIR_NO_CACHE`, for the same reason — it is the second instrument that counts git invocations, and the first pass fixed only the Go one |
-| `internal/cli/root.go` | also: `GIT_PAIR_NO_CACHE`, the environment form of `--no-cache` |
-| `internal/hygiene/hygiene_test.go` | `spawn` joins `run` as a named git call site, and the detector's self-test proves it is caught |
+| file                               | what it does now                                                                                                                                                |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `internal/git/memo.go`             | new. Classifies each invocation `pureRead` / `liveRead` / `mutation`, memoizes the first, clears on the last                                                    |
+| `internal/git/git.go`              | `run` splits into the memo decision and `spawn`; `Repo` carries both caches and the two switches                                                                |
+| `internal/factcache/`              | new. JSON entries under `<gitdir>/git-pair/cache`, one file per derived fact, pruned by mtime                                                                   |
+| `internal/changeset/chain.go`      | `LandedChain` resolves the destination to a commit first and derives from it, then caches                                                                       |
+| `internal/lifecycle/lifecycle.go`  | `Summarize` resolves `base` and `headRef` to commits and caches the derivation                                                                                  |
+| `internal/cli/landed.go`           | the landings report caches one record per landed changeset against the destination commit                                                                       |
+| `internal/cli/root.go`             | `loadRepo` turns both caches on for a command run; `--no-cache` turns both off                                                                                  |
+| `internal/tui/session.go`          | the review session turns the memo off and keeps the fact cache                                                                                                  |
+| `internal/cli/change.go`           | `change wait` drops the memo before each poll round                                                                                                             |
+| `internal/gittest/spawn.go`        | `SpawnShim` turns both caches off, so an invocation count is a cold measurement of the algorithm                                                                |
+| `scripts/gates/ci-integrate.sh`    | `count_calls` sets `GIT_PAIR_NO_CACHE`, for the same reason — it is the second instrument that counts git invocations, and the first pass fixed only the Go one |
+| `internal/cli/root.go`             | also: `GIT_PAIR_NO_CACHE`, the environment form of `--no-cache`                                                                                                 |
+| `internal/hygiene/hygiene_test.go` | `spawn` joins `run` as a named git call site, and the detector's self-test proves it is caught                                                                  |
 
 Git subprocesses spawned, and what each layer took off them:
 
-| | on `main` | memo only | memo + facts | warm wall clock |
-| --- | --- | --- | --- | --- |
-| `queue` | 639 | 555 | **87** | 2.24s → **0.27s** |
-| `status`, no changeset on the branch (the landings path) | 537 | 483 | **10** | — |
-| `status --changeset <slug>` | 75 | 60 | 51 | 0.19s → 0.12s |
-| `status`, on a changeset branch | 31 | 28 | 19 | 0.09s → 0.05s |
-| `check` | 42 | 29 | 20 | 0.11s → 0.05s |
-| `change wait`, 3s at `--interval 1s` | 30 | — | 21 | — |
-| `review history` | 16 | 15 | 14 | 0.04s → 0.04s |
+|                                                          | on `main` | memo only | memo + facts | warm wall clock   |
+| -------------------------------------------------------- | --------- | --------- | ------------ | ----------------- |
+| `queue`                                                  | 639       | 555       | **87**       | 2.24s → **0.27s** |
+| `status`, no changeset on the branch (the landings path) | 537       | 483       | **10**       | —                 |
+| `status --changeset <slug>`                              | 75        | 60        | 51           | 0.19s → 0.12s     |
+| `status`, on a changeset branch                          | 31        | 28        | 19           | 0.09s → 0.05s     |
+| `check`                                                  | 42        | 29        | 20           | 0.11s → 0.05s     |
+| `change wait`, 3s at `--interval 1s`                     | 30        | —         | 21           | —                 |
+| `review history`                                         | 16        | 15        | 14           | 0.04s → 0.04s     |
 
 Cold — the first run after a fetch, with an empty cache — is where the memo alone earns its keep, and it is
 not a regression: `queue` measured 2.24s on `main` and 2.27s here, and `check` and `status` were slightly
@@ -176,7 +176,7 @@ faster cold than they are on `main`.
   tests that call the CLI several times against one fixture.
 - **`resolver.at` is not cached**, so `queue` and every `--changeset` still resolve each of the N local
   branches on a warm run — 12 branches is roughly 40 subprocesses here. It is keyed on `(branch tip,
-  destination tip)` in principle and is the obvious next increment.
+destination tip)` in principle and is the obvious next increment.
 - **`landingView` is not cached as a unit.** It gets the chain and lifecycle answers from the two caches
   underneath it, which is why `status` on one changeset is already fast; the remaining reads are per-single-
   changeset and do not scale with anything the author controls.

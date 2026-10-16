@@ -34,15 +34,15 @@ would let a reviewer's diff settle something they cannot see.
 
 ## Evidence
 
-| Fixture | Result |
-|---|---|
-| `TestARecordedStackShrinksToTheChangesetOnTop` — trunk, `booking`, `booking-tests`, `booking-cases`, each on a branch not named after its slug | `[booking-cases]`, selected, undecided never. Fails without M4's read, both for the id key spelling |
-| the same fixture's `parent:`/`parent-changeset:` subtest | passes before and after — this is the "stays readable" half, and it needed a fixture of its own |
-| `TestALegacyParentFileAnswersWhatTheNewSpellingMeans` | same selection, same measurement base, same `BaseWhy`. Fails without M4: the new spelling lost its id and measured against the wrong place |
-| `TestAFileNamingBothBaseAndParentIsRefused` | `ErrParentWithBase` from `StackAt` |
-| `TestCheckRecommendsWhenTheRecordedIdAndItsBaseDisagree` | one recommendation naming both ids, no reason carrying it, `recommend:` prefix on the human surface |
-| `TestInitLooksPastTheAncestorsAStackedBaseCarries` | unchanged assertion, and it now exercises the resolver's drop instead of the deleted walker |
-| full `go test ./...` | green |
+| Fixture                                                                                                                                        | Result                                                                                                                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `TestARecordedStackShrinksToTheChangesetOnTop` — trunk, `booking`, `booking-tests`, `booking-cases`, each on a branch not named after its slug | `[booking-cases]`, selected, undecided never. Fails without M4's read, both for the id key spelling                                        |
+| the same fixture's `parent:`/`parent-changeset:` subtest                                                                                       | passes before and after — this is the "stays readable" half, and it needed a fixture of its own                                            |
+| `TestALegacyParentFileAnswersWhatTheNewSpellingMeans`                                                                                          | same selection, same measurement base, same `BaseWhy`. Fails without M4: the new spelling lost its id and measured against the wrong place |
+| `TestAFileNamingBothBaseAndParentIsRefused`                                                                                                    | `ErrParentWithBase` from `StackAt`                                                                                                         |
+| `TestCheckRecommendsWhenTheRecordedIdAndItsBaseDisagree`                                                                                       | one recommendation naming both ids, no reason carrying it, `recommend:` prefix on the human surface                                        |
+| `TestInitLooksPastTheAncestorsAStackedBaseCarries`                                                                                             | unchanged assertion, and it now exercises the resolver's drop instead of the deleted walker                                                |
+| full `go test ./...`                                                                                                                           | green                                                                                                                                      |
 
 The fixture's first draft was not discriminating, and the reason is worth keeping: its branches were named
 `booking-tests` and so on, equal to the changeset slugs, so the old slug comparison matched by accident and the test

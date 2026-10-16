@@ -8,7 +8,7 @@ two passes agree, that is stated.
 ## Summary
 
 All five milestones are implemented, committed and verified — no milestone is incomplete, and every
-deliverable named in the plan exists. The plan's *wording* had drifted in five places, one of which
+deliverable named in the plan exists. The plan's _wording_ had drifted in five places, one of which
 asserted a flag that never existed, and its evidence column conflated tests with hand-run terminal
 sessions.
 
@@ -29,26 +29,26 @@ behaviours do not meet what the plan claims.
 
 ### Project health
 
-| Category           | Status | Note |
-| ------------------ | ------ | ---- |
-| Plan Accuracy      | 🟡     | Five stale or false claims, corrected in place with the reason recorded |
-| Milestone Progress | 🟢     | M1, M2, M3, M3b, M4, M5 done; each now maps to a commit |
-| Deliverables       | 🟢     | Every deliverable in every milestone exists and behaves as described |
+| Category           | Status | Note                                                                                                                                                                                                                                      |
+| ------------------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plan Accuracy      | 🟡     | Five stale or false claims, corrected in place with the reason recorded                                                                                                                                                                   |
+| Milestone Progress | 🟢     | M1, M2, M3, M3b, M4, M5 done; each now maps to a commit                                                                                                                                                                                   |
+| Deliverables       | 🟢     | Every deliverable in every milestone exists and behaves as described                                                                                                                                                                      |
 | Verification       | 🟡     | 328 tests, incl. a refusal test per mutating key and falsified layout claims. Gaps: the failing criterion had no test; `pty` rows are hand runs with no script in the repo; `review open`'s span flags untested; multi-ref drift untested |
-| Documentation      | 🟡     | README and PRD matched behaviour except two statements corrected during this audit (sample shortcut bar, one-revision difftool claim) and the requirements header. One copy item left open: `--tool`'s flag help, which is Go source |
-| Technical Debt     | 🟡     | The three *Known gaps*, plus the finished MVP plan still sitting in `active/` with suite totals frozen at 237/13 |
-| Risks              | 🟢     | `internal/hygiene` green: nothing pushes, merges, rebases or resets |
+| Documentation      | 🟡     | README and PRD matched behaviour except two statements corrected during this audit (sample shortcut bar, one-revision difftool claim) and the requirements header. One copy item left open: `--tool`'s flag help, which is Go source      |
+| Technical Debt     | 🟡     | The three _Known gaps_, plus the finished MVP plan still sitting in `active/` with suite totals frozen at 237/13                                                                                                                          |
+| Risks              | 🟢     | `internal/hygiene` green: nothing pushes, merges, rebases or resets                                                                                                                                                                       |
 
 ### Milestone status
 
-| Milestone | Progress | Verified |
-| --------- | -------- | -------- |
-| M1 — checkpoints, nameable head | 100% (`cc7dc6c`) | Yes — `internal/span` checkpoint/drift tests, CLI flag tests |
-| M2 — read-only historical mode | 100% (`8b9dd9d`) | Yes — six tests in `readonly_internal_test.go`, incl. one-ref-vs-two-rev difftool and the single-fetch preview claim; header/refusals also by hand, unscripted |
-| M3 — the `V` picker | 100% (`efd9474`) | Yes — 16 tests in `picker_internal_test.go`, incl. `TestPickerNeverOffersHEAD`, `TestThePickerFillsTheWindow` |
-| M3b — `v` walks session spans | 100% (`2bc714e`) | Yes for walking, dedup, escape-from-history and broken stops. **No** test for marks returning, and they do not |
-| M4 — drift and `r` | 100% (`ebaeccd`) | Yes for a single drifted ref. The `(+N more)` branch and `RefreshDrift`'s loop over several refs are untested |
-| M5 — base-side CLI flags | 100% (`eeb0919`) | Yes on `diff`: `TestDiffBaseCheckpoints`, contract rows. Nothing exercises `review open`, which cannot run headless |
+| Milestone                       | Progress         | Verified                                                                                                                                                       |
+| ------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M1 — checkpoints, nameable head | 100% (`cc7dc6c`) | Yes — `internal/span` checkpoint/drift tests, CLI flag tests                                                                                                   |
+| M2 — read-only historical mode  | 100% (`8b9dd9d`) | Yes — six tests in `readonly_internal_test.go`, incl. one-ref-vs-two-rev difftool and the single-fetch preview claim; header/refusals also by hand, unscripted |
+| M3 — the `V` picker             | 100% (`efd9474`) | Yes — 16 tests in `picker_internal_test.go`, incl. `TestPickerNeverOffersHEAD`, `TestThePickerFillsTheWindow`                                                  |
+| M3b — `v` walks session spans   | 100% (`2bc714e`) | Yes for walking, dedup, escape-from-history and broken stops. **No** test for marks returning, and they do not                                                 |
+| M4 — drift and `r`              | 100% (`ebaeccd`) | Yes for a single drifted ref. The `(+N more)` branch and `RefreshDrift`'s loop over several refs are untested                                                  |
+| M5 — base-side CLI flags        | 100% (`eeb0919`) | Yes on `diff`: `TestDiffBaseCheckpoints`, contract rows. Nothing exercises `review open`, which cannot run headless                                            |
 
 ## Findings
 
@@ -60,20 +60,20 @@ behaviours do not meet what the plan claims.
    the unreviewed span, `v` back → `reviewed=0/5`. Cause, in order of biting: `scan` rebuilds the
    file list and its only in-session carrier is the previous list's diff keys, which belong to the
    span just left; `Session.persisted` is read once in `NewSession` (`loadMarks`) and never re-read
-   or updated; `toggleMark` → `SaveMarks` writes the *whole* current set, so the emptied set reaches
+   or updated; `toggleMark` → `SaveMarks` writes the _whole_ current set, so the emptied set reaches
    disk on the next toggle and a later `review open` on the same commit resumes without marks it had.
    **Independently confirmed** by the second pass from `session.go:187-198`, `session.go:575-590`,
    `session.go:96` and `reviewmark.go:96`. Reachable through the ring M3b shipped. Written up in the
-   plan under *Known gaps*.
+   plan under _Known gaps_.
 
 2. **The header calls every review-based span `unreviewed`** — `Session.Unreviewed()`
    (`session.go:361-363`) tests only `base.Kind == KindReview && head.Kind == KindWorkingTree`, and
    `spanName` (`tui.go:964-969`) substitutes the word for the span label. So `review open
-   --since-review=-3`, `--base-review=-3`, and the picker's `Review -3` base all display
+--since-review=-3`, `--base-review=-3`, and the picker's `Review -3` base all display
    `span: unreviewed` for a span starting three submissions back. Contradicts Success Criterion 3 and
    requirement §17 (the current span should always be visible). `Unreviewed()` is asserted only for
    the genuine unreviewed span (`session_test.go:246`), and no `spanName` test uses a review base
-   other than `-1`. Fix is a condition — base must be the *latest* review — plus a test; the plan now
+   other than `-1`. Fix is a condition — base must be the _latest_ review — plus a test; the plan now
    records it rather than the current behaviour.
 
 3. **A historical span can recreate `ABOUT.md`** — `openArtifact` (`tui.go:684-692`) lets `ABOUT.md`
@@ -89,9 +89,9 @@ behaviours do not meet what the plan claims.
    base end was not covered for an arbitrary commit or ref. Rewritten; the base trio is recorded as
    its own item (M5, `eeb0919`). Confirmed independently.
 
-5. **Claim overtaken by later work.** M3b's verification said a *deleted ref* makes a span stop
+5. **Claim overtaken by later work.** M3b's verification said a _deleted ref_ makes a span stop
    unresolvable. After M4's pinning a deleted ref still resolves to its pin, so
-   `TestStepSpanStopsShortWhenAStopNoLongerResolves` breaks a stop by deleting a *tag* that a typed
+   `TestStepSpanStopsShortWhenAStopNoLongerResolves` breaks a stop by deleting a _tag_ that a typed
    `Commit…` endpoint named. Plan now says so, and why the new form is the realistic case.
 
 6. **Stale claim.** Context said "Keys `V` and `r` are unbound" — true when written, false since M3
@@ -114,7 +114,7 @@ behaviours do not meet what the plan claims.
 
 10. **Two verified discoveries were filed under the wrong heading** — the pin-timing and
     banner-clipping notes sat as unlabelled bullets after M4's checkboxes, where a reader would take
-    them for unchecked tasks. Moved to a new *Discoveries* section with a third entry.
+    them for unchecked tasks. Moved to a new _Discoveries_ section with a third entry.
 
 11. **`requirements.md` departed from the handoff in more ways than the plan admitted.** It gained §8.1
     and a rewritten Scenario A (`2bc714e`), its header asserted a non-existent "audit notes at the end"

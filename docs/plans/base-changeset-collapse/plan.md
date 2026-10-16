@@ -40,16 +40,16 @@ changesets on the revision that the destination does not carry, subtract the ids
 their base changeset, and what remains is the work - and the suite passed in both modes. The fixtures that
 differed:
 
-| shape | last-touch today | set operation | add-commit ranking |
-| --- | --- | --- | --- |
-| three-level stack, ids recorded | child, candidates keep all three | child, candidates `[child]` | child |
-| stacked sibling, then a commit to the parent's directory | **parent** | child | child |
-| legacy file: `base:` naming a branch, no id | child, via distance | child, via distance | child |
-| two files naming each other | ambiguous, both named | ambiguous, both named | ambiguous |
-| a file naming itself | itself | itself | itself |
-| middle level landed alone, grandparent still carried | child, via distance | child, via distance | child |
-| `ignores:` on the parent, sibling stacked on it | parent | **parent loses** | parent |
-| two unrelated changesets on one branch | the later one | the later one | the later one |
+| shape                                                    | last-touch today                 | set operation               | add-commit ranking |
+| -------------------------------------------------------- | -------------------------------- | --------------------------- | ------------------ |
+| three-level stack, ids recorded                          | child, candidates keep all three | child, candidates `[child]` | child              |
+| stacked sibling, then a commit to the parent's directory | **parent**                       | child                       | child              |
+| legacy file: `base:` naming a branch, no id              | child, via distance              | child, via distance         | child              |
+| two files naming each other                              | ambiguous, both named            | ambiguous, both named       | ambiguous          |
+| a file naming itself                                     | itself                           | itself                      | itself             |
+| middle level landed alone, grandparent still carried     | child, via distance              | child, via distance         | child              |
+| `ignores:` on the parent, sibling stacked on it          | parent                           | **parent loses**            | parent             |
+| two unrelated changesets on one branch                   | the later one                    | the later one               | the later one      |
 
 Three conclusions, each of which became a milestone.
 
@@ -137,8 +137,6 @@ still answers the legacy and dangling-ancestor shapes the way distance does toda
   selection that is not an inference, and recording the link makes the shape it decides more common rather than
   rarer.
 
-
-
 `ignores:` is written by `git pair change use` (PRD section 9.8), which records that its changeset is the one the
 branch is working on and that the others named merely share the branch. Two shapes survive the set operation and
 need it. The first is cohabitation: candidates with no stack edge between them, where subtraction has nothing to
@@ -187,10 +185,10 @@ last-edit measurement and pass under the add-commit one, with and without the re
 
 #### Tasks
 
-- [ ] Replace `distanceFromTouch` with the add-commit form: `git log -1 --format=%H --diff-filter=A <rev> --
-      changesets/<id>`, then `rev-list --count <add>..<rev>`. Keep the `-1` meaning: a directory the revision's
-      tree carries but this line never added, which is what a graft or a shallow boundary gives, ties with other
-      absences rather than inventing an order.
+- [ ] Replace `distanceFromTouch` with the add-commit form:
+      `git log -1 --format=%H --diff-filter=A <rev> -- changesets/<id>`, then `rev-list --count <add>..<rev>`.
+      Keep the `-1` meaning: a directory the revision's tree carries but this line never added, which is what a
+      graft or a shallow boundary gives, ties with other absences rather than inventing an order.
 - [ ] Make the read lazy. `nearness` currently fills `Distance` for every candidate whenever there are two or
       more, before `choose` decides anything. Move the call so it runs only for the candidates that survive the
       earlier tiers, and only when more than one of them survives.
@@ -268,7 +266,7 @@ before this milestone an id recorded beside a `base:` was read by nothing.
 ### M5 - the set operation is the primary rule
 
 **Status:** landed as `3764473` from `feat-set-operation-primary-rule`. The review decided the one open question: the set
-operation is the *only* subtraction. The older pass also removed whatever a candidate's `base:` looked like it
+operation is the _only_ subtraction. The older pass also removed whatever a candidate's `base:` looked like it
 named, which decided a stack only when a branch happened to be spelled like its changeset; a file with no recorded
 id now falls through to the ranking instead, which answers - usually the same way - and says so by leaving both
 candidates in the list.
@@ -414,7 +412,6 @@ destination carries is landed and the resolver never offers it.
 - The refusal text is asserted, not merely its presence, so it cannot rot back into a bare "two changesets" error.
   It has to name both exits by command name, since an author who is not told the two answers cannot pick one.
 
-
 ### M7 - the two exits: `change combine` and `change stack`
 
 **Status:** landed as `622f56f` from `feat-two-exits`. This is where the M6 refusal stops being a dead end.
@@ -508,7 +505,6 @@ must not read as one.
 - A fixture for each review-state guard: a ready marker on either changeset makes both exits refuse.
 - Each refusal's text is asserted, so neither exit can rot into a message that names no command.
 
-
 ### M8 - `ignores:` loses its remaining case
 
 **Status:** landed as `7b38a5f` from `feat/ignores-writer-gone`.
@@ -551,14 +547,13 @@ Two consequences the deliverables did not spell out:
 - `git pair change use` on a clean branch says why it did nothing.
 - A fixture carrying the key still selects the declaring changeset, so reading it is not lost by accident.
 
-
 ### M9 - the PRD says the rule in this order
 
 **Status:** landed as `0a4e1ed` from `feat/prd-says-the-rule-in-order`. This closes the plan: every milestone M1-M9 is now recorded as landed.
 
 Two references in the deliverables were stale and were read as what they meant rather than obeyed literally:
 
-- "PRD §13.1 states which rules decide the active changeset and in what order" - §13.1 is *The destination*. The
+- "PRD §13.1 states which rules decide the active changeset and in what order" - §13.1 is _The destination_. The
   selection order is in §4, which M5 rewrote and M8 touched again, so that deliverable was satisfied before this
   milestone and needed no edit. The same applies to the verification bullet "reading the PRD from §13 forward":
   §13 is landing, and the order a reader would reproduce is §4's.
