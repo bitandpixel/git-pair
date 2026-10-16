@@ -124,6 +124,7 @@ Two things did not move with it:
   READY and still names `git pair hooks --trust` and `--decline`. The off switch says a machine does not want to
   run scripts today and says nothing about what those scripts do; that rule is why the flag is not a way through
   the position, on any command.
+> would --no-hooks plus --trust-hooks-once allow getting through this? do they work together like that?
 - **Nothing is quiet.** Every skipped hook arrives as `status: "skipped-by-flag"` in `hooks[]` and on stderr, so a
   verdict that ran nothing reads as one that ran nothing. `ready` itself is unchanged: the run says what it
   checked, and the array says what it did not.
