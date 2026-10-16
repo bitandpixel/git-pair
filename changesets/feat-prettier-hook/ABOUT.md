@@ -124,6 +124,11 @@ which is why these commits came out formatted).
 - `mise run check` green: format, gofmt, vet, the sharded suite. The document contract tests are the ones that
   could have caught a formatter rewriting a sentence, and they pass:
   `go test ./internal/cli/ -run 'TestDocumentsQuoteTheLandingSentencesTheCodeBuilds|TestCommandsNamedInTheDocsExist|TestEveryCommandIsNamedInTheDocs|TestTheCommandTreeIsTheCommandSet|TestStackedExamplesShowTheWrittenPair|TestSkillFrontmatterIsLoadable|TestDefaultBranchEnvIsTheNameTheDocsTeach|TestNoDocNamesADurableRef'`
+- `mise run gates` green in 86s. That is `dev-profiles command verify` — what
+  `.github/workflows/git-pair-check.yml` runs on a pull request, and what the merge job runs against the tree it
+  is about to land: `E2E: all checks passed`, `PTY: all checks passed`, and
+  `CI-INTEGRATE: all checks passed (132 checks)`. The replays build their own scratch repositories, so the hook
+  installed in this clone is not what they exercise; the scratch-clone runs below are.
 - Formatting was proved text-preserving against a parser that is not Prettier: every tracked document, rendered
   to text with micromark (`remark-parse` + `remark-gfm` + `mdast-util-to-string`, whitespace runs collapsed)
   before and after, from `git show HEAD:<path>` to the working tree. 144 of 148 are identical. The four that
