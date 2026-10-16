@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -35,12 +36,15 @@ type Addition struct {
 type Report struct {
 	ReviewSHA   string `json:"review_commit"`
 	ReviewShort string `json:"review_short"`
-	// Code holds additions outside the changeset directory. These block `change ready`.
+	// Code holds the additions that block `change ready`: anything outside a
+	// changesets/ directory, and reviewer text in any ABOUT.md. The description is
+	// the author's account of the change, so a reviewer's sentence left inside it is
+	// feedback to settle rather than conversation to keep (PRD §19.5).
 	Code []Addition `json:"code"`
-	// Artifacts holds additions inside a changesets/ directory. Reviewer text
-	// there is conversation surface rather than code to resolve — a thread
-	// answered by appending still contains every original line — so it is
-	// reported but never blocks. See
+	// Artifacts holds additions inside a changesets/ directory that are not the
+	// description. Reviewer text there is conversation surface rather than code to
+	// resolve — a thread answered by appending still contains every original line
+	// — so it is reported but never blocks. See
 	// docs/plans/completed/gitpr-mvp/research/git-plumbing-findings.md.
 	Artifacts []Addition `json:"artifacts"`
 	// AddedLines is the total number of non-blank lines the review added.
@@ -146,8 +150,23 @@ func sortReport(r *Report) {
 }
 
 // isArtifactPath reports whether path is review state rather than code.
+//
+// Everything under the changeset root is conversation surface except the description.
+// A reply appended to a thread still holds every line the reviewer wrote, and that is
+// what makes it worth keeping. ABOUT.md is the exception: it is the author's account of
+// the change, so text a reviewer put into it is feedback the author settles before the
+// work goes back to the queue — the same duty a comment in an implementation file
+// carries (PRD §19.5). The exception is keyed on the file name rather than the directory,
+// so an edit to a landed or archived changeset's description carries the same duty
+// rather than becoming a hole the shape of the tree decides.
 func isArtifactPath(path string) bool {
-	return path == changeset.Root || strings.HasPrefix(path, changeset.Root+"/")
+	if path == changeset.Root {
+		return true
+	}
+	if !strings.HasPrefix(path, changeset.Root+"/") {
+		return false
+	}
+	return filepath.Base(path) != changeset.AboutFile
 }
 
 // binaryPaths collects paths git reports as binary, using the literal dashes

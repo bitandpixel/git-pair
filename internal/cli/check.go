@@ -579,9 +579,14 @@ func eventSHA(e *lifecycle.Event) string {
 //
 // The surviving-review-additions diagnostic is deliberately absent. Requirements §26 lists it
 // among the readiness conditions, but `change ready` is where that decision is made and
-// acknowledged, and the outcome and drift conditions here already guarantee that nothing has
-// moved since the marker — re-deriving it would re-litigate a decision the author already took,
-// in a command with no override flag to take it again.
+// acknowledged, and the acknowledgement is recorded nowhere — so re-deriving it here would
+// re-litigate a decision the author already took, in a command with no override flag to take it
+// again. Say what that leaves outside the gate rather than implying it is covered: the drift
+// condition below excludes the changeset directory, so reviewer text in `ABOUT.md` can reach the
+// destination unaltered, exactly as an addition acknowledged with
+// `--allow-surviving-review-additions` already can. What this command promises is that nothing
+// outside that directory moved since the marker and that the author was asked before the marker,
+// and it promises nothing more.
 func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summary,
 	head string, allowFeedback bool, landed landing, lineage, parent string) []string {
 	if landed.Commit != "" {

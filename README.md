@@ -206,15 +206,16 @@ Cannot mark changeset booking-transaction ready.
 2 additions from review 332887c still survive unchanged:
 
 src/service.ts:10
-    // Please use a transaction here
+  // Please use a transaction here
 
 src/service.ts:11
-    // What happens if these execute concurrently?
+  // What happens if these execute concurrently?
 
 
 Review these additions before continuing: apply each one, then remove the comment it came
 from. The review commit keeps its history. Record anything that needs further discussion in
-ABOUT.md or in a new thread.
+ABOUT.md or in a new thread. Reviewer text in ABOUT.md counts the same way: keep the
+description you want, in your own words.
 
 To intentionally preserve them:
   git pair change ready --allow-surviving-review-additions
@@ -444,7 +445,9 @@ marker on a branch, so pruning trunk does not retire that either.
 
 **ABOUT.md and threads.** `changesets/<changeset>/ABOUT.md` is the canonical description of
 the change: the author writes it, the reviewer edits it, and edits committed by a review
-submission are high-level feedback. Any other `.md` file in that directory is a thread;
+submission are high-level feedback — high-level enough that they do not block a merge, and
+blocking enough that `change ready` refuses until the author settles them (PRD §19.5). Any
+other `.md` file in that directory is a thread;
 `git pair review thread "concurrency tests"` creates or reopens
 `changesets/<changeset>/concurrency-tests.md`. Replies are appended sections and git history
 supplies authorship and order. Both are plain Markdown with no schema.
@@ -657,10 +660,12 @@ diff, so `change ready` re-derives them with
 `git show -U0 --no-renames <review>` and test each line for exact membership in the `HEAD` blob,
 reporting `path:line` at `HEAD`. Blank additions are ignored, binaries are skipped via
 `--numstat`, repeated identical lines collapse to one entry with a count, and only the most
-recent review submission is considered. Additions outside `changesets/<changeset>/` block;
-additions inside it are reported as "changeset artifacts, not blocking": a thread answered by
-appending still contains every line the reviewer wrote, and `ABOUT.md` edits are normally kept,
-so blocking on those would fail almost every real changeset and push users toward reflexive use
+recent review submission is considered. Additions outside `changesets/` block, and so does an
+addition to any `ABOUT.md`: the description is the author's account of the change, so the
+reviewer's text in it is feedback to settle rather than conversation to keep (PRD §19.5). The
+rest of what sits inside that directory is reported as "changeset artifacts, not blocking": a
+thread answered by appending still contains every line the reviewer wrote, so blocking on those
+would fail almost every real changeset and push users toward reflexive use
 of the override. See `docs/plans/completed/gitpr-mvp/research/git-plumbing-findings.md`.
 
 **Lifecycle hooks.** A repository can run its own script at the moment work is handed on, and refuse the
@@ -2405,9 +2410,11 @@ acknowledge them deliberately:
 git pair change ready --allow-surviving-review-additions
 ```
 
-Only the most recent review counts, and only additions outside `changesets/<changeset>/`
-block; surviving `ABOUT.md` and thread text is listed as non-blocking. Resolving a blocking
-addition means applying it and then removing the reviewer's inline comment; an edit the author keeps
+Only the most recent review counts. Additions outside `changesets/` block, and so does an
+addition to any `ABOUT.md`: keep the description you want in the author's own words, or use the
+flag to say you meant to keep the reviewer's wording. Surviving thread text is listed as
+non-blocking. Resolving a blocking addition in an implementation file means applying it and then
+removing the reviewer's inline comment; an edit the author keeps
 is what the flag is for (PRD §19.5). It is the only hatch left:
 `git pair check` has no override flag, because its answer is what a merge acts on, and the recorder runs
 no diagnostic at all — refusing to write down a landing that has already happened would be an argument

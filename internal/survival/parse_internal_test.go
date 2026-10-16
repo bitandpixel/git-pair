@@ -308,17 +308,23 @@ func TestFindLineIsExactAndUntrimmed(t *testing.T) {
 
 // PRD §19 and plan decision D3: additions inside the changeset directory are
 // conversation surface, everything else is code that must be resolved.
+// The changeset directory is conversation surface and never blocks, except that its
+// description does: ABOUT.md is keyed on the file name, wherever in changesets/ it sits,
+// so a landed or archived one carries the same duty.
 func TestIsArtifactPath(t *testing.T) {
 	tests := []struct {
 		path string
 		want bool
 	}{
-		{"changesets/booking/ABOUT.md", true},
+		{"changesets/booking/ABOUT.md", false},
 		{"changesets/booking/concurrency-tests.md", true},
 		{"changesets/booking/CHANGESET.yaml", true},
+		{"changesets/.landed/booking/ABOUT.md", false},
+		{"changesets/.combined/booking/ABOUT.md", false},
 		{"changesets", true},
 		{"changesets.go", false},
 		{"src/changesets/booking.md", false},
+		{"src/changesets/ABOUT.md", false},
 		{"service.go", false},
 		{"README.md", false},
 	}

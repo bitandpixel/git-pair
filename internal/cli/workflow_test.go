@@ -92,7 +92,11 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 	}
 	mustContain(t, res.stderr, "service.go", "the refusal must name the file")
 	mustContain(t, res.stderr, blockingTwo, "the refusal must print the surviving addition")
-	mustContain(t, res.stderr, "1 addition from review", "the refusal must count the survivors")
+	// The reviewer's two ABOUT.md lines block alongside the source comment: the description
+	// is the author's account of the change, so the reviewer's text in it is feedback to
+	// settle as well (PRD §19.5). Three survivors, then — one comment and two lines of it.
+	mustContain(t, res.stderr, "changesets/"+slug+"/ABOUT.md", "the refusal must name the description")
+	mustContain(t, res.stderr, "3 additions from review", "the refusal must count the survivors")
 	mustContain(t, res.stderr, "git pair change ready --allow-surviving-review-additions",
 		"the refusal must print the override")
 	if got := f.Subject(f.Head()); strings.HasPrefix(got, "git-pair: ready") {
@@ -109,9 +113,15 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 		t.Errorf("the response span must show the resolved comment as removed:\n%s", span.stdout)
 	}
 
-	// --- author: consciously resolve the survivor, then ready again ------------
+	// --- author: consciously resolve the survivor and the description, then ready again ---
 	f.Commit("author: synchronise both transactions before the capacity read",
 		gittest.WithFile("service.go", "package main\n\nfunc CreateOffering() { transaction() }\n\nfunc Enroll() { transaction() }\n"),
+		// The reviewer's note is settled by writing the same point as the author's own
+		// text: their two lines are gone from HEAD, so nothing of theirs survives.
+		gittest.WithFile(about, "# Booking transaction locking\n\n"+
+			"## Summary\n\nAdds transactional locking around offering creation.\n\n"+
+			"## Validation\n\n- unit tests\n- concurrent final-seat test\n\n"+
+			"## Concurrency\n\nBoth transactions take the booking row before the capacity read.\n"),
 		gittest.WithFile(filepath.Join("changesets", slug, "concurrency-tests.md"),
 			"# Concurrency tests\n\nI'm not convinced the test makes the two transactions overlap.\n\n"+
 				"## Response\n\nBoth transactions now block immediately before the capacity read.\n"))

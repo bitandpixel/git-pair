@@ -377,6 +377,42 @@ func TestChangeReadyNotBlockedByChangesetArtifactSurvivals(t *testing.T) {
 	}
 }
 
+// PRD §19.5: reviewer text in ABOUT.md blocks readiness the way a comment in an
+// implementation file does. The description is the author's account of the change, so
+// leaving the reviewer's sentence inside it is not a settled answer, and the override is
+// the author saying they meant to keep their wording.
+func TestChangeReadyBlockedByReviewerTextInAbout(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	ready(t, f)
+
+	const note = "The concurrency story needs to be explicit."
+	about := filepath.Join("changesets", slug, "ABOUT.md")
+	f.Write(about, f.Read(about)+"\n## Review note\n\n"+note+"\n")
+	submit(t, f, "feedback")
+
+	res := runIn(t, f.Dir(), "change", "ready")
+	if res.code != exitRefusal {
+		t.Fatalf("reviewer text in ABOUT.md exited %d, want %d\nstdout: %s\nstderr: %s",
+			res.code, exitRefusal, res.stdout, res.stderr)
+	}
+	mustContain(t, res.stderr, about, "the report must name the description")
+	mustContain(t, res.stderr, note, "the report must print the reviewer's line")
+	mustContain(t, res.stderr, "in your own words",
+		"the report must say how an ABOUT.md survivor is settled")
+	if queueListsChangeset(t, runIn(t, f.Dir(), "queue", "--json"), slug) {
+		t.Error("the refused changeset appeared in the review queue")
+	}
+
+	// Rewriting the point as the author's own text settles it. The check is an exact
+	// line match, so the exit the author is offered is to write the description they want.
+	f.Commit("author: describe the concurrency story", gittest.WithFile(about,
+		"# booking\n\n## Summary\n\nBoth transactions take the booking row before the capacity read.\n"))
+	ready(t, f)
+	if got := f.Subject(f.Head()); got != "git-pair: ready "+slug {
+		t.Errorf("HEAD = %q, want the ready marker", got)
+	}
+}
+
 func queueListsChangeset(t *testing.T, res result, slug string) bool {
 	t.Helper()
 	for _, entry := range res.jsonList(t, "ready_for_review") {

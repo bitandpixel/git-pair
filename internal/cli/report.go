@@ -57,10 +57,14 @@ func printSurvivalReport(w io.Writer, r survival.Report, header, hint string) {
 	// The line is the author's first reading of the rule, because this is the moment they hit it. A
 	// sentence that only says "review these" leaves the resolution policy — apply it, then delete the
 	// reviewer's comment, and record it only when it needs discussion — to a document they are not
-	// looking at. PRD §19.5.
+	// looking at. PRD §19.5. The last sentence is the part nothing else states: an addition to
+	// ABOUT.md is the reviewer's words standing inside the author's own description, so settling it
+	// means writing the description the author wants rather than leaving their text in place. The
+	// hint below is what says so when the author meant to keep it.
 	fmt.Fprintf(w, "\nReview these additions before continuing: apply each one, then remove the comment it came\n"+
 		"from. The review commit keeps its history. Record anything that needs further discussion in\n"+
-		"ABOUT.md or in a new thread.\n")
+		"ABOUT.md or in a new thread. Reviewer text in ABOUT.md counts the same way: keep the\n"+
+		"description you want, in your own words.\n")
 	if hint != "" {
 		fmt.Fprintf(w, "\nTo intentionally preserve them:\n  %s\n", hint)
 	}
@@ -68,7 +72,8 @@ func printSurvivalReport(w io.Writer, r survival.Report, header, hint string) {
 
 // printArtifactSurvivals reports surviving reviewer text inside the changeset
 // directory. It never blocks: a thread answered by appending still contains
-// every line the reviewer wrote, and ABOUT.md edits are normally kept.
+// every line the reviewer wrote. Reviewer text in ABOUT.md is not here — it
+// belongs to Code and blocks.
 func printArtifactSurvivals(w io.Writer, r survival.Report) {
 	if len(r.Artifacts) == 0 {
 		return
