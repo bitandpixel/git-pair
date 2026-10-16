@@ -163,3 +163,10 @@ nothing" as "no editor configured" reaches the fallback, which is git-pair's beh
 ## Execution status
 
 Complete, awaiting review.
+
+## Closure
+
+Filed under `completed/` on 2026-10-15 by `chore-file-finished-plans`. **Delivered** on `feat/editor-term-gate`,
+merged `5f1dfb8` (2026-09-27). `TestEditorPrecedenceMatchesGit` in `internal/console/console_test.go` pins the
+`TERM` it measures rather than inheriting the developer's, which is the goal in one line; the prose correction in
+the three files went with it.

@@ -182,3 +182,13 @@ two facts are different. `mise run check` per milestone. The pty walkthrough rec
 
 | Date       | Audit | Summary |
 | ---------- | ----- | ------- |
+
+## Closure
+
+Filed under `completed/` on 2026-10-15 by `chore-file-finished-plans`. **Superseded, not delivered.** The banner
+above the Goal is the record: M1's subject was a retired layout under `refs/git-pair/`, and the plan that replaced
+this one deleted the namespace, so the legacy reading, `KindLegacyIntegration` and the guard built on it went with
+it. M2's remote-branch claims were never executed and remain unexecuted.
+
+Filed rather than deleted for two reasons: the Goal still states the reasoning about what a clone may claim about
+a branch it cannot check out, and a plan that was stopped is not the same record as a plan that was finished.

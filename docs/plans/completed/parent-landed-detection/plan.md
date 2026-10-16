@@ -587,3 +587,13 @@ with no flags and no branch present; a merge landing recorded after `git branch 
 three landed changesets, recording the one that needed it and refusing with `nothing to record` when all three
 were finished; `init` recording `base: main` in a clone with `refs/remotes/origin/HEAD` set, and printing the
 divergence note when the local trunk had one commit origin did not.
+
+## Closure
+
+Filed under `completed/` on 2026-10-15 by `chore-file-finished-plans`. **Delivered** on `feat/parent-landed-impl`,
+merged `043af3f` (2026-09-23), one commit per milestone, with the four deviations from the plan recorded in the
+Execution status section above and in their commit messages.
+
+The read lives in `parentStatus` and the remedy in `landedParentStep` (`internal/cli/stacked.go`). Two later
+changesets refined what it prints rather than what it measures: `feat/landed-parent-advice` (`f89623e`,
+2026-10-13) and `fix/landed-destination-name` (`a2c8eae`, 2026-10-14).

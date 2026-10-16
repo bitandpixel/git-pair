@@ -444,3 +444,14 @@ at every milestone, and PRD/README edits in the same commit as the behaviour, wi
 | Date | Audit | Summary |
 | ---- | ----- | ------- |
 | —    | —     | Plan written from the review-architecture-v2 follow-up discussion; no implementation yet. |
+
+## Closure
+
+Filed under `completed/` on 2026-10-15 by `chore-file-finished-plans`. **Superseded, not delivered as written.**
+Its milestones were implemented in the ref era and then undone by `simplify-architecture` (`01dcd0a`,
+2026-09-29): there is no `git pair integration publish`, no `--fetch` for a record, no mirror refspec and no
+consent command. None of them is in the tree, and `internal/cli/contract_test.go` fails the build if a next action
+names one of them.
+
+What the plan was for is answered another way now: the merge that puts `changesets/<id>/` in the destination is the
+record, and a clone given the branches can read it (PRD §13.4).

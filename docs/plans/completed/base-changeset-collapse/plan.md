@@ -187,16 +187,21 @@ last-edit measurement and pass under the add-commit one, with and without the re
 
 #### Tasks
 
-- [ ] Replace `distanceFromTouch` with the add-commit form: `git log -1 --format=%H --diff-filter=A <rev> --
+- [x] Replace `distanceFromTouch` with the add-commit form: `git log -1 --format=%H --diff-filter=A <rev> --
       changesets/<id>`, then `rev-list --count <add>..<rev>`. Keep the `-1` meaning: a directory the revision's
       tree carries but this line never added, which is what a graft or a shallow boundary gives, ties with other
-      absences rather than inventing an order.
-- [ ] Make the read lazy. `nearness` currently fills `Distance` for every candidate whenever there are two or
+      absences rather than inventing an order. Delivered as `distanceFromAdd` in
+      `internal/changeset/resolve.go`, including the graft and shallow-boundary rule the box asks for; landed with
+      `feat/rank-by-add-commit` (`b4b5c6f`, 2026-09-30).
+- [x] Make the read lazy. `nearness` currently fills `Distance` for every candidate whenever there are two or
       more, before `choose` decides anything. Move the call so it runs only for the candidates that survive the
-      earlier tiers, and only when more than one of them survives.
-- [ ] Update the prose that describes the measurement. The comment above `nearness`, the PRD sentence about the
+      earlier tiers, and only when more than one of them survives. Delivered: `rankByCreation` runs only when more
+      than one candidate survives the earlier tiers, so the walk to the add commit happens where something has to
+      be ordered.
+- [x] Update the prose that describes the measurement. The comment above `nearness`, the PRD sentence about the
       commit that last touched a directory, and any test name that says "nearest" all describe an edit fact that
-      is going away.
+      is going away. Delivered: the comments above `rankByCreation` and `distanceFromAdd` state the creation fact,
+      and no sentence in `PRD.md` still describes the last-touch measurement.
 - [ ] Deferred, and recorded here rather than dropped: cache the add commit per id for the life of one command, in
       the same place `changeset.Reads` caches tree reads. Two things make it not this milestone's work.
       `changeset.Reads` is on `feat/destination-from-tree` and not on main, so a cache written now lands in a second
@@ -612,3 +617,21 @@ tightening the ceiling, one by adding nine invocations to a single level - and e
 
 - `mise run gates` green, and the CI job green on the offered branch.
 - Reading the PRD from §13 forward, a person can reproduce the order in `choose` without reading Go.
+
+## Closure
+
+Filed under `completed/` on 2026-10-15 by `chore-file-finished-plans`. **Delivered.** Four milestones, each its
+own changeset, all landed 2026-09-30:
+
+-   `ignores:` outranks every inference — `feat/ignores-before-inference` (`71c55bc`), commit `27ec2dc`.
+-   rank by the commit that added the directory, and only when ranking is needed — `feat/rank-by-add-commit`
+    (`b4b5c6f`), commit `7b3d753`: `distanceFromAdd` and the lazy `rankByCreation` in
+    `internal/changeset/resolve.go`.
+-   `base:` with an always-recorded `base-changeset:` — `feat/base-changeset-always-recorded` (`7d6518c`),
+    commit `c88ab86`.
+-   the set operation as the primary rule — `feat/set-operation-primary-rule` (`3764473`), commit `4fb85d4`:
+    `subtractRecordedParents`.
+
+Three checklist boxes in M3 were left unticked while the code carried the work. They are ticked here with the
+symbol that delivers each, so the checklist and the tree say the same thing. The fourth box stays as it was
+written: the per-command add-commit cache, deferred with the two reasons that make it nobody's milestone yet.
