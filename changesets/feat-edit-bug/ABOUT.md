@@ -14,21 +14,21 @@ exec.Command("/bin/sh", "-c", `eval exec ${GIT_PAIR_EDITOR} "$@"`, "git-pair", p
 ```
 
 Two parses happen there. `"$@"` carries the path as one word, quoting intact — that half was
-correct. Then `eval` assembles a command string from the expanded words and parses *that*, so the
+correct. Then `eval` assembles a command string from the expanded words and parses _that_, so the
 path is shell input at the second parse and its `$businessId` is a variable reference. The two
 dynamic directories expanded away, the path that remained does not exist, and an editor asked to
 open a nonexistent file shows an empty buffer.
 
 What the second parse did to a path, each verified against the old line:
 
-| path held | the editor was given |
-| --- | --- |
-| `$businessId` | nothing, or the value of that environment variable — the wrong file, silently |
-| `` $(...) `...` `` | the substitution ran, as the reviewer's own user |
-| `*`, `?`, `[a]` | the matching files, when any matched |
-| `a b` | two arguments |
-| `a\b` | `ab` |
-| `a'b`, `a"b`, `a;b`, `a&&b`, `a\|b` | a syntax error, or a truncated argument |
+| path held                           | the editor was given                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------- |
+| `$businessId`                       | nothing, or the value of that environment variable — the wrong file, silently |
+| `` $(...) `...` ``                  | the substitution ran, as the reviewer's own user                              |
+| `*`, `?`, `[a]`                     | the matching files, when any matched                                          |
+| `a b`                               | two arguments                                                                 |
+| `a\b`                               | `ab`                                                                          |
+| `a'b`, `a"b`, `a;b`, `a&&b`, `a\|b` | a syntax error, or a truncated argument                                       |
 
 Only files with those characters hit it, which is why it surfaced on dynamic-route paths and not
 before. The TUI, the session, and the path handed to `EditorCommand` were all correct; the damage
@@ -52,6 +52,7 @@ was one line inside the launch.
   and quoting inside the value is still honoured. The path is assigned from `$1` before `set --`
   overwrites the positionals, and is quoted at the `exec`, so no parser reads its contents again.
   The comment records why the two halves are parsed differently.
+
 - `internal/console/console_test.go`:
   - `editorProbe(t)`, extracted from `TestEditorCommandLineIsSplitAndGivenTheFile`, so the stand-in
     editor that logs its `argv` is one script. Its arguments are now bracketed, because a log that

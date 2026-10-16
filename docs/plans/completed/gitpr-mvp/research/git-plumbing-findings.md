@@ -5,21 +5,21 @@ directory; edge cases (binary/rename/deleted/NUL bytes) in `/tmp` spikes reprodu
 
 ## Confirmed working
 
-| Need | Command | Notes |
-| --- | --- | --- |
-| Read one trailer in log | `git log --format='%(trailers:key=GitPR-Outcome,only,unfold)'` | Works. Use `%x09` (not `%09`) for tab separators in `--format`. |
-| Changeset diff span | `git diff <base>...HEAD` | Three-dot == `merge-base(base,HEAD)..HEAD`. Matches PRD §17.1. |
-| Review-relative span | `git diff <review>..HEAD` | Two-dot. Matches PRD §17.2/§17.3. |
-| Enumerate branch-only history | `git log --reverse <base>..HEAD` | Two-dot set equals merge-base-anchored set. |
-| Empty review commit (`--approve`) | `git commit --allow-empty` | Works with multi-line message + trailers. |
-| Construct trailer block | `git interpret-trailers --trailer 'K=V'` | Clean round-trip; avoids hand-formatted messages. |
-| Lifecycle commit classification | `%(trailers:only,unfold)` empty ⇒ implementation commit | Gives PRD §12 "implementation commit invalidates marker" for free. |
-| Durable review ref | `git update-ref refs/reviews/<cs> <sha>` | Verified: after `branch -D`, the full 5-commit chain stayed reachable via the ref. |
-| List review refs | `git for-each-ref --format='%(refname:short) %(objectname:short) %(committerdate:relative)' refs/reviews` | Good fit for `review queue`. |
-| Missing ref probe | `git rev-parse --verify -q refs/reviews/x` | Exit 128; use `-q` to suppress stderr. |
-| Dirty tree check | `test -z "$(git status --porcelain -uall)"` | Reports ` M` and `??`; respects `.gitignore`. |
-| Branch → slug | `tr '/' '-'` then squeeze/strip non `[A-Za-z0-9._-]` | Deterministic: `feature/x/y` → `feature-x-y`. |
-| Read HEAD blob | `git show HEAD:<path>` | Fails cleanly for deleted paths. |
+| Need                              | Command                                                                                                   | Notes                                                                              |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Read one trailer in log           | `git log --format='%(trailers:key=GitPR-Outcome,only,unfold)'`                                            | Works. Use `%x09` (not `%09`) for tab separators in `--format`.                    |
+| Changeset diff span               | `git diff <base>...HEAD`                                                                                  | Three-dot == `merge-base(base,HEAD)..HEAD`. Matches PRD §17.1.                     |
+| Review-relative span              | `git diff <review>..HEAD`                                                                                 | Two-dot. Matches PRD §17.2/§17.3.                                                  |
+| Enumerate branch-only history     | `git log --reverse <base>..HEAD`                                                                          | Two-dot set equals merge-base-anchored set.                                        |
+| Empty review commit (`--approve`) | `git commit --allow-empty`                                                                                | Works with multi-line message + trailers.                                          |
+| Construct trailer block           | `git interpret-trailers --trailer 'K=V'`                                                                  | Clean round-trip; avoids hand-formatted messages.                                  |
+| Lifecycle commit classification   | `%(trailers:only,unfold)` empty ⇒ implementation commit                                                   | Gives PRD §12 "implementation commit invalidates marker" for free.                 |
+| Durable review ref                | `git update-ref refs/reviews/<cs> <sha>`                                                                  | Verified: after `branch -D`, the full 5-commit chain stayed reachable via the ref. |
+| List review refs                  | `git for-each-ref --format='%(refname:short) %(objectname:short) %(committerdate:relative)' refs/reviews` | Good fit for `review queue`.                                                       |
+| Missing ref probe                 | `git rev-parse --verify -q refs/reviews/x`                                                                | Exit 128; use `-q` to suppress stderr.                                             |
+| Dirty tree check                  | `test -z "$(git status --porcelain -uall)"`                                                               | Reports ` M` and `??`; respects `.gitignore`.                                      |
+| Branch → slug                     | `tr '/' '-'` then squeeze/strip non `[A-Za-z0-9._-]`                                                      | Deterministic: `feature/x/y` → `feature-x-y`.                                      |
+| Read HEAD blob                    | `git show HEAD:<path>`                                                                                    | Fails cleanly for deleted paths.                                                   |
 
 ## Added-line extraction (basis of the surviving-additions diagnostic)
 
@@ -40,8 +40,8 @@ Parser rules that matter:
    data lines, so binaries cannot produce false survivors — but they are still skipped
    explicitly via numstat so a future `diff.binary` config change cannot corrupt the check.
 
-Survival test: `text in git show HEAD:<path>`.splitlines()` using exact (non-trimmed)
-line content; report `path:<line-number-at-HEAD>`.
+Survival test: `text in git show HEAD:<path>`.splitlines()`using exact (non-trimmed)
+line content; report`path:<line-number-at-HEAD>`.
 
 ## Design problem found (needs a product decision)
 
@@ -73,7 +73,7 @@ changeset and pushes users toward reflexive use of
 to provide.
 
 Recommended resolution (see plan D3): scope the blocking set to paths **outside**
-`changesets/<changeset>/`, and report surviving additions *inside* the changeset directory
+`changesets/<changeset>/`, and report surviving additions _inside_ the changeset directory
 as a separate, non-blocking "review artifacts still present" list. Rationale: the
 mechanism exists to stop forgotten **code** feedback (`// Please use a transaction here`)
 from silently returning to the reviewer; `ABOUT.md` and threads are conversation surface

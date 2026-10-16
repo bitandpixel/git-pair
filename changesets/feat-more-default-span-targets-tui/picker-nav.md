@@ -2,7 +2,6 @@
 
 `d` and `u` should also work instead of having to hold ctrl, similar to other parts of the app
 
-
 ## Author reply
 
 Added. In the drill's navigation mode `d` and `u` move half a page beside `ctrl-d`/`ctrl-u`, the way the

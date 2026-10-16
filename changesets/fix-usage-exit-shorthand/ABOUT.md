@@ -7,11 +7,11 @@ repository refused a correctly used command" and 2 means "the invocation was wro
 back as 1 — so an agent that typed `git pair -V` was told to go re-read a repository that had refused
 nothing, instead of fixing its own command:
 
-| invocation | message | before | now |
-| --- | --- | --- | --- |
-| `git pair -V`, `git pair status -x` | `unknown shorthand flag: 'V' in -V` | 1 | 2 |
-| `git pair init --id` (value missing) | `flag needs an argument: --id` | 1 | 2 |
-| `git pair ---x` | `bad flag syntax: ---x` | 1 | 2 |
+| invocation                           | message                             | before | now |
+| ------------------------------------ | ----------------------------------- | ------ | --- |
+| `git pair -V`, `git pair status -x`  | `unknown shorthand flag: 'V' in -V` | 1      | 2   |
+| `git pair init --id` (value missing) | `flag needs an argument: --id`      | 1      | 2   |
+| `git pair ---x`                      | `bad flag syntax: ---x`             | 1      | 2   |
 
 The printed message was always right; only the code was wrong. `git pair --nope` and `git pair bogus`
 already exited 2, which is what made the three above visible by contrast.

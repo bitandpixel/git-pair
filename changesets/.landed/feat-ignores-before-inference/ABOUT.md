@@ -17,7 +17,7 @@ reported ambiguity rather than to nothing.
 ## Evidence
 
 Two fixtures in `internal/changeset/ignores_precedence_test.go`, the same branch written in the two spellings of a
-stack link, each with the last commit touching the *other* changeset's directory so nothing can pass by being
+stack link, each with the last commit touching the _other_ changeset's directory so nothing can pass by being
 recent:
 
 - `base: booking` with `base-changeset: booking`, an id the ancestor drop can match. This one fails before the

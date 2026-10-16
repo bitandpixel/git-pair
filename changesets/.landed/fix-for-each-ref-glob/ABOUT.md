@@ -61,9 +61,9 @@ rather than reasoned: with the changeset on `feat/booked`, the merge on `main` a
 local tip and says nothing about a second carrier.
 
 That blindness is what the next commit in the stack removes — and the answer there is the same one, for a
-better reason. `fix-legacy-refs-and-remote-branches` keys candidates on the branch a ref *names*, so a local
+better reason. `fix-legacy-refs-and-remote-branches` keys candidates on the branch a ref _names_, so a local
 branch and the copy the last fetch brought are one candidate and the local tip is what gets recorded; two
-candidates appear only when two *different* branches carry the directory, which is the refusal in "The
+candidates appear only when two _different_ branches carry the directory, which is the refusal in "The
 change" above. Its `TestIntegrationRecordCountsOneBranchUnderBothSpellings` is the case above, kept as a
 test rather than run as a check, with the fetched copy deliberately behind the local one — keyed on the
 commit those would be two carriers and a refusal, which is the failure this question is really asking about.

@@ -13,13 +13,13 @@ stacked on `feat-hooks-author-points`.
 
 ## What changed
 
--   `internal/cli/check.go` — `pre-check` runs before the gate and `post-check` after the verdict is built;
-    both contribute reasons; `hooks` added to `check`'s JSON beside `reasons`.
--   `internal/cli/hooks.go` — `hookReasons`, the wording that says who refused.
--   `internal/hooks/hooks.go` — the two gate points activated; `cmd.WaitDelay` on the hook spawn.
--   Docs: PRD §11.4 gains the gate subsection; the README gains a CI example and updates the `check` and
-    `hooks` rows; the skill's `references/cli.md` names the check points.
--   Tests: `internal/cli/hooks_check_test.go`.
+- `internal/cli/check.go` — `pre-check` runs before the gate and `post-check` after the verdict is built;
+  both contribute reasons; `hooks` added to `check`'s JSON beside `reasons`.
+- `internal/cli/hooks.go` — `hookReasons`, the wording that says who refused.
+- `internal/hooks/hooks.go` — the two gate points activated; `cmd.WaitDelay` on the hook spawn.
+- Docs: PRD §11.4 gains the gate subsection; the README gains a CI example and updates the `check` and
+  `hooks` rows; the skill's `references/cli.md` names the check points.
+- Tests: `internal/cli/hooks_check_test.go`.
 
 ## Design decisions
 
@@ -80,49 +80,49 @@ it is not the fix: the memo makes the duplicate invisible to the measurement tha
 
 ## Validation
 
--   `go build ./...` clean; `gofmt -l internal cmd` empty.
--   `mise run gates` — not just `check` — exited **0**: 90 checks, no `FAIL`, and its cost section reads
-    `a child on a parent stays inside the recorded cost of the stack (49 measured, 50 allowed)`, with the
-    repeat line beside it (`49 then 49`). The same measurement before this changeset's once-per-run resolution
-    was 51, which is the assertion that made CI decline the head. `TestCheckAsksTheHookQuestionsOncePerRun`
-    pins it from the Go side with `gittest.SpawnShimLines`: it reports 2 and 2 against a per-point resolution
-    and 1 and 1 against the shared one.
--   `go test ./internal/hooks/ ./internal/cli/ ./internal/hygiene/` green, run in full (121s). The new cases:
-    a failing `pre-check` refuses the gate with itself as the only reason, keeps its output off stdout and on
-    stderr, and the human form exits 1 under `NOT READY:`; a passing hook leaves the verdict alone and is
-    reported; the gate's own conditions and the hook's are named in the same run; a timeout says "deadline"
-    rather than "failed"; an unaccepted tracked hook does not refuse the gate; an invented override flag is a
-    usage error; a failing `post-check` sets `ready: false` and clears `next_action`; both points appear in
-    the array in the order they ran; and `change integrate` runs neither point while `check` runs its own.
--   `go test ./internal/cli/ -run Docs` and `-run TestTheCommandTreeIsTheCommandSet` green.
--   The README's CI example was exercised against a fixture repository rather than written from the JSON's
-    shape. The committed hook, `git pair hooks --trust`, the refusal, the reason wording and the `hooks` entry
-    are the output that run produced, including `check --json` exiting 0 with `ready: false` and the hook's log
-    on stderr only.
--   `mise run check` exited 0: 36 test shards ok, 22 served from cache, no `FAIL`, and its `gofmt -l internal
-    cmd` step reported nothing. Re-run after this file was written, with the same result.
--   Restacked onto M1's answers to the reviewer's feedback, twice — once for the two questions, once for the
-    `trust_state` work that came out of the vendoring discussion — and re-run each time: exit 0, 36 shards ok,
-    no `FAIL`, `gofmt` silent. Neither answer touches this milestone's behaviour: a hook that joins the verdict
-    does so whatever the reason it did not run was, and the trust state is what `git pair hooks` reports rather
-    than when a point fires. What did reach this branch is documentation — M1's two rows gained the three
-    acceptance states, and the restack carried both texts forward.
+- `go build ./...` clean; `gofmt -l internal cmd` empty.
+- `mise run gates` — not just `check` — exited **0**: 90 checks, no `FAIL`, and its cost section reads
+  `a child on a parent stays inside the recorded cost of the stack (49 measured, 50 allowed)`, with the
+  repeat line beside it (`49 then 49`). The same measurement before this changeset's once-per-run resolution
+  was 51, which is the assertion that made CI decline the head. `TestCheckAsksTheHookQuestionsOncePerRun`
+  pins it from the Go side with `gittest.SpawnShimLines`: it reports 2 and 2 against a per-point resolution
+  and 1 and 1 against the shared one.
+- `go test ./internal/hooks/ ./internal/cli/ ./internal/hygiene/` green, run in full (121s). The new cases:
+  a failing `pre-check` refuses the gate with itself as the only reason, keeps its output off stdout and on
+  stderr, and the human form exits 1 under `NOT READY:`; a passing hook leaves the verdict alone and is
+  reported; the gate's own conditions and the hook's are named in the same run; a timeout says "deadline"
+  rather than "failed"; an unaccepted tracked hook does not refuse the gate; an invented override flag is a
+  usage error; a failing `post-check` sets `ready: false` and clears `next_action`; both points appear in
+  the array in the order they ran; and `change integrate` runs neither point while `check` runs its own.
+- `go test ./internal/cli/ -run Docs` and `-run TestTheCommandTreeIsTheCommandSet` green.
+- The README's CI example was exercised against a fixture repository rather than written from the JSON's
+  shape. The committed hook, `git pair hooks --trust`, the refusal, the reason wording and the `hooks` entry
+  are the output that run produced, including `check --json` exiting 0 with `ready: false` and the hook's log
+  on stderr only.
+- `mise run check` exited 0: 36 test shards ok, 22 served from cache, no `FAIL`, and its `gofmt -l internal
+cmd` step reported nothing. Re-run after this file was written, with the same result.
+- Restacked onto M1's answers to the reviewer's feedback, twice — once for the two questions, once for the
+  `trust_state` work that came out of the vendoring discussion — and re-run each time: exit 0, 36 shards ok,
+  no `FAIL`, `gofmt` silent. Neither answer touches this milestone's behaviour: a hook that joins the verdict
+  does so whatever the reason it did not run was, and the trust state is what `git pair hooks` reports rather
+  than when a point fires. What did reach this branch is documentation — M1's two rows gained the three
+  acceptance states, and the restack carried both texts forward.
 
 ## Known limitations
 
--   `pre-submit` and `post-submit` remain configured-but-inert until M4; `git pair hooks` reports them as such.
--   A tracked `pre-check` hook that nobody has accepted does not refuse the gate. Consent is not a merge
-    condition — a fresh clone must still get a verdict — but it means the suite a team committed does not run
-    in a clone that has not accepted it, and `check` says so on stderr rather than treating the absence as a
-    pass.
--   `WaitDelay` closes the pipes five seconds after the deadline. Output still in flight at that moment is
-    truncated in the report, not lost silently: the status is already `timeout`, and the reason names the
-    deadline.
--   There is still no results store, so `git pair hooks` reports configuration rather than the last result of
-    each hook.
+- `pre-submit` and `post-submit` remain configured-but-inert until M4; `git pair hooks` reports them as such.
+- A tracked `pre-check` hook that nobody has accepted does not refuse the gate. Consent is not a merge
+  condition — a fresh clone must still get a verdict — but it means the suite a team committed does not run
+  in a clone that has not accepted it, and `check` says so on stderr rather than treating the absence as a
+  pass.
+- `WaitDelay` closes the pipes five seconds after the deadline. Output still in flight at that moment is
+  truncated in the report, not lost silently: the status is already `timeout`, and the reason names the
+  deadline.
+- There is still no results store, so `git pair hooks` reports configuration rather than the last result of
+  each hook.
 
 ## Open questions
 
--   Whether `LANDED UNREVIEWED`-style reporting should ever mention a hook result. Nothing here persists one.
--   M1's question stays open: should a repository that has committed tracked hooks refuse outright in a clone
-    that has not accepted them, instead of proceeding with a note?
+- Whether `LANDED UNREVIEWED`-style reporting should ever mention a hook result. Nothing here persists one.
+- M1's question stays open: should a repository that has committed tracked hooks refuse outright in a clone
+  that has not accepted them, instead of proceeding with a note?

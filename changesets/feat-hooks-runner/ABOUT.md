@@ -13,20 +13,20 @@ milestone of the approved lifecycle-hooks plan (`docs/plans/lifecycle-hooks/plan
 
 ## What changed
 
--   `internal/hooks/` — the new package. `Discover` finds the hooks configured for a point across two roots;
-    `Run` executes them argv-exact with a deadline and captured output; `Trusted`/`Accept`/`Trust` are the
-    trust store, where `Trust` reports the clone's state — accepted, changed, or unrecorded — beside both
-    hashes.
--   `internal/cli/hooks.go` — `app.runHooks`, the single call site every command reaches its point through,
-    plus `git pair hooks` and `git pair hooks --trust`.
--   `internal/cli/change.go` — `runChangeReady` calls the `pre-ready` point after the built-in checks and
-    before `marker.Commit`, and re-checks the tree afterwards.
--   `internal/git/git.go`, `internal/marker/marker.go` — `CommitWithEnv`, so the resolution reaches the
-    marker commit's environment and therefore git's own hooks.
--   `PRD.md` §11.4, the `README.md` command table, and `skills/git-pair/references/cli.md` name the command
-    and the point; `PRD.md`'s command tree gained `hooks`.
--   Tests: `internal/hooks/hooks_test.go` for the discovery and environment rules, `internal/cli/hooks_test.go`
-    for the behaviour of the point end to end.
+- `internal/hooks/` — the new package. `Discover` finds the hooks configured for a point across two roots;
+  `Run` executes them argv-exact with a deadline and captured output; `Trusted`/`Accept`/`Trust` are the
+  trust store, where `Trust` reports the clone's state — accepted, changed, or unrecorded — beside both
+  hashes.
+- `internal/cli/hooks.go` — `app.runHooks`, the single call site every command reaches its point through,
+  plus `git pair hooks` and `git pair hooks --trust`.
+- `internal/cli/change.go` — `runChangeReady` calls the `pre-ready` point after the built-in checks and
+  before `marker.Commit`, and re-checks the tree afterwards.
+- `internal/git/git.go`, `internal/marker/marker.go` — `CommitWithEnv`, so the resolution reaches the
+  marker commit's environment and therefore git's own hooks.
+- `PRD.md` §11.4, the `README.md` command table, and `skills/git-pair/references/cli.md` name the command
+  and the point; `PRD.md`'s command tree gained `hooks`.
+- Tests: `internal/hooks/hooks_test.go` for the discovery and environment rules, `internal/cli/hooks_test.go`
+  for the behaviour of the point end to end.
 
 ## Design decisions
 
@@ -86,86 +86,86 @@ override.
 
 ## Validation
 
--   `go build ./...` clean; `gofmt -l internal cmd` empty.
--   `go test ./internal/hooks/ ./internal/cli/ ./internal/git/` green. The CLI file covers: a passing hook
-    writes the marker and is reported; a failing hook refuses with exit 1, writes no commit, and its output
-    reaches the author; the missing executable bit, the deadline, and the dirty-tree case each refuse with
-    their own reason; an unaccepted tracked hook does not run and the run says why; `--trust` accepts and
-    prints what it approved; editing a hook invalidates the acceptance; the per-clone hook needs no
-    acceptance; tracked-then-clone ordering and stop-at-first-failure ordering; both off switches; the
-    environment a hook receives; git's own `pre-commit` reading the resolution; and `git pair hooks`
-    reporting configuration, including a misspelled point and a hook under a point this build does not run.
--   `go test ./internal/cli/ -run 'Docs|CommandTree'` green, which is what forced the new name into all three
-    documents rather than one.
--   `go test ./internal/hygiene/` green — the new package introduces no literal for the git verbs git-pair
-    itself must not invoke, and no read-path command gained a hook.
--   `Trust` is the new answer and `Trusted` is now expressed through it, so one comparison decides and the
-    report cannot disagree with the runner. The cases: no tracked tree is accepted by vacuity with neither hash
-    set; a tree nobody accepted is `unrecorded` with only the tree hash; after `Accept` both hashes equal the
-    approved value; after a rewrite it is `changed`, the recorded hash still the approved one, and `Trusted`
-    false.
--   End to end in the CLI: a clone that never accepted gets the plain `NOT trusted` sentence and no `accepted`
-    field; a clone the repository moved under gets `CHANGED since you accepted them` with both hashes, on
-    stderr, and `trust_state: "changed"` with `tree_hash` in the JSON. The two hashes are asserted distinct, so
-    the report cannot print one value twice and call it a comparison.
--   Checked against the built binary rather than only the tests: a fixture repository at the three states —
-    never accepted, `hooks --trust`, then a committed rewrite of the hook — printed the two sentences and the
-    hash pair this changeset claims.
--   `mise run check` exited 0 on the committed tree (`f96271e`): 35 test shards ok, 27 of them served from
-    cache, no `FAIL`, and the gate's own `gofmt -l internal cmd` step reported nothing. Run from the
-    repository root, which is the task that runs build, gofmt, vet and every package's tests including the
-    sharded `internal/cli` and `internal/tui` ones.
--   After the review feedback, `mise run check` exited 0 again on `1f06e27`: 36 test shards ok, 31 served from
-    cache, no `FAIL`, `gofmt` silent. The change since the run above is documentation only — two answered
-    reviewer questions and the paragraph they exposed as missing — so no test was added and none of the
-    existing ones changed.
+- `go build ./...` clean; `gofmt -l internal cmd` empty.
+- `go test ./internal/hooks/ ./internal/cli/ ./internal/git/` green. The CLI file covers: a passing hook
+  writes the marker and is reported; a failing hook refuses with exit 1, writes no commit, and its output
+  reaches the author; the missing executable bit, the deadline, and the dirty-tree case each refuse with
+  their own reason; an unaccepted tracked hook does not run and the run says why; `--trust` accepts and
+  prints what it approved; editing a hook invalidates the acceptance; the per-clone hook needs no
+  acceptance; tracked-then-clone ordering and stop-at-first-failure ordering; both off switches; the
+  environment a hook receives; git's own `pre-commit` reading the resolution; and `git pair hooks`
+  reporting configuration, including a misspelled point and a hook under a point this build does not run.
+- `go test ./internal/cli/ -run 'Docs|CommandTree'` green, which is what forced the new name into all three
+  documents rather than one.
+- `go test ./internal/hygiene/` green — the new package introduces no literal for the git verbs git-pair
+  itself must not invoke, and no read-path command gained a hook.
+- `Trust` is the new answer and `Trusted` is now expressed through it, so one comparison decides and the
+  report cannot disagree with the runner. The cases: no tracked tree is accepted by vacuity with neither hash
+  set; a tree nobody accepted is `unrecorded` with only the tree hash; after `Accept` both hashes equal the
+  approved value; after a rewrite it is `changed`, the recorded hash still the approved one, and `Trusted`
+  false.
+- End to end in the CLI: a clone that never accepted gets the plain `NOT trusted` sentence and no `accepted`
+  field; a clone the repository moved under gets `CHANGED since you accepted them` with both hashes, on
+  stderr, and `trust_state: "changed"` with `tree_hash` in the JSON. The two hashes are asserted distinct, so
+  the report cannot print one value twice and call it a comparison.
+- Checked against the built binary rather than only the tests: a fixture repository at the three states —
+  never accepted, `hooks --trust`, then a committed rewrite of the hook — printed the two sentences and the
+  hash pair this changeset claims.
+- `mise run check` exited 0 on the committed tree (`f96271e`): 35 test shards ok, 27 of them served from
+  cache, no `FAIL`, and the gate's own `gofmt -l internal cmd` step reported nothing. Run from the
+  repository root, which is the task that runs build, gofmt, vet and every package's tests including the
+  sharded `internal/cli` and `internal/tui` ones.
+- After the review feedback, `mise run check` exited 0 again on `1f06e27`: 36 test shards ok, 31 served from
+  cache, no `FAIL`, `gofmt` silent. The change since the run above is documentation only — two answered
+  reviewer questions and the paragraph they exposed as missing — so no test was added and none of the
+  existing ones changed.
 
 ## Known limitations
 
--   Only `pre-ready` is wired. The runner serves one point at a time, and `git pair hooks` reports a hook
-    under any other point as `active: false` rather than pretending to run it. The remaining points arrive
-    with the milestones that run them.
--   There is no results store, so `git pair hooks` reports configuration rather than the last result of each
-    hook. The plan leaves the record's contents open and this milestone did not need it; adding it is still
-    open.
--   `git-pair.hookTimeout` accepts a plain number of seconds, the same shape as `core.hooksPath`-adjacent
-    git config values elsewhere in this tool; it is not git's `10s`/`5m` duration grammar.
--   A tracked hook that has never been accepted does not refuse the operation — the operation proceeds and
-    names the skipped hooks on stderr. That is deliberate, so a fresh clone is not blocked by a file nobody
-    has read yet, and it is the same asymmetry `--configure-fetch` uses for consent. It does mean a repository
-    cannot rely on a hook being enforced in a clone that has not accepted it, which is the honest reading of
-    "client control".
--   Hooks are not part of `check`. That is M3, and it lands only on the command's entry point: `change
-    integrate` runs `check`'s gate as the same code, and hooks firing there would double-run a suite inside
-    one author action.
--   **Acceptance answers three states, because two failures wear one sentence.** `trusted: false` covered both
-    a clone where nobody has run `--trust` and a clone whose accepted hash the repository moved under by
-    shipping a new version of the check. The second needs its own words: it is the moment a check starts not
-    running for everybody who pulled, and from the clone it looks identical to the first. `git pair hooks`
-    now reports `trust_state` (`accepted`, `changed`, `unrecorded`) and, when the two differ, both the
-    accepted hash and the tree's current one — the values `--trust` printed when the person approved, so the
-    comparison is against something they saw. A state rather than a second boolean, because the reader's next
-    action differs: one is "read these", the other is "read what moved, then decide". The warning goes to
-    stderr beside the note a run makes when it skips the same hooks; the table stays the answer on stdout.
+- Only `pre-ready` is wired. The runner serves one point at a time, and `git pair hooks` reports a hook
+  under any other point as `active: false` rather than pretending to run it. The remaining points arrive
+  with the milestones that run them.
+- There is no results store, so `git pair hooks` reports configuration rather than the last result of each
+  hook. The plan leaves the record's contents open and this milestone did not need it; adding it is still
+  open.
+- `git-pair.hookTimeout` accepts a plain number of seconds, the same shape as `core.hooksPath`-adjacent
+  git config values elsewhere in this tool; it is not git's `10s`/`5m` duration grammar.
+- A tracked hook that has never been accepted does not refuse the operation — the operation proceeds and
+  names the skipped hooks on stderr. That is deliberate, so a fresh clone is not blocked by a file nobody
+  has read yet, and it is the same asymmetry `--configure-fetch` uses for consent. It does mean a repository
+  cannot rely on a hook being enforced in a clone that has not accepted it, which is the honest reading of
+  "client control".
+- Hooks are not part of `check`. That is M3, and it lands only on the command's entry point: `change
+integrate` runs `check`'s gate as the same code, and hooks firing there would double-run a suite inside
+  one author action.
+- **Acceptance answers three states, because two failures wear one sentence.** `trusted: false` covered both
+  a clone where nobody has run `--trust` and a clone whose accepted hash the repository moved under by
+  shipping a new version of the check. The second needs its own words: it is the moment a check starts not
+  running for everybody who pulled, and from the clone it looks identical to the first. `git pair hooks`
+  now reports `trust_state` (`accepted`, `changed`, `unrecorded`) and, when the two differ, both the
+  accepted hash and the tree's current one — the values `--trust` printed when the person approved, so the
+  comparison is against something they saw. A state rather than a second boolean, because the reader's next
+  action differs: one is "read these", the other is "read what moved, then decide". The warning goes to
+  stderr beside the note a run makes when it skips the same hooks; the table stays the answer on stdout.
 
 ## Open questions
 
--   M5 task 1 rewords PRD §26 to say that its list binds what git-pair invokes of its own choosing. This
-    milestone depends on that reading, and the wording is the reviewer's to sign off.
--   Whether a hook result belongs in the review marker is the open spike before M4. Nothing here writes hook
-    state into any marker.
--   Whether an untrusted tracked tree should refuse outright once a repository has committed hooks — today it
-    proceeds with a note. The current answer favours the fresh clone; a team that wants enforcement will want
-    the other one.
--   Whether the `changed` state should be louder than `unrecorded` at run time. Today `change ready` says the
-    same sentence in both cases and `git pair hooks` is the command that explains which; if the enforcement
-    question above resolves toward refusing, the run-time note has to carry the distinction too, because "you
-    are working without the check the team shipped yesterday" is not a fact to relegate to a second command.
--   Whether keeping the version you read deserves a command. It works today by copying the old content into
-    the per-clone root, which is git's model applied by hand (`git show <commit>:.git-pair/hooks/…` and a
-    `chmod +x`). A first-class `hooks --pin` would be a real convenience, and it is the piece this milestone
-    deliberately did not add: it needs a decision about what happens when a pinned copy and a later-accepted
-    tracked tree both match a point, and that decision belongs with the enforcement question above.
+- M5 task 1 rewords PRD §26 to say that its list binds what git-pair invokes of its own choosing. This
+  milestone depends on that reading, and the wording is the reviewer's to sign off.
+- Whether a hook result belongs in the review marker is the open spike before M4. Nothing here writes hook
+  state into any marker.
+- Whether an untrusted tracked tree should refuse outright once a repository has committed hooks — today it
+  proceeds with a note. The current answer favours the fresh clone; a team that wants enforcement will want
+  the other one.
+- Whether the `changed` state should be louder than `unrecorded` at run time. Today `change ready` says the
+  same sentence in both cases and `git pair hooks` is the command that explains which; if the enforcement
+  question above resolves toward refusing, the run-time note has to carry the distinction too, because "you
+  are working without the check the team shipped yesterday" is not a fact to relegate to a second command.
+- Whether keeping the version you read deserves a command. It works today by copying the old content into
+  the per-clone root, which is git's model applied by hand (`git show <commit>:.git-pair/hooks/…` and a
+  `chmod +x`). A first-class `hooks --pin` would be a real convenience, and it is the piece this milestone
+  deliberately did not add: it needs a decision about what happens when a pinned copy and a later-accepted
+  tracked tree both match a point, and that decision belongs with the enforcement question above.
 
 ## Addressed feedback
 

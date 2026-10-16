@@ -22,25 +22,25 @@ deleted for want of a spike that earned it.
 
 ## What changed
 
--   `internal/cli/stacked.go` — `parentStatus` gained `Step` and `ApprovalSurvivesLanding`. A landed parent now
-    writes the fact into `Note` and the command into `Step` instead of gluing them into one sentence, so a
-    surface can print one without the other. `landedApprovalStillStands` records the comparison's outcome when
-    the content came out equal and the branch merges cleanly, and `advisesRestack()` beside `owesLandingStep()`
-    decides whether the command is put in front of the author. On the branch-present side, an approval that
-    recorded no measurement is now said out loud when its step is given.
--   `internal/cli/check.go` — the verdict's `parent:` line and `next_action` consult `advisesRestack()`;
-    when it withholds the step the line carries the comparison sentence instead, and when it gives the step
-    without having compared, it says so. `check --json` gained `parent_approval_survives_landing`.
--   `internal/cli/status.go` — `parent.step` is the command and `parent.note` the fact, printed as `step:` and
-    `note:`. `status` keeps advising the step wherever `owesLandingStep()` says one is owed, which is what
-    keeps the command readable for anyone who wants the tidier history.
--   `queue` is unchanged: its housekeeping voice carries no verdict, so it advises on the fact alone.
--   Tests — `restack_advice_test.go` covers the six end-to-end cases the plan's M1 asked for; the two
-    predicates are pinned separately in `stacked_internal_test.go`; and three tests that asserted the old
-    advice were re-pointed at what they now describe. The plan is updated with the spike results and its
-    execution status, and moved under `docs/plans/completed/`.
--   Docs — the PRD's parent-landing section, the README's stack prose and `check --json` field list, and the
-    skill's agent-facing rule.
+- `internal/cli/stacked.go` — `parentStatus` gained `Step` and `ApprovalSurvivesLanding`. A landed parent now
+  writes the fact into `Note` and the command into `Step` instead of gluing them into one sentence, so a
+  surface can print one without the other. `landedApprovalStillStands` records the comparison's outcome when
+  the content came out equal and the branch merges cleanly, and `advisesRestack()` beside `owesLandingStep()`
+  decides whether the command is put in front of the author. On the branch-present side, an approval that
+  recorded no measurement is now said out loud when its step is given.
+- `internal/cli/check.go` — the verdict's `parent:` line and `next_action` consult `advisesRestack()`;
+  when it withholds the step the line carries the comparison sentence instead, and when it gives the step
+  without having compared, it says so. `check --json` gained `parent_approval_survives_landing`.
+- `internal/cli/status.go` — `parent.step` is the command and `parent.note` the fact, printed as `step:` and
+  `note:`. `status` keeps advising the step wherever `owesLandingStep()` says one is owed, which is what
+  keeps the command readable for anyone who wants the tidier history.
+- `queue` is unchanged: its housekeeping voice carries no verdict, so it advises on the fact alone.
+- Tests — `restack_advice_test.go` covers the six end-to-end cases the plan's M1 asked for; the two
+  predicates are pinned separately in `stacked_internal_test.go`; and three tests that asserted the old
+  advice were re-pointed at what they now describe. The plan is updated with the spike results and its
+  execution status, and moved under `docs/plans/completed/`.
+- Docs — the PRD's parent-landing section, the README's stack prose and `check --json` field list, and the
+  skill's agent-facing rule.
 
 ## Design decisions
 
@@ -82,32 +82,32 @@ the branches (PRD §26); what moved is which of them a verdict is willing to nam
 
 ## Validation
 
--   The six end-to-end cases from the plan: approved with a plain-merge landing (ready, no `git rebase` in
-    `next_action`, the comparison on the `parent:` line, exit 0); the same fixture after running the withheld
-    step (refused for the rewritten history, which is the choice the author can still make); a rewritten child
-    over a squashed landing (refused, with the re-offer and the re-review); a child that would conflict with
-    the destination (the conflicting path named, and `git merge main && git pair change ready --changeset …`);
-    a child with no approval (the step on `status`, `queue`, and `check` under `--allow-feedback`); and an
-    approval with no recorded measurement (the step given, with the unverified clause).
--   Unit tests for the two predicates, so a housekeeping fact and an instruction cannot be merged back
-    together by the next simplification.
--   `mise run check` (gofmt, vet, the sharded suite including the docs contract and the hygiene scan), and the
-    scripted gates: `mise run gates`.
--   One behaviour change was made deliberately rather than discovered: `TestCheckPassesAChildOnALandedParent`
-    and `TestChildOfALandedParentIsToldWhereTheWorkWent` asserted the step on an approved child. Those tests
-    encoded the bug; their expectations were re-pointed and their comments say which case they now cover.
+- The six end-to-end cases from the plan: approved with a plain-merge landing (ready, no `git rebase` in
+  `next_action`, the comparison on the `parent:` line, exit 0); the same fixture after running the withheld
+  step (refused for the rewritten history, which is the choice the author can still make); a rewritten child
+  over a squashed landing (refused, with the re-offer and the re-review); a child that would conflict with
+  the destination (the conflicting path named, and `git merge main && git pair change ready --changeset …`);
+  a child with no approval (the step on `status`, `queue`, and `check` under `--allow-feedback`); and an
+  approval with no recorded measurement (the step given, with the unverified clause).
+- Unit tests for the two predicates, so a housekeeping fact and an instruction cannot be merged back
+  together by the next simplification.
+- `mise run check` (gofmt, vet, the sharded suite including the docs contract and the hygiene scan), and the
+  scripted gates: `mise run gates`.
+- One behaviour change was made deliberately rather than discovered: `TestCheckPassesAChildOnALandedParent`
+  and `TestChildOfALandedParentIsToldWhereTheWorkWent` asserted the step on an approved child. Those tests
+  encoded the bug; their expectations were re-pointed and their comments say which case they now cover.
 
 ## Known limitations
 
--   The withheld step is withheld from `check` only. A reader who wants it finds it in `status` and `queue`;
-    there is no flag to ask the verdict for it, because a verdict that can be talked into printing a
-    self-invalidating command is the thing that just shipped.
--   A child whose parent's branch is gone and whose head is not on the landing gets no command from `check`.
-    Its prose lives in the reason, and the command the old code printed named a deleted branch in
-    `git rebase --onto`.
+- The withheld step is withheld from `check` only. A reader who wants it finds it in `status` and `queue`;
+  there is no flag to ask the verdict for it, because a verdict that can be talked into printing a
+  self-invalidating command is the thing that just shipped.
+- A child whose parent's branch is gone and whose head is not on the landing gets no command from `check`.
+  Its prose lives in the reason, and the command the old code printed named a deleted branch in
+  `git rebase --onto`.
 
 ## Open questions
 
--   Plan spike 2 — whether carrying a parent's commits through to the landing misleads `change tidy`, the
-    queue's wait measurement, `history`, or the review span — was not asked, because nothing here depends on
-    the answer. It is recorded as open in the plan rather than assumed away.
+- Plan spike 2 — whether carrying a parent's commits through to the landing misleads `change tidy`, the
+  queue's wait measurement, `history`, or the review span — was not asked, because nothing here depends on
+  the answer. It is recorded as open in the plan rather than assumed away.

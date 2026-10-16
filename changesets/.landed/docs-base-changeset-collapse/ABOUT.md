@@ -51,7 +51,7 @@ The plan records measurements taken on `probe/setop-selection`, an experiment br
 set operation was installed in `choose`, the suite was run in both modes, and the fixtures that differed are
 tabulated in the plan. Two results shaped the milestones:
 
-- With the set operation absent, a branch whose last commit edits the *parent* changeset's directory is answered
+- With the set operation absent, a branch whose last commit edits the _parent_ changeset's directory is answered
   with the parent, not the child. Ranking by the commit that added each directory answers the child, with or
   without the recorded id, so the defect is fixed by M3 on its own.
 - With the set operation installed ahead of `ignores:`, a stacked sibling wins over the changeset whose file

@@ -116,22 +116,22 @@ relationship in `status` is its own field or part of `reason`.
 #### Tasks
 
 - [x] Teach `marker.Decode` the value `working`, as its own kind rather than a review outcome, and give
-  it arms in `markerLabel` and `markerReason`.
+      it arms in `markerLabel` and `markerReason`.
 - [x] No state machinery is needed beyond that: `derive` (`internal/lifecycle/lifecycle.go:174`) takes the
-  newest marker and asks it `Event.State()`, which already falls back to `model.StateWorking`
-  (`internal/lifecycle/lifecycle.go:323`). What must not happen is `working` being left unrecognised,
-  because an unrecognised marker counts as an implementation commit, so the retraction would be
-  invisible to the newest-marker rule instead of ending readiness. `Event.State()` names `KindUnready`
-  explicitly rather than relying on that fallback.
+      newest marker and asks it `Event.State()`, which already falls back to `model.StateWorking`
+      (`internal/lifecycle/lifecycle.go:323`). What must not happen is `working` being left unrecognised,
+      because an unrecognised marker counts as an implementation commit, so the retraction would be
+      invisible to the newest-marker rule instead of ending readiness. `Event.State()` names `KindUnready`
+      explicitly rather than relying on that fallback.
 - [x] Command in `internal/cli/change.go`, next to `runChangeComplete`: clean tree, derive state, write
-  the marker iff state is READY, APPROVED or FEEDBACK, otherwise succeed without recording. The refusal
-  for a terminal changeset waits for M6, since no terminal state exists to refuse yet.
+      the marker iff state is READY, APPROVED or FEEDBACK, otherwise succeed without recording. The refusal
+      for a terminal changeset waits for M6, since no terminal state exists to refuse yet.
 - [x] Tests mirroring `internal/cli/complete_test.go`: `internal/cli/unready_test.go`, seven cases,
-  including the two that are easy to get wrong — `recorded: false` on a BLOCKED changeset must still
-  report `state: BLOCKED`, and the working marker must be recognised rather than listed under
-  `unrecognised_markers`.
+      including the two that are easy to get wrong — `recorded: false` on a BLOCKED changeset must still
+      report `state: BLOCKED`, and the working marker must be recognised rather than listed under
+      `unrecognised_markers`.
 - [x] README command table, marker table, JSON contract, agent contract, troubleshooting; PRD §8 tree,
-  new §9.6, §12, §22.
+      new §9.6, §12, §22.
 
 #### Verification
 
@@ -155,37 +155,37 @@ refuses (`TestChangeUnreadyFromApprovedRequiresAFreshReview`).
 #### Tasks
 
 - [x] Staleness was applied inside `Summarize` itself: `derive` only counts commits and marked the
-  verdict provisional, and `Summarize` handed the result to `ReconcileStaleness` before returning
-  (`internal/lifecycle/lifecycle.go:131`). It is opt-in now: `Summarize` returns the marker verdict,
-  and `SummarizeAgainstTree` / `SummarizeAgainstTreeHEAD` add the tree question. No flag on the
-  shared function, because only one caller wants it and a boolean that six callers pass `false` to is
-  a trap waiting for a seventh.
+      verdict provisional, and `Summarize` handed the result to `ReconcileStaleness` before returning
+      (`internal/lifecycle/lifecycle.go:131`). It is opt-in now: `Summarize` returns the marker verdict,
+      and `SummarizeAgainstTree` / `SummarizeAgainstTreeHEAD` add the tree question. No flag on the
+      shared function, because only one caller wants it and a boolean that six callers pass `false` to is
+      a trap waiting for a seventh.
 - [x] `derive`'s provisional flip (`s.Stale = true; s.State = model.StateWorking` when `trailing > 0`)
-  no longer overwrites `State`; it keeps `Stale` as the observation and puts the count in the reason,
-  so `marked ready by 8065dae (2 commits since)` tells a reviewer the branch moved without the state
-  claiming anything about it.
+      no longer overwrites `State`; it keeps `Stale` as the observation and puts the count in the reason,
+      so `marked ready by 8065dae (2 commits since)` tells a reviewer the branch moved without the state
+      claiming anything about it.
 - [x] `change complete` is the one caller of `SummarizeAgainstTreeHEAD`. `ReconcileStaleness` now
-  sets `State = WORKING` itself in both invalidating branches, since it can no longer rely on `derive`
-  having done it.
+      sets `State = WORKING` itself in both invalidating branches, since it can no longer rely on `derive`
+      having done it.
 - [x] Rewrite the sentences that promise the old behaviour. README's "a commit that only touches
-  ABOUT.md or a thread does not invalidate the marker" and PRD §12's named safety property described a
-  rule that no longer exists; both are rewritten, and PRD §23's "any implementation commit after an
-  approval invalidates approval" follows. Grep for `invalidat`, `stale` and `to WORKING` over README
-  and PRD comes back with two unrelated hits.
+      ABOUT.md or a thread does not invalidate the marker" and PRD §12's named safety property described a
+      rule that no longer exists; both are rewritten, and PRD §23's "any implementation commit after an
+      approval invalidates approval" follows. Grep for `invalidat`, `stale` and `to WORKING` over README
+      and PRD comes back with two unrelated hits.
 - [x] Keep `survival.Check` where it is: it gates `change ready` and `change complete`, and a BLOCKED
-  changeset still cannot return to READY without running `change ready`. Unchanged, and now the only
-  content gate a ready marker has to pass.
+      changeset still cannot return to READY without running `change ready`. Unchanged, and now the only
+      content gate a ready marker has to pass.
 - [x] `nextAction` names the drift for APPROVED and FEEDBACK. Without this it points an agent at
-  `change complete` for a head that command will refuse, which is the one thing the field exists to
-  prevent.
+      `change complete` for a head that command will refuse, which is the one thing the field exists to
+      prevent.
 - [x] An unrecognised `Review-*` commit no longer moves state, but it still blocks completion: the
-  tree cannot speak for trailers git-pair cannot read, so `TrailingUnrecognised` keeps that in
-  `ReconcileStaleness`. It establishes nothing and clears nothing, and `status` still lists it under
-  `unrecognised_markers`. Covered by the rewritten cases in `lifecycle_internal_test.go` and
-  `TestStatusReportsUnrecognisedMarkers`.
+      tree cannot speak for trailers git-pair cannot read, so `TrailingUnrecognised` keeps that in
+      `ReconcileStaleness`. It establishes nothing and clears nothing, and `status` still lists it under
+      `unrecognised_markers`. Covered by the rewritten cases in `lifecycle_internal_test.go` and
+      `TestStatusReportsUnrecognisedMarkers`.
 - [x] `e2e-29.sh` gains a withdraw-and-re-offer step, because the queue's behaviour across an
-  implementation commit is now the opposite of what that script asserted; the completion refusal it
-  checks is labelled for the drift rather than for `WORKING`.
+      implementation commit is now the opposite of what that script asserted; the completion refusal it
+      checks is labelled for the drift rather than for `WORKING`.
 
 #### Verification
 
@@ -207,21 +207,21 @@ BLOCKED through an author's fix commit. `mise run check`, `e2e-29.sh` and `pty-w
 #### Tasks
 
 - [x] One call, one place: `runChangeComplete` derives with `SummarizeAgainstTreeHEAD` and refuses
-  when it reports the reviewed content gone. Landed with M2, because deleting the drift flip without
-  it would have left a hole in the same commit that opened it.
+      when it reports the reviewed content gone. Landed with M2, because deleting the drift flip without
+      it would have left a hole in the same commit that opened it.
 - [x] That is the surviving piece of the deleted machinery, including its changeset-directory
-  carve-out, which is what lets an author reply in `ABOUT.md` after approval without breaking the
-  anchor. The function's own comment is the argument for keeping it: the verdict is taken from the
-  tree, so a base merge, a rebase, and a change followed by its revert all get the same right answer.
+      carve-out, which is what lets an author reply in `ABOUT.md` after approval without breaking the
+      anchor. The function's own comment is the argument for keeping it: the verdict is taken from the
+      tree, so a base merge, a rebase, and a change followed by its revert all get the same right answer.
 - [x] Document in PRD §9.5 and README's agent contract that the archive names a head that was
-  reviewed. Done with M2's rewrite of §12 and the derived-state section; §9.5's own wording checked
-  against the new behaviour.
+      reviewed. Done with M2's rewrite of §12 and the derived-state section; §9.5's own wording checked
+      against the new behaviour.
 - [x] An escape hatch for the author who committed something outside the changeset directory after
-  approval and does not want a second review — a README typo is the canonical case.
-  `--allow-unreviewed-changes`, named beside `--allow-surviving-review-additions`; it fires only
-  when the newest marker is an approve or feedback and `Drifted` is non-empty, so it cannot walk
-  past a `block` or a `change unready`, which have a different marker underneath. The count reaches
-  `--json` as `acknowledged_unreviewed_paths`.
+      approval and does not want a second review — a README typo is the canonical case.
+      `--allow-unreviewed-changes`, named beside `--allow-surviving-review-additions`; it fires only
+      when the newest marker is an approve or feedback and `Drifted` is non-empty, so it cannot walk
+      past a `block` or a `change unready`, which have a different marker underneath. The count reaches
+      `--json` as `acknowledged_unreviewed_paths`.
 - [x] Mutation-check the guard. Four notes from running it:
   - reversing the diff range is not a mutation — `git diff --name-only A B` reports the same path
     set as `B A`, so the comparison is symmetric and no test can see the swap;
@@ -254,22 +254,22 @@ applied to the movable ref instead of the newest marker.
 #### Tasks
 
 - [x] Call `reviewref.Update` from `runChangeReady`, next to the existing call in `reviewops.Submit`
-  and the one in `change complete`. No re-point step: with state moving only on markers (§12), the
-  ready marker is always the newest thing on the branch when the command finishes, so ref and
-  derived state agree by construction.
+      and the one in `change complete`. No re-point step: with state moving only on markers (§12), the
+      ready marker is always the newest thing on the branch when the command finishes, so ref and
+      derived state agree by construction.
 - [x] Report the anchor truthfully. `ReviewRef` was `reviewref.Head(slug)`, a name derived from the
-  slug that is never checked for existence, so `review_ref` was never empty and could not answer
-  "has this changeset been anchored at all", and the human printer printed it under a heading that
-  said "Review archive" when it is the anchor, not the archive. The section is gated on the ref
-  existing, the lines are labelled `movable:` and `archive:`, and README's JSON contract says the
-  two fields stay empty until `change ready` or a submission writes the ref.
+      slug that is never checked for existence, so `review_ref` was never empty and could not answer
+      "has this changeset been anchored at all", and the human printer printed it under a heading that
+      said "Review archive" when it is the anchor, not the archive. The section is gated on the ref
+      existing, the lines are labelled `movable:` and `archive:`, and README's JSON contract says the
+      two fields stay empty until `change ready` or a submission writes the ref.
 - [x] Reachability argument in the commit message: a ready marker always descends from the last
-  submission on that branch, so an anchor only ever grows the reachable set.
+      submission on that branch, so an anchor only ever grows the reachable set.
 - [x] Decided against the anchor-vs-head annotation. The ref lags `HEAD` routinely now — only
-  `change ready`, a submission and `change complete` move it — so "author moved since <sha>" would
-  fire on ordinary work, re-deriving a signal from the ref that this milestone's own deliverable
-  says the ref must not carry. `reason` already names the commits since the marker, and the drift
-  that matters is the tree question M3 answers at completion.
+      `change ready`, a submission and `change complete` move it — so "author moved since <sha>" would
+      fire on ordinary work, re-deriving a signal from the ref that this milestone's own deliverable
+      says the ref must not carry. `reason` already names the commits since the marker, and the drift
+      that matters is the tree question M3 answers at completion.
 
 #### Verification
 
@@ -288,24 +288,24 @@ deleting the branch afterwards still leaves `git pair review history <slug>` wor
 #### Tasks
 
 - [x] New primitive: read `CHANGESET.yaml` from a commit (`git show <ref>:changesets/<slug>/CHANGESET.yaml`)
-  alongside `changeset.ForBranch`, so a branch can be examined without checking it out. `AtCommit`,
-  plus `BaseAt` for callers holding a slug and a commit and no branch, and `DirsAt` for the
-  directories a revision carries. `git.ShowFile` already existed and already distinguishes a missing
-  path, so the new code adds no git verb. `changeset.List`, the `os.ReadDir` scan, is gone: leaving
-  it in place invites the queue back to reading the checkout.
+      alongside `changeset.ForBranch`, so a branch can be examined without checking it out. `AtCommit`,
+      plus `BaseAt` for callers holding a slug and a commit and no branch, and `DirsAt` for the
+      directories a revision carries. `git.ShowFile` already existed and already distinguishes a missing
+      path, so the new code adds no git verb. `changeset.List`, the `os.ReadDir` scan, is gone: leaving
+      it in place invites the queue back to reading the checkout.
 - [x] Rebuild `runReviewQueue` as: one `for-each-ref refs/heads`, resolve each branch's changeset at
-  the branch's commit, derive `base..branch`, print the READY ones. The `os.ReadDir` scan and the
-  per-changeset `for-each-ref` go away.
+      the branch's commit, derive `base..branch`, print the READY ones. The `os.ReadDir` scan and the
+      per-changeset `for-each-ref` go away.
 - [x] Classify a changeset directory that has no branch instead of skipping it: compare its subtree
-  between `base` and the anchor and stay silent when they agree (landed) or when nothing anchored it
-  (never offered). The skip note is now only for directories that genuinely cannot be explained.
-  "or say nothing when it is terminal" waits for M6, which is what creates a terminal record.
-  Mutation-checked: a landed check that never fires, one that compares the whole tree, a
-  never-anchored directory that stops being silent, and an already-branch-owned directory that gets
-  classified as an orphan each turn a test red. The last two needed tests first — one had left the
-  branch in place, so it never reached the classification it claimed to cover.
+      between `base` and the anchor and stay silent when they agree (landed) or when nothing anchored it
+      (never offered). The skip note is now only for directories that genuinely cannot be explained.
+      "or say nothing when it is terminal" waits for M6, which is what creates a terminal record.
+      Mutation-checked: a landed check that never fires, one that compares the whole tree, a
+      never-anchored directory that stops being silent, and an already-branch-owned directory that gets
+      classified as an orphan each turn a test red. The last two needed tests first — one had left the
+      branch in place, so it never reached the classification it claimed to cover.
 - [x] `--changeset` for `status`, `review history` and `change feedback`, resolving by slug from
-  whichever branch carries it. Two changes to the sketch, both recorded in PRD §11.1:
+      whichever branch carries it. Two changes to the sketch, both recorded in PRD §11.1:
   - the marker-writing commands do not accept it at all, not even "when a branch matches". A marker
     is a commit, and the commit primitive writes at `HEAD`, so `change ready --changeset other` from
     branch A would put the marker on A while reporting it described `other`. Refusing with a reason
@@ -339,28 +339,28 @@ ABOUT.md.
 #### Tasks
 
 - [x] The terminal marker is an ordinary marker commit on the changeset's branch, followed by
-  `reviewref.Update` to that head. Requiring the branch is not a limitation but the point: abandoning
-  is a decision made while the work is still there, and anchoring the marker is what keeps it
-  reachable once `git branch -D` runs. This keeps M6 inside the existing commit and ref primitives.
+      `reviewref.Update` to that head. Requiring the branch is not a limitation but the point: abandoning
+      is a decision made while the work is still there, and anchoring the marker is what keeps it
+      reachable once `git branch -D` runs. This keeps M6 inside the existing commit and ref primitives.
 - [x] Derivation gains a fallback, not an overlay: with a branch, state comes from the branch as it
-  does now; without one, state comes from the anchor chain, which can only report what the branch
-  last claimed before it disappeared. In PRD §12 next to "state comes from the branch", and
-  `resolveNamed` implements it: no branch → read `CHANGESET.yaml` and history from the anchor, with
-  `branch` reported empty so a reader can tell.
+      does now; without one, state comes from the anchor chain, which can only report what the branch
+      last claimed before it disappeared. In PRD §12 next to "state comes from the branch", and
+      `resolveNamed` implements it: no branch → read `CHANGESET.yaml` and history from the anchor, with
+      `branch` reported empty so a reader can tell.
 - [x] The write gate checks both chains before `ready`, `unready` and `submit` record anything. The
-  branch is the primary source and the anchor the fallback, not the reverse — a test deletes the
-  review ref and asserts the refusal still happens, because otherwise the anchor's copy of the record
-  hides a gate that only ever consulted the ref.
+      branch is the primary source and the anchor the fallback, not the reverse — a test deletes the
+      review ref and asserts the refusal still happens, because otherwise the anchor's copy of the record
+      hides a gate that only ever consulted the ref.
 - [x] Abandoning a changeset whose branch is already gone is refused, with a reason pointing at the
-  landed classification in M5: post-merge bookkeeping is not a lifecycle act. It falls out of the
-  write path — writes have no `--changeset`, so there is no way to address a branchless slug — and
-  `change ready` on a recreated slug refuses naming the terminal marker instead.
+      landed classification in M5: post-merge bookkeeping is not a lifecycle act. It falls out of the
+      write path — writes have no `--changeset`, so there is no way to address a branchless slug — and
+      `change ready` on a recreated slug refuses naming the terminal marker instead.
 - [x] Out of scope and stated as such: removing `changesets/<slug>/` from the deployment branch. That
-  is a commit on `main`, which git-pair does not make. `052e529` is the manual form, and the queue
-  classification in M5 is what makes the leftover directory harmless until a landing command exists.
+      is a commit on `main`, which git-pair does not make. `052e529` is the manual form, and the queue
+      classification in M5 is what makes the leftover directory harmless until a landing command exists.
 - [x] Settled the name: `change abandon`, and `Review-State: abandoned`. Not a sixth state — reported
-  as `abandoned`/`abandoned_commit` beside `state` (see PRD §9.7 for the argument, which is the same
-  one that kept `working` from becoming a state in M1).
+      as `abandoned`/`abandoned_commit` beside `state` (see PRD §9.7 for the argument, which is the same
+      one that kept `working` from becoming a state in M1).
 
 #### Verification
 
@@ -391,14 +391,14 @@ reuse hazard. Abandoning without a branch refuses, and says why.
 
 ## Risks
 
-| Risk | Mitigation |
-| --- | --- |
+| Risk                                                                                                             | Mitigation                                                                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | An agent commits implementation work without running `change unready`, so the reviewer sees a changeset in flux. | Accepted and intended: the cost is reviewer attention, not safety. M3 keeps the approval pinned to bytes, `review open` shows live HEAD, and the queue line names the anchored sha so the reviewer can see drift at a glance. Documented in PRD §22 as the author's obligation. |
-| Deleting the drift flip removes the check that stopped `change complete` archiving unapproved content. | M3 exists for exactly this, and is the one place the old rule keeps a caller. Decided, not provisional: the archive names a reviewed head or completion refuses. |
-| Rewriting README/PRD sentences that promise content-derived staleness. | Listed as tasks in M2 rather than left to discovery; grep the docs for "invalidates", "stale" and "since the ready marker" before M2 is considered done. |
-| Deriving a branchless changeset from the anchor chain contradicts "state comes from the branch". | Framed as a fallback, not an overlay, in M6, with its own PRD sentence, and a test that it can only report what the branch last claimed. |
-| `refs/reviews/*` are permanent and now written more often. | Intentional: they are the archival record. M6 gives them a terminal end; nothing deletes them. |
-| `--changeset` on a marker command writing to the wrong branch. | Guarded in M5: marker commands require a matching branch and refuse otherwise. |
+| Deleting the drift flip removes the check that stopped `change complete` archiving unapproved content.           | M3 exists for exactly this, and is the one place the old rule keeps a caller. Decided, not provisional: the archive names a reviewed head or completion refuses.                                                                                                                |
+| Rewriting README/PRD sentences that promise content-derived staleness.                                           | Listed as tasks in M2 rather than left to discovery; grep the docs for "invalidates", "stale" and "since the ready marker" before M2 is considered done.                                                                                                                        |
+| Deriving a branchless changeset from the anchor chain contradicts "state comes from the branch".                 | Framed as a fallback, not an overlay, in M6, with its own PRD sentence, and a test that it can only report what the branch last claimed.                                                                                                                                        |
+| `refs/reviews/*` are permanent and now written more often.                                                       | Intentional: they are the archival record. M6 gives them a terminal end; nothing deletes them.                                                                                                                                                                                  |
+| `--changeset` on a marker command writing to the wrong branch.                                                   | Guarded in M5: marker commands require a matching branch and refuse otherwise.                                                                                                                                                                                                  |
 
 ## Verification strategy
 
@@ -414,8 +414,8 @@ approve-then-commit refusal, merged changeset absent from the queue, abandon-wit
 
 ## Audit history
 
-| Date | Audit | Summary |
-| --- | --- | --- |
-| 2026-09-17 | research/2026-09-17-queue-after-landing.md | Plan written. Landing behaviour measured live in this repo; ref-driven queue rejected; anchor check retained at completion. |
-| 2026-09-17 | — | Four pending decisions settled with the reviewer, all as recommended. Pre-existing `status` anchor bug added to M4. |
-| 2026-09-17 | M1–M6 executed | All six milestones landed on `main` as ordinary commits (the pair lifecycle was set aside for the day). `change unready`, command-only state, the completion guard and its `--allow-unreviewed-changes` hatch, anchors from the first handoff, the branch-enumerating queue, `--changeset` on reads, and `change abandon`. Three defects found by mutation-testing rather than by reports: the reviewed baseline was the marker's parent (wrong for a review submission carrying the reviewer's edits), one queue test had left its branch in place and so never reached the classification it claimed, and the abandon gate was ref-only under test. Plan closed; `change init`'s branch-name-reuse hazard and the `pi-git-pair` skill's stale `review close` docs remain open follow-ups. |
+| Date       | Audit                                      | Summary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-09-17 | research/2026-09-17-queue-after-landing.md | Plan written. Landing behaviour measured live in this repo; ref-driven queue rejected; anchor check retained at completion.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 2026-09-17 | —                                          | Four pending decisions settled with the reviewer, all as recommended. Pre-existing `status` anchor bug added to M4.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 2026-09-17 | M1–M6 executed                             | All six milestones landed on `main` as ordinary commits (the pair lifecycle was set aside for the day). `change unready`, command-only state, the completion guard and its `--allow-unreviewed-changes` hatch, anchors from the first handoff, the branch-enumerating queue, `--changeset` on reads, and `change abandon`. Three defects found by mutation-testing rather than by reports: the reviewed baseline was the marker's parent (wrong for a review submission carrying the reviewer's edits), one queue test had left its branch in place and so never reached the classification it claimed, and the abandon gate was ref-only under test. Plan closed; `change init`'s branch-name-reuse hazard and the `pi-git-pair` skill's stale `review close` docs remain open follow-ups. |

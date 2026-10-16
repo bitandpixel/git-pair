@@ -80,13 +80,13 @@ Review -1 → Working Tree
 
 Capabilities:
 
-* inspect diffs,
-* launch difftool,
-* edit current working-tree files,
-* edit `ABOUT.md`,
-* create/update review threads,
-* mark files reviewed/unreviewed,
-* submit a review.
+- inspect diffs,
+- launch difftool,
+- edit current working-tree files,
+- edit `ABOUT.md`,
+- create/update review threads,
+- mark files reviewed/unreviewed,
+- submit a review.
 
 This is the normal review workflow.
 
@@ -106,18 +106,18 @@ Historical mode is read-only.
 
 Capabilities:
 
-* inspect diffs,
-* browse files,
-* use difftool against historical snapshots,
-* change span.
+- inspect diffs,
+- browse files,
+- use difftool against historical snapshots,
+- change span.
 
 Unavailable:
 
-* editing product files,
-* editing `ABOUT.md`,
-* creating/updating review threads,
-* marking files reviewed,
-* submitting reviews.
+- editing product files,
+- editing `ABOUT.md`,
+- creating/updating review threads,
+- marking files reviewed,
+- submitting reviews.
 
 The UI must clearly indicate that the session is read-only.
 
@@ -285,9 +285,9 @@ V    advanced/custom span selection
 `v` is not a two-state switch. It steps through the spans this session has been in, in the
 order they were first entered, and wraps:
 
-* the span the session opened on, including one named entirely by command-line arguments,
-* the full-changeset and unreviewed presets,
-* every span chosen with `V`.
+- the span the session opened on, including one named entirely by command-line arguments,
+- the full-changeset and unreviewed presets,
+- every span chosen with `V`.
 
 It is a set of spans, not a log of keystrokes: choosing the same span twice is one stop, and a
 rescan after an editor or difftool closes is not a visit. The two presets are present from the
@@ -376,12 +376,12 @@ e31aa72  agent: address locking review         31m
 
 Requirements:
 
-* show short SHA,
-* show subject,
-* preferably show age/date,
-* support search/filtering,
-* permit direct SHA input,
-* return an immutable commit checkpoint.
+- show short SHA,
+- show subject,
+- preferably show age/date,
+- support search/filtering,
+- permit direct SHA input,
+- return an immutable commit checkpoint.
 
 A commit checkpoint does not drift.
 
@@ -418,14 +418,14 @@ OTHER REFS
 
 Requirements:
 
-* show friendly shortened names where unambiguous,
-* preserve enough information to identify the actual Git ref,
-* support search/filtering,
-* support direct ref entry,
-* support local branches,
-* support remote-tracking refs,
-* support tags,
-* support arbitrary/custom refs where Git can resolve them.
+- show friendly shortened names where unambiguous,
+- preserve enough information to identify the actual Git ref,
+- support search/filtering,
+- support direct ref entry,
+- support local branches,
+- support remote-tracking refs,
+- support tags,
+- support arbitrary/custom refs where Git can resolve them.
 
 ---
 
@@ -473,11 +473,11 @@ ref again.
 
 Examples of appropriate refresh opportunities include:
 
-* after returning from `$EDITOR`,
-* after returning from `git difftool`,
-* after explicit TUI refresh,
-* after operations known to potentially update Git refs,
-* while redrawing/reloading repository state if inexpensive.
+- after returning from `$EDITOR`,
+- after returning from `git difftool`,
+- after explicit TUI refresh,
+- after operations known to potentially update Git refs,
+- while redrawing/reloading repository state if inexpensive.
 
 If:
 
@@ -572,11 +572,11 @@ Instead:
 
 This provides:
 
-* stable review semantics,
-* no silent changes to already-reviewed files,
-* visibility when branches/remotes move,
-* intuitive behavior after fetch/pull,
-* user control over when the active comparison changes.
+- stable review semantics,
+- no silent changes to already-reviewed files,
+- visibility when branches/remotes move,
+- intuitive behavior after fetch/pull,
+- user control over when the active comparison changes.
 
 ---
 
@@ -679,9 +679,9 @@ When historical, editing actions must be unavailable.
 
 The action should either:
 
-* be hidden,
-* be disabled,
-* or show:
+- be hidden,
+- be disabled,
+- or show:
 
 ```text
 Editing is only available when the review head is Working Tree.
@@ -735,8 +735,8 @@ Example:
 
 When switching to historical mode:
 
-* hide or disable review-state toggling,
-* do not interpret historical inspection as review completion.
+- hide or disable review-state toggling,
+- do not interpret historical inspection as review completion.
 
 Any span refresh or endpoint change may conservatively reset file-review state in MVP.
 
@@ -935,17 +935,17 @@ Ref drift also has no effect on which review commit is considered the latest lif
 
 Do not implement:
 
-* editing historical commits,
-* automatic ref following,
-* silent span mutation when refs move,
-* persistent arbitrary span bookmarks,
-* multiple simultaneous spans,
-* cherry-picking from historical views,
-* history rewriting from the TUI,
-* DAG visualization,
-* multi-reviewer span filtering,
-* author-specific review spans,
-* complex semantic checkpoint inference.
+- editing historical commits,
+- automatic ref following,
+- silent span mutation when refs move,
+- persistent arbitrary span bookmarks,
+- multiple simultaneous spans,
+- cherry-picking from historical views,
+- history rewriting from the TUI,
+- DAG visualization,
+- multi-reviewer span filtering,
+- author-specific review spans,
+- complex semantic checkpoint inference.
 
 ---
 

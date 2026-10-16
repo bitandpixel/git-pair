@@ -19,7 +19,7 @@ cannot answer on their own, and only on the path about to refuse:
   itself, which is how a reviewer takes one level of a stack and leaves the work below it unlanded. From the child's
   branch that is two directories nothing on the branch connects, because the link between them is in the landed
   parent's file.
-hmm, but a middle level stack landing would carry its parent changeset and changes with it would it not?
+  hmm, but a middle level stack landing would carry its parent changeset and changes with it would it not?
 - **a `base:` that names a branch**, resolved by asking which changeset directory that branch carries. This is the
   legacy file with no recorded id, and it is the case that would otherwise refuse `feature/auth` for carrying
   `feature-auth` - an id not spelled like its branch, which git-pair never required anybody to fix.
@@ -41,13 +41,13 @@ rather than in `stackOf`, which has no branch to compare against.
 
 `internal/cli/branch_shape_test.go`:
 
-| Fixture | Result |
-|---|---|
-| `TestChangeReadyRefusesABranchCarryingTwoChangesets` | exit 1, both ids named, three ways out named; the resolver has selected one of the two and the refusal stands |
-| `TestCheckGatesABranchCarryingTwoChangesets` | `ready: false`, a reason naming both ids and "no approval of its own" |
-| `TestChangeReadyAcceptsAChangesetTheDestinationCarriedAfterTheBranchPoint` | offered: the second directory is landed work |
-| `TestChangeReadyAcceptsAChildStackedOnTheChangesetItsBranchCarries` | offered: `base-changeset:` recorded, one stack |
-| `TestChangeReadyAcceptsAChildWhoseLandedParentLandedWithoutItsOwn` | offered: the middle level landed alone, and **fails when the destination read is removed** |
+| Fixture                                                                    | Result                                                                                                        |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `TestChangeReadyRefusesABranchCarryingTwoChangesets`                       | exit 1, both ids named, three ways out named; the resolver has selected one of the two and the refusal stands |
+| `TestCheckGatesABranchCarryingTwoChangesets`                               | `ready: false`, a reason naming both ids and "no approval of its own"                                         |
+| `TestChangeReadyAcceptsAChangesetTheDestinationCarriedAfterTheBranchPoint` | offered: the second directory is landed work                                                                  |
+| `TestChangeReadyAcceptsAChildStackedOnTheChangesetItsBranchCarries`        | offered: `base-changeset:` recorded, one stack                                                                |
+| `TestChangeReadyAcceptsAChildWhoseLandedParentLandedWithoutItsOwn`         | offered: the middle level landed alone, and **fails when the destination read is removed**                    |
 
 Six tests failed when the rule went in, which is the discrimination check: five built the refused shape as a
 convenience and moved to branches carrying their own work (`init` with a second `--id`, the two base-inference

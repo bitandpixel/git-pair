@@ -15,10 +15,10 @@ what this tool runs of its own choosing, not what you install beside your own gi
 
 Two roots, consulted in this order:
 
-| Root | Path | Who it is for | Consent |
-| --- | --- | --- | --- |
-| `worktree` | `.git-pair/hooks/<point>/` | the repository's rules, committed and reviewed | runs only after a person accepts the content with `git pair hooks --trust` |
-| `clone` | `<git-common-dir>/git-pair/hooks/<point>/` | your own checks, on your own machine — one directory per clone, so a worktree does not need its own | none — it is your file, never committed |
+| Root       | Path                                       | Who it is for                                                                                       | Consent                                                                    |
+| ---------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `worktree` | `.git-pair/hooks/<point>/`                 | the repository's rules, committed and reviewed                                                      | runs only after a person accepts the content with `git pair hooks --trust` |
+| `clone`    | `<git-common-dir>/git-pair/hooks/<point>/` | your own checks, on your own machine — one directory per clone, so a worktree does not need its own | none — it is your file, never committed                                    |
 
 The tracked root runs first, then the per-clone root: the repository's rules are the baseline and the client
 adds to them. Under a point, either a directory of scripts or one file named for the point is accepted.
@@ -33,14 +33,14 @@ approval because none of them leave the machine.
 
 Twelve, in the order a changeset meets them — six actions, a side before and a side after:
 
-| Point | Fires | A failing pre-hook |
-| --- | --- | --- |
-| `pre-ready`, `post-ready` | `change ready` | refuses the offer, writes no marker |
-| `pre-integrate`, `post-integrate` | `change integrate`, after its own cheap gate | refuses the declaration, writes no marker |
-| `pre-unready`, `post-unready` | `change unready` | refuses the withdrawal |
-| `pre-abandon`, `post-abandon` | `change abandon` | refuses the abandonment |
-| `pre-check`, `post-check` | `check`, around the gate | appends a reason and sets `ready: false` |
-| `pre-submit`, `post-submit` | `review submit`, after staging and before the review commit | refuses the verdict, writes no review commit |
+| Point                             | Fires                                                       | A failing pre-hook                           |
+| --------------------------------- | ----------------------------------------------------------- | -------------------------------------------- |
+| `pre-ready`, `post-ready`         | `change ready`                                              | refuses the offer, writes no marker          |
+| `pre-integrate`, `post-integrate` | `change integrate`, after its own cheap gate                | refuses the declaration, writes no marker    |
+| `pre-unready`, `post-unready`     | `change unready`                                            | refuses the withdrawal                       |
+| `pre-abandon`, `post-abandon`     | `change abandon`                                            | refuses the abandonment                      |
+| `pre-check`, `post-check`         | `check`, around the gate                                    | appends a reason and sets `ready: false`     |
+| `pre-submit`, `post-submit`       | `review submit`, after staging and before the review commit | refuses the verdict, writes no review commit |
 
 The read-path commands — `queue`, `status`, `diff`, `feedback`, `history`, `wait` — run no hooks, on purpose.
 A hook on a read turns a lookup into a build, and a cost test that counts subprocesses would start measuring
@@ -57,23 +57,23 @@ nothing on stdin. It needs a shebang and the executable bit. Read the environmen
 gives `pre-commit` no arguments either, and a hook that re-derives which changeset it is inside would have to
 reimplement rules that live in this binary.
 
-| Variable | Meaning |
-| --- | --- |
-| `GIT_PAIR_HOOK_POINT` | the point that fired, e.g. `pre-ready` |
-| `GIT_PAIR_CHANGESET` | the resolved changeset id |
-| `GIT_PAIR_BRANCH` | the branch holding the work |
-| `GIT_PAIR_BASE` | the base branch |
-| `GIT_PAIR_HEAD` | the current head commit |
-| `GIT_PAIR_DEFAULT_BRANCH` | the destination, when known |
-| `GIT_PAIR_HOOK_ROOT` | `worktree` or `clone` |
-| `GIT_PAIR_HOOKS` | `0`, inherited by anything the hook runs — a nested `git pair` runs no hooks, and `env -u GIT_PAIR_HOOKS git pair …` opts back in |
+| Variable                  | Meaning                                                                                                                           |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `GIT_PAIR_HOOK_POINT`     | the point that fired, e.g. `pre-ready`                                                                                            |
+| `GIT_PAIR_CHANGESET`      | the resolved changeset id                                                                                                         |
+| `GIT_PAIR_BRANCH`         | the branch holding the work                                                                                                       |
+| `GIT_PAIR_BASE`           | the base branch                                                                                                                   |
+| `GIT_PAIR_HEAD`           | the current head commit                                                                                                           |
+| `GIT_PAIR_DEFAULT_BRANCH` | the destination, when known                                                                                                       |
+| `GIT_PAIR_HOOK_ROOT`      | `worktree` or `clone`                                                                                                             |
+| `GIT_PAIR_HOOKS`          | `0`, inherited by anything the hook runs — a nested `git pair` runs no hooks, and `env -u GIT_PAIR_HOOKS git pair …` opts back in |
 
 The submission points add three, because a verdict has content of its own:
 
-| Variable | Meaning |
-| --- | --- |
-| `GIT_PAIR_REVIEW_OUTCOME` | `approve`, `block`, or `feedback` |
-| `GIT_PAIR_REVIEW_HEAD` | the commit being reviewed |
+| Variable                    | Meaning                                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `GIT_PAIR_REVIEW_OUTCOME`   | `approve`, `block`, or `feedback`                                                                                   |
+| `GIT_PAIR_REVIEW_HEAD`      | the commit being reviewed                                                                                           |
 | `GIT_PAIR_REVIEW_BODY_FILE` | a file holding the reviewer's body; git-pair deletes it when the command returns, so copy it if you mean to keep it |
 
 A hook's stdout and stderr never reach git-pair's stdout — that is where `--json` lives. A failing hook's
@@ -176,7 +176,7 @@ question about them.
 
 Two doors stay open with nothing recorded, on purpose. `change unready` and `change abandon` work, because they
 take work out of the queue and a person who cannot run the checks still has to be able to put the work down. And
-`git pair hooks` never asks, because reading the scripts is the act that comes *before* the decision — a command
+`git pair hooks` never asks, because reading the scripts is the act that comes _before_ the decision — a command
 that refused until you had decided would make the reading impossible.
 
 A clone sitting on `changed` has a third option besides accepting and declining: copy the version it did read into
@@ -206,10 +206,10 @@ scripts right now and says nothing about what those scripts do.
 Two flags carry the same two questions to a single invocation, so a person does not have to reach for a
 process-wide switch to get through one command.
 
-| Flag | On | What it does | What it does not do |
-| --- | --- | --- | --- |
-| `--no-hooks` | every command that runs the repository's scripts, `check` and `change integrate` included | runs none of them, either root, `pre-` and `post-` both; every configured hook appears as `status: "skipped-by-flag"` | answers the refusal for an `unrecorded` or `changed` tree for that one command, and writes nothing — `git pair hooks` still reports the tree as unrecorded and the next command asks again, so it is a way past one command rather than a cheaper way to take a position |
-| `--trust-hooks-once` | the same commands | runs the tracked hooks with no position recorded, and records nothing, so the next command asks again; those hooks carry `"consent": "once"` | does not let a failing hook pass — it says these may run, not that they ran clean |
+| Flag                 | On                                                                                        | What it does                                                                                                                                 | What it does not do                                                                                                                                                                                                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--no-hooks`         | every command that runs the repository's scripts, `check` and `change integrate` included | runs none of them, either root, `pre-` and `post-` both; every configured hook appears as `status: "skipped-by-flag"`                        | answers the refusal for an `unrecorded` or `changed` tree for that one command, and writes nothing — `git pair hooks` still reports the tree as unrecorded and the next command asks again, so it is a way past one command rather than a cheaper way to take a position |
+| `--trust-hooks-once` | the same commands                                                                         | runs the tracked hooks with no position recorded, and records nothing, so the next command asks again; those hooks carry `"consent": "once"` | does not let a failing hook pass — it says these may run, not that they ran clean                                                                                                                                                                                        |
 
 Asking for both at once is a usage error: one runs no scripts, the other runs the scripts nobody has read, and
 the combination would produce a hand-off that looks checked and is not. On `check` and `change integrate` the two

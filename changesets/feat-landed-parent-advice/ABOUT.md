@@ -21,11 +21,11 @@ Plan-only. No behaviour changes in this changeset.
 
 ## What changed
 
--   `docs/plans/landed-parent-restack-advice/plan.md` — the plan: goal, success criteria, the code map, two
-    implementation milestones and a third that exists only if a spike earns it, four spikes, risks,
-    verification strategy.
--   `docs/plans/landed-parent-restack-advice/research/2026-10-13-approved-child-advised-to-rewrite.md` — the
-    transcript, the two colliding rules, and the table of which function holds which half.
+- `docs/plans/landed-parent-restack-advice/plan.md` — the plan: goal, success criteria, the code map, two
+  implementation milestones and a third that exists only if a spike earns it, four spikes, risks,
+  verification strategy.
+- `docs/plans/landed-parent-restack-advice/research/2026-10-13-approved-child-advised-to-rewrite.md` — the
+  transcript, the two colliding rules, and the table of which function holds which half.
 
 ## Design decisions
 
@@ -66,37 +66,37 @@ stay, with the plan requiring the `--json` key set to be compared before and aft
 
 ## Validation
 
--   Documentation only, so the risk is a plan that does not survive contact with the code. Every file,
-    function and line the plan names was read in the tree it lands on: `parentSinceApproval`, `parentLive`,
-    `parentGone`, `parentLanded`, `landedApprovalStillStands`, `landedWorkUnchanged`, `landedMergeIsClean`,
-    `landedParentStep`, `owesLandingStep`, and `check.go`'s two print sites.
--   The transcript in the research note is the real output of the real sequence, including the tree hash that
-    did not change and the refusal that followed.
--   Success criterion 2 (squash landing still refuses and still advises) is stated as a non-regression
-    requirement precisely because it is the behaviour that already works and is easiest to break with a
-    suppression rule aimed at the wrong case.
--   The plan's M1 task 5 includes the case where the advice is followed, expecting the refusal: the point is
-    that the author sees the command as a declinable choice, not as a trap.
--   `mise run check` exited **0**: 35 test shards ok, none served from cache (every package re-run for this
-    tree), no `FAIL`, and its `gofmt -l internal cmd` step reported nothing. The shard count is one below the
-    hooks stack's 36 because this branch sits on `main` and carries none of that work's test files.
+- Documentation only, so the risk is a plan that does not survive contact with the code. Every file,
+  function and line the plan names was read in the tree it lands on: `parentSinceApproval`, `parentLive`,
+  `parentGone`, `parentLanded`, `landedApprovalStillStands`, `landedWorkUnchanged`, `landedMergeIsClean`,
+  `landedParentStep`, `owesLandingStep`, and `check.go`'s two print sites.
+- The transcript in the research note is the real output of the real sequence, including the tree hash that
+  did not change and the refusal that followed.
+- Success criterion 2 (squash landing still refuses and still advises) is stated as a non-regression
+  requirement precisely because it is the behaviour that already works and is easiest to break with a
+  suppression rule aimed at the wrong case.
+- The plan's M1 task 5 includes the case where the advice is followed, expecting the refusal: the point is
+  that the author sees the command as a declinable choice, not as a trap.
+- `mise run check` exited **0**: 35 test shards ok, none served from cache (every package re-run for this
+  tree), no `FAIL`, and its `gofmt -l internal cmd` step reported nothing. The shard count is one below the
+  hooks stack's 36 because this branch sits on `main` and carries none of that work's test files.
 
 ## Known limitations
 
--   The plan asserts that the measured contribution above the landing is what the gate would compute with the
-    destination as base. Spike 3 is written to find a counterexample rather than to confirm; if one exists,
-    M1's predicate consults the gate's own measurement instead of a second one.
--   Whether anything actually needs the child to take the destination in before merging is open (spikes 1 and
-    2). If the answers are all "no", the third milestone is deleted, and the stale-branch tidiness is left to
-    `status` and `queue` — which may leave landed parent branches alive longer than they are today.
--   This plan does not touch the deleted-branch side's own wording; it unifies behaviour under one decision
-    function, and the strings on that side may still be reworded by whoever lands M1.
+- The plan asserts that the measured contribution above the landing is what the gate would compute with the
+  destination as base. Spike 3 is written to find a counterexample rather than to confirm; if one exists,
+  M1's predicate consults the gate's own measurement instead of a second one.
+- Whether anything actually needs the child to take the destination in before merging is open (spikes 1 and
+  2). If the answers are all "no", the third milestone is deleted, and the stale-branch tidiness is left to
+  `status` and `queue` — which may leave landed parent branches alive longer than they are today.
+- This plan does not touch the deleted-branch side's own wording; it unifies behaviour under one decision
+  function, and the strings on that side may still be reworded by whoever lands M1.
 
 ## Open questions
 
--   Should the withheld step be recoverable from `check` on request rather than living only in `status` and
-    `queue`? The plan says no new flag; a reader who wants it has a surface that prints it. If that turns out
-    to be friction, the answer is a wording change in the note, not a flag.
--   Does the same self-invalidating-advice shape exist anywhere else — any `next_action` whose execution
-    changes the verdict that carried it? Worth one pass over the other producers during M1 rather than a
-    separate plan.
+- Should the withheld step be recoverable from `check` on request rather than living only in `status` and
+  `queue`? The plan says no new flag; a reader who wants it has a surface that prints it. If that turns out
+  to be friction, the answer is a wording change in the note, not a flag.
+- Does the same self-invalidating-advice shape exist anywhere else — any `next_action` whose execution
+  changes the verdict that carried it? Worth one pass over the other producers during M1 rather than a
+  separate plan.

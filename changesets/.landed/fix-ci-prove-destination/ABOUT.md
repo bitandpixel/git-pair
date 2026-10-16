@@ -9,17 +9,17 @@ while every run stays green.
 
 ## What changed
 
--   `scripts/ci/gh-request-ci.sh` (new): the forge hook. Dispatches the test workflow for a branch and answers
-    `0` requested, `1` refused, `2` cannot tell, the same three answers `gh-head-green.sh` gives.
--   `scripts/ci/git-pair-integrate.sh`: `request_ci` runs after a successful push and only after one, with
-    `--ci-request <cmd>` / `GIT_PAIR_CI_REQUEST` as the seam and the helper as the default when
-    `GITHUB_REPOSITORY` is set. The header's claim that "nothing follows this push" now names the exception
-    instead of hiding it.
--   `.github/workflows/git-pair-integrate.yml`: `actions: write`, with the reason next to the other scopes,
-    and the step renamed to say what it does.
--   `scripts/gates/ci-integrate.sh`: a scenario that drives the job with a recording stub hook, plus three
-    static checks on the things that could remove the ask silently — the scope, the helper's executable bit,
-    and the default named in the script.
+- `scripts/ci/gh-request-ci.sh` (new): the forge hook. Dispatches the test workflow for a branch and answers
+  `0` requested, `1` refused, `2` cannot tell, the same three answers `gh-head-green.sh` gives.
+- `scripts/ci/git-pair-integrate.sh`: `request_ci` runs after a successful push and only after one, with
+  `--ci-request <cmd>` / `GIT_PAIR_CI_REQUEST` as the seam and the helper as the default when
+  `GITHUB_REPOSITORY` is set. The header's claim that "nothing follows this push" now names the exception
+  instead of hiding it.
+- `.github/workflows/git-pair-integrate.yml`: `actions: write`, with the reason next to the other scopes,
+  and the step renamed to say what it does.
+- `scripts/gates/ci-integrate.sh`: a scenario that drives the job with a recording stub hook, plus three
+  static checks on the things that could remove the ask silently — the scope, the helper's executable bit,
+  and the default named in the script.
 
 ## Design decisions
 
@@ -77,22 +77,22 @@ a fixture that only ever passes proves nothing, which is the lesson this reposit
 
 ## Known limitations
 
--   The run is not bound to the merge's sha. It is bound to the destination's tip at the moment GitHub creates
-    it, and the log carries the sha the job intended.
--   Nothing waits for the result. A red run on `main` is found by whoever opens it; this change makes the run
-    exist, not the trunk blocking.
--   A push refused mid-flight has no fixture. `scripts/gates/ci-integrate.sh` covers a refused merge (the
-    conflict scenario) and a refused ask, but not a `git push` that fails after the merge commit exists.
--   The ask is skipped silently-by-design outside a forge. It is reported in the log and asserted in the gate,
-    but a repository with no `GITHUB_REPOSITORY` and no `--ci-request` gets no run and no red build.
+- The run is not bound to the merge's sha. It is bound to the destination's tip at the moment GitHub creates
+  it, and the log carries the sha the job intended.
+- Nothing waits for the result. A red run on `main` is found by whoever opens it; this change makes the run
+  exist, not the trunk blocking.
+- A push refused mid-flight has no fixture. `scripts/gates/ci-integrate.sh` covers a refused merge (the
+  conflict scenario) and a refused ask, but not a `git push` that fails after the merge commit exists.
+- The ask is skipped silently-by-design outside a forge. It is reported in the log and asserted in the gate,
+  but a repository with no `GITHUB_REPOSITORY` and no `--ci-request` gets no run and no red build.
 
 ## Open questions
 
--   Should `ci.yml` grow a `workflow_dispatch` input naming a commit to check out, so the run can be pinned to
-    the merge's sha rather than to the branch tip? `repository_dispatch` with `client_payload` would do this
-    without an input, and is the first thing to revisit if a second workflow ever needs to react to a merge.
--   Should `main` require the `gates` check? That is the step that turns "the run exists" into "an untested
-    tip cannot become the base of the next changeset", and it is a repository setting rather than a file in
-    this changeset.
+- Should `ci.yml` grow a `workflow_dispatch` input naming a commit to check out, so the run can be pinned to
+  the merge's sha rather than to the branch tip? `repository_dispatch` with `client_payload` would do this
+  without an input, and is the first thing to revisit if a second workflow ever needs to react to a merge.
+- Should `main` require the `gates` check? That is the step that turns "the run exists" into "an untested
+  tip cannot become the base of the next changeset", and it is a repository setting rather than a file in
+  this changeset.
 
 > is it possible to disable the recursive workflow restriction for this one workflow? that way we don't have to maintain what list of CI jobs need to be run after integrating/merging?

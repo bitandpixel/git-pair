@@ -24,7 +24,7 @@ branch cannot orphan a queue entry.
 Two roles share one repository, and the commands answer different questions. Keep them straight.
 
 - **Author** — writes the change. Usually the agent. `git pair init`, then `change ready |
-  integrate | unready | abandon | wait | feedback`, with `change stack` and `change combine` as the exits
+integrate | unready | abandon | wait | feedback`, with `change stack` and `change combine` as the exits
   from a branch carrying two, plus the reads: `status`, `queue`, `diff`,
   `review history`, `check`. `change tidy` belongs to whoever maintains trunk, not to this loop.
 - **Reviewer** — a human. `review open | reopen | about | thread | submit`.
@@ -61,22 +61,22 @@ is coming.
 
 ## The commands you run
 
-| Command | What it is for |
-| --- | --- |
-| `git pair init --base <ref>` | creates `changesets/<id>/` with `CHANGESET.yaml` and a scaffolded `ABOUT.md`, then commits them. Commits only the changeset directory, so staged work elsewhere stays staged. `--parent <branch>` stacks the changeset instead of naming a base |
-| `git pair change stack --base <branch>` | the two exits from a branch carrying more than one unlanded changeset, with `change combine --into <id>`: record the stack link, or fold two directories into one and archive the other. `--changeset <id>` answers the same question for one command |
-| `git pair change ready` | hands off. Checks, in order: clean working tree, `ABOUT.md` exists, the repository has commits, no blocking surviving review additions |
-| `git pair change unready` | withdraws the offer when the work is not finished after all. Do it before continuing, rather than leaving a reviewer looking at a stale offer. It withdraws a declaration too |
-| `git pair change integrate` | declares the approved head ready to be merged, as one marker commit. It merges nothing, pushes nothing and writes no ref, and it refuses anything `check` refuses — so run it after a passing gate, never instead of it. Not needed when a person does the merge by hand |
-| `git pair change abandon` | ends the changeset. Terminal: `change ready`, `change unready` and `review submit` refuse against it afterwards |
-| `git pair change tidy [<id>…]` | moves the directory of a changeset the destination already holds to `changesets/.landed/<id>/`, as one commit of renames on this branch — trunk housekeeping, run by whoever maintains trunk. A landed parent whose child is still open moves, and the run notes the branch whose changeset records it as its base. `--all-landed`, `--dry-run` |
-| `git pair change wait` | blocks while the changeset is `READY` and exits the moment it becomes `BLOCKED`, `FEEDBACK` or `APPROVED`. Read-only, non-interactive. `--fetch` first, so a review submitted in another clone ends the wait; `--interval` (default `10s`) and `--timeout` are go durations |
-| `git pair change feedback` | the most recent submission as a diff (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together. `--stat`, `--name-only` to scope it |
-| `git pair status` | derived state, the reason for it, and a `next_action`. Observing, not deciding |
-| `git pair queue` | every branch whose changeset is `READY`, longest wait first, read from the repository rather than the checkout; plus the approved work whose author asked for the merge |
-| `git pair diff` | the whole changeset, or a span. `--stat` and `--tool` included |
-| `git pair review history` | the review submissions only, indexed from `0`, each naming the commit it reviewed |
-| `git pair check` | asserts integration-readiness. Deciding, not observing. Reports `integrating` beside the verdict, so CI gates on `.ready and .integrating` |
+| Command                                 | What it is for                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `git pair init --base <ref>`            | creates `changesets/<id>/` with `CHANGESET.yaml` and a scaffolded `ABOUT.md`, then commits them. Commits only the changeset directory, so staged work elsewhere stays staged. `--parent <branch>` stacks the changeset instead of naming a base                                                                                                 |
+| `git pair change stack --base <branch>` | the two exits from a branch carrying more than one unlanded changeset, with `change combine --into <id>`: record the stack link, or fold two directories into one and archive the other. `--changeset <id>` answers the same question for one command                                                                                           |
+| `git pair change ready`                 | hands off. Checks, in order: clean working tree, `ABOUT.md` exists, the repository has commits, no blocking surviving review additions                                                                                                                                                                                                          |
+| `git pair change unready`               | withdraws the offer when the work is not finished after all. Do it before continuing, rather than leaving a reviewer looking at a stale offer. It withdraws a declaration too                                                                                                                                                                   |
+| `git pair change integrate`             | declares the approved head ready to be merged, as one marker commit. It merges nothing, pushes nothing and writes no ref, and it refuses anything `check` refuses — so run it after a passing gate, never instead of it. Not needed when a person does the merge by hand                                                                        |
+| `git pair change abandon`               | ends the changeset. Terminal: `change ready`, `change unready` and `review submit` refuse against it afterwards                                                                                                                                                                                                                                 |
+| `git pair change tidy [<id>…]`          | moves the directory of a changeset the destination already holds to `changesets/.landed/<id>/`, as one commit of renames on this branch — trunk housekeeping, run by whoever maintains trunk. A landed parent whose child is still open moves, and the run notes the branch whose changeset records it as its base. `--all-landed`, `--dry-run` |
+| `git pair change wait`                  | blocks while the changeset is `READY` and exits the moment it becomes `BLOCKED`, `FEEDBACK` or `APPROVED`. Read-only, non-interactive. `--fetch` first, so a review submitted in another clone ends the wait; `--interval` (default `10s`) and `--timeout` are go durations                                                                     |
+| `git pair change feedback`              | the most recent submission as a diff (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together. `--stat`, `--name-only` to scope it                                                                                                                                                                                       |
+| `git pair status`                       | derived state, the reason for it, and a `next_action`. Observing, not deciding                                                                                                                                                                                                                                                                  |
+| `git pair queue`                        | every branch whose changeset is `READY`, longest wait first, read from the repository rather than the checkout; plus the approved work whose author asked for the merge                                                                                                                                                                         |
+| `git pair diff`                         | the whole changeset, or a span. `--stat` and `--tool` included                                                                                                                                                                                                                                                                                  |
+| `git pair review history`               | the review submissions only, indexed from `0`, each naming the commit it reviewed                                                                                                                                                                                                                                                               |
+| `git pair check`                        | asserts integration-readiness. Deciding, not observing. Reports `integrating` beside the verdict, so CI gates on `.ready and .integrating`                                                                                                                                                                                                      |
 
 Every command takes `--json` and `--default-branch <ref>`. Pass `--default-branch` in CI: a job that
 cloned with `init` and one `fetch` has no recorded remote default to read, and git-pair refuses rather
@@ -113,7 +113,7 @@ appended sections; git history supplies authorship and order.
 ## Reading a review that just arrived
 
 Use `git pair change feedback`. Do not use `git pair diff --unreviewed` for it: immediately after a
-submission that span is empty, because the submission *is* the newest commit. `--unreviewed` is the
+submission that span is empty, because the submission _is_ the newest commit. `--unreviewed` is the
 reviewer's question ("what has landed since I reviewed"); `change feedback` is the author's ("what did
 the reviewer just tell me").
 
@@ -151,12 +151,12 @@ substance only when it needs further discussion, elaboration, or another person:
 
 ## Exit codes
 
-| Code | Meaning | What to do |
-| --- | --- | --- |
-| 0 | success | — |
-| 1 | the invocation was right and the repository said no: surviving additions, dirty tree, missing `ABOUT.md`, `check` printing `NOT READY:`, `change integrate` refusing work the gate would refuse or a child whose parent has not landed, `change wait` timing out or finding a `WORKING` changeset | fix the state, retry |
-| 2 | usage error: unknown flag or subcommand, detached HEAD, no changeset for this branch, ambiguous changeset, TUI or editor command without a terminal | fix the command; retrying unchanged fails again |
-| 3 | git itself failed: not a repository, a git subprocess failed | fix the repository |
+| Code | Meaning                                                                                                                                                                                                                                                                                           | What to do                                      |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| 0    | success                                                                                                                                                                                                                                                                                           | —                                               |
+| 1    | the invocation was right and the repository said no: surviving additions, dirty tree, missing `ABOUT.md`, `check` printing `NOT READY:`, `change integrate` refusing work the gate would refuse or a child whose parent has not landed, `change wait` timing out or finding a `WORKING` changeset | fix the state, retry                            |
+| 2    | usage error: unknown flag or subcommand, detached HEAD, no changeset for this branch, ambiguous changeset, TUI or editor command without a terminal                                                                                                                                               | fix the command; retrying unchanged fails again |
+| 3    | git itself failed: not a repository, a git subprocess failed                                                                                                                                                                                                                                      | fix the repository                              |
 
 The split between 1 and 2 is load-bearing for agents: 1 means the repository changed under you, 2 means
 your command was wrong.

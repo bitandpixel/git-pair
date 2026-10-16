@@ -102,7 +102,7 @@ paragraph, the overlay paragraph, and the paragraph on the two file rows that re
 ## Design decisions
 
 **`z` is the screen, not the region.** The same key from the diff and from the list means the same thing —
-*this, at the size of the terminal* — and both readings land on one screen reached by one pair of
+_this, at the size of the terminal_ — and both readings land on one screen reached by one pair of
 functions. Reading it as only the diff's key would have made the reviewer press `p` first, which is a key
 about where the keyboard is, not about how big the diff is. `p` and `z` differ only in the size they ask
 for: `p` takes the diff at whatever size the window has room for, `z` asks for the whole of it.
@@ -124,7 +124,7 @@ always, because from the pane the whole screen always fits — the overlay's flo
 
 **Only `ChangeAdded` opens the editor.** `ReadsAsFile` also covers a rename whose bytes are unchanged, and
 the pane keeps doing that: a two-line argument about a path is not a patch worth a pane. `Enter` is
-different, because there the rename *is* the comparison and it is why the file is under review. An added
+different, because there the rename _is_ the comparison and it is why the file is under review. An added
 file has no other side at all, which is the same fact `artifactAction` acts on for `ABOUT.md` and threads.
 
 **`d` keeps its meaning on every row.** The two keys were already different — `Enter` reads a document the

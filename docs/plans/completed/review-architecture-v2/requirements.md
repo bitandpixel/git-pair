@@ -6,7 +6,7 @@
 > analysis and `../plan.md` §Decisions records the resolution; this file is left unedited.
 >
 > The reviewer narrowed these requirements twice in the same session — first to the local workflow with
-> two create-only refs, then by walking back the `land` command. Those narrowings are *not* edits to this
+> two create-only refs, then by walking back the `land` command. Those narrowings are _not_ edits to this
 > document. They are decisions, and they live in `../plan.md` §Decisions.
 
 ## Product Thesis
@@ -35,8 +35,8 @@ While work is active, the ordinary Git feature branch is the primary collaborati
 
 The branch carries both:
 
-* implementation commits;
-* review commits and review artifacts.
+- implementation commits;
+- review commits and review artifacts.
 
 There is no continuously updated remote changeset ref.
 
@@ -48,9 +48,9 @@ A changeset provides durable identity for a unit of work.
 
 The changeset identity is independent of the branch name and survives:
 
-* branch renames;
-* branch deletion after integration;
-* archival of the completed review history.
+- branch renames;
+- branch deletion after integration;
+- archival of the completed review history.
 
 A changeset may appear in more than one branch history. Therefore, while work is active, the changeset ID
 alone must not be treated as sufficient to identify the active review surface.
@@ -88,14 +88,14 @@ Reviews are represented as commits within the active branch history.
 
 A review commit contains human-readable review artifacts describing the review event, such as:
 
-* reviewer;
-* reviewed state;
-* review status;
-* comments and threads;
-* resolution state;
-* approval;
-* changes requested;
-* feedback-only review.
+- reviewer;
+- reviewed state;
+- review status;
+- comments and threads;
+- resolution state;
+- approval;
+- changes requested;
+- feedback-only review.
 
 Review artifacts should be stored in stable, human-readable formats suitable for normal filesystem and
 Unix tooling.
@@ -208,9 +208,9 @@ refs/git-pair/reviews/123
 
 These refs are append-only:
 
-* creation is allowed;
-* mutation is not;
-* deletion is not performed by normal Git-pair operations.
+- creation is allowed;
+- mutation is not;
+- deletion is not performed by normal Git-pair operations.
 
 Their purpose is to preserve the original review event even if the active branch is later rebased or
 rewritten.
@@ -236,9 +236,9 @@ review commits.
 
 For the initial implementation:
 
-* rebasing after approval invalidates that approval;
-* rewritten review commits must not be treated as equivalent to the original approval automatically;
-* a new approval is required after a rebase affecting the reviewed branch history.
+- rebasing after approval invalidates that approval;
+- rewritten review commits must not be treated as equivalent to the original approval automatically;
+- a new approval is required after a rebase affecting the reviewed branch history.
 
 The immutable review ref preserves the original review event for inspection and comparison.
 
@@ -271,13 +271,13 @@ Cryptographic reviewer verification is out of scope for the initial implementati
 
 Git-pair should not initially require:
 
-* GPG keys;
-* SSH signing keys;
-* reviewer key enrollment;
-* key synchronization;
-* key rotation handling;
-* trusted signer registries;
-* signed review commits.
+- GPG keys;
+- SSH signing keys;
+- reviewer key enrollment;
+- key synchronization;
+- key rotation handling;
+- trusted signer registries;
+- signed review commits.
 
 Review identity is therefore advisory in the same sense that ordinary unsigned Git author metadata is
 advisory.
@@ -293,10 +293,10 @@ The architecture should leave room for signed review commits later.
 
 A future trust model may use:
 
-* signed Git commits;
-* forge-backed reviewer identity;
-* protected immutable review refs;
-* repository-local trusted signer configuration.
+- signed Git commits;
+- forge-backed reviewer identity;
+- protected immutable review refs;
+- repository-local trusted signer configuration.
 
 ## Remote Collaboration
 
@@ -385,10 +385,10 @@ implementation and review process.
 
 It should remain useful regardless of whether code reaches trunk through:
 
-* merge;
-* squash;
-* rebase;
-* another integration strategy.
+- merge;
+- squash;
+- rebase;
+- another integration strategy.
 
 The integration record should also retain enough metadata to relate the historical reviewed lineage to
 the resulting state on trunk.
@@ -496,11 +496,11 @@ For the initial implementation:
 
 This includes:
 
-* parent implementation commits;
-* parent review commits;
-* parent approval commits;
-* rebases;
-* merges into the parent branch.
+- parent implementation commits;
+- parent review commits;
+- parent approval commits;
+- rebases;
+- merges into the parent branch.
 
 This rule is intentionally conservative.
 
@@ -560,13 +560,13 @@ filesystem and Git operations.
 
 Agents should be able to answer questions such as:
 
-* Has this approach been reviewed before?
-* Why was this implementation changed?
-* What concern caused this code to take its current form?
-* Was a similar issue raised previously?
-* Which implementation followed a particular review comment?
-* What changed between a rejected review and eventual approval?
-* What reasoning led to the version that was ultimately integrated?
+- Has this approach been reviewed before?
+- Why was this implementation changed?
+- What concern caused this code to take its current form?
+- Was a similar issue raised previously?
+- Which implementation followed a particular review comment?
+- What changed between a rejected review and eventual approval?
+- What reasoning led to the version that was ultimately integrated?
 
 This should not require a remote API, forge database, vector database, or proprietary memory service.
 
@@ -575,26 +575,26 @@ of truth.
 
 Review artifacts should therefore favor:
 
-* human-readable text;
-* predictable paths;
-* stable identifiers;
-* grep-friendly structure;
-* explicit relationships between review events and changesets.
+- human-readable text;
+- predictable paths;
+- stable identifiers;
+- grep-friendly structure;
+- explicit relationships between review events and changesets.
 
 ## Design Principles
 
 Git-pair should prefer:
 
-* ordinary Git primitives over custom synchronization protocols;
-* filesystem artifacts over opaque databases;
-* immutable historical anchors over mutable remote coordination state;
-* branches as active review surfaces;
-* stable changeset identity for durable history;
-* explicit review events over inferred external state;
-* local-first operation;
-* provider independence;
-* compatibility with Unix tools and editors;
-* agent-readable history.
+- ordinary Git primitives over custom synchronization protocols;
+- filesystem artifacts over opaque databases;
+- immutable historical anchors over mutable remote coordination state;
+- branches as active review surfaces;
+- stable changeset identity for durable history;
+- explicit review events over inferred external state;
+- local-first operation;
+- provider independence;
+- compatibility with Unix tools and editors;
+- agent-readable history.
 
 Git-pair should avoid introducing distributed mutable state unless a feature clearly requires it.
 
@@ -602,27 +602,27 @@ In particular, an active custom ref namespace should not exist solely to enable 
 
 ## Deferred Capabilities
 
-> Two of these have since been taken, and the line between them is worth stating. *Approval preservation
-> across parent integration* is the landed-parent comparison, which asks the content question against the
+> Two of these have since been taken, and the line between them is worth stating. _Approval preservation
+> across parent integration_ is the landed-parent comparison, which asks the content question against the
 > identity the approval recorded (PRD §21.1). The case beside it that list left open — a child that has merged
 > the destination in — is settled by crediting the destination in the rule that counts content the review
 > never saw (PRD §11.3), with the rendered half of `Review-Diff-Id` covering the file both the child and
-> trunk edited. *Patch-equivalent carry-forward after rebases* stays deferred: a rewritten history is refused
+> trunk edited. _Patch-equivalent carry-forward after rebases_ stays deferred: a rewritten history is refused
 > on `Review-Head` lineage whatever the trees say (§12). Recorded 2026-10-05.
 
 The following are intentionally deferred rather than rejected:
 
-* cryptographically signed review commits;
-* trusted reviewer key management;
-* historical key rotation;
-* patch-equivalent approval carry-forward after rebases;
-* approval preservation across metadata-only parent changes;
-* approval preservation across parent integration;
-* canonical implementation-state fingerprints;
-* protected remote review-ref namespaces;
-* globally synchronized review queues;
-* forge-backed reviewer identity;
-* semantic indexing of historical review artifacts.
+- cryptographically signed review commits;
+- trusted reviewer key management;
+- historical key rotation;
+- patch-equivalent approval carry-forward after rebases;
+- approval preservation across metadata-only parent changes;
+- approval preservation across parent integration;
+- canonical implementation-state fingerprints;
+- protected remote review-ref namespaces;
+- globally synchronized review queues;
+- forge-backed reviewer identity;
+- semantic indexing of historical review artifacts.
 
 ## Core Invariants
 

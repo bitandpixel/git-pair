@@ -23,12 +23,12 @@ acceptance without reading.
 
 Each command asks about the points it runs, and only those:
 
-| command | asks about | says nothing about |
-| --- | --- | --- |
-| `change ready` | `pre-ready`, `post-ready` | the other ten |
-| `review submit` | `pre-submit`, `post-submit` | the other ten |
-| `check` | `pre-check`, `post-check` | `pre-integrate`, and a `pre-ready` suite |
-| `change integrate` | `pre-integrate`, `post-integrate` | `pre-check`, and a `pre-ready` suite |
+| command            | asks about                        | says nothing about                       |
+| ------------------ | --------------------------------- | ---------------------------------------- |
+| `change ready`     | `pre-ready`, `post-ready`         | the other ten                            |
+| `review submit`    | `pre-submit`, `post-submit`       | the other ten                            |
+| `check`            | `pre-check`, `post-check`         | `pre-integrate`, and a `pre-ready` suite |
+| `change integrate` | `pre-integrate`, `post-integrate` | `pre-check`, and a `pre-ready` suite     |
 
 `init` runs no point, so it warns and starts the changeset:
 
@@ -45,15 +45,15 @@ git-pair: the repository's tracked hooks under .git-pair/hooks have not been rec
 
 - **The record.** `Trust` still decides over the whole tree — one hash of what can execute. A team that adds a
   second script to a point you already accepted changes the hash, and you are asked again, at the command that
-  runs it. Scoping the *question* does not soften the *answer*; that is the distinction the whole change rests
+  runs it. Scoping the _question_ does not soften the _answer_; that is the distinction the whole change rests
   on, and it is the one worth re-reading in `hooksPositionReason`'s comment.
 - `change unready` and `change abandon` still ask nothing, and `git pair hooks` is still never gated.
 - The refusal's sentence names `git pair hooks --trust`, `--decline`, and — for the person reviewing a change to
   the scripts — `--trust-hooks-once`, which is what the parent layer settled. This layer adds `--no-hooks` to the
   same sentence, so the way past a command that is in the way is visible from the refusal that stops it.
 - `--trust-hooks-once` from the parent stays. It is no longer the only way a reviewer of a hook change gets through —
-  with the scoping, most of those cases never refuse — but it is still how you run the scripts *at your own
-  point* unrecorded, which is now the reviewer case the tests use.
+  with the scoping, most of those cases never refuse — but it is still how you run the scripts _at your own
+  point_ unrecorded, which is now the reviewer case the tests use.
 
 ## How it was implemented
 
@@ -74,8 +74,8 @@ set it, the comments that argued the opposite, and the documentation that repeat
 ## Where to look
 
 1. `Ask for the position only where the command runs a hook` — the code. The judgement to test is whether any
-   command that *should* ask now stays quiet. The gate is the risky one: it is shared by `check` and `change
-   integrate`, and if a point is missed on the caller side, a merge stops asking about a script it does run.
+   command that _should_ ask now stays quiet. The gate is the risky one: it is shared by `check` and `change
+integrate`, and if a point is missed on the caller side, a merge stops asking about a script it does run.
    `TestThePositionIsAskedOnlyWhereTheCommandRuns` is written as a command/point matrix for exactly that.
 2. `Say where the position is asked, and where it is not` — the prose. Check that `init` reading as lenient does
    not leave an agent without a prompt; the skill's instruction is the answer, and it is worth a read.
@@ -106,7 +106,6 @@ and `go test ./...` on its own.
 - The pair refusal now runs over `change ready`, `check` and `change integrate` in
   `TestTrustOnceRunsTheUnrecordedTreeAndRecordsNothing`: eight commands carry both flags, and one rule in
   `PersistentPreRunE` is what has to hold them all.
-
 
 ## Also asked for in review: `--no-hooks` on the gate and the declaration
 
@@ -153,11 +152,11 @@ them, and either answers the position question for that invocation. The pair is 
 contradict each other, not because either one is dangerous. The three positions that are offered, and what each
 leaves behind:
 
-| you want | you type | what it leaves behind |
-| --- | --- | --- |
-| the scripts to run, this once, though unrecorded | `--trust-hooks-once` | nothing; the next command asks again, and the hooks that ran carry `"consent": "once"` |
-| this one command to run nothing | `--no-hooks` | a report naming every hook that did not run, and the same question from the next command |
-| to stop being asked, having read them | `git pair hooks --decline` | a position recorded against the content hash, readable by the next person with `git pair hooks` |
+| you want                                         | you type                   | what it leaves behind                                                                           |
+| ------------------------------------------------ | -------------------------- | ----------------------------------------------------------------------------------------------- |
+| the scripts to run, this once, though unrecorded | `--trust-hooks-once`       | nothing; the next command asks again, and the hooks that ran carry `"consent": "once"`          |
+| this one command to run nothing                  | `--no-hooks`               | a report naming every hook that did not run, and the same question from the next command        |
+| to stop being asked, having read them            | `git pair hooks --decline` | a position recorded against the content hash, readable by the next person with `git pair hooks` |
 
 The middle row is the new one, and it does not replace the third. `--decline` is still what to use when the question
 should stop being asked, because it is the only one of the three that leaves a record — and the record is what the
@@ -171,13 +170,13 @@ is an escape hatch worth having. It is not refused now: any tree state, any of t
 The case that carried the old rule was "the off switch is not a position", and three questions from the review
 found how little of it was load-bearing:
 
-- *An agent optimising for a green answer will skip the hooks on a trusted tree too.* Correct. The refusal was
+- _An agent optimising for a green answer will skip the hooks on a trusted tree too._ Correct. The refusal was
   never what stopped that; the report and the skill rule are, and they apply to every command equally.
-- *The skipped hooks are listed in the payload either way.* Correct, and this is the question that finished it. The
+- _The skipped hooks are listed in the payload either way._ Correct, and this is the question that finished it. The
   argument had been that a bypass which cleared the question leaves nothing to spot — but the run still reports
   `skipped-by-flag` for every configured hook, and `git pair hooks` still reports the tree as unrecorded, because
   the flag writes nothing. There was no lost signal to protect.
-- *Is preventing abuse of the flag worth a refusal?* Not on the above.
+- _Is preventing abuse of the flag worth a refusal?_ Not on the above.
 
 What survives is friction: while the refusal stood, reading the scripts was the cheapest way through, and now
 nothing requires it. That is a decision about how hard the tool should push, not a safety property, and it was made

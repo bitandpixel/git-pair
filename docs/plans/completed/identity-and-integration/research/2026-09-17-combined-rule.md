@@ -18,8 +18,8 @@ the fallback — precisely enough to implement, with the cases measured in
 
 ## The rule, in order
 
-**Step 0. Terminal and integrated are excluded everywhere.** *(Superseded — see "Step 0, amended
-in implementation" below: they are reported as facts and filtered by the layers that list work.)*
+**Step 0. Terminal and integrated are excluded everywhere.** _(Superseded — see "Step 0, amended
+in implementation" below: they are reported as facts and filtered by the layers that list work.)_
 A changeset with an
 `integration` ref, or whose archive ref points at a commit carrying a terminal marker
 (`Review-State: abandoned`), is not a candidate at any rank. The terminal test reads the ref
@@ -42,7 +42,7 @@ unrelated changesets on one branch is a state the tool should not guess about, a
 the honest answer. Both paths are measured: the stack resolves without any archive refs, and
 two sibling directories stay ambiguous.
 
-**Step 3. Rank 1 — only when rank 0 is empty.** Ask the refs about this branch's *history*:
+**Step 3. Rank 1 — only when rank 0 is empty.** Ask the refs about this branch's _history_:
 
 ```
 candidate = an archive ref whose target is in `git rev-list T..R`
@@ -53,20 +53,20 @@ candidate = an archive ref whose target is in `git rev-list T..R`
 This is the only thing the fallback is for: **the directory is gone but the branch still
 carries the work.** The realistic causes are a deletion (author's cleanup, a merge that
 dropped it, a rebase that dropped the init commit) and a CI checkout that has the code but
-not the metadata. The answer is reported with a distinguishing note — *changeset directory is
-not in the working tree* — because it is a degraded state worth seeing, not a normal one to
+not the metadata. The answer is reported with a distinguishing note — _changeset directory is
+not in the working tree_ — because it is a degraded state worth seeing, not a normal one to
 hide.
 
 The two filters are deliberately redundant, and each carries a case the other does not:
 
-- `rev-list T..R` says the work is on *this* line and not in trunk's history. On trunk itself
+- `rev-list T..R` says the work is on _this_ line and not in trunk's history. On trunk itself
   that set is empty, so the fallback costs one listing there — this is why the fallback is
   not the 1,802-invocation walk again.
 - `changesets/<id>/ ∉ tree(T)` catches work that landed **by content** rather than by
   commit — a squash landing has the directory on trunk while its archive target is nowhere in
   trunk's history. Without this filter, continued work on a squash-landed branch would
-  resurrect a changeset that has landed. Measured: *"a landed changeset is not resurrected by
-  its own ref"* resolves to uninitialized.
+  resurrect a changeset that has landed. Measured: _"a landed changeset is not resurrected by
+  its own ref"_ resolves to uninitialized.
 
 **Step 4. Nothing matched → uninitialized.** With the standard hint (`git pair change init`).
 
@@ -76,16 +76,16 @@ neither is on trunk.
 
 ## What each rank is good at, and where each is blind
 
-| Situation | Rank 0 (tree) | Rank 1 (ref) |
-| --- | --- | --- |
-| Normal work on a branch | answers | not consulted |
-| Stacked child, parent unlanded | answers (nearest wins) | not consulted |
-| Parent and child diverged, one shared ref | answers on both branches | not consulted |
-| Parent landed, child continues | answers the child | not consulted |
-| Directory deleted, history intact | blind | answers, with a note |
-| Changeset landed, branch keeps working | correctly uninitialized | correctly excluded |
-| Branch deleted entirely | blind | blind from `HEAD`; visible to `queue`, which enumerates refs as well as branches |
-| Two unrelated changesets on one branch | ambiguous, by design | — |
+| Situation                                 | Rank 0 (tree)            | Rank 1 (ref)                                                                     |
+| ----------------------------------------- | ------------------------ | -------------------------------------------------------------------------------- |
+| Normal work on a branch                   | answers                  | not consulted                                                                    |
+| Stacked child, parent unlanded            | answers (nearest wins)   | not consulted                                                                    |
+| Parent and child diverged, one shared ref | answers on both branches | not consulted                                                                    |
+| Parent landed, child continues            | answers the child        | not consulted                                                                    |
+| Directory deleted, history intact         | blind                    | answers, with a note                                                             |
+| Changeset landed, branch keeps working    | correctly uninitialized  | correctly excluded                                                               |
+| Branch deleted entirely                   | blind                    | blind from `HEAD`; visible to `queue`, which enumerates refs as well as branches |
+| Two unrelated changesets on one branch    | ambiguous, by design     | —                                                                                |
 
 The union is what makes the pair worth building: neither rule alone covers the deleted
 directory, and the ref rule alone gets four fixtures wrong.
@@ -107,7 +107,7 @@ thing from the branch that means landed. Order of resolution:
    they are different concepts. `integration record --target release/2.x` states where a backport
    landed, while the branch that defines "landed" for discovery is still `main`. One name could not
    say both, and `--default-branch` cannot serve the record command — `integration record
-   --default-branch release/2.x` would be a false sentence.
+--default-branch release/2.x` would be a false sentence.
 2. `refs/remotes/origin/HEAD`, when present.
 3. A unique `origin/main` or `origin/master`; a local `main`/`master` when there is no remote.
 4. Otherwise **refuse**, naming both fixes: the flag, and `git remote set-head origin --auto`.
@@ -116,12 +116,12 @@ thing from the branch that means landed. Order of resolution:
 
 Measured, because the whole proposal leans on this:
 
-| Setup | `refs/remotes/origin/HEAD` |
-| --- | --- |
-| `git clone` of a remote whose HEAD names an existing branch (path and `file://` transports) | set, e.g. `origin/trunk` |
-| CI shape: `git init` + `git remote add` + `git fetch origin <branch>` | **not set** |
-| …then `git remote set-head origin --auto` | set |
-| Remote HEAD names a branch that does not exist | git declines to guess (`Cannot determine remote HEAD`) |
+| Setup                                                                                       | `refs/remotes/origin/HEAD`                             |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `git clone` of a remote whose HEAD names an existing branch (path and `file://` transports) | set, e.g. `origin/trunk`                               |
+| CI shape: `git init` + `git remote add` + `git fetch origin <branch>`                       | **not set**                                            |
+| …then `git remote set-head origin --auto`                                                   | set                                                    |
+| Remote HEAD names a branch that does not exist                                              | git declines to guess (`Cannot determine remote HEAD`) |
 
 So a human clone needs no configuration at all, and a runner needs one flag or one extra
 command. Preferring the remote-tracking ref over any local branch is deliberate: what counts
@@ -159,11 +159,11 @@ review refs present, and `internal/changeset/resolve_test.go` asserts ≤10.
 
 Measured with 300 archive refs present:
 
-| Position | Invocations |
-| --- | --- |
-| Requirements' rules as written, one resolution | 1,802 |
-| Combined rule, on a changeset branch | 8 |
-| Combined rule, on trunk (fallback fires, matches nothing) | 12 |
+| Position                                                  | Invocations |
+| --------------------------------------------------------- | ----------- |
+| Requirements' rules as written, one resolution            | 1,802       |
+| Combined rule, on a changeset branch                      | 8           |
+| Combined rule, on trunk (fallback fires, matches nothing) | 12          |
 
 The rank-1 filter is one `rev-list T..R`, bounded by the commits unique to this branch rather
 than by repository history or ref count. Per-candidate work (terminal trailer, distance) runs
@@ -205,7 +205,7 @@ caused, and it buys back the notes field, the rank in `--json`, and the ordering
 
 ### Merging an unlanded sibling is the case rank 0 cannot answer
 
-Measured: merging a sibling changeset branch into yours puts *their* directory in your tree, and
+Measured: merging a sibling changeset branch into yours puts _their_ directory in your tree, and
 both are absent from trunk, so the branch is ambiguous (`[mine@4 theirs@4]` — equal distance,
 nothing to order them by). The claim model could not hit this, because their directory claimed
 their branch. Merging trunk stays clean (landed directories drop out), so this is specifically
@@ -217,7 +217,7 @@ chosen — `ignores: <id> [...]` in `changesets/<id>/CHANGESET.yaml`. A candidat
 candidate's `ignores:` stops being a candidate.
 
 **Where the field goes was measured, and the intuition was wrong.** Putting `inactive: true` in
-the *losing* changeset's metadata does travel: land the winner, and the losing branch inherits an
+the _losing_ changeset's metadata does travel: land the winner, and the losing branch inherits an
 `inactive: true` in its own directory after it catches up with trunk. But a control run with no
 decision recorded at all resolves identically — that branch's directory is already on trunk,
 carried in by the winner's landing, so the trunk test ended it regardless of the flag. The leak is

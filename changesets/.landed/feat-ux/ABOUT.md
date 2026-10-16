@@ -6,9 +6,9 @@ preview had the whole screen, and the list column's scroll markers cost a row th
 ## Summary
 
 **`q` over the whole-screen preview ended the session.** That screen is the only form the diff has on a
-narrow terminal, and the only form on *any* terminal below the pane's floor, so the key a reviewer reaches
+narrow terminal, and the only form on _any_ terminal below the pane's floor, so the key a reviewer reaches
 for to get the file list back instead threw away the session they were in the middle of. `q` now gives the
-list back there, the way `esc` and `enter` already do. From the preview *column* nothing changes: the list
+list back there, the way `esc` and `enter` already do. From the preview _column_ nothing changes: the list
 is drawn beside the diff there, so `q` means leave as it means it on every other screen.
 
 **`gg` and `G` jumped between the two regions.** They were the two ends of the whole list column: `gg` took
@@ -44,7 +44,7 @@ an empty span or a box-less changeset keeps the behaviour the keys had before.
 **The scroll counts live on the rules and borders** (`treeSpine`, `boxEdge`, `boxLines`, `listBlock`,
 `hiddenAround`, `scrollHints`). `filesHidden` and `metaHidden` count each region's rows off screen above and
 below, read off the same `visibleRows` arithmetic that draws them, so the number and the rows cannot
-disagree. `scrollHints` renders a region's pair as `  ↑  1 ` and `  ↓ 34 `, both counts in one numeric field
+disagree. `scrollHints` renders a region's pair as ` ↑  1` and ` ↓ 34`, both counts in one numeric field
 as wide as the longer of them, so the two arrows of a region share a column and its digits line up. The field
 width is shared because the two arrows are the pair a reviewer reads together, and one that moved a cell when
 its count grew past 9 would make the pair read as two unrelated notes. `treeSpine` puts a count at the end of

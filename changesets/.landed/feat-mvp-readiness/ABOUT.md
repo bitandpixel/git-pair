@@ -8,7 +8,7 @@ Four gaps sit between "the plans are done" and "this is releasable". None is a m
    not name them and a contributor would not find them.
 2. Three `--json` arrays printed `null` when empty, against the rule the durable-records plan adopted.
 3. PRD §8's command tree missed `change abandon`, `review reopen` and `integration publish`. `review
-   reopen` has no PRD section at all.
+reopen` has no PRD section at all.
 4. `status` on a branch whose changeset landed told the reader to run `git pair init`.
 5. The review TUI showed a file the span created as a patch: its own text with a `+` on every line. A move
    with no edits showed two lines about a path. Nothing in the tree said which files were new.
@@ -16,7 +16,7 @@ Four gaps sit between "the plans are done" and "this is releasable". None is a m
 ## What changed
 
 - `e2e-29.sh`, `pty-walkthrough.sh` and their two python helpers are `scripts/gates/` now. `mise run
-  gates` builds the binary and runs both. README gained a Development section that says what each gate
+gates` builds the binary and runs both. README gained a Development section that says what each gate
   covers and what it needs. The old directory keeps a README that maps each historical path to the new
   one. The commands quoted inside finished plans and audits still resolve.
 - Both scripts run every command with stdin at `/dev/null`. `git pair init` reads an open pipe as

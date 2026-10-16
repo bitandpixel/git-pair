@@ -40,7 +40,7 @@ What exists now, on `main`:
   (`internal/reviewops/reviewops.go:65`) and `change abandon` (`8a84a06`).
 - `refs/reviews/archive/<slug>/<short-head>` is an immutable per-head ref written by `change complete`
   (`882100c`), which commits nothing.
-- `change abandon` records `Review-State: abandoned` and reports terminality *beside* `state`
+- `change abandon` records `Review-State: abandoned` and reports terminality _beside_ `state`
   (`8a84a06`, PRD §9.7).
 - The queue enumerates branches and classifies a branchless directory as landed, never-offered, or
   unexplained (`e55f5ba`); reads accept `--changeset`, writes do not (`80c5d33`).
@@ -77,7 +77,7 @@ Settled with the reviewer on 2026-09-17. Rejected alternatives are named so they
   beside it; reading both for a release.
 - **The spec's archive model is adopted.** One movable archive ref per changeset, advanced by the
   commands that already anchor, plus `change archive` for review-artifact-only commits. `change
-  complete` retires, and the per-head `refs/reviews/archive/<slug>/<short>` refs retire with it:
+complete` retires, and the per-head `refs/reviews/archive/<slug>/<short>` refs retire with it:
   durability comes from the single archive ref, frozen once integration exists. Rejected: keeping
   `complete` and layering integration on top of it; keeping `complete` as a verify-only assertion.
 - **Sequence: identity, then refs, then CI commands**, in one plan. Refs are named by ID, so deciding
@@ -126,7 +126,7 @@ Consequences recorded rather than asked separately:
   alternatives, both measured: counting `CHANGESET.yaml` at any depth under
   `changesets/` would make relocating safe for ~2ms, but it defends tidying rather than deleting and
   adds a layout assumption nobody asked for; asking the history (`git log --diff-filter=A`, which does
-  catch squash landings) costs ~33ms per candidate on a 20k-commit trunk and is paid by every *active*
+  catch squash landings) costs ~33ms per candidate on a 20k-commit trunk and is paid by every _active_
   changeset, since those are absent from trunk's tree too. §35 already puts garbage collection out of
   scope, so git-pair neither prunes nor guards the prune.
 
@@ -184,31 +184,31 @@ dropped and ambiguity became a recorded decision — see the amendment at the en
 #### Tasks
 
 - [x] **Resolution had to move first, and the plan did not say so.** `ForBranch` and `AtCommit`
-  derived the directory from `SlugFromBranch(branch)`, so `--id booking-transaction-v2` would
-  have created a directory no command could find. A directory now belongs to the branch its
-  `CHANGESET.yaml` records, claims beat names, and `CHANGESET.yaml` gains `branch:`. That is
-  also what fixes a bug nobody reported: a child branch created on its parent's head carries
-  the parent's directory, and the name rule could make the queue show the child owning work it
-  merely inherited.
+      derived the directory from `SlugFromBranch(branch)`, so `--id booking-transaction-v2` would
+      have created a directory no command could find. A directory now belongs to the branch its
+      `CHANGESET.yaml` records, claims beat names, and `CHANGESET.yaml` gains `branch:`. That is
+      also what fixes a bug nobody reported: a child branch created on its parent's head carries
+      the parent's directory, and the name rule could make the queue show the child owning work it
+      merely inherited.
 - [x] `changeset.WriteOptions` and the metadata read path gain `ID`; `parseMetadata` already parses
-  arbitrary keys, so this is the struct and the writer.
+      arbitrary keys, so this is the struct and the writer.
 - [x] `change init --id` validated by the same character rule `SlugFromBranch` applies; explicit `--id`
-  wins over the branch default, and an `--id` that normalises to something other than what was typed is
-  refused rather than quietly rewritten. The path-separator check is redundant with the character
-  loop and stays for its message: pasting a branch name as an ID is the likely mistake, and
-  "must not contain a path separator" says what to fix where "contains `/`" does not.
+      wins over the branch default, and an `--id` that normalises to something other than what was typed is
+      refused rather than quietly rewritten. The path-separator check is redundant with the character
+      loop and stays for its message: pasting a branch name as an ID is the likely mistake, and
+      "must not contain a path separator" says what to fix where "contains `/`" does not.
 - [x] Collision checks before anything is written: the directory at `HEAD` or in the worktree, and any
-  ref under the changeset's ref namespace. The ref half is what stops a resurrected slug inheriting the
-  archive of the changeset that owned the name first. Both go through one helper so M2's rename moves
-  the check with it — `reviewref.Taken` and `reviewref.Namespace` are the only places the layout is
-  spelled out.
-- [x] Re-running `change init` on one's own changeset stays idempotent; colliding with *someone else's*
-  changeset of the same ID is the failure.
+      ref under the changeset's ref namespace. The ref half is what stops a resurrected slug inheriting the
+      archive of the changeset that owned the name first. Both go through one helper so M2's rename moves
+      the check with it — `reviewref.Taken` and `reviewref.Namespace` are the only places the layout is
+      spelled out.
+- [x] Re-running `change init` on one's own changeset stays idempotent; colliding with _someone else's_
+      changeset of the same ID is the failure.
 - [x] Resolution enforces `id == filepath.Base(Dir)`; disagreement is an error naming both, which is
-  §6's "reject ID mutation once refs exist" expressed as a read rule instead of a write rule.
+      §6's "reject ID mutation once refs exist" expressed as a read rule instead of a write rule.
 - [x] Tests: `--id` honoured, default unchanged, collision by directory, collision by ref, hand-edited
-  `id:` refused, `--id` with a path separator refused, a committed deletion releasing the name, and a
-  live claim not being reported as stale.
+      `id:` refused, `--id` with a path separator refused, a committed deletion releasing the name, and a
+      live claim not being reported as stale.
 - [x] PRD §9.1 and README's command surface and `CHANGESET.yaml` sample.
 
 Not done, deliberately:
@@ -253,7 +253,7 @@ assertion about stale claims was vacuous because no changeset directory existed 
   integration. It appears at the first `change ready` or `review submit`, which is what
   requirements §10 describes ("review submission must update the archive ref"); `change init`
   does not create it.
-  - *Amended 2026-09-17:* an earlier draft of this deliverable said the ref is created at
+  - _Amended 2026-09-17:_ an earlier draft of this deliverable said the ref is created at
     `change init`, citing requirements §11 — which is actually "Archive Advancement After
     Review", and asks for no such thing. Nothing in the requirements asks for a ref before the
     first handoff, and creating one there costs more than it buys: refs are never deleted, so a
@@ -276,17 +276,17 @@ move is the mechanical rename it should be.
 #### Tasks
 
 - [x] Default-branch resolution, one function serving discovery **and** `change init`'s existing
-  `defaultBase` (local `main` then `master` today, `internal/cli/change.go:316`): `--default-branch
-  <ref>` on the resolving commands, else `refs/remotes/origin/HEAD`, else a unique
-  `origin/main`/`origin/master`, else a local `main`/`master`, else refuse naming the flag and
-  `git remote set-head origin --auto`. No config key. Two resolvers would let a changeset's recorded
-  base and the landed-test disagree, which is the inconsistency this rule exists to remove. Refuse
-  rather than treat an unresolvable trunk as "no trunk", which makes every directory a candidate.
+      `defaultBase` (local `main` then `master` today, `internal/cli/change.go:316`): `--default-branch
+<ref>` on the resolving commands, else `refs/remotes/origin/HEAD`, else a unique
+      `origin/main`/`origin/master`, else a local `main`/`master`, else refuse naming the flag and
+      `git remote set-head origin --auto`. No config key. Two resolvers would let a changeset's recorded
+      base and the landed-test disagree, which is the inconsistency this rule exists to remove. Refuse
+      rather than treat an unresolvable trunk as "no trunk", which makes every directory a candidate.
 - [x] `changeset.Resolve(ctx, repo, rev, defaultBranch)`: candidates from `ls-tree` of
-  `changesets/` in the revision and in the default branch; nearest archive tip, then `base:`-names-parent
-  to break a stack, then ambiguity. `ForID` stays for `--changeset` reads; `ForBranch`/`AtCommit` and the claim machinery
-  are deleted, including `StaleClaims` and the renamed-branch warning.
-  - *Amended while implementing:* a terminal candidate is **reported** (`Candidate.Terminal`) rather
+      `changesets/` in the revision and in the default branch; nearest archive tip, then `base:`-names-parent
+      to break a stack, then ambiguity. `ForID` stays for `--changeset` reads; `ForBranch`/`AtCommit` and the claim machinery
+      are deleted, including `StaleClaims` and the renamed-branch warning.
+  - _Amended while implementing:_ a terminal candidate is **reported** (`Candidate.Terminal`) rather
     than excluded at step 0. Excluding it makes `status` on an abandoned branch answer "no changeset
     here" about a directory that is still in the tree — the regression M1's abandoned reporting exists
     to avoid — and the queue and `check` already filter terminal work at their own layer. The
@@ -295,14 +295,14 @@ move is the mechanical rename it should be.
     measured in `research/2026-09-17-combined-rule.md`. Reading it as a fact keeps `Resolve` a read of
     what is there instead of a policy about what to hide.
 - [x] No ref fallback. Resolution is rank 0 alone; a branch whose changeset directory was deleted
-  reports `uninitialized` with the normal hint. Fixture asserts exactly that, so the omission is a
-  decision in the test suite rather than an oversight.
+      reports `uninitialized` with the normal hint. Fixture asserts exactly that, so the omission is a
+      decision in the test suite rather than an oversight.
 - [x] `change use <id>`: records which candidate this branch is working on. Refuses an id that is not
-  a candidate here, writes `ignores: <id> [...]` into the chosen changeset's `CHANGESET.yaml` and
-  commits it. A candidate named in another candidate's `ignores:` stops being a candidate. In the
-  chosen file and not the loser's, because an edit under `changesets/<other>/` is implementation
-  drift to `change archive` and carries a foreign path into this changeset's landing.
-  - *Amended while implementing:* the write is **simulated first** (`Resolution.WithIgnores`, which
+      a candidate here, writes `ignores: <id> [...]` into the chosen changeset's `CHANGESET.yaml` and
+      commits it. A candidate named in another candidate's `ignores:` stops being a candidate. In the
+      chosen file and not the loser's, because an edit under `changesets/<other>/` is implementation
+      drift to `change archive` and carries a foreign path into this changeset's landing.
+  - _Amended while implementing:_ the write is **simulated first** (`Resolution.WithIgnores`, which
     runs the real filter against the real candidate set), and the command refuses when the record
     would leave the branch undecided. Two records naming each other cancel out, so writing a third
     file over a contradicting record would commit noise and leave the branch as undecided as it was.
@@ -314,31 +314,31 @@ move is the mechanical rename it should be.
     `Review-Changeset` and **no** `Review-State`: choosing which changeset a branch is about is not a
     lifecycle event, and must not move a changeset out of review.
 - [x] Ambiguity message names every candidate and points at `change use` and `status --changeset`,
-  since both escape hatches already exist. A tie is now classified as a usage error (exit 2) like
-  `ErrNoChangeset`: the branch cannot answer the question, and both ways out are things the user can
-  type.
+      since both escape hatches already exist. A tie is now classified as a usage error (exit 2) like
+      `ErrNoChangeset`: the branch cannot answer the question, and both ways out are things the user can
+      type.
 - [x] `status --json` reports the default branch it resolved, its commit, and which source supplied
-  it (`flag` / `origin-head` / `sole-candidate`), reported the same way whether the ref came from
-  `--default-branch` or from detection. A CI run should be explainable from its own output rather
-  than from what the machine happened to have fetched.
-  - *Landed with M5, not M2:* `default_branch`, `default_branch_commit`, `default_branch_source`. The
+      it (`flag` / `origin-head` / `sole-candidate`), reported the same way whether the ref came from
+      `--default-branch` or from detection. A CI run should be explainable from its own output rather
+      than from what the machine happened to have fetched.
+  - _Landed with M5, not M2:_ `default_branch`, `default_branch_commit`, `default_branch_source`. The
     resolved ref now travels on `session`, which is why `RequireCurrentOn`/`ResolveCurrentOn` exist:
     reporting the comparison and making it have to be the same resolution, so the two cannot disagree
     and no second lookup is paid for. The doc comment on the `DefaultBranch*` source constants had
     promised these fields since M2; the code never grew them.
 - [x] Cost assertions: resolving on a changeset branch and on trunk stay in single-digit git
-  invocations with 300 archive refs present, against 1,802 for the per-ref formulation.
+      invocations with 300 archive refs present, against 1,802 for the per-ref formulation.
 - [x] `queue` enumerates local branches and resolves each against trunk — two `ls-tree` calls per
-  branch, which is the enumeration shape the previous plan's M4 wanted. Archive refs with no branch
-  behind them are deliberately **not** listed in this milestone: with refs created at init, a
-  branchless ref is as likely to be an abandoned attempt as a deleted branch, and guessing either
-  way is a report nobody asked for. Recorded as a known gap.
+      branch, which is the enumeration shape the previous plan's M4 wanted. Archive refs with no branch
+      behind them are deliberately **not** listed in this milestone: with refs created at init, a
+      branchless ref is as likely to be an abandoned attempt as a deleted branch, and guessing either
+      way is a report nobody asked for. Recorded as a known gap.
 - [x] README troubleshooting gains the consequence the tree rule accepts: if someone merges your
-  unlanded changeset and lands it, your changeset reads as landed on your own branch, because your
-  directory is in trunk's tree. Measured, not inferred.
+      unlanded changeset and lands it, your changeset reads as landed on your own branch, because your
+      directory is in trunk's tree. Measured, not inferred.
 - [x] `reviewref`: `Archive(id)`, `Update`, `Resolve` against the new namespace; delete the per-head
-  archive writer and its exact-SHA matcher; no reader of `refs/reviews/*` remains.
-  - *Amended while implementing:* the per-head writer and the exact-SHA matcher went with
+      archive writer and its exact-SHA matcher; no reader of `refs/reviews/*` remains.
+  - _Amended while implementing:_ the per-head writer and the exact-SHA matcher went with
     `change archive` rather than with the move, because keeping them would have meant writing
     `refs/git-pair/changesets/<id>/archive` **and** a per-head copy under it — and a per-head child
     under a changeset's namespace is what made the leaf/namespace collision unresolvable in the first
@@ -347,10 +347,10 @@ move is the mechanical rename it should be.
     and the old name implied a branch-shaped thing; `Entry.Slug` became `Entry.ID`. The broad
     `slug`→`id` rename in the rest of the codebase is still open.
 - [x] `change archive`: succeeds when the archive is already at `HEAD`; advances when nothing outside
-  `changesets/<id>/` changed between the archive and `HEAD`; otherwise refuses naming the paths and says
-  a review cycle is required. Reuses `PathsChanged` and the drift machinery from the anchored-lifecycle
-  plan rather than computing a second diff.
-  - *Amended while implementing:* the gate is **the review at HEAD**, not a diff from the archive to
+      `changesets/<id>/` changed between the archive and `HEAD`; otherwise refuses naming the paths and says
+      a review cycle is required. Reuses `PathsChanged` and the drift machinery from the anchored-lifecycle
+      plan rather than computing a second diff.
+  - _Amended while implementing:_ the gate is **the review at HEAD**, not a diff from the archive to
     HEAD. The archive is moved by `change ready` and every submission, so between a reviewer's approval
     and the author's archive the two are normally the same commit, and a diff measured from the ref
     would ask "what changed since the ref" — which a thread reply also is — instead of the question the
@@ -358,36 +358,36 @@ move is the mechanical rename it should be.
     is that comparison, already used by `status` for its drifted commits, so no second diff is computed
     and the two commands cannot disagree about what drift is.
 - [x] `change archive` refuses a terminal changeset. Refuses **before** the review gate, which would
-  also refuse it (an abandoned changeset derives `WORKING`) but would blame the wrong thing, and which
-  would otherwise leave a path to `squash_safe: true` on a changeset that will never be taken forward.
-  - *Amended while implementing:* it does **not** refuse when no archive ref exists yet. Reaching that
+      also refuse it (an abandoned changeset derives `WORKING`) but would blame the wrong thing, and which
+      would otherwise leave a path to `squash_safe: true` on a changeset that will never be taken forward.
+  - _Amended while implementing:_ it does **not** refuse when no archive ref exists yet. Reaching that
     state needs a permitted marker at HEAD, which means `change ready` already wrote the ref, so the
     only way to arrive is a ref that was deleted — and recreating it is the repair, not a mistake to
     refuse. The plan asked for the refusal to keep first-anchoring in `change ready`; it still is,
     and `change archive` never claims to have created the first one.
 - [x] Refuse an archive move whose target is not a descendant of the current ref. This is the one place
-  `merge-base --is-ancestor` re-enters the write path; document that it verifies a move, not a state.
-  - *Amended while implementing:* the refusal is for a target that is an **ancestor** of the tip. A
+      `merge-base --is-ancestor` re-enters the write path; document that it verifies a move, not a state.
+  - _Amended while implementing:_ the refusal is for a target that is an **ancestor** of the tip. A
     rebase produces a head that is neither ancestor nor descendant, and archiving must follow a rebase
     — the markers moved with it, and refusing would strand the archive on a commit that no longer
     exists on the branch. `git.Repo.IsAncestor` states the direction in its name.
 - [x] Delete `change complete`, and the `complete_test.go` cases that only
-  made sense for completion; re-home the surviving-review-additions and drift cases onto `change archive`.
-  - *Amended while implementing:* `--allow-unreviewed-changes` survives. The plan expected the
+      made sense for completion; re-home the surviving-review-additions and drift cases onto `change archive`.
+  - _Amended while implementing:_ `--allow-unreviewed-changes` survives. The plan expected the
     archive-to-HEAD comparison to make drift impossible and the hatch pointless; with the gate on the
     review at HEAD, drift over a permitted marker is still reachable (a README typo fixed after the
     approval), and the hatch is the acknowledgement for it, reported as `acknowledged_unreviewed_paths`
     rather than swallowed. `complete_test.go` is now `archive_test.go`.
 - [x] `status` reports the archive as current or stale with its SHA, beside `state`: `archive_ref` and
-  `archive_commit`, and `next_action` claims squash-safety only while the two agree and the changeset
-  has not ended. No separate "stale" word — the comparison against `head` is the answer, and a state
-  word for it would be a state the markers do not record.
+      `archive_commit`, and `next_action` claims squash-safety only while the two agree and the changeset
+      has not ended. No separate "stale" word — the comparison against `head` is the answer, and a state
+      word for it would be a state the markers do not record.
 - [x] Update `e2e-29.sh` and `pty-walkthrough.sh` in this commit — they are the live proof that the
-  archive survives `git branch -D`, and that proof currently runs through `change complete`.
+      archive survives `git branch -D`, and that proof currently runs through `change complete`.
 - [x] PRD §9.5 rewritten for `change archive`, §13's second ref removed, §12's completion paragraph;
-  README's concepts, command surface, JSON contract, troubleshooting. §13's namespace move stays open
-  with the ref rename below.
-Landed so far:
+      README's concepts, command surface, JSON contract, troubleshooting. §13's namespace move stays open
+      with the ref rename below.
+      Landed so far:
 
 - Resolution and default-branch detection, in `internal/changeset/resolve.go`. Additive: no caller
   uses it yet, so this commit changes no output. Fixtures are the spike's ported — stacked,
@@ -397,8 +397,8 @@ Landed so far:
   carries no instrumentation for the measurement.
 - Two defects the first version shipped with, both found by mutation testing rather than by reading
   the code: the ordering rule was never exercised, because the `base:`-names-parent filter decided
-  the stacked case before distance was consulted; and "no review ref" was treated as *tying* with
-  any distance instead of *losing* to one, which made an unarchived candidate block a ready one.
+  the stacked case before distance was consulted; and "no review ref" was treated as _tying_ with
+  any distance instead of _losing_ to one, which made an unarchived candidate block a ready one.
   The tests for both are `TestResolveNearestRefDecidesWhenNothingElseDoes` and
   `TestResolveUnarchivedCandidateSortsLast`.
 - Callers moved, and the claim machinery deleted rather than deprecated: `ForBranch`, `AtCommit`,
@@ -417,7 +417,7 @@ Landed so far:
   the integration branch; `change init` on a branch that inherited a matching directory says it
   is already initialised instead of refusing a collision between a changeset and itself;
   `change init --id <other>` on a branch that already carries a changeset succeeds with a warning
-  rather than refusing, because the old refusal existed for two *claims* on one branch and the
+  rather than refusing, because the old refusal existed for two _claims_ on one branch and the
   rule has no such conflict; and renaming a branch needs nothing at all, so the stale-claim
   warning went with the claim. `queue` names a branch it cannot resolve in `skipped` instead of
   dropping it silently.
@@ -430,7 +430,7 @@ Landed so far:
 - Mutation-tested: nine mutations over the new code, eight caught. The survivor was equivalent —
   `cs.Exists = dir.Worktree || dir.Committed` where the `Committed && !Worktree` case has already
   returned — so the dead term was removed instead of being covered.
-- Known gap, recorded in `changeset.DirectoryAt`: two branches minting the same *new* id before
+- Known gap, recorded in `changeset.DirectoryAt`: two branches minting the same _new_ id before
   either is readied is invisible from one checkout. The refs check closes it the moment either is,
   and closing it earlier means a full branch scan per `change init`, which prices a rare mistake
   against a common command.
@@ -448,7 +448,7 @@ Landed so far:
   the ref is the only thing guaranteeing the unsquashed chain survives the squash merge that the
   command is preparing for, while a rebased head — neither ancestor nor descendant — is followed,
   since its markers moved with it. And `next_action` claims squash-safety only while `archive_commit`
-  is HEAD *and* the changeset has not ended, so neither an archive of an ancestor nor an abandoned
+  is HEAD _and_ the changeset has not ended, so neither an archive of an ancestor nor an abandoned
   changeset whose abandon marker the archive happens to name can tell an agent the work is done.
 - `change archive` refuses an abandoned changeset before the review gate, which would also have
   refused it for the wrong reason.
@@ -489,56 +489,56 @@ still resolves and `status --changeset <id>` still reads the history.
 #### Tasks
 
 - [x] One predicate, built from the derivation that already exists: terminal → fail; newest marker's
-  outcome → `APPROVED` passes, `FEEDBACK` passes only with `--allow-feedback`, `BLOCKED` and a withdrawal
-  fail; archive not at the source head → fail; implementation drift over the reviewed content → fail.
-  - *Decided before implementing:* this makes `check` stricter than `change archive`, which accepts
+      outcome → `APPROVED` passes, `FEEDBACK` passes only with `--allow-feedback`, `BLOCKED` and a withdrawal
+      fail; archive not at the source head → fail; implementation drift over the reviewed content → fail.
+  - _Decided before implementing:_ this makes `check` stricter than `change archive`, which accepts
     `FEEDBACK` as permitting integration (§9.5). They are not in contradiction, and the docs have to say
     so rather than let them look contradictory: archiving is preservation, and non-blocking feedback is
     still a review of that head; `check` is the gate, and the repository decides at the gate whether
     feedback alone is enough to land. An author can therefore archive a changeset that CI refuses, which
     is the intended shape — the archive is not a claim that the work may merge.
 - [x] §28's wording: `OK: <id> is integration-ready` plus `archive: <sha>`, or `NOT READY:` with one
-  bullet per failed condition — every condition, not the first, so CI output is actionable without a
-  second run.
-  - *Amended while implementing:* the two §28 examples are reproduced exactly, and the archive bullet
+      bullet per failed condition — every condition, not the first, so CI output is actionable without a
+      second run.
+  - _Amended while implementing:_ the two §28 examples are reproduced exactly, and the archive bullet
     carries the two ends it compared (`… is at 6c1d0aa, HEAD is 91bf204`) because "the archive does not
     point at the source commit" without the two SHAs sends someone to run `git rev-parse` twice.
 - [x] Exit codes follow the existing table: 0 ready, 1 not ready, 2 usage. No new codes.
-  - *Amended while implementing:* the not-ready verdict goes to **stdout** and returns the silent-error
+  - _Amended while implementing:_ the not-ready verdict goes to **stdout** and returns the silent-error
     sentinel, because a failing check is the command working: printing `git-pair: …` over the verdict
     would put a tool diagnostic where the gate's answer is.
 - [x] `--json`: `id`, `ready`, `state`, `archive`, `archive_current`, `reasons` as machine-readable
-  strings, `policy`.
-  - *Decided before implementing:* the key is `changeset`, not `id`. Every command that reports a
+      strings, `policy`.
+  - _Decided before implementing:_ the key is `changeset`, not `id`. Every command that reports a
     changeset in JSON calls it `changeset` today, and `check` naming the same value `id` would make
     the deferred `slug`→`id` rename a breaking change to the JSON contract as well as to the code —
     two things to schedule instead of one. The rename, when it comes, moves every key together.
-  - *Amended while implementing:* added `head`, which the list did not carry. A CI job runs the gate on
+  - _Amended while implementing:_ added `head`, which the list did not carry. A CI job runs the gate on
     the revision it built, and without the source SHA in the output it has to run `git rev-parse` to
     learn whether the gate looked at that revision. `head` and `archive` are full SHAs — the human
     output prints short forms, and a short SHA cannot be compared safely. `reasons` is an empty array
     rather than `null` when the gate passes, so a consumer branches on `ready` instead of handling two
     shapes for one fact.
 - [x] `check` does **not** re-run the surviving-review-additions diagnostic. §26 lists it among the
-  conditions, but `change ready` is where that decision gets made and acknowledged, and the outcome
-  and drift conditions already guarantee that nothing has changed since the marker — re-deriving it
-  would re-litigate a decision the author already took, in a command with no override flag to take
-  it again. This settles the open question at the bottom of this plan; the reason goes in the code
-  comment where the conditions are listed.
+      conditions, but `change ready` is where that decision gets made and acknowledged, and the outcome
+      and drift conditions already guarantee that nothing has changed since the marker — re-deriving it
+      would re-litigate a decision the author already took, in a command with no override flag to take
+      it again. This settles the open question at the bottom of this plan; the reason goes in the code
+      comment where the conditions are listed.
 - [x] Works on a checked-out changeset branch; deliberately does not take `--changeset`, since it is the
-  thing a forge check runs *on* a branch. The absence is a test, not a comment: `check --changeset <id>`
-  exits 2 with cobra's `unknown flag`.
+      thing a forge check runs _on_ a branch. The absence is a test, not a comment: `check --changeset <id>`
+      exits 2 with cobra's `unknown flag`.
 - [x] Table-driven tests over outcome × policy × drift × archive-current, plus a shell-level assertion
-  of `$?` because the deliverable is an exit code.
-  - *Amended while implementing:* the predicate tests are white-box over `integrationReasons`
+      of `$?` because the deliverable is an exit code.
+  - _Amended while implementing:_ the predicate tests are white-box over `integrationReasons`
     (`check_internal_test.go`), which is where the conditions actually live — the table asserts the
     reason **count** as well as its text, so a merged or dropped condition fails even when the wording
     still matches. The shell-level `$?` assertion went into `e2e-29.sh` rather than a Go test: the
     harness calls the same `cli.Execute` that `main` passes to `os.Exit`, so a Go test cannot observe an
     exit status the harness does not already have, and only a shell sees one.
 - [x] README's agent contract (this is the command agents should call) and a CI example; PRD gets a new
-  section beside §9.
-  - *Amended while implementing:* the section is **§11.3**, beside `status` and `diff`, not under §9.
+      section beside §9.
+  - _Amended while implementing:_ the section is **§11.3**, beside `status` and `diff`, not under §9.
     `check` is not a `change` subcommand, and filing it with the author commands would have made §8's
     tree and §11's command disagree about what the command is. README gained the command-table row, the
     agent-contract line, an "As a CI gate" subsection, a `--json` sample, an exit-code row and a
@@ -570,38 +570,38 @@ the same `cli.Execute` that `main` passes to `os.Exit`.
 #### Tasks
 
 - [x] `reviewref`: `Integration(id)`, `ResolveIntegration`, and archive-ref discovery by
-  `for-each-ref --points-at`, filtered to `/archive` children. Resolve `--source` through `rev-parse`
-  first, so an abbreviated SHA from a CI log resolves before discovery rather than matching nothing.
+      `for-each-ref --points-at`, filtered to `/archive` children. Resolve `--source` through `rev-parse`
+      first, so an abbreviated SHA from a CI log resolves before discovery rather than matching nothing.
 - [x] §18 and §19 as written: no match fails saying so; more than one fails listing the candidates and
-  naming `--changeset`; `--changeset` disambiguates but never substitutes for a missing archive. The
-  two-refs-at-one-commit fixture is built by moving a ref by hand, since git-pair cannot create that
-  state itself.
+      naming `--changeset`; `--changeset` disambiguates but never substitutes for a missing archive. The
+      two-refs-at-one-commit fixture is built by moving a ref by hand, since git-pair cannot create that
+      state itself.
 - [x] Order the §21 checks so the useful failures come first: unknown source, no archive, ambiguity,
-  terminal changeset, unknown integrated commit, `--target` reachability, existing integration ref.
+      terminal changeset, unknown integrated commit, `--target` reachability, existing integration ref.
 - [x] Reachability via `merge-base --is-ancestor`, with a comment on the re-added helper explaining why
-  verifying a caller-named target is not the derivation the anchored-lifecycle plan removed. Note the
-  asymmetry the fixtures showed: `--commit` need not descend from `--source` (a squash landing has no
-  ancestry between them), but it must be reachable from `--target`.
+      verifying a caller-named target is not the derivation the anchored-lifecycle plan removed. Note the
+      asymmetry the fixtures showed: `--commit` need not descend from `--source` (a squash landing has no
+      ancestry between them), but it must be reachable from `--target`.
 - [x] Verify the record rather than believing it: `changesets/<id>/` must exist in `tree(--commit)`.
-  Measured true for merge, squash and cherry-pick landings, since the directory is committed content
-  that travels with the change; it is what makes a release-branch record pointing at an unrelated
-  commit fail.
+      Measured true for merge, squash and cherry-pick landings, since the directory is committed content
+      that travels with the change; it is what makes a release-branch record pointing at an unrelated
+      commit fail.
 - [x] Create-only write (`update-ref <ref> <new> ""`) as the backstop, behind an existence check that
-  prints §22's message instead of git's `fatal:`.
+      prints §22's message instead of git's `fatal:`.
 - [x] The freeze: the single archive-update path refuses once an integration ref exists, for every
-  command including `change archive`.
+      command including `change archive`.
 - [x] `status` gains `integrated`, `integrated_commit` and integrated-ness in the default branch beside
-  `state`; the containment matters because a changeset that retired into `release/2.x` and never
-  reached the default branch must not look like a default-branch landing. `check` fails an integrated
-  changeset with "already integrated at <sha>" naming what it can.
+      `state`; the containment matters because a changeset that retired into `release/2.x` and never
+      reached the default branch must not look like a default-branch landing. `check` fails an integrated
+      changeset with "already integrated at <sha>" naming what it can.
 - [x] Second-record refusal prints the existing record's commit, so a backport attempt explains itself:
-  the release branch's own history is the record, and git-pair does not keep a second ref per landing.
+      the release branch's own history is the record, and git-pair does not keep a second ref per landing.
 - [x] `integration record` runs from any branch — it addresses changesets by SHA and ref, not by
-  checkout — and reports what it wrote in `--json`.
+      checkout — and reports what it wrote in `--json`.
 - [x] Tests for each failure ordering, the squash shape (approved head A, unrelated target commit B, no
-  ancestry between them, record succeeds), the second-record refusal, and the release-branch shape:
-  merged into `release/2.x` with a `main` baseline, the changeset stays active until recorded, and the
-  recorded commit's tree carries the directory.
+      ancestry between them, record succeeds), the second-record refusal, and the release-branch shape:
+      merged into `release/2.x` with a `main` baseline, the changeset stays active until recorded, and the
+      recorded commit's tree carries the directory.
 - [x] PRD section for the command and §13's namespace; README surface, JSON contract, exit codes.
 
 #### Decisions taken while implementing
@@ -652,14 +652,13 @@ Every other state-writing command moves the ref, and §12's "state moves on comm
 Caught here because the e2e's record step assumed the archive tracked HEAD, and the fix is a behaviour
 change with its own test and wording — it belongs in its own commit, not inside this milestone.
 
-*Fixed after this plan was archived*, in the commit that added `TestChangeUnreadyWithdrawalSurvivesBranchDeletion`:
+_Fixed after this plan was archived_, in the commit that added `TestChangeUnreadyWithdrawalSurvivesBranchDeletion`:
 `change unready` moves the ref in the same call that writes the marker. That test is the guard — it deletes
 the branch and reads the state from the anchor, which is the read that used to be wrong. Two notes for
 anyone reading the milestone's own claims: `e2e-29.sh`'s record step derives `--source` from the archive, so
 it had been quietly deriving it from the offer rather than the withdrawal; and §23's freeze test listed
 `change unready` among the commands that must not move a frozen ref, an assertion that was vacuous until the
 command moved it at all.
-
 
 #### Verification
 
@@ -689,26 +688,26 @@ archive, queue — because that is the sequence a CI job runs and the exit codes
 #### Tasks
 
 - [x] One helper answering "is the namespace empty?" separately from "does this changeset have a ref?",
-  because §24's error is about a CI job that fetched the wrong things and §18's is about a changeset that
-  was never archived. Conflating them sends someone to the wrong fix. `reviewref.Present` answers it, and
-  `FetchRefspec`/`FetchCommand` spell the fix once so the messages and the README cannot disagree.
+      because §24's error is about a CI job that fetched the wrong things and §18's is about a changeset that
+      was never archived. Conflating them sends someone to the wrong fix. `reviewref.Present` answers it, and
+      `FetchRefspec`/`FetchCommand` spell the fix once so the messages and the README cannot disagree.
 - [x] Used by `integration record` and `check` where refs are load-bearing; `status` and `review queue`
-  keep working without the changeset namespace and must not start failing because a CI job fetched
-  nothing. They do require the **default branch** — the tree rule compares against it — so the resolver's
-  refusal is the correct failure there, and the guidance it prints has to name the fetch rather than
-  blame the changeset.
+      keep working without the changeset namespace and must not start failing because a CI job fetched
+      nothing. They do require the **default branch** — the tree rule compares against it — so the resolver's
+      refusal is the correct failure there, and the guidance it prints has to name the fetch rather than
+      blame the changeset.
 - [x] README: the fetch refspec, the push config a human needs to publish refs in the first place
-  (documented, not configured — git-pair runs no `push`), and the error they will see if they skip it.
-  The CI recipe also fetches the default branch, because resolution is a comparison against it.
+      (documented, not configured — git-pair runs no `push`), and the error they will see if they skip it.
+      The CI recipe also fetches the default branch, because resolution is a comparison against it.
 - [x] README states the consequence of landing outside the default branch: such a landing is invisible to
-  resolution, so `git pair integration record` is what retires the changeset. A release-line repository
-  that treats recording as optional reporting will show landed changesets as active forever.
+      resolution, so `git pair integration record` is what retires the changeset. A release-line repository
+      that treats recording as optional reporting will show landed changesets as active forever.
 - [x] README states the pruning rule in the same breath: a repository that removes landed changeset
-  directories from the default branch may only prune those with a terminal record, because the landed
-  test reads the default branch's tree. Measured, and it is a documentation requirement rather than a
-  bug to fix — the resurrection of an unrecorded landing is the rule working as designed.
+      directories from the default branch may only prune those with a terminal record, because the landed
+      test reads the default branch's tree. Measured, and it is a documentation requirement rather than a
+      bug to fix — the resurrection of an unrecorded landing is the rule working as designed.
 - [x] Tests: a clone without the namespace produces the fetch guidance, not a false "not ready" or a
-  misleading "no archive"; after the fetch, the same command succeeds.
+      misleading "no archive"; after the fetch, the same command succeeds.
 
 #### Decisions taken while implementing
 
@@ -808,17 +807,17 @@ against running the fetch first.
 
 ## Audit history
 
-| Date | Audit | Summary |
-| --- | --- | --- |
-| 2026-09-17 | requirements.md | Spec supplied. Reconciled against the closed anchored-lifecycle plan: conflicts in §12/§25 (CLOSED) and §8–§11 (namespace, archive shape, `change complete`); the rest is either already true or additive. |
-| 2026-09-17 | research/2026-09-17-ref-namespace-reality.md | Primitives verified; nothing to migrate; §19's ambiguity is reachable in stacked work; `merge-base` permitted by hygiene, so ancestry may return for verification. |
-| 2026-09-17 | — | Four decisions settled with the reviewer, all as recommended: no CLOSED state, full namespace move, adopt the movable-archive model and retire `change complete`, identity first. `READY`, `--allow-unreviewed-changes` retirement, and the narrowed write rule recorded as consequences. |
-| 2026-09-17 | — | Reviewer corrected the §19 ambiguity claim: an empty child branch shares its parent's head but not its archive ref, because every ref-moving command commits first. Ambiguity is now an out-of-band recovery case, and M4's fixture builds the collision directly. |
-| 2026-09-17 | measurements | M1's claim resolution cost 859 extra `git show` calls per queue run (0.29s → 2.3s) and turned `status --changeset` from name matching into a full walk (0.03s → 2.3s) on a 41-branch, 40-directory fixture. Fixed before M2 by `2c465a9`: one `ls-tree` per branch plus one `cat-file --batch` over distinct object ids, back to 0.30s and 0.15s. Worth keeping because the shape is a standing cost: the directory count grows with every changeset that lands and is never garbage-collected (§35). |
-| 2026-09-17 | measurements | Archive-ref discovery prototyped (`research/2026-09-17-archive-ref-discovery.md`). The five rules as written resolve the stacked case but leave a diverged parent without a changeset, make an unrecorded merge landing ambiguous for every later branch, answer differently for squash versus merge, and let a forgotten `change init` own its descendants; measured cost 1,802 invocations per resolution at 300 refs, ~11s per read on a 20k-commit history. Two amendments measured (exclude landed refs; comparable-not-ancestor) each fixed part of it. The tree rule — directories here and not on trunk — passed all six fixtures in 8 invocations. M2 is held until the rule is chosen. |
-| 2026-09-17 | decision | Combined rule adopted after measurement: changeset directories on the revision and not on trunk decide resolution, archive refs are the fallback for a directory that no longer exists (`research/2026-09-17-combined-rule.md`). Seven fixtures in the spike pass, including the two no amendment of the specified rule could answer; cost 8 invocations on a changeset branch and 12 on trunk against 1,802 for the per-ref formulation. The `branch:` claim goes, `change init` still creates the archive ref, and M2 now carries discovery alongside the namespace move. The one new dependency is resolving the integration branch, which nothing in the product does today. |
-| 2026-09-17 | decision | Rank 1 (the archive-ref fallback) removed after the reviewer read its purpose correctly: two of the three justifications were false (a PR checkout has the tree; a rebase that drops the init commit also detaches the archive ref), leaving only a committed deletion of `changesets/<id>/`, where the loss is one confusing message. Resolution is the tree rule alone. Two findings from that probe: merging an unlanded sibling branch makes the branch ambiguous (`[mine@4 theirs@4]`, a case the claim model could not reach), answered by `change use <id>` recording `ignores:` in the chosen changeset rather than the losing one; and landing someone else's merge of your unlanded changeset makes yours read as landed on your own branch, measured with and without any recorded decision — a control run showed the flag was never the cause. |
-| 2026-09-17 | decision | The integration branch is a flag or git's own answer, not configuration: `--integration <ref>`, else `refs/remotes/origin/HEAD`, else a unique `origin/main`/`origin/master`, else refuse naming the flag and `git remote set-head origin --auto`. The `pair.integrationBranch` key I had proposed was an invention — the product reads no git config today, the requirements already pass `--target origin/main` at the call site, and machine-local config is what this plan rejected for the `branch:` claim. Measured: `git clone` records `origin/HEAD` when the remote HEAD names an existing branch (path and `file://`); the CI `init`+`remote add`+`fetch <branch>` shape does not; `git remote set-head --auto` fixes it; git refuses to guess when the remote HEAD dangles. |
-| 2026-09-17 | decision | Read-side flag named `--default-branch`, not `--integration` and not `--target`. `--target` stays on `integration record` because the two are different concepts: a backport records `--target release/2.x` while the branch defining "landed" for discovery is still `main`, and neither flag can say both. Also found: `defaultBase` (`internal/cli/change.go:316`) already guesses trunk as local `main` then `master` for `change init --base`, so it must fold into the same resolver — two resolvers would let a changeset's recorded base and the landed-test disagree. |
-| 2026-09-17 | measurements | How recording interacts with release branches, measured: merged into `release/2.x` with a `main` baseline, the changeset stayed active until its integration ref existed, then retired — so a landing outside the default branch makes `integration record` load-bearing rather than informational. The record becomes verifiable: `--commit` must be reachable from `--target`, and `changesets/<id>/` must be in `tree(--commit)`, which held for merge, squash and cherry-pick landings. Backports: first landing wins, one integration ref, the refusal names the existing commit and target. Also confirmed `git cherry-pick` fast-forwards by default, which is why reachability is a poor definition of "landed" and content is a good one. |
-| 2026-09-17 | measurements | Trunk pruning probed: deleting landed `changesets/<id>/` from the default branch resurrects the changeset on any branch that has not merged the prune (measured, `status` and `queue` alike), while an integration ref or terminal record survives it. Decided: document "prune only what carries a terminal record" and leave the rule as a top-level match. Rejected with numbers: any-depth `CHANGESET.yaml` matching (~2ms, defends relocation only) and a history walk for deleted directories (~33ms per candidate on a 20k-commit trunk, charged to every active changeset). |
+| Date       | Audit                                        | Summary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-09-17 | requirements.md                              | Spec supplied. Reconciled against the closed anchored-lifecycle plan: conflicts in §12/§25 (CLOSED) and §8–§11 (namespace, archive shape, `change complete`); the rest is either already true or additive.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 2026-09-17 | research/2026-09-17-ref-namespace-reality.md | Primitives verified; nothing to migrate; §19's ambiguity is reachable in stacked work; `merge-base` permitted by hygiene, so ancestry may return for verification.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 2026-09-17 | —                                            | Four decisions settled with the reviewer, all as recommended: no CLOSED state, full namespace move, adopt the movable-archive model and retire `change complete`, identity first. `READY`, `--allow-unreviewed-changes` retirement, and the narrowed write rule recorded as consequences.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 2026-09-17 | —                                            | Reviewer corrected the §19 ambiguity claim: an empty child branch shares its parent's head but not its archive ref, because every ref-moving command commits first. Ambiguity is now an out-of-band recovery case, and M4's fixture builds the collision directly.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 2026-09-17 | measurements                                 | M1's claim resolution cost 859 extra `git show` calls per queue run (0.29s → 2.3s) and turned `status --changeset` from name matching into a full walk (0.03s → 2.3s) on a 41-branch, 40-directory fixture. Fixed before M2 by `2c465a9`: one `ls-tree` per branch plus one `cat-file --batch` over distinct object ids, back to 0.30s and 0.15s. Worth keeping because the shape is a standing cost: the directory count grows with every changeset that lands and is never garbage-collected (§35).                                                                                                                                                                                                                                                                                                                                                       |
+| 2026-09-17 | measurements                                 | Archive-ref discovery prototyped (`research/2026-09-17-archive-ref-discovery.md`). The five rules as written resolve the stacked case but leave a diverged parent without a changeset, make an unrecorded merge landing ambiguous for every later branch, answer differently for squash versus merge, and let a forgotten `change init` own its descendants; measured cost 1,802 invocations per resolution at 300 refs, ~11s per read on a 20k-commit history. Two amendments measured (exclude landed refs; comparable-not-ancestor) each fixed part of it. The tree rule — directories here and not on trunk — passed all six fixtures in 8 invocations. M2 is held until the rule is chosen.                                                                                                                                                            |
+| 2026-09-17 | decision                                     | Combined rule adopted after measurement: changeset directories on the revision and not on trunk decide resolution, archive refs are the fallback for a directory that no longer exists (`research/2026-09-17-combined-rule.md`). Seven fixtures in the spike pass, including the two no amendment of the specified rule could answer; cost 8 invocations on a changeset branch and 12 on trunk against 1,802 for the per-ref formulation. The `branch:` claim goes, `change init` still creates the archive ref, and M2 now carries discovery alongside the namespace move. The one new dependency is resolving the integration branch, which nothing in the product does today.                                                                                                                                                                            |
+| 2026-09-17 | decision                                     | Rank 1 (the archive-ref fallback) removed after the reviewer read its purpose correctly: two of the three justifications were false (a PR checkout has the tree; a rebase that drops the init commit also detaches the archive ref), leaving only a committed deletion of `changesets/<id>/`, where the loss is one confusing message. Resolution is the tree rule alone. Two findings from that probe: merging an unlanded sibling branch makes the branch ambiguous (`[mine@4 theirs@4]`, a case the claim model could not reach), answered by `change use <id>` recording `ignores:` in the chosen changeset rather than the losing one; and landing someone else's merge of your unlanded changeset makes yours read as landed on your own branch, measured with and without any recorded decision — a control run showed the flag was never the cause. |
+| 2026-09-17 | decision                                     | The integration branch is a flag or git's own answer, not configuration: `--integration <ref>`, else `refs/remotes/origin/HEAD`, else a unique `origin/main`/`origin/master`, else refuse naming the flag and `git remote set-head origin --auto`. The `pair.integrationBranch` key I had proposed was an invention — the product reads no git config today, the requirements already pass `--target origin/main` at the call site, and machine-local config is what this plan rejected for the `branch:` claim. Measured: `git clone` records `origin/HEAD` when the remote HEAD names an existing branch (path and `file://`); the CI `init`+`remote add`+`fetch <branch>` shape does not; `git remote set-head --auto` fixes it; git refuses to guess when the remote HEAD dangles.                                                                      |
+| 2026-09-17 | decision                                     | Read-side flag named `--default-branch`, not `--integration` and not `--target`. `--target` stays on `integration record` because the two are different concepts: a backport records `--target release/2.x` while the branch defining "landed" for discovery is still `main`, and neither flag can say both. Also found: `defaultBase` (`internal/cli/change.go:316`) already guesses trunk as local `main` then `master` for `change init --base`, so it must fold into the same resolver — two resolvers would let a changeset's recorded base and the landed-test disagree.                                                                                                                                                                                                                                                                              |
+| 2026-09-17 | measurements                                 | How recording interacts with release branches, measured: merged into `release/2.x` with a `main` baseline, the changeset stayed active until its integration ref existed, then retired — so a landing outside the default branch makes `integration record` load-bearing rather than informational. The record becomes verifiable: `--commit` must be reachable from `--target`, and `changesets/<id>/` must be in `tree(--commit)`, which held for merge, squash and cherry-pick landings. Backports: first landing wins, one integration ref, the refusal names the existing commit and target. Also confirmed `git cherry-pick` fast-forwards by default, which is why reachability is a poor definition of "landed" and content is a good one.                                                                                                          |
+| 2026-09-17 | measurements                                 | Trunk pruning probed: deleting landed `changesets/<id>/` from the default branch resurrects the changeset on any branch that has not merged the prune (measured, `status` and `queue` alike), while an integration ref or terminal record survives it. Decided: document "prune only what carries a terminal record" and leave the rule as a top-level match. Rejected with numbers: any-depth `CHANGESET.yaml` matching (~2ms, defends relocation only) and a history walk for deleted directories (~33ms per candidate on a 20k-commit trunk, charged to every active changeset).                                                                                                                                                                                                                                                                         |

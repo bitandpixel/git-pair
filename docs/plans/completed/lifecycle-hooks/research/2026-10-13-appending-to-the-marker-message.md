@@ -27,27 +27,27 @@ So git decides which lines are trailers, and among duplicates the earliest wins.
 
 Each is a `git-pair: ready` marker on its own branch, varying only what is appended.
 
-| | Appended | What git extracted as the trailer block | Derived state | |
-| --- | --- | --- | --- | --- |
-| c1 | nothing (control) | `Review-State: ready`, `Review-Changeset` | `READY` | baseline |
-| c2 | a prose line below the block, blank-line separated | **only** `hook: ran /bin/true, exit 0 at 14:32` | `WORKING` | the real trailers fell out of the block |
-| c3 | `Review-Hook-Result: pass suite 41s` at the end of the block | all three | `READY` | safe |
-| c4 | `Review-State: working` **after** the real `Review-State: ready` | all three | `READY` | cannot forge from below |
-| c5 | `Review-State: working` **before** the real one | all three | `WORKING` | forges |
+|     | Appended                                                         | What git extracted as the trailer block         | Derived state |                                         |
+| --- | ---------------------------------------------------------------- | ----------------------------------------------- | ------------- | --------------------------------------- |
+| c1  | nothing (control)                                                | `Review-State: ready`, `Review-Changeset`       | `READY`       | baseline                                |
+| c2  | a prose line below the block, blank-line separated               | **only** `hook: ran /bin/true, exit 0 at 14:32` | `WORKING`     | the real trailers fell out of the block |
+| c3  | `Review-Hook-Result: pass suite 41s` at the end of the block     | all three                                       | `READY`       | safe                                    |
+| c4  | `Review-State: working` **after** the real `Review-State: ready` | all three                                       | `READY`       | cannot forge from below                 |
+| c5  | `Review-State: working` **before** the real one                  | all three                                       | `WORKING`     | forges                                  |
 
 Two conclusions, one of them a trap.
 
 **Appending cannot forge, provided it lands at the end of the block.** c4 and c5 are the same two keys in
 opposite order and produce opposite states. First-wins is the protection, and it only protects keys that
-appear *earlier* than the appended one. So the append position is the security property, not a formatting
+appear _earlier_ than the appended one. So the append position is the security property, not a formatting
 preference.
 
 **The obvious implementation fails silently.** c2 is what any script does naturally — `printf '%s\n' "$out"
->> $MSG` puts a blank line and then prose. git then treats the prose as the trailer paragraph and the real
-`Review-State` and `Review-Changeset` are no longer trailers at all. Nothing errors. `change ready` still
-reports success, because the commit it set out to write was written. `queue` simply stops listing the
-changeset, and `status` says `WORKING`. A repository can sit on a marker that derives nothing, and the only
-symptom is an empty queue.
+
+> > $MSG`puts a blank line and then prose. git then treats the prose as the trailer paragraph and the real`Review-State`and`Review-Changeset`are no longer trailers at all. Nothing errors.`change ready`still
+reports success, because the commit it set out to write was written.`queue`simply stops listing the
+changeset, and`status`says`WORKING`. A repository can sit on a marker that derives nothing, and the only
+> > symptom is an empty queue.
 
 That is the same failure class `Render`'s comment warns about from the other end, and it is the reason the
 append has to be done by the renderer rather than by the hook.
@@ -76,16 +76,16 @@ Asked in review on this plan: can a client manufacture a new paragraph with newl
 anyway. Measured with eight marker commits varying only the appended text. "Same paragraph" means appended
 with no blank line; the key column names the shape of the appended line.
 
-| Appended | git's extracted block | Derived | |
-| --- | --- | --- | --- |
-| nothing | `Review-State: ready`, `Review-Changeset` | `READY` | control |
-| `Hook-Test: pass suite` | all three | `READY` | joins the block |
-| `note: all good` | all three | `READY` | key case is not significant |
-| `all tests passed` (no colon) | **empty** | `WORKING` | whole block gone |
-| `␣more indented detail` (leading space) | real trailers, last value now `cs-q5 more indented detail` | `WORKING` | continuation corrupts a real trailer |
-| blank line, then `Hook-Test: pass suite` | only `Hook-Test` | `WORKING` | real trailers evicted |
-| blank line, then `all tests passed` | empty | `WORKING` | new paragraph is not trailers |
-| blank line, then two trailer-shaped lines | empty | `WORKING` | one line lacks a colon → no block |
+| Appended                                  | git's extracted block                                      | Derived   |                                      |
+| ----------------------------------------- | ---------------------------------------------------------- | --------- | ------------------------------------ |
+| nothing                                   | `Review-State: ready`, `Review-Changeset`                  | `READY`   | control                              |
+| `Hook-Test: pass suite`                   | all three                                                  | `READY`   | joins the block                      |
+| `note: all good`                          | all three                                                  | `READY`   | key case is not significant          |
+| `all tests passed` (no colon)             | **empty**                                                  | `WORKING` | whole block gone                     |
+| `␣more indented detail` (leading space)   | real trailers, last value now `cs-q5 more indented detail` | `WORKING` | continuation corrupts a real trailer |
+| blank line, then `Hook-Test: pass suite`  | only `Hook-Test`                                           | `WORKING` | real trailers evicted                |
+| blank line, then `all tests passed`       | empty                                                      | `WORKING` | new paragraph is not trailers        |
+| blank line, then two trailer-shaped lines | empty                                                      | `WORKING` | one line lacks a colon → no block    |
 
 Git's rule, as the results read:
 
@@ -102,7 +102,7 @@ Git's rule, as the results read:
 So the answer to the question is yes, and cheaply: one blank line is enough to make a new paragraph, and the
 consequence is not that the client's line sits apart — it is that the authoritative trailers stop being
 trailers. Three independent injections destroy the marker, and the third is the quiet one, because the block
-still *lists* `Review-State` and `Review-Changeset` and the damage is inside a value.
+still _lists_ `Review-State` and `Review-Changeset` and the damage is inside a value.
 
 Note also that sanitising after the fact does not work: appending a blank line following the client's own
 line is row six or row eight. Separation is not a mitigation. Order and shape are.
@@ -126,7 +126,7 @@ silently dropped line, which would leave the repository believing it recorded a 
 ## What this changes in the plan
 
 The reviewer's framing is right: appending is not a schema change, needs no migration, and gives clients a
-place to persist a result. The recommendation against a *new trailer key that git-pair reads* stands; this is
+place to persist a result. The recommendation against a _new trailer key that git-pair reads_ stands; this is
 a different mechanism, and it is acceptable subject to:
 
 1. **The renderer performs the append, never the hook.** `Message` gains a field for hook-supplied lines

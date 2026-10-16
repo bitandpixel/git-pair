@@ -1,6 +1,5 @@
 # gitpr MVP — Technical Plan
 
-
 > **Renamed after archiving (2026-09-17).** `gitpr` in this document is today's **`git-pair`** — binary
 > `git-pair`, invoked `git pair …`, module `gitpair` — and the marker trailers it specifies,
 > `GitPR-State` / `GitPR-Outcome` / `GitPR-Changeset`, are today's `Review-State` / `Review-Outcome` /
@@ -56,7 +55,7 @@ Observable end-to-end behaviour, per PRD §29:
     As written this criterion predates two changes: the key list above is the current one (it
     grew `Tab`, `d`, `p`, `V`, `r`, `s`), and `v` is no longer a two-state span toggle — it walks
     the spans the session has been in, which the Review Span Selection plan specified. See
-    *Follow-on plans*.
+    _Follow-on plans_.
 
 Nothing above requires a forge, network access, or a third-party review API.
 
@@ -97,34 +96,34 @@ From the PRD, treated as binding:
 
 ## Decisions (resolved)
 
-| ID | Question | Decision |
-| --- | --- | --- |
-| D1 | Implementation language / toolchain | **Go 1.27.1** (cobra for the command tree, Bubble Tea for the TUI) |
-| D2 | TUI implementation | **Bubble Tea**, with a headless `Session` model so review state is testable without a TTY |
-| D3 | Scope of the surviving-review-additions blocking set | **Block only on additions outside `changesets/`**; surviving `ABOUT.md`/thread additions are reported as a non-blocking list (see findings §"Design problem") |
-| D4 | What `Enter` does in the TUI | **`git difftool <span> -- <path>`**, honouring the user's configured `diff.tool`. Superseded twice: by the review-experience pass (live spans run `git difftool <from> -- <path>`, one revision against the working tree, so the tool's right-hand buffer is the real file and edits persist) and by the Review Span Selection plan (a span whose head is a commit has no working tree in the comparison, so it passes both pinned revisions — `difftoolHead`, `console.DiffToolCommand`) |
-| D5 | Undoing a review submission | **No undo — submit again.** The newest submission decides the state and earlier ones stay in history. Resetting the commit is out (the no-destructive-verbs invariant, and a review commit may be shared); a withdrawal marker would need a trailer older builds cannot read, leaving two gitpr versions disagreeing about one branch; moving the ref back changes nothing because state is derived from trailers. Owner chose documentation over either |
+| ID  | Question                                             | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | Implementation language / toolchain                  | **Go 1.27.1** (cobra for the command tree, Bubble Tea for the TUI)                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| D2  | TUI implementation                                   | **Bubble Tea**, with a headless `Session` model so review state is testable without a TTY                                                                                                                                                                                                                                                                                                                                                                                                 |
+| D3  | Scope of the surviving-review-additions blocking set | **Block only on additions outside `changesets/`**; surviving `ABOUT.md`/thread additions are reported as a non-blocking list (see findings §"Design problem")                                                                                                                                                                                                                                                                                                                             |
+| D4  | What `Enter` does in the TUI                         | **`git difftool <span> -- <path>`**, honouring the user's configured `diff.tool`. Superseded twice: by the review-experience pass (live spans run `git difftool <from> -- <path>`, one revision against the working tree, so the tool's right-hand buffer is the real file and edits persist) and by the Review Span Selection plan (a span whose head is a commit has no working tree in the comparison, so it passes both pinned revisions — `difftoolHead`, `console.DiffToolCommand`) |
+| D5  | Undoing a review submission                          | **No undo — submit again.** The newest submission decides the state and earlier ones stay in history. Resetting the commit is out (the no-destructive-verbs invariant, and a review commit may be shared); a withdrawal marker would need a trailer older builds cannot read, leaving two gitpr versions disagreeing about one branch; moving the ref back changes nothing because state is derived from trailers. Owner chose documentation over either                                  |
 
 ## Status (updated during implementation)
 
-| Milestone | State | Evidence |
-| --- | --- | --- |
-| M0 scaffold + git core | done | `go build ./...`, `go vet` clean; `gitpr --help`. The project check is `mise run check` now (Context → Toolchain) |
-| M1 `change init` | done | Idempotence exercised by `artifacts/e2e-29.sh` (it calls `change init --base main` twice and expects the second to be a no-op). **Corrected at audit:** the base-conflict path is *not* in that script — no conflicting-base step exists in it — it is `TestChangeInitBaseConflict`. Adding a `$G change init --base other; check … 2` line to the script would make the claim true in the artifact too |
-| M2 lifecycle, `status`, `history` | done | e2e replay shows `READY → BLOCKED → WORKING → FEEDBACK → APPROVED → CLOSED`; `status --json` emits PRD §11.1's keys (`TestStatusJSONEmitsPRDKeySet`) plus nine more, pinned as a set by `TestJSONKeySets` |
-| M3 spans, `diff`, survival, `change ready` | done | e2e replay blocks `change ready` on exactly the untouched review line, then passes after resolution and with the override |
-| M4 submit, refs, queue, close | done | e2e replay re-run at audit (2026-09-16), all checks passed — reproduce with `mise run build && bash docs/plans/completed/gitpr-mvp/artifacts/e2e-29.sh ~/.local/bin/gitpr`, expect `E2E: all checks passed` (the script defaults `$G` to `/tmp/gitpr`, so pass the binary): empty approve commit, ref moves, and after `git branch -D` the archive ref still reaches **14** commits — one more than the 13 recorded when M4 closed, because `change init` now commits its scaffold. The promise being tested is that the whole unsquashed chain survives deletion, not the number |
-| M5 TUI | done | Verified under a pty at the time: first paint, `j/k`, `space` (0/4 → 1/4 → 2/4), `v`, `a` editor handoff, `s`+`b` submit (created `review: block demo` and moved the ref), clean `q` exit. The gap recorded here — `Enter` launching a real difftool *inside* the TUI — has since been verified against a configured `diff.tool` under a pty, during the preview-pane and span work. **Evidence caveat closed after the audit:** the hand runs are scripted in `artifacts/pty-walkthrough.sh`, which drives the installed binary through a real pty against a repository it builds itself — first paint, a read-only historical span, the `V` picker, the `v` ring, a mark surviving `v` away and back, drift and `r` with a ref moved by another process, and the difftool handoff keeping the alternate screen |
-| Post-MVP: `review reopen` opens the session on the since-review span | done, model replaced | `TestReviewReopenWithoutReviews`, `TestReviewReopenAfterTheAuthorResponds`. The covered-span fallback and its three tests (`TestReviewReopenFallsBackToTheSpanTheReviewCovered`, `TestResolveCoveredSpan`, `TestSessionToggleSpanFromCoveredGoesToTheFullChangeset`) no longer exist: once a span's head decides whether it is reviewable, a covered span — which ends at a commit — would have opened read-only. `reopen` is `Review(-1) → WorkingTree` now; discoveries 11 and 12 say what was lost and what was kept |
-| Post-MVP: reviewed marks persist locally, keyed on the commit under review | done, keying corrected | `internal/reviewmark` tests, `TestReviewedMarksResumeInALaterSession`, `TestMarksDoNotResumeOnceTheCodeHasChanged`, `TestClearingEveryMarkIsRemembered`. A mark turned out to be a fact about *(path, diff key)* rather than path: two spans ending at one commit had been erasing each other's marks on save, and a mark did not come back when `v` returned to the span it was made in. Fixed in `9b5a877` with `TestMarksComeBackWhenTheSpanComesBack` and `TestSavingOneSpanLeavesTheOtherSpansMarks` (discovery 13) |
-| Post-MVP: `k` at the top of the file list no longer panics | done | `TestNavigationStopsAtBothEndsOfTheList`, `TestNavigationOnAnEmptyListDoesNotPanic` |
-| Post-MVP: staleness compares trees, not commit counts | done | `TestSummarizeChangesetOnlyCommitDoesNotInvalidateReady`, `TestSummarizeMixedCommitInvalidatesReady`, `TestSummarizeBaseMovingUnderAReadyChangesetKeepsReady` |
-| Post-MVP: difftool shows the working tree; submit exits the TUI | done | `TestSubmitKeyEndsTheSession`, `TestEscInSubmitModeKeepsTheSessionOpen`; the one-revision difftool argv verified by hand against a configured tool |
-| M6 docs + dogfood | done | `README.md`; `artifacts/e2e-29.sh` is the scripted replay and passes end to end |
-| Post-MVP: refuse a self-referential base | done | `TestBaseIsOwnBranch` (11 cases) + init/ready/status CLI tests; reproduces and closes the owner's dogfood report |
-| Post-MVP: `change init` commits, takes `--about` | done | `TestChangeInit*` (20 test functions) plus the corrected golden workflow; e2e replay still passes |
-| Post-MVP: one TUI list, two sections — files, then ABOUT.md and nested threads with `+ new thread…` | done | `TestJRunsFromTheFilesIntoTheChangesetSection`, `TestTabSwitchesBetweenTheTwoSections`, `TestThreadsHeadingCollapsesAndExpands`, `TestEnterOpensWhatTheRowIsFor`, `TestSpaceMarksFilesAndRefusesTheRest`, `TestNewThreadRowSitsUnderItsThreads`, `TestThreadPromptKeepsSpacesInATitle` |
-| Post-MVP: author-side `change feedback` and `change wait`, replacing `diff --unreviewed` in author hints | done | `TestChangeFeedbackShowsTheReviewItself`, `TestChangeFeedbackWithoutAReview`, `TestChangeWaitReturnsAtOnceWhenAReviewIsAlreadyIn`, `TestChangeWaitTimeoutReportsWhereThingsStand`, `TestChangeWaitFetchesAndSeesAReviewFromAnotherClone` (two clones, bare remote, no network), `TestPollUntil*` (6 cases) |
+| Milestone                                                                                                | State                  | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M0 scaffold + git core                                                                                   | done                   | `go build ./...`, `go vet` clean; `gitpr --help`. The project check is `mise run check` now (Context → Toolchain)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| M1 `change init`                                                                                         | done                   | Idempotence exercised by `artifacts/e2e-29.sh` (it calls `change init --base main` twice and expects the second to be a no-op). **Corrected at audit:** the base-conflict path is _not_ in that script — no conflicting-base step exists in it — it is `TestChangeInitBaseConflict`. Adding a `$G change init --base other; check … 2` line to the script would make the claim true in the artifact too                                                                                                                                                                                                                                                                                                                                                                                                          |
+| M2 lifecycle, `status`, `history`                                                                        | done                   | e2e replay shows `READY → BLOCKED → WORKING → FEEDBACK → APPROVED → CLOSED`; `status --json` emits PRD §11.1's keys (`TestStatusJSONEmitsPRDKeySet`) plus nine more, pinned as a set by `TestJSONKeySets`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| M3 spans, `diff`, survival, `change ready`                                                               | done                   | e2e replay blocks `change ready` on exactly the untouched review line, then passes after resolution and with the override                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| M4 submit, refs, queue, close                                                                            | done                   | e2e replay re-run at audit (2026-09-16), all checks passed — reproduce with `mise run build && bash docs/plans/completed/gitpr-mvp/artifacts/e2e-29.sh ~/.local/bin/gitpr`, expect `E2E: all checks passed` (the script defaults `$G` to `/tmp/gitpr`, so pass the binary): empty approve commit, ref moves, and after `git branch -D` the archive ref still reaches **14** commits — one more than the 13 recorded when M4 closed, because `change init` now commits its scaffold. The promise being tested is that the whole unsquashed chain survives deletion, not the number                                                                                                                                                                                                                                |
+| M5 TUI                                                                                                   | done                   | Verified under a pty at the time: first paint, `j/k`, `space` (0/4 → 1/4 → 2/4), `v`, `a` editor handoff, `s`+`b` submit (created `review: block demo` and moved the ref), clean `q` exit. The gap recorded here — `Enter` launching a real difftool _inside_ the TUI — has since been verified against a configured `diff.tool` under a pty, during the preview-pane and span work. **Evidence caveat closed after the audit:** the hand runs are scripted in `artifacts/pty-walkthrough.sh`, which drives the installed binary through a real pty against a repository it builds itself — first paint, a read-only historical span, the `V` picker, the `v` ring, a mark surviving `v` away and back, drift and `r` with a ref moved by another process, and the difftool handoff keeping the alternate screen |
+| Post-MVP: `review reopen` opens the session on the since-review span                                     | done, model replaced   | `TestReviewReopenWithoutReviews`, `TestReviewReopenAfterTheAuthorResponds`. The covered-span fallback and its three tests (`TestReviewReopenFallsBackToTheSpanTheReviewCovered`, `TestResolveCoveredSpan`, `TestSessionToggleSpanFromCoveredGoesToTheFullChangeset`) no longer exist: once a span's head decides whether it is reviewable, a covered span — which ends at a commit — would have opened read-only. `reopen` is `Review(-1) → WorkingTree` now; discoveries 11 and 12 say what was lost and what was kept                                                                                                                                                                                                                                                                                          |
+| Post-MVP: reviewed marks persist locally, keyed on the commit under review                               | done, keying corrected | `internal/reviewmark` tests, `TestReviewedMarksResumeInALaterSession`, `TestMarksDoNotResumeOnceTheCodeHasChanged`, `TestClearingEveryMarkIsRemembered`. A mark turned out to be a fact about _(path, diff key)_ rather than path: two spans ending at one commit had been erasing each other's marks on save, and a mark did not come back when `v` returned to the span it was made in. Fixed in `9b5a877` with `TestMarksComeBackWhenTheSpanComesBack` and `TestSavingOneSpanLeavesTheOtherSpansMarks` (discovery 13)                                                                                                                                                                                                                                                                                         |
+| Post-MVP: `k` at the top of the file list no longer panics                                               | done                   | `TestNavigationStopsAtBothEndsOfTheList`, `TestNavigationOnAnEmptyListDoesNotPanic`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Post-MVP: staleness compares trees, not commit counts                                                    | done                   | `TestSummarizeChangesetOnlyCommitDoesNotInvalidateReady`, `TestSummarizeMixedCommitInvalidatesReady`, `TestSummarizeBaseMovingUnderAReadyChangesetKeepsReady`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Post-MVP: difftool shows the working tree; submit exits the TUI                                          | done                   | `TestSubmitKeyEndsTheSession`, `TestEscInSubmitModeKeepsTheSessionOpen`; the one-revision difftool argv verified by hand against a configured tool                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| M6 docs + dogfood                                                                                        | done                   | `README.md`; `artifacts/e2e-29.sh` is the scripted replay and passes end to end                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Post-MVP: refuse a self-referential base                                                                 | done                   | `TestBaseIsOwnBranch` (11 cases) + init/ready/status CLI tests; reproduces and closes the owner's dogfood report                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Post-MVP: `change init` commits, takes `--about`                                                         | done                   | `TestChangeInit*` (20 test functions) plus the corrected golden workflow; e2e replay still passes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Post-MVP: one TUI list, two sections — files, then ABOUT.md and nested threads with `+ new thread…`      | done                   | `TestJRunsFromTheFilesIntoTheChangesetSection`, `TestTabSwitchesBetweenTheTwoSections`, `TestThreadsHeadingCollapsesAndExpands`, `TestEnterOpensWhatTheRowIsFor`, `TestSpaceMarksFilesAndRefusesTheRest`, `TestNewThreadRowSitsUnderItsThreads`, `TestThreadPromptKeepsSpacesInATitle`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Post-MVP: author-side `change feedback` and `change wait`, replacing `diff --unreviewed` in author hints | done                   | `TestChangeFeedbackShowsTheReviewItself`, `TestChangeFeedbackWithoutAReview`, `TestChangeWaitReturnsAtOnceWhenAReviewIsAlreadyIn`, `TestChangeWaitTimeoutReportsWhereThingsStand`, `TestChangeWaitFetchesAndSeesAReviewFromAnotherClone` (two clones, bare remote, no network), `TestPollUntil*` (6 cases)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 Test suite at audit (2026-09-16): 39 test files, 342 test functions across 14 packages (the audit's own 38/335 grew by the tests its recommendations asked for), all
 passing; `mise run check` (build, `go vet`, `gofmt`, `go test`) green. It read 29 files / 237
@@ -155,7 +154,7 @@ behaviour it describes and are recorded elsewhere:
 
 1. **`git interpret-trailers` cannot be handed a subject without a trailing newline.**
    With no trailing newline it appends the trailers to the subject paragraph with no blank
-   separator, so git sees a one-line subject, finds no trailer block, and *every* derived
+   separator, so git sees a one-line subject, finds no trailer block, and _every_ derived
    state collapses to `WORKING`. `marker.Message.Render` now builds the message directly.
    Any future change to message construction must keep the blank line before trailers.
 2. **`git rev-parse --verify --quiet` signals an unresolvable rev with exit 1 and empty
@@ -163,7 +162,7 @@ behaviour it describes and are recorded elsewhere:
    failure, which broke `CreateRefIfAbsent` (and therefore `review close`). `git.ExitCode`
    exists so callers can distinguish the two.
 3. **Interactive subcommands must refuse without a terminal.** `review about`, `review
-   thread`, and `review open` previously inherited the caller's `$VISUAL` and hung forever
+thread`, and `review open` previously inherited the caller's `$VISUAL` and hung forever
    when stdin was a pipe — which is the normal agent context. They now exit 2 with a
    message pointing at the file, which is an ordinary file in the working tree.
 4. **Deferred from MVP as planned:** `review queue --global`, the `gitpr repo` registry, and
@@ -183,9 +182,8 @@ behaviour it describes and are recorded elsewhere:
    Everything is derived from `base...HEAD`; when the base names the branch it is stacked on,
    that range is empty for all time. `change ready` reported success for a marker no reader
    could ever observe, and `status` answered `WORKING` forever — found by the owner while
-   dogfooding a single-branch repo. `changeset.BaseIsOwnBranch` now gates `change init` (exit
-   2) and `change ready` (exit 1), and `status` names it as the reason. The predicate compares
-   *refs*, not commits: a branch created moments ago legitimately shares its base's tip, and a
+   dogfooding a single-branch repo. `changeset.BaseIsOwnBranch` now gates `change init` (exit 2) and `change ready` (exit 1), and `status` names it as the reason. The predicate compares
+   _refs_, not commits: a branch created moments ago legitimately shares its base's tip, and a
    commit-based test would have refused the normal first `change init`.
 8. **PRD §421 says "implementation commit", and counting non-marker commits over-reads it.**
    An `ABOUT.md` typo fix after `change ready` was demoting the changeset to `WORKING` and
@@ -206,7 +204,7 @@ behaviour it describes and are recorded elsewhere:
    conflated "file left the span" with "still marked", which is what made the reports
    undiagnosable; those are now separate failure messages.
 10. **A resume-like default for `review open` was built, then reverted in favour of `review
-    reopen`.** The complaint was real: with no flag every session opened on `base...HEAD`, so
+reopen`.** The complaint was real: with no flag every session opened on `base...HEAD`, so
     reopening after submitting a review re-showed what had just been read. The first cut had
     `span.StartingSpan` choose `<latest review>..HEAD` when code had changed since the review,
     with `--full` as the escape hatch; it passed the gate and an eight-case pty check, and was
@@ -219,7 +217,7 @@ behaviour it describes and are recorded elsewhere:
     names the review it is relative to, since an empty file list reads as a broken tool.
     (The second guard lasted one discovery: 11 removed it as the wrong answer.)
 11. **The empty-span refusal was the wrong answer, and is gone.** The owner hit it in the
-    dogfood repo: `review reopen` refused because their feedback submission *was* the newest
+    dogfood repo: `review reopen` refused because their feedback submission _was_ the newest
     commit, which is precisely the state in which a reviewer types `reopen`. Refusing there
     served the command's definition over the user's intent. `span.Covered` now resolves the
     changes a submission saw (discovery 12 settles where that range ends, and why), and
@@ -238,8 +236,9 @@ behaviour it describes and are recorded elsewhere:
     reopening would have opened a screen that refuses every keystroke; `review reopen` resolves
     `Review(-1) → WorkingTree` instead, and the `you` section of the preview covers the case the
     fallback existed for. The two lessons above outlive the mechanism.
+
 12. **The covered span ended in the wrong commit, so reopen showed a reviewer their own notes.**
-    The first cut ran `merge-base(base, review)..<review>`, and `..<review>` from the *previous*
+    The first cut ran `merge-base(base, review)..<review>`, and `..<review>` from the _previous_
     review for a second submission. A review commit carries what the reviewer wrote — a thread,
     an `ABOUT.md` edit, occasionally a file — so reopening listed those as the work under review,
     and back-to-back submissions produced a span holding nothing but the previous reviewer's
@@ -252,6 +251,7 @@ behaviour it describes and are recorded elsewhere:
     markers touched the same `service.go` the implementation did. A fixture where the submission
     writes a file nothing else touches is what pins this. (The covered span this discovery fixes was
     later removed, as discovery 11 records; the fixture lesson is general and still applies.)
+
 13. **Reviewed marks persist between sessions, as a local cache.** PRD §16 keeps marks out of the
     durable review artifact and permits an in-memory implementation; caching them locally honours
     the first while making a review resumable, which the owner asked for. They are written to
@@ -269,7 +269,7 @@ behaviour it describes and are recorded elsewhere:
     assumption that a path has one key at a time. It does not: the full changeset and the unreviewed
     span both end at HEAD, so the same file has a different diff key in each, and saving one span's
     set erased the other's — from disk, while both were on screen. A mark is a fact about
-    *(path, diff key)*, so the store keeps several keys per path and `Save` replaces only the pairs
+    _(path, diff key)_, so the store keeps several keys per path and `Save` replaces only the pairs
     it is handed. The session also reads the store for the span it just entered rather than once at
     open, which is what makes a mark survive `v` away and back. Discovery 24's "the reviewed counter
     stays the span's" is the same rule from the other side.
@@ -299,7 +299,7 @@ behaviour it describes and are recorded elsewhere:
     terminal width (`wrapGroups`, same wrapping for the submit prompt) and `windowRows()` is
     the single place the header/footer allowance is computed, used by both `clamp` and
     `visibleRows`, so the list gives up the rows a wrapped helper uses. Known adjacent gap, since closed:
-    `truncate` shortened only the *selected* row, so an unselected path longer than
+    `truncate` shortened only the _selected_ row, so an unselected path longer than
     the window still wraps in the terminal.
 
 16. **The threads browse mode was a second place to be, so the TUI is now one list.** ABOUT.md
@@ -310,7 +310,7 @@ behaviour it describes and are recorded elsewhere:
     off the bottom of the files into it; `Tab` toggles between the halves (a key that only goes
     one way strands the reviewer there); `Enter` activates per row kind through `activateBy`,
     kept apart from the process handoff so the table is testable without launching an editor.
-    `Space` stays file-only and says so. Files that *are* artifacts keep their file rows when
+    `Space` stays file-only and says so. Files that _are_ artifacts keep their file rows when
     they change in the span — the list is the record of what the diff did, the section is the
     shortcut to read it — which the owner chose over deduplicating. Rows live in the model and
     are rebuilt by `refresh`, which preserves the cursor by row kind and path, so a thread
@@ -323,7 +323,7 @@ behaviour it describes and are recorded elsewhere:
     real TUI in a pty caught a bug the unit tests could not: bubbletea reports a lone space as
     `KeySpace`, not `KeyRunes`, so every space in a new thread's title was silently dropped
     before the file name was derived from it. Two polish corrections came from using it: the
-    thread heading shows its count only while collapsed (expanded, the rows below *are* the
+    thread heading shows its count only while collapsed (expanded, the rows below _are_ the
     count), and the shortcut bar needed a rule over it, because sitting directly under the
     section it read as more rows of the list. `d` was added as an explicit diff key: Enter's
     meaning depends on which block the cursor happens to be in, and a reviewer who wants the
@@ -337,13 +337,13 @@ behaviour it describes and are recorded elsewhere:
     the fallback happened.
 17. **Enter on a changeset document follows the span, because a diff against nothing is not a
     diff.** The proposal was to make Enter on ABOUT.md and threads behave like `d`. The
-    objection was that these files are *added* by the changeset, so `git difftool <base> --
-    changesets/x/ABOUT.md` opens a two-pane view with `/dev/null` on the left: the document,
+    objection was that these files are _added_ by the changeset, so `git difftool <base> --
+changesets/x/ABOUT.md` opens a two-pane view with `/dev/null` on the left: the document,
     with extra steps. That objection only holds for the full span. In a since-review span the
     documents already exist at its left end, so the span holds a genuine comparison — the lines
     the author rewrote after the last submission, which is exactly what a returning reviewer
-    came for, in prose as much as in code. So the rule is *in the span and existed where the
-    span starts* → difftool; anything else → editor, with a note naming which case it was.
+    came for, in prose as much as in code. So the rule is _in the span and existed where the
+    span starts_ → difftool; anything else → editor, with a note naming which case it was.
     `e` and `a` stay unconditional ways into the editor, so nothing is harder to reach than
     before. Verified against a two-round fixture (review submitted, then the author's fix
     commit) with a probing `diff.tool` and `EDITOR`: in the reopen span ABOUT.md and an edited
@@ -353,7 +353,8 @@ behaviour it describes and are recorded elsewhere:
     Flagged there and fixed below: `console.EditorCommand` resolved `VISUAL`/`EDITOR` (default
     `vi`) and ignored `GIT_EDITOR` and `core.editor`, both of which git itself honours, so a
     reviewer who configured their editor the git way got `vi` in the TUI. Fixed in 19.
-19. **The editor now comes from git, which is where everyone configures it.** `EditorCommand`
+
+18. **The editor now comes from git, which is where everyone configures it.** `EditorCommand`
     read `$VISUAL`, then `$EDITOR`, then `vi`, so `git config core.editor vim` — what git's own
     docs recommend, and what my `~/.gitconfig` said — was invisible: the TUI opened `vi`, and an
     `$EDITOR` set alongside a `core.editor` won in the wrong order. Asking git removes both
@@ -363,13 +364,13 @@ behaviour it describes and are recorded elsewhere:
     `editor`, not `vi`, a detail the first version of these tests got wrong and the code did
     not. The environment chain stays as the last resort for a git that cannot answer, where
     `vi` remains the literal default. The launch shape is unchanged (`eval exec
-    ${GITPR_EDITOR} "$@"`), so `core.editor="code --wait"` still splits into program and flags,
+${GITPR_EDITOR} "$@"`), so `core.editor="code --wait"` still splits into program and flags,
     and `GIT_EDITOR=true` still means "no editor" exactly as it does for git. Verified in the
     TUI against a repository whose `core.editor` is a marker script: `e` ran the marker with the
     absolute path, where the previous binary had opened `vi`.
-*(18 and 19 are out of order — 19 was committed first. The numbers are labels, not a sequence.)*
+    _(18 and 19 are out of order — 19 was committed first. The numbers are labels, not a sequence.)_
 
-18. **The difftool's exit messages outlived the TUI, so a session that handed the terminal away
+19. **The difftool's exit messages outlived the TUI, so a session that handed the terminal away
     clears the screen.** Bubbletea's handoff suspends the renderer and leaves the alt screen,
     so the child draws on the main screen; when vimdiff quits it prints `2 files to edit` there
     — where the session's last frame had been — and closing the alt screen reveals it above the
@@ -396,7 +397,7 @@ behaviour it describes and are recorded elsewhere:
     screen is cleared and homed, and dropping lines taller than the window is moot at our
     sizes. The one obligation is to clear and home when something else has had the screen, done
     in the `externalDoneMsg` handler: a handoff resets the renderer's line count, so without it
-    the next frame is written *onto* the tool's output instead of over it. Leaving the screen is
+    the next frame is written _onto_ the tool's output instead of over it. Leaving the screen is
     explicit before anything is printed — the submitted summary has to land where the user is
     still looking — and deferred for the panic path.
 
@@ -404,6 +405,7 @@ behaviour it describes and are recorded elsewhere:
     immediately before a child started (bytes 853→884, 7444→7475, which is the flash); this one
     emits 3, ours a single pair at the ends of the session and the middle two vim's own, with the
     frame after the last tool closing intact.
+
 21. **Prototype: a diff preview in a right pane when the terminal is wide enough.** The choices
     were made with the user: a right pane (the list keeps its rows and gives up width), the
     span's committed diff — matching `gitpr diff`, `--stat` and the reviewed marks, deliberately
@@ -427,13 +429,14 @@ behaviour it describes and are recorded elsewhere:
 
     Prototype status: the threshold, the split ratio and the header are taste. `p` exists so they
     can be argued about without rebuilding.
+
 22. **The preview takes the frame with it.** Four asks on top of discovery 21: fill the window's
     height, pad to the edges, wrap the diff rather than cut it, and put a line number beside each
     line. Two of them turned out to be load-bearing for the other two.
 
     Padding the frame to the terminal's width and the row area to its height exposed a scroll that
     predates the preview: Bubble Tea's renderer writes one line per frame line and moves down after
-    it, so a frame of exactly `height` lines *ending in a newline* has no row left for the cursor
+    it, so a frame of exactly `height` lines _ending in a newline_ has no row left for the cursor
     and the terminal scrolls the top line away — which is what any changeset taller than the window
     did. The frame is joined rather than newline-terminated now, and the invariant is a test rather
     than an observation. Reading the renderer's source was what made this visible; guessing from a
@@ -452,6 +455,7 @@ behaviour it describes and are recorded elsewhere:
     with no hunk header is not numbered at all, and the classification strips colour first because
     git colours the very characters being looked for. It does not fold, group, filter or restyle —
     PRD §3 stays intact, and reading a diff still means opening it.
+
 23. **The split is adaptive: the list pays for its own paths.** The 60/40 split made the diff share
     the screen with columns of whitespace, because most changesets are named after a package and a
     feature, not a tarball. The list now takes the width of its widest row — plus the two header
@@ -470,11 +474,12 @@ behaviour it describes and are recorded elsewhere:
 
     The 60/40 constant is gone. What remains are two numbers to argue with: `previewListMax` (48)
     and `previewListMin` (24).
+
 24. **The reviewer's own edits get their own section.** Playing with the preview surfaced an
     asymmetry the design had left implicit: `d`/`Enter` diff the span's start against the **working
     tree** so edits persist, while the preview diffs `<from>..<to>`, which is committed state — so
     the keys showed the reviewer's typing and the pane never did. The reviewer's uncommitted edits
-    are a real part of what they are looking at, and `review submit` already treats them as *not*
+    are a real part of what they are looking at, and `review submit` already treats them as _not_
     part of the review ("the working tree is still dirty; those changes are not part of this
     review").
 
@@ -501,17 +506,16 @@ behaviour it describes and are recorded elsewhere:
     to say "no changes in this span" while the answer about the reviewer's edits is still in flight,
     which would be wrong for the length of one git call.
 
-    Rejected: a three-way view. Git has three-way *merge* machinery (`merge-file`, `mergetool` with
+    Rejected: a three-way view. Git has three-way _merge_ machinery (`merge-file`, `mergetool` with
     `$BASE`/`$LOCAL`/`$REMOTE`, `diff3`/`zdiff3` conflict styles) but no three-way **diff**; a
     `merge-file` rendering would be a merged file that silently resolves everything except
     collisions, and pointing a real 3-way tool at base/author/you means owning a per-tool argument
     convention, which PRD §3 puts outside the project.
 
-
 ## Architecture
 
 Fifteen packages under `internal/` behind one `cmd/gitpr`, a thin `cli` layer over a pure-git
-core. No database, no daemon, and no cache of *derived* state: state comes from commit order and
+core. No database, no daemon, and no cache of _derived_ state: state comes from commit order and
 nothing reads a stored answer.
 
 "One package" and "no cache" are both corrected at audit. There are fifteen packages (D1's Go
@@ -523,7 +527,7 @@ deleting `<gitdir>/gitpr/marks` loses nothing but clicks.
 ### As built (Go)
 
 D1 chose Go, so this is the tree that exists. The Python sketch that follows is the plan as
-written; it is kept because the *responsibility split* in it is what got built, and every module
+written; it is kept because the _responsibility split_ in it is what got built, and every module
 in it has a Go counterpart.
 
 ```
@@ -598,7 +602,7 @@ Core invariants the code must hold:
   `git show -U0 --no-ext-diff --no-textconv --no-renames --format= <R>`, plus exact-line membership
   in the `HEAD` blob, with `git show --numstat …` for the binary skip and blank-line exclusion.
   Corrected at audit: this said `git diff -U0 --no-renames <R>^ <R>`, which is not what
-  `survival.AddedLines` runs. `git show` is the deliberate choice — it *is* a first-parent diff and
+  `survival.AddedLines` runs. `git show` is the deliberate choice — it _is_ a first-parent diff and
   handles the root commit with no special case, which is why M3's "root-commit handling" task needs
   no code. `--no-ext-diff` and `--no-textconv` are load-bearing rather than tidy: without them a
   configured external diff or textconv turns the output into whatever the user's tool prints, and
@@ -628,10 +632,12 @@ table above records where reality diverged from them.
 ### M0 — Repository scaffolding and git core (no product decisions needed)
 
 Deliverables
+
 - Project builds and installs; `gitpr --help` works; test harness runs.
 - `git.py`/`repo.py` wrap the plumbing verified in the spike, with error propagation.
 
 Tasks
+
 - `pyproject.toml` (uv, console script `gitpr = gitpr.cli.main:main`), `src/` layout,
   `.gitignore`.
 - `git.py`: `run_git(args, cwd, stdin, check)` capturing stdout/stderr; typed `GitError`.
@@ -647,10 +653,12 @@ rule and clean/dirty detection against a real repo.
 ### M1 — Changeset identity and `change init` (unblocked)
 
 Deliverables
+
 - `gitpr change init --base <ref> [--about <text>]` creates `changesets/<slug>/CHANGESET.yaml`
   and `ABOUT.md`, then commits them; safe to re-run; refuses to run on a detached `HEAD`.
 
 Tasks
+
 - `changeset.py`: `for_branch()`, `dir`, `metadata` (minimal YAML written/parsed by hand —
   one `key: value` line; no PyYAML dependency), `ABOUT.md` template with PRD §6 headings.
 - Idempotence: never overwrite an existing `ABOUT.md`/`CHANGESET.yaml`; `--base` conflict
@@ -672,10 +680,12 @@ staged after init and absent from its commit; an empty pipe yields the scaffold,
 ### M2 — Lifecycle, state derivation, `status`, `review history` (unblocked)
 
 Deliverables
+
 - `gitpr status` / `status --json` report derived state, base, head, latest review, review ref.
 - `gitpr review history` renders PRD §10.5's table with `0..n` and `-1` addressing.
 
 Tasks
+
 - `lifecycle.py`: single pass over `git log --reverse --format=...%x09...` of `<base>..HEAD`;
   classify `ready` / `review(outcome)` / `close` / implementation.
 - `derive_state()` precedence: `CLOSED` > latest marker > `WORKING` if an implementation
@@ -696,6 +706,7 @@ step; explicit test that an implementation commit after an `approve` marker yiel
 ### M3 — Spans, `diff`, surviving additions, `change ready` (unblocked except D3 default)
 
 Deliverables
+
 - `gitpr diff` with `<path>`, `--unreviewed`, `--since-review[=N]`, and `--stat`; resolves to
   exactly the PRD §17 commit ranges and delegates rendering to Git.
 - `gitpr change ready` with the surviving-review-additions gate, PRD-verbatim output, and
@@ -703,6 +714,7 @@ Deliverables
 - Ready marker commit `gitpr: ready <slug>` with `GitPR-State: ready`.
 
 Tasks
+
 - `span.py`: `full` = `merge-base(base,HEAD)..HEAD`; `since_review(N)`; `--unreviewed` as an
   alias for `--since-review=-1`; clear errors for "no reviews yet" and out-of-range indexes.
 - `survival.py` per findings: `-U0 --no-renames`, `--numstat` binary skip, blank exclusion,
@@ -723,6 +735,7 @@ review with empty diff (`--approve`), and `-3`/`0` index spans.
 ### M4 — Review submission, refs, queue, close (unblocked except D3 default)
 
 Deliverables
+
 - `gitpr review submit --block|--feedback|--approve` (mutually exclusive, one required),
   staging the reviewer's work and updating `refs/reviews/<slug>` to the exact `HEAD`.
 - `gitpr review about`, `gitpr review thread` (slugified, dedup-aware, `$VISUAL`/`$EDITOR`).
@@ -730,6 +743,7 @@ Deliverables
 - `gitpr review close` with archive ref, closed marker, and the surviving check.
 
 Tasks
+
 - `outcome.py`/`cli/review.py submit`: commit message `review: <outcome> <slug>` per PRD
   §10.4, trailers via `git interpret-trailers`; `git add -A` then `--allow-empty` fallback;
   `update-ref` immediately after the commit succeeds.
@@ -754,20 +768,22 @@ then `git branch -D` leaves the full chain reachable via `git rev-list refs/revi
 ### M5 — Review TUI (needs D2, D4)
 
 Deliverables
+
 - `gitpr review open [--unreviewed] [--since-review=N]` curses UI matching PRD §14: header
   (changeset, base, span), file list with `○`/`✓`, `n / m reviewed`, `ABOUT.md` and
   `Threads (k)` rows.
 - `gitpr review reopen` — the same session on `<latest review>..HEAD`, with no span flags: the
-  named way back to a reviewed changeset. *As delivered it is `Review(-1) → Working Tree`*; the
+  named way back to a reviewed changeset. _As delivered it is `Review(-1) → Working Tree`_; the
   covered-span fallback described here was removed by the Review Span Selection plan, because a
   span that ends at a commit is read-only under that plan's rule and a resume you cannot resume
   from is not one (discoveries 11 and 12 carry the history).
 - Bindings `j/k Enter e Space a t T v q`; file state resets to unreviewed when its diff
-  changes during the session (PRD §16). *As delivered the set is larger:* `Tab` section, `d` diff,
+  changes during the session (PRD §16). _As delivered the set is larger:_ `Tab` section, `d` diff,
   `p` preview, `v`/`V` span ring and picker, `r` drift refresh, `s` submit, `ctrl-f`/`ctrl-b` to
   page the preview. `Enter`'s meaning depends on the row, which is why `d` exists.
 
 Tasks
+
 - `tui.py` with a `ReviewSession` model (files, per-file content hash, reviewed set) kept
   separate from rendering, so the model is unit-testable without a terminal.
 - `ui.py`: `curses.wrapper` + `endwin()`/`doupdate()` around subprocess handoff; restore on
@@ -785,13 +801,14 @@ a smoke test, but not the same one, and no test drives the program under an unus
 ### M6 — Docs and dogfood pass (unblocked)
 
 Deliverables
+
 - `README.md` with the PRD §29 walkthrough, JSON contracts, exit codes, and agent guidance.
 - A `CHANGELOG.md` entry; `gitpr --help` text reviewed for agent-parseability. **Not delivered:**
   no `CHANGELOG.md` exists. The README carries the user-visible contract and `git log` the
   per-change rationale, so nothing is undocumented — but the deliverable was listed and is not
   there, so it is recorded as skipped rather than quietly dropped.
 - End-to-end run of the §29 script in a scratch repo, transcript captured under
-  `docs/plans/completed/gitpr-mvp/artifacts/`. **Partly delivered:** the artifact is the *script*
+  `docs/plans/completed/gitpr-mvp/artifacts/`. **Partly delivered:** the artifact is the _script_
   (`e2e-29.sh`), which is reproducible and re-run at audit; no captured transcript was kept. The
   script is the better artifact of the two — a transcript goes stale, a script re-runs — so this is
   recorded rather than back-filled.
@@ -808,16 +825,16 @@ alt-screen pairing and clean-screen-on-return tests in `internal/tui/teardown_in
 
 ## Risks
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| Literal §19 semantics make `change ready` fail on `ABOUT.md`/thread noise (measured: 4/6 additions) | Check becomes wallpaper; agents auto-override | D3 default scopes blocking to non-`changesets/` paths; artifact survivals still reported, not silenced |
-| Base ref absent/unresolvable (fresh clone, renamed base, merged stack) | Wrong or empty spans, silent `main` fallback | Fail with an explicit "cannot resolve base X" error; never guess; test covers missing base |
-| `main` advancing under a changeset shifts `merge-base` and hides history | Reviewer sees a smaller diff than expected | Print the resolved span in `diff`/`status`/TUI header so the range is never implicit: `gitpr diff: <label>` on stderr, `Span:` in `status`, and a labelled counter line in the TUI. Label shapes are `<base>...HEAD`, `<short>..HEAD (after review N)`, and `<ref>@<sha>..<sha>` for a pinned ref span — not the `base...HEAD @ <sha>` this cell used to quote |
-| Blank/whitespace-only additions dominate the survival report | False positives | Blank lines excluded from the check; documented, tested |
-| Review commit not on the current branch (detached HEAD, wrong branch) | Review submitted to the wrong place | Require a named branch and a matching changeset dir; `submit` prints the changeset, outcome, commit, files, the ref it moved and the submission it supersedes — after the commit, so what was written is legible without another command. It does **not** print branch or span, which is what this cell claimed until the audit read the output |
-| A `TERM` the terminal library mishandles | TUI unusable, leaked terminal | The risk stands; the mechanism changed twice. D2 chose Bubble Tea, so `curses` is gone, and the session now owns its alt screen (discovery 20) instead of asking the library for one — which makes leaked terminal state *our* bug rather than the library's. Mitigation as delivered: headless model tests plus the alt-screen pairing tests; no `TERM=dumb` run exists (see M5) |
-| Line-membership check mis-locates duplicated review lines | Misleading `path:line` | Report occurrence count with the first match; never claim uniqueness |
-| State derivation silently classifies a hand-written `GitPR-*` trailer | Ghost lifecycle event | Accept a marker only with both expected trailers (`GitPR-Changeset` matching); malformed ⇒ warning line, not a state change |
+| Risk                                                                                                | Impact                                        | Mitigation                                                                                                                                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Literal §19 semantics make `change ready` fail on `ABOUT.md`/thread noise (measured: 4/6 additions) | Check becomes wallpaper; agents auto-override | D3 default scopes blocking to non-`changesets/` paths; artifact survivals still reported, not silenced                                                                                                                                                                                                                                                                            |
+| Base ref absent/unresolvable (fresh clone, renamed base, merged stack)                              | Wrong or empty spans, silent `main` fallback  | Fail with an explicit "cannot resolve base X" error; never guess; test covers missing base                                                                                                                                                                                                                                                                                        |
+| `main` advancing under a changeset shifts `merge-base` and hides history                            | Reviewer sees a smaller diff than expected    | Print the resolved span in `diff`/`status`/TUI header so the range is never implicit: `gitpr diff: <label>` on stderr, `Span:` in `status`, and a labelled counter line in the TUI. Label shapes are `<base>...HEAD`, `<short>..HEAD (after review N)`, and `<ref>@<sha>..<sha>` for a pinned ref span — not the `base...HEAD @ <sha>` this cell used to quote                    |
+| Blank/whitespace-only additions dominate the survival report                                        | False positives                               | Blank lines excluded from the check; documented, tested                                                                                                                                                                                                                                                                                                                           |
+| Review commit not on the current branch (detached HEAD, wrong branch)                               | Review submitted to the wrong place           | Require a named branch and a matching changeset dir; `submit` prints the changeset, outcome, commit, files, the ref it moved and the submission it supersedes — after the commit, so what was written is legible without another command. It does **not** print branch or span, which is what this cell claimed until the audit read the output                                   |
+| A `TERM` the terminal library mishandles                                                            | TUI unusable, leaked terminal                 | The risk stands; the mechanism changed twice. D2 chose Bubble Tea, so `curses` is gone, and the session now owns its alt screen (discovery 20) instead of asking the library for one — which makes leaked terminal state _our_ bug rather than the library's. Mitigation as delivered: headless model tests plus the alt-screen pairing tests; no `TERM=dumb` run exists (see M5) |
+| Line-membership check mis-locates duplicated review lines                                           | Misleading `path:line`                        | Report occurrence count with the first match; never claim uniqueness                                                                                                                                                                                                                                                                                                              |
+| State derivation silently classifies a hand-written `GitPR-*` trailer                               | Ghost lifecycle event                         | Accept a marker only with both expected trailers (`GitPR-Changeset` matching); malformed ⇒ warning line, not a state change                                                                                                                                                                                                                                                       |
 
 ## Verification Strategy
 
@@ -869,23 +886,23 @@ M0 ──► M1 ──► M2 ──┬──► M3 ──► M4 ──► M6
 
 ## Audit History
 
-| Date | Audit | Summary |
-| --- | --- | --- |
-| 2026-09-16 | — | Initial plan. Plumbing spike complete; D1–D4 raised. |
-| 2026-09-16 | implementation pass | D1–D4 resolved. M0–M4 implemented and verified by the PRD §29 replay; M5 implemented with the TUI verified under a pty. Three implementation-level discoveries recorded above; no PRD requirement dropped. |
-| 2026-09-16 | `change init` change of contract | Init now commits the scaffold (scoped with `git commit --only`) and accepts `ABOUT.md` content by flag or pipe, so agents can initialise and describe atomically. M1 updated above; two further discoveries recorded. Found while this change was being tested, not by it: the template warning in `change ready` was unreachable. |
-| 2026-09-16 | dogfood bug report | `status` said `WORKING` after a successful `change ready` in a single-branch repo. Cause: base == branch, so `base...HEAD` is permanently empty and the ready marker sits below the range that reads it. Guarded at init and ready, explained by status; the review workflow itself was never broken. |
-| 2026-09-16 | review-experience pass | Three owner-reported items. The difftool was read-only and blind to `e` edits because it diffed two revisions — now one revision against the working tree, superseding D4's two-rev form. Submitting with `s` now ends the session. Readiness no longer demotes on changeset-only commits (discovery 8). |
-| 2026-09-16 | span default reversed | The resume-like default for `review open` (discovery 10) was reverted the same day and replaced by `review reopen`, so `review open` stays on the full changeset as §17.2 specifies. |
-| 2026-09-16 | reopen no longer refuses an empty span | Owner report from the dogfood repo (discovery 11). `span.Covered` added; `review reopen` falls back to the span the submission covered; the exit-1 refusal and its test removed as unreachable. |
-| 2026-09-16 | space no longer advances the cursor | Owner report. `toggleAt` moved the cursor down after marking, so the file just marked could not be re-read without pressing `k`, and repeated presses marked successive files instead of toggling one. `TestSpaceMarksTheFileAndLeavesTheCursorOnIt` pins it; confirmed to fail with the advance restored. |
-| 2026-09-16 | marks persist locally; cursor clamp fix | Two owner requests. Reviewed marks are cached under the git directory keyed on the commit under review (discovery 13), restored only on a matching diff key. Separately, `clamp()` bounded the cursor from above only, so `k` at the top made it negative and `View` indexed `files[-1]`, panicking the program. |
-| 2026-09-16 | no undo for submissions | Owner asked whether `review reopen` should undo a submission (reset the commit, or a cancelling commit on top). Neither: D5 records that a submission is corrected by submitting again, with `previous_review` in the submit output making supersession visible. Evidence in the discussion: deleting the review ref left `State: FEEDBACK` unchanged. |
-| 2026-09-16 | covered span ends at the submission's parent | Second owner report on the same command: reopen listed the thread and files the submission itself wrote (discovery 12). `coveredSpan` now diffs to `<review>^` from the merge base, dropping the previous-review start point. |
-| 2026-09-16 | author-side commands | `change feedback` and `change wait`, and every author-facing hint retargeted off `diff --unreviewed`, which is the reviewer's span and empty the moment a submission lands (discovery 14). |
-| 2026-09-16 | the TUI became one list | Files and the changeset section under one cursor, `Tab` between them, threads nested under a collapsing heading, `+ new thread…` as the group's action, `d` as an explicit diff key (discovery 16). The shortcut bar learned to wrap (15); the editor comes from git (19); the session keeps its alt screen through a handoff (18, 20). |
-| 2026-09-16 | diff preview pane | A right pane printing git's own bytes, with line numbers, wrapping, tabs at their stops, the reviewer's uncommitted edits under their own caption, and an adaptive split (21–24). PRD §3 stays intact: nothing in the pane interprets a diff. |
-| 2026-09-16 | Review Span Selection (separate plan) | Spans became checkpoints with a capability answer derived from the head; `V` picker, `v` ring, `r` drift refresh, `--base-*`/`--head-*`. Recorded in `docs/plans/completed/review-span-selection/`; it removed the covered span (11, 12) and replaced `reopen`'s fallback. |
-| 2026-09-16 | **completion audit (this row)** | Audited and archived out of `active/`. Corrected: the Python architecture tree and the `uv`/`pytest` task lists against the Go tree that exists (D1); M4's "13 commits" (now 14, because init commits its scaffold); M5's "not yet verified" difftool gap (verified since) and its never-written `TERM=dumb` smoke test; the covered-span claims; the suite totals (237/13 → 335/14); a truncated sentence in Success Criterion 11; a `--no-tui` mitigation that never existed; `CHANGELOG.md` and the M6 transcript, both listed and never delivered. A second read-only pass then found what the first missed: the survival invariant naming `git diff` where the code runs `git show -U0 --no-ext-diff --no-textconv`, hygiene described as a grep where it is a three-layer syntax scan over seven verbs, `status --json` claimed exact where it is a sixteen-field superset, a span label format that has never been printed, a base-conflict credit to a script with no such step, three wrong evidence counts, and four references that break on the move. `e2e-29.sh` re-run green; the research spike re-run green. Full record:
-`audits/2026-09-16-completion.md` — immutable; further corrections go in this plan, not there. |
-| 2026-09-17 | **the audits' follow-ups, worked** | Six things the two audits recorded and left open, done. `--tool`'s help stopped promising a working tree for every span (`TestToolFlagHelpNamesBothKindsOfSpan`). `e2e-29.sh` grew the base-conflict step its M1 row always claimed (`change init --base trunk` → exit 2, and the base is still `main` afterwards) — falsified by removing the conflict guard, which turns both new lines red. The pty hand runs became `artifacts/pty-walkthrough.sh` plus `pty-tui.py`/`pty-plain.py`, checked against four mutants so it is a test and not a demo. The multi-ref drift branch, `review open`'s span-flag registration, the head-side mutual exclusion, and the default span at the session level gained tests; `TestBaseIsOwnBranch` lost a duplicate case row whose label made a failure ambiguous. One thing the plan promised is still not there and now has a number rather than a promise: with `TERM=dumb` the TUI paints nothing and quits cleanly — harmless, useless, and a product decision about refusing rather than a regression. |
+| Date                                                                                           | Audit                                        | Summary                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-09-16                                                                                     | —                                            | Initial plan. Plumbing spike complete; D1–D4 raised.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 2026-09-16                                                                                     | implementation pass                          | D1–D4 resolved. M0–M4 implemented and verified by the PRD §29 replay; M5 implemented with the TUI verified under a pty. Three implementation-level discoveries recorded above; no PRD requirement dropped.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 2026-09-16                                                                                     | `change init` change of contract             | Init now commits the scaffold (scoped with `git commit --only`) and accepts `ABOUT.md` content by flag or pipe, so agents can initialise and describe atomically. M1 updated above; two further discoveries recorded. Found while this change was being tested, not by it: the template warning in `change ready` was unreachable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 2026-09-16                                                                                     | dogfood bug report                           | `status` said `WORKING` after a successful `change ready` in a single-branch repo. Cause: base == branch, so `base...HEAD` is permanently empty and the ready marker sits below the range that reads it. Guarded at init and ready, explained by status; the review workflow itself was never broken.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 2026-09-16                                                                                     | review-experience pass                       | Three owner-reported items. The difftool was read-only and blind to `e` edits because it diffed two revisions — now one revision against the working tree, superseding D4's two-rev form. Submitting with `s` now ends the session. Readiness no longer demotes on changeset-only commits (discovery 8).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 2026-09-16                                                                                     | span default reversed                        | The resume-like default for `review open` (discovery 10) was reverted the same day and replaced by `review reopen`, so `review open` stays on the full changeset as §17.2 specifies.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 2026-09-16                                                                                     | reopen no longer refuses an empty span       | Owner report from the dogfood repo (discovery 11). `span.Covered` added; `review reopen` falls back to the span the submission covered; the exit-1 refusal and its test removed as unreachable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 2026-09-16                                                                                     | space no longer advances the cursor          | Owner report. `toggleAt` moved the cursor down after marking, so the file just marked could not be re-read without pressing `k`, and repeated presses marked successive files instead of toggling one. `TestSpaceMarksTheFileAndLeavesTheCursorOnIt` pins it; confirmed to fail with the advance restored.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 2026-09-16                                                                                     | marks persist locally; cursor clamp fix      | Two owner requests. Reviewed marks are cached under the git directory keyed on the commit under review (discovery 13), restored only on a matching diff key. Separately, `clamp()` bounded the cursor from above only, so `k` at the top made it negative and `View` indexed `files[-1]`, panicking the program.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 2026-09-16                                                                                     | no undo for submissions                      | Owner asked whether `review reopen` should undo a submission (reset the commit, or a cancelling commit on top). Neither: D5 records that a submission is corrected by submitting again, with `previous_review` in the submit output making supersession visible. Evidence in the discussion: deleting the review ref left `State: FEEDBACK` unchanged.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 2026-09-16                                                                                     | covered span ends at the submission's parent | Second owner report on the same command: reopen listed the thread and files the submission itself wrote (discovery 12). `coveredSpan` now diffs to `<review>^` from the merge base, dropping the previous-review start point.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 2026-09-16                                                                                     | author-side commands                         | `change feedback` and `change wait`, and every author-facing hint retargeted off `diff --unreviewed`, which is the reviewer's span and empty the moment a submission lands (discovery 14).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 2026-09-16                                                                                     | the TUI became one list                      | Files and the changeset section under one cursor, `Tab` between them, threads nested under a collapsing heading, `+ new thread…` as the group's action, `d` as an explicit diff key (discovery 16). The shortcut bar learned to wrap (15); the editor comes from git (19); the session keeps its alt screen through a handoff (18, 20).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 2026-09-16                                                                                     | diff preview pane                            | A right pane printing git's own bytes, with line numbers, wrapping, tabs at their stops, the reviewer's uncommitted edits under their own caption, and an adaptive split (21–24). PRD §3 stays intact: nothing in the pane interprets a diff.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 2026-09-16                                                                                     | Review Span Selection (separate plan)        | Spans became checkpoints with a capability answer derived from the head; `V` picker, `v` ring, `r` drift refresh, `--base-*`/`--head-*`. Recorded in `docs/plans/completed/review-span-selection/`; it removed the covered span (11, 12) and replaced `reopen`'s fallback.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 2026-09-16                                                                                     | **completion audit (this row)**              | Audited and archived out of `active/`. Corrected: the Python architecture tree and the `uv`/`pytest` task lists against the Go tree that exists (D1); M4's "13 commits" (now 14, because init commits its scaffold); M5's "not yet verified" difftool gap (verified since) and its never-written `TERM=dumb` smoke test; the covered-span claims; the suite totals (237/13 → 335/14); a truncated sentence in Success Criterion 11; a `--no-tui` mitigation that never existed; `CHANGELOG.md` and the M6 transcript, both listed and never delivered. A second read-only pass then found what the first missed: the survival invariant naming `git diff` where the code runs `git show -U0 --no-ext-diff --no-textconv`, hygiene described as a grep where it is a three-layer syntax scan over seven verbs, `status --json` claimed exact where it is a sixteen-field superset, a span label format that has never been printed, a base-conflict credit to a script with no such step, three wrong evidence counts, and four references that break on the move. `e2e-29.sh` re-run green; the research spike re-run green. Full record: |
+| `audits/2026-09-16-completion.md` — immutable; further corrections go in this plan, not there. |
+| 2026-09-17                                                                                     | **the audits' follow-ups, worked**           | Six things the two audits recorded and left open, done. `--tool`'s help stopped promising a working tree for every span (`TestToolFlagHelpNamesBothKindsOfSpan`). `e2e-29.sh` grew the base-conflict step its M1 row always claimed (`change init --base trunk` → exit 2, and the base is still `main` afterwards) — falsified by removing the conflict guard, which turns both new lines red. The pty hand runs became `artifacts/pty-walkthrough.sh` plus `pty-tui.py`/`pty-plain.py`, checked against four mutants so it is a test and not a demo. The multi-ref drift branch, `review open`'s span-flag registration, the head-side mutual exclusion, and the default span at the session level gained tests; `TestBaseIsOwnBranch` lost a duplicate case row whose label made a failure ambiguous. One thing the plan promised is still not there and now has a number rather than a promise: with `TERM=dumb` the TUI paints nothing and quits cleanly — harmless, useless, and a product decision about refusing rather than a regression.                                                                                         |

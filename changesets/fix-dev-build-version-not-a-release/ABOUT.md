@@ -5,11 +5,11 @@
 What `git-pair --version` prints now says how the binary was built, and none of the answers is a
 released number:
 
-| built by | `--version` prints |
-| --- | --- |
-| `go build ./cmd/git-pair` | `git-pair version 0.0.0-untagged` |
+| built by                                | `--version` prints                                                                     |
+| --------------------------------------- | -------------------------------------------------------------------------------------- |
+| `go build ./cmd/git-pair`               | `git-pair version 0.0.0-untagged`                                                      |
 | `mise run build`, `mise run build:prod` | `git-pair version 0.0.0-dev+498c623`, with `.dirty` when the tree had uncommitted work |
-| goreleaser, from a tag | `git-pair version 0.2.0` — the tag, unchanged by this change |
+| goreleaser, from a tag                  | `git-pair version 0.2.0` — the tag, unchanged by this change                           |
 
 The fallback was `0.1.0`, which is also a published release, so a build off any commit was
 indistinguishable from something everyone could have installed. Review then asked for the open question
@@ -59,7 +59,7 @@ and the tag distance is not what a report needs. The sha is.
 - On a dirty tree, `sh scripts/dev-version.sh` → `0.0.0-dev+6708d9e.dirty`; on the clean tree it is the
   same string without `.dirty`.
 - `mise run build` printed `installed ~/.local/bin/git-pair-dev-build-version-not-a-release at
-  0.0.0-dev+6708d9e.dirty`, and that binary reports the same from `--version`.
+0.0.0-dev+6708d9e.dirty`, and that binary reports the same from `--version`.
 - The release path is unaffected, checked rather than assumed: building with
   `-ldflags "-s -w -X gitpair/internal/cli.Version=0.2.0"` prints `git-pair version 0.2.0`, and the
   published v0.2.0 archives come from goreleaser's own ldflags in `.goreleaser.yaml`, which this change

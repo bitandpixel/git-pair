@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# git-pair repository hook: scripts/git-hooks/pre-commit
+#
+# Format the markdown this commit is about to record.
+#
+# Installed by `mise run hooks:install`, which drops a two-line shim into the clone's hook directory that
+# execs this file from whichever worktree is committing. It lives in the tree rather than in `.git/hooks`
+# for the reason git-pair gives for its own tracked hook root: a script git runs has to be reviewable,
+# versioned, and the same for everyone working here, and `.git/` is none of those.
+#
+# What it does:
+#
+#   - It asks about the markdown staged for this commit, not the whole tree. A commit of Go code should
+#     not pay for formatting 150 documents, and a commit should not fail over a file it does not touch.
+#   - It formats, rather than checking and refusing. The point of the hook is that nobody has to remember
+#     `mise run format`; a hook that refuses the commit has moved the remembering to a worse moment.
+#   - It adds what it formatted. A formatted file left unstaged means the commit records the version
+#     nobody just read.
+#
+# What it refuses:
+#
+#   - A file with both staged and unstaged content. Formatting such a file and re-staging it would put the
+#     unstaged half in the commit, which is the one thing a pre-commit hook must never do. Stage it or set
+#     it aside; the message names the files and both ways out.
+#   - Nothing else. When the formatter is not installed the commit proceeds with a warning, because this
+#     hook is a convenience and `mise run check` is the rule: it runs the same check as part of `gates`,
+#     which the pull-request workflow and the merge job both run.
+set -euo pipefail
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+# A clone checked out at a commit from before the formatter, or a call from outside a repository: nothing
+# here is this hook's business.
+[ -f scripts/format.sh ] || exit 0
+
+staged=()
+while IFS= read -r -d '' f; do
+  staged+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACMR -z -- '*.md')
+[ "${#staged[@]}" -eq 0 ] && exit 0
+
+# `git diff --quiet -- <path>` compares the working tree against the index, so a hit here means the file
+# is staged in one state and held in the working tree in another.
+partial=()
+for f in "${staged[@]}"; do
+  if ! git diff --quiet -- "$f"; then
+    partial+=("$f")
+  fi
+done
+if [ "${#partial[@]}" -gt 0 ]; then
+  printf 'pre-commit: these markdown files are staged in one state and edited in another:\n' >&2
+  printf '  %s\n' "${partial[@]}" >&2
+  printf '\nThe formatter would have to stage the unstaged half to format the whole file, so it ran on\n' >&2
+  printf 'neither. Stage what you mean to commit (git add <file>), or set the rest aside\n' >&2
+  printf '(git stash push -- <file>), then commit again. mise run format formats the whole tree.\n' >&2
+  exit 1
+fi
+
+changed=$(bash scripts/format.sh write "${staged[@]}") || rc=$?
+rc=${rc:-0}
+if [ "$rc" = 3 ]; then
+  printf 'pre-commit: prettier is not installed, so the markdown in this commit is unformatted.\n' >&2
+  printf '          mise install puts the pinned formatter where the next run finds it;\n' >&2
+  printf '          mise run format formats what is here. mise run check will fail until then.\n' >&2
+  exit 0
+elif [ "$rc" != 0 ]; then
+  printf 'pre-commit: the markdown formatter failed, so nothing was formatted and the commit is refused.\n' >&2
+  printf '          Run mise run format to see what it says.\n' >&2
+  exit 1
+fi
+
+[ -n "$changed" ] || exit 0
+while IFS= read -r f; do
+  [ -n "$f" ] && git add -- "$f"
+done <<<"$changed"

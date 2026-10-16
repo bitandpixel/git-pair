@@ -21,12 +21,12 @@ own code responding to a git-pair event. The client owns it and owns what it doe
 
 Decided during exploration (2026-10-13), and reflected throughout this plan:
 
-| Question | Decision |
-| --- | --- |
-| Which points get hooks in v1 | Every write point: the author's (`ready`, `integrate`, `unready`, `abandon`), the reviewer's (`submit`), and the `check` gate |
+| Question                                     | Decision                                                                                                                                                  |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Which points get hooks in v1                 | Every write point: the author's (`ready`, `integrate`, `unready`, `abandon`), the reviewer's (`submit`), and the `check` gate                             |
 | Where hooks are defined, and who trusts them | Tracked executables under `.git-pair/hooks/`, refused until a person records acceptance, plus a per-clone root under `<gitdir>/` that needs no trust step |
-| What a hook may run | Anything. §26 constrains git-pair's own invocations, not client code triggered by a git-pair event |
-| Blocking behaviour | Pre-hooks block; post-hooks report and do not reverse |
+| What a hook may run                          | Anything. §26 constrains git-pair's own invocations, not client code triggered by a git-pair event                                                        |
+| Blocking behaviour                           | Pre-hooks block; post-hooks report and do not reverse                                                                                                     |
 
 Row two's second half is what makes this client control rather than repository policy: a reviewer who has
 no write access to the repository can still attach their own discipline to the events. Row three needs no
@@ -61,7 +61,7 @@ carve-out in §26, only a sentence saying who the subject of that rule is.
 - Hooks on read commands (`queue`, `status`, `diff`, `change feedback`, `review history`, `change wait`).
   Those are pure derivations with cost-bound tests behind them, and a hook there makes a read cost
   whatever the repository wrote.
-- Hooks on the reviewer's *writing* commands other than `submit` — `review about`, `review thread`, and
+- Hooks on the reviewer's _writing_ commands other than `submit` — `review about`, `review thread`, and
   the review screen. Those write files without recording anything, and a refusal there strands a reviewer
   mid-edit with an answer that has no record. `submit` is the one reviewer point that produces state, so it
   is the one that gets hooks.
@@ -127,7 +127,7 @@ own edits checkable: they are in that index.
 argv literals, bare verb strings, and shell text passed to `exec.Command`. A hook body is runtime data
 read from a file, so the scan is structurally blind to it — correctly, because the scan's subject is what
 git-pair invokes. The runner must stay inside that subject: it execs the client's file and passes no git
-verb of its own, which is a property hygiene *can* check and should, via a fixture. PRD §26 states "There
+verb of its own, which is a property hygiene _can_ check and should, via a fixture. PRD §26 states "There
 is no carve-out. **git-pair may not push anything**, at any point in a lifecycle", which stays true of
 git-pair; the edit needed is the sentence that says so explicitly, plus an update to §27, which lists
 pre-push hooks among the deferred mechanisms.
@@ -292,10 +292,10 @@ seen for a key (`:724`). Two properties follow, both measured:
   above it. So a client destroys the marker three independent ways, and one is quiet: a blank line
   manufactures a new paragraph and evicts the real trailers; a colon-less line empties the block; and a line
   beginning with whitespace is a continuation that appends itself onto the preceding real trailer's value,
-  leaving a block that still *lists* `Review-State` and `Review-Changeset` while corrupting one of them out
+  leaving a block that still _lists_ `Review-State` and `Review-Changeset` while corrupting one of them out
   of matching its slug. Nothing errors in any of the three; `change ready` still exits 0, and the changeset
   simply stops appearing in the queue.
-- Sanitising after the fact does not work. Appending a blank line *after* the client's own line is the
+- Sanitising after the fact does not work. Appending a blank line _after_ the client's own line is the
   eviction case again. Separation is not a mitigation; order and shape are.
 
 So the append is git-pair's job, not the hook's: `Message` gains a field for client lines rendered after
@@ -360,7 +360,7 @@ Tasks
 1. New `internal/hooks` package: `Plan(ctx, repo, point) ([]Hook, error)` for discovery over both roots,
    and `Run(ctx, repo, point, env) (Result, error)` for execution. argv-exact exec, `/dev/null` stdin,
    captured output, context deadline.
-   Note for the runner's own source: hygiene Layer B reports a string literal *equal* to `push`, `merge`,
+   Note for the runner's own source: hygiene Layer B reports a string literal _equal_ to `push`, `merge`,
    `rebase` or `reset` anywhere in a shipped file, so the runner cannot carry those words as data, and
    error text about them has to be written so it does not become a bare literal.
 2. Trust store beside the other two git-directory stores: `<gitdir>/git-pair/trusted-hooks`.
@@ -544,33 +544,32 @@ Verification
   hand-off refuses a moved script as well as an unseen one, a refused `review submit` stages nothing and leaves the
   reviewer's own edit untouched, and `change unready`/`change abandon` still work with nothing recorded.
 
-
 ## Spikes / research
 
-| Question | Status | Conclusion |
-| --- | --- | --- |
-| Could git's own `pre-commit`/`commit-msg` be the mechanism instead? | Resolved | No, and the cost is measurable. They cover the five commit points and nothing at `check`, `pre-commit` receives no arguments so it cannot tell a marker from an ordinary commit, tracked hooks need `core.hooksPath` (one flat directory, not cloned), and a native refusal gives exit 3 with empty `--json` instead of exit 1. git-pair keeps its own runner and exports context to native hooks regardless. Full measurements: [research/2026-10-13-native-git-hooks.md](research/2026-10-13-native-git-hooks.md). |
-| Does a manifest format earn a config dependency? | Open | Default is no: discovery by filesystem, attributes by git config. Revisit only if per-hook timeouts or per-hook blocking are actually wanted. |
-| Do post-hooks need a per-point opt-in to blocking? | Open | Deferred. Under §26 a blocking post-hook cannot reverse anything, so the only difference is exit code, and the plan already reports nonzero. |
-| Is there a safe form of reviewer-side hooks? | Resolved | Yes, and they are in scope as of 2026-10-13. Hooks are client control, so the reviewer owns their own hooks and what they enforce. The safety question moves from "may a hook gate a verdict" to "what may a hook write into the record", and the answer there is: client-appended lines yes, anything the gate reads no — see *What the record carries, and what it does not*. |
-| Should a hook result be recorded in the review marker? | Resolved | Split, after review feedback. A key git-pair reads: still no. Lines the client appends: yes — `Message` gains a field rendered after `Trailers` in the same paragraph, with reserved keys rejected and a client-owned prefix. Measured: appending at the end of the block cannot forge (first-wins protects the real keys), while appending prose below the block silently evicts `Review-State` and collapses the changeset to `WORKING`. See [research/2026-10-13-appending-to-the-marker-message.md](research/2026-10-13-appending-to-the-marker-message.md). |
+| Question                                                                         | Status                         | Conclusion                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Could git's own `pre-commit`/`commit-msg` be the mechanism instead?              | Resolved                       | No, and the cost is measurable. They cover the five commit points and nothing at `check`, `pre-commit` receives no arguments so it cannot tell a marker from an ordinary commit, tracked hooks need `core.hooksPath` (one flat directory, not cloned), and a native refusal gives exit 3 with empty `--json` instead of exit 1. git-pair keeps its own runner and exports context to native hooks regardless. Full measurements: [research/2026-10-13-native-git-hooks.md](research/2026-10-13-native-git-hooks.md).                                                                                                                                                                                                                                                                                                                                     |
+| Does a manifest format earn a config dependency?                                 | Open                           | Default is no: discovery by filesystem, attributes by git config. Revisit only if per-hook timeouts or per-hook blocking are actually wanted.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Do post-hooks need a per-point opt-in to blocking?                               | Open                           | Deferred. Under §26 a blocking post-hook cannot reverse anything, so the only difference is exit code, and the plan already reports nonzero.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Is there a safe form of reviewer-side hooks?                                     | Resolved                       | Yes, and they are in scope as of 2026-10-13. Hooks are client control, so the reviewer owns their own hooks and what they enforce. The safety question moves from "may a hook gate a verdict" to "what may a hook write into the record", and the answer there is: client-appended lines yes, anything the gate reads no — see _What the record carries, and what it does not_.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Should a hook result be recorded in the review marker?                           | Resolved                       | Split, after review feedback. A key git-pair reads: still no. Lines the client appends: yes — `Message` gains a field rendered after `Trailers` in the same paragraph, with reserved keys rejected and a client-owned prefix. Measured: appending at the end of the block cannot forge (first-wins protects the real keys), while appending prose below the block silently evicts `Review-State` and collapses the changeset to `WORKING`. See [research/2026-10-13-appending-to-the-marker-message.md](research/2026-10-13-appending-to-the-marker-message.md).                                                                                                                                                                                                                                                                                         |
 | Should a repository with committed hooks refuse outright in an unaccepted clone? | **Adopted, implemented in M6** | Mandatory, with a `declined` state as the way out: the tracked tree is recorded per-clone beside `trusted-hooks` and keyed by the tree hash, and the commands that start or advance work refuse while it is `unrecorded` or `changed` — `init`, `change ready`, `review submit`, and the gate behind `check` and `change integrate` — while `change unready`, `change abandon` and `git pair hooks` stay free. The consequence the reviewer took knowingly: a CI checkout is a clone that has recorded nothing, so a job takes a position in its own script (`git pair hooks --trust`, or `--decline` where a team has genuinely chosen that), and `GIT_PAIR_HOOKS=0` is deliberately not a substitute — it says a machine does not want to run scripts, not what the scripts do. Nothing breaks on upgrade because no repository has tracked hooks yet. |
-| Does `--no-cache` interact with hook state? | Open | Expected no: hooks run once per command and nothing about them is memoised. Confirm no fact-cache key covers them. |
+| Does `--no-cache` interact with hook state?                                      | Open                           | Expected no: hooks run once per command and nothing about them is memoised. Confirm no fact-cache key covers them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 ## Risks
 
-| Risk | Mitigation |
-| --- | --- |
-| PRD §26's wording is a product decision, not a code change, and a hook that pushes makes the current absolute sentence read wrongly if its subject is left unstated. | Do it in M5 task 1, agreed before anything merges. The change names who the rule binds rather than excepting anything, so a refusal costs only the freedom to run git verbs from a hook — the rest of the feature stands. |
-| A hook that commits or rewrites invalidates the `Review-Head`/`Review-Diff-Id` a marker just recorded. | Detect and report the HEAD move. Document that hooks which rewrite history invalidate approvals by design, since that is git-pair's rebase rule anyway. |
-| A `pre-submit` hook mutates the index after inspecting it, so the review commit records content the hook never checked. | Compare the staged tree (`git write-tree`) before and after the hook and refuse on a change, naming the hook — the same shape as HEAD-move detection. |
-| A reviewer's own broken hook makes their verdict unreachable, with no way to record a review in a repository they cannot fix. | `review submit --allow-hook-failure`, reported as `overridden` in the `hooks` array. `GIT_PAIR_HOOKS=0` for a hook that hangs. |
-| A per-clone hook is invisible to teammates, so an approval that a local hook gated reads as unconditional. | Client-appended lines are visible to everyone who reads the commit, and the gate reads none of them (see *What the record carries, and what it does not*); the skill says plainly that the clone root is local discipline rather than shared policy. |
-| Hooks make `change ready` slow in an agent loop, and a hang blocks it forever. | Context deadline from `git-pair.hookTimeout`, plus `GIT_PAIR_HOOKS=0` and `git-pair.hooks=false`. |
-| The trust step becomes friction and people blanket-approve without reading. | `hooks --trust` prints the tree it is approving; the hash covers content, so an edit re-prompts. The clone root needs no consent step precisely because it is the person's own code. |
-| A hook corrupts the clean-tree precondition of `change ready`. | Clean-tree check runs before and after pre-hooks; the second one refuses and names the hook. |
-| `check` hooks run repository scripts in CI, where the toolchain differs from the author's. | Documented: the gate runs what the repository configured, on whatever the runner has. Not determinism across clones, and the prose says so. |
-| Someone reads hooks as git-pair performing the push, and the distinction in §26 is lost. | The restated §26 names its subject; `hooks` output names the script, not git-pair, as the thing that ran, and `GIT_PAIR_HOOK_ROOT` says which root it came from. |
+| Risk                                                                                                                                                                 | Mitigation                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PRD §26's wording is a product decision, not a code change, and a hook that pushes makes the current absolute sentence read wrongly if its subject is left unstated. | Do it in M5 task 1, agreed before anything merges. The change names who the rule binds rather than excepting anything, so a refusal costs only the freedom to run git verbs from a hook — the rest of the feature stands.                            |
+| A hook that commits or rewrites invalidates the `Review-Head`/`Review-Diff-Id` a marker just recorded.                                                               | Detect and report the HEAD move. Document that hooks which rewrite history invalidate approvals by design, since that is git-pair's rebase rule anyway.                                                                                              |
+| A `pre-submit` hook mutates the index after inspecting it, so the review commit records content the hook never checked.                                              | Compare the staged tree (`git write-tree`) before and after the hook and refuse on a change, naming the hook — the same shape as HEAD-move detection.                                                                                                |
+| A reviewer's own broken hook makes their verdict unreachable, with no way to record a review in a repository they cannot fix.                                        | `review submit --allow-hook-failure`, reported as `overridden` in the `hooks` array. `GIT_PAIR_HOOKS=0` for a hook that hangs.                                                                                                                       |
+| A per-clone hook is invisible to teammates, so an approval that a local hook gated reads as unconditional.                                                           | Client-appended lines are visible to everyone who reads the commit, and the gate reads none of them (see _What the record carries, and what it does not_); the skill says plainly that the clone root is local discipline rather than shared policy. |
+| Hooks make `change ready` slow in an agent loop, and a hang blocks it forever.                                                                                       | Context deadline from `git-pair.hookTimeout`, plus `GIT_PAIR_HOOKS=0` and `git-pair.hooks=false`.                                                                                                                                                    |
+| The trust step becomes friction and people blanket-approve without reading.                                                                                          | `hooks --trust` prints the tree it is approving; the hash covers content, so an edit re-prompts. The clone root needs no consent step precisely because it is the person's own code.                                                                 |
+| A hook corrupts the clean-tree precondition of `change ready`.                                                                                                       | Clean-tree check runs before and after pre-hooks; the second one refuses and names the hook.                                                                                                                                                         |
+| `check` hooks run repository scripts in CI, where the toolchain differs from the author's.                                                                           | Documented: the gate runs what the repository configured, on whatever the runner has. Not determinism across clones, and the prose says so.                                                                                                          |
+| Someone reads hooks as git-pair performing the push, and the distinction in §26 is lost.                                                                             | The restated §26 names its subject; `hooks` output names the script, not git-pair, as the thing that ran, and `GIT_PAIR_HOOK_ROOT` says which root it came from.                                                                                     |
 
 ## Verification strategy
 
@@ -595,9 +594,9 @@ reviewer run — edit in the review screen, have the hook refuse, fix, submit.
 
 ## Audit history
 
-| Date | Audit | Summary |
-| --- | --- | --- |
-| — | — | Not yet audited. |
+| Date | Audit | Summary          |
+| ---- | ----- | ---------------- |
+| —    | —     | Not yet audited. |
 
 ## Execution status
 
@@ -616,15 +615,15 @@ post-hook clean-tree re-check, `git pair hooks` with `--trust`, and the `hooks` 
 
 Two deviations from the plan, both deliberate:
 
--   **`git pair hooks` reports configuration, not the last result.** The plan's reporting section asks for
-    "the last result of each". There is no results store, and building one in M1 would have meant inventing
-    the persistence that the plan's own "what the record carries, and what it does not" section leaves open.
-    The command therefore answers what is configured, what is executable, and whether this build invokes the
-    point at all — which is the question a person asks first, and the one that makes a misspelled point
-    visible. A results store stays open.
--   **`GIT_PAIR_HOOK_OUTPUT` instead of a `-v` flag.** A flag on `change ready` would put an option on the
-    author's command for a diagnostic about someone else's script, and `change ready` already refuses to grow
-    flags the gate does not need. The variable is read once, on the CLI side.
+- **`git pair hooks` reports configuration, not the last result.** The plan's reporting section asks for
+  "the last result of each". There is no results store, and building one in M1 would have meant inventing
+  the persistence that the plan's own "what the record carries, and what it does not" section leaves open.
+  The command therefore answers what is configured, what is executable, and whether this build invokes the
+  point at all — which is the question a person asks first, and the one that makes a misspelled point
+  visible. A results store stays open.
+- **`GIT_PAIR_HOOK_OUTPUT` instead of a `-v` flag.** A flag on `change ready` would put an option on the
+  author's command for a diagnostic about someone else's script, and `change ready` already refuses to grow
+  flags the gate does not need. The variable is read once, on the CLI side.
 
 Task 3 (the resolution onto the marker commit) landed as `git.Repo.CommitWithEnv` and
 `marker.CommitWithEnv`, reached through `runEnv` rather than a second spawn path so `run` stays the one place
@@ -638,26 +637,26 @@ the `hooks` array in the `unready`, `abandon` and `integrate` JSON contracts.
 
 Three things the plan did not predict, each of which changed the shape of the code:
 
--   **A tracked hook is content the approval has to cover, which gives the install a place in the sequence.** A
-    tracked hook is a commit, and the declaration gate compares what the reviewer saw with what the branch now
-    carries. Installed after the approval, the install is the thing it refuses —
-    `content outside changesets/checkout-flow/ changed since <approval>: .git-pair/hooks/pre-integrate/01-suite`
-    — which is a statement about the install, not about the point under test. Installed before the approval the
-    hook is ordinary reviewed content, consent is recorded against the tree, and the point fires from the
-    tracked root like any other; `TestTrackedRootAtTheIntegratePoint` runs it three ways since M6 — unrecorded (the
-    declaration refuses, no marker, both position commands named), declined (the declaration proceeds and the hook
-    stays skipped) and accepted (blocking the declaration with no marker written). The table of
-    author points still installs at the per-clone root, so the four points read identically and none of them
-    depends on a consent step that belongs to the root rather than the point. Trust is a property of the root,
-    not of the point.
--   **A post-hook failure needs its own message, not just a nonzero exit.** The plan asks for a nonzero exit
-    and a line that says what happened; writing it as `postHookError` made the second half concrete — the
-    state the changeset is in, the hook, and "nothing was undone". M1's PRD paragraph said a post-hook failure
-    "does not change the exit code", which contradicts this section of the plan; the paragraph now matches the
-    plan.
--   **The HEAD-move warning cannot name the hook that committed.** A hook is a child process that can run any
-    git command and git-pair does not watch the index between them, so the warning names the hooks that ran
-    and the marker they invalidated, which is the honest version of the same information.
+- **A tracked hook is content the approval has to cover, which gives the install a place in the sequence.** A
+  tracked hook is a commit, and the declaration gate compares what the reviewer saw with what the branch now
+  carries. Installed after the approval, the install is the thing it refuses —
+  `content outside changesets/checkout-flow/ changed since <approval>: .git-pair/hooks/pre-integrate/01-suite`
+  — which is a statement about the install, not about the point under test. Installed before the approval the
+  hook is ordinary reviewed content, consent is recorded against the tree, and the point fires from the
+  tracked root like any other; `TestTrackedRootAtTheIntegratePoint` runs it three ways since M6 — unrecorded (the
+  declaration refuses, no marker, both position commands named), declined (the declaration proceeds and the hook
+  stays skipped) and accepted (blocking the declaration with no marker written). The table of
+  author points still installs at the per-clone root, so the four points read identically and none of them
+  depends on a consent step that belongs to the root rather than the point. Trust is a property of the root,
+  not of the point.
+- **A post-hook failure needs its own message, not just a nonzero exit.** The plan asks for a nonzero exit
+  and a line that says what happened; writing it as `postHookError` made the second half concrete — the
+  state the changeset is in, the hook, and "nothing was undone". M1's PRD paragraph said a post-hook failure
+  "does not change the exit code", which contradicts this section of the plan; the paragraph now matches the
+  plan.
+- **The HEAD-move warning cannot name the hook that committed.** A hook is a child process that can run any
+  git command and git-pair does not watch the index between them, so the warning names the hooks that ran
+  and the marker they invalidated, which is the honest version of the same information.
 
 Two things the plan left open, decided here: a command that writes nothing runs no hooks — `unready` on a
 changeset never offered, `abandon` on one already abandoned, `integrate` on a head already declared — because
@@ -673,19 +672,19 @@ starts once per author action rather than twice.
 
 Three things worth recording:
 
--   **`check --json` exits 0 when the gate refuses.** The verdict travels in `ready`, and `check_test.go:307`
-    asserts that deliberately. The milestone's first draft asserted exit 1 in JSON mode and was wrong. The
-    tests now assert both forms — the JSON for `ready: false`, the human form for exit 1 and `NOT READY:` —
-    because the two carry the answer differently and a reader uses one of them at a time.
--   **A hook that spawned a background process held the command open past its deadline.** `exec.Cmd.Wait`
-    waits for the captured pipes to close, and the write ends belong to whatever the hook left running, so a
-    `sleep 30` behind a one-second deadline cost thirty seconds. Fixed with `cmd.WaitDelay`: five seconds of
-    grace for output genuinely still arriving, then the pipes close and the verdict is reported. The gate's
-    timeout case went from 30s to 6s, and M1's equivalent case had been paying the same 30s unnoticed.
--   **A post-hook joins the verdict at the gate, and nowhere else.** At a marker a post-hook cannot reverse
-    the transition and does not try; at `check` there is nothing to reverse, so its failure is a condition
-    like any other. The invariant kept in both places is that the exit code and `ready` never answer different
-    questions.
+- **`check --json` exits 0 when the gate refuses.** The verdict travels in `ready`, and `check_test.go:307`
+  asserts that deliberately. The milestone's first draft asserted exit 1 in JSON mode and was wrong. The
+  tests now assert both forms — the JSON for `ready: false`, the human form for exit 1 and `NOT READY:` —
+  because the two carry the answer differently and a reader uses one of them at a time.
+- **A hook that spawned a background process held the command open past its deadline.** `exec.Cmd.Wait`
+  waits for the captured pipes to close, and the write ends belong to whatever the hook left running, so a
+  `sleep 30` behind a one-second deadline cost thirty seconds. Fixed with `cmd.WaitDelay`: five seconds of
+  grace for output genuinely still arriving, then the pipes close and the verdict is reported. The gate's
+  timeout case went from 30s to 6s, and M1's equivalent case had been paying the same 30s unnoticed.
+- **A post-hook joins the verdict at the gate, and nowhere else.** At a marker a post-hook cannot reverse
+  the transition and does not try; at `check` there is nothing to reverse, so its failure is a condition
+  like any other. The invariant kept in both places is that the exit code and `ready` never answer different
+  questions.
 
 The CI example in the README was exercised against a fixture repository rather than written from the shape of
 the JSON: the hook, the `--trust`, the refusal, the reason wording, and the `hooks` entry are the output that
@@ -701,24 +700,24 @@ from `git pair hooks` (see below).
 
 Three things worth recording:
 
--   **The review screen had a second submission path, and task 1 was written without knowing it.** The plan
-    says to keep `reviewops.Submit` free of hook calls "so the review screen's own submit path stays covered
-    by one call site" — but the screen called `reviewops.Submit` directly, so attaching hooks to the CLI's
-    call site would have left the surface reviewers actually use hook-free. Fixed by injecting the submission
-    into the screen: `tui.Options.Submit` is a function the CLI supplies (`a.submitReview`), and the screen has
-    no other way to submit. A hook now fires wherever a verdict is recorded. The screen opened without a
-    submission path says so on the status line rather than inventing its own.
--   **`active` was removed rather than flipped to always-true.** M1 added it so a hook under a point nobody
-    ran stayed visible while the milestones wired the rest. With the last two points wired, every declared
-    point is invoked, so the field could never again be false — and a JSON field that can never be false is
-    data that misleads. `AllPoints()` still carries the vocabulary, `unknown[]` still catches a misspelled
-    directory, and the CLI tests run every point end to end, which is the stronger claim.
--   **The reviewer's index is the hook's input, and a refusal has to say where the content is.** Two tests
-    caught the shape of this by being wrong first: a fixture whose "reviewer edit" was byte-identical to what
-    the commit already held staged nothing, and the hook correctly saw nothing. The index is real input here,
-    so the refusal names it — the review was *not recorded* and the content is *still staged* — because that
-    state has no other symptom: the next plain `git commit` would land the reviewer's source edits as ordinary
-    work with no verdict attached.
+- **The review screen had a second submission path, and task 1 was written without knowing it.** The plan
+  says to keep `reviewops.Submit` free of hook calls "so the review screen's own submit path stays covered
+  by one call site" — but the screen called `reviewops.Submit` directly, so attaching hooks to the CLI's
+  call site would have left the surface reviewers actually use hook-free. Fixed by injecting the submission
+  into the screen: `tui.Options.Submit` is a function the CLI supplies (`a.submitReview`), and the screen has
+  no other way to submit. A hook now fires wherever a verdict is recorded. The screen opened without a
+  submission path says so on the status line rather than inventing its own.
+- **`active` was removed rather than flipped to always-true.** M1 added it so a hook under a point nobody
+  ran stayed visible while the milestones wired the rest. With the last two points wired, every declared
+  point is invoked, so the field could never again be false — and a JSON field that can never be false is
+  data that misleads. `AllPoints()` still carries the vocabulary, `unknown[]` still catches a misspelled
+  directory, and the CLI tests run every point end to end, which is the stronger claim.
+- **The reviewer's index is the hook's input, and a refusal has to say where the content is.** Two tests
+  caught the shape of this by being wrong first: a fixture whose "reviewer edit" was byte-identical to what
+  the commit already held staged nothing, and the hook correctly saw nothing. The index is real input here,
+  so the refusal names it — the review was _not recorded_ and the content is _still staged_ — because that
+  state has no other symptom: the next plain `git commit` would land the reviewer's source edits as ordinary
+  work with no verdict attached.
 
 The open spike the plan carried into this milestone — whether a hook result belongs in the review marker — is
 closed as no. The review commit carries what the reviewer did (the outcome, the body, what was reviewed and
@@ -731,7 +730,6 @@ The per-clone root needed no new code: M1 discovered both roots and M2's `runPre
 every point, so the reviewer's own hooks came with the wiring. What was reviewer-specific was the trust rule,
 which is asserted rather than assumed: a tracked hook from the repository under review stays skipped until
 accepted, and the same command runs it after `git pair hooks --trust`.
-
 
 **M5 — done** on `feat/hooks-spec`, stacked on M4.
 
@@ -784,7 +782,7 @@ committed one.
 
 **The hygiene fixture asserts both directions for the hook runner.** The product scan already covers
 `internal/hooks` (it walks `cmd` and `internal`), so the runner invoking no forbidden verb is a fact about the
-shipped tree. What the fixture adds is that the scan is not vacuous *and* not over-eager on the feature's
+shipped tree. What the fixture adds is that the scan is not vacuous _and_ not over-eager on the feature's
 shapes: a hook run by path, environment and root-name literals, and a config key that names the tool are all
 marked OK, and a planted `exec.Command("git", "push", "origin")` in a hook-shaped function is marked BAD. Without
 the OK cases the feature's own code would be the thing that eventually gets a rule relaxed.

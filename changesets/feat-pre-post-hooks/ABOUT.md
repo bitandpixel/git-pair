@@ -115,8 +115,10 @@ mechanism use it without re-deriving the changeset in every script.
    `Message.Render`, not by the hook. Full answer under **Review discussion**, and in
    `docs/plans/lifecycle-hooks/research/2026-10-13-appending-to-the-marker-message.md`, which the plan now
    cites from its spike table.
-> Maybe it can't replace content in the trailer, but could append/insert content? Then it's not a schema change or an official 
-alteration of the contract, but gives clients a way to persist a result. Let's discuss this further.
+
+> Maybe it can't replace content in the trailer, but could append/insert content? Then it's not a schema change or an official
+> alteration of the contract, but gives clients a way to persist a result. Let's discuss this further.
+
 2. **Do hooks need a manifest?** Default is no — discovery by filesystem, attributes by git config — because
    `parseMetadata` is hand-rolled `key: value` and `go.mod` has no YAML or TOML. Worth revisiting only if
    per-hook timeouts or per-hook blocking are actually wanted.
@@ -130,11 +132,11 @@ alteration of the contract, but gives clients a way to persist a result. Let's d
 `mise run check` (gofmt, `go vet`, sharded suite) run three times on this branch, the most recent
 immediately before this handoff. All three exited 0.
 
-| Run | Duration | What it did |
-| --- | --- | --- |
-| first | 77s | executed the suite: gofmt clean, `go vet` clean, 35 shards reported `ok`, none failed, across 15 packages |
-| second | 16s | all 35 shard results from Go's test cache, 0 failures |
-| third | 16s | same — 35 `ok` on `(cached)` lines, 0 failures |
+| Run    | Duration | What it did                                                                                               |
+| ------ | -------- | --------------------------------------------------------------------------------------------------------- |
+| first  | 77s      | executed the suite: gofmt clean, `go vet` clean, 35 shards reported `ok`, none failed, across 15 packages |
+| second | 16s      | all 35 shard results from Go's test cache, 0 failures                                                     |
+| third  | 16s      | same — 35 `ok` on `(cached)` lines, 0 failures                                                            |
 
 A cached pass is a real pass by Go's own definition: identical inputs, so the recorded result still holds.
 It is not 35 fresh executions, so both are stated rather than the flattering one. What makes the two cached
@@ -169,29 +171,31 @@ then trailers as separate paragraphs. `lifecycle.parseTrailers` (`internal/lifec
 handed git's own `%(trailers:only,unfold)` — so git, not git-pair, decides which lines are trailers — and on
 duplicates it keeps the **first** value it sees (`:724`). I had assumed the risk was body text shadowing a
 verdict; git's paragraph rule means the body never enters the block at all. The real risk is positional.
+
 > can a client artificially produce a new "paragraph" via newlines, or what makes a paragraph a paragraph
-in git's eyes?
+> in git's eyes?
 
 **Five crafted markers, measured.** Each a `git-pair: ready` marker, varying only what is appended:
 
-| Appended | git's extracted block | Derived | |
-| --- | --- | --- | --- |
-| nothing | real trailers | `READY` | control |
-| prose below the block, blank-line separated | **only the prose** | `WORKING` | real trailers evicted |
-| `Review-Hook-Result: pass suite 41s` at block end | all three | `READY` | safe |
-| `Review-State: working` **after** the real one | all three | `READY` | cannot forge from below |
-| `Review-State: working` **before** the real one | all three | `WORKING` | forges |
+| Appended                                          | git's extracted block | Derived   |                         |
+| ------------------------------------------------- | --------------------- | --------- | ----------------------- |
+| nothing                                           | real trailers         | `READY`   | control                 |
+| prose below the block, blank-line separated       | **only the prose**    | `WORKING` | real trailers evicted   |
+| `Review-Hook-Result: pass suite 41s` at block end | all three             | `READY`   | safe                    |
+| `Review-State: working` **after** the real one    | all three             | `READY`   | cannot forge from below |
+| `Review-State: working` **before** the real one   | all three             | `WORKING` | forges                  |
 
 So your instinct holds, and for a better reason than "it isn't a schema change": **appending at the end of
 the block cannot forge anything**, because first-wins protects the keys already there. The same two keys in
 the opposite order flip the state, so the append position is the security property, not cosmetics.
 
 **The trap is the obvious implementation.** Row two is what a script does naturally — `printf '%s\n' "$out"
->> $MSG` — and it silently kills the changeset. Nothing errors, `change ready` still exits 0 because the
-commit it meant to write was written, `queue` stops listing the changeset, and `status` says `WORKING`. A
+
+> > $MSG`— and it silently kills the changeset. Nothing errors,`change ready`still exits 0 because the
+commit it meant to write was written,`queue`stops listing the changeset, and`status`says`WORKING`. A
 repository can sit on a marker that derives nothing, with an empty queue as the only symptom. `Render`'s own
-comment already warns about this failure class from the subject-line end; this is the same collapse from the
-other end.
+> > comment already warns about this failure class from the subject-line end; this is the same collapse from the
+> > other end.
 
 **What that does to the design.** The append becomes git-pair's job, not the hook's — `Message` gains a field
 rendered after `Trailers` in the same paragraph, which makes the eviction case unreachable instead of
@@ -205,6 +209,7 @@ true — the same trick `Review-Head` exists for.
 client-appended keys. Everything above is about persisting a result; the moment the gate branches on one, it
 becomes part of the contract and "not a schema change" stops being true of it. That's a line between two
 different things, not a veto on the mechanism.
+
 > sure and the escape hatch if a customer really wants to do this is have their pre-check hook check that custom trailer yes?
 
 **Also checked, since it was adjacent:** can reviewer `-m` text reach that parser? It sits in `Message.Body`,
@@ -223,18 +228,18 @@ text; the full table is in the research note, and git's rule reads:
 2. Every line in it must be trailer-shaped (`key: value`) or a continuation (leading whitespace). One line
    that is neither removes the **entire** block, including the real trailers above it.
 3. Key case is not significant — lowercase `note: all good` was extracted as a trailer.
-4. A continuation appends to the *preceding* trailer's value.
+4. A continuation appends to the _preceding_ trailer's value.
 
 The four rows that matter:
 
-| Appended | git's block | Derived |
-| --- | --- | --- |
-| `Hook-Test: pass suite` | all three | `READY` |
-| `all tests passed` (no colon) | **empty** | `WORKING` |
-| <code>␣more indented detail</code> | real trailers, `Review-Changeset` value now `cs-q5 more indented detail` | `WORKING` |
-| blank line, then `Hook-Test: pass suite` | only `Hook-Test` | `WORKING` |
+| Appended                                 | git's block                                                              | Derived   |
+| ---------------------------------------- | ------------------------------------------------------------------------ | --------- |
+| `Hook-Test: pass suite`                  | all three                                                                | `READY`   |
+| `all tests passed` (no colon)            | **empty**                                                                | `WORKING` |
+| <code>␣more indented detail</code>       | real trailers, `Review-Changeset` value now `cs-q5 more indented detail` | `WORKING` |
+| blank line, then `Hook-Test: pass suite` | only `Hook-Test`                                                         | `WORKING` |
 
-That middle row is the one I had not considered and the one worth your attention: the block still *lists*
+That middle row is the one I had not considered and the one worth your attention: the block still _lists_
 `Review-State` and `Review-Changeset`, so it looks healthy in `git log`, while the slug no longer matches and
 `parseEvent` (`lifecycle.go:377`) voids the marker. Three independent injections destroy a changeset this
 way, all of them silent, all of them with `change ready` exiting 0.

@@ -14,24 +14,24 @@ each.
 
 ## What changed
 
--   `internal/cli/review.go` — `a.submitReview` becomes the one path that records a verdict: stage, then
-    `pre-submit`, then the review commit, then `post-submit`. It is injected into the review screen through
-    `tui.Options.Submit`, and `runReviewSubmit` calls it too. The screen's half is `a.screenSubmission`, which
-    adds the hook output to the refusal the screen shows (see *The screen owns the terminal*), and
-    `withHookText`, which caps what it appends.
--   `internal/cli/hooks.go` — `hookOutputLines` is now the one definition of a hook run's text, with
-    `replayHookOutput` writing it to stderr and `app.hookPresenter` diverting it to a caller that can render it.
--   `internal/tui/{session.go,tui.go}` — the screen submits through the injected path instead of calling
-    `reviewops.Submit` itself.
--   `internal/cli/hooks.go` — `firstFailureAt`, `refusedBySubmitHook`, and the `overridden` field; the
-    `active` flag is removed from `git pair hooks`.
--   `internal/hooks/hooks.go` — `PreSubmit`/`PostSubmit` documented as the reviewer's points; the `active`
-    set and `Active` deleted; the vocabulary comment rewritten for a complete set.
--   Docs: PRD §11.4 gains the reviewer subsection and the three reviewer variables; the README's `review
-    submit` and `hooks` rows and the skill's `references/cli.md` name the points and the flag.
--   Tests: `internal/cli/hooks_submit_test.go`, the screen's delegation assertion in
-    `internal/tui/submit_internal_test.go`, the refused-submission case beside it, and
-    `internal/cli/hooks_submit_internal_test.go` for the text the two surfaces share.
+- `internal/cli/review.go` — `a.submitReview` becomes the one path that records a verdict: stage, then
+  `pre-submit`, then the review commit, then `post-submit`. It is injected into the review screen through
+  `tui.Options.Submit`, and `runReviewSubmit` calls it too. The screen's half is `a.screenSubmission`, which
+  adds the hook output to the refusal the screen shows (see _The screen owns the terminal_), and
+  `withHookText`, which caps what it appends.
+- `internal/cli/hooks.go` — `hookOutputLines` is now the one definition of a hook run's text, with
+  `replayHookOutput` writing it to stderr and `app.hookPresenter` diverting it to a caller that can render it.
+- `internal/tui/{session.go,tui.go}` — the screen submits through the injected path instead of calling
+  `reviewops.Submit` itself.
+- `internal/cli/hooks.go` — `firstFailureAt`, `refusedBySubmitHook`, and the `overridden` field; the
+  `active` flag is removed from `git pair hooks`.
+- `internal/hooks/hooks.go` — `PreSubmit`/`PostSubmit` documented as the reviewer's points; the `active`
+  set and `Active` deleted; the vocabulary comment rewritten for a complete set.
+- Docs: PRD §11.4 gains the reviewer subsection and the three reviewer variables; the README's `review
+submit` and `hooks` rows and the skill's `references/cli.md` name the points and the flag.
+- Tests: `internal/cli/hooks_submit_test.go`, the screen's delegation assertion in
+  `internal/tui/submit_internal_test.go`, the refused-submission case beside it, and
+  `internal/cli/hooks_submit_internal_test.go` for the text the two surfaces share.
 
 ## Design decisions
 
@@ -95,71 +95,71 @@ of it is readable.
 
 ## Validation
 
--   `go build ./...` clean; `gofmt -l internal cmd` empty; `go vet ./internal/...` clean.
--   `go test ./internal/hooks/ ./internal/tui/` green, and the new CLI cases green: the hook sees the
-    reviewer's edit in the index; a body policy blocks `--approve` and accepts the corrected body; the
-    reviewer environment names the outcome, the reviewed head, and the body file; a refusal says the content is
-    still staged; `--allow-hook-failure` records the verdict and reports `overridden`; a per-clone hook runs
-    where nothing is tracked; a tracked hook stays skipped until accepted and then runs; both roots run in
-    tracked-then-clone order; a failing `post-submit` exits nonzero with the approval standing.
--   `go test ./internal/tui/ -run TestSubmit` green, including the new assertion that the screen called the
-    injected path exactly once with the outcome the reviewer pressed.
--   `TestRefusedSubmissionStaysOpenWithTheReason` (screen layer): a submission whose injected path returns an
-    error leaves the session open with the file list back, submits nothing, and renders the whole refusal — the
-    hook name, the point, and the staged-content clause — rather than swallowing a sentence too long for a
-    status line. `TestHookOutputLinesIsTheTextBothSurfacesShare`,
-    `TestScreenRefusalCarriesTheReasonTheHookGave` and `TestLongHookOutputKeepsItsTail` (cli layer): what a
-    hook's text is, that the screen's refusal carries both the sentence and the text, and that the cap keeps the
-    tail and says where the rest is.
--   Manual, over a pty sized 32×110, in a fixture whose `pre-submit` hook prints to both streams and exits 1:
-    `git pair review submit --block` printed `running the suite` and `suite red: 2 failures` and exited 1 with
-    nothing committed; `git pair review` then `s` then `b` showed the refusal sentence with `the hook printed:`
-    and both lines beneath it, kept the file list and diff on screen, and `q` left the command at exit 0 with no
-    review commit. The same fixture against the binary from before this change showed only the sentence in the
-    status area, with the hook's text arriving mid-frame and gone on the next repaint — which is the defect the
-    change is for, and why the transcript above is quoted rather than described.
--   `go test ./internal/cli/ -run Docs` and `-run TestTheCommandTreeIsTheCommandSet` green.
--   `mise run check` exited **0** on the head this changeset carries after the feedback round, with the test
-    cache cleared first so no shard was answered from an earlier tree: 36 test shards ok, none served from
-    cache, no `FAIL`, and its `gofmt -l internal cmd` step reported nothing. The run that covered the original
-    submission reported the same 36 ok with 31 shards served from cache.
--   Restacked onto M1's answers to the reviewer's feedback, twice — once for the two questions, once for the
-    `trust_state` work that came out of the vendoring discussion — and re-run each time: exit 0, 36 shards ok,
-    no `FAIL`, `gofmt` silent. Neither answer bears on this milestone's behaviour; both were answered from what
-    the code already does, so no test changed. The reviewer-side trust rule did get sharper as a side effect of
-    the second answer: a reviewer reviewing a repository they cannot edit is exactly the person who may be
-    sitting on a `changed` tracked tree they never read, which is why the open question about unaccepted tracked
-    hooks now names the reviewer. The two documentation rows collided with M1's new trust-state wording during
-    the restack and carry both texts.
--   Restacked onto `29f49e8`, the landing of M3, and re-run: exit 0, 90 checks, no `FAIL`, `gofmt` silent, and
-    the two-level stack still measures 49 invocations against the ceiling of 50. Two files collided, both
-    because M3 and the landing-advice work landed under this branch while it was in review. `internal/cli/review.go`
-    — the submitted-review next step now comes from the landing contract (`nextActionFor(result.Outcome, lc)`,
-    which reads where the work is going rather than trusting the recorded base), and keeps this milestone's
-    `hooks` and `overridden` keys beside it. `internal/cli/root.go` — the app carries both the per-run
-    `hooks.Resolution` M3 added and this milestone's `hookPresenter`. Neither collision changed behaviour, and
-    both texts are carried.
--   The rewrite spent the approval that stood before it: `check` reported `review b5fc4a0 reviewed f7c7bbf,
-    which is no longer in this history`, and separately that with the parent landed the contribution "was never
-    read". The approval beside this head is the one submitted after the restack.
+- `go build ./...` clean; `gofmt -l internal cmd` empty; `go vet ./internal/...` clean.
+- `go test ./internal/hooks/ ./internal/tui/` green, and the new CLI cases green: the hook sees the
+  reviewer's edit in the index; a body policy blocks `--approve` and accepts the corrected body; the
+  reviewer environment names the outcome, the reviewed head, and the body file; a refusal says the content is
+  still staged; `--allow-hook-failure` records the verdict and reports `overridden`; a per-clone hook runs
+  where nothing is tracked; a tracked hook stays skipped until accepted and then runs; both roots run in
+  tracked-then-clone order; a failing `post-submit` exits nonzero with the approval standing.
+- `go test ./internal/tui/ -run TestSubmit` green, including the new assertion that the screen called the
+  injected path exactly once with the outcome the reviewer pressed.
+- `TestRefusedSubmissionStaysOpenWithTheReason` (screen layer): a submission whose injected path returns an
+  error leaves the session open with the file list back, submits nothing, and renders the whole refusal — the
+  hook name, the point, and the staged-content clause — rather than swallowing a sentence too long for a
+  status line. `TestHookOutputLinesIsTheTextBothSurfacesShare`,
+  `TestScreenRefusalCarriesTheReasonTheHookGave` and `TestLongHookOutputKeepsItsTail` (cli layer): what a
+  hook's text is, that the screen's refusal carries both the sentence and the text, and that the cap keeps the
+  tail and says where the rest is.
+- Manual, over a pty sized 32×110, in a fixture whose `pre-submit` hook prints to both streams and exits 1:
+  `git pair review submit --block` printed `running the suite` and `suite red: 2 failures` and exited 1 with
+  nothing committed; `git pair review` then `s` then `b` showed the refusal sentence with `the hook printed:`
+  and both lines beneath it, kept the file list and diff on screen, and `q` left the command at exit 0 with no
+  review commit. The same fixture against the binary from before this change showed only the sentence in the
+  status area, with the hook's text arriving mid-frame and gone on the next repaint — which is the defect the
+  change is for, and why the transcript above is quoted rather than described.
+- `go test ./internal/cli/ -run Docs` and `-run TestTheCommandTreeIsTheCommandSet` green.
+- `mise run check` exited **0** on the head this changeset carries after the feedback round, with the test
+  cache cleared first so no shard was answered from an earlier tree: 36 test shards ok, none served from
+  cache, no `FAIL`, and its `gofmt -l internal cmd` step reported nothing. The run that covered the original
+  submission reported the same 36 ok with 31 shards served from cache.
+- Restacked onto M1's answers to the reviewer's feedback, twice — once for the two questions, once for the
+  `trust_state` work that came out of the vendoring discussion — and re-run each time: exit 0, 36 shards ok,
+  no `FAIL`, `gofmt` silent. Neither answer bears on this milestone's behaviour; both were answered from what
+  the code already does, so no test changed. The reviewer-side trust rule did get sharper as a side effect of
+  the second answer: a reviewer reviewing a repository they cannot edit is exactly the person who may be
+  sitting on a `changed` tracked tree they never read, which is why the open question about unaccepted tracked
+  hooks now names the reviewer. The two documentation rows collided with M1's new trust-state wording during
+  the restack and carry both texts.
+- Restacked onto `29f49e8`, the landing of M3, and re-run: exit 0, 90 checks, no `FAIL`, `gofmt` silent, and
+  the two-level stack still measures 49 invocations against the ceiling of 50. Two files collided, both
+  because M3 and the landing-advice work landed under this branch while it was in review. `internal/cli/review.go`
+  — the submitted-review next step now comes from the landing contract (`nextActionFor(result.Outcome, lc)`,
+  which reads where the work is going rather than trusting the recorded base), and keeps this milestone's
+  `hooks` and `overridden` keys beside it. `internal/cli/root.go` — the app carries both the per-run
+  `hooks.Resolution` M3 added and this milestone's `hookPresenter`. Neither collision changed behaviour, and
+  both texts are carried.
+- The rewrite spent the approval that stood before it: `check` reported `review b5fc4a0 reviewed f7c7bbf,
+which is no longer in this history`, and separately that with the parent landed the contribution "was never
+  read". The approval beside this head is the one submitted after the restack.
 
 ## Known limitations
 
--   A reviewer who submits from a screen opened by another caller of `tui.Run` with no `Submit` gets a status
-    line and no verdict. The CLI is the only caller today; the nil case exists so a future caller fails
-    visibly rather than submitting through a path nobody hooked.
--   `GIT_PAIR_REVIEW_BODY_FILE` is a path to a file git-pair removes when the command returns. A hook that
-    needs the body after the fact has to copy it, which is what a hook that wants to keep it should do anyway.
--   There is still no results store, so `git pair hooks` reports configuration rather than the last result of
-    each hook.
+- A reviewer who submits from a screen opened by another caller of `tui.Run` with no `Submit` gets a status
+  line and no verdict. The CLI is the only caller today; the nil case exists so a future caller fails
+  visibly rather than submitting through a path nobody hooked.
+- `GIT_PAIR_REVIEW_BODY_FILE` is a path to a file git-pair removes when the command returns. A hook that
+  needs the body after the fact has to copy it, which is what a hook that wants to keep it should do anyway.
+- There is still no results store, so `git pair hooks` reports configuration rather than the last result of
+  each hook.
 
 ## Open questions
 
--   M1's question stays open: should a repository that has committed tracked hooks refuse outright in a clone
-    that has not accepted them, instead of proceeding with a note? At this point it has a reviewer-side edge:
-    a reviewer who never ran `--trust` reviews without the repository's own checks having run, and the stderr
-    note is the only trace.
--   M5 has to settle the PRD §26 sentence about git verbs inside hooks.
+- M1's question stays open: should a repository that has committed tracked hooks refuse outright in a clone
+  that has not accepted them, instead of proceeding with a note? At this point it has a reviewer-side edge:
+  a reviewer who never ran `--trust` reviews without the repository's own checks having run, and the stderr
+  note is the only trace.
+- M5 has to settle the PRD §26 sentence about git verbs inside hooks.
 
 ## Addressed feedback
 
@@ -183,14 +183,14 @@ written — `git log` still ends at the implementation commit. Leaving with `q` 
 
 Two decisions are in that shape, and the reviewer's question is the reason both are written down.
 
--   **The refusal ends the submission, not the session.** At the moment the hook refuses, the reviewer has work
-    in progress: comments typed into threads, an ABOUT edit, source annotations staged for the review commit.
-    An outcome key that closed the screen would discard it, and the reviewer would start the review again from
-    nothing. What was refused is the verdict, so what stops is the verdict.
--   **The exit code belongs to the command, not the screen.** `review submit --block` ran, was refused, and says
-    so to the shell with 1 — that is what automation reads. `q` is the ordinary way out of a screen that looked
-    at a changeset and recorded nothing, and a nonzero code for it would report a business refusal that nobody
-    made. `review submit --json` is the surface for a script that needs the hooks' outcomes too.
+- **The refusal ends the submission, not the session.** At the moment the hook refuses, the reviewer has work
+  in progress: comments typed into threads, an ABOUT edit, source annotations staged for the review commit.
+  An outcome key that closed the screen would discard it, and the reviewer would start the review again from
+  nothing. What was refused is the verdict, so what stops is the verdict.
+- **The exit code belongs to the command, not the screen.** `review submit --block` ran, was refused, and says
+  so to the shell with 1 — that is what automation reads. `q` is the ordinary way out of a screen that looked
+  at a changeset and recorded nothing, and a nonzero code for it would report a business refusal that nobody
+  made. `review submit --json` is the surface for a script that needs the hooks' outcomes too.
 
 The question also exposed a defect, and that is the part that changed code. Before this change the hook's own
 text went to stderr while the screen held the terminal. The same fixture produced this, in the middle of the

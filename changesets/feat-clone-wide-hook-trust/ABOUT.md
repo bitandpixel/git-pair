@@ -23,7 +23,7 @@ asked, and thirteen worktrees made it get asked thirteen times.
   and `CloneRootDir` resolves through the same shared directory, so a script attached from any worktree is the
   clone's script.
 - `internal/cli/hooks.go` — `--trust` and `--decline` print the path they actually wrote to and say the answer is
-  the clone's; the `changed` sentence says what the clone *recorded* rather than what the reader accepted; the
+  the clone's; the `changed` sentence says what the clone _recorded_ rather than what the reader accepted; the
   command's help says both roots are the clone's.
 - `internal/hooks/trust_test.go` (new) — six tests: the record's location, the set under two versions, the
   cancellation rule, the bound, what the hash is allowed to depend on, and the shared client root.
@@ -53,7 +53,7 @@ it is the one thing here that relaxes an invariant, so it is the place to look h
 single-slot reading: with one hash stored, the mere presence of an acceptance made content that was not that hash
 report as `changed`, so a person who declined the tree in front of them could be told to re-read something they
 had just read. Membership removes that reading — an entry answers for the content it names and for no other — so
-what has to be cleared is the *same hash* in the other record, which is the actual contradiction. Clearing the
+what has to be cleared is the _same hash_ in the other record, which is the actual contradiction. Clearing the
 whole file is not free any more either: a person declining the branch they are standing on would switch off, in
 every other worktree, the check somebody accepted on trunk. The test that pinned the old rule still pins its
 purpose — the state after declining is `declined`, not `changed` — and now also pins that the older acceptance
@@ -61,13 +61,13 @@ survives.
 
 **The hash covers the executable bit, not the permission set.** Found while building the worktree tests, and the
 reason the per-worktree behaviour was worse than a nuisance: git checks a file out at the machine's umask (0664
-here) while an editor, `tar`, or a fixture writes one at 0644, so two worktrees of *one commit*, holding one
+here) while an editor, `tar`, or a fixture writes one at 0644, so two worktrees of _one commit_, holding one
 byte-for-byte script, hashed apart. Every new worktree therefore arrived looking like content that had moved under
 an acceptance. The executable bit stays, because that is the bit that changes what the repository is asking to
 run; who may write the file is a fact about the machine.
 
 **`commondir` rather than `git rev-parse --git-common-dir`.** The plain clone is the case that must not pay: it
-has no `commondir` file, because its git directory *is* the common one, and `CommonDir` returns false without
+has no `commondir` file, because its git directory _is_ the common one, and `CommonDir` returns false without
 touching git, so the change costs zero extra invocations on the path every author and every CI job walks — which
 is the quantity `TestCheckAsksTheHookQuestionsOncePerRun` guards. A linked worktree pays one file read beside the
 records it was going to read anyway. A checkout whose git directory was pointed at by hand has no such file and
@@ -87,7 +87,7 @@ hand-off can happen.
 **The client's own root is the clone's too.** `CloneRootDir` resolves through the same shared directory, so a
 check a reviewer attaches to a repository they cannot edit is attached once rather than once per checkout. This
 was left as an open question in the first revision and taken up on review: the argument for keeping it per
-worktree — that a directory is a place to attach something to *this* checkout — is weaker than the argument
+worktree — that a directory is a place to attach something to _this_ checkout — is weaker than the argument
 against, which is asking the same act twice for no extra protection. The honest cost is named in Known
 limitations: a directory shared by the clone changes which scripts run in a checkout, and that is a bigger claim
 than moving a record file. It is bounded by what the root already is — your own file, outside the working tree,
@@ -120,7 +120,7 @@ to make.
   - `TestTreeHashCoversContentAndExecutabilityOnly` — 0644/0600/0664 hash alike, 0755/0775 hash alike, exec and
     non-exec differ, and an edit to the bytes still invalidates.
   - `TestHookTrustIsRecordedForTheWholeClone` — `--trust` in one worktree, then `hooks --json` says
-    `trust_state: accepted` in the main checkout *and* in a worktree created afterwards, and `git status` stays
+    `trust_state: accepted` in the main checkout _and_ in a worktree created afterwards, and `git status` stays
     clean.
 - Two mutation checks, each reverted afterwards with `git status` and `gofmt -l` clean:
   - Making `RecordDir` return the git directory it was given — the behaviour before this change — fails
@@ -144,7 +144,7 @@ to make.
   acceptances taken before this ship read as `changed` once. That is the mechanism working — the hash it prints
   names bytes it has not hashed before — but it is a one-time cost a reviewer should not be surprised by, and
   cadence's not-yet-adopted hook means no consumer is mid-flight.
-- A `changed` report prints the *newest* hash in the set, which may name a version another worktree recorded. The
+- A `changed` report prints the _newest_ hash in the set, which may name a version another worktree recorded. The
   sentence now says what the clone recorded rather than what the reader accepted, which is the true statement; it
   still cannot say who, or where.
 - `CommonDir` trusts git's `commondir` file. A hand-pointed `GIT_DIR`, or a worktree directory copied rather than
@@ -161,15 +161,15 @@ to make.
 
 Review 7080856 (feedback) left three notes.
 
-- *"we dont really have adoption yet so you can simplify and remove this read fallback"*, on the compatibility
+- _"we dont really have adoption yet so you can simplify and remove this read fallback"_, on the compatibility
   read. Removed: `readPositions`, `TrustAt`, `AcceptedAt`, `DeclinedAt` and `recordPosition` all take one
   directory now, `Resolution` memoizes one string instead of a slice, and `TestLegacyPerWorktreeRecordStillAnswers`
   is gone. The design paragraph above says why there is nothing to be compatible with.
-- *"yes that makes sense to me, for it to be shared by the whole clone"*, on the open question about the
+- _"yes that makes sense to me, for it to be shared by the whole clone"_, on the open question about the
   per-clone root. Done: `CloneRootDir` resolves through `RecordDir`, the help text and both tables name
   `<git-common-dir>`, and `TestCloneRootIsSharedByEveryWorktree` pins that a script attached from one worktree is
   discovered from the other and that the two checkouts agree on the path.
-- *"recorded newer seems best"*, on how `changed` should read. The three sentences that said "since you accepted
+- _"recorded newer seems best"_, on how `changed` should read. The three sentences that said "since you accepted
   them" / "since this clone accepted them" now say "since this clone recorded them", with the parenthetical
   labelled `recorded`. The assertions that guarded them were updated to the new wording rather than relaxed: they
   still require the note and the refusal to name the move and print both hashes.

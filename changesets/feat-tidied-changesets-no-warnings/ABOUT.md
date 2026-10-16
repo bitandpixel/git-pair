@@ -60,13 +60,13 @@ repeat `ls-tree` inside it (the active listing, to subtract) is served by the me
 
 Two Go fixtures in `internal/cli/landed_test.go`:
 
-| Fixture | Asserts |
-|---|---|
-| `TestATidiedLandingIsNotReportedUnreviewed` | the heading is there before the tidy; after the tidy reaches `main` it is gone from `queue`, from `queue --json`, and from `status` on the destination — which keeps its exit 2 — while `status --changeset` still says `landed: true`, `reviewed: false` |
-| `TestATidyThatHasNotReachedTheDestinationIsStillAFinding` | the tidy commit exists on `tidy-up`, unmerged, and `queue` still reports the landing in both modes |
+| Fixture                                                   | Asserts                                                                                                                                                                                                                                                   |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TestATidiedLandingIsNotReportedUnreviewed`               | the heading is there before the tidy; after the tidy reaches `main` it is gone from `queue`, from `queue --json`, and from `status` on the destination — which keeps its exit 2 — while `status --changeset` still says `landed: true`, `reviewed: false` |
+| `TestATidyThatHasNotReachedTheDestinationIsStillAFinding` | the tidy commit exists on `tidy-up`, unmerged, and `queue` still reports the landing in both modes                                                                                                                                                        |
 
 `internal/changeset/landed_test.go` gains `TestTidiedIDsNamesOnlyWhatHasBeenFiledAway`, which builds the
-three cases the definition turns on — moved, never moved, and moved *while the directory in place stays* —
+three cases the definition turns on — moved, never moved, and moved _while the directory in place stays_ —
 plus a directory nested under the namespace under a name `ValidateID` refuses, and
 `TestTidiedIDsOfARevisionWithNothing`. `TestLandedIDsCountAChangesetOnceInEitherSpelling` still passes
 against the rewritten `LandedIDs`.
@@ -92,7 +92,7 @@ report were the common carriers of the wrong wording. Worth its own change: `Squ
 shape of the landing commit, not by where trunk's tip happens to be.
 
 **Filing is not recorded as an acknowledgement.** The rule reads the tree, not the tidy commit. A repository
-that wants to see *who* filed what reads the rename commit itself — `git log --changesets/.landed/<id>`. No
+that wants to see _who_ filed what reads the rename commit itself — `git log --changesets/.landed/<id>`. No
 marker was added: a marker would be a new claim about a landing, and PRD §13.4 keeps git-pair out of the
 business of writing durable statements about finished work.
 

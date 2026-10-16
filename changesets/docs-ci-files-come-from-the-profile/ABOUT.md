@@ -5,7 +5,7 @@
 The layer below this one made `.github/workflows/git-pair-check.yml`, `.github/workflows/git-pair-integrate.yml`,
 `scripts/ci/git-pair-integrate.sh` and `scripts/ci/install-git-pair.sh` installed bytes — written by `install`,
 byte-compared by `doctor`. The documentation still described them as files this repository wrote, and PRD invited a
-reader who wanted that pipeline to *copy one*. That advice is how the shape went stale in the first place: the
+reader who wanted that pipeline to _copy one_. That advice is how the shape went stale in the first place: the
 library's own copy of the merge job had a `timeout-minutes` GitHub would not schedule and an installer that never
 told anyone where to put the binary, and both survived every text assertion pointed at them. A copy is the artifact
 that drifts; the profile is the thing that gets fixed.
@@ -17,10 +17,10 @@ A reader can tell, from the page they are on, which bytes they are allowed to ed
 README's landing table gains a **whose** column, and now lists all five files rather than three — the four the
 profile installs, and the replay this repository keeps:
 
-| file | whose |
-| --- | --- |
-| `.github/workflows/git-pair-check.yml`, `git-pair-integrate.yml`, `scripts/ci/git-pair-integrate.sh`, `scripts/ci/install-git-pair.sh` | the profile's |
-| `scripts/gates/ci-integrate.sh` | this repository's |
+| file                                                                                                                                   | whose             |
+| -------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `.github/workflows/git-pair-check.yml`, `git-pair-integrate.yml`, `scripts/ci/git-pair-integrate.sh`, `scripts/ci/install-git-pair.sh` | the profile's     |
+| `scripts/gates/ci-integrate.sh`                                                                                                        | this repository's |
 
 README's CI paragraph used to say `.github/workflows/ci.yml` runs the ladder "— one line, because the task is the
 definition". It now names `git-pair-check.yml`, and says what both files actually do: neither repeats the command,

@@ -18,7 +18,7 @@ themselves in one column.
 ## What changed
 
 - `internal/git/git.go`: `DirtyPaths`, and `parseStatusZ` beside it. One `git status --porcelain -z
-  --untracked-files=all` answers the question for every path at once; the parse handles the record that
+--untracked-files=all` answers the question for every path at once; the parse handles the record that
   `--porcelain` writes for a rename or a copy, where the origin path follows the destination as a field of
   its own with no status in front of it.
 - `internal/tui/session.go`: `File.Dirty`, set in `scan` from `dirtyPaths` — which asks git once per scan, and
@@ -72,7 +72,7 @@ the name is the only difference.
 
 **The gutter keeps the review answer, and the name says whose change it is.** The two states are independent
 and a row has to be able to say both, so the gutter stays the reviewed column — `✓`, `○`, `◐` — and `✱`
-replaces only the marks that say "not read". A file that is reviewed *and* written into keeps its tick,
+replaces only the marks that say "not read". A file that is reviewed _and_ written into keeps its tick,
 because the tick is the answer the counter is made of and losing it would move information out of the one
 place that counts it. That combination is not a corner case: a mark is keyed on the file's diff within the
 span, both of the span's ends are commits, and so an edit never invalidates a mark — comment-then-mark is the

@@ -10,14 +10,14 @@ the flag's own answer is reported.
 
 ## What changed
 
-| File | Change |
-| --- | --- |
-| `internal/cli/root.go` | `DefaultBranchEnv = "GIT_PAIR_DEFAULT_BRANCH"` beside `NoCacheEnv`, `defaultBranchOverride` (flag, then environment, empty is not set), `resolveDefaultBranch` as the single place a command asks the destination question, `noteDefaultBranchEnv` for the once-per-run stderr note, and `--default-branch`'s help text names the variable (built from the constant, so help and code cannot drift) |
-| `internal/changeset/resolve.go` | `DefaultBranchEnvironment = "env"` added to the source vocabulary, with the reason a caller is allowed to set `Source` at all; both `ErrNoDefaultBranch` refusals now name the variable beside the flag |
-| `internal/cli/{init,queue,status,tidy}.go` | every destination resolution goes through `a.resolveDefaultBranch`; `defaultBase` became a method on `app` so `init`'s inferred base follows the same rule as every other command's |
-| `internal/cli/default_branch_env_test.go` | the environment form: it supplies the destination and reports `env`, the flag outranks it and silences the note, an empty value is not set, a value that does not resolve is refused with its source named, it replaces the flag in a one-branch CI checkout, and the name in the code is the name README and the skill teach |
-| `README.md` | the flag section gains the variable's paragraph, the CI runner paragraph no longer says the command never reads it, and the troubleshooting entry for `cannot tell which branch is the integration branch` offers it |
-| `skills/git-pair/SKILL.md`, `skills/git-pair/references/cli.md` | the flag bullet, the `default_branch_source` value list (`flag`, `env`, `origin-head`, `sole-candidate`), and the skill's CI sentence |
+| File                                                            | Change                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `internal/cli/root.go`                                          | `DefaultBranchEnv = "GIT_PAIR_DEFAULT_BRANCH"` beside `NoCacheEnv`, `defaultBranchOverride` (flag, then environment, empty is not set), `resolveDefaultBranch` as the single place a command asks the destination question, `noteDefaultBranchEnv` for the once-per-run stderr note, and `--default-branch`'s help text names the variable (built from the constant, so help and code cannot drift) |
+| `internal/changeset/resolve.go`                                 | `DefaultBranchEnvironment = "env"` added to the source vocabulary, with the reason a caller is allowed to set `Source` at all; both `ErrNoDefaultBranch` refusals now name the variable beside the flag                                                                                                                                                                                             |
+| `internal/cli/{init,queue,status,tidy}.go`                      | every destination resolution goes through `a.resolveDefaultBranch`; `defaultBase` became a method on `app` so `init`'s inferred base follows the same rule as every other command's                                                                                                                                                                                                                 |
+| `internal/cli/default_branch_env_test.go`                       | the environment form: it supplies the destination and reports `env`, the flag outranks it and silences the note, an empty value is not set, a value that does not resolve is refused with its source named, it replaces the flag in a one-branch CI checkout, and the name in the code is the name README and the skill teach                                                                       |
+| `README.md`                                                     | the flag section gains the variable's paragraph, the CI runner paragraph no longer says the command never reads it, and the troubleshooting entry for `cannot tell which branch is the integration branch` offers it                                                                                                                                                                                |
+| `skills/git-pair/SKILL.md`, `skills/git-pair/references/cli.md` | the flag bullet, the `default_branch_source` value list (`flag`, `env`, `origin-head`, `sole-candidate`), and the skill's CI sentence                                                                                                                                                                                                                                                               |
 
 ## Design decisions
 
@@ -63,7 +63,7 @@ the flag's own answer is reported.
 - **What that option risks, and what bounds it.** The risk is a durable claim written by an inherited
   value: a stale export, and `CHANGESET.yaml` records the wrong destination. Three things keep it from being
   quiet. The run says it at the moment it happens — `integration branch master comes from
-  $GIT_PAIR_DEFAULT_BRANCH` is printed before `base: master (pass --base to choose a different ref)`. Then
+$GIT_PAIR_DEFAULT_BRANCH` is printed before `base: master (pass --base to choose a different ref)`. Then
   `status` prints both sides, the recorded `base` and the `default_branch` it measured against with
   `default_branch_source: "env"`, so a wrong record contradicts its own output. And the correction already
   exists: `git pair init --base <ref> --set-base`, with `change stack` for a stack. The option that removes
@@ -95,7 +95,7 @@ the flag's own answer is reported.
   in provenance.
 - Manual `init` in a repository holding `main` and `master` on a fresh branch: with
   `GIT_PAIR_DEFAULT_BRANCH=refs/heads/master` the run prints the note first, then `base: master (pass --base
-  to choose a different ref)`, and `CHANGESET.yaml` records `base: master`; `status --json` on that
+to choose a different ref)`, and `CHANGESET.yaml` records `base: master`; `status --json` on that
   changeset reports `default_branch: "master"` with `default_branch_source: "env"`. That is the state the
   two design decisions above weigh, observed rather than assumed.
 - `mise run check` (gofmt, `go vet ./...`, the sharded suite): passed.
@@ -106,7 +106,7 @@ the flag's own answer is reported.
 
 ## Known limitations
 
-- `default_branch_source` reports which source was *used*, not which were present. A run where the flag
+- `default_branch_source` reports which source was _used_, not which were present. A run where the flag
   overrode an exported variable is indistinguishable in the JSON from one where no variable was set. That
   is the shape the field already had (`flag` never said whether git could have answered), and a second
   field for "what else was there" would be a new contract rather than an extension of this one.

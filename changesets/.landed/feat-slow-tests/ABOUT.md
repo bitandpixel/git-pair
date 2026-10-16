@@ -36,7 +36,7 @@ subprocesses of pure set-up. The keys are constants this package owns, so they a
 
 **The pty walkthrough now stops reading an idle terminal.** It ran ~28 pty sessions and waited a fixed
 1s settle plus a fixed 0.8s tail on every one, which was ~42s of its 47s. Only `--settle` shortens now,
-and only on silence; the reasoning for why the *others* may not is in `## Design decisions`.
+and only on silence; the reasoning for why the _others_ may not is in `## Design decisions`.
 
 **`scripts/test-sharded.sh` runs the suite over several `go test` processes.** A shard is one `-run`
 regex over names read from `go test -list`, so the script keeps no list of its own and cannot drift from
@@ -97,12 +97,12 @@ shards landed within four seconds of each other (38.6 / 42.1 / 42.4). Carrying t
 the script has to invalidate.
 
 **Only `--settle` shortens, and that is the whole argument.** `pty-plain --after N` returns everything
-from keystroke N to the *end* of the capture, so a window is what a `refuse` check reads — "did this *not*
+from keystroke N to the _end_ of the capture, so a window is what a `refuse` check reads — "did this _not_
 paint from here on" — and a window shortened on silence can only ever make such a check pass more easily.
 The tail closes the last window, the per-keystroke `--gap` bounds the window a keystroke opens, and an
 explicit `~<seconds>` waits for a timer the harness cannot observe, so silence proves nothing there. All
 three stay fixed wall clock. `--settle` is the one window where shortening is defensible, because what it
-can lose is a late *second* frame rather than the first one those checks are about — and it is still a
+can lose is a late _second_ frame rather than the first one those checks are about — and it is still a
 trade, so the threshold is generous (0.4s) and `--settle` remains the ceiling.
 
 **No cache in `internal/git`.** A scoped read-only memo looked like the largest available win, and
@@ -118,15 +118,15 @@ commands that mutate at all       : 1164 of 1199
 ```
 
 The 22% collapses to 9% because most commands write something, and most duplicate pairs straddle that
-write — the code re-reads *because* it just changed the repository. For ~5s it would put two headline
+write — the code re-reads _because_ it just changed the repository. For ~5s it would put two headline
 behaviours at risk, both of which observe another process writing:
 
 - `change wait` polls `observeReview` → `SummarizeHEAD` (`internal/cli/change.go:850`). Without
   `--fetch` the review arrives from another clone, so nothing in this process would invalidate anything:
   the poll would never see it and would always time out.
-- `Session.CheckDrift` (`internal/tui/session.go:432`) asks where the span's endpoints point *now*,
+- `Session.CheckDrift` (`internal/tui/session.go:432`) asks where the span's endpoints point _now_,
   repeatedly, while a session is open. The walkthrough's `session drift
-  "!git update-ref refs/heads/probe HEAD,~3.5,r,q"` is that behaviour, checked.
+"!git update-ref refs/heads/probe HEAD,~3.5,r,q"` is that behaviour, checked.
 
 A memo on `Repo` cannot tell those apart from a one-shot `status`, because they use the same type the same
 way. The fix for the remaining 9% is to stop asking twice — resolve `HEAD` once and pass the SHA down
@@ -157,7 +157,7 @@ rather than a tuned optimum, and `GIT_PAIR_TEST_SHARDS` / `GIT_PAIR_TEST_WORKERS
   (the remote's answer beats a local `main` beside it), `TestDefaultBranchFallsBackAndRefuses` (sole
   origin branch, and two origin branches as a coin flip), and the two override cases — and by the new
   dangling-pointer test. Nothing in `resolve_test.go` or `internal/cli` asserts an exact spawn count that
-  this moves: `fetch_test.go`'s `+3` is a *difference* between two runs, so it is unchanged by both
+  this moves: `fetch_test.go`'s `+3` is a _difference_ between two runs, so it is unchanged by both
   commands getting cheaper.
 - Sharding's correctness argument is structural rather than observed: each shard is an ordinary
   single-process `go test`, and `GIT_PAIR_TEST_SHARDS=1` reproduces `go test ./...` exactly. Verified by
@@ -198,7 +198,7 @@ rather than a tuned optimum, and `GIT_PAIR_TEST_SHARDS` / `GIT_PAIR_TEST_WORKERS
   of the 2,554. `sessionFor` already builds a struct holding `head` for one caller — the question is
   whether that value should be threaded through the resolution and lifecycle code instead of each layer
   re-resolving it. That is worth about 3s and a fair amount of diff, so it is left here rather than done.
-- Is `internal/cli`'s 97s mostly *tests* or mostly one-time cost per process? Three shards of the same
+- Is `internal/cli`'s 97s mostly _tests_ or mostly one-time cost per process? Three shards of the same
   package sum to ~54s of reported test time against 97s serial, which does not add up, and the difference
   is unexplained. Per-test durations from `-v` sum to 70.5s against 97s of package time. Worth
   understanding before spending more on sharding, since it decides whether the floor is the tests or

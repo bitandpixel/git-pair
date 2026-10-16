@@ -65,13 +65,13 @@ not move; a handoff asks for the wheel back and a session with the setting off d
 End to end inside tmux 3.7c, with the wheel injected to a real client as SGR mouse input, and the
 pane read back with `capture-pane`:
 
-| case | result |
-| --- | --- |
-| six notches over the diff | last visible row went from `+added 0040` to `+added 0058` — 18 rows, six × three |
-| `z` overlay, six notches | scrolls the same way |
-| `git-pair.mouse false` | `mouse_any=0` in the pane, six notches changed nothing |
-| while `$GIT_EDITOR` held the terminal | `mouse_any=0`: the modes were released, so the child could take them |
-| after the editor exited | `mouse_any=1` and six notches scrolled 18 rows again — the `wheelBack` path |
+| case                                  | result                                                                           |
+| ------------------------------------- | -------------------------------------------------------------------------------- |
+| six notches over the diff             | last visible row went from `+added 0040` to `+added 0058` — 18 rows, six × three |
+| `z` overlay, six notches              | scrolls the same way                                                             |
+| `git-pair.mouse false`                | `mouse_any=0` in the pane, six notches changed nothing                           |
+| while `$GIT_EDITOR` held the terminal | `mouse_any=0`: the modes were released, so the child could take them             |
+| after the editor exited               | `mouse_any=1` and six notches scrolled 18 rows again — the `wheelBack` path      |
 
 The same probe is what produced the tmux facts in the README: the shipped root binding is
 `WheelUpPane → if-shell -F "#{||:#{alternate_on},#{pane_in_mode},#{mouse_any_flag}}" { send-keys -M }

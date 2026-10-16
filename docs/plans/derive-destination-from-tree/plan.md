@@ -80,13 +80,13 @@ comment justifying the guards at `:72-75`, the guards themselves at `:71` and `:
 #### Tasks
 
 - [x] `init`: when the base is not the integration branch (already refused at `init.go:190`) and the branch it
-  names carries exactly one unlanded changeset, record that id as `parent-changeset:`, reusing
-  `parentChangesetOn` (`init.go:193`) rather than writing a second lookup.
+      names carries exactly one unlanded changeset, record that id as `parent-changeset:`, reusing
+      `parentChangesetOn` (`init.go:193`) rather than writing a second lookup.
 - [x] `init`: two or more active changesets on that branch means no guess - leave the field empty and warn,
-  naming every candidate so the author can pass the right one.
+      naming every candidate so the author can pass the right one.
 - [x] `check`: one reason for a stacked changeset with no `parent-changeset:` whose base names a branch
-  carrying exactly one unlanded changeset. Print the id it would have recorded. Non-blocking: it is a
-  recommendation, and it must not gate a merge.
+      carrying exactly one unlanded changeset. Print the id it would have recorded. Non-blocking: it is a
+      recommendation, and it must not gate a merge.
 - [x] Confirm no read-time path calls the new inference: the inference lives in the writer, not the resolver.
 
 #### Discovery during execution
@@ -138,15 +138,15 @@ parses to a plain base, because `stackOf` has no branch to attach the id to.
 #### Tasks
 
 - [ ] At hop 0, test the base against both `LandedIDs` and `SlugFromBranch(base)`, keeping the `underNamespace`
-  guard the walked side keeps.
+      guard the walked side keeps.
 - [ ] On a landed match, continue the walk through that changeset's record (`base, parentChangeset = "", base`)
-  instead of returning the default branch, so a two-deep stack stops at the first live parent.
+      instead of returning the default branch, so a two-deep stack stops at the first live parent.
 - [ ] At hop 0, run the existence proof; on `ErrUnknownRevision` set `Unreachable` and fall back to the default
-  branch with `why = "default"`. Keep any other error an error.
+      branch with `why = "default"`. Keep any other error an error.
 - [ ] Give the override its own `DestinationSource` value, distinct from `"base"` and from `"default"`, so the
-  substitution is visible in `--json` and in the human surface.
+      substitution is visible in `--json` and in the human surface.
 - [ ] Feed `landingNextAction` (`status.go:659`) the computed destination rather than `s.cs.Base`
-  (`check.go:162`), so the sentence cannot go stale while the declaration is correct.
+      (`check.go:162`), so the sentence cannot go stale while the declaration is correct.
 - [ ] PRD: one passage naming the asymmetry with `BaseFor`, the two proofs, and the tie-break decision below.
 
 #### Verification
@@ -169,7 +169,7 @@ Cost is measured against `cost_test.go`, whose fixtures are extended rather than
 ## Risks
 
 - **Slug collisions.** `SlugFromBranch` collapse can match a changeset the author did not mean. Mitigation: the
-  rule prints the id it matched, and the hop-0 rule only ever *continues a walk* - it cannot invent a
+  rule prints the id it matched, and the hop-0 rule only ever _continues a walk_ - it cannot invent a
   destination that no tree fact supports.
 - **This changes a merge target for existing changesets.** A changeset whose base names a now-merged branch
   stops declaring against that branch. That is the intent, and it is the kind of change the release note and

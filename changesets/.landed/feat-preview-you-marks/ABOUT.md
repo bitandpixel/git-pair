@@ -99,7 +99,7 @@ changed under it. The count's slot is pinned by name and number together (`fresh
 (`internal/tui/change_internal_test.go`). It asserted that a file row shows none of the reviewer's text. The
 property it guards — the file row is the span's file and the box's About row is the document on disk, from
 two caches — is unchanged, and is now pinned the other way round: the file row shows the reviewer's line
-*as an edit* (`-# Changeset` and the marker), and the About row shows the same text as the document, with no
+_as an edit_ (`-# Changeset` and the marker), and the About row shows the same text as the document, with no
 marker on it because all of it is the reviewer's.
 
 **`mergeRows` is the merge** (`internal/tui/preview.go`). It walks the author's rows and the reviewer's, both
@@ -134,7 +134,7 @@ numbers belong to, and the working copy's numbering beside it would be two numbe
 of them a lie. The removed line, by contrast, is a line of that file and keeps its number.
 
 **The marker is the pane's word, in the pane's dim, and not a colour.** Colour is git's here. The colour
-argument would also be ambiguous in the other direction: in a pane that reads a file as a file, *every*
+argument would also be ambiguous in the other direction: in a pane that reads a file as a file, _every_
 marked line is the reviewer's, which is precisely the fact to state rather than leave to a palette.
 
 **The reviewer's own section leads the diff pane.** It is the section they came to check, and on a diff longer
@@ -202,7 +202,7 @@ is the readable half.
   `you edited it  +3 −1` above `-func Fresh() {}` and the two `+` lines, each ending in `← you`, and the
   file's own rows around them.
 - The cases that are the tests' rather than by eye: the unedited file (`TestTheTextPaneSaysWhenTheReviewer
-  EditedTheFile`, `TestEditedRowsWithNoEditsAreTheFileAlone`) and the historical span
+EditedTheFile`, `TestEditedRowsWithNoEditsAreTheFileAlone`) and the historical span
   (`TestTheTextPaneMarksNothingOverAHistoricalSpan`).
 - One thing the walkthrough cannot check and the Go test can: which section is on top. The capture holds
   repaints, and the frame that arrives first is the span without the working patch, so `grep` over it says
@@ -211,13 +211,13 @@ is the readable half.
 
 ## Known limitations
 
-- A reviewer's *submitted* edits — lines they changed in an earlier review submission, now inside the file at
+- A reviewer's _submitted_ edits — lines they changed in an earlier review submission, now inside the file at
   the span's head — are still not distinguished. Marking those needs a review-relative diff for the path and
   a rule about which submission owns which line; the ask was the typing the pane currently refuses to show.
 - A long run of edits carries `← you` on every row of it. Marking only the first row of a run is wrong for a
   scrolling pane, where the row above the window is the one that would have carried it.
-- The reviewer's section is `head..working`, so what it holds is *whatever is not in the revision under
-  review*. The marker reads that as "yours", which is git-pair's model — the tree under review is the
+- The reviewer's section is `head..working`, so what it holds is _whatever is not in the revision under
+  review_. The marker reads that as "yours", which is git-pair's model — the tree under review is the
   reviewer's, and the author's work is committed before the handoff. In a tree where the author is still
   working, their unreviewed lines arrive in that section marked as the reviewer's, and the whole file can look
   like the reviewer wrote it. Nothing on the screen attributes an uncommitted line.

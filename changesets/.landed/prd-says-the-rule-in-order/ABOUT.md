@@ -30,11 +30,11 @@ Taken with a shim placed ahead of git on `PATH`, so the count is what the binary
 appears to do. `check --json`, four branches cut from each other:
 
 | levels below | invocations |
-|---|---|
-| 0 | 25 |
-| 1 | 43 |
-| 2 | 52 |
-| 3 | 61 |
+| ------------ | ----------- |
+| 0            | 25          |
+| 1            | 43          |
+| 2            | 52          |
+| 3            | 61          |
 
 The first hop costs nine more than the hops after it, and that is the honest shape rather than an accident to fix:
 below one level there is nothing to look for, while at two the code has a parent to find, so the reads that locate a
@@ -46,17 +46,17 @@ investigates.
 
 ## Evidence
 
-| Break | Result |
-|---|---|
+| Break                                       | Result                                                                                                                                          |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | stale `parent:` example appended to the PRD | `TestStackedExamplesShowTheWrittenPair` names the file, quotes the block, and says the example cannot be produced by any command; removed after |
-| cost ceiling tightened to 20 | the two-level check fails printing `43 measured` |
-| nine invocations added to one level only | the successive-hops check fails, and the ceiling does not - the two assertions look at different things |
+| cost ceiling tightened to 20                | the two-level check fails printing `43 measured`                                                                                                |
+| nine invocations added to one level only    | the successive-hops check fails, and the ceiling does not - the two assertions look at different things                                         |
 
 `mise run gates`: 22 packages, `E2E`, `PTY`, `CI-INTEGRATE: all checks passed (69 checks)`.
 
 ## Deviations from the plan
 
-- Two deliverable references were stale: §13.1 is *The destination* (the selection order is §4's, and §4 was
+- Two deliverable references were stale: §13.1 is _The destination_ (the selection order is §4's, and §4 was
   rewritten in M5, so that deliverable needed no edit), and the refusal prints four ways out where the deliverable
   said three. Both are recorded in the plan's M9 status rather than quietly reworded out of it.
 - The plan expected the invocation check to be linear from the first hop. It is linear from the second, and the step

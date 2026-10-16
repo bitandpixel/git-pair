@@ -3,7 +3,7 @@
 Executing `docs/plans/change-integrate-cmd/plan.md`. An approved changeset still has a person standing
 between the approval and the merge button: the gate, the merge, and the record are three steps one
 author runs in sequence, and CI can only take the merge over by ignoring the author. This changeset adds
-the sentence the author was missing — one commit that says *this is approved and I want it merged* — and
+the sentence the author was missing — one commit that says _this is approved and I want it merged_ — and
 keeps every part of the merge on the side of git and of the person who owns the destination branch.
 
 **All five milestones are done.** The marker and the state (M1), the command and the gate it shares with
@@ -55,7 +55,7 @@ gate. git-pair still writes no merge, pushes nothing, and writes no ref while wo
   parent branch has no integration record, and a parent that records no `parent-changeset:` is refused
   because there is no record to look for. `check` keeps answering "may this merge" for a person who can
   merge onto an unlanded parent and record that.
-- Idempotency is `alreadyDeclared`: HEAD *is* the declaration commit. Not "the state is INTEGRATING",
+- Idempotency is `alreadyDeclared`: HEAD _is_ the declaration commit. Not "the state is INTEGRATING",
   which survives a commit — the claim does not.
 
 ## What changed (M3 — where a child lands)
@@ -100,7 +100,7 @@ gate. git-pair still writes no merge, pushes nothing, and writes no ref while wo
   §10.6 for the second queue list; §21 gains "Where a child lands is not what it is measured against"
   beside the relink rule it already documented; §22 gains the step an agent may run after the gate; §26
   re-read and extended rather than amended — the declaration is inside the no-merge rule, and the section
-  now says a future command that *performs* a merge would need a second carve-out; §29's landing contract
+  now says a future command that _performs_ a merge would need a second carve-out; §29's landing contract
   gains the request as a step.
 - README: the command table, the quickstart, the state list, the JSON contracts, and the CI section
   spelled as the conjunction. `references/cli.md` names the leaf command (the docs-contract test holds it
@@ -119,7 +119,7 @@ a git-pair subcommand, and §26 stays true — this is the example a repository 
 keeps it honest.
 
 - `scripts/ci/git-pair-integrate.sh`: gate → `git merge --no-ff` → push the destination → `integration
-  record` → `integration publish`, with the destination read from `queue --json` rather than `base:`, the
+record` → `integration publish`, with the destination read from `queue --json` rather than `base:`, the
   head cross-checked between the two reads so a branch that moved mid-run is not merged, `merge --abort` on
   a conflict, no record for a refused push, `--dry-run`, and `--require` for a hand-run where a refusal
   should be red. It never calls `change integrate`: a pipeline that writes the declaration would be asking
@@ -142,7 +142,7 @@ keeps it honest.
   pull requests, through mise so the pinned Go and the task list stay in `.mise.toml`. It is here for two
   reasons. It is the workflow `git-pair-integrate.yml`'s `workflow_run` names, which until now pointed at a
   placeholder. And it triggers on `push` to every branch, because the merge job reads the checks on a
-  *branch head* while a pull-request run reports them against the PR's merge ref — a PR-only CI would leave
+  _branch head_ while a pull-request run reports them against the PR's merge ref — a PR-only CI would leave
   every declared head looking untested, correctly and silently.
 - One host dependency, caught before the new CI ran once: `e2e-29.sh` commits a merge in a clone it creates,
   and a clone has no committer of its own — every pass it had returned here came from the machine's global
@@ -214,15 +214,15 @@ keeps it honest.
 - `TestParentOfTreatsEverySpellingOfTrunkAsTrunk`, and `change integrate` in a real clone where trunk is
   only a fetch ref: the pair that covers the bug the CI replay found (M6).
 - `scripts/gates/pty-walkthrough.sh` under the runner's surroundings — `CI=true NO_COLOR=1
-  GITHUB_ACTIONS=true` exported for the whole replay — and under a clean environment: `PTY: all checks
-  passed` both ways. Before the driver removed those switches, the same replay with `CI=true` failed the
+GITHUB_ACTIONS=true` exported for the whole replay — and under a clean environment: `PTY: all checks
+passed` both ways. Before the driver removed those switches, the same replay with `CI=true` failed the
   pane's one colour assertion, which is what makes the passing pair evidence rather than a weakened check.
 - `main` merged in (`5a3a7a3`) for the terminal fix in `feat-editor-term-gate`. The first CI run of this
   repository failed on `TestEditorPrecedenceMatchesGit/VISUAL_beats_EDITOR` — neither this changeset's
   code nor a git-pair defect: `git var GIT_EDITOR` reads `VISUAL` only when `TERM` names a usable
   terminal, and that fixture inherited `TERM` from the developer's shell. After the merge `mise run gates`
   is green end to end (`E2E`, `PTY`, `CI-INTEGRATE`), and `env -u TERM go test ./internal/console
-  -run TestEditorPrecedence` passes, which is the condition that run failed in.
+-run TestEditorPrecedence` passes, which is the condition that run failed in.
 - `TestEveryCommandIsNamedInTheDocs` passes, which is what makes PRD, README and `cli.md` name the
   command rather than merely mention it.
 
@@ -242,11 +242,11 @@ formatter pass would settle it either way.
 
 ## Known limitations
 
-- The job proves the *declared head* green, not the merge result green; `main` runs its own CI after the
+- The job proves the _declared head_ green, not the merge result green; `main` runs its own CI after the
   push, and proving the result before it lands is a merge queue, which this example deliberately is not
   (README, "Green before the merge"). This is the same fact that makes a deferred child declaration worth
   refusing: a green from before the parent landed is a green about different work.
-- The destination is the branch a parent's record *says* it was based on. A parent landed somewhere other
+- The destination is the branch a parent's record _says_ it was based on. A parent landed somewhere other
   than its own base makes that answer wrong, and it is wrong in the direction `integration record`
   catches: the record refuses a landing not reachable from the destination it derived, and `--target` is
   the named way to say otherwise.

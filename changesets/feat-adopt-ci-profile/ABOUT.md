@@ -39,7 +39,7 @@ GitHub reads the workflow files from the pushed branch, so both of the profile's
   reaches a runner, and a refused job bills nothing: measured on the library's runs, `timing.billable.total_ms` is 0
   with each job at `duration_ms: 0`, while `run_duration_ms` shows a second or two of wall clock that is not billed.
 - **`git-pair integrate`** runs: full-history checkout → `install-git-pair.sh` (pinned release) → `toolchain` →
-  resolve `verify` → build the merge commit, run `mise run gates` against *that* tree, push if green → report
+  resolve `verify` → build the merge commit, run `mise run gates` against _that_ tree, push if green → report
   `"$GIT_PAIR_BIN" queue`.
 
 On a pull request only the check file triggers, and it runs the same `toolchain` step and the same resolved `verify`,
@@ -58,25 +58,25 @@ reason: it has to hand something to the steps after it. It fetches mise when the
 `$GITHUB_PATH`, without which the next step cannot find `mise`), trusts and installs `.mise.toml`'s pins, runs
 `mise run build`, and exports `GIT_PAIR_BIN` as the branch-named binary `scripts/install-name.sh` derives. That export
 is what makes the driver and the closing queue report ask the tool this tree built instead of the release the
-installer left behind — and it is why the step sits *after* the install rather than before it.
+installer left behind — and it is why the step sits _after_ the install rather than before it.
 
 **`scripts/ci/gh-request-ci.sh`** keeps its three exit codes and changes only its default, from `ci.yml` to
 `git-pair-check.yml`. It names the file rather than the workflow's display name: `gh workflow run` accepts either, the
 two differ here (the file is `git-pair-check.yml`, the `name:` is `git-pair check`), and a path is the address that
 cannot drift when somebody rewords a header.
 
-**`scripts/gates/ci-integrate.sh`** had seven assertions retargeted. Each one encoded this repository's *layout* rather
+**`scripts/gates/ci-integrate.sh`** had seven assertions retargeted. Each one encoded this repository's _layout_ rather
 than the rule, and the installed files answer all seven differently without any of them being wrong:
 
-| the assertion assumed | the installed file does |
-|---|---|
-| `name: CI` for the ladder | `name: git-pair check` |
-| `permissions:` at column zero | `    permissions:` on the job |
-| `actions: write` indented two | indented six, under the job |
-| `branches:` as a block list `- '**'` | flow style `branches: ['**']` |
-| `ref_name != (vars.GIT_PAIR_BASE \|\| 'main')` on one line | two comparisons, variable and fallback |
+| the assertion assumed                                         | the installed file does                                                      |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `name: CI` for the ladder                                     | `name: git-pair check`                                                       |
+| `permissions:` at column zero                                 | `    permissions:` on the job                                                |
+| `actions: write` indented two                                 | indented six, under the job                                                  |
+| `branches:` as a block list `- '**'`                          | flow style `branches: ['**']`                                                |
+| `ref_name != (vars.GIT_PAIR_BASE \|\| 'main')` on one line    | two comparisons, variable and fallback                                       |
 | `--ci-request scripts/ci/gh-request-ci.sh` written in the job | resolves the role: `dev-profiles command ci-request`, answered in the marker |
-| the requested workflow repeated as a literal in the fixture | (unchanged shape; now derived) |
+| the requested workflow repeated as a literal in the fixture   | (unchanged shape; now derived)                                               |
 
 The retargets accept the rule in either spelling — a scope at file level or job level, a branch filter in flow style
 or block form — and still fail on the meaning: a `branches:` filter that is not the every-branch value, or a
@@ -140,8 +140,8 @@ are each handled with a message, and none of them has been exercised. The first 
 integrate run.
 
 **The retargeted assertions.** Seven rules moved from one spelling to another, which is exactly when a rule gets lost
-rather than changed. The interesting one is the last row of the table: the fixture that *repeated* the requested
-workflow name passed while the one that *derived* it failed, when the default named a file that does not exist. A
+rather than changed. The interesting one is the last row of the table: the fixture that _repeated_ the requested
+workflow name passed while the one that _derived_ it failed, when the default named a file that does not exist. A
 reviewer who wants to check my work should delete one half of a rule locally and confirm the gate goes red.
 
 **The timeout.** The profile's ceiling is 30 minutes; the deleted files said 20. `GIT_PAIR_TIMEOUT` is unset on the

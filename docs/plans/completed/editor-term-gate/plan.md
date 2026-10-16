@@ -119,12 +119,12 @@ Measured on git 2.43.0 with `VISUAL=vs EDITOR=ed`, `HOME` and both config files 
 invoked three ways (`stdin` from `/dev/null`, from a pipe, from a pty). The answer was the same in
 all three columns; only `TERM` moved it:
 
-| `TERM` | `/dev/null` | pipe | pty |
-| --- | --- | --- | --- |
-| `xterm-256color` | `vs` | `vs` | `vs` |
-| `xterm` | `vs` | `vs` | `vs` |
-| empty (`TERM=`) | `vs` | `vs` | `vs` |
-| `dumb`, or unset | `ed` | `ed` | `ed` |
+| `TERM`           | `/dev/null` | pipe | pty  |
+| ---------------- | ----------- | ---- | ---- |
+| `xterm-256color` | `vs`        | `vs` | `vs` |
+| `xterm`          | `vs`        | `vs` | `vs` |
+| empty (`TERM=`)  | `vs`        | `vs` | `vs` |
+| `dumb`, or unset | `ed`        | `ed` | `ed` |
 
 Two details worth keeping: an empty `TERM` counts as usable (the pointer is non-null and the value is
 not `dumb`), which is why `editorRepo` unsets rather than empties; and with `TERM` dumb and nothing
@@ -155,10 +155,10 @@ nothing" as "no editor configured" reaches the fallback, which is git-pair's beh
 
 ## Audit history
 
-| Date | Finding | Action |
-| --- | --- | --- |
+| Date       | Finding                                                                                                                                                                           | Action                                                                             |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | 2026-09-27 | Root cause established in `feat/change-integrate-cmd` by reproducing the CI failure with `env -u TERM`, and against git's `editor.c`. The integrate changeset is untouched by it. | Opened this changeset off `main` rather than stacking the fix onto unrelated work. |
-| 2026-09-27 | M1 green under all three `TERM` conditions. M2 prose corrected in three files. | Plan and `ABOUT.md` written; handed off with `change ready`. |
+| 2026-09-27 | M1 green under all three `TERM` conditions. M2 prose corrected in three files.                                                                                                    | Plan and `ABOUT.md` written; handed off with `change ready`.                       |
 
 ## Execution status
 

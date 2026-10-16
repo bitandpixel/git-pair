@@ -30,7 +30,7 @@ unchanged across `-U3`, `-U10`, `-U1`, `--ignore-all-space` and `--diff-algorith
 sensitive to a trailing-whitespace change and to a mode change, which is what a reviewer read.
 
 The two claims are about different things, and the split is the whole design: what is insensitive is how git
-*renders* a diff, and what is hashed is the *content*. `--raw` prints no hunk text, so an entry for a file
+_renders_ a diff, and what is hashed is the _content_. `--raw` prints no hunk text, so an entry for a file
 that was already in the diff looks the same when one line inside it changes — same modes, same status, same
 path — and what differs is the post-image blob OID, which is one of the hashed fields. A change to content
 is therefore never a non-change, including in a file the reviewer had already read; the digest does not say
@@ -39,39 +39,39 @@ reviewed". The single deliberate blindness is the review record, which is exclud
 
 **The load-bearing invariants, and where each lives.**
 
-- *Configuration cannot move the answer.* `internal/git/diffdigest.go` pins `--no-renames` (rename
+- _Configuration cannot move the answer._ `internal/git/diffdigest.go` pins `--no-renames` (rename
   detection is a shape difference in the raw form: one `R` entry, or a `D` and an `A`), `--no-ext-diff` and
   `--no-textconv`, and builds no `-c` arguments so `classify` keeps the invocation a pure read in the memo.
   `core.quotePath=false` comes from `spawn` for every invocation. Enforced by
   `TestDiffRawDigestIsNotMovedByDiffConfiguration`, which sets `diff.context`, `diff.algorithm`,
   `diff.renames` and `diff.noprefix` in the repository config and asks again.
-- *A recorded value is a fact about two named commits.* Neither end moves, so nothing that happens
+- _A recorded value is a fact about two named commits._ Neither end moves, so nothing that happens
   elsewhere — another branch, another file, or another line of the same file — can move the answer. This is
   what separates the digest from a reading of how far the world has moved, which would expire on somebody
   else's merge. Enforced by `TestDiffRawDigestIsNotMovedByWorkOnAnotherBranch`, which also measures against
   the branch that gained the content to prove the value is pinned rather than inert.
-- *Content cannot hide from it.* Enforced by `TestDiffRawDigestSeesEveryChangeAReviewerRead` (whitespace,
+- _Content cannot hide from it._ Enforced by `TestDiffRawDigestSeesEveryChangeAReviewerRead` (whitespace,
   mode, two different contents, and a line changed inside a file already in the diff — the last of those
-  asserting that the raw entry's shape is *unchanged* once its blob OIDs are hidden, so the digest moved on
+  asserting that the raw entry's shape is _unchanged_ once its blob OIDs are hidden, so the digest moved on
   content and not on shape) and by the digest being over blob OIDs.
-- *The changeset's own directory is outside the identity.* The review record — ABOUT.md, and the threads
+- _The changeset's own directory is outside the identity._ The review record — ABOUT.md, and the threads
   inside it — lives in it, so without the exclusion a reply to a review thread would change the identity of
   the approval that reply is written into. Enforced by the caller
   (`changeset.MeasureSubmission`, passing `ActiveDirPath` and `LandedDirPath`) and pinned at both levels:
   `TestDiffRawDigestExcludesWhatTheCallerNames` at git, and
   `TestAReplyToTheReviewThreadKeepsTheRecordedIdentity` /
   `TestAReplyToTheReviewThreadLeavesTheRecordedDiffAlone` through the command and through `Submit`.
-- *A value is only worth its trailer: it must be reproducible from the marker that carries it.* Pinned by
+- _A value is only worth its trailer: it must be reproducible from the marker that carries it._ Pinned by
   recomputing with git from the base the same marker names, in
   `TestSubmissionRecordsTheIdentityOfTheDiffItReviewed` and `TestSubmitRecordsTheIdentityOfTheDiffItReviewed`.
-- *An unreadable value is an absence, never a difference.* `model.ParseDiffID` and `lifecycle.Event.DiffID`
+- _An unreadable value is an absence, never a difference._ `model.ParseDiffID` and `lifecycle.Event.DiffID`
   are the only readers of the format; a wrong version or a malformed value reads as "no identity recorded",
   which is the same reading an absent trailer gets, so no approval is refused on a mismatch nobody can
   explain. Pinned by `TestAFutureVersionReadsAsNoDigest` and `TestAMalformedDiffIdentityReadsAsNoDigest`.
-- *An unmeasurable value is not recorded.* `MeasureSubmission` does not fail: a git read that does not
+- _An unmeasurable value is not recorded._ `MeasureSubmission` does not fail: a git read that does not
   resolve leaves the trailer absent, which is a fact a reader can see, rather than a fabricated digest or a
   refused verdict. A revision named to `DiffRawDigest` that it cannot read is an error, not an empty digest.
-- *A record describes the moment it was written.* Each submission records its own head's identity and an
+- _A record describes the moment it was written._ Each submission records its own head's identity and an
   earlier marker keeps its own, pinned by
   `TestSubmissionsOverDifferentWorkRecordDifferentIdentities` and `TestEachSubmissionRecordsItsOwnDiff`.
 
@@ -132,13 +132,13 @@ surface a reviewer uses).
 
 The review asked whether one line changed inside a file that was already in the diff would read as a
 non-change. It would not. That reading comes from the sentence above it, which lists what the digest is
-measured *unchanged* across, and the answer is the distinction now written into that paragraph: `--raw` is
+measured _unchanged_ across, and the answer is the distinction now written into that paragraph: `--raw` is
 insensitive to how git renders a diff (`-U`, whitespace-normalising options, the diff algorithm, rename
 detection) and hashes content — modes, pre- and post-image blob OIDs, statuses, paths. Editing a line inside
 a file already in the diff rewrites that file's post-image blob, and the OID is a hashed field, so the digest
 changes.
 
-What `--raw` genuinely cannot tell you is *which* line moved: the entry for that file has the same modes,
+What `--raw` genuinely cannot tell you is _which_ line moved: the entry for that file has the same modes,
 status and path before and after the edit. That is enough for this value, because the only verdict it carries
 is "this is not the diff that was reviewed" — and the refusal that explains itself is the `Review-Head` and
 `Review-Base-Head` pair beside it, which name the commit and say which side moved.
@@ -163,7 +163,7 @@ arrives inside the child's diff as reverse changes, and the case asked about her
 then bites — an approval dying on a far away line nobody reviewed. Its measurements are in that changeset's
 `ABOUT.md` case table rather than repeated here.
 
-The case trunk movement *does* legitimately create is not visible in any digest: the two changes needing
+The case trunk movement _does_ legitimately create is not visible in any digest: the two changes needing
 each other. That is a conflict, and the answer to it is the merge probe in the changeset that reads this
 value — a digest of committed content between two commits says nothing about whether they merge cleanly, and
 `Known limitations` above says so rather than leaving it to be inferred.
@@ -177,16 +177,16 @@ to the branch that gained content is not — so the value is pinned to its commi
 The review asked whether a change that landed in trunk — same file the child changed, lines nothing in the
 child touches — forces a re-approval. Two cases, and the digest asks for one in neither.
 
--   **The trunk commit is not in the child's history**, which is the ordinary case: a branch does not absorb
-    trunk by osmosis, and "between" in time is not "between" in ancestry. Such a commit cannot appear in a
-    two-dot diff between the recorded base and the recorded head, because neither of those commits contains
-    it. That is the case the test above pins.
--   **The child merged trunk in**, so the commit is an ancestor of the head. The answer then depends on
-    whether the two edits are in the same file. If trunk's change is in a file this branch does not touch,
-    the ground the gate measures from is that trunk commit — it already carries the change, and the identity
-    is unchanged. If it is the *same* file, the identity moves even when the line is nowhere near the child's,
-    because the value hashes post-image blob OIDs and a blob is a whole file: the child's post-image now
-    contains trunk's line as well. A far away trunk line in a shared file costs a re-read of that file.
+- **The trunk commit is not in the child's history**, which is the ordinary case: a branch does not absorb
+  trunk by osmosis, and "between" in time is not "between" in ancestry. Such a commit cannot appear in a
+  two-dot diff between the recorded base and the recorded head, because neither of those commits contains
+  it. That is the case the test above pins.
+- **The child merged trunk in**, so the commit is an ancestor of the head. The answer then depends on
+  whether the two edits are in the same file. If trunk's change is in a file this branch does not touch,
+  the ground the gate measures from is that trunk commit — it already carries the change, and the identity
+  is unchanged. If it is the _same_ file, the identity moves even when the line is nowhere near the child's,
+  because the value hashes post-image blob OIDs and a blob is a whole file: the child's post-image now
+  contains trunk's line as well. A far away trunk line in a shared file costs a re-read of that file.
 
 For the second case this is not a new cost, because a different rule refuses first: the one that counts
 content the review never saw refuses on any content arriving from another branch, near or far. Its boundary

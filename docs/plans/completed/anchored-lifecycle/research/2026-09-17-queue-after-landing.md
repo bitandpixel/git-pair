@@ -20,7 +20,7 @@ git-pair-complete-command
 The changeset had already merged. The queue lists it as awaiting review, and will keep doing so
 for as long as the branch exists, because `lifecycle.Summarize(base..branch)` still finds
 `git-pair: ready` as the newest marker in `main..934ce8b`. Nothing about the merge is visible to
-that derivation: a squash merge puts the *content* on `main` and leaves the branch's commits
+that derivation: a squash merge puts the _content_ on `main` and leaves the branch's commits
 disconnected from it.
 
 ## Once the branch is deleted, the changeset directory becomes a permanent note
@@ -49,7 +49,7 @@ tree**, while a changeset is a relationship between **a branch and a base**.
 inherits the landed directory, its `CHANGESET.yaml` and any thread files, and `change ready`
 succeeds on it. Observed by hand; the condition is exactly the state `main` was in above.
 
-## What a squash merge leaves that *can* be used to detect landing
+## What a squash merge leaves that _can_ be used to detect landing
 
 The archived head is not on `main` in any form: not an ancestor, not reachable, `git cherry`
 reports `+`, and tree equality is unreliable because other work lands alongside. What does land is

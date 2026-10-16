@@ -71,14 +71,14 @@ Observable outcomes. Each is checkable by a person or an agent who has not read 
 
 The durable layer was built in three steps, and each step added a reader that the tree could have served.
 
-| what | where | what it is really asking |
-| --- | --- | --- |
-| "has this changeset landed" | `reviewref.ResolveIntegration` at `internal/cli/check.go:277`, `internal/cli/status.go:470` | is `changesets/<id>/` in trunk's tree |
-| "the parent landed while its branch stayed" | `internal/cli/stacked.go:182-207`, `:316-345` | same question, about the parent |
-| "which chain does a landed changeset have" | `internal/cli/root.go:294-302` | walk trunk's first-parent line for this changeset's directory |
-| "what is the child's base now" | `internal/changeset/resolve.go:596-610`, `internal/cli/root.go:326-333` | `merge-base(head, destination)` |
-| "where does a child's work land" | `internal/changeset/destination.go:60-125` | the parent's `CHANGESET.yaml`, which the tree carries |
-| "which landings were never recorded" | `internal/cli/landed.go:71-88`, `internal/cli/queue.go:132` | a ref-vs-tree difference — the finding exists only because the ref exists |
+| what                                        | where                                                                                       | what it is really asking                                                  |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| "has this changeset landed"                 | `reviewref.ResolveIntegration` at `internal/cli/check.go:277`, `internal/cli/status.go:470` | is `changesets/<id>/` in trunk's tree                                     |
+| "the parent landed while its branch stayed" | `internal/cli/stacked.go:182-207`, `:316-345`                                               | same question, about the parent                                           |
+| "which chain does a landed changeset have"  | `internal/cli/root.go:294-302`                                                              | walk trunk's first-parent line for this changeset's directory             |
+| "what is the child's base now"              | `internal/changeset/resolve.go:596-610`, `internal/cli/root.go:326-333`                     | `merge-base(head, destination)`                                           |
+| "where does a child's work land"            | `internal/changeset/destination.go:60-125`                                                  | the parent's `CHANGESET.yaml`, which the tree carries                     |
+| "which landings were never recorded"        | `internal/cli/landed.go:71-88`, `internal/cli/queue.go:132`                                 | a ref-vs-tree difference — the finding exists only because the ref exists |
 
 The read side is already built: `changeset.newResolver` does one `DirsAt(ctx, repo, db.Ref)` and caches the
 result as `onTrunk` (`internal/changeset/resolve.go:244-255`), exported per scan as `TrunkIDs`
@@ -88,12 +88,12 @@ replaces, and it costs nothing per changeset.
 What the refs genuinely provide is the unsquashed chain after a squash merge. That case is real and it is
 documented as lost rather than worked around:
 
-| landing | chain in trunk's ancestry | verdict readable after the branch dies | `LANDED UNREVIEWED` |
-| --- | --- | --- | --- |
-| merge commit | yes, via `landing^2` | yes | yes |
-| fast-forward | yes, first-parent line | yes | yes |
-| rebase merge | yes, replayed, messages intact | yes | yes |
-| squash | no | **no** | **no** |
+| landing      | chain in trunk's ancestry      | verdict readable after the branch dies | `LANDED UNREVIEWED` |
+| ------------ | ------------------------------ | -------------------------------------- | ------------------- |
+| merge commit | yes, via `landing^2`           | yes                                    | yes                 |
+| fast-forward | yes, first-parent line         | yes                                    | yes                 |
+| rebase merge | yes, replayed, messages intact | yes                                    | yes                 |
+| squash       | no                             | **no**                                 | **no**              |
 
 A rebase merge keeps every `Review-*` trailer, because replayed commits keep their messages, and loses
 only commit identity — which is the thing `ffChainTip` currently refuses to guess and sends the operator to
@@ -108,14 +108,14 @@ namespace, its `--fetch`, its mirrors, its consent command), and milestone M1 of
 
 Recorded so a later reader finds a decision rather than an omission.
 
-- **D1 — Landed means on trunk.** A child merged into its parent branch is *carried*, not landed: its
+- **D1 — Landed means on trunk.** A child merged into its parent branch is _carried_, not landed: its
   directory reaches trunk only when the parent's does. Stacked work merged into a parent is legal and
   reads as carried.
 - **D2 — Squash landings lose post-landing reads.** The review chain of a squashed changeset survives only
   in the clone that had the branch, and past git's reflog expiry (30 days by `gc.reflogExpireUnreachable`)
   it survives nowhere. The deferred escape is cheap and separate: `tidy` writes `reviewed:`, `verdict:`,
   `verdict_at:` into `changesets/.landed/<id>/CHANGESET.yaml`, which trunk replicates for free, so the
-  *verdict* outlives a squash even though the *conversation* does not. Build it when a squash-merged trunk
+  _verdict_ outlives a squash even though the _conversation_ does not. Build it when a squash-merged trunk
   is a real configuration, not before.
 - **D3 — `--fetch` leaves `status`, `queue`, and `check`.** It was added so those commands could answer
   about refs other clones had written (`docs/plans/publish-the-records/`); with no refs there is nothing of
@@ -207,18 +207,18 @@ git fetch origin && git merge-base --is-ancestor origin/main HEAD && echo "up to
 #### Tasks
 
 - [x] In `internal/changeset`, exclude `.landed` from the active-children listing in `DirsAt`
-  (`internal/changeset/changeset.go:361-385`). Verified necessary: `DirsAt` lists every immediate child
-  directory with no dotfile or underscore exclusion, so `changesets/.landed` currently becomes a changeset
-  id named `.landed` and `candidateFor` then fails the branch on a missing `CHANGESET.yaml`
-  (`internal/changeset/resolve.go:445-453`). One fix inside `DirsAt` covers every caller.
+      (`internal/changeset/changeset.go:361-385`). Verified necessary: `DirsAt` lists every immediate child
+      directory with no dotfile or underscore exclusion, so `changesets/.landed` currently becomes a changeset
+      id named `.landed` and `candidateFor` then fails the branch on a missing `CHANGESET.yaml`
+      (`internal/changeset/resolve.go:445-453`). One fix inside `DirsAt` covers every caller.
 - [x] Export `ActiveIDs(ctx, repo, rev)` (children of `changesets/`, minus `.landed`) and
-  `LandedIDs(ctx, repo, trunkRef)` (`ActiveIDs` of trunk, plus the children of `changesets/.landed/`).
-  `onTrunk` and `TrunkIDs` become the two, so nothing re-implements either.
+      `LandedIDs(ctx, repo, trunkRef)` (`ActiveIDs` of trunk, plus the children of `changesets/.landed/`).
+      `onTrunk` and `TrunkIDs` become the two, so nothing re-implements either.
 - [x] `internal/changeset/tidy.go`: `LandedDirPath(id)` and the pair of pathspecs
-  (`changesets/<id>/`, `changesets/.landed/<id>/`) that history walks need. M4 uses them and M2's chain
-  walk depends on them, so they exist before either caller.
+      (`changesets/<id>/`, `changesets/.landed/<id>/`) that history walks need. M4 uses them and M2's chain
+      walk depends on them, so they exist before either caller.
 - [x] Move the `.landed` literal and the exclusion rule into one place with a comment naming the `DirsAt`
-  trap, so the next namespace added under `changesets/` is a decision rather than an accident.
+      trap, so the next namespace added under `changesets/` is a decision rather than an accident.
 
 #### Verification
 
@@ -251,60 +251,60 @@ Two things measured while building those fixtures, because they change later mil
 #### Tasks
 
 - [x] `internal/cli/landed.go`: replace the ref index (`:71-88`) and `unrecordedLandings` (`:99-110`) with
-  the unreviewed detector — a landed id whose chain carries no approval marker. Keep the file's own
-  reasoning for the heading (`:16-22`): a finding worth a heading is one the reader must act on, and "the
-  author stopped one command early" is no longer a finding anybody can act on.
+      the unreviewed detector — a landed id whose chain carries no approval marker. Keep the file's own
+      reasoning for the heading (`:16-22`): a finding worth a heading is one the reader must act on, and "the
+      author stopped one command early" is no longer a finding anybody can act on.
 - [x] Chain range for a landed changeset: the contiguous run on trunk's first-parent line carrying this
-  changeset's directory, both pathspecs from M1. Range end is the newest commit in the run, range start the
-  commit that introduced the directory. Feed it to the existing
-  `lifecycle.Summarize(ctx, repo, slug, base, head)` (`internal/lifecycle/lifecycle.go:98`) so the state,
-  verdict, and staleness reads are the same functions the live path uses.
+      changeset's directory, both pathspecs from M1. Range end is the newest commit in the run, range start the
+      commit that introduced the directory. Feed it to the existing
+      `lifecycle.Summarize(ctx, repo, slug, base, head)` (`internal/lifecycle/lifecycle.go:98`) so the state,
+      verdict, and staleness reads are the same functions the live path uses.
 - [x] `internal/cli/root.go:294-302`: the archive-ref fallback becomes the trunk walk above. Keep the
-  distinction the current comment draws (`:296-300`) — a changeset that never landed has nothing to read,
-  and the usage error should still say so rather than inventing a chain.
+      distinction the current comment draws (`:296-300`) — a changeset that never landed has nothing to read,
+      and the usage error should still say so rather than inventing a chain.
 - [x] `internal/cli/status.go:461-480`: drop `archive_ref`, `archive_commit`, `integrated`,
-  `integrated_commit`, `integrated_ref`; add `landed`, `landed_commit`, `chain_base`, `chain_head`,
-  `reviewed`. Update `internal/cli/contract_test.go` and the README JSON table in the same commit.
-  Shipped as `landed`, `landed_commit`, `landed_branch`, `chain_base`, `chain_head`, `reviewed`: the plan's
-  `landed_in_default_branch` is tautological once landing *is* the integration branch holding the directory,
-  so the field names the branch the read was taken from instead — the answer a consumer can branch on, and
-  the one `integrated_default_branch` used to give. All six are present on every document, empty rather than
-  absent.
+      `integrated_commit`, `integrated_ref`; add `landed`, `landed_commit`, `chain_base`, `chain_head`,
+      `reviewed`. Update `internal/cli/contract_test.go` and the README JSON table in the same commit.
+      Shipped as `landed`, `landed_commit`, `landed_branch`, `chain_base`, `chain_head`, `reviewed`: the plan's
+      `landed_in_default_branch` is tautological once landing _is_ the integration branch holding the directory,
+      so the field names the branch the read was taken from instead — the answer a consumer can branch on, and
+      the one `integrated_default_branch` used to give. All six are present on every document, empty rather than
+      absent.
 - [x] `internal/cli/check.go:277-284`: `g.Recorded` and `g.Where` become the tree landing and its reach.
-  Add the unreviewed reason to `integrationReasons` in the documented order — history, then content, then
-  the tree, then landing hygiene (`internal/cli/check.go:334-347`) — so the reader is told what the
-  reviewers decided before being told the paperwork is tidy.
+      Add the unreviewed reason to `integrationReasons` in the documented order — history, then content, then
+      the tree, then landing hygiene (`internal/cli/check.go:334-347`) — so the reader is told what the
+      reviewers decided before being told the paperwork is tidy.
 - [x] `internal/marker/marker.go:192-217`: `RefuseIntegrated` asks the tree. The comment's two reasons
-  (an author who forgot the branch was merged; a reviewer working from an old clone) both survive a tree
-  read, and the exit code stays 1.
+      (an author who forgot the branch was merged; a reviewer working from an old clone) both survive a tree
+      read, and the exit code stays 1.
 - [x] `internal/cli/queue.go`: `:132` becomes the unreviewed detector, `:162` the tree landing,
-  `:324-350` the orphan classification loses its ref lookups, `:242-248` and `:261-280` lose `unpublished`
-  and rename `landed_unrecorded` to `landed_unreviewed`.
+      `:324-350` the orphan classification loses its ref lookups, `:242-248` and `:261-280` lose `unpublished`
+      and rename `landed_unrecorded` to `landed_unreviewed`.
 - [x] Rewrite `scripts/gates/e2e-29.sh`'s 43 durable-layer assertions to assert the tree facts instead, and
-  add a case where the branch is deleted before `status --changeset` is asked about it. What shipped: the
-  release-line step now asserts the work is still offerable and that `check` has no landing refusal for it;
-  the recording step asserts both `LANDED UNREVIEWED` sentences (no verdict, and one-commit landing), the
-  `--json` key, the exit-2 `status` carry, and that writing the record changes nothing — the finding is
-  about the chain, not the paper trail; and the queue's landed/unreviewed path is read with the branch gone.
+      add a case where the branch is deleted before `status --changeset` is asked about it. What shipped: the
+      release-line step now asserts the work is still offerable and that `check` has no landing refusal for it;
+      the recording step asserts both `LANDED UNREVIEWED` sentences (no verdict, and one-commit landing), the
+      `--json` key, the exit-2 `status` carry, and that writing the record changes nothing — the finding is
+      about the chain, not the paper trail; and the queue's landed/unreviewed path is read with the branch gone.
 - [x] Decided during execution, and it is the design rather than a loss: **landed means the integration
-  branch, and a merge into some other branch leaves the changeset live.** The durable record refused here —
-  once `integration record --target release/2.x` had run, `change ready`, `change unready`, `review submit`,
-  `change abandon` and `change integrate` all refused — and the tree model does not, because nothing
-  outside the integration branch puts the directory in the integration branch. That is what the author wants:
-  the release line can revert the merge, the changeset may still have to go to `main` on its own, and until
-  the destination holds the directory the work is unfinished and offerable. The two questions stay separate
-  and neither one moves to the other's tree — landed-ness reads the integration branch (`CarriesDir`, the
-  gate, `check`, `queue`), and the merge target reads the changeset's own base and stack
-  (`changeset.DestinationFor`, which is what `change integrate` prints as `merge into:`). Pointing the
-  write gate at the destination would retire a changeset on a release-line merge, which is the behaviour
-  this task rejects. `TestLandingOnAnotherBranchLeavesTheWorkInProgress` asserts the answer.
+      branch, and a merge into some other branch leaves the changeset live.** The durable record refused here —
+      once `integration record --target release/2.x` had run, `change ready`, `change unready`, `review submit`,
+      `change abandon` and `change integrate` all refused — and the tree model does not, because nothing
+      outside the integration branch puts the directory in the integration branch. That is what the author wants:
+      the release line can revert the merge, the changeset may still have to go to `main` on its own, and until
+      the destination holds the directory the work is unfinished and offerable. The two questions stay separate
+      and neither one moves to the other's tree — landed-ness reads the integration branch (`CarriesDir`, the
+      gate, `check`, `queue`), and the merge target reads the changeset's own base and stack
+      (`changeset.DestinationFor`, which is what `change integrate` prints as `merge into:`). Pointing the
+      write gate at the destination would retire a changeset on a release-line merge, which is the behaviour
+      this task rejects. `TestLandingOnAnotherBranchLeavesTheWorkInProgress` asserts the answer.
 
 #### Verification
 
 - CLI tests on `gittest` fixtures, one per landing shape: merge commit, fast-forward, rebase merge. Each
   asserts `queue` reports the changeset landed, `status --changeset` prints the verdict and the chain
   endpoints, and `check` refuses with the unreviewed reason when the fixture drops the approval marker.
-- One test per squash case, asserting the *limitation* — `status --changeset` says the chain is not
+- One test per squash case, asserting the _limitation_ — `status --changeset` says the chain is not
   readable here and names why. A limitation nobody tests turns into a bug report.
 - A repository fixture with `refs/git-pair/*` refs present and inconsistent: every answer comes from the
   tree, so the refs are inert. This is the test that proves M5 is safe.
@@ -322,31 +322,31 @@ Two things measured while building those fixtures, because they change later mil
 #### Tasks
 
 - [x] `internal/changeset/base.go`: `BaseFor(ctx, repo, cs, head, db) (Base, error)` with `Base{Ref, Why,
-  Derived, ParentBranch}`. Rules in order — (1) the parent branch while it exists and
-  `!CarriesDir(destination, parent)`; (2) `merge-base(childHead, destination)`, `Why` naming the landing or
-  the gone branch; (3) the default branch itself; `ErrNoDefaultBranch` when neither resolves. A changeset
-  with no parent returns its recorded base with `Why "recorded base"`. `Changeset.BaseWhy` carries the rule
-  beside the value; the resolver caches it in `applyBases`, so the surfaces print what one read produced.
+Derived, ParentBranch}`. Rules in order — (1) the parent branch while it exists and
+      `!CarriesDir(destination, parent)`; (2) `merge-base(childHead, destination)`, `Why` naming the landing or
+      the gone branch; (3) the default branch itself; `ErrNoDefaultBranch` when neither resolves. A changeset
+      with no parent returns its recorded base with `Why "recorded base"`. `Changeset.BaseWhy` carries the rule
+      beside the value; the resolver caches it in `applyBases`, so the surfaces print what one read produced.
 - [x] `internal/changeset/resolve.go`: `relinkStacks` deleted; `applyBases(ctx, repo, candidates, db, head)`
-  runs before `nearness` and sets `Base` and `BaseWhy`.
+      runs before `nearness` and sets `Base` and `BaseWhy`.
 - [x] `internal/cli/root.go`: the chain-read path derives its base the same way when the parent branch is
-  gone; `explainBrokenStack` asks the destination instead of a ref.
+      gone; `explainBrokenStack` asks the destination instead of a ref.
 - [~] `internal/changeset/destination.go:60-125`: **deferred to M5.** The walk still reads the parent's
   `CHANGESET.yaml` from the landing commit's tree, so a landing that carried no directory still loses the
   parent link there. It is the last read of the durable shape outside the files M5 deletes, and the code
   around it is rewritten when `integration record` goes.
 - [x] `internal/cli/stacked.go`: `parentLanded` and `parentGone` read `LandedChain`/`CarriesDir`.
-  `st.landedFull` is the derived landing and `landedBaseIsTheSameWork` keeps its shape with it on the
-  "now" side. `LandedReach` goes quiet for a derived landing — the chain is derived from the destination,
-  so containment is not a second question — and `describeLanding` survives only for `check`.
+      `st.landedFull` is the derived landing and `landedBaseIsTheSameWork` keeps its shape with it on the
+      "now" side. `LandedReach` goes quiet for a derived landing — the chain is derived from the destination,
+      so containment is not a second question — and `describeLanding` survives only for `check`.
 - [~] `internal/cli/status.go`: the `Base:` line prints the rule. The `Stack:` block's per-ancestor
   `record:` line and `--json`'s `stack[].integration` are **deferred to M5** with the index they read.
 - [x] `--json`: `base_ref` and `base_why` added beside `base`, which keeps its meaning as what the
-  changeset recorded about its stack. Contract tests in the same commit.
+      changeset recorded about its stack. Contract tests in the same commit.
 - [x] `internal/cli/init.go`, `internal/changeset/changeset.go`: an id's uniqueness comes from the directory
-  that carries it — active or landed — instead of from a ref's name. `DirectoryAt` gained `Landed`, which is
-  what tells a tidied landing apart from an uncommitted deletion. `init` refuses a landed id from the
-  destination's tree before it writes anything.
+      that carries it — active or landed — instead of from a ref's name. `DirectoryAt` gained `Landed`, which is
+      what tells a tidied landing apart from an uncommitted deletion. `init` refuses a landed id from the
+      destination's tree before it writes anything.
 
 **Deviation.** A parent merged only into a release branch is not landed, and its child keeps measuring
 against the parent branch. That is D1 applied to the stack, and it replaces the reach hedge the durable ref
@@ -356,14 +356,14 @@ branch.
 #### Verification
 
 - [x] `internal/changeset/base_test.go`: seven tests, one per rule, plus the two landing shapes and the
-  rebased-onto-trunk case — the rebase case asserts the child's own commits are the whole diff, where a
-  ref-named base would have pulled in the destination's later work.
+      rebased-onto-trunk case — the rebase case asserts the child's own commits are the whole diff, where a
+      ref-named base would have pulled in the destination's later work.
 - [x] The rebase-merge stack case: `landedBaseIsTheSameWork` reports "not the same work" and the advice
-  names the rebase (`internal/cli/parent_relink_test.go`).
+      names the rebase (`internal/cli/parent_relink_test.go`).
 - [x] A clone where the parent branch still exists after landing: the derived base answers, and the branch
-  name appears nowhere (`TestADerivedBaseReplacesTheParentBranchWhileTheBranchIsHere`).
+      name appears nowhere (`TestADerivedBaseReplacesTheParentBranchWhileTheBranchIsHere`).
 - [x] With both of a parent's durable refs deleted from the repository the base is the same commit
-  (`TestADerivedBaseNeedsNoRecordInThisClone`), which is the difference between a fact and a paper trail.
+      (`TestADerivedBaseNeedsNoRecordInThisClone`), which is the difference between a fact and a paper trail.
 - [x] `mise run gates`.
 
 ### M4 — `git pair change tidy`
@@ -377,27 +377,27 @@ branch.
 #### Tasks
 
 - [x] `internal/cli/tidy.go`: `git pair change tidy <id>…`, `--all-landed`, `--dry-run`, `--json`. Moves
-  `changesets/<id>/` to `changesets/.landed/<id>/` in one commit on the checked-out branch, written with the
-  same commit machinery as a marker (`internal/marker/marker.go:156`), and touching nothing else.
+      `changesets/<id>/` to `changesets/.landed/<id>/` in one commit on the checked-out branch, written with the
+      same commit machinery as a marker (`internal/marker/marker.go:156`), and touching nothing else.
 - [~] Refusals, each exit 1 with its own reason: the id is not landed (nothing to move); some active
   changeset names it as `parent-changeset:`; the working tree is dirty; the id is not present on this branch.
   **Stricter than planned:** the tree must be clean everywhere, including inside `changesets/`, because the
   file a tidy must not sweep is a sibling's half-written `ABOUT.md`. The refusal prints the paths it would
   have taken. `--all-landed` treats an unlanded id as not in the set; a named id refuses.
 - [x] `init`'s name check: done in M3 ("Take an id's uniqueness from the tree it lives in"), including the
-  `.landed/` half and `DirectoryAt.Landed`.
+      `.landed/` half and `DirectoryAt.Landed`.
 - [x] README: tidy is a changeset like any other — the reviewer sees the whole list as renames in one span,
-  and the move reaches trunk through the normal flow.
+      and the move reaches trunk through the normal flow.
 - [x] `scripts/gates/e2e-29.sh`: the `tidy:` step lands a changeset, tidies it on a branch, and re-runs
-  `status --changeset`, `queue --json`, `check`, a second `tidy`, and `init` on the name it freed.
+      `status --changeset`, `queue --json`, `check`, a second `tidy`, and `init` on the name it freed.
 
 #### Verification (executed)
 
 - [x] `internal/cli/tidy_test.go`: the move, its renames-only diff, the no-op second run, the two refusals,
-  `--dry-run`, the two usage errors, the JSON shape, the surfaces after the move, the empty array.
+      `--dry-run`, the two usage errors, the JSON shape, the surfaces after the move, the empty array.
 - [x] `mise run gates` for this changeset, then `git pair change ready` and push. The branch is
-  `feat/change-tidy` (worktree `/home/david/dev/worktrees/git-pair/change-tidy`), stacked on
-  `feat/derived-bases`; it moves onto new `origin/main` before the handoff.
+      `feat/change-tidy` (worktree `/home/david/dev/worktrees/git-pair/change-tidy`), stacked on
+      `feat/derived-bases`; it moves onto new `origin/main` before the handoff.
 
 ### M5 — Delete the durable-ref subsystem
 
@@ -410,39 +410,39 @@ branch.
 #### Tasks
 
 - [x] Carried from M3: `internal/changeset/destination.go` reads the parent's `CHANGESET.yaml` from the
-  integration branch (`StackAt(ctx, repo, db.Ref, parent)`), in either directory spelling, and no longer
-  imports `internal/reviewref`. `Changeset.BaseDerived` distinguishes a derived measurement base from a
-  destination. Two rules came with it: a walked base naming a directory the destination carries is a landed
-  changeset to walk through, not a destination; and a parent merged only into a release branch is not landed,
-  so the child's destination stays the live parent branch.
+      integration branch (`StackAt(ctx, repo, db.Ref, parent)`), in either directory spelling, and no longer
+      imports `internal/reviewref`. `Changeset.BaseDerived` distinguishes a derived measurement base from a
+      destination. Two rules came with it: a walked base naming a directory the destination carries is a landed
+      changeset to walk through, not a destination; and a parent merged only into a release branch is not landed,
+      so the child's destination stays the live parent branch.
 - [x] Carried from M3: `internal/cli/status.go`'s `Stack:` block still prints `record:` per ancestor from the ref index, with
-  `--json`'s `stack[].integration` beside it. Both read the durable shape and move with this milestone.
+      `--json`'s `stack[].integration` beside it. Both read the durable shape and move with this milestone.
 - [x] Delete `internal/reviewref` (467), `internal/cli/integration.go` (1366), `internal/cli/publish.go`
-  (415), `internal/cli/configure.go` (281), `internal/cli/published.go` (210), the ref half of
-  `internal/cli/landed.go` (184), `internal/git/push.go` (204), and their tests (~3.0k lines).
+      (415), `internal/cli/configure.go` (281), `internal/cli/published.go` (210), the ref half of
+      `internal/cli/landed.go` (184), `internal/git/push.go` (204), and their tests (~3.0k lines).
 - [x] Delete the commands and their registrations: `integration`, `integration record`,
-  `integration publish`, `integration configure`. `git pair change integrate` stays.
+      `integration publish`, `integration configure`. `git pair change integrate` stays.
 - [x] `internal/hygiene/hygiene_test.go`: drop the single-`update-ref` rule (`:647-736`) and the audited-push
-  fence (`:89-110`); add, in the same syntax-reading style, `TestShippedCodeNeverWritesARef` — no shipped
-  file passes `update-ref`, `symbolic-ref`, or `git tag` to git, with `symbolic-ref` allowed at exactly one
-  file and only in the read-only `--quiet --short HEAD` form, checked by the AST pass. Keep the layer
-  A/B/C structure so a spread slice cannot hide a write, and keep the fixture self-test proving the ref
-  rule set catches an injected write and ignores a read.
+      fence (`:89-110`); add, in the same syntax-reading style, `TestShippedCodeNeverWritesARef` — no shipped
+      file passes `update-ref`, `symbolic-ref`, or `git tag` to git, with `symbolic-ref` allowed at exactly one
+      file and only in the read-only `--quiet --short HEAD` form, checked by the AST pass. Keep the layer
+      A/B/C structure so a spread slice cannot hide a write, and keep the fixture self-test proving the ref
+      rule set catches an injected write and ignores a read.
 - [x] `--fetch`: delete `internal/cli/fetch.go` (113) — its help text already says the flag exists for the
-  durable refs and their mirrors (`:24`), and its three users are `status.go:58`, `check.go:72`, and
-  `queue.go:88`. `change wait --fetch` is a separate flag (`internal/cli/change.go:713`) that polls for
-  somebody else's commits, and stays. README's `--fetch` rows and the agent contract go in the same commit.
+      durable refs and their mirrors (`:24`), and its three users are `status.go:58`, `check.go:72`, and
+      `queue.go:88`. `change wait --fetch` is a separate flag (`internal/cli/change.go:713`) that polls for
+      somebody else's commits, and stays. README's `--fetch` rows and the agent contract go in the same commit.
 - [x] `.github/workflows/git-pair-integrate.yml`: drop the record and publish steps and the `fetch-depth: 0`
-  justification (`:69-70`, `:91-96`); the job's remaining work is gate, merge, push. Keep the
-  `workflow_run`→`schedule`→`dispatch` shape and the comment explaining why there is no `push` trigger.
+      justification (`:69-70`, `:91-96`); the job's remaining work is gate, merge, push. Keep the
+      `workflow_run`→`schedule`→`dispatch` shape and the comment explaining why there is no `push` trigger.
 - [x] `scripts/gates/ci-integrate.sh` (313 lines): drop the record, publish, and "already recorded"
-  scenarios; keep gate, merge, re-run-is-a-no-op, conflicting-merge, and probe cases; keep the assertion
-  that the two workflow files still name each other.
+      scenarios; keep gate, merge, re-run-is-a-no-op, conflicting-merge, and probe cases; keep the assertion
+      that the two workflow files still name each other.
 - [x] Mark `docs/plans/review-architecture-v2/`, `docs/plans/publish-the-records/`, and
-  `docs/plans/legacy-refs-and-remote-branches/` superseded, each with a line pointing here.
+      `docs/plans/legacy-refs-and-remote-branches/` superseded, each with a line pointing here.
 - [x] PRD §13, §12, §21, §22, §26, §29 and README §Concepts, §Command reference, §JSON contracts,
-  §Configuration, §Landing a declared change from CI: rewrite in the same commits as the deletions, and
-  state the squash limitation (D2) where §13 currently promises the archive.
+      §Configuration, §Landing a declared change from CI: rewrite in the same commits as the deletions, and
+      state the squash limitation (D2) where §13 currently promises the archive.
 
 #### Verification
 
@@ -463,24 +463,24 @@ branch.
 #### Tasks
 
 - [x] `internal/cli/docs_contract_test.go:117-127`: `TestRefPathsInTheDocsAreOnesWeWrite` becomes
-  `TestNoDocNamesADurableRef` — "no path under `refs/git-pair/` appears in any document, README, PRD, or
-  skill file", with no whitelist. The migration prose that needed the old whitelist entry lives in the
-  retired chapters of PRD §27 instead, which the test does not read as a promise.
+      `TestNoDocNamesADurableRef` — "no path under `refs/git-pair/` appears in any document, README, PRD, or
+      skill file", with no whitelist. The migration prose that needed the old whitelist entry lives in the
+      retired chapters of PRD §27 instead, which the test does not read as a promise.
 - [x] `skills/git-pair/SKILL.md` and `references/integration.md` (11 mentions between them): the lifecycle
-  story without refs — ready, review, submit, integrate, merge with ordinary git, tidy when the list grows.
-  `references/cli.md` (10 mentions) loses the three commands.
+      story without refs — ready, review, submit, integrate, merge with ordinary git, tidy when the list grows.
+      `references/cli.md` (10 mentions) loses the three commands.
 - [x] README §The agent skill and §Agent contract: what an agent can now assume about a landed changeset,
-  and what it must not assume about a squashed one.
+      and what it must not assume about a squashed one.
 - [x] The gate scripts, which are contracts and had to change with the behaviour rather than be loosened:
-  `scripts/gates/e2e-29.sh` loses the record and publish steps and gains a landing on a branch that is not
-  the destination (the source branch stays live, `--default-branch` makes the same history answer "landed,
-  reviewed", and the destination still answers after the branch is deleted); `scripts/gates/ci-integrate.sh`
-  asserts the remote holds branches and nothing else; `scripts/gates/pty-walkthrough.sh` moves its
-  "a command that writes asks for nothing at a terminal" subject from `integration configure` to
-  `change tidy`; `scripts/ci/git-pair-integrate.sh` and `.github/workflows/git-pair-integrate.yml` end at
-  the push.
+      `scripts/gates/e2e-29.sh` loses the record and publish steps and gains a landing on a branch that is not
+      the destination (the source branch stays live, `--default-branch` makes the same history answer "landed,
+      reviewed", and the destination still answers after the branch is deleted); `scripts/gates/ci-integrate.sh`
+      asserts the remote holds branches and nothing else; `scripts/gates/pty-walkthrough.sh` moves its
+      "a command that writes asks for nothing at a terminal" subject from `integration configure` to
+      `change tidy`; `scripts/ci/git-pair-integrate.sh` and `.github/workflows/git-pair-integrate.yml` end at
+      the push.
 - [x] Sweep PRD and README for prose that assumes a second statement of a fact — "recorded", "unrecorded",
-  "published", "paper trail" — and rewrite each to the tree fact or delete it.
+      "published", "paper trail" — and rewrite each to the tree fact or delete it.
 
 #### Verification
 
@@ -571,14 +571,14 @@ was checking.
 
 Executed 2026-09-29, one changeset per milestone, each handed off green.
 
-| Milestone | Branch | Shipped |
-| --------- | ------ | ------- |
-| M1 | `feat/landed-tree-model` (merged, `81f01e2`) | `.landed/` in the tree model: `Reserved`, `ActiveIDs`, `LandedIDs`, `DirAt`, `DirPathspecs` |
-| M2 | `feat/landing-is-a-tree-fact` | `CarriesDir`, `LandedChain`, `LandingCommit`; `LANDED UNREVIEWED`; `status`'s landing block read from the destination |
-| M3 | `feat/derived-bases` | `BaseFor` with the rule attached (`base_ref`, `base_why`), the destination walk past a landed parent (`destination_via`) |
-| M4 | `feat/change-tidy` | `git pair change tidy`, renames-only, `--dry-run`, `--all-landed`, JSON `actions` |
-| M5 | `feat/durable-refs-gone` | `internal/reviewref`, the five `integration`-family files, `internal/git/push.go` and ~5.7k lines of them deleted; `internal/cli/landing.go` added; the hygiene ref-write ban |
-| M6 | same branch | PRD §3–§30, README, the shipped skill and `references/`; `TestNoDocNamesADurableRef`; the supersession notices; the gate scripts |
+| Milestone | Branch                                       | Shipped                                                                                                                                                                       |
+| --------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M1        | `feat/landed-tree-model` (merged, `81f01e2`) | `.landed/` in the tree model: `Reserved`, `ActiveIDs`, `LandedIDs`, `DirAt`, `DirPathspecs`                                                                                   |
+| M2        | `feat/landing-is-a-tree-fact`                | `CarriesDir`, `LandedChain`, `LandingCommit`; `LANDED UNREVIEWED`; `status`'s landing block read from the destination                                                         |
+| M3        | `feat/derived-bases`                         | `BaseFor` with the rule attached (`base_ref`, `base_why`), the destination walk past a landed parent (`destination_via`)                                                      |
+| M4        | `feat/change-tidy`                           | `git pair change tidy`, renames-only, `--dry-run`, `--all-landed`, JSON `actions`                                                                                             |
+| M5        | `feat/durable-refs-gone`                     | `internal/reviewref`, the five `integration`-family files, `internal/git/push.go` and ~5.7k lines of them deleted; `internal/cli/landing.go` added; the hygiene ref-write ban |
+| M6        | same branch                                  | PRD §3–§30, README, the shipped skill and `references/`; `TestNoDocNamesADurableRef`; the supersession notices; the gate scripts                                              |
 
 Three things the plan did not predict:
 
@@ -587,12 +587,12 @@ Three things the plan did not predict:
   `pty-walkthrough.sh`'s "a command that writes asks for nothing at a terminal" needed a new subject and got
   `change tidy`. Neither script was loosened; both were rewritten with the behaviour.
 - **A gate assertion can fail because of the shell, not the product.** `cmd | grep -q` under `set -o
-  pipefail` turns a successful match into a SIGPIPE exit when the producer is still writing, which showed up
+pipefail` turns a successful match into a SIGPIPE exit when the producer is still writing, which showed up
   as a flaky failure in the new landing step. The gate captures output into a variable before matching, the
   way its other long-output assertions already did.
 - **The queue's landed skip note has no subject in the tree model's ordinary cases.** `queue` names a
   changeset as `landed on <destination> at <sha>` only when the destination is a branch other than the
-  integration branch *and* the branch still carries a live candidate; every landing the gates replay is
+  integration branch _and_ the branch still carries a live candidate; every landing the gates replay is
   either on trunk (the resolver drops the candidate) or a release line the reader has to name. It stays
   because a changeset that vanishes from the queue silently is a mystery. Nothing tested its text, so
   walking the skill added `TestQueueNamesALandingOnABranchThatIsNotTheDefault`, which also pins that such a

@@ -19,12 +19,12 @@ document alone; no code changes are included.
 
 The four mechanisms the plan replaces:
 
-| today | planned |
-| --- | --- |
-| `refs/git-pair/integrations/<id>` says the changeset landed | `changesets/<id>/` present in the destination's tree — `resolver.onTrunk`, already built and cached per scan at `internal/changeset/resolve.go:244-255` |
-| `refs/git-pair/archive/<id>` names the unsquashed chain | the contiguous run on trunk's first-parent line carrying this changeset's directory |
-| a child of a landed parent is measured against `refs/git-pair/integrations/<parent>` | one exported `changeset.BaseFor` returning `merge-base(head, destination)`, cached in the scan |
-| `LANDED, UNRECORDED` — a finding about a command nobody ran | `LANDED UNREVIEWED` — a finding about work that reached trunk without a verdict |
+| today                                                                                | planned                                                                                                                                                 |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `refs/git-pair/integrations/<id>` says the changeset landed                          | `changesets/<id>/` present in the destination's tree — `resolver.onTrunk`, already built and cached per scan at `internal/changeset/resolve.go:244-255` |
+| `refs/git-pair/archive/<id>` names the unsquashed chain                              | the contiguous run on trunk's first-parent line carrying this changeset's directory                                                                     |
+| a child of a landed parent is measured against `refs/git-pair/integrations/<parent>` | one exported `changeset.BaseFor` returning `merge-base(head, destination)`, cached in the scan                                                          |
+| `LANDED, UNRECORDED` — a finding about a command nobody ran                          | `LANDED UNREVIEWED` — a finding about work that reached trunk without a verdict                                                                         |
 
 `git pair change tidy` is added to move landed directories from `changesets/<id>/` to `changesets/.landed/<id>/`,
 so tidying clutter does not also erase the tree's statement that a changeset existed and the metadata the

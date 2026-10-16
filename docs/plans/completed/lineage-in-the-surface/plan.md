@@ -20,7 +20,7 @@ nothing about it is visible. Three symptoms, all observed while landing the stac
    on" and "what carried it into trunk" — and the refusal asserts one of them is a mistake.
 
 2. `git pair status` says nothing about the stack. The chain is reconstructible from `parent-changeset`
-   plus the durable refs — that is what `parent-changeset:` is *for* (`internal/changeset/changeset.go:459`:
+   plus the durable refs — that is what `parent-changeset:` is _for_ (`internal/changeset/changeset.go:459`:
    "the durable half of the relationship, which is what still means something after the parent branch is
    deleted") — and no command prints it.
 
@@ -36,7 +36,7 @@ correct record is wrong.
 
 - A run of `integration record` whose asked integration commit **descends from** the recorded one and is
   reachable from the destination answers that the record already covers it, names both commits, changes
-  no ref, and exits 0. An asked commit that is *not* a descendant still refuses with the existing
+  no ref, and exits 0. An asked commit that is _not_ a descendant still refuses with the existing
   wording, and an archive conflict still refuses: the reviewed chain is a different claim, not a later
   one.
 - `git pair status` for a changeset with a record prints the stack chain — each ancestor changeset, the
@@ -54,10 +54,10 @@ correct record is wrong.
 
 Landed state, so the plan can be checked against real data rather than a fixture:
 
-| changeset | archive | integration | on trunk's first-parent line? |
-|---|---|---|---|
-| `feat-two-frozen-refs` | `4a666d7` | `ba921b0` | yes |
-| `feat-publish-the-records` | `6e1200c` | `816af32` | no — `816af32` is a second parent of `ba921b0` |
+| changeset                  | archive   | integration | on trunk's first-parent line?                  |
+| -------------------------- | --------- | ----------- | ---------------------------------------------- |
+| `feat-two-frozen-refs`     | `4a666d7` | `ba921b0`   | yes                                            |
+| `feat-publish-the-records` | `6e1200c` | `816af32`   | no — `816af32` is a second parent of `ba921b0` |
 
 The child's `CHANGESET.yaml` says `parent: feat/two-frozen-refs` and
 `parent-changeset: feat-two-frozen-refs`. `ParentOf` treats a missing parent branch as still-a-stack with
@@ -116,7 +116,7 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
       based on, which is where the chain continues. PRD §11.4's create-only paragraphs and README's `integration record` prose and conflict sample all gained the carrying case, including the first-parent condition and the two refusals it does not swallow. §11.4 also gained that a stacked child's record names its landing on the branch it was based on, which is where the chain continues.
 - [x] Tests: carrying (exit 0, refs byte-identical, `carried_by` set, `--json` shape), non-descendant
       conflict still refused with the existing wording, archive differing while integration descends still
-      refused, and the child-into-parent-then-parent-into-trunk sequence end to end. `internal/cli/integration_carried_test.go`: carrying (exit 0, refs unchanged by SHA and by shape, `carried_by` present and a prefix of the asked commit, `recorded` false, and the exact repeat asserting `carried_by` is *absent* — the key distinguishes the two kinds of no-op), archive-mismatch-with-descending-integration still a conflict, and a carrier the named target does not hold refused with the reachability wording.
+      refused, and the child-into-parent-then-parent-into-trunk sequence end to end. `internal/cli/integration_carried_test.go`: carrying (exit 0, refs unchanged by SHA and by shape, `carried_by` present and a prefix of the asked commit, `recorded` false, and the exact repeat asserting `carried_by` is _absent_ — the key distinguishes the two kinds of no-op), archive-mismatch-with-descending-integration still a conflict, and a carrier the named target does not hold refused with the reachability wording.
 
 **Verification**
 
@@ -191,14 +191,14 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
       branch names once, not once per step. `TestStatusStackChainCostsABoundedReadPerStep` asserts the marginal is
       at most 5 — the shape that would catch a per-step namespace read or a chain walked twice, where a
       two-ancestor delta measured at 9 would fail.
-- [x] S2: does any *other* surface ask the "which commit brought this directory" question and get the
+- [x] S2: does any _other_ surface ask the "which commit brought this directory" question and get the
       first-parent answer? `queue`'s landed-unrecorded detection and `record`'s derivation are the two
       candidates; if a third exists, the carrying rule belongs beside it too.
-      Answered inside the scope taken: `queue`'s landed-unrecorded detection asks the *tree* question (does the
+      Answered inside the scope taken: `queue`'s landed-unrecorded detection asks the _tree_ question (does the
       directory exist on trunk) and never derives an ancestry range, so there is no first-parent answer for it to
       get wrong; `record`'s derivation was the surface with the defect and M1 fixed it. `check` reasons about
       landings but is branch-bound and takes no `--changeset`, so it cannot make a record-read mistake at all. No
-      third surface was found and none was widened into. The defect that *was* shared was the record read's
+      third surface was found and none was widened into. The defect that _was_ shared was the record read's
       missing verdict, shared between `status` and `review history` through the session summary.
 
 ## Risks
@@ -213,8 +213,8 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
 
 ## Audit history
 
-| date | what | outcome |
-|---|---|---|
+| date       | what                                                                                   | outcome     |
+| ---------- | -------------------------------------------------------------------------------------- | ----------- |
 | 2026-09-22 | plan written from the landing of `feat-two-frozen-refs` and `feat-publish-the-records` | not started |
 
 ## Closure

@@ -93,21 +93,21 @@ a statement about where the head sits. `check` then appends it to `next_action` 
   construction; the spikes check that rather than assume it.
 - A plain-merge landing that brought nothing new leaves the child's contribution unchanged. Observed in the
   incident (identical trees) and asserted by existing tests on the vanished-parent side.
-- The parent's branch being present is not itself a reason to advise anything; it is the reason the *old*
+- The parent's branch being present is not itself a reason to advise anything; it is the reason the _old_
   code path was taken.
 
 ## Design
 
 **Ask the content question once, and ask it regardless of whether the parent's branch survived.** The
 landed-parent case has one decision function — the one `landedApprovalStillStands` already is — reached from
-both `parentLive` and `parentGone`. Whether the branch is still there decides which *read* supplies the
+both `parentLive` and `parentGone`. Whether the branch is still there decides which _read_ supplies the
 landing, not whether the child's content is compared. This removes the asymmetry instead of patching one
 side of it, and it means a parent deleted after the landing and a parent branch left in place cannot give
 different advice about the same content.
 
 **Advice is a function of consequence, not of geography.** "The head is not on the landing commit" is a fact
 about commit positions, and `owesLandingStep` should stay that statement — it is the housekeeping predicate.
-The decision to *tell the author to rewrite* gets its own predicate, and it is false exactly when all of:
+The decision to _tell the author to rewrite_ gets its own predicate, and it is false exactly when all of:
 an approval is the newest marker; the contribution above the landing equals what that approval recorded; and
 the branch merges cleanly into the destination. Where those hold, the step is withheld on the verdict, and the
 note says what it is: the parent landed, this head is still measured on it, and nothing is owed until the
@@ -228,7 +228,7 @@ Each answered one question; the conclusions are in `research/`.
    base?** **Yes, with one asymmetry that supports the design.** Where the comparison answered equal, the gate
    passed and the merge carried the reviewed content; no fixture was found where the two disagreed about a
    merge that should happen, so M1's predicate consults the measurement it has. The asymmetry: in the squash
-   case the same content reads equal *until* the author takes the step, and reads different afterwards, when
+   case the same content reads equal _until_ the author takes the step, and reads different afterwards, when
    the recorded base has stopped being an ancestor of the head and the reading falls through to the older
    comparison of two base trees.
 4. **How often is the branch-present case the one that happens?** A landing is a merge into the destination and
@@ -266,8 +266,8 @@ Layered, in the order that catches a mistake cheapest:
 
 ## Audit history
 
-| Date | Audit | Summary |
-| --- | --- | --- |
+| Date       | Audit                      | Summary                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-10-14 | Spikes 1 and 3, then M1/M2 | Both measurement spikes answered in `research/`; spike 1 says the merge does not need the restack, spike 3 says the contribution measurement agrees with the gate and the one asymmetry argues for withholding. M1 shipped with the two predicates pinned apart in `stacked_internal_test.go`; M2 shipped with the PRD's parent-landing section, the README's stack prose and check-field list, and the skill's agent-facing rule. M3 deleted. |
 
 ## Execution status
@@ -278,22 +278,22 @@ Plan written on 2026-10-13 from the transcript in
 
 What the code ended up with:
 
--   `parentStatus.Step` and `parentStatus.Note` split the landed-parent sentence into the instruction and the
-    fact, which is what lets `check` print one without the other. `landedParentStep` is still the only
-    spelling of the command, and it is now called from one place.
--   `parentStatus.ApprovalSurvivesLanding` is written only by `landedApprovalStillStands`, only where an
-    approval is the verdict, and only when the content came out equal and the branch merges cleanly. The
-    comparison sentence is the note it leaves behind.
--   `advisesRestack()` beside `owesLandingStep()` is the instruction's predicate, tested beside the fact's in
-    `stacked_internal_test.go`. `check` prints the step where it is true; `status` prints it whenever
-    `owesLandingStep()` is.
--   Two sentences that misadvised were corrected on the way, both in the same family: a refusal for a
-    conflicting merge now names its own step in the reason, as every other parent refusal does, and a child
-    already standing on the landing is told to re-offer rather than handed a branch deletion glued to "and
-    have the result reviewed again".
--   The branch-is-gone path never set `Step`, so a passing verdict no longer prints a rebase naming a parent
-    branch that has been deleted. That command could never run, and `TestOwesLandingStep` and
-    `TestLandedParentStepSaysNothingIsOwedWhenTheBranchIsGoneAndTheHeadIsOnTheLanding` already said so.
+- `parentStatus.Step` and `parentStatus.Note` split the landed-parent sentence into the instruction and the
+  fact, which is what lets `check` print one without the other. `landedParentStep` is still the only
+  spelling of the command, and it is now called from one place.
+- `parentStatus.ApprovalSurvivesLanding` is written only by `landedApprovalStillStands`, only where an
+  approval is the verdict, and only when the content came out equal and the branch merges cleanly. The
+  comparison sentence is the note it leaves behind.
+- `advisesRestack()` beside `owesLandingStep()` is the instruction's predicate, tested beside the fact's in
+  `stacked_internal_test.go`. `check` prints the step where it is true; `status` prints it whenever
+  `owesLandingStep()` is.
+- Two sentences that misadvised were corrected on the way, both in the same family: a refusal for a
+  conflicting merge now names its own step in the reason, as every other parent refusal does, and a child
+  already standing on the landing is told to re-offer rather than handed a branch deletion glued to "and
+  have the result reviewed again".
+- The branch-is-gone path never set `Step`, so a passing verdict no longer prints a rebase naming a parent
+  branch that has been deleted. That command could never run, and `TestOwesLandingStep` and
+  `TestLandedParentStepSaysNothingIsOwedWhenTheBranchIsGoneAndTheHeadIsOnTheLanding` already said so.
 
 The JSON decision M2 asked for is recorded in the changeset's `ABOUT.md`: `check --json` gained
 `parent_approval_survives_landing`, and `status --json` gained `parent.step`, because neither `parent_comparison`

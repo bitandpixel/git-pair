@@ -18,7 +18,7 @@ parent's directory cannot move the child's review.
 - The note is correctly worded. The old message was `changeset <child-branch> is still in flight on <parent-id>`,
   which put a branch name in the slot the sentence calls a changeset, and reversed the parent and child shown in
   README's and the PRD's own sample of that line. It now says `the changeset on <branch> still records it as its
-  base`.
+base`.
 - PRD §11.10 loses refusal 2 and gains the note, with the reason it existed recorded as no longer true. The README
   command table, the exit-code table, the troubleshooting entry, the skill's command row, and the skill's CLI
   reference follow. The `--json` shape is documented in all three places that document it.
@@ -28,13 +28,13 @@ parent's directory cannot move the child's review.
 Three probes, each building two identical stacks and tidying the parent's directory in only one of them, then
 comparing every output with the ids and shas normalised away:
 
-| Comparison | Result |
-|---|---|
-| child's `status`, `check`, `diff --stat`, `queue` before and after the parent's move | identical, including the base commit |
-| the same with the parent's branch deleted as well | `check`, `diff`, `queue` identical; one `status` note reworded, correctly in both worlds |
-| `change stack --base <parent>` and `init --base <parent>` from a new branch | refuse identically — the parent has **landed**, which is what removes it from the candidate set |
-| a child whose own commit edits `changesets/<parent>/ABOUT.md`, then merges the tidied trunk | same span, same counts column, reported at `changesets/.landed/<parent>/ABOUT.md` |
-| the same battery with the child's record spelled the old way (`parent:` + `parent-changeset:`) | identical |
+| Comparison                                                                                     | Result                                                                                          |
+| ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| child's `status`, `check`, `diff --stat`, `queue` before and after the parent's move           | identical, including the base commit                                                            |
+| the same with the parent's branch deleted as well                                              | `check`, `diff`, `queue` identical; one `status` note reworded, correctly in both worlds        |
+| `change stack --base <parent>` and `init --base <parent>` from a new branch                    | refuse identically — the parent has **landed**, which is what removes it from the candidate set |
+| a child whose own commit edits `changesets/<parent>/ABOUT.md`, then merges the tidied trunk    | same span, same counts column, reported at `changesets/.landed/<parent>/ABOUT.md`               |
+| the same battery with the child's record spelled the old way (`parent:` + `parent-changeset:`) | identical                                                                                       |
 
 The first two rows are now `TestChangeTidyMovesAParentWhoseChildIsStillOpen` and
 `TestChangeTidyMovesAParentTheChildEditedWithoutChangingTheSpan`. The old behaviour's test,

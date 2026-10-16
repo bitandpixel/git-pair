@@ -1,6 +1,6 @@
 # nudge user
 
-Is there anywhere that nudges the user to set up this command? I'm thinking it could be a nudge on `git pair integration record` and/or `publish`.  It may also be useful to nudge the user on a read-path too.
+Is there anywhere that nudges the user to set up this command? I'm thinking it could be a nudge on `git pair integration record` and/or `publish`. It may also be useful to nudge the user on a read-path too.
 
 ## Author reply
 
@@ -10,11 +10,11 @@ write path, no on the other, no on the read path. Fixed on both.
 Each surface names the half its own run is about, and each stays silent in a clone that already has the
 line:
 
-| Surface | What it says |
-| --- | --- |
-| `integration record` | the `configure:` line naming both keys — the two refspecs it did not write (already there in the first version) |
+| Surface               | What it says                                                                                                                                                                                       |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `integration record`  | the `configure:` line naming both keys — the two refspecs it did not write (already there in the first version)                                                                                    |
 | `integration publish` | the `configure:` line naming `remote.<name>.push` only. A clone that just sent a pair by hand is the clone an ordinary push could have served, and the fetch half is not what this run did by hand |
-| `status`, `queue` | the "nothing here can say whether a record reached `<remote>`… never fetched" note now ends with the `--fetch` that asks once *and* `git pair integration configure`, which stops the asking |
+| `status`, `queue`     | the "nothing here can say whether a record reached `<remote>`… never fetched" note now ends with the `--fetch` that asks once _and_ `git pair integration configure`, which stops the asking       |
 
 Three details worth your read:
 
@@ -35,4 +35,3 @@ still says so in one sentence, with both remedies in it.
 
 Tested by `TestTheSurfacesNudgeTowardConfiguring` (status, its `--json`, queue, publish, publish again after
 configuring) and `TestPublishWithoutAnythingToSendDoesNotNudge`.
-

@@ -10,19 +10,19 @@ From review `a87ae0b`, inline on the plan's first non-goal:
 
 You are right, and the purity argument does not hold. Deleting the branch relinks the base
 (`relinkStacks`, `internal/changeset/resolve.go:535-549`), so the base moves either way. The current trigger
-decides only *when*, and the delay is where the wrong diff lives.
+decides only _when_, and the delay is where the wrong diff lives.
 
 Probed in a scratch repository — trunk, `parent` off trunk, trunk advances independently with `t1`, `p1` on
 `parent`, `parent` merged into trunk as `L`, child off `p1` with `c.txt`:
 
-| child state | base = parent branch tip | base = integration ref |
-|---|---|---|
-| child not yet on the landing commit | `c.txt` | `c.txt` |
-| child rebased onto trunk | `c.txt`, `p.txt`, `trunk.txt` | `c.txt` |
+| child state                         | base = parent branch tip      | base = integration ref |
+| ----------------------------------- | ----------------------------- | ---------------------- |
+| child not yet on the landing commit | `c.txt`                       | `c.txt`                |
+| child rebased onto trunk            | `c.txt`, `p.txt`, `trunk.txt` | `c.txt`                |
 
 The second row is the ordinary state of a child a few minutes after its parent landed, and it is the case the
 trigger gets wrong today: with the base at the parent's branch tip, the child's diff carries the parent's own
-work *and* unrelated trunk work, because `tree(B)` predates both. `git diff --name-only` there printed
+work _and_ unrelated trunk work, because `tree(B)` predates both. `git diff --name-only` there printed
 `c.txt p.txt trunk.txt` against `c.txt` for the integration ref. The integration ref is the base that
 produces the honest diff, and the child reaches it only once somebody deletes the branch.
 

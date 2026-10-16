@@ -5,10 +5,10 @@ Does that command exist, and what should the advice say instead?
 
 ## What is emitted
 
-| Where | Sentence |
-| --- | --- |
+| Where                         | Sentence                                                                                                                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `internal/cli/stacked.go:358` | "this head is already on `<landing>`, so what it now contributes was never read — re-offer it with `git pair change ready --changeset <id>` and have the result reviewed again" |
-| `internal/cli/stacked.go:600` | "`git merge <destination> && git pair change ready --changeset <id>`" (the reason a child that conflicts with the destination is refused) |
+| `internal/cli/stacked.go:600` | "`git merge <destination> && git pair change ready --changeset <id>`" (the reason a child that conflicts with the destination is refused)                                       |
 
 Both came in with `feat-next-action-fixes`, and both were asserted verbatim by its tests — the tests pinned the
 string, so the runnability was never asked.
@@ -33,7 +33,7 @@ check  --changeset      yes      change ready  --changeset     no       change w
                                                                                 change integrate    no
 ```
 
-The commands that act on a changeset the reader names take the flag; the commands that act on *the current*
+The commands that act on a changeset the reader names take the flag; the commands that act on _the current_
 changeset — `ready`, `unready`, `integrate`, `abandon`, `wait` — do not, because their subject is the branch
 (`git pair change ready` finds the changeset this branch carries). So the advice is not merely wrong, it asks
 for a selector the command deliberately refuses: the branch-shape rule is what makes `change ready` unambiguous.
@@ -66,5 +66,5 @@ fails.
 
 M1 therefore builds the per-command version of the same check for emitted advice: collect the `git pair …`
 strings from the four advice surfaces, resolve each against `commandPaths(newRootCommand(&app{}))`, and then
-check the flags against *that* command rather than against the union. The union would pass this bug —
+check the flags against _that_ command rather than against the union. The union would pass this bug —
 `--changeset` exists somewhere — which is exactly the mistake the two sentences made.

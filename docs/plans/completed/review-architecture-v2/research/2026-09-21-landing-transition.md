@@ -38,7 +38,7 @@ $ git rev-list -1 --first-parent HEAD
 ```
 
 Same rule, same shape of answer. Squash destroys the ancestry between the reviewed head and the landing
-commit, which is precisely why the landing commit has to be *recorded* rather than derived by ancestry —
+commit, which is precisely why the landing commit has to be _recorded_ rather than derived by ancestry —
 and precisely why recording it is cheap: the tree transition identifies it.
 
 ## Result C — the chain an archive ref has to keep alive

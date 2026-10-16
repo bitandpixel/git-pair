@@ -39,16 +39,16 @@ parent: feat-dev-workflow-profile landed as 92d6dd3 — this head is already on 
 - `internal/cli/review.go`, `internal/tui/tui.go`: both submission surfaces call the same helper, so the CLI
   and the review screen cannot record different values for one submission.
 - `internal/cli/stacked.go`:
-    - `parentStatus.Measured`, `approvalBase()`, and `LandingUnderHead`.
-    - `parentLive` and `parentGone` compare the landing against `approvalBase()` rather than against the
-      parent's branch tip, and both stop refusing when the approval recorded neither record — they say what
-      is missing, which is what §21 already said to do.
-    - `parentGone` reads whether this head already carries the landing, which it never did, and its reason is
-      spelled like `parentLive`'s instead of printing the landing twice.
-    - `landedParentStep` names no step when the branch is gone and the head is already on the landing; before,
-      it printed `git rebase --onto <landing> <parent-branch> <child-branch>` with a branch that does not
-      exist.
-    - `owesLandingStep()` keeps `check`'s `next` from repeating the sentence its `parent:` line printed.
+  - `parentStatus.Measured`, `approvalBase()`, and `LandingUnderHead`.
+  - `parentLive` and `parentGone` compare the landing against `approvalBase()` rather than against the
+    parent's branch tip, and both stop refusing when the approval recorded neither record — they say what
+    is missing, which is what §21 already said to do.
+  - `parentGone` reads whether this head already carries the landing, which it never did, and its reason is
+    spelled like `parentLive`'s instead of printing the landing twice.
+  - `landedParentStep` names no step when the branch is gone and the head is already on the landing; before,
+    it printed `git rebase --onto <landing> <parent-branch> <child-branch>` with a branch that does not
+    exist.
+  - `owesLandingStep()` keeps `check`'s `next` from repeating the sentence its `parent:` line printed.
 - `internal/cli/status.go`, `internal/cli/check.go`: `parent.head_carries_landing` and
   `parent_head_carries_landing`, beside the existing `stale_branch`.
 - `internal/cli/parent_landed_base_test.go`: five scenarios — the case above passing, the boundary where the
@@ -136,7 +136,7 @@ present.
 ## Open questions
 
 - `internal/changeset/base.go`: `MeasureBase`'s body moves into a new `Measure` in
-  `feat/tui-stacked-span-rendering`, which also makes the *printed* base the destination rather than the
+  `feat/tui-stacked-span-rendering`, which also makes the _printed_ base the destination rather than the
   merge-base commit. `MeasuredBase` keeps working under that change — it calls `MeasureBase` and takes the
   result to its merge base — and the text conflict is inside `MeasureBase`'s body. Whoever lands second
   resolves a few lines.
