@@ -2035,6 +2035,25 @@ under a deadline executes the code. The off switch is not a position: `GIT_PAIR_
 `git-pair.hooks=false` say a machine does not want to run scripts right now, which says nothing about what those
 scripts do, and the quietest way past a gate should not be an environment variable nobody has to read.
 
+Two flags carry these two questions to a single invocation, so a person does not need a process-wide switch to get
+through one command. **`--no-hooks`** runs none of them — either root, `pre-` and `post-` both — and is the
+per-command form of the off switch, so it follows the off switch's rule: it never clears the refusal above, on any
+command. **`--trust-once`** runs the tracked hooks with no position recorded and records nothing, so the next
+command asks again; it clears the refusal and nothing else, because a hook that runs and exits nonzero still
+refuses. Neither is quiet: the skipped set arrives in `hooks[]` as `status: "skipped-by-flag"` and the ones that
+ran unrecorded carry `"consent": "once"`, since the one reading a bypass must never be able to is that it happened.
+`--no-hooks` is absent from `check` and `change integrate` and `--trust-once` is present on both, which is one rule
+applied twice: these commands may be given more checking and never less. Asking for both flags at once is a usage
+error, as `--trust` with `--decline` is. And neither is named inside the refusal, as neither is `--trust` or
+`--decline`: whether somebody's script runs on this machine, or is skipped on it, is the person's decision, and an
+agent that types the flag has made it for them.
+
+The answer a command gets is read whenever it asks, not kept for the life of the process. The review screen sits
+open for as long as a person reviews, and a second terminal can record a position while it is open; an answer kept
+across that window is a refusal about content the clone has already settled, and it reads to the reviewer as a bug
+that only quitting fixes — deleting what they typed changes nothing, reopening clears it. What may be kept is what
+cannot move inside a process: the off switch, and where the clone's git directory is.
+
 Two commands deliberately do not ask: `change unready` and `change abandon`. Both take work out of the queue
 rather than putting it in, and the person who cannot run the repository's checks is exactly the person who needs to
 put the work down; refusing them would make the safety mechanism a trap. `git pair hooks` is never gated either —
@@ -2215,6 +2234,13 @@ somewhere.
 `check` because the two override different things: a reviewer's hook is their own script on their own machine,
 and when it misbehaves it must not strand a verdict the reviewer has already decided to record. The override is
 loud — the human stream says so, and `--json` carries `overridden: true` beside the failed entry in `hooks`.
+
+`--trust-once` covers the case it cannot: the changeset whose own diff edits `.git-pair/hooks/`, where the tracked
+tree in the reviewer's worktree is the content under review and the position refusal stops the submission that
+would record an opinion about it. Asking the reviewer to accept what they were asked to review is backwards, and
+running the scripts for this one submission without recording a position is not — the exposure is one command, and
+what the refusal exists to prevent, checks resting on silence, is what the flag removes. The hooks that ran that
+way carry `"consent": "once"`.
 
 The refusal says the review was not recorded and the reviewer's content is **still staged**. That state has no
 other symptom: the next plain `git commit` would land the reviewer's source edits as ordinary work with no

@@ -195,6 +195,27 @@ switch belongs to the person whose machine it is, for the moment their own scrip
 position — the verdict refuses with hooks switched off, because the off switch says a machine does not want to run
 scripts right now and says nothing about what those scripts do.
 
+### For one command instead of one clone
+
+Two flags carry the same two questions to a single invocation, so a person does not have to reach for a
+process-wide switch to get through one command.
+
+| Flag | On | What it does | What it does not do |
+| --- | --- | --- | --- |
+| `--no-hooks` | `change ready`, `change unready`, `change abandon`, `review submit`, `review open`, `review reopen` | runs none of them, either root, `pre-` and `post-` both; every configured hook appears as `status: "skipped-by-flag"` | does not clear the refusal for an `unrecorded` or `changed` tree — it is `GIT_PAIR_HOOKS=0` for one command, and the off switch was never a position |
+| `--trust-once` | those six, plus `check` and `change integrate` | runs the tracked hooks with no position recorded, and records nothing, so the next command asks again; those hooks carry `"consent": "once"` | does not let a failing hook pass — it says these may run, not that they ran clean |
+
+Asking for both at once is a usage error: one runs no scripts, the other runs the scripts nobody has read, and
+the combination would produce a hand-off that looks checked and is not.
+
+**Neither is an agent's flag to type.** `--no-hooks` is how a hand-off gets made with the team's suite silently
+not run, which is the failure the whole feature exists to prevent; `--trust-once` executes content on the person's
+machine that they have not agreed to execute. Report the refusal, print it as it came, and name both flags beside
+`git pair hooks --trust` and `--decline` as what a person can do — including for the case those flags were written
+for, a changeset whose own diff edits `.git-pair/hooks/`, where the submission that would record an opinion about
+the scripts is the one the position refusal stops. Whether to run someone's script, or to skip yours, is their
+decision, and typing the flag makes it yours.
+
 ## Per-clone, and what that costs
 
 The clone root is not shared. A check that lives only in `<git-dir>/git-pair/hooks/` runs on one machine,
@@ -204,7 +225,8 @@ is reviewed, versioned, and present in everybody's clone. If a check has to hold
 
 The same applies to results. Nothing here persists a hook's outcome: it is not in the marker, not in the
 review commit, and not on any ref. `hooks[]` in the `--json` of the command that ran is where a result lives,
-with `point`, `name`, `path`, `root`, `status`, `exit` and `duration_ms`. A repository that wants its gate to
+with `point`, `name`, `path`, `root`, `status`, `exit` and `duration_ms`, plus `consent` — `once` for a tracked
+hook that ran on `--trust-once`, and nothing for one the clone had recorded a position on. A repository that wants its gate to
 credit a run it performed records that itself, as a `pre-check` hook that writes what it observed.
 
 ## In CI
