@@ -168,12 +168,24 @@ func CloneRootDir(gitDir string) string {
 	return filepath.Join(RecordDir(gitDir), "git-pair", "hooks")
 }
 
-// Plan is what discovery found for one point.
+// Plan is what discovery found for one point, together with the one answer about the clone that point already
+// had to have. The position fields travel with the plan because the decision and the sentence beside it are
+// about the same content: a point that decided the tracked hooks do not run, and then asked the question again
+// to build the warning, can read the record twice and get two different answers.
 type Plan struct {
 	Hooks []Hook
 	// TrackedTrusted is false when the tracked hooks tree has changed since it was accepted, or was never
 	// accepted. The tracked hooks are then reported as skipped rather than run.
 	TrackedTrusted bool
+	// TrustState, Accepted, Current and Declined are the clone's position as it stood when the plan was built:
+	// the state, the newest hash this clone recorded as accepted, the tree's hash now, and the newest hash it
+	// recorded as declined. The last three are here to be printed, which is why `Declined` is the recorded value
+	// rather than the one the state machine compared — the person reading a skipped run wants the number they
+	// chose. Every field is empty or `accepted` where there was nothing to take a position on.
+	TrustState TrustState
+	Accepted   string
+	Current    string
+	Declined   string
 	// UnknownPoints names entries under `.git-pair/hooks/` that are not part of the vocabulary — the report
 	// surface for a typo.
 	UnknownPoints []string
@@ -198,28 +210,28 @@ func Discover(ctx context.Context, repo *git.Repo, point Point) (Plan, error) {
 // twice pays once. The memo in internal/git would answer the repeat for free in normal use, but the cost gate
 // measures a formulation with the caches off, on the grounds that a bound on what a command costs cannot depend
 // on whether somebody asked the same question a minute ago — so the duplicate is charged, and asking once is
-// the fix rather than the memo. Neither answer can move inside a process: the off switch is the environment
-// plus a config value read at the start, and the git directory is where it is.
+// the fix rather than the memo.
+//
+// What is kept here is what cannot move inside a process: the off switch is the environment plus a config value
+// read at the start, and the git directory is where it is. What is not kept is the clone's position on the
+// tracked tree and the tree's hash. Those are two files and a directory that some other process is free to
+// write while this one is open, and the long-lived process is not hypothetical — a reviewer sits in `review open`
+// while a second terminal runs `git pair hooks --trust`. An answer kept for that process's life keeps refusing
+// content the clone recorded a position on a minute ago, and reads to the person standing at it as a refusal
+// that survives deleting what they typed and only clears when the screen is reopened. The cost of asking again
+// is reading a handful of small files; the hook that runs is the expensive thing, and it is asked about once per
+// point by Discover, which carries the answer in Plan.
 type Resolution struct {
-	repo     *git.Repo
-	offSet   bool
-	off      bool
-	offWhy   string
-	dirSet   bool
-	gitDir   string
-	dirErr   error
-	recSet   bool
-	recDir   string
-	recErr   error
-	trustSet bool
-	state    TrustState
-	accepted string
-	current  string
-	trustErr error
-
-	declineSet bool
-	declined   string
-	declineErr error
+	repo   *git.Repo
+	offSet bool
+	off    bool
+	offWhy string
+	dirSet bool
+	gitDir string
+	dirErr error
+	recSet bool
+	recDir string
+	recErr error
 }
 
 // Resolve prepares the run's answers without asking git anything; each question is asked the first time an
@@ -259,37 +271,27 @@ func (r *Resolution) recordDirAt(ctx context.Context) (string, error) {
 	return r.recDir, r.recErr
 }
 
-// Trust is TrustAt for a run that may already have asked the questions above, answered once for the whole
-// run. The state decides two things at once now — whether the tracked scripts run, and whether the gate will
-// call a changeset ready while they did not — so a run that asked it per hook point would walk the same
-// directory for every point and answer the same question each time.
+// Trust is TrustAt for a run that may already have asked the questions above. It asks the filesystem every
+// time: the state decides whether the tracked scripts run and whether the gate will call a changeset ready while
+// they did not, and both are claims about content another process can replace while this one is open. A command
+// that walks several points and wants one answer about the tree for all of them takes it from Plan, which
+// Discover fills — not from a value kept here.
 func (r *Resolution) Trust(ctx context.Context) (TrustState, string, string, error) {
-	if !r.trustSet {
-		recordDir, err := r.recordDirAt(ctx)
-		if err != nil {
-			r.trustErr = err
-		} else {
-			r.state, r.accepted, r.current, r.trustErr = TrustAt(recordDir, r.repo.Dir)
-		}
-		r.trustSet = true
+	recordDir, err := r.recordDirAt(ctx)
+	if err != nil {
+		return TrustUnrecorded, "", "", err
 	}
-	return r.state, r.accepted, r.current, r.trustErr
+	return TrustAt(recordDir, r.repo.Dir)
 }
 
-// DeclinedHash is the recorded decline for a run that may already have asked the questions above. It is a
-// separate memo from Trust on purpose: the state machine answers "does the record match the tree?", and the
-// sentence beside a skipped run needs the recorded value itself, including the case where it no longer matches.
+// DeclinedHash is the recorded decline for a run that may already have asked the questions above, read again on
+// every call for the same reason Trust is. The command that reports hooks takes it from Plan instead.
 func (r *Resolution) DeclinedHash(ctx context.Context) (string, error) {
-	if !r.declineSet {
-		recordDir, err := r.recordDirAt(ctx)
-		if err != nil {
-			r.declineErr = err
-		} else {
-			r.declined, r.declineErr = DeclinedAt(recordDir)
-		}
-		r.declineSet = true
+	recordDir, err := r.recordDirAt(ctx)
+	if err != nil {
+		return "", err
 	}
-	return r.declined, r.declineErr
+	return DeclinedAt(recordDir)
 }
 
 // Discover is Discover for a run that may already have asked the two questions below.
@@ -305,10 +307,11 @@ func (r *Resolution) Discover(ctx context.Context, point Point) (Plan, error) {
 		// further to read without it. The tracked root alone would be the unsafe half to run anyway.
 		return plan, err
 	}
-	state, _, _, err := r.Trust(ctx)
+	state, accepted, current, err := r.Trust(ctx)
 	if err != nil {
 		return plan, err
 	}
+	plan.TrustState, plan.Accepted, plan.Current = state, accepted, current
 	plan.TrackedTrusted = state == TrustAccepted
 	// A clone with no tracked hooks tree needs no acceptance at all, so an absent directory is not an
 	// untrusted one: reporting `skipped-untrusted` there would tell a reader to approve something that
@@ -332,6 +335,17 @@ func (r *Resolution) Discover(ctx context.Context, point Point) (Plan, error) {
 	}
 	plan.Hooks = append(plan.Hooks, hooks...)
 	plan.UnknownPoints = append(plan.UnknownPoints, UnknownPointsIn(CloneRootDir(gitDir))...)
+
+	// The recorded decline travels with the plan so the sentence beside a skipped run is built from the same
+	// read as the decision to skip. Read only where a position was taken against the tree: an accepted plan has
+	// nothing to explain, and printing a decline nobody is standing on would be a second, older answer.
+	if !plan.TrackedTrusted {
+		declined, err := r.DeclinedHash(ctx)
+		if err != nil {
+			return plan, err
+		}
+		plan.Declined = declined
+	}
 	return plan, nil
 }
 

@@ -191,20 +191,13 @@ func (a *app) runPoint(ctx context.Context, s *session, c hookContext, mode runM
 		// The sentence depends on why they did not run, because the reader's next act does. An unrecorded tree
 		// is content nobody has read; a declined one is content somebody read and chose not to run, and telling
 		// that person to accept it would be telling them to revisit a decision they already made — beside
-		// losing the hash that tells them whether the tree they declined is the tree that is here.
-		state, _, _, err := run.Trust(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if state == hooks.TrustDeclined {
+		// losing the hash that tells them whether the tree they declined is the tree that is here. Both come
+		// from the plan, so the warning describes the same read that decided to skip.
+		if plan.TrustState == hooks.TrustDeclined {
 			// The recorded hash, not the one the state machine compared: this sentence is read by the person who
 			// declined, and the number they need is the one they chose.
-			declined, err := run.DeclinedHash(ctx)
-			if err != nil {
-				return nil, err
-			}
 			a.warn("git-pair: %d tracked hook(s) at %s did not run — the tree under %s is declined for this clone (declined %s); `git pair hooks --trust` runs it after you read it\n",
-				len(plan.SkippedUntrusted()), c.Point, hooks.TrackedRootDir(s.repo.Dir), declined)
+				len(plan.SkippedUntrusted()), c.Point, hooks.TrackedRootDir(s.repo.Dir), plan.Declined)
 		} else {
 			a.warn("git-pair: %d tracked hook(s) at %s did not run — the tree under %s has not been accepted; "+
 				"review it and run `git pair hooks --trust`\n",
