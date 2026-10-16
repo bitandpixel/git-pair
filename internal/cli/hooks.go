@@ -201,12 +201,12 @@ func (a *app) runPoint(ctx context.Context, s *session, c hookContext, mode runM
 	// The flag is what a person says about *this* command, so it answers the tree's unread state for this run
 	// and nothing else: the scripts run, and the clone's record is left exactly as it was. What it does not buy
 	// is immunity from what the scripts say — a hook that runs and refuses still refuses.
-	trustOnce := a.hooksTrustOnce && !plan.TrackedTrusted
-	if trustOnce {
-		a.warn("git-pair: --trust-once: running %d tracked hook(s) at %s that this clone has not recorded (%s); nothing was recorded\n",
+	runUnrecorded := a.hooksTrustOnce && !plan.TrackedTrusted
+	if runUnrecorded {
+		a.warn("git-pair: --trust-hooks-once: running %d tracked hook(s) at %s that this clone has not recorded (%s); nothing was recorded\n",
 			len(plan.SkippedUntrusted()), c.Point, hooks.TrackedRootDir(s.repo.Dir))
 	}
-	if !plan.TrackedTrusted && !trustOnce {
+	if !plan.TrackedTrusted && !runUnrecorded {
 		results = append(results, plan.SkippedUntrusted()...)
 		runnable = nil
 		for _, h := range plan.Hooks {
@@ -237,7 +237,7 @@ func (a *app) runPoint(ctx context.Context, s *session, c hookContext, mode runM
 			results = append(results, hooks.RunAll(ctx, s.repo, runnable, env)...)
 		}
 	}
-	if trustOnce {
+	if runUnrecorded {
 		for i := range results {
 			if results[i].Hook.Root == hooks.RootTracked {
 				results[i].Consent = hooks.ConsentOnce
@@ -345,16 +345,18 @@ func noHooksFlag(cmd *cobra.Command, a *app) {
 		"run none of this repository's or this clone's hooks for this command, and report that none ran")
 }
 
-// trustOnceFlag registers `--trust-once`: run the tracked hooks for this command although this clone has
-// recorded no position on them, and record nothing.
+// trustHooksOnceFlag registers `--trust-hooks-once`: run the tracked hooks for this command although this clone has
+// recorded no position on them, and record nothing. The name says what the flag trusts — this repository's hook
+// scripts, for this one invocation — because a flag called "trust" that a person reads as a general trust
+// decision would be the wrong instrument to reach for.
 //
 // It is offered where it makes checking more likely — the hand-off, the submission, the gate, the declaration —
 // and never where it would make checking less likely, which is why it sits beside `--no-hooks` on two commands
 // and alone on the other two. `git pair hooks --trust` is still the answer for a team that wants the scripts to
 // run regularly: it records that somebody read them, which is the part a flag cannot do on a person's behalf.
-func trustOnceFlag(cmd *cobra.Command, a *app) {
-	cmd.Flags().BoolVar(&a.hooksTrustOnce, "trust-once", false,
-		"run the tracked hooks for this command without recording a position on them")
+func trustHooksOnceFlag(cmd *cobra.Command, a *app) {
+	cmd.Flags().BoolVar(&a.hooksTrustOnce, "trust-hooks-once", false,
+		"run this repository's tracked hooks for this command without recording a position on them")
 }
 
 // hookOverridesAgree rejects the one combination of the two hook flags with no honest meaning. Running none of
@@ -363,7 +365,7 @@ func trustOnceFlag(cmd *cobra.Command, a *app) {
 // --trust --decline`, refused for the same reason: opposite positions about the same content.
 func (a *app) hookOverridesAgree() error {
 	if a.hooksOff && a.hooksTrustOnce {
-		return &usageError{fmt.Errorf("--no-hooks and --trust-once ask opposite things of the same scripts: one runs none of them, the other runs the ones this clone has not recorded")}
+		return &usageError{fmt.Errorf("--no-hooks and --trust-hooks-once ask opposite things of the same scripts: one runs none of them, the other runs the ones this clone has not recorded")}
 	}
 	return nil
 }
@@ -675,8 +677,8 @@ func reportUnknown(a *app, rep hooksReport, found []unknownEntry) {
 func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo) (string, error) {
 	if a.hooksTrustOnce {
 		// The question the refusal asks is whether the repository's checks are resting on silence, and under
-		// `--trust-once` they are not: the scripts run for this command, and their own verdicts arrive as results
-		// and reasons. What the flag does not do is leave a position behind, so the next command asks again.
+		// `--trust-hooks-once` they are not: the scripts run for this command, and their own verdicts arrive as
+		// results and reasons. What the flag does not do is leave a position behind, so the next command asks again.
 		return "", nil
 	}
 	state, accepted, current, err := a.hookRun(repo).Trust(ctx)
@@ -688,12 +690,20 @@ func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo) (string, 
 		return "", nil
 	}
 	root := displayPath(hooks.TrackedRootDir(repo.Dir))
+	// The sentence names three ways out, in the order a person should meet them: read the scripts, then record a
+	// position, or — when the reading is the task in hand rather than a detour from it — run them once without
+	// recording. The third is scoped in its own words to the person reviewing a change to the scripts, because the
+	// reviewer of a hook change is the one who is asked to run content that has no position, and it is the case
+	// that would otherwise end in a flag nobody thought to look for. `git pair hooks --trust` and `--decline` are
+	// named here too, and are nobody's flag to type on their behalf either; who may type what is the skill's rule,
+	// not something this sentence can enforce.
+	const once = "; if you are reading them in order to review a change to the scripts themselves, `--trust-hooks-once` runs them for this command alone and records nothing"
 	if state == hooks.TrustChanged {
-		return fmt.Sprintf("the repository's tracked hooks under %s changed since this clone recorded them (recorded %s, the tree is now %s): the checks they carry have not run on this content — read what moved, then `git pair hooks --trust` to run it or `git pair hooks --decline` to record that you read it and chose not to",
-			root, short(accepted), short(current)), nil
+		return fmt.Sprintf("the repository's tracked hooks under %s changed since this clone recorded them (recorded %s, the tree is now %s): the checks they carry have not run on this content — read what moved, then `git pair hooks --trust` to run it or `git pair hooks --decline` to record that you read it and chose not to%s",
+			root, short(accepted), short(current), once), nil
 	}
-	return fmt.Sprintf("the repository's tracked hooks under %s have not been recorded in this clone: the checks they carry have not run — read them, then `git pair hooks --trust` to run them or `git pair hooks --decline` to record that you read them and chose not to",
-		root), nil
+	return fmt.Sprintf("the repository's tracked hooks under %s have not been recorded in this clone: the checks they carry have not run — read them, then `git pair hooks --trust` to run them or `git pair hooks --decline` to record that you read them and chose not to%s",
+		root, once), nil
 }
 
 // hooksPositionRefusal is the same question as an error, for the commands that refuse rather than report. It is a

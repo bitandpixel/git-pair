@@ -61,7 +61,7 @@ the queue on its own — and ` + "`change unready`" + ` is how you leave it on p
 		Example: `  git pair change ready
   git pair change ready --allow-surviving-review-additions
   git pair change ready --no-hooks
-  git pair change ready --trust-once
+  git pair change ready --trust-hooks-once
   git pair change ready --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -71,7 +71,7 @@ the queue on its own — and ` + "`change unready`" + ` is how you leave it on p
 	cmd.Flags().BoolVar(&opts.allowSurviving, "allow-surviving-review-additions", false,
 		"acknowledge surviving review additions and mark ready anyway")
 	noHooksFlag(cmd, a)
-	trustOnceFlag(cmd, a)
+	trustHooksOnceFlag(cmd, a)
 	return cmd
 }
 

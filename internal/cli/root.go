@@ -83,7 +83,7 @@ type app struct {
 	// The flag exists because the off switch is a process-wide thing a person sets for their machine, and "not
 	// this one time" has no spelling in it. Both are reported; neither is invisible.
 	hooksOff bool
-	// hooksTrustOnce is `--trust-once`: run the tracked hooks for this command although this clone has
+	// hooksTrustOnce is `--trust-hooks-once`: run the tracked hooks for this command although this clone has
 	// recorded no position on them, and record nothing. It goes the other way from hooksOff — the checks the
 	// repository asked for do run — which is why it is a separate flag rather than a second meaning of the
 	// first. What it clears is the refusal for an unread tree, not a hook that ran and said no.

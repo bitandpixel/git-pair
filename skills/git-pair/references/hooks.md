@@ -164,7 +164,9 @@ there because a note asked you to is how a repository ends up running a check no
 **The commands that start or advance work ask for a position.** While the tracked tree is `unrecorded` or
 `changed`, `git pair init` refuses before the changeset directory exists, `git pair change ready` before the
 hand-off, `git pair review submit` before the reviewer's content is staged, and the gate refuses the merge —
-`git pair check`, and `git pair change integrate` with it. Each says the same sentence and names both ways out, so
+`git pair check`, and `git pair change integrate` with it. Each says the same sentence and names the ways out —
+`git pair hooks --trust`, `git pair hooks --decline`, and, in a clause addressed to the person whose task is to
+read the scripts in order to review a change to them, `--trust-hooks-once` — so
 meeting it twice is not two different problems. None of it is an obstacle to route around: the checks the
 repository asked for have not run. `accepted` and `declined` both clear it — one because the scripts ran, one
 because a person answered a question about them.
@@ -203,18 +205,20 @@ process-wide switch to get through one command.
 | Flag | On | What it does | What it does not do |
 | --- | --- | --- | --- |
 | `--no-hooks` | `change ready`, `change unready`, `change abandon`, `review submit`, `review open`, `review reopen` | runs none of them, either root, `pre-` and `post-` both; every configured hook appears as `status: "skipped-by-flag"` | does not clear the refusal for an `unrecorded` or `changed` tree — it is `GIT_PAIR_HOOKS=0` for one command, and the off switch was never a position |
-| `--trust-once` | those six, plus `check` and `change integrate` | runs the tracked hooks with no position recorded, and records nothing, so the next command asks again; those hooks carry `"consent": "once"` | does not let a failing hook pass — it says these may run, not that they ran clean |
+| `--trust-hooks-once` | those six, plus `check` and `change integrate` | runs the tracked hooks with no position recorded, and records nothing, so the next command asks again; those hooks carry `"consent": "once"` | does not let a failing hook pass — it says these may run, not that they ran clean |
 
 Asking for both at once is a usage error: one runs no scripts, the other runs the scripts nobody has read, and
 the combination would produce a hand-off that looks checked and is not.
 
 **Neither is an agent's flag to type.** `--no-hooks` is how a hand-off gets made with the team's suite silently
-not run, which is the failure the whole feature exists to prevent; `--trust-once` executes content on the person's
+not run, which is the failure the whole feature exists to prevent; `--trust-hooks-once` executes content on the person's
 machine that they have not agreed to execute. Report the refusal, print it as it came, and name both flags beside
 `git pair hooks --trust` and `--decline` as what a person can do — including for the case those flags were written
 for, a changeset whose own diff edits `.git-pair/hooks/`, where the submission that would record an opinion about
 the scripts is the one the position refusal stops. Whether to run someone's script, or to skip yours, is their
-decision, and typing the flag makes it yours.
+decision, and typing the flag makes it yours. The position refusal itself names all of them — `--trust` and
+`--decline` because they are the answer, `--trust-hooks-once` so the reviewer of a hook change does not have to go
+looking for it — and a refusal that names a command is not an instruction to run it.
 
 ## Per-clone, and what that costs
 
@@ -226,7 +230,7 @@ is reviewed, versioned, and present in everybody's clone. If a check has to hold
 The same applies to results. Nothing here persists a hook's outcome: it is not in the marker, not in the
 review commit, and not on any ref. `hooks[]` in the `--json` of the command that ran is where a result lives,
 with `point`, `name`, `path`, `root`, `status`, `exit` and `duration_ms`, plus `consent` — `once` for a tracked
-hook that ran on `--trust-once`, and nothing for one the clone had recorded a position on. A repository that wants its gate to
+hook that ran on `--trust-hooks-once`, and nothing for one the clone had recorded a position on. A repository that wants its gate to
 credit a run it performed records that itself, as a `pre-check` hook that writes what it observed.
 
 ## In CI

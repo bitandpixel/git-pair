@@ -141,7 +141,7 @@ type Result struct {
 }
 
 // ConsentOnce marks a tracked hook that ran although this clone had recorded no position on it, because the
-// person running the command asked for it with `--trust-once`.
+// person running the command asked for it with `--trust-hooks-once`.
 //
 // It is reported because the difference matters to the next reader and is otherwise invisible: a suite that ran
 // against content nobody agreed to run is a different fact from a suite that ran against the team's own checks,

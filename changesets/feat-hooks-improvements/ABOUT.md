@@ -30,7 +30,7 @@ Two flags, at the two boundaries the feature already draws:
 
 ```
 git pair change ready --no-hooks       # run none of them, either root, pre- and post- both
-git pair change ready --trust-once     # run the tracked ones with no position recorded, and record nothing
+git pair change ready --trust-hooks-once     # run the tracked ones with no position recorded, and record nothing
 ```
 
 `--no-hooks` is the per-command form of the off switch and goes exactly as far: it never clears the refusal for an
@@ -38,14 +38,24 @@ git pair change ready --trust-once     # run the tracked ones with no position r
 one flag from "the repository's checks did not run". `--trust-hooks-once` goes the other way — it clears the position
 refusal and runs the scripts, and it does not let a failing hook pass. Neither is quiet: a skipped set arrives in
 the `hooks[]` array as `status: "skipped-by-flag"`, and a hook that ran unrecorded carries `"consent": "once"`.
-^ let's rename the flag to be clear that the trust-once applies specifically to hooks. And should (or is it already) a 
-hint in the error message when trying to run `git pair change ready` when there are untrusted hooks?
+**The name says what it trusts.** `--trust-hooks-once`, not `--trust-once`: a flag whose only noun is "trust" reads
+like a general decision to trust something, and it is nothing of the kind — it is this repository's hook scripts,
+for one invocation, with nothing recorded. The flag is spelled the same way in every surface, including the JSON,
+where a hook that ran this way carries `"consent": "once"`.
+
+**The refusal names the way through.** The sentence that stops an unrecorded or moved tree already named `git pair
+hooks --trust` and `git pair hooks --decline`; it now adds one clause, addressed to the person whose task is to
+read the scripts in order to review a change to them: `--trust-hooks-once` runs them for this command alone and
+records nothing. The alternative was a person who meets the refusal, knows a way through must exist, and has to go
+and read the manual to submit a review. Naming a command in a refusal is not an instruction to run it — `--trust`
+and `--decline` have been named there since the feature began, and nobody's gets to type them on another person's
+behalf, which is a rule the skill carries and not one this sentence can enforce.
 
 The reviewer's case works:
 
 ```
 $ git pair review submit --feedback -m "the rewritten hook is wrong"        # exit 1, position refusal
-$ git pair review submit --feedback -m "the rewritten hook is wrong" --trust-once
+$ git pair review submit --feedback -m "the rewritten hook is wrong" --trust-hooks-once
 review: feedback …                                    # and the clone's record is untouched
 ```
 
@@ -87,7 +97,7 @@ scenario test. PRD:2062 and PRD:2131 had disagreed about the value; the implemen
 **Consent is per-result, not per-command**, because a run mixes roots: one report can hold a clone hook that
 always runs, a tracked hook accepted months ago, and a tracked hook nobody recorded.
 
-`--no-hooks` with `--trust-once` is refused in `PersistentPreRunE`, before any command body runs, the way
+`--no-hooks` with `--trust-hooks-once` is refused in `PersistentPreRunE`, before any command body runs, the way
 `git pair hooks --trust --decline` is: opposite requests about the same scripts, and the combination would
 produce a hand-off that looks checked and is not.
 
@@ -101,8 +111,9 @@ The commits are four separable layers; reviewing them in order is easier than re
    measures, but it is a filesystem read that used to happen once.
 2. `Make the hook recursion guard guard` — one value and the two spec sentences that disagreed about it.
 3. / 4. The two flags. The boundary decisions are the part worth arguing with: `--no-hooks` not clearing the
-   position refusal, and `--trust-once` being offered on `check` and `change integrate` where `--no-hooks` is not.
-5. The docs, including the skill's rule that neither flag is an agent's to type.
+   position refusal, and `--trust-hooks-once` being offered on `check` and `change integrate` where `--no-hooks` is not.
+5. The docs, including the skill's rule that neither flag is an agent's to type, and the sentence in the position
+   refusal that names the flag anyway.
 
 The open question is whether a skipped or once-run set should also leave a trace in history. This changeset
 reports it in the output of the run that made the decision and writes nothing, which fits "nothing to write" and
@@ -124,4 +135,6 @@ The behaviours are pinned where they can fail:
 - `TestNoHooksSkipsTheRunAndSaysSo` — both roots, both halves, the JSON entry, and the refusal it does not clear.
 - `TestTrustOnceRunsTheUnrecordedTreeAndRecordsNothing` — the reviewer of a hook change submitting, the failing
   hook still refusing, the gate running the unrecorded checks, nothing written to the record, and the two flags
-  together as exit 2.
+  together as exit 2. Its first two cases pin the refusal's own words for both states: the missing position, the
+  moved tree, and the clause naming `--trust-hooks-once` — with the hook's own marker file asserted absent, so the
+  sentence cannot quietly become a run.

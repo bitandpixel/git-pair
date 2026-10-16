@@ -2024,8 +2024,11 @@ person the script they refused has been replaced.
 **The commands that start or advance work ask for a position.** `git pair init` refuses before a changeset
 directory exists, `git pair change ready` before the hand-off, `git pair review submit` before the reviewer's
 content is staged, and the gate refuses the merge: `git pair check`, and `git pair change integrate` with it.
-One sentence on every surface, naming both ways out, because a person who meets the refusal twice should read the
-same words. The reviewer asked for it this way — the existence of the repository's own checks should be obvious as
+One sentence on every surface, because a person who meets the refusal twice should read the same words. It names
+`git pair hooks --trust` and `git pair hooks --decline`, and it names `--trust-hooks-once` in a clause addressed to
+the person whose task is to read the scripts in order to review a change to them: that reviewer is refused over the
+content they are being asked to judge, and finding the way through should not require reading the manual. Whoever
+runs the command, it is a refusal — naming a command in it is not an instruction to run it. The reviewer asked for it this way — the existence of the repository's own checks should be obvious as
 early as it can be, and the hand-off is where a reviewer is asked to spend attention, so a queue that can fill with
 work whose suite never ran is the failure they cannot see.
 `accepted` passes because the scripts ran and `declined` passes because a person answered a question about them;
@@ -2038,11 +2041,11 @@ scripts do, and the quietest way past a gate should not be an environment variab
 Two flags carry these two questions to a single invocation, so a person does not need a process-wide switch to get
 through one command. **`--no-hooks`** runs none of them — either root, `pre-` and `post-` both — and is the
 per-command form of the off switch, so it follows the off switch's rule: it never clears the refusal above, on any
-command. **`--trust-once`** runs the tracked hooks with no position recorded and records nothing, so the next
+command. **`--trust-hooks-once`** runs the tracked hooks with no position recorded and records nothing, so the next
 command asks again; it clears the refusal and nothing else, because a hook that runs and exits nonzero still
 refuses. Neither is quiet: the skipped set arrives in `hooks[]` as `status: "skipped-by-flag"` and the ones that
 ran unrecorded carry `"consent": "once"`, since the one reading a bypass must never be able to is that it happened.
-`--no-hooks` is absent from `check` and `change integrate` and `--trust-once` is present on both, which is one rule
+`--no-hooks` is absent from `check` and `change integrate` and `--trust-hooks-once` is present on both, which is one rule
 applied twice: these commands may be given more checking and never less. Asking for both flags at once is a usage
 error, as `--trust` with `--decline` is. And neither is named inside the refusal, as neither is `--trust` or
 `--decline`: whether somebody's script runs on this machine, or is skipped on it, is the person's decision, and an
@@ -2235,7 +2238,7 @@ somewhere.
 and when it misbehaves it must not strand a verdict the reviewer has already decided to record. The override is
 loud — the human stream says so, and `--json` carries `overridden: true` beside the failed entry in `hooks`.
 
-`--trust-once` covers the case it cannot: the changeset whose own diff edits `.git-pair/hooks/`, where the tracked
+`--trust-hooks-once` covers the case it cannot: the changeset whose own diff edits `.git-pair/hooks/`, where the tracked
 tree in the reviewer's worktree is the content under review and the position refusal stops the submission that
 would record an opinion about it. Asking the reviewer to accept what they were asked to review is backwards, and
 running the scripts for this one submission without recording a position is not — the exposure is one command, and
