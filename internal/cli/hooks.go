@@ -356,10 +356,13 @@ The roots, searched in this order:
   git-pair/hooks/            check you attach to your machine is attached once, not once per worktree
 
 At each root a point is either one executable file or a directory whose executable entries run in
-lexicographic order.
+lexicographic order. Entries a reader would not call a hook — a dot-file, git's own ` + "`*.sample`" + `, a ` + "`*.md`" + ` note,
+a ` + "`~`" + ` backup, a nested directory — are passed over.
 
 The tracked tree is trusted by content, not by a flag: any edit to any hook invalidates the acceptance,
-because the thing that was approved was that content. Four states describe a clone's relation to it —
+because the thing that was approved was that content. The acceptance covers exactly the entries that run — the list
+above and nothing else — so an editor's swap file beside a hook cannot revoke a position, and a script that would
+run cannot stay outside one. Four states describe a clone's relation to it —
 ` + "`accepted`" + `, ` + "`declined`" + `, ` + "`changed`" + `, ` + "`unrecorded`" + `. Only ` + "`accepted`" + ` runs the scripts.
 
 The record lives with the clone rather than with one working directory, so reading the scripts once covers every

@@ -1984,8 +1984,15 @@ entry nobody runs is otherwise indistinguishable from no entry at all.
 
 A tracked file is code that runs on a clone, which is why git keeps its hooks under `.git/` and refuses to
 clone them. git-pair's tracked hooks are committable because consent is taken by content: the path, the executable
-bit, and the bytes of the tracked hooks tree are hashed, and that hash joins the set of content the clone has
+bit, and the bytes of the files the runner would run are hashed, and that hash joins the set of content the clone has
 taken a position on, recorded in `<git-common-dir>/git-pair/trusted-hooks`.
+
+That set is decided once and read twice: discovery executes it, and the identity hashes it. Neither side may be
+wider than the other. An entry the runner passes over — a dot-file, a `*.sample`, a backup, a note, anything in a
+nested directory, by the name-based rule above — is outside the identity as it is outside the run, so an editor's
+`.pre-ready.swp` cannot revoke a position taken about somebody else's scripts; and every entry that would run is
+inside it, so a script nobody has read cannot inherit an old acceptance. A test compares the two sets and fails if
+they ever differ.
 
 The record is clone-wide rather than per working directory, because what it answers for is content and every
 worktree of a clone checks the same content out: one reading covers the clone, including worktrees cut afterwards,

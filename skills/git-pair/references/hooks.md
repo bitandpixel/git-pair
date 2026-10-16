@@ -124,9 +124,16 @@ shape: `check --json` exits 0 and carries the verdict in `ready`; the human form
 
 A tracked file is code that runs on a clone, which is why git keeps its hooks under `.git/` and refuses to
 clone them. git-pair's tracked hooks are committable because consent is taken by content: the path, the
-executable bit, and the bytes of the tracked hooks tree are hashed, and the hash is added to the set of content
-this clone has taken a position on, recorded in `<git-common-dir>/git-pair/trusted-hooks` (and
+executable bit, and the bytes of the files the runner would run are hashed, and the hash is added to the set of
+content this clone has taken a position on, recorded in `<git-common-dir>/git-pair/trusted-hooks` (and
 `declined-hooks` beside it).
+
+**The hashed set and the running set are one list.** Discovery decides what executes — the single-script form, or a
+point directory's entries that a reader would call a hook — and the identity hashes exactly that. An entry the runner
+skips is outside the identity as well, so a vim swap file left beside a hook cannot revoke a position a person took
+about other people's scripts; an entry the runner would execute is inside it, so a script nobody has read cannot
+inherit somebody else's acceptance. When you report a `changed` state, name what moved between the two hashes: under
+this rule the movement is content somebody wrote, never a file the machine dropped beside it.
 
 **The record belongs to the clone, not to one working directory.** What it answers for is content, and every
 worktree of the clone checks the same content out; recording it per worktree made a person who keeps a dozen
