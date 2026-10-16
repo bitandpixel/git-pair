@@ -2050,17 +2050,24 @@ under a deadline executes the code. The off switch is not a position: `GIT_PAIR_
 scripts do, and the quietest way past a gate should not be an environment variable nobody has to read.
 
 Two flags carry these two questions to a single invocation, so a person does not need a process-wide switch to get
-through one command. **`--no-hooks`** runs none of them — either root, `pre-` and `post-` both — and is the
-per-command form of the off switch, so it follows the off switch's rule: it never clears the refusal above, on any
-command. **`--trust-hooks-once`** runs the tracked hooks with no position recorded and records nothing, so the next
-command asks again; it clears the refusal and nothing else, because a hook that runs and exits nonzero still
-refuses. Neither is quiet: the skipped set arrives in `hooks[]` as `status: "skipped-by-flag"` and the ones that
-ran unrecorded carry `"consent": "once"`, since the one reading a bypass must never be able to is that it happened.
-`--no-hooks` is absent from `check` and `change integrate` and `--trust-hooks-once` is present on both, which is one rule
-applied twice: these commands may be given more checking and never less. Asking for both flags at once is a usage
-error, as `--trust` with `--decline` is. And neither is named inside the refusal, as neither is `--trust` or
-`--decline`: whether somebody's script runs on this machine, or is skipped on it, is the person's decision, and an
-agent that types the flag has made it for them.
+through one command. **`--no-hooks`** runs none of them — either root, `pre-` and `post-` both — on every command
+that runs the repository's scripts, and it is the escape hatch: it answers the refusal above for that command as
+well, and writes nothing, so the clone's position is untouched and the next command asks the question again. It is
+kept deliberate rather than ambient, which is why it answers where `GIT_PAIR_HOOKS=0` does not: the flag is one
+invocation long and names every hook it skipped in the report the command already produces, while the environment
+variable silences a whole clone and reports nothing. **`--trust-hooks-once`** runs the tracked hooks with no
+position recorded and records nothing, so the next command asks again; it clears the refusal and nothing else,
+because a hook that runs and exits nonzero still refuses. Neither is quiet: the skipped set arrives in `hooks[]` as
+`status: "skipped-by-flag"` and the ones that ran unrecorded carry `"consent": "once"`, because a bypass that cannot
+be seen afterwards is not a bypass, it is an absence. What `--no-hooks` gives up is the only pressure the question
+had — while a refusal stood in the way, reading the scripts was the cheapest way through, and now nothing requires
+it — which is a decision about how hard the tool should push rather than a safety property, and the part of this
+design most likely to be revisited. Asking for both flags at once is a usage error, as `--trust` with `--decline`
+is: one runs none of them, the other runs the ones this clone has not recorded. All four ways out are named inside
+the refusal — `git pair hooks --trust`, `git pair hooks --decline`, and the two per-command flags — because a
+person who is refused should see them without going looking for them. Naming a command in a refusal is not an
+instruction to run it: whether somebody's script runs on this machine, or is skipped on it, is that person's
+decision, and an agent that types the flag has made it for them.
 
 The answer a command gets is read whenever it asks, not kept for the life of the process. The review screen sits
 open for as long as a person reviews, and a second terminal can record a position while it is open; an answer kept

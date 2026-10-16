@@ -709,17 +709,21 @@ unrecorded rather than quietly exempt, and `git pair hooks` prints the hash each
 recording first, because a position about content nobody has seen is not a position.
 
 Two flags answer the same question for one command instead of for the clone. `--no-hooks` runs none of them —
-both roots, both halves of the transition — on `change ready`, `change unready`, `change abandon`, `review submit`,
-`review open` and `review reopen`; every hook configured still appears in the `hooks[]` array as
-`skipped-by-flag`, because a hand-off that skipped the suite must not be reportable as one that ran it. It is the
-per-command form of `GIT_PAIR_HOOKS=0` and it goes exactly as far: it never clears the refusal for an unrecorded
-or changed tree, since saying your machine should not run scripts today says nothing about what they do. It is
-absent from `check` and `change integrate` for the same reason. `--trust-hooks-once` goes the other way: the tracked
-hooks run, and the clone's record is left untouched, so the next command asks again. It carries
-`"consent": "once"` on the hooks that ran that way, and it is offered where it makes checking more likely — those
-six commands plus `check` and `change integrate`. It clears the position refusal and nothing else: a hook that
-runs and exits nonzero still refuses. Neither flag is named in the refusal itself, because both are a person's
-decision to run or not run somebody's script, and an agent that types one has made that decision for them.
+both roots, both halves of the transition — on every command that runs the repository's scripts: `change ready`,
+`change unready`, `change abandon`, `review submit`, `review open`, `review reopen`, `check` and `change
+integrate`; every hook configured still appears in the `hooks[]` array as `skipped-by-flag`, because a hand-off
+that skipped the suite must not be reportable as one that ran it. It is the per-command form of `GIT_PAIR_HOOKS=0`,
+and it is the escape hatch: it answers the position question for that command as well, so nobody is blocked by a
+script they have no use for. It writes nothing — `git pair hooks` still reports the tree as unrecorded, and the
+next command asks the question again — which is what keeps it a way past one command rather than a cheaper way to
+take a position. The environment off switch does not answer it, because it is ambient and reports nothing: a line
+in a shell profile should not be able to answer a question about content nobody read. `--trust-hooks-once` goes the
+other way: the tracked hooks run, and the clone's record is left untouched, so the next command asks again. It
+carries `"consent": "once"` on the hooks that ran that way, and it does not let a failing hook pass. Both flags are
+named in the refusal that stops an unrecorded tree, beside `git pair hooks --trust` and `--decline`, because a
+person who meets the refusal should see the ways out of it — and naming a command is not an instruction to run one.
+Neither is an agent's to type: whether somebody's script runs on this machine, or is skipped on it, is that
+person's decision, and an agent that types the flag has made it for them.
 
 **The commands that run the repository's scripts ask for a position — about those scripts.** While the tracked
 tree is `unrecorded` or `changed`, each command asks about the points it runs: `change ready` about `pre-ready` and
@@ -728,10 +732,10 @@ tree is `unrecorded` or `changed`, each command asks about the points it runs: `
 repository whose only hook is a `pre-ready` suite does not stop `git pair check` over a script no merge executes.
 The position itself is always about the whole tree — one hash of what can execute — and a script added later is a
 new question, asked where it runs. `git pair init` runs no hook, so it warns instead of refusing and the refusal
-arrives with the first command that would execute one. The same sentence on every surface, naming `git pair hooks --trust` and `git pair hooks --decline`, and
-naming `--trust-hooks-once` in a clause addressed to the person whose task is to read the scripts in order
-to review a change to them.
-`accepted` passes because the scripts ran and
+arrives with the first command that would execute one. The same sentence on every surface, naming `git pair hooks --trust` and `git pair hooks --decline`, and the two
+per-command flags — `--trust-hooks-once` runs the scripts this once, `--no-hooks` skips them this once — addressed
+to the person whose task is to read them in order to review a change to them, or who needs the command to get
+through. `accepted` passes because the scripts ran and
 `declined` passes because a person answered a question about them, which is what makes the demand fair: without a
 decline, a gate that waits on approval asks every clone to either execute code it does not want or stay red
 forever. Two commands deliberately keep working with nothing recorded — `change unready` and `change abandon` take

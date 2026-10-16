@@ -70,7 +70,7 @@ func TestTrustOnceRunsTheUnrecordedTreeAndRecordsNothing(t *testing.T) {
 			}
 			got := res.stdout + res.stderr
 			mustContain(t, got, state.want, "the refusal has to say what is missing")
-			for _, phrase := range []string{"git pair hooks --trust", "git pair hooks --decline", "--trust-hooks-once", "this command alone and records nothing"} {
+			for _, phrase := range []string{"git pair hooks --trust", "git pair hooks --decline", "--trust-hooks-once", "--no-hooks", "nothing is recorded"} {
 				mustContain(t, got, phrase, "the refusal names its ways out")
 			}
 			if _, err := os.Stat(filepath.Join(dir, "RAN")); err == nil {

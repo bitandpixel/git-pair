@@ -82,22 +82,33 @@ func TestNoHooksSkipsTheRunAndSaysSo(t *testing.T) {
 		runIn(t, f.Dir(), "change", "ready", "--no-hooks").mustSucceed(t, "change", "ready", "--no-hooks")
 	})
 
-	t.Run("the refusal it does not clear is the position, and it says so", func(t *testing.T) {
+	t.Run("the flag answers the position for one command, and records nothing", func(t *testing.T) {
 		f, _ := newChangeset(t, "checkout-flow", "main")
 		dir := scratch(t)
 		// Configured and trusted by nobody: the tree the clone has taken no position on.
 		putHook(t, f, "tracked", "pre-ready", "01-suite", touch(dir, "RAN"))
 
-		res := runIn(t, f.Dir(), "change", "ready", "--no-hooks")
-		if res.code != exitRefusal {
-			t.Fatalf("exit = %d, want %d: skipping the scripts is not reading them\nstdout: %s\nstderr: %s",
-				res.code, exitRefusal, res.stdout, res.stderr)
+		if res := runIn(t, f.Dir(), "change", "ready"); res.code == 0 {
+			t.Fatal("the hand-off went through with no position recorded, so this case proves nothing")
 		}
-		if !strings.Contains(res.stdout+res.stderr, "git pair hooks --trust") {
-			t.Errorf("the refusal does not name the way that answers the question: %s", res.stderr)
-		}
+		res := runIn(t, f.Dir(), "change", "ready", "--no-hooks", "--json").
+			mustSucceed(t, "change", "ready", "--no-hooks", "--json")
+
 		if _, err := os.Stat(filepath.Join(dir, "RAN")); err == nil {
-			t.Error("the refused command ran the hook")
+			t.Error("the hand-off ran the hook the command said to skip")
+		}
+		entries := res.jsonList(t, "hooks")
+		if len(entries) != 1 {
+			t.Fatalf("hooks = %v, want the unread hook listed as skipped", entries)
+		}
+		if entry := entries[0].(map[string]any); entry["status"] != "skipped-by-flag" || entry["point"] != "pre-ready" {
+			t.Errorf("hook entry = %v, want a skipped-by-flag pre-ready entry", entry)
+		}
+		// The escape hatch is per-command, so the clone's position has to be exactly where it was: a skipped run
+		// that quietly took a position would be the thing `--trust` and `--decline` exist to record.
+		again := runIn(t, f.Dir(), "hooks")
+		if !strings.Contains(again.stderr, "NOT trusted") {
+			t.Errorf("after --no-hooks the clone no longer reads as unrecorded; it should: %s", again.stderr)
 		}
 	})
 
@@ -164,18 +175,40 @@ func TestNoHooksSkipsTheRunAndSaysSo(t *testing.T) {
 	// Skipping is not reading. The flag says the scripts should not run here today; the position question is
 	// about whether anybody read them, and a skipped run cannot answer that — which is why the gate keeps
 	// refusing, and keeps naming the two commands that would answer it.
-	t.Run("the gate still asks for the position the flag cannot answer", func(t *testing.T) {
+	t.Run("the gate is clear over an unread tree when the hooks are skipped", func(t *testing.T) {
 		f, _ := newChangeset(t, "checkout-flow", "main")
 		putHook(t, f, "tracked", "pre-check", "01-suite", passHook)
 		ready(t, f)
 		submit(t, f, "approve")
 
-		res := runIn(t, f.Dir(), "check", "--no-hooks", "--json").mustSucceed(t, "check", "--no-hooks", "--json")
-		if res.json(t)["ready"] != false {
-			t.Errorf("check --no-hooks answered ready over a tree this clone never recorded; reasons: %v", res.json(t)["reasons"])
+		blocked := runIn(t, f.Dir(), "check", "--json")
+		if blocked.json(t)["ready"] != false {
+			t.Fatalf("check answered ready over a tree this clone never recorded, so this case proves nothing")
 		}
-		mustContain(t, fmt.Sprint(res.json(t)["reasons"]), "have not been recorded in this clone",
+		mustContain(t, fmt.Sprint(blocked.json(t)["reasons"]), "have not been recorded in this clone",
 			"the position has to be asked by the command that would have run the script")
+
+		// The verdict is what a person reads to find out where they stand, and an unread tree is not their
+		// failure. It is reported, not hidden: the hook that did not run is in the array, and the clone's own
+		// record still reads as unrecorded, so nothing here is a position taken on somebody's behalf.
+		res := runIn(t, f.Dir(), "check", "--no-hooks", "--json").mustSucceed(t, "check", "--no-hooks", "--json")
+		if res.json(t)["ready"] != true {
+			t.Errorf("check --no-hooks still refuses: %v", res.json(t)["reasons"])
+		}
+		found := false
+		for _, e := range res.jsonList(t, "hooks") {
+			entry := e.(map[string]any)
+			if entry["point"] == "pre-check" && entry["status"] == "skipped-by-flag" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("hooks = %v, want the unread pre-check hook listed as skipped", res.jsonList(t, "hooks"))
+		}
+		report := runIn(t, f.Dir(), "hooks")
+		if !strings.Contains(report.stderr, "NOT trusted") {
+			t.Errorf("a skipped check left the clone's position changed; it should still read as unrecorded: %s", report.stderr)
+		}
 	})
 
 	// The declaration is the author asking, and the approval underneath the declaration is what permits the

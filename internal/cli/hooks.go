@@ -182,8 +182,9 @@ func (a *app) runPoint(ctx context.Context, s *session, c hookContext, mode runM
 		// The person asked for no scripts in this command. Everything configured is still reported, as the
 		// outcomes that did not run: a hand-off that skipped the suite has to be distinguishable from one that
 		// ran it, in the same array a machine already reads. `--no-hooks` is the per-command form of the off
-		// switch, so it goes as far as the off switch goes — it never answers for the tracked tree, which is
-		// what the commands that ask for a position refuse.
+		// switch and it goes one step further than the environment variable: because the person asked about this
+		// command and the report names every hook that did not run, it also answers the position question for this
+		// invocation. `hooksPositionReason` is where that decision, and what it gives up, are written down.
 		results := plan.SkippedByFlag()
 		a.warn("git-pair: --no-hooks: %d hook(s) at %s did not run\n", len(results), c.Point)
 		for _, r := range results {
@@ -687,14 +688,28 @@ func reportUnknown(a *app, rep hooksReport, found []unknownEntry) {
 // rather than putting it in, and a person who cannot run the checks is exactly the person who needs to put the
 // work down. Refusing them would turn the safety mechanism into a trap.
 //
-// The off switch is not an answer either. `GIT_PAIR_HOOKS=0` and `git-pair.hooks=false` say a machine does not
-// want to run scripts right now, which says nothing about what those scripts do; the position is
-// `git pair hooks --decline`, written down where the next reader can see it was taken.
+// The environment off switch is not an answer. `GIT_PAIR_HOOKS=0` and `git-pair.hooks=false` are ambient — a shell
+// profile or a CI image sets one and every command in the clone goes quiet about scripts it never ran — and they
+// report nothing, so they still refuse. `--no-hooks` is deliberate, one command at a time, and names every hook it
+// skipped in the report the command already produces; that is the difference that lets it answer the question and
+// leaves the off switch out.
+//
+// The decision to let `--no-hooks` answer it was the destination owner's, on the grounds that skipping the scripts
+// has to stay an escape someone can always reach. What it gives up is the only forcing function the question had:
+// while a refusal stood in the way, reading the scripts was the cheapest way through, and now nothing requires it.
+// The argument set aside is in this changeset's record under "Skipping is an escape hatch", so the line below can
+// be re-read against it if the state of a clone's hooks ever turns out to matter more than expected.
 func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo, points ...hooks.Point) (string, error) {
+	// `--trust-hooks-once` answers the question by running the scripts: their own verdicts arrive as results and
+	// reasons, so the command does not rest on silence. It leaves no position behind, so the next command asks again.
 	if a.hooksTrustOnce {
-		// The question the refusal asks is whether the repository's checks are resting on silence, and under
-		// `--trust-hooks-once` they are not: the scripts run for this command, and their own verdicts arrive as
-		// results and reasons. What the flag does not do is leave a position behind, so the next command asks again.
+		return "", nil
+	}
+	// `--no-hooks` answers it by being the escape hatch, and writes nothing: `git pair hooks` still reports the
+	// tree as unrecorded, and each configured hook still arrives as `skipped-by-flag`, so the run says what it did
+	// not do. The clone's position is untouched, which is what keeps this different from `git pair hooks --trust`
+	// and `--decline` rather than a cheaper way to take one.
+	if a.hooksOff {
 		return "", nil
 	}
 	scripts, err := hooks.TrackedHooksAt(repo.Dir, points...)
@@ -722,7 +737,7 @@ func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo, points ..
 	// that would otherwise end in a flag nobody thought to look for. `git pair hooks --trust` and `--decline` are
 	// named here too, and are nobody's flag to type on their behalf either; who may type what is the skill's rule,
 	// not something this sentence can enforce.
-	const once = "; if you are reading them in order to review a change to the scripts themselves, `--trust-hooks-once` runs them for this command alone and records nothing"
+	const once = "; if you are reading them in order to review a change to the scripts themselves, `--trust-hooks-once` runs them for this command alone; `--no-hooks` skips them for this command alone. Either way nothing is recorded, and the next command asks again"
 	if state == hooks.TrustChanged {
 		return fmt.Sprintf("the repository's tracked hooks under %s changed since this clone recorded them (recorded %s, the tree is now %s): the checks they carry have not run on this content — read what moved, then `git pair hooks --trust` to run it or `git pair hooks --decline` to record that you read it and chose not to%s",
 			root, short(accepted), short(current), once), nil
