@@ -49,7 +49,7 @@ git-pair: the repository's tracked hooks under .git-pair/hooks have not been rec
   on, and it is the one worth re-reading in `hooksPositionReason`'s comment.
 - `change unready` and `change abandon` still ask nothing, and `git pair hooks` is still never gated.
 - The refusal's sentence is unchanged, and still names only `git pair hooks --trust` and `--decline`.
-- `--trust-once` from the parent stays. It is no longer the only way a reviewer of a hook change gets through —
+- `--trust-hooks-once` from the parent stays. It is no longer the only way a reviewer of a hook change gets through —
   with the scoping, most of those cases never refuse — but it is still how you run the scripts *at your own
   point* unrecorded, which is now the reviewer case the tests use.
 
