@@ -48,6 +48,8 @@ command spelled two ways.`,
 	}
 	opts.register(cmd)
 	opts.registerHead(cmd)
+	noHooksFlag(cmd, a)
+	trustHooksOnceFlag(cmd, a)
 	cmd.AddCommand(
 		newReviewOpenCommand(a),
 		newReviewReopenCommand(a),
@@ -102,6 +104,8 @@ screen keeps the pinned span and offers r to re-pin it.`,
 	}
 	opts.register(cmd)
 	opts.registerHead(cmd)
+	noHooksFlag(cmd, a)
+	trustHooksOnceFlag(cmd, a)
 	return cmd
 }
 
@@ -256,6 +260,8 @@ makes a clean-tree approval work.`,
 	cmd.Flags().BoolVar(&opts.noStage, "no-stage", false, "commit only what is already staged")
 	cmd.Flags().BoolVar(&opts.allowHookFailure, "allow-hook-failure", false,
 		"record the submission even if a pre-submit hook refuses it")
+	noHooksFlag(cmd, a)
+	trustHooksOnceFlag(cmd, a)
 	return cmd
 }
 
@@ -602,12 +608,16 @@ your submission, not the whole changeset a second time. ` + "`review open`" + ` 
 whole changeset by default. For an earlier review use ` + "`review open --since-review=N`" + `.
 
 Needs a terminal; the author reads the submission itself with ` + "`git pair change feedback`" + `.`,
-		Example: `  git pair review reopen`,
-		Args:    cobra.NoArgs,
+		Example: `  git pair review reopen
+  git pair review reopen --no-hooks
+  git pair review reopen --trust-hooks-once`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runReviewReopen(cmd.Context(), a)
 		},
 	}
+	noHooksFlag(cmd, a)
+	trustHooksOnceFlag(cmd, a)
 	return cmd
 }
 

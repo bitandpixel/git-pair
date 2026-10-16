@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"gitpair/internal/gittest"
+	"gitpair/internal/hooks"
 )
 
 // The point of the whole feature, in one sentence: a repository can commit a script and have it run at the
@@ -392,7 +393,8 @@ func TestHooksSwitches(t *testing.T) {
 		f, _ := newChangeset(t, "checkout-flow", "main")
 		dir := scratch(t)
 		// A hook that shells out to `git pair` is the recursion the guard exists for, and the child
-		// has to see the variable the parent set.
+		// has to see the variable the parent set — at the value that switches hooks off, which is the
+		// half the guard is made of.
 		putHook(t, f, "tracked", "pre-ready", "01-env",
 			fmt.Sprintf("#!/bin/sh\nprintf '%%s' \"${GIT_PAIR_HOOKS:-unset}\" > %s\nexit 0\n",
 				strconv.Quote(filepath.Join(dir, "GUARD"))))
@@ -400,8 +402,43 @@ func TestHooksSwitches(t *testing.T) {
 
 		runIn(t, f.Dir(), "change", "ready").mustSucceed(t, "change", "ready")
 
-		if got := readFile(t, filepath.Join(dir, "GUARD")); got != "1" {
-			t.Errorf("GIT_PAIR_HOOKS inside the hook = %q, want 1", got)
+		if got := readFile(t, filepath.Join(dir, "GUARD")); got != hooks.GuardValue {
+			t.Errorf("GIT_PAIR_HOOKS inside the hook = %q, want %q", got, hooks.GuardValue)
+		}
+	})
+
+	// The consequence, end to end: a hook that runs a command of its own must not fire that command's hooks.
+	// The value alone is not the feature — a child that read `0` and ran its hooks anyway would pass the
+	// assertion above and re-enter just the same.
+	t.Run("a hook calling git pair fires no hooks of its own", func(t *testing.T) {
+		f, _ := newChangeset(t, "checkout-flow", "main")
+		dir := scratch(t)
+		putHook(t, f, "tracked", "pre-ready", "01-nests",
+			fmt.Sprintf("#!/bin/sh\ngit pair check >/dev/null 2>&1\nexit 0\n"))
+		putHook(t, f, "tracked", "pre-check", "01-suite", touch(dir, "RAN_CHECK"))
+		trustHooks(t, f)
+
+		runIn(t, f.Dir(), "change", "ready").mustSucceed(t, "change", "ready")
+
+		if _, err := os.Stat(filepath.Join(dir, "RAN_CHECK")); err == nil {
+			t.Error("the pre-check hook ran from the `git pair check` a pre-ready hook started; the guard does not hold")
+		}
+		// The nested command still works — it runs no hooks, it is not broken.
+		runIn(t, f.Dir(), "check", "--json").mustSucceed(t, "check", "--json")
+	})
+
+	t.Run("a hook can take the guard back off", func(t *testing.T) {
+		f, _ := newChangeset(t, "checkout-flow", "main")
+		dir := scratch(t)
+		putHook(t, f, "tracked", "pre-ready", "01-nests",
+			fmt.Sprintf("#!/bin/sh\nenv -u GIT_PAIR_HOOKS git pair check >/dev/null 2>&1\nexit 0\n"))
+		putHook(t, f, "tracked", "pre-check", "01-suite", touch(dir, "RAN_CHECK"))
+		trustHooks(t, f)
+
+		runIn(t, f.Dir(), "change", "ready").mustSucceed(t, "change", "ready")
+
+		if _, err := os.Stat(filepath.Join(dir, "RAN_CHECK")); err != nil {
+			t.Error("the nested command ran no hooks although the script removed the guard")
 		}
 	})
 }

@@ -60,6 +60,8 @@ Readiness is not taken away by a commit. The changeset stays READY until you run
 the queue on its own — and ` + "`change unready`" + ` is how you leave it on purpose.`,
 		Example: `  git pair change ready
   git pair change ready --allow-surviving-review-additions
+  git pair change ready --no-hooks
+  git pair change ready --trust-hooks-once
   git pair change ready --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -68,6 +70,8 @@ the queue on its own — and ` + "`change unready`" + ` is how you leave it on p
 	}
 	cmd.Flags().BoolVar(&opts.allowSurviving, "allow-surviving-review-additions", false,
 		"acknowledge surviving review additions and mark ready anyway")
+	noHooksFlag(cmd, a)
+	trustHooksOnceFlag(cmd, a)
 	return cmd
 }
 
@@ -335,12 +339,14 @@ Once the changeset has landed, this refuses. A changeset that has landed has no 
 to withdraw, and "nothing to withdraw" would be an answer about the branch rather than about the work
 being finished.`,
 		Example: `  git pair change unready
+  git pair change unready --no-hooks
   git pair change unready --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runChangeUnready(cmd.Context(), a)
 		},
 	}
+	noHooksFlag(cmd, a)
 	return cmd
 }
 
@@ -481,12 +487,14 @@ The state stays WORKING and no state value is added: the ending is reported as
 Re-running the command changes nothing and succeeds. Abandoning work whose branch is already gone
 refuses: post-landing bookkeeping is not a lifecycle act.`,
 		Example: `  git pair change abandon
+  git pair change abandon --no-hooks
   git pair change abandon --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runChangeAbandon(cmd.Context(), a)
 		},
 	}
+	noHooksFlag(cmd, a)
 	return cmd
 }
 

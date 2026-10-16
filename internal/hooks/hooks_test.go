@@ -344,3 +344,95 @@ func TestDeclineStates(t *testing.T) {
 			accepted, acceptedHash)
 	}
 }
+
+// A long-lived process must read the record again.
+//
+// The review screen is the case this holds: the reviewer sits in `review open` while a second terminal runs
+// `git pair hooks --trust`, then presses the outcome key. The submission asks the trust question at that
+// moment, and an answer taken when the screen opened — or taken by the submission that was just refused —
+// says `changed` about content the clone has since recorded. The reviewer then removes the comment they were
+// writing, submits again, and reads the same refusal, because the refusal stopped being about the repository
+// and became about this process's lifetime. Quitting the screen and opening it again fixes it, which is how a
+// stale answer reads to the person standing at it.
+//
+// What may be kept for the life of a process is what cannot move inside one: the off switch, and where the
+// clone's git directory is. The two records and the hook files are ordinary files that another process
+// writes.
+func TestResolutionReadsTheTrustRecordAgainEachTime(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a position recorded in another terminal is seen", func(t *testing.T) {
+		_, repo, _ := hooksRepo(t, "#!/bin/sh\nexit 0\n")
+		run := Resolve(repo)
+		if state, _, _, err := run.Trust(ctx); err != nil || state != TrustUnrecorded {
+			t.Fatalf("first answer = %v (%v), want unrecorded", state, err)
+		}
+		if _, _, err := Accept(ctx, repo); err != nil {
+			t.Fatalf("Accept: %v", err)
+		}
+		state, _, _, err := run.Trust(ctx)
+		if err != nil || state != TrustAccepted {
+			t.Errorf("second answer = %v (%v), want accepted: the record changed while this process was open", state, err)
+		}
+	})
+
+	t.Run("content moved under a recorded position is seen", func(t *testing.T) {
+		f, repo, _ := hooksRepo(t, "#!/bin/sh\nexit 0\n")
+		run := Resolve(repo)
+		if _, _, err := Accept(ctx, repo); err != nil {
+			t.Fatalf("Accept: %v", err)
+		}
+		if state, _, _, err := run.Trust(ctx); err != nil || state != TrustAccepted {
+			t.Fatalf("first answer = %v (%v), want accepted", state, err)
+		}
+		moveHookTo(t, f, "#!/bin/sh\nexit 0\n# rewritten\n", "the repository ships a new version")
+		state, _, _, err := run.Trust(ctx)
+		if err != nil || state != TrustChanged {
+			t.Errorf("second answer = %v (%v), want changed: the tree moved while this process was open", state, err)
+		}
+	})
+
+	// The declined hash beside a skipped run is the same kind of answer, and the same staleness makes a
+	// report print a hash the person has since replaced.
+	t.Run("a decline recorded in another terminal is seen", func(t *testing.T) {
+		_, repo, _ := hooksRepo(t, "#!/bin/sh\nexit 0\n")
+		run := Resolve(repo)
+		if declined, err := run.DeclinedHash(ctx); err != nil || declined != "" {
+			t.Fatalf("first answer = %q (%v), want nothing recorded", declined, err)
+		}
+		if _, _, err := Decline(ctx, repo); err != nil {
+			t.Fatalf("Decline: %v", err)
+		}
+		declined, err := run.DeclinedHash(ctx)
+		if err != nil || declined == "" {
+			t.Errorf("second answer = %q (%v), want the hash recorded while this process was open", declined, err)
+		}
+	})
+}
+
+// The guard is the off switch, handed to the child.
+//
+// `Disabled` and `GuardValue` are two facts in two places, and the run-time guard only exists if they agree.
+// They did not: the value a hook was given was `1`, which `Disabled` reads as "run them", so the documented
+// recursion guard — "a nested `git pair` runs no hooks" — guarded nothing, and a `pre-ready` hook that shelled
+// out to `git pair check` fired `pre-check`. The end-to-end case is pinned in `internal/cli`; this pins the
+// half that is easy to break from here, which is a change to either side of the pair.
+func TestGuardValueSwitchesHooksOff(t *testing.T) {
+	t.Setenv(EnvDisable, GuardValue)
+	off, why := Disabled(context.Background(), nil)
+	if !off {
+		t.Errorf("a hook inheriting %s=%q runs hooks; Disabled must read the guard as off", EnvDisable, GuardValue)
+	}
+	if why != "$"+EnvDisable {
+		t.Errorf("why = %q, want $%s", why, EnvDisable)
+	}
+
+	// The other side of the pair: the two spellings that mean "run them", so a person who exports the
+	// variable for their own shell is not switched off by the value they typed to keep hooks on.
+	for _, on := range []string{"1", "true", "TRUE"} {
+		t.Setenv(EnvDisable, on)
+		if off, _ := Disabled(context.Background(), nil); off {
+			t.Errorf("%s=%q switches hooks off, want it to leave them on", EnvDisable, on)
+		}
+	}
+}
