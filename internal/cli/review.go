@@ -302,9 +302,12 @@ func (a *app) submitReview(ctx context.Context, s *session, outcome model.Outcom
 	stageAll, allowHookFailure bool) (reviewops.Result, []hooks.Result, bool, error) {
 	// The reviewer's clone owes the same answer as the author's, and asked here rather than at the pre-submit
 	// hooks so a refusal stages nothing: the alternative is a reviewer left with a dirty index and a verdict they
-	// did not record. There is no override flag beside this one, because the way through is one command that
-	// records a position — and `--allow-hook-failure` covers refusing scripts, not unread ones.
-	if err := a.hooksPositionRefusal(ctx, s.repo); err != nil {
+	// did not record. It is asked about the two points a submission runs — a review of somebody's `pre-ready`
+	// suite is not stopped by a suite this submission never executes. `--trust-hooks-once` is the way through when the
+	// content under review *is* the hooks: the scripts run, nothing is recorded, and the reviewer gets to say
+	// what they think. `--allow-hook-failure` covers refusing scripts, not unread ones, and `--no-hooks` clears
+	// nothing here.
+	if err := a.hooksPositionRefusal(ctx, s.repo, hooks.PreSubmit, hooks.PostSubmit); err != nil {
 		return reviewops.Result{}, nil, false, err
 	}
 	if stageAll {

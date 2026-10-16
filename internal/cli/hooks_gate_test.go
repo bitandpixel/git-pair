@@ -135,14 +135,16 @@ func TestCheckAsksForAPositionOnTrackedHooks(t *testing.T) {
 	t.Run("content that moved under the acceptance is silence again", func(t *testing.T) {
 		dir := scratch(t)
 		f, _ := newChangeset(t, "checkout-flow", "main")
-		putHook(t, f, "tracked", "pre-ready", "01-suite", touch(dir, "RAN_READY"))
+		// At the gate's own point: the verdict asks about the scripts the verdict runs, and a `pre-ready` suite is
+		// the hand-off's business. See `TestThePositionIsAskedOnlyWhereTheCommandRuns`.
+		putHook(t, f, "tracked", "pre-check", "01-suite", touch(dir, "RAN_CHECK"))
 		trustHooks(t, f)
 		// Hand-off and approval while the accepted content is still what is here, so nothing else is outstanding
 		// when the repository moves it: the tree this clone accepted is not the tree that is here, and that is the
 		// fact the refusal is about.
 		ready(t, f)
 		submit(t, f, "approve")
-		f.Append(filepath.Join(".git-pair", "hooks", "pre-ready", "01-suite"), "echo escalated\n")
+		f.Append(filepath.Join(".git-pair", "hooks", "pre-check", "01-suite"), "echo escalated\n")
 		f.Commit("escalate the hook")
 
 		have := checkRefused(t, f)
@@ -241,34 +243,42 @@ func TestHooksDeclineCommand(t *testing.T) {
 // work *out* of the queue deliberately do not ask, because the person who cannot run the checks is exactly the
 // person who needs to put the work down.
 func TestTheCommandsThatStartWorkAskForAPosition(t *testing.T) {
-	t.Run("init refuses before a changeset exists, and leaves nothing behind", func(t *testing.T) {
+	t.Run("init warns about a tree nobody has read, and the hand-off is where the ask lands", func(t *testing.T) {
 		f := newRepo(t)
 		putHook(t, f, "tracked", "pre-ready", "01-suite", "#!/bin/sh\nexit 0\n")
 		f.CreateBranch("checkout-flow")
 		before := f.Head()
 
-		res := runIn(t, f.Dir(), "init")
-		if res.code != exitRefusal {
-			t.Fatalf("`init` exited %d, want %d\nstdout: %s\nstderr: %s",
-				res.code, exitRefusal, res.stdout, res.stderr)
-		}
+		// init runs no hook, so it has no check of its own resting on silence and no business refusing. It says
+		// the checks exist — the reviewer's "obvious as early as it can be" — and lets the changeset start.
+		res := runIn(t, f.Dir(), "init").mustSucceed(t, "init")
 		have := res.stdout + res.stderr
-		mustContain(t, have, "have not been recorded in this clone",
+		mustContain(t, have, "ships 1 hook(s) under .git-pair/hooks that this clone has not read",
 			"the first command a newcomer runs tells them the repository ships scripts")
-		mustContain(t, have, "git pair hooks --trust", "and names the way that runs them")
-		mustContain(t, have, "git pair hooks --decline", "and the way that does not")
-		if _, err := os.Stat(filepath.Join(f.Dir(), "changesets", "checkout-flow")); err == nil {
-			t.Error("a refused init still created the changeset directory")
+		mustContain(t, have, "git pair hooks", "and where to read them")
+		mustContain(t, have, "the first command that runs one asks for a position", "and when the refusal comes")
+		if _, err := os.Stat(filepath.Join(f.Dir(), "changesets", "checkout-flow")); err != nil {
+			t.Error("init would not create the changeset directory it was asked to create")
 		}
-		if f.Head() != before {
-			t.Error("a refused init wrote a commit")
+		if f.Head() == before {
+			t.Error("init recorded nothing")
 		}
 
-		// Reading is never gated, so the refusal is a stop with a way forward rather than a wall.
+		// The warning is not the refusal. The ask arrives with the first command that would execute the script,
+		// and reading is never gated, so the stop has a way forward in both directions.
+		refused := runIn(t, f.Dir(), "change", "ready")
+		if refused.code != exitRefusal {
+			t.Fatalf("`change ready` exited %d, want %d\nstdout: %s\nstderr: %s",
+				refused.code, exitRefusal, refused.stdout, refused.stderr)
+		}
+		mustContain(t, refused.stdout+refused.stderr, "have not been recorded in this clone",
+			"the hand-off names the silence the warning only pointed at")
+		mustContain(t, refused.stdout+refused.stderr, "git pair hooks --trust", "and names the way that runs them")
+		mustContain(t, refused.stdout+refused.stderr, "git pair hooks --decline", "and the way that does not")
 		runIn(t, f.Dir(), "hooks").mustSucceed(t, "hooks")
 
 		trustHooks(t, f)
-		runIn(t, f.Dir(), "init").mustSucceed(t, "init")
+		runIn(t, f.Dir(), "change", "ready").mustSucceed(t, "change", "ready")
 	})
 
 	// Not only the unseen content: a script the repository moved after this clone accepted it is content nobody

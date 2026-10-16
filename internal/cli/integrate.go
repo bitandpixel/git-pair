@@ -80,6 +80,7 @@ after the declaration moves the head it names, and the next run declares that on
 Exit codes: 0 declared or already declared, 1 refused, 2 usage, 3 git failed.`,
 		Example: `  git pair change integrate
   git pair change integrate --allow-feedback
+  git pair change integrate --no-hooks
   git pair change integrate --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -88,9 +89,13 @@ Exit codes: 0 declared or already declared, 1 refused, 2 usage, 3 git failed.`,
 	}
 	cmd.Flags().BoolVar(&opts.allowFeedback, "allow-feedback", false,
 		"accept non-blocking feedback as sufficient, as git pair check --allow-feedback does")
-	// The gate's flag, for the same reason: this command declares a merge, so it may be given more checking
-	// and not less. See `git pair check --trust-hooks-once`.
+	// The gate's two flags, for the same reasons as `git pair check`: this command declares a merge, and what
+	// permits the merge is the approval underneath the declaration, not the hooks this invocation ran. The job
+	// that lands the change builds the merge commit and verifies that tree with its own invocation, so a person
+	// whose `pre-integrate` hook is broken can still ask for the merge they were approved for. See
+	// `git pair check --trust-hooks-once`.
 	trustHooksOnceFlag(cmd, a)
+	noHooksFlag(cmd, a)
 	return cmd
 }
 
@@ -163,7 +168,7 @@ func runChangeIntegrate(ctx context.Context, a *app, opts *integrateOptions) err
 		return err
 	}
 
-	g, err := a.integrationGate(ctx, s, opts.allowFeedback)
+	g, err := a.integrationGate(ctx, s, opts.allowFeedback, hooks.PreIntegrate, hooks.PostIntegrate)
 	if err != nil {
 		return err
 	}

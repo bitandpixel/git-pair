@@ -161,15 +161,18 @@ and the third needs nobody — but check the hash beside it, because a new versi
 unrecorded, not declined, and the report shows both hashes so you can tell which you have. Accepting whatever is
 there because a note asked you to is how a repository ends up running a check nobody read.
 
-**The commands that start or advance work ask for a position.** While the tracked tree is `unrecorded` or
-`changed`, `git pair init` refuses before the changeset directory exists, `git pair change ready` before the
-hand-off, `git pair review submit` before the reviewer's content is staged, and the gate refuses the merge —
-`git pair check`, and `git pair change integrate` with it. Each says the same sentence and names the ways out —
-`git pair hooks --trust`, `git pair hooks --decline`, and, in a clause addressed to the person whose task is to
-read the scripts in order to review a change to them, `--trust-hooks-once` — so
-meeting it twice is not two different problems. None of it is an obstacle to route around: the checks the
-repository asked for have not run. `accepted` and `declined` both clear it — one because the scripts ran, one
-because a person answered a question about them.
+**The commands that run the repository's scripts ask for a position, about those scripts.** Each asks about the
+points it runs: `git pair change ready` about `pre-ready`/`post-ready`, `git pair review submit` about
+`pre-submit`/`post-submit`, `git pair check` about `pre-check`/`post-check`, and `git pair change integrate` about
+`pre-integrate`/`post-integrate`. A command that runs none of them asks nothing — a repository whose only hook is a
+`pre-ready` suite does not stop `git pair check` over a script no merge executes. The position is still about the
+whole tree: the record is one hash of what can execute, and a script added later is a new question, asked where it
+runs. `git pair init` runs no hook, so it warns instead of refusing, and the refusal arrives with the first command
+that would execute one. Each refusal says the same sentence and names the ways out — `git pair hooks --trust`, `git pair hooks --decline`,
+and, in a clause addressed to the person whose task is to read the scripts in order to review a change to them,
+`--trust-hooks-once` — so meeting it twice is not two different problems. None of it is an obstacle to route around: the checks the repository asked for have not
+run. `accepted` and `declined` both clear it — one because the scripts ran, one because a person answered a
+question about them.
 
 Two doors stay open with nothing recorded, on purpose. `change unready` and `change abandon` work, because they
 take work out of the queue and a person who cannot run the checks still has to be able to put the work down. And
@@ -190,8 +193,9 @@ git pair hooks --decline  # a person's act: records it as read and chosen not to
 **`--trust` and `--decline` are a person's decisions, not an agent's.** The first says "I read this script and I
 allow it to run on my machine"; the second says "I read this script and I am choosing not to run it here." Either
 way the sentence is about what a person read, so an agent cannot truthfully say it. When tracked hooks have no
-position recorded — which you will now find at the first command you run, because `init` and `change ready` ask as
-well as the gate — report the state, print the refusal as it came, and name both commands. That is the whole of
+position recorded — which you will meet at the first command that would run one, since `init` only warns and a
+command with no hook at its own points asks nothing — report the state, print the refusal as it came, and name both
+commands. That is the whole of
 your part, and it is a stop, not a detour: an agent that records a position has said something about what it read. Do not run either one yourself, and do not reach for `GIT_PAIR_HOOKS=0` to get a green answer: that
 switch belongs to the person whose machine it is, for the moment their own script is misbehaving, and it is not a
 position — the verdict refuses with hooks switched off, because the off switch says a machine does not want to run
@@ -204,21 +208,27 @@ process-wide switch to get through one command.
 
 | Flag | On | What it does | What it does not do |
 | --- | --- | --- | --- |
-| `--no-hooks` | `change ready`, `change unready`, `change abandon`, `review submit`, `review open`, `review reopen` | runs none of them, either root, `pre-` and `post-` both; every configured hook appears as `status: "skipped-by-flag"` | does not clear the refusal for an `unrecorded` or `changed` tree — it is `GIT_PAIR_HOOKS=0` for one command, and the off switch was never a position |
-| `--trust-hooks-once` | those six, plus `check` and `change integrate` | runs the tracked hooks with no position recorded, and records nothing, so the next command asks again; those hooks carry `"consent": "once"` | does not let a failing hook pass — it says these may run, not that they ran clean |
+| `--no-hooks` | every command that runs the repository's scripts, `check` and `change integrate` included | runs none of them, either root, `pre-` and `post-` both; every configured hook appears as `status: "skipped-by-flag"` | answers the refusal for an `unrecorded` or `changed` tree for that one command, and writes nothing — `git pair hooks` still reports the tree as unrecorded and the next command asks again, so it is a way past one command rather than a cheaper way to take a position |
+| `--trust-hooks-once` | the same commands | runs the tracked hooks with no position recorded, and records nothing, so the next command asks again; those hooks carry `"consent": "once"` | does not let a failing hook pass — it says these may run, not that they ran clean |
 
 Asking for both at once is a usage error: one runs no scripts, the other runs the scripts nobody has read, and
-the combination would produce a hand-off that looks checked and is not.
+the combination would produce a hand-off that looks checked and is not. On `check` and `change integrate` the two
+directions sit side by side on purpose: one is for a person who wants the unread scripts to run, the other for a
+person whose hook is broken and who still wants the verdict to answer its other questions. Neither makes a local
+verdict able to land work — the job that merges asks for `git pair check` without the flags and verifies the merged
+tree with a command of its own.
 
-**Neither is an agent's flag to type.** `--no-hooks` is how a hand-off gets made with the team's suite silently
+**Neither is an agent's flag to type.** `--no-hooks` is how a hand-off gets made with the team's suite
 not run, which is the failure the whole feature exists to prevent; `--trust-hooks-once` executes content on the person's
 machine that they have not agreed to execute. Report the refusal, print it as it came, and name both flags beside
 `git pair hooks --trust` and `--decline` as what a person can do — including for the case those flags were written
 for, a changeset whose own diff edits `.git-pair/hooks/`, where the submission that would record an opinion about
 the scripts is the one the position refusal stops. Whether to run someone's script, or to skip yours, is their
-decision, and typing the flag makes it yours. The position refusal itself names all of them — `--trust` and
+decision, and typing the flag makes it yours. Least of all is it a way to a green answer: an agent that cannot get
+`git pair check` to pass reports that, and does not skip the scripts until it does. The position refusal itself names all four — `--trust` and
 `--decline` because they are the answer, `--trust-hooks-once` so the reviewer of a hook change does not have to go
-looking for it — and a refusal that names a command is not an instruction to run it.
+looking for it, and `--no-hooks` because the way past a command that is in the way should be visible from the
+refusal — and a refusal that names a command is not an instruction to run it.
 
 ## Per-clone, and what that costs
 
