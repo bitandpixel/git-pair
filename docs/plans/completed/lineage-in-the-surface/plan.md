@@ -216,3 +216,15 @@ strict, which is also what the hygiene guard and `push_guard_test` assume.
 | date       | what                                                                                   | outcome     |
 | ---------- | -------------------------------------------------------------------------------------- | ----------- |
 | 2026-09-22 | plan written from the landing of `feat-two-frozen-refs` and `feat-publish-the-records` | not started |
+
+## Closure
+
+Filed under `completed/` on 2026-10-15 by `chore-file-finished-plans`. **Delivered** on
+`feat/lineage-in-the-surface`, merged `6c081a5` (2026-09-22), with each milestone's deviation written into its own
+task text.
+
+Two of the three milestones read the durable ref namespace, and `simplify-architecture` later deleted that
+namespace, so M1's create-only carrying-commit path and M2's ref walk no longer exist as written. What survived is
+what the surface was for: `git pair status` prints the stack chain from what the destination's tree holds,
+`--json` answers a list rather than null for an unstacked changeset, and `TestStatusStackChainCostsABoundedReadPerStep`
+bounds what the walk costs per ancestor.

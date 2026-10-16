@@ -715,3 +715,15 @@ never-`null` array rule, because those shapes are agent contracts rather than im
 | Date | Audit | Summary        |
 | ---- | ----- | -------------- |
 | —    | —     | No audits yet. |
+
+## Closure
+
+Filed under `completed/` on 2026-10-15 by `chore-file-finished-plans`. **Superseded.** M1–M5 are marked done in
+their headings and landed in the two-frozen-refs round of 2026-09-21; the design they built — two frozen refs and
+the create-only invariants around them — was deleted by `simplify-architecture` (`01dcd0a`, 2026-09-29), and a
+landing is now the changeset directory in the destination's history (PRD §13). The questions M6–M8 opened were
+answered by later work rather than by this plan: the queue answers per branch, stacked changesets exist with a
+parent whose landing is owed first, and the agent contract is the skill's.
+
+Read the Goal and the Constraints as history. `requirements.md` and `reconciliation.md` stay beside the plan for
+the same reason.

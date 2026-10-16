@@ -313,3 +313,10 @@ untouched, which is what `e2e-29.sh` keeps pinned.
       file as text reads its placements off the same walk now. |
 
 | 2026-09-24 | M5 executed | Git's per-file rows come off a file's pane, `@@` stays, the caption is gone with its counts moved to the header, and the reviewer's rows take the pane's three colours and the `×` sign. Two plan tasks moved: `singleFilePatch` → `paneView`, because a patch's shape cannot tell a file from a directory holding one file, and `laidOut.you` → `youText`, beside where `patchRows` already decides whose a row is. `mise run gates` green. |
+
+## Closure
+
+Filed under `completed/` on 2026-10-15 by `chore-file-finished-plans`. **Delivered** on `feat/preview-you-marks`,
+merged `e504d5a` (2026-09-24). The audit rows above record M1–M3, then M4 added from review feedback, then M5 and
+M6, each with `mise run gates` green. The merge and the marking still live in `internal/tui/preview.go` as
+`previewEditsBody` and `youText`.
