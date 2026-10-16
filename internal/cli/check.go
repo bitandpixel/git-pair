@@ -61,6 +61,7 @@ landing itself is what git-pair reads afterwards — the directory in the destin
 Exit codes: 0 integration-ready, 1 not ready, 2 usage, 3 git failed.`,
 		Example: `  git pair check
   git pair check --allow-feedback
+  git pair check --trust-once
   git pair check --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -69,6 +70,10 @@ Exit codes: 0 integration-ready, 1 not ready, 2 usage, 3 git failed.`,
 	}
 	cmd.Flags().BoolVar(&allowFeedback, "allow-feedback", false,
 		"accept non-blocking feedback as sufficient for integration")
+	// `--trust-once` and not `--no-hooks`: this is the verdict a merge runs on, and a flag one keystroke from
+	// "the repository's checks did not run" is the thing the gate exists to refuse. Running the checks the
+	// clone has not recorded is the opposite direction, so it is offered.
+	trustOnceFlag(cmd, a)
 	return cmd
 }
 

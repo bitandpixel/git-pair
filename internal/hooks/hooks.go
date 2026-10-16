@@ -128,9 +128,25 @@ type Result struct {
 	Status     Status `json:"status"`
 	Exit       int    `json:"exit"`
 	DurationMS int64  `json:"duration_ms"`
-	Stdout     string `json:"-"`
-	Stderr     string `json:"-"`
+	// Consent says what let a tracked hook run when there was nothing to run on: empty for content this clone
+	// recorded a position on, and ConsentOnce for content the person chose to run for one command. The clone's
+	// own root has no consent question, so its results carry nothing.
+	//
+	// It travels with the result rather than with the command because a run mixes roots: the same report can
+	// hold a clone hook that always runs, a tracked hook that was accepted months ago, and a tracked hook
+	// nobody recorded, and only the last of those needs explaining.
+	Consent string `json:"consent,omitempty"`
+	Stdout  string `json:"-"`
+	Stderr  string `json:"-"`
 }
+
+// ConsentOnce marks a tracked hook that ran although this clone had recorded no position on it, because the
+// person running the command asked for it with `--trust-once`.
+//
+// It is reported because the difference matters to the next reader and is otherwise invisible: a suite that ran
+// against content nobody agreed to run is a different fact from a suite that ran against the team's own checks,
+// and the one thing it must not be is indistinguishable from the second.
+const ConsentOnce = "once"
 
 // Ran reports whether the hook was executed at all, as opposed to being skipped for trust or refused before
 // it started for want of the executable bit. It is the difference between "this script changed a file" and

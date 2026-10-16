@@ -88,6 +88,9 @@ Exit codes: 0 declared or already declared, 1 refused, 2 usage, 3 git failed.`,
 	}
 	cmd.Flags().BoolVar(&opts.allowFeedback, "allow-feedback", false,
 		"accept non-blocking feedback as sufficient, as git pair check --allow-feedback does")
+	// The gate's flag, for the same reason: this command declares a merge, so it may be given more checking
+	// and not less. See `git pair check --trust-once`.
+	trustOnceFlag(cmd, a)
 	return cmd
 }
 

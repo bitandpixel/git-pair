@@ -307,7 +307,9 @@ Gate:              git pair check, then merge into the destination with ordinary
 			if jsonFlag, err := cmd.Flags().GetBool("json"); err == nil {
 				a.json = jsonFlag
 			}
-			return nil
+			// Checked before any command body runs, so the refusal is a usage error with nothing behind it:
+			// nothing has been staged, no hook has started, and the repository is as it was found.
+			return a.hookOverridesAgree()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
