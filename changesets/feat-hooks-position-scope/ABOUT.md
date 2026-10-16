@@ -88,3 +88,7 @@ and `go test ./...` on its own.
   root only, nothing for an empty point.
 - `TestTheCommandsThatStartWorkAskForAPosition` — the `init` case now asserts the warning, that the changeset is
   created, and that `change ready` is where the refusal arrives.
+
+
+While we're in here, can we also allow --no-hooks to run on check and integrate? I think omitting it from them causes more 
+complications than value.
