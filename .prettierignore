@@ -1,0 +1,29 @@
+# Paths Prettier must not touch. Editors run Prettier on whatever file is open, so this file — and not
+# only `scripts/format.sh` — is what keeps the excluded bytes excluded.
+#
+# The rule for what belongs here: a file whose bytes somebody else owns. `scripts/format.sh` feeds Prettier
+# tracked markdown, so these paths would otherwise be formatted by the gate as readily as any other.
+
+# The development workflow's own bytes. `dev-profiles install` materialises the profiles under
+# `.dev-profiles/` into `.agents/skills/`, and `dev-profiles doctor` byte-compares what it installed
+# against what the library declares — including the executable bits. Reformatted copies read as a broken
+# install, and the fix a doctor suggests is to overwrite the formatting.
+/.dev-profiles/
+/.agents/
+
+# The profile pointer stanza in this file is written and rewritten by `dev-profiles install`, which puts
+# no blank line before its closing marker. Prettier puts one there. The two would rewrite each other on
+# every run, and the check would fail whichever tool ran first. The rest of the file is 15 lines of prose
+# that a formatter earns nothing from.
+/AGENTS.md
+
+# Generated. `scripts/gen-third-party-notices.sh` writes it, and `mise run release:check` regenerates it
+# and byte-compares, so a formatted copy is a red release for a reason the dependency graph has nothing to
+# do with. Regenerate rather than format.
+/packaging/THIRD-PARTY-NOTICES.md
+
+# Build and release output, and anything a package manager leaves behind.
+/bin/
+/dist/
+/vendor/
+/node_modules/

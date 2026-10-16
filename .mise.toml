@@ -1,5 +1,14 @@
 [tools]
 go = "1.27.1"
+# The markdown formatter, pinned beside Go so that `mise run format` on a laptop and the CI job that runs
+# `mise run check` ask the same question of the same version. Prettier's output does move between minors —
+# 3.6 and 3.9 differ on the blank line before an HTML comment — so a floating version would let a file be
+# formatted on one machine and not on another, which is the one thing a formatter must never do. `node` is
+# pinned for the same reason one layer down: Prettier is an npm package, and an unpinned runtime means a
+# runner takes whatever node mise resolves by default, so the pinned formatter version is not the whole
+# answer. It costs every checkout a download, which is the same bargain the goreleaser pin above makes.
+node = "24.22.0"
+"npm:prettier" = "3.9.10"
 # The release packager, pinned beside Go so `mise run release:*` and the Release workflow agree on one
 # goreleaser. `.goreleaser.yaml` says `version: 2`, which an older binary would reject, and a workflow
 # that installed its own would be a second definition of the release — the same rule the check workflow
@@ -100,11 +109,38 @@ bash scripts/gates/ci-integrate.sh
 depends = ["check"]
 description = "check, then replay the PRD §29 loop, the pty TUI walkthrough, and the CI merge job (needs python3)"
 
-# The full gate: formatting, vet, then tests. `check` is what to run before
+# Markdown is formatted the way Go is: one tool, its output checked by `check`. The two modes are split
+# on purpose. `check` is what the gate runs and it rewrites nothing — a gate that fixes what it finds
+# reports green for a tree it just changed, and nobody else can reproduce that verdict. `write` is what a
+# person runs, and what the pre-commit hook runs on the files a commit is about to carry.
+#
+# The input is tracked markdown minus `.prettierignore`, which is where the bytes another tool owns are
+# excluded: the profile library under `.dev-profiles/` and the copies `dev-profiles install` materialises
+# into `.agents/` (both byte-compared by `dev-profiles doctor`), the generated notices file, and AGENTS.md,
+# whose profile stanza `dev-profiles install` rewrites without the blank line Prettier puts before a
+# closing HTML comment. Two formatters owning one file is a loop, so one of them stays out. The header of
+# `scripts/format.sh` carries the reasoning for each exclusion.
+[tasks.format]
+run = "bash scripts/format.sh write"
+description = "Format the repository's markdown with Prettier"
+
+[tasks."format:check"]
+run = "bash scripts/format.sh check"
+description = "Report markdown Prettier would rewrite (mise run format fixes it)"
+
+# The repository's git hooks live in `scripts/git-hooks/` and git reads its own directory, so a clone has
+# to be pointed at them once. It is a per-clone act rather than something `check` can enforce: a gate that
+# depended on a file outside the tree would fail for a reason the tree cannot show.
+[tasks."hooks:install"]
+run = "bash scripts/install-hooks.sh"
+description = "Point this clone's git hooks at scripts/git-hooks/ (formatting on commit)"
+
+# The full gate: markdown formatting, gofmt, vet, then tests. `check` is what to run before
 # calling a change done; `test` is what to run while iterating.
 [tasks.check]
 run = """
 set -eu
+bash scripts/format.sh check
 unformatted=$(gofmt -l internal cmd)
 if [ -n "$unformatted" ]; then
   echo "not gofmt-clean:"
@@ -114,7 +150,7 @@ fi
 go vet ./...
 bash scripts/test-sharded.sh
 """
-description = "gofmt + vet + tests (sharded; test:serial runs them in one process)"
+description = "markdown format + gofmt + vet + tests (sharded; test:serial runs them in one process)"
 
 # The release path, in the order it runs. Publishing itself is not a task: cut a tag
 # (`git tag v0.2.0 && git push origin v0.2.0`) and `.github/workflows/release.yml` does the rest.
