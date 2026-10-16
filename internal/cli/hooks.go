@@ -336,10 +336,14 @@ func hookReasons(results []hooks.Result) []string {
 // flag means the same thing everywhere it appears, and a person who meets it on two commands should read the
 // same sentence rather than wonder whether the second one skips less than the first.
 //
-// It is offered on the commands that can be undone — the hand-off, the withdrawal, the ending, the submission —
-// and not on the two that declare a merge. `check` and `change integrate` are where a green answer has to mean
-// the repository's checks ran, and a flag one keystroke away from that answer is the thing the gate exists to
-// refuse.
+// It is offered on every command that runs the repository's scripts, the gate and the declaration included. It
+// was once kept off `check` and `change integrate` on the grounds that a green verdict must not sit one keystroke
+// from "the checks did not run". That ground turned out to be a local verdict nothing lands on: what lands work is
+// the integrate job's own verification of the merged tree, which runs `git pair check` without this flag and
+// cannot be talked out of it, and the scripts a person skips locally are the same scripts that job declines to
+// take on trust. What the flag does to a local answer stays visible rather than quiet — every configured hook
+// arrives as `status: "skipped-by-flag"`, on stderr and in `hooks[]` — and it still does not answer the position
+// question, because declining to run a script is not the same as having read one.
 func noHooksFlag(cmd *cobra.Command, a *app) {
 	cmd.Flags().BoolVar(&a.hooksOff, "no-hooks", false,
 		"run none of this repository's or this clone's hooks for this command, and report that none ran")
@@ -350,10 +354,10 @@ func noHooksFlag(cmd *cobra.Command, a *app) {
 // scripts, for this one invocation — because a flag called "trust" that a person reads as a general trust
 // decision would be the wrong instrument to reach for.
 //
-// It is offered where it makes checking more likely — the hand-off, the submission, the gate, the declaration —
-// and never where it would make checking less likely, which is why it sits beside `--no-hooks` on two commands
-// and alone on the other two. `git pair hooks --trust` is still the answer for a team that wants the scripts to
-// run regularly: it records that somebody read them, which is the part a flag cannot do on a person's behalf.
+// It is offered where it makes checking more likely — the hand-off, the submission, the gate, the declaration.
+// It travels the opposite way from `--no-hooks`, which makes checking less likely: both are a person's decision
+// about one invocation, and neither records the position that `git pair hooks --trust` exists to record, which is
+// the part a flag cannot do on a person's behalf.
 func trustHooksOnceFlag(cmd *cobra.Command, a *app) {
 	cmd.Flags().BoolVar(&a.hooksTrustOnce, "trust-hooks-once", false,
 		"run this repository's tracked hooks for this command without recording a position on them")

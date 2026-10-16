@@ -62,6 +62,7 @@ Exit codes: 0 integration-ready, 1 not ready, 2 usage, 3 git failed.`,
 		Example: `  git pair check
   git pair check --allow-feedback
   git pair check --trust-hooks-once
+  git pair check --no-hooks
   git pair check --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -70,10 +71,14 @@ Exit codes: 0 integration-ready, 1 not ready, 2 usage, 3 git failed.`,
 	}
 	cmd.Flags().BoolVar(&allowFeedback, "allow-feedback", false,
 		"accept non-blocking feedback as sufficient for integration")
-	// `--trust-hooks-once` and not `--no-hooks`: this is the verdict a merge runs on, and a flag one keystroke from
-	// "the repository's checks did not run" is the thing the gate exists to refuse. Running the checks the
-	// clone has not recorded is the opposite direction, so it is offered.
+	// Both hook flags are on the verdict, in opposite directions. `--trust-hooks-once` runs the scripts the clone
+	// has not recorded, which is more checking. `--no-hooks` runs none of them, which is less, and is here because
+	// this verdict is what a person reads to find out what is wrong: a hook that fails or misbehaves should not
+	// also stop the gate from answering the other questions. It does not buy a clear gate from an unread tree —
+	// the position refusal stands, because the off switch says nothing about what the scripts do — and what it did
+	// is reported, hook by hook, as `skipped-by-flag`. The integrate job runs `git pair check` without either flag.
 	trustHooksOnceFlag(cmd, a)
+	noHooksFlag(cmd, a)
 	return cmd
 }
 

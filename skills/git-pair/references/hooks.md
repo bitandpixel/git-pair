@@ -208,11 +208,15 @@ process-wide switch to get through one command.
 
 | Flag | On | What it does | What it does not do |
 | --- | --- | --- | --- |
-| `--no-hooks` | `change ready`, `change unready`, `change abandon`, `review submit`, `review open`, `review reopen` | runs none of them, either root, `pre-` and `post-` both; every configured hook appears as `status: "skipped-by-flag"` | does not clear the refusal for an `unrecorded` or `changed` tree — it is `GIT_PAIR_HOOKS=0` for one command, and the off switch was never a position |
-| `--trust-hooks-once` | those six, plus `check` and `change integrate` | runs the tracked hooks with no position recorded, and records nothing, so the next command asks again; those hooks carry `"consent": "once"` | does not let a failing hook pass — it says these may run, not that they ran clean |
+| `--no-hooks` | every command that runs the repository's scripts, `check` and `change integrate` included | runs none of them, either root, `pre-` and `post-` both; every configured hook appears as `status: "skipped-by-flag"` | does not clear the refusal for an `unrecorded` or `changed` tree — it is `GIT_PAIR_HOOKS=0` for one command, and the off switch was never a position |
+| `--trust-hooks-once` | the same commands | runs the tracked hooks with no position recorded, and records nothing, so the next command asks again; those hooks carry `"consent": "once"` | does not let a failing hook pass — it says these may run, not that they ran clean |
 
 Asking for both at once is a usage error: one runs no scripts, the other runs the scripts nobody has read, and
-the combination would produce a hand-off that looks checked and is not.
+the combination would produce a hand-off that looks checked and is not. On `check` and `change integrate` the two
+directions sit side by side on purpose: one is for a person who wants the unread scripts to run, the other for a
+person whose hook is broken and who still wants the verdict to answer its other questions. Neither makes a local
+verdict able to land work — the job that merges asks for `git pair check` without the flags and verifies the merged
+tree with a command of its own.
 
 **Neither is an agent's flag to type.** `--no-hooks` is how a hand-off gets made with the team's suite silently
 not run, which is the failure the whole feature exists to prevent; `--trust-hooks-once` executes content on the person's
@@ -220,7 +224,8 @@ machine that they have not agreed to execute. Report the refusal, print it as it
 `git pair hooks --trust` and `--decline` as what a person can do — including for the case those flags were written
 for, a changeset whose own diff edits `.git-pair/hooks/`, where the submission that would record an opinion about
 the scripts is the one the position refusal stops. Whether to run someone's script, or to skip yours, is their
-decision, and typing the flag makes it yours. The position refusal itself names all of them — `--trust` and
+decision, and typing the flag makes it yours. Least of all is it a way to a green answer: an agent that cannot get
+`git pair check` to pass reports that, and does not skip the scripts until it does. The position refusal itself names all of them — `--trust` and
 `--decline` because they are the answer, `--trust-hooks-once` so the reviewer of a hook change does not have to go
 looking for it — and a refusal that names a command is not an instruction to run it.
 
