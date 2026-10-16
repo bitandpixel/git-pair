@@ -26,25 +26,128 @@ import (
 // itself proceeds. Refusing to work in a clone one has not yet approved would make the safety mechanism the
 // thing people route around, which is the same asymmetry `--configure-fetch` uses for consent.
 
-// trustRecordPath is where acceptance is recorded, beside the other two git-directory stores.
-func trustRecordPath(gitDir string) string {
-	return filepath.Join(gitDir, "git-pair", "trusted-hooks")
-}
-
-// declinedRecordPath is where a decline is recorded, beside the acceptance.
+// The two records a clone holds about the tracked hooks tree: the hashes a person accepted, and the hashes the
+// same person read and declined.
 //
-// It is a separate file rather than a marker inside the acceptance record because the two answers are not
-// states of one thing: they are two positions a person can hold about two different trees. A clone may have
-// accepted last month's suite and decline this month's, and reading the pair is what tells a report which of
-// the two the person took *for the content in front of them* — which is the whole difference between a team
-// that opted out and a team that never heard.
-func declinedRecordPath(gitDir string) string {
-	return filepath.Join(gitDir, "git-pair", "declined-hooks")
+// They are separate files rather than markers inside one record because the two answers are not states of one
+// thing: they are two positions a person can hold about two different trees. A clone may have accepted last
+// month's suite and decline this month's, and reading the pair is what tells a report which of the two the
+// person took *for the content in front of them* — which is the whole difference between a team that opted out
+// and a team that never heard.
+//
+// Each file is a set: one tree hash per line, oldest first. A single slot was enough while the record lived in
+// one worktree's git directory, because there was one tree in front of it. The record is clone-wide now, and two
+// worktrees of one clone can stand on two different versions of the directory — one on trunk, one on the branch
+// that edits the suite — so the record has to hold a position about each. Membership is what decides a state;
+// order only decides which hash a report prints.
+//
+// Nothing shipped a per-worktree record, so there is no migration to make and no second place to read: this is
+// the release that first asks the question.
+const (
+	trustedRecordName  = "trusted-hooks"
+	declinedRecordName = "declined-hooks"
+)
+
+// maxRecordedPositions bounds what one clone remembers. The state machine asks only whether the tree in front
+// of it is in the set, so the entries that matter are the current one and the handful of versions a team has
+// actually run against. The bound keeps a repository that edits its hooks every week from accumulating a file
+// nobody reads, and keeps `--trust` from becoming slower as history piles up.
+const maxRecordedPositions = 32
+
+// recordPath is one record inside a git directory.
+func recordPath(dir, name string) string { return filepath.Join(dir, "git-pair", name) }
+
+// TrustedRecordPath and DeclinedRecordPath name where a position gets written, for the surfaces that print the
+// path they recorded to. A report that names the wrong path tells a reader to go and delete the wrong file.
+func TrustedRecordPath(gitDir string) string { return recordPath(RecordDir(gitDir), trustedRecordName) }
+
+func DeclinedRecordPath(gitDir string) string {
+	return recordPath(RecordDir(gitDir), declinedRecordName)
 }
 
-// TreeHash hashes the tracked hooks tree: every regular file's path, mode, and content. The mode is in the
-// hash because an executable bit is part of what a hook is — making a script executable, or removing it,
-// changes what the repository is asking to run.
+// RecordDir is where a position about the tracked hooks belongs: the directory the clone shares with every
+// worktree cut from it, or — where there is nothing to share — the git directory this command was asked about.
+//
+// A position is an answer about content, and the content is the same in every worktree that has it checked out,
+// so the answer belongs to the clone. Recording it per worktree instead asked a person who keeps ten worktrees to
+// read the same dozen lines ten times, and the tenth reading is not a safety check — it is the tax that teaches
+// people to run `--trust` without reading.
+//
+// There is no reading of a record written beside a single worktree, which is a choice rather than an oversight:
+// no release ever wrote one there, so the only people holding such a file are running a checkout of this
+// repository. The cost of a second location is that every reader of this code has to work out which one answers.
+func RecordDir(gitDir string) string {
+	if common, ok := git.CommonDir(gitDir); ok {
+		return common
+	}
+	return gitDir
+}
+
+// readPositions reads one record and returns the hashes it holds, oldest first. An absent file and a blank line
+// both mean "no position", and a line that is not a tree hash is skipped rather than fatal: the record is a set of
+// content a person read, and one corrupt line is not a reason to stop a hand-off.
+func readPositions(dir, name string) ([]string, error) {
+	data, err := os.ReadFile(recordPath(dir, name))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the hook %s record: %w", name, err)
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(data), "\n") {
+		hash := strings.TrimSpace(line)
+		if hash == "" || !isTreeHash(hash) || seen[hash] {
+			continue
+		}
+		seen[hash] = true
+		out = append(out, hash)
+	}
+	return out, nil
+}
+
+// newest returns the entry a report prints: the last one recorded, or "" when nothing was.
+func newest(list []string) string {
+	if len(list) == 0 {
+		return ""
+	}
+	return list[len(list)-1]
+}
+
+func containsHash(list []string, hash string) bool {
+	for _, h := range list {
+		if h == hash {
+			return true
+		}
+	}
+	return false
+}
+
+// isTreeHash is the shape TreeHash produces: 32 lowercase hex characters. Checking it is what lets a hand-edited
+// or half-written record be ignored rather than believed.
+func isTreeHash(s string) bool {
+	if len(s) != 32 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// TreeHash hashes the tracked hooks tree: every regular file's path, whether it is executable, and its content.
+//
+// The executable bit is in the hash because it is part of what a hook is — making a script executable, or removing
+// it, changes what the repository is asking to run. Nothing else about the permission set is. git checks a file out
+// at whatever the machine's umask says and an editor or `tar` writes one at whatever its writer chose, so the
+// group and other bits, and even the owner's write bit, are facts about the machine rather than about the content
+// a person read. Hashing them made two worktrees of one commit, holding one byte-for-byte script, hash apart — and
+// each difference is a position somebody has to re-record.
 //
 // The empty tree hashes to "" rather than to the digest of nothing, so an absent directory and an empty one
 // are both "nothing to trust" and neither needs accepting.
@@ -77,7 +180,11 @@ func TreeHash(workTree string) (string, []string, error) {
 			return err
 		}
 		content := sha256.Sum256(data)
-		files = append(files, fmt.Sprintf("%s\t%o\t%s", filepath.ToSlash(rel), info.Mode().Perm(), hex.EncodeToString(content[:])))
+		executable := "0"
+		if info.Mode()&0o100 != 0 {
+			executable = "1"
+		}
+		files = append(files, fmt.Sprintf("%s\t%s\t%s", filepath.ToSlash(rel), executable, hex.EncodeToString(content[:])))
 		return nil
 	})
 	if errors.Is(err, os.ErrNotExist) {
@@ -142,7 +249,7 @@ func Trust(ctx context.Context, repo *git.Repo) (TrustState, string, string, err
 	if err != nil {
 		return TrustUnrecorded, "", "", err
 	}
-	return TrustAt(gitDir, repo.Dir)
+	return TrustAt(RecordDir(gitDir), repo.Dir)
 }
 
 // Trusted reports whether the tracked hooks tree matches what was accepted. A tree that does not exist is
@@ -152,7 +259,7 @@ func Trusted(ctx context.Context, repo *git.Repo) (bool, error) {
 	return state == TrustAccepted, err
 }
 
-// TrustAt is Trust for a caller that already knows where the git directory is. The state itself is read from
+// TrustAt is Trust for a caller that already knows where the records live. The state itself is read from
 // the filesystem — the tree hash and the two records beside it — so the directory is the only git question in
 // it, and a run that asks it once can answer this for every hook point it walks.
 //
@@ -161,7 +268,11 @@ func Trusted(ctx context.Context, repo *git.Repo) (bool, error) {
 // decline of the current content is next. A stale acceptance outranks a decline of anything, because "the tree
 // moved under a person who approved the old version" is the fact a report must not bury under a choice they
 // made about different content. Anything else is unrecorded.
-func TrustAt(gitDir, workTree string) (TrustState, string, string, error) {
+//
+// Membership decides all four of those, not recency: a record that holds the version of the suite a worktree is
+// standing on answers for it, and the versions beside it answer for nothing. Recency only decides which hash
+// gets printed, so the sentence beside `changed` can say what the clone last recorded.
+func TrustAt(recordDir, workTree string) (TrustState, string, string, error) {
 	current, _, err := TreeHash(workTree)
 	if err != nil {
 		return TrustUnrecorded, "", "", err
@@ -169,58 +280,55 @@ func TrustAt(gitDir, workTree string) (TrustState, string, string, error) {
 	if current == "" {
 		return TrustAccepted, "", "", nil
 	}
-	accepted, err := AcceptedAt(gitDir)
+	accepted, err := readPositions(recordDir, trustedRecordName)
 	if err != nil {
 		return TrustUnrecorded, "", current, err
 	}
-	declined, err := DeclinedAt(gitDir)
+	declined, err := readPositions(recordDir, declinedRecordName)
 	if err != nil {
 		return TrustUnrecorded, "", current, err
 	}
 	switch {
-	case accepted == current:
-		return TrustAccepted, accepted, current, nil
-	case declined == current:
-		return TrustDeclined, accepted, current, nil
-	case accepted != "":
-		return TrustChanged, accepted, current, nil
+	case containsHash(accepted, current):
+		return TrustAccepted, newest(accepted), current, nil
+	case containsHash(declined, current):
+		return TrustDeclined, newest(accepted), current, nil
+	case len(accepted) > 0:
+		return TrustChanged, newest(accepted), current, nil
 	default:
 		return TrustUnrecorded, "", current, nil
 	}
 }
 
-// AcceptedAt is Accepted with the directory the record lives under already resolved.
-func AcceptedAt(gitDir string) (string, error) {
-	data, err := os.ReadFile(trustRecordPath(gitDir))
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
-	}
+// AcceptedAt is Accepted with the record directory already resolved. It reports the newest accepted hash, or ""
+// when nobody has accepted anything: the set is what the state machine consults, and by the time a caller wants a
+// value to print, membership has already been answered. Printing the newest rather than an arbitrary entry is what
+// makes "accepted 3f1a…, the tree is now 82b0…" the same number the person saw when they approved it.
+func AcceptedAt(recordDir string) (string, error) {
+	list, err := readPositions(recordDir, trustedRecordName)
 	if err != nil {
-		return "", fmt.Errorf("reading the hook trust record: %w", err)
+		return "", err
 	}
-	return strings.TrimSpace(string(data)), nil
+	return newest(list), nil
 }
 
-// Accepted reports the recorded hash, or "" when nobody has accepted anything.
+// Accepted reports the newest hash this clone has accepted, or "" when nobody has accepted anything.
 func Accepted(ctx context.Context, repo *git.Repo) (string, error) {
 	gitDir, err := repo.GitDir(ctx)
 	if err != nil {
 		return "", err
 	}
-	return AcceptedAt(gitDir)
+	return AcceptedAt(RecordDir(gitDir))
 }
 
-// DeclinedAt is Declined with the directory the record lives under already resolved. An absent file and an
-// empty one both mean no decline has been recorded, which is the same answer a reader needs.
-func DeclinedAt(gitDir string) (string, error) {
-	data, err := os.ReadFile(declinedRecordPath(gitDir))
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
-	}
+// DeclinedAt is Declined with the record directory already resolved. An absent file and an empty one both mean no
+// decline has been recorded, which is the same answer a reader needs.
+func DeclinedAt(recordDir string) (string, error) {
+	list, err := readPositions(recordDir, declinedRecordName)
 	if err != nil {
-		return "", fmt.Errorf("reading the hook decline record: %w", err)
+		return "", err
 	}
-	return strings.TrimSpace(string(data)), nil
+	return newest(list), nil
 }
 
 // Declined reports the recorded declined hash, or "" when nobody has declined anything. It is reported even
@@ -231,7 +339,7 @@ func Declined(ctx context.Context, repo *git.Repo) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return DeclinedAt(gitDir)
+	return DeclinedAt(RecordDir(gitDir))
 }
 
 // Accept records the current tracked hooks tree as approved and returns the hash and the file names that
@@ -250,8 +358,7 @@ func Accept(ctx context.Context, repo *git.Repo) (string, []string, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	path := trustRecordPath(gitDir)
-	if err := recordPosition(gitDir, path, declinedRecordPath(gitDir), hash); err != nil {
+	if err := recordPosition(RecordDir(gitDir), trustedRecordName, declinedRecordName, hash); err != nil {
 		return "", nil, err
 	}
 	return hash, names, nil
@@ -276,27 +383,65 @@ func Decline(ctx context.Context, repo *git.Repo) (string, []string, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	if err := recordPosition(gitDir, declinedRecordPath(gitDir), trustRecordPath(gitDir), hash); err != nil {
+	if err := recordPosition(RecordDir(gitDir), declinedRecordName, trustedRecordName, hash); err != nil {
 		return "", nil, err
 	}
 	return hash, names, nil
 }
 
-// recordPosition writes one per-clone position and clears the other.
+// recordPosition adds one hash to a position record and removes that hash from the other, both in the directory
+// the clone shares.
 //
-// They clear each other because both are answers to "what do you think of the content that is here now".
-// Leaving a stale acceptance in place beside a fresh decline would let the older record answer for newer
-// content — which is the one reading the state machine in TrustAt refuses to allow, and the reason a decline
-// of last month's suite cannot be allowed to cover this month's.
-func recordPosition(gitDir, path, other, hash string) error {
+// The two positions still cancel each other — accepting content you had declined, or declining content you had
+// accepted, is one person changing their mind about the same bytes — but they cancel *that hash*, not the whole
+// file. Under a single-slot record the difference was invisible, because writing the current hash necessarily
+// cleared whatever older answer sat beside it. Under a set, clearing the file would erase positions about content
+// nobody is standing on, which is the difference between "this clone read four versions of the suite" and "this
+// clone read one". The safety property the state machine needs is untouched either way: an entry answers for the
+// content it names and for no other, so an acceptance cannot stretch over a version nobody read and a decline
+// cannot inherit across versions — and clearing the file would let one worktree's decline switch off, clone-wide,
+// a check somebody else had accepted.
+func recordPosition(recordDir, name, other, hash string) error {
+	list, err := readPositions(recordDir, name)
+	if err != nil {
+		return err
+	}
+	if !containsHash(list, hash) {
+		list = append(list, hash)
+	}
+	if len(list) > maxRecordedPositions {
+		list = list[len(list)-maxRecordedPositions:]
+	}
+	path := recordPath(recordDir, name)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("creating %s: %w", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, []byte(hash+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(strings.Join(list, "\n")+"\n"), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
-	if err := os.Remove(other); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("clearing %s: %w", other, err)
+
+	others, err := readPositions(recordDir, other)
+	if err != nil {
+		return err
+	}
+	var kept []string
+	for _, h := range others {
+		if h != hash {
+			kept = append(kept, h)
+		}
+	}
+	if len(kept) == len(others) {
+		return nil
+	}
+	otherPath := recordPath(recordDir, other)
+	if len(kept) == 0 {
+		if err := os.Remove(otherPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("clearing %s: %w", otherPath, err)
+		}
+		return nil
+	}
+	if err := os.WriteFile(otherPath, []byte(strings.Join(kept, "\n")+"\n"), 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", otherPath, err)
 	}
 	return nil
 }

@@ -1959,7 +1959,7 @@ Hooks live in two roots, consulted in this order:
 | Root | Path | Trust |
 | --- | --- | --- |
 | tracked | `<worktree>/.git-pair/hooks/<point>/` | committed, therefore content that arrived from somewhere; runs only after `git pair hooks --trust`, and the verdict asks this clone for a position — `--trust` or `--decline` — before it will call the work ready |
-| per-clone | `<git-dir>/git-pair/hooks/<point>/` | the person's own file under their own git directory, never committed, runs directly |
+| per-clone | `<git-common-dir>/git-pair/hooks/<point>/` | the person's own file under the git directory the clone shares — one per clone, not one per worktree — never committed, runs directly |
 
 The tracked root is a deliberate departure from git's own model, where `.git/hooks` is not cloned and a team
 vendors a script into every checkout. Vendoring buys one execution surface and costs a second copy of the
@@ -1983,8 +1983,16 @@ entry nobody runs is otherwise indistinguishable from no entry at all.
 ### Trust
 
 A tracked file is code that runs on a clone, which is why git keeps its hooks under `.git/` and refuses to
-clone them. git-pair's tracked hooks are committable because consent is taken by content: the path, mode, and
-bytes of the tracked hooks tree are hashed and the hash is recorded per clone in `<git-dir>/git-pair/trusted-hooks`.
+clone them. git-pair's tracked hooks are committable because consent is taken by content: the path, the executable
+bit, and the bytes of the tracked hooks tree are hashed, and that hash joins the set of content the clone has
+taken a position on, recorded in `<git-common-dir>/git-pair/trusted-hooks`.
+
+The record is clone-wide rather than per working directory, because what it answers for is content and every
+worktree of a clone checks the same content out: one reading covers the clone, including worktrees cut afterwards,
+and each version of the directory holds its own entry, so two worktrees standing on two versions do not invalidate
+one another. Only the executable bit is hashed — an executable script is a different thing to run, while the rest of
+the permission set is whatever the umask and the writer left, which would make two checkouts of one commit disagree.
+
 An unaccepted tree does not run at all, and the skipped hooks are named on stderr, so a clone is never surprised
 by an unreviewed script and never silently left without the checks it thinks it has. Editing a hook changes the
 hash, so an edit after acceptance is a new acceptance.

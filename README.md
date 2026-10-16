@@ -670,8 +670,9 @@ client is current: none of that is in the graph, and no tool can know it for a r
 
 Hooks live in two roots, consulted in that order: `.git-pair/hooks/<point>/` is committed, so it is content
 that arrived from somewhere, runs only after a person accepts it with `git pair hooks --trust`, and is asked about by the verdict, which wants a position — acceptance or a recorded decline — before it will call the work ready; and
-`<git-dir>/git-pair/hooks/<point>/` is your own file under your own git directory, never committed, and needs
-no consent — which is where a reviewer attaches a check for a repository they cannot edit. Under a point, a
+`<git-common-dir>/git-pair/hooks/<point>/` is your own file under the git directory the clone shares — one
+directory per clone, so cutting a worktree does not ask you to attach your checks again — never committed, and
+needing no consent, which is where a reviewer attaches a check for a repository they cannot edit. Under a point, a
 directory of scripts or one file named for the point is accepted, run in lexicographic order (`01-fmt`,
 `02-test`), the tracked root first, so the repository's rules are the baseline and the client adds to them.
 The twelve points are the six actions on both sides — `pre-`/`post-ready`, `-integrate`, `-unready`,
@@ -692,9 +693,11 @@ nothing was undone, so judge it by that line rather than by the exit code. At `c
 verdict instead, because `check` writes nothing to undo: a failing `pre-check` or `post-check` appends a
 reason and sets `ready: false`, so one command and one answer still cover the repository's own conditions.
 
-Consent is by content: the path, mode and bytes of the tracked hooks tree are hashed and the hash recorded per
-clone in `<git-dir>/git-pair/trusted-hooks`, so an edit after acceptance is a new acceptance. An unaccepted
-tree runs no hooks and says so on stderr. Four states describe what a clone has done about that tree:
+Consent is by content: the path, the executable bit and the bytes of the tracked hooks tree are hashed, and the
+hash joins the set of content the clone has taken a position on, recorded in
+`<git-common-dir>/git-pair/trusted-hooks` — so an edit after acceptance is a new acceptance, and one reading
+covers every worktree of the clone rather than asking each directory `git worktree add` made for its own. An
+unaccepted tree runs no hooks and says so on stderr. Four states describe what a clone has done about that tree:
 `unrecorded` is one where nobody has recorded anything, `changed` is one whose accepted version the repository
 replaced — the team shipped a new check, and this clone is now running without it — and `declined` is one where a
 person read the scripts and chose not to run them. A decline is recorded beside the acceptance, in
@@ -778,7 +781,7 @@ duplicate it exists to catch.
 | `review about` | — | opens `ABOUT.md` in the editor, creating it if missing |
 | `review thread [title...]` | — | slugifies the title, reopens an existing match, prompts for a title only with a terminal |
 | `review submit` | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage`, `--allow-hook-failure` | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history, and where it measured with `Review-Base-Head`, which is what lets `check` tell which side moved, and what it measured with `Review-Diff-Id`, the identity of that diff in two halves — the content, and the rendered hunks (`<version>:<raw>+<patch>`) (§11.3). `pre-submit` hooks run after the staging and before the commit; `--allow-hook-failure` records the verdict over a refusing one and says so in both output forms (§11.4) |
-| `hooks` | `--trust` | lifecycle hooks: what is configured, and the way to accept the tracked root. Reports both roots — `.git-pair/hooks/<point>/` committed, `<git-dir>/git-pair/hooks/<point>/` per-clone — each hook's path and executability, and any entry that is not a lifecycle point, since a misspelled directory is otherwise indistinguishable from no check at all. The points are both sides of the six actions a changeset meets — `pre-`/`post-ready`,
+| `hooks` | `--trust` | lifecycle hooks: what is configured, and the way to accept the tracked root. Reports both roots — `.git-pair/hooks/<point>/` committed, `<git-common-dir>/git-pair/hooks/<point>/` per-clone — each hook's path and executability, and any entry that is not a lifecycle point, since a misspelled directory is otherwise indistinguishable from no check at all. The points are both sides of the six actions a changeset meets — `pre-`/`post-ready`,
 `-unready`, `-abandon`, `-integrate` — both sides of the gate: `pre-check` and `post-check`, and the reviewer's `pre-submit` and `post-submit`. A pre-hook's nonzero exit refuses the operation with exit **1**; a post-hook's makes the command exit nonzero too, prints the hook's output, and reverses nothing — the message names the state the changeset is in, because a reader told only "failed" assumes the marker was never written. A tracked hook runs only after `git pair hooks --trust` records its content, and an edit after that is a new acceptance; the per-clone root is your own file and needs none, which is where a reviewer attaches a check for a repository they cannot edit. `--trust` prints the hook names and the hash it is approving. Acceptance has three states because there are two reasons a tracked tree does not run: `unrecorded` means nobody has accepted anything, `changed` means the repository shipped a new version since you did — `--json` answers `trust_state` beside `trusted` and carries `tree_hash` when the two differ, and the changed case names both hashes on stderr, because that is the moment a check starts not running for everybody who pulled. A clone in that state can keep running the version it read by copying that content into the per-clone root. PRD §11.4 |
 | `review history` | `--changeset <slug>` | only review marker commits, indexed from `0`, each naming the commit it reviewed under `REVIEWED` and the reviewer who submitted it under `REVIEWER` |
 | `queue` | — | one row per branch whose changeset is `READY`, longest wait first, plus a `LANDED UNREVIEWED` heading for a landing whose destination holds no approval of what it carries (a finding no command closes, and one a `change tidy` that reached the destination does end, because the move is the acknowledgement); read from the repository, not the checkout. A second list, `AWAITING INTEGRATION` / `awaiting_integration`, holds approved work whose author has asked for the merge (§9.9) with the branch it is asking to land on — never in both lists, because a declaration is a marker and a branch carrying one is not `READY` |

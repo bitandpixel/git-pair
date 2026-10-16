@@ -146,7 +146,7 @@ func TestCheckAsksForAPositionOnTrackedHooks(t *testing.T) {
 		f.Commit("escalate the hook")
 
 		have := checkRefused(t, f)
-		mustContain(t, have, "changed since this clone accepted them", "the refusal has to say the tree moved")
+		mustContain(t, have, "changed since this clone recorded them", "the refusal has to say the tree moved")
 		mustContain(t, have, "git pair hooks --decline", "and that a position is what is wanted, not a re-approval")
 	})
 
@@ -285,7 +285,7 @@ func TestTheCommandsThatStartWorkAskForAPosition(t *testing.T) {
 			t.Fatalf("`change ready` exited %d, want %d\nstdout: %s\nstderr: %s",
 				res.code, exitRefusal, res.stdout, res.stderr)
 		}
-		mustContain(t, res.stdout+res.stderr, "changed since this clone accepted them",
+		mustContain(t, res.stdout+res.stderr, "changed since this clone recorded them",
 			"the hand-off names the move, not only the absence")
 	})
 

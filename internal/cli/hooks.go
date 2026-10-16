@@ -352,7 +352,8 @@ The roots, searched in this order:
 
   .git-pair/hooks/<point>    committed with the repository, so shared — and so code from a stranger, which
                              runs only after a person records acceptance with ` + "`--trust`" + `
-  <gitdir>/git-pair/hooks/   this clone only, never shared, trusted by construction
+  <clone gitdir>/            this clone only, never shared, trusted by construction: one directory per clone, so a
+  git-pair/hooks/            check you attach to your machine is attached once, not once per worktree
 
 At each root a point is either one executable file or a directory whose executable entries run in
 lexicographic order.
@@ -360,6 +361,10 @@ lexicographic order.
 The tracked tree is trusted by content, not by a flag: any edit to any hook invalidates the acceptance,
 because the thing that was approved was that content. Four states describe a clone's relation to it —
 ` + "`accepted`" + `, ` + "`declined`" + `, ` + "`changed`" + `, ` + "`unrecorded`" + `. Only ` + "`accepted`" + ` runs the scripts.
+
+The record lives with the clone rather than with one working directory, so reading the scripts once covers every
+worktree cut from the repository — including ones cut later — and it holds one entry per version, so the branch
+that edits the suite does not invalidate what trunk's checkout accepted.
 
 The commands that start or advance work refuse while the tree is ` + "`changed`" + ` or ` + "`unrecorded`" + `: ` + "`init`" + ` before a
 changeset exists, ` + "`change ready`" + ` before the hand-off, ` + "`review submit`" + ` before the reviewer's content is
@@ -540,7 +545,10 @@ func runHooksReport(ctx context.Context, a *app, trust, decline bool) error {
 		// not have the warning inside it.
 		switch hooks.TrustState(rep.TrustState) {
 		case hooks.TrustChanged:
-			a.warn("tracked hooks CHANGED since you accepted them (accepted %s, the tree is now %s): they will not run until `git pair hooks --trust` records them\n", rep.Accepted, rep.TreeHash)
+			// "this clone recorded", not "you accepted": the record is the clone's, so the reading beside that hash
+			// may have been taken in another worktree. The two hashes are still both printed, which is what lets a
+			// reader see that content moved rather than being told something is missing.
+			a.warn("tracked hooks CHANGED since this clone recorded them (recorded %s, the tree is now %s): they will not run until `git pair hooks --trust` records them\n", rep.Accepted, rep.TreeHash)
 		case hooks.TrustDeclined:
 			a.warn("tracked hooks DECLINED for this clone (declined %s): they will not run. `git pair hooks --trust` runs them after you read them\n", rep.Declined)
 		default:
@@ -607,7 +615,7 @@ func (a *app) hooksPositionReason(ctx context.Context, repo *git.Repo) (string, 
 	}
 	root := displayPath(hooks.TrackedRootDir(repo.Dir))
 	if state == hooks.TrustChanged {
-		return fmt.Sprintf("the repository's tracked hooks under %s changed since this clone accepted them (accepted %s, the tree is now %s): the checks they carry have not run on this content — read what moved, then `git pair hooks --trust` to run it or `git pair hooks --decline` to record that you read it and chose not to",
+		return fmt.Sprintf("the repository's tracked hooks under %s changed since this clone recorded them (recorded %s, the tree is now %s): the checks they carry have not run on this content — read what moved, then `git pair hooks --trust` to run it or `git pair hooks --decline` to record that you read it and chose not to",
 			root, short(accepted), short(current)), nil
 	}
 	return fmt.Sprintf("the repository's tracked hooks under %s have not been recorded in this clone: the checks they carry have not run — read them, then `git pair hooks --trust` to run them or `git pair hooks --decline` to record that you read them and chose not to",
@@ -640,7 +648,9 @@ func acceptHooks(ctx context.Context, a *app, repo *git.Repo, gitDir string) err
 	for _, n := range names {
 		a.printf("  %s\n", n)
 	}
-	a.printf("recorded %s at %s\n", hash, displayPath(filepath.Join(gitDir, "git-pair", "trusted-hooks")))
+	// The path is printed because it is the file a reader deletes to undo this, and the answer belongs to the
+	// clone rather than the worktree: one reading here covers every worktree cut from this repository.
+	a.printf("recorded %s for this clone at %s\n", hash, displayPath(hooks.TrustedRecordPath(gitDir)))
 	return nil
 }
 
@@ -659,7 +669,7 @@ func declineHooks(ctx context.Context, a *app, repo *git.Repo, gitDir string) er
 	for _, n := range names {
 		a.printf("  %s\n", n)
 	}
-	a.printf("recorded %s at %s\n", hash, displayPath(filepath.Join(gitDir, "git-pair", "declined-hooks")))
+	a.printf("recorded %s for this clone at %s\n", hash, displayPath(hooks.DeclinedRecordPath(gitDir)))
 	a.printf("they will not run; a new version the repository commits is unrecorded again, not declined\n")
 	return nil
 }
