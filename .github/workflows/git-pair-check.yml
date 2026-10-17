@@ -77,27 +77,25 @@ jobs:
           GIT_PAIR_VERSION: ${{ vars.GIT_PAIR_VERSION }}
         run: scripts/ci/install-git-pair.sh
 
-      # The consumer's toolchain, if it has one. `toolchain` is a seam the profile offers rather than demands, so an
-      # empty answer is legal: a repository whose suite needs nothing beyond the runner answers nothing, says so in
-      # the log, and moves on. A *misspelled* answer is not legal, and `doctor` fails it at the handoff.
+      # The consumer's own preparation, in a file the profile neither writes nor byte-compares. The path is the
+      # profile's, because GitHub resolves `uses:` while it reads the file and no marker can supply one; the bytes
+      # are the consumer's, because what a repository needs on a runner is nobody else's to write. A composite
+      # action runs here — in this job, on this runner, against this checkout — so caches restored, toolchains
+      # installed, and a build of this tree's own tool placed on `$GITHUB_PATH` all reach the steps after it.
+      #
+      # The guard is the answer to "must every repository have this file". GitHub evaluates `if:` before it resolves
+      # a local `uses:` path, so a repository with no action.yml reports this step `skipped` and bills nothing.
+      # Absence is a decision and `doctor` reports it; what `doctor` fails is a file that exists and is not a
+      # composite action, or one named `action.yaml`, because either leaves the tree unprepared while the job looks
+      # green — the failure this profile refuses everywhere it can see it.
       #
       # After the pinned install on purpose: a repository that builds the tool from the tree under review replaces
-      # what the installer put there, rather than being overwritten by a release that cannot contain the change. The
-      # command runs with `$GITHUB_ENV` in reach, so an answer that has to hand something to the steps after it — a
-      # built binary's name, a PATH entry — can write it. The merge job runs this same step, so a check and a
-      # candidate can never be answered about differently built trees.
-      - name: toolchain
-        run: |
-          set -uo pipefail
-          toolchain=$(.dev-profiles/bin/dev-profiles command toolchain) || {
-            printf 'the toolchain answer in .dev-profiles.toml could not be resolved\n' >&2
-            exit 2
-          }
-          if [ -z "$toolchain" ]; then
-            printf 'no toolchain answered — nothing to prepare\n'
-          else
-            eval "$toolchain"
-          fi
+      # what the installer fetched, rather than being overwritten by a release that cannot contain the change. The
+      # merge job carries this step word for word, so a check and a candidate cannot be answered about differently
+      # prepared trees.
+      - name: setup
+        if: ${{ hashFiles('.github/actions/git-pair-setup/action.yml') != '' }}
+        uses: ./.github/actions/git-pair-setup
 
       - name: suite
         # Resolved, not written here. The consumer names what green means (`.dev-profiles.toml`, `[commands]
@@ -107,6 +105,10 @@ jobs:
         # Two lines, because an empty answer has to be fatal. `cmd=$(…)` takes the substitution's exit status, so an
         # unresolvable pointer stops the step; `eval "$(…)"` would eval an empty string and go green, which is the
         # one outcome this job exists to make impossible.
+        #
+        # Anything the tree under test needs installed belongs at the top of that answer rather than in a step of
+        # this file: here the tree is the head, and in the merge job the same answer runs against the merge commit,
+        # so the installation is asked of whichever tree is being certified.
         run: |
           set -uo pipefail
           cmd=$(.dev-profiles/bin/dev-profiles command verify) || {

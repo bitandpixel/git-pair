@@ -192,6 +192,11 @@ REQUIRE_NAMES=(); REQUIRE_REASONS=(); REQUIRE_OWNERS=()
 # `[commands]`. Declaring an offer, rather than inventing a convention the consumer has to guess, is what lets
 # doctor tell "this repository has nothing to build" apart from "this repository misspelled its build".
 OPTIONAL_NAMES=(); OPTIONAL_REASONS=(); OPTIONAL_OWNERS=()
+# Roles a profile used to offer and no longer does. The difference between this and a role nobody ever declared is
+# who is at fault: an unknown key is a typo in the consumer's marker, a retired one is a name the library took away.
+# Silence is the migrated state and stays silent; an answered one is a command nothing runs, which is the failure
+# this library treats as the dangerous one, so it is reported by name with the replacement beside it.
+RETIRED_NAMES=(); RETIRED_WHY=(); RETIRED_OWNERS=()
 # The entry points the pointer stanza is made of: the skill, the reason the profile gives for reading it, and who
 # named it. Same precedence as everything else derived from the declared set — the first profile to name it owns
 # the line, because AGENTS.md has one place for a skill and one sentence beside it.
@@ -204,6 +209,7 @@ build_profile_view() {
   PROFILE_DIRS=(); PROFILE_NAMES=(); PROFILE_ACCEPTED=()
   REQUIRE_NAMES=(); REQUIRE_REASONS=(); REQUIRE_OWNERS=()
   OPTIONAL_NAMES=(); OPTIONAL_REASONS=(); OPTIONAL_OWNERS=()
+  RETIRED_NAMES=(); RETIRED_WHY=(); RETIRED_OWNERS=()
   ROUTER_SKILLS=(); ROUTER_REASONS=(); ROUTER_OWNERS=()
   local i j idx name reason dup dir seen_here rskill seen_r rc_here
   for i in "${!DECL_NAMES[@]}"; do
@@ -257,6 +263,24 @@ build_profile_view() {
         continue
       fi
       OPTIONAL_NAMES+=("$name"); OPTIONAL_REASONS+=("$(mkv "$dir" "optional.$idx.reason")"); OPTIONAL_OWNERS+=("${PROFILE_NAMES[$i]}")
+    done
+
+    # What this profile has taken away. Read alongside the offers rather than instead of them: a retired role must
+    # not also be offered by the same declaration, or a consumer cannot tell which line is true, and the marker's
+    # answer would be run by one profile and ignored by another.
+    for idx in $(table_indexes "$dir" retired); do
+      name=$(mkv "$dir" "retired.$idx.name")
+      [ -n "$name" ] || { record FAIL "retired:#$idx" "an [[retired]] entry in '${PROFILE_NAMES[$i]}' names no role — nothing can be retired by that line"; continue; }
+      case " ${REQUIRE_NAMES[*]:-} ${OPTIONAL_NAMES[*]:-} " in
+        *" $name "*) record FAIL "retired:$name" "'$name' is both declared and retired by '${PROFILE_NAMES[$i]}' — a consumer cannot tell which of the two lines is true"; continue ;;
+      esac
+      dup=0
+      for j in "${!RETIRED_NAMES[@]}"; do [ "${RETIRED_NAMES[$j]}" = "$name" ] && dup=1; done
+      if [ "$dup" = 1 ]; then
+        record NOTE "retired:$name" "also retired by '${PROFILE_NAMES[$i]}' — the first profile to retire it owns the replacement printed here"
+        continue
+      fi
+      RETIRED_NAMES+=("$name"); RETIRED_WHY+=("$(mkv "$dir" "retired.$idx.replaced_by")"); RETIRED_OWNERS+=("${PROFILE_NAMES[$i]}")
     done
 
     # The pointer's content, entry by entry. A profile says which of its skills an agent should open and why, and the
@@ -869,7 +893,7 @@ check_command_answer() { # check_command_answer <name> <value> <reason>
 }
 
 check_required_commands() {
-  local i name value reason keys owner known
+  local i j name value reason keys owner known retired_at
   # Empty lists are the normal case, not an edge one: `plain-git` and `forge-pr` declare neither demands nor offers.
   # Guarded on the length rather than on `:-`, which hands back one empty word and then indexes the array with it.
   for i in "${!REQUIRE_NAMES[@]}"; do
@@ -917,7 +941,13 @@ check_required_commands() {
     for name in $(marker_command_keys); do
       case " $known " in
         *" $name "*) ;;
-        *) record FAIL "command:$name" "the marker answers a role no declared profile demands or offers — they name:$known" ;;
+        *) retired_at=-1
+           for j in "${!RETIRED_NAMES[@]}"; do [ "${RETIRED_NAMES[$j]}" = "$name" ] && retired_at=$j; done
+           if [ "$retired_at" != -1 ]; then
+             record FAIL "command:$name" "'$name' is retired by '${RETIRED_OWNERS[$retired_at]}' and nothing runs it any more — the marker still answers it: ${RETIRED_WHY[$retired_at]:-no replacement was named in the profile declaration}"
+           else
+             record FAIL "command:$name" "the marker answers a role no declared profile demands or offers — they name:$known"
+           fi ;;
       esac
     done
   fi
@@ -964,6 +994,55 @@ check_ci_files() {
   # is not this list's job — that is a `[[require]]` role, whose answer the consumer writes in `[commands]`.
 }
 
+# The consumer-authored preparation the shipped jobs call by path: a composite action, at a path the profile fixes
+# because GitHub resolves `uses:` statically, with bytes the consumer owns because the profile has no business
+# writing a repository's build. So this is the one dependency of the shipped jobs that `install` never writes and
+# `doctor` never byte-compares, and the two states it can be in fail differently:
+#
+#   absent          a decision, not a fault. The shipped step carries `if: hashFiles(…) != ''`, which GitHub
+#                   evaluates before it resolves the path, so a repository with no setup step skips it and reports
+#                   green — verified against a real runner, not inferred. Reported, like any other open seam.
+#   not a composite a run that dies partway. GitHub loads the whole file before its first nested step runs, so a
+#                   malformed action.yml fails the job rather than the handoff — which is the difference between a
+#                   person fixing a line and a merge job going red for it at the worst moment.
+#   action.yaml     the trap the guard sets: GitHub accepts either name, the shipped `if:` reads one of them, and
+#                   the setup that was authored is silently skipped. A skipped preparation that reports green is
+#                   the failure this file refuses to allow anywhere else, so it fails here.
+check_consumer_actions() {
+  local dirs d owner manifest i starter hint
+  read -r -a dirs <<<"$(profile_list consumer_actions)"
+  for d in "${dirs[@]:-}"; do
+    [ -n "$d" ] || continue
+    owner=$(declared_in consumer_actions "$d")
+    manifest="$ROOT/$d/action.yml"
+    if [ ! -f "$manifest" ]; then
+      if [ -f "$ROOT/$d/action.yaml" ]; then
+        record FAIL "setup:$d" "$d/action.yaml exists and the job's guard reads action.yml, so the step is skipped and nothing prepares the tree — rename it to action.yml"
+        continue
+      fi
+      # A seam answered by a file the profile does not own is the one open seam a consumer can fail to notice exists,
+      # because there is no key to look at. A profile may therefore ship a starter beside its declaration — kept out
+      # of `ci_files` on purpose, so `install` never copies it into the tree and nothing later compares what the
+      # consumer writes against it — and when one is there the report names it. A pointer to a file the person can
+      # read is what turns "this runner needs nothing" from a guess into a decision.
+      starter=''; hint=''
+      for i in "${!PROFILE_DIRS[@]}"; do
+        [ "${PROFILE_NAMES[$i]}" = "$owner" ] && starter="${PROFILE_DIRS[$i]}/references/git-pair-setup.example.yml"
+      done
+      if [ -n "$starter" ] && [ -f "$starter" ]; then
+        hint=" — $starter is a starter: copy it to $d/action.yml to answer the seam. install never writes there"
+      fi
+      record NOTE "setup:$d" "offered by ${owner:-the profile} and unanswered — no $d/action.yml, so the job skips its setup step and nothing prepares the runner${hint}"
+      continue
+    fi
+    if ! grep -qE '^[[:space:]]*runs:' "$manifest" || ! grep -qE '^[[:space:]]*using:[[:space:]]*[^a-zA-Z]*composite' "$manifest"; then
+      record FAIL "setup:$d" "$d/action.yml is not a composite action — no runs: with using: composite, and the job calls it with uses:, so GitHub fails the run over it"
+      continue
+    fi
+    record OK "setup:$d" "$d/action.yml is a composite action, and both jobs call it before the work"
+  done
+}
+
 check_housekeeping() {
   # Each declared profile runs its own. Housekeeping is the profile noticing something in this checkout that needs
   # a commit — landed changesets to tidy, plans to archive, scratch to clear — and one profile's idea of what to
@@ -1000,6 +1079,7 @@ run_checks() {
   check_pointer
   check_ci
   check_ci_files
+  check_consumer_actions
   check_required_commands
   check_housekeeping
 }
@@ -1097,6 +1177,15 @@ do_install() {
       rname=${OPTIONAL_NAMES[$i]}; [ -n "$rname" ] || continue
       rvalue=$(mkv "$MARKER" "commands.$rname")
       printf 'optional   %-12s %s\n' "$rname" "${rvalue:-offered, unanswered — nothing runs it}"
+    done
+  fi
+  # A retired role still answered is printed rather than skipped: it is a line in the marker that does nothing, and
+  # the person who wrote it for the previous version needs to be told where it went, not left to diff two files.
+  if [ "${#RETIRED_NAMES[@]}" -gt 0 ]; then
+    for i in "${!RETIRED_NAMES[@]}"; do
+      rname=${RETIRED_NAMES[$i]}; [ -n "$rname" ] || continue
+      [ -n "$(mkv "$MARKER" "commands.$rname")" ] || continue
+      printf 'retired    %-12s answered, and nothing runs it — %s\n' "$rname" "${RETIRED_WHY[$i]:-no replacement was named in the profile declaration}"
     done
   fi
 

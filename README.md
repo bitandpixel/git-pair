@@ -2256,10 +2256,13 @@ the one `mise run release:snapshot` writes.
 and `.github/workflows/git-pair-integrate.yml` triggers on the push that declares a changeset, runs the same
 task against the merge candidate, and performs the landing if it passes (§Landing a declared change from CI).
 One definition of green serves both: neither file repeats the command, each resolves it from
-`.dev-profiles.toml`, and both run this repository's `toolchain` answer first — `scripts/ci/prepare-toolchain.sh`
-— which builds the binary the job then gates with. Neither waits on the other and neither runs on a schedule:
+`.dev-profiles.toml`, and both prepare the runner first with this repository's composite action at
+`.github/actions/git-pair-setup/action.yml`, which runs `scripts/ci/prepare-toolchain.sh` and builds the binary the
+job then gates with. Neither waits on the other and neither runs on a schedule:
 the merge job tests what it is about to push, so there is no finished run to wait for and no queue to poll.
-Both files arrive from the profile, so this paragraph describes behaviour and not who maintains the YAML.
+Both files arrive from the profile, so this paragraph describes behaviour and not who maintains the YAML. The action
+at that path is the repository's own — the profile names the path, `install` never writes it, and `doctor` asks only
+that the file exists and is a composite action.
 
 The installer replay is not in `gates`. That ladder is what every change pays for, and the replay needs
 goreleaser, a cross-compile of four targets, and a listening socket — none of which matters until a tag is

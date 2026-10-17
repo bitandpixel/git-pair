@@ -1,0 +1,51 @@
+# A starter for `.github/actions/git-pair-setup/action.yml` — the preparation both git-pair jobs call before any
+# work. Copy this file to that path and edit it. Nothing here is a contract: `dev-profiles install` never writes to
+# that path, and `dev-profiles doctor` never compares your file against this one. It asks two questions about the
+# file you write — that it exists, and that it is a composite action — and reports your repository's silence as a
+# choice when the file is absent.
+#
+# Delete what you do not use. A repository whose runner needs nothing should keep neither this file nor a copy of
+# it: both jobs call this path behind
+#
+#   if: ${{ hashFiles('.github/actions/git-pair-setup/action.yml') != '' }}
+#
+# and GitHub evaluates a step's `if:` before it resolves a local `uses:` path, so no file means the step reports
+# `skipped` and the run is green. Name the file `action.yml`, not `action.yaml`: GitHub accepts either, the guard
+# reads one, and `doctor` fails the other because it leaves a repository believing it prepared a runner that was
+# never prepared.
+#
+# What a step here can do that the profile's retired `toolchain` seam could not: write `$GITHUB_ENV` and
+# `$GITHUB_PATH`, so a tool installed here or a binary built here is on the path for the git-pair steps that follow
+# — and give a step its own `if:`, `env:`, `id:` or `uses:`.
+#
+# What does not work here: `${{ secrets.X }}`. GitHub fails to load the file rather than passing an empty string, so
+# a token has to be declared as your own secret and passed in where it is used. A nested action's `post:` runs after
+# the job's last step, so a cache that is *saved* on success is fine and anything that depends on ordering is not.
+# And cache what you download, not what you build: this action runs against the branch head in the check job, while
+# your `verify` answer runs against the merge commit in the merge job — a key built from one tree's output describes
+# neither.
+
+name: git-pair setup
+description: Prepare this repository's tree for the git-pair check and merge jobs.
+
+runs:
+  using: composite
+  steps:
+    # Restore what the suite downloads. Name in the key only what the restore depends on — usually a lockfile — and
+    # nothing that changes when you edit source, or the cache misses on every run and costs a minute for nothing.
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache
+        key: ${{ runner.os }}-git-pair-setup-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: ${{ runner.os }}-git-pair-setup-
+
+    # Install what the suite needs. Make this fail loudly: a setup that fails here fails the run, which is where a
+    # person is still looking at it, and a setup that quietly does nothing is the failure the guard above exists to
+    # make visible.
+    - name: install
+      run: |
+        set -uo pipefail
+        # ./scripts/ci/install-toolchain.sh
+        printf 'setup: nothing installed yet — edit this file, or delete it\n'
+      shell: bash

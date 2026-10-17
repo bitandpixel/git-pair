@@ -14,7 +14,7 @@ destination branch.
     git push
 
 Asking is still a command and still the author's. Whether a person or a job performs the merge does not change what
-the author may do: never `git pair review submit|open|reopen|thread|about`, never `change tidy`, never merge into the
+the author may do: never `git pair review submit|open|reopen|discussion|about`, never `change tidy`, never merge into the
 destination yourself.
 
 ## The gate is the same one

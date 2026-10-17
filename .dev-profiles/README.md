@@ -14,7 +14,9 @@ anything outside this directory reads.
 | **capability skill** | how to drive one tool, with no opinion about workflow | `git-pair`, `gh-cli`                          | the tool itself, or this library |
 
 A profile never says how to drive a CLI, and a capability never says what the workflow is. Keeping that line
-clean is what lets `forge-pr` and `git-pair` share the GitHub rules instead of each keeping a copy.
+clean is what lets `forge-pr` and `git-pair` share the GitHub rules instead of each keeping a copy. Profiles
+can also compose: `planning` adds a plan/create/execute/audit process alongside the chosen change workflow,
+without defining its review or merge route.
 
 ## Layers
 
@@ -54,6 +56,8 @@ such.
 ## Adding a profile
 
 1. `profiles/<name>/` with `profile.md`, `profile.toml`, `VERSION`, `CHANGELOG.md`, and `skills/<skill>/SKILL.md`.
+   For optional cross-cutting guidance, declare it as another `[[profile]]` rather than copying skills into
+   every review workflow. For example, `planning` v1 installs three skills without changing the merge route.
 2. Every skill's `description` is the routing mechanism — a harness reads only `name` and `description`
    before activating. Say what the skill is for and, just as importantly, when it does not apply.
 3. Add it to every profile's `references/alternative-workflows.md`.

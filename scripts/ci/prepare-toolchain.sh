@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Prepare the tree before anything tests it — this repository's answer at the profile's `toolchain` seam
-# (.dev-profiles.toml, `[commands] toolchain`).
+# Prepare the tree before anything tests it — the work behind this repository's composite action,
+# `.github/actions/git-pair-setup/action.yml`, which both git-pair jobs call.
 #
 # Both of the profile's jobs run it, and that is the point: `.github/workflows/git-pair-check.yml` runs it on a pull
 # request and on a push to the destination, and `.github/workflows/git-pair-integrate.yml` runs it before it builds
@@ -18,14 +18,16 @@
 #   0  prepared  — mise available, the pinned tools present, and a binary built from this tree on ~/.local/bin
 #   1  failed    — mise could not be obtained, or the build did not leave a binary where it said it would
 #
-# Three things happen here, and the third is why this is a file rather than a command line in the marker. A marker
-# answer is `eval`'d inside a step, so a step that has to hand something to the steps after it has to be able to
-# write to `$GITHUB_ENV` — and that is worth doing out loud, in a file a reader can open, because the value it passes
+# Three things happen here, and the third is why this is a script rather than YAML steps inside the action: a script
+# is runnable on a developer machine — a person in a checkout and the replays under `scripts/gates/` both use it —
+# and a composite action is not. The third also has to reach the steps after it, which is what `$GITHUB_ENV` and
+# `$GITHUB_PATH` are for, and that is worth doing out loud in a file a reader can open, because the value it passes
 # is the name of the binary the whole job then depends on:
 #
 #   1. mise itself, when the runner has none. The profile ships no action steps for the consumer's toolchain, so the
 #      fetch lives here rather than in a `- uses:` line. `PATH` is extended for the rest of this step and written to
-#      `$GITHUB_PATH` for the steps after it; without the second half, the suite step would not find `mise`.
+#      `$GITHUB_PATH` for the steps after it; without the second half, the suite step would not find `mise`, and a
+#      composite action's writes to that file are what make this work at all.
 #   2. The tools `.mise.toml` pins — Go, and goreleaser beside it. Pinned in one file, fetched here, so a runner
 #      cannot test on a Go the runner happened to ship.
 #   3. The build, and the name it landed under. `mise run build` installs under the name `scripts/install-name.sh`

@@ -68,6 +68,12 @@
 #                           moved since the head was certified, and which a repository can answer with no
 #                           forge in the picture at all. A failure here is an error rather than a skip: with
 #                           no separate test workflow, this run is the only place the author sees it.
+#   the tree still matches  before the push, the working tree is compared against the commit the merge made.
+#                           A verification command that writes tracked files — a code generator, a formatter,
+#                           a lockfile rewrite — would leave the suite green about a tree the destination is
+#                           never going to hold, which is the one thing this sequence exists to prevent.
+#                           Untracked output (node_modules, target/) is not part of the comparison: it is what
+#                           the preparation is there to produce, and it is not what gets pushed.
 #   push <destination>      the landing exists when the destination branch says it does, and the pushed
 #                           branch's tree is then the whole record of it (PRD §13.4). Nothing follows this
 #                           push except the request below: no ref to write, nothing to publish, and no second
@@ -339,6 +345,23 @@ integrate_one() {
       return 1
     fi
     note "$cs: the candidate passed verification"
+  fi
+
+  # The tree the destination is about to receive, checked against the commit the merge made. Everything between
+  # the merge and the push runs commands the consumer chose, and a consumer's build that writes tracked files —
+  # generated sources, a formatter, an updated lockfile — makes the suite green about a working tree the push
+  # will not carry. That is the claim this sequence is built on, so it is asserted rather than trusted, and in
+  # the same shape as a failed verification: the local destination goes back, nothing is pushed, the answer is
+  # red. Tracked files only. Build output sitting untracked beside the tree is not part of what lands, and a
+  # rule that refused for it would refuse every compiled language out of the profile.
+  dirty=$(git status --porcelain --untracked-files=no 2>/dev/null) || dirty=''
+  if [ -n "$dirty" ]; then
+    if ! git checkout -q -B "$BASE_LOCAL" "$REMOTE/$dest"; then
+      note "$cs: could not put $BASE_LOCAL back after the tree was found modified — later changesets in this run are unverified"
+    fi
+    note "$cs: tracked files were modified after the merge — the tree that was tested is not the tree $dest would receive, so nothing is pushed"
+    printf '%s\n' "$dirty" | sed 's/^/    /'
+    return 1
   fi
 
   if ! git push -q "$REMOTE" "HEAD:refs/heads/$dest"; then

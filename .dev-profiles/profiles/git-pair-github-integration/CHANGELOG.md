@@ -1,6 +1,79 @@
 # git-pair-github-integration profile changelog
 
 
+## 9 — 2026-10-17
+
+- The `Never` list names `git pair review discussion` where it named the removed `git pair review thread`, so the
+  commands an author may not run are the commands the tool answers to: `submit`, `open`, `reopen`, `discussion`,
+  `about`. The conversation the removed command wrote to is now one file per changeset,
+  `changesets/<id>/DISCUSSION.md`, and the author's route to it is `git pair change discussion`, which needs no
+  terminal.
+
+## 8 — 2026-10-15
+
+`toolchain` is retired, and a composite action takes its place: `.github/actions/git-pair-setup/action.yml`, called
+by both shipped jobs.
+
+The seam was a shell fragment in the consumer's `[commands]` table, which both jobs passed to `eval`. That shape is
+where its awkwardness came from: the preparation could reach `$GITHUB_ENV` only because `run:` hands a step that
+variable, a repository could not give the step its own `if:`, `env:`, `id:` or `timeout-minutes`, and `doctor` could
+ask only whether the key existed — not whether what it named was anything. A composite action is GitHub's supported
+shape for this exact thing: it runs in the job, in the checkout, as its own step, and its writes to `$GITHUB_ENV`
+and `$GITHUB_PATH` reach the steps after it. Each of those was checked against a real runner rather than read out of
+the documentation, which lists a narrower set of contexts for a nested step's `if:` than the runner accepts.
+
+The path is the profile's and the bytes are the consumer's, and that split is what keeps the change free of
+machinery: no rendering, no seeding, no template, nothing to diff at an upgrade. GitHub resolves a local `uses:`
+while it reads the workflow, so the path cannot come from a marker; what runs there is a repository's build, so
+`install` does not write it and `doctor` does not byte-compare it. `consumer_actions` in `profile.toml` names the
+directory, and doctor asks three questions about it instead of none:
+
+- absent — a decision, reported as one. The shipped step carries a guard, so the job says the step was `skipped`.
+- present and not a composite action — a run that dies partway, because GitHub loads the whole file before its
+  first nested step runs. Failed here, where a person can still be told the line to fix.
+- present as `action.yaml` — failed, because GitHub accepts either filename, the guard reads one of them, and the
+  setup that was written is then silently skipped. An unprepared tree reporting green is the failure this profile
+  refuses everywhere else it can see it.
+
+The guard is `if: ${{ hashFiles('.github/actions/git-pair-setup/action.yml') != '' }}`. GitHub evaluates a step's
+`if:` before it resolves a local action path, so a repository with no such file skips the step rather than failing
+it. `continue-on-error` was the other candidate and is what this profile must not do: a setup that broke would have
+sat behind a green job.
+
+**A starter, not a seed.** The profile ships a file to copy at
+`.dev-profiles/profiles/git-pair-github-integration/references/git-pair-setup.example.yml`, and `doctor` names that
+path whenever the seam is unanswered. It deliberately does two things a seeded template would: it carries the
+measured facts below as comments, and it stays outside `ci_files`, so `install` never writes a consumer's build and
+nothing can later compare one against a library copy. A marker key declaring that a repository uses the setup step
+was considered with it and refused for the same reason it was paired with: the step is called if and only if the file
+exists, so the key would state a fact the tree already answers, and could be answered wrongly while the job stayed
+correct. Discovery is the problem worth solving here, and a path printed by the check every landing already runs
+solves it without a second source of truth.
+
+**A `prepare` seam was considered and not added.** The window it would fill — installing and restoring caches for a
+tree that does not exist until the merge — is the window `verify` already holds: the driver runs the consumer's
+command after the merge commit is made and before the push, so installation belongs at the top of `verify` and runs
+against the tree it is meant to serve. A second role in that window would duplicate the `verify` answer's job and
+run outside the `GITHUB_TOKEN` the gate step passes down through its own `env:`. Offers are cheap to add later and
+expensive to take away, which settles it.
+
+The driver now refuses to push a tree that changed after the merge. It merges, runs `--verify-cmd`, and compares
+the working tree against the merge commit before pushing: a verification command that rewrites tracked files — a
+generator, a formatter, a lockfile — leaves the suite green about a tree the destination would never receive, which
+is the one claim this whole sequence is built on. Tracked files only; untracked build output is not what gets
+pushed, and a rule that refused for it would refuse every compiled language out of the profile. Nothing the consumer
+controls runs between the merge and the push any more, and this check is what makes that a fact rather than an
+intention.
+
+**What a consumer does.** Delete the `toolchain` line from `[commands]` in `.dev-profiles.toml`. A marker that still
+answers it now fails `doctor`, naming the replacement — which is the right severity, because a command nothing runs
+is how a preparation goes missing quietly. Move the shell into `.github/actions/git-pair-setup/action.yml` as a
+composite action if the runner needs anything — `doctor` prints the path of a starter to copy, and the starter carries
+the facts below as comments; a repository that needs nothing writes no file, and its jobs say so.
+Export `GIT_PAIR_BIN` from that action when it builds the tool from the tree under review, so the merge and its
+report use this tree's build. Then run `dev-profiles install` and move the marker's accepted version to 8.
+
+
 ## 7 — 2026-10-15
 
 `install-git-pair.sh` tells the release installer where to write. It chose a directory, fetched the pinned release's

@@ -17,7 +17,7 @@ permits the merge, so `git pair check` keeps passing after you run this and keep
 have made it refuse before. A rebase rewrites the head the marker names, and the stale name is what makes the gate
 refuse the rewrite rather than bless it: re-declare after a rewrite.
 
-Never run `git pair review submit|open|reopen|thread|about`, never `change tidy`, never merge into the destination,
+Never run `git pair review submit|open|reopen|discussion|about`, never `change tidy`, never merge into the destination,
 and never ask for the merge in prose you already asked for with the command.
 
 ## What the job is allowed to merge
@@ -39,6 +39,17 @@ A failing verification is always a refusal. It puts the local destination back, 
 not a skip, not a retry, and not a signal to push anyway. If the suite is failing, the work is not ready and the
 author fixes it on the branch, then re-declares.
 
+**Nothing may change the tree between the merge and the push.** Before pushing, the driver compares the working tree
+against the merge commit it made. A verification command that rewrites tracked files — a code generator, a formatter,
+an updated lockfile — would leave the suite green about a tree the destination is never going to hold, which is the
+claim this whole sequence exists to make. The refusal is the same shape as a failed suite: the local destination goes
+back, nothing is pushed, the log prints the files that moved. Tracked files only; untracked build output is not what
+gets pushed, so a compiled language is not refused for its `target/` directory.
+
+That is also where installation belongs. Whatever the suite needs installed goes at the top of the `verify` answer,
+not in a step of the workflow: in the merge job the tree under test does not exist until the merge is made, and putting
+it in `verify` asks the question of the tree the installation is meant to serve.
+
 The scripts under `scripts/ci/` are this profile's bytes, installed and byte-compared. Edit them in the library, not
 in a checkout.
 
@@ -49,21 +60,64 @@ checks; `dev-profiles command verify` prints what was chosen. A checkout may kee
 demand is a role and the marker holds the answer, which is what stops the profile shipping a file it would then have to
 overwrite.
 
-## Two seams you may leave unanswered
+## The seams you may leave unanswered
 
-The same `[commands]` table holds two keys the job reads that are offers rather than demands. Leaving one open is a
-decision, not an error, and `dev-profiles doctor` names the ones left open rather than hiding them.
+Two moments belong to the consumer rather than to this profile, and each has exactly one place to be answered.
+Leaving one unanswered is a decision, not an error: `dev-profiles doctor` names what is open instead of hiding it,
+and fails what is answered wrongly. A third heading below is a seam this profile has taken away, and the migration
+out of it.
 
-`toolchain` prepares the tree before it is tested — a compiler invoked, a toolchain installed, a build run. Both jobs
-run it, and it runs after the pinned install of `git-pair`, so a repository that builds the tool from the tree under
-review can replace the release that install fetched. A repository whose suite needs nothing beyond the runner answers
-`true` or says nothing, and the step reports that it prepared nothing. What that answer must not be is misspelled: an
-answer under a key no declared profile offers fails `doctor`, because the failure this seam is exposed to is a job that
-skips its own build and still reports green.
+**`setup` — `.github/actions/git-pair-setup/action.yml`, a composite action.** This is what prepares a runner: a
+compiler invoked, a toolchain installed, a dependency cache restored, a build of the repository's own tool. Both jobs
+call it, after the pinned install of `git-pair` and before any work. It is a file rather than a marker key because
+GitHub resolves a local `uses:` path while it reads the workflow, so no expression and no command table can supply
+one; and it is the consumer's file rather than this profile's because a repository's build is nobody else's to write.
+`install` never authors it and `doctor` never byte-compares it, so an upgrade costs one guard line and nothing else.
+A starter sits at
+`.dev-profiles/profiles/git-pair-github-integration/references/git-pair-setup.example.yml`, and `doctor` names that
+path when the seam is unanswered. It is a file to copy and edit, not one `install` seeds: the step is called if and
+only if the file is there, so a marker key saying "this repository uses the setup step" would state a fact the tree
+already answers — and could be answered wrongly while the job stayed correct.
 
-`ci-request` names a script that asks the forge to run the destination branch after a landing. Unanswered means trunk
-gets no run of its own, which is allowed: the tree the destination now holds is the tree this job tested, and nothing
-waits on the run the ask produces.
+A repository that needs nothing on a runner writes no file. The step carries
+`if: ${{ hashFiles('.github/actions/git-pair-setup/action.yml') != '' }}`, and GitHub evaluates a step's `if:` before it
+resolves a local action path — so the step reports `skipped` and never reaches a runner. `doctor` reports that
+absence as a choice. It fails two states instead, both of which leave a tree unprepared while the job looks green: a
+file that is not a composite action (no `runs:` with `using: composite`), which makes GitHub fail the run when it
+loads the file; and the same file named `action.yaml`, which GitHub would accept but the guard does not read.
+
+What a composite action can do here was checked on a real runner rather than taken from the documentation, which is
+narrower than the runner in the first two cases:
+
+- Its steps write `$GITHUB_ENV` and `$GITHUB_PATH` into the parent job, so the actions and variables it sets reach
+  every step after it — including the driver and the post-run report. That is how a repository builds git-pair from
+  the tree under review: export `GIT_PAIR_BIN` from the composite, and both ask for the tool by that name.
+- A nested step's `if:` may read `steps.<id>.outputs` and `env`, so a cache hit inside the composite can decide what
+  its later steps do. The context list published for composite actions is narrower than what the runner accepts.
+- `${{ secrets.X }}` is not available in a composite action at all — it is a load failure for the file, not an empty
+  string. If an action in there needs a token, pass it in from the calling step's `env:`. This profile deliberately
+  does not hand `GITHUB_TOKEN` to the composite: the merge job's token is `contents: write`, and a third-party action
+  fetched inside your setup should not receive it.
+
+Two consequences for what you put in it. A nested action's `post:` runs in the job's post phase, after the parent's
+last step, so a cache that is *saved* on success is fine while anything that depends on ordering is not. And cache
+what you download, not what you build: `setup` runs against the branch head in the check job and against whatever
+your `verify` runs in the merge job, and a cache key built from one tree's artifacts does not describe the other.
+
+Nothing runs before the pinned install. A repository that needs a prerequisite for a shared action it cannot edit puts
+`run:` steps at the top of its own composite; that window is not opened by the profile, because the first thing the
+job does that could affect the tree is fetch the pinned release, and a step ahead of it would be a step whose output
+that fetch can overwrite.
+
+**`toolchain` is retired — delete its line.** It was the same seam answered as a shell string in `[commands]`, which
+both jobs passed to `eval`. A marker that still answers it fails `doctor`, which names this replacement: a command
+nothing runs is how a preparation goes missing quietly, and that is the failure this seam is most exposed to. The name
+is retired rather than renamed because `setup`, `bootstrap` and `prepare` describe one moment, and offering all three
+teaches nobody the difference.
+
+**`ci-request` names a script that asks the forge to run the destination branch after a landing.** Unanswered means
+trunk gets no run of its own, which is allowed: the tree the destination now holds is the tree this job tested, and
+nothing waits on the run the ask produces.
 
 ## The two files the profile ships
 
@@ -111,6 +165,6 @@ Four rules span both files, written once here rather than twice:
   in that protection — and a repository that will not name it should declare `git-pair-manual-integration` and merge
   by hand.
 
-`GIT_PAIR_BIN` is the seam between your `toolchain` answer and the merge job. The driver and the post-run queue
+`GIT_PAIR_BIN` is the seam between your `setup` action and the merge job. The driver and the post-run queue
 report both ask for the tool by that name, so a repository that builds git-pair from the tree under review lands and
 reports on its own build rather than on the release `scripts/ci/install-git-pair.sh` fetched.
