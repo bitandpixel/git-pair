@@ -156,11 +156,17 @@ type Summary struct {
 	// marker and headRef. Only ReconcileStaleness fills it in, so it is empty for every
 	// caller that asks the marker question and not the tree question.
 	Drifted []string
-	// DriftCredited lists the paths ReconcileStaleness left out of Drifted because the destination
-	// carries that content: taking the integration branch in is not content the review never saw, it is
+	// DriftCredited lists the paths ReconcileStaleness left out of Drifted because a credit ref carries
+	// that content: taking the ground under your own work in is not content the review never saw, it is
 	// content the review had no reason to read. Only ReconcileStaleness fills it in, and only where a
-	// destination was named — an ancestor branch that has not landed earns nothing here (PRD §10.4).
+	// credit ref was named — with nothing to cite, every path that moved stays drift.
 	DriftCredited []string
+	// DriftCreditedBy attributes each credited path to the credit ref that supplied its content, keyed by
+	// path and valued by the name that ref was passed in with. The paths alone would let a reader see that
+	// something was credited but not who vouched for it, which was harmless while only the integration
+	// branch could be and is not harmless now that a stack's parent can be. Only ReconcileStaleness fills
+	// it in.
+	DriftCreditedBy map[string]string
 	// TrailingUnrecognised counts the trailing commits that carry Review-*
 	// trailers git-pair could not interpret. They always invalidate a marker:
 	// a newer git-pair may read them fine, and guessing from the tree would be a
@@ -252,21 +258,45 @@ func SummarizeHEAD(ctx context.Context, repo *git.Repo, slug, base string) (Summ
 // Everywhere else state moves when a git-pair command records a marker, not when the author
 // commits (PRD §12).
 //
-// `destination` names the integration branch, and is what the drift rule credits: content head
-// shares with it is content the branch took in rather than content the author added. Empty means no
-// destination could be named, which costs the credit and never adds a refusal — the reading without
-// it is the one every approval written before the credit was measured under.
-func SummarizeAgainstTree(ctx context.Context, repo *git.Repo, slug, base, headRef, destination string) (Summary, error) {
+// `credit` names the refs the drift rule may credit: content head shares with one of them is content
+// the branch took in rather than content the author added. An empty list costs the credit and never
+// adds a refusal — the reading without it is the one every approval written before the credit was
+// measured under. See `CreditRef` for what qualifies.
+func SummarizeAgainstTree(ctx context.Context, repo *git.Repo, slug, base, headRef string,
+	credit []CreditRef) (Summary, error) {
 	s, err := Summarize(ctx, repo, slug, base, headRef)
 	if err != nil {
 		return s, err
 	}
-	return ReconcileStaleness(ctx, repo, slug, headRef, s, destination)
+	return ReconcileStaleness(ctx, repo, slug, headRef, s, credit)
 }
 
 // SummarizeAgainstTreeHEAD is SummarizeAgainstTree for the checked-out branch.
-func SummarizeAgainstTreeHEAD(ctx context.Context, repo *git.Repo, slug, base, destination string) (Summary, error) {
-	return SummarizeAgainstTree(ctx, repo, slug, base, "HEAD", destination)
+func SummarizeAgainstTreeHEAD(ctx context.Context, repo *git.Repo, slug, base string,
+	credit []CreditRef) (Summary, error) {
+	return SummarizeAgainstTree(ctx, repo, slug, base, "HEAD", credit)
+}
+
+// CreditRef is a ref whose content the drift rule may treat as ground rather than as the author's work,
+// beside the name a report calls it by.
+//
+// What qualifies is the ground the branch is measured on, not any branch the author names. That is the
+// integration branch, and — for a stack whose parent has not landed — the parent branch the changeset's
+// own `base:` records and its diff is measured from. Both hold content this changeset's reviewer never
+// read and had no reason to read, and both are read where they stand now rather than as a snapshot,
+// which is what takes the credit off when a ref moves on: content a parent later drops matches neither
+// it nor the destination, and reads as drift again.
+//
+// A parent that has landed is not on the list. Its work is in the destination by definition, so the
+// integration branch vouches for it, and a branch keeps its name after the content it carried was
+// merged — crediting the name would credit whatever anybody pushes to a finished branch next.
+type CreditRef struct {
+	// Ref is what git is asked: a commit the caller resolved, so the answer is the one the caller
+	// decided to credit rather than a ref that moved between the decision and the read.
+	Ref string
+	// Name is what the reason line and the machine-readable answer call it — a branch name, shortened
+	// the way every other branch is shortened on these surfaces.
+	Name string
 }
 
 // MarkerAt reads the Review-* trailers one commit carries.
@@ -546,9 +576,9 @@ func markerReason(m Event) string {
 // marker spoke about been changed underneath it? Where it has, the marker no longer
 // describes HEAD and the state is WORKING.
 //
-// Only SummarizeAgainstTree calls it, and only `check` uses that. The gate is the one place
-// git-pair asks whether reviewed content is still there, because a merge is about to act on the
-// answer (PRD §9.5). Everywhere else a commit is not something that changes state: `change ready`,
+// Only SummarizeAgainstTree calls it, and the gate is that function's only production caller. The gate is
+// the one place git-pair asks whether reviewed content is still there, because a merge is about to act on
+// the answer (PRD §9.5). Everywhere else a commit is not something that changes state: `change ready`,
 // `change unready` and a review submission are (PRD §12).
 //
 // The verdict comes from the tree rather than from the commit count, because committing
@@ -564,12 +594,16 @@ func markerReason(m Event) string {
 // check "still here" and must still refuse, because the approval was about a commit, not about a
 // tree: `check`'s ancestry condition on `Review-Head` is what catches it (PRD §12).
 //
-// `destination` is the integration branch, and the rule credits it and nothing else. A branch that
-// takes trunk in has not added content; it has moved the ground under its own work, and the reviewer
-// had no reason to read trunk. A branch that carries an ancestor's unlanded work *has* added content
-// the reviewer never saw, and the destination does not vouch for that, so it is still drift (§10.4).
+// `credit` is the refs the rule may credit, and what may enter it is the ground the branch is measured
+// on — see `CreditRef`. A branch that takes its ground in has not added content; it has moved the ground
+// under its own work, and this changeset's reviewer had no reason to read it. Content that matches none
+// of the refs is the author's own, and it is still drift.
+//
+// The refs are asked in the order they are given, and the first one that accounts for a path is the one
+// named for it, so the integration branch — the citation that means most — is the one reported wherever
+// it supplies the file.
 func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef string, s Summary,
-	destination string) (Summary, error) {
+	credit []CreditRef) (Summary, error) {
 	if !s.Stale || s.Marker == nil {
 		return s, nil
 	}
@@ -597,8 +631,10 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 	if err != nil {
 		return s, err
 	}
-	if len(changed) > 0 && destination != "" {
-		changed, s.DriftCredited = creditDestination(ctx, repo, changed, from, headRef, destination)
+	var creditUsed []string
+	if len(changed) > 0 && len(credit) > 0 {
+		res := creditContent(ctx, repo, changed, from, headRef, credit)
+		changed, s.DriftCredited, s.DriftCreditedBy, creditUsed = res.drift, res.credited, res.by, res.used
 	}
 	if len(changed) > 0 {
 		s.State = model.StateWorking
@@ -613,9 +649,12 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 	s.Stale = false
 	if len(s.DriftCredited) > 0 {
 		// A different sentence, because it is a different fact: the commits after the marker did change
-		// files, and what makes them pass is that the content they changed them to is the destination's.
-		s.Reason = fmt.Sprintf("%s (%d commit%s since, all of it content the destination carries)",
-			markerReason(marker), s.Trailing, plural(s.Trailing))
+		// files, and what makes them pass is that the content they changed them to belongs to somebody
+		// else's branch. Naming that branch is the point of the sentence — a reader told only that a file
+		// was credited has nothing to check the claim against.
+		s.Reason = fmt.Sprintf("%s (%d commit%s since, all of it content %s %s)",
+			markerReason(marker), s.Trailing, plural(s.Trailing), listConjunction(creditUsed),
+			pluralVerb(len(creditUsed)))
 		return s, nil
 	}
 	s.Reason = fmt.Sprintf("%s (%d changeset-only commit%s since)",
@@ -666,6 +705,147 @@ func creditDestination(ctx context.Context, repo *git.Repo, changed []string, ma
 		credited = append(credited, p)
 	}
 	return drift, credited
+}
+
+// creditResult is what the credit rule decided: the paths left as drift, the paths credited, who
+// supplied each credited path, and the refs that supplied anything at all, in the order they were given.
+// The last of the four is what the reason line is written from, so the sentence names a branch a reader
+// can go and look at rather than a nameless "the destination".
+type creditResult struct {
+	drift    []string
+	credited []string
+	by       map[string]string
+	used     []string
+}
+
+// creditContent removes from `changed` the paths whose content one of `credit` supplies, and returns what
+// is left beside what was credited and who supplied it.
+//
+// Two readings, the whole-branch one first because it is one comparison and covers what the file-by-file
+// reading cannot, and asked of every ref before any of them is asked the second question.
+//
+// The whole-branch reading asks what merging the reviewed commit with the ref would produce, and
+// compares that tree with the tree at head. Equal means head *is* that merge: nothing was written on top
+// of it by hand, and every difference from the marker is git's own merge of that ref's content. A merge
+// with a conflict in it produces no tree, so a resolution somebody wrote by hand is not covered — which
+// is the point: the content the reviewer read is no longer what is there, and the resolution is content
+// nobody read.
+//
+// The file-by-file reading asks, for each path, whether head carries that ref's content there. A path
+// where it does is a path the branch took in rather than one it changed, which is what makes an edit the
+// author added since the review still drift: it matches neither the marker nor any of the refs. It is
+// also what lets one merge credit one file and another ref credit the next, which is what a branch that
+// took both trunk and its parent in produces.
+//
+// An unreadable ref costs its own credit and not the verdict — what is left is reported as drift, the
+// reading this rule exists to soften (PRD §21).
+func creditContent(ctx context.Context, repo *git.Repo, changed []string, marker, head string,
+	credit []CreditRef) creditResult {
+	headTree, treeErr := repo.RevParse(ctx, head+"^{tree}")
+	type reading struct {
+		name    string
+		differs map[string]bool
+	}
+	readings := make([]reading, 0, len(credit))
+	for _, c := range credit {
+		if c.Ref == "" {
+			continue
+		}
+		name := firstNonEmpty(c.Name, c.Ref)
+		if treeErr == nil {
+			if res, err := repo.MergeTree(ctx, marker, c.Ref); err == nil && res.Clean && res.Tree == headTree {
+				return wholeBranchCredit(changed, name)
+			}
+		}
+		theirs, err := repo.PathsChanged(ctx, c.Ref, head)
+		if err != nil {
+			// This ref cannot answer, which costs its own credit. The others are still asked.
+			continue
+		}
+		set := make(map[string]bool, len(theirs))
+		for _, p := range theirs {
+			set[p] = true
+		}
+		readings = append(readings, reading{name: name, differs: set})
+	}
+	out := creditResult{drift: make([]string, 0, len(changed)),
+		credited: make([]string, 0, len(changed)), by: map[string]string{}}
+	used := map[string]bool{}
+	for _, p := range changed {
+		supplied := ""
+		for _, r := range readings {
+			if !r.differs[p] {
+				supplied = r.name
+				break
+			}
+		}
+		if supplied == "" {
+			out.drift = append(out.drift, p)
+			continue
+		}
+		out.credited = append(out.credited, p)
+		out.by[p] = supplied
+		used[supplied] = true
+	}
+	if len(out.credited) == 0 {
+		// Nothing was credited, so the attribution is not worth a shape of its own and the caller
+		// keeps the list it came in with as the drift.
+		return creditResult{drift: changed}
+	}
+	// The names are reported in the order the refs were given rather than the order a map noticed
+	// them: a reason line that names its branches in a different order each run is one nobody can diff.
+	reported := map[string]bool{}
+	for _, c := range credit {
+		if name := firstNonEmpty(c.Name, c.Ref); used[name] && !reported[name] {
+			out.used = append(out.used, name)
+			reported[name] = true
+		}
+	}
+	return out
+}
+
+// wholeBranchCredit credits every path to one ref: head is that ref's merge with the reviewed commit, so
+// there is nothing left to attribute file by file.
+func wholeBranchCredit(changed []string, name string) creditResult {
+	by := make(map[string]string, len(changed))
+	for _, p := range changed {
+		by[p] = name
+	}
+	return creditResult{credited: changed, by: by, used: []string{name}}
+}
+
+// firstNonEmpty answers with the first string that is not empty, for a credit ref that named itself only
+// by the rev git was asked about.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// listConjunction writes names the way the rest of these sentences do: "main", "main and alpha", "main,
+// alpha and beta".
+func listConjunction(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " and " + names[1]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
+// pluralVerb agrees with the number of branches the sentence names, because "content main and alpha
+// carries" is the kind of slip that makes a reason line look untrustworthy.
+func pluralVerb(n int) string {
+	if n == 1 {
+		return "carries"
+	}
+	return "carry"
 }
 
 func plural(n int) string {

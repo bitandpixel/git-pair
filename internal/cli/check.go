@@ -107,10 +107,15 @@ type checkJSON struct {
 	// name both ends of the comparison (PRD §11.3).
 	ReviewedHead string `json:"reviewed_head,omitempty"`
 	// DriftCredited names the paths that differ from the reviewed commit and were not counted as drift
-	// because the destination carries the same content: what the gate took on trust when a branch that
-	// merged the integration branch in kept its approval. It is a fact about the reading, not a second
-	// verdict — the paths the gate did refuse are in `reasons` (PRD §10.4).
+	// because a credit ref carries the same content: what the gate took on trust when a branch that merged
+	// its ground in kept its approval. Which refs may be credited is `creditRefs`'s rule — the integration
+	// branch, and a stack's unlanded parent. It is a fact about the reading, not a second verdict — the
+	// paths the gate did refuse are in `reasons` (PRD §10.4).
 	DriftCredited []string `json:"drift_credited,omitempty"`
+	// DriftCreditedBy names, per credited path, the branch whose content supplied it. The two answers are
+	// different facts: `drift_credited` says a path was excused, and this says who vouched for it — which
+	// a reader needs now that a parent branch can be cited and not only trunk (PRD §10.4).
+	DriftCreditedBy map[string]string `json:"drift_credited_by,omitempty"`
 	// Landed says the destination's tree carries this changeset's directory, and LandedCommit names the
 	// commit that brought it there. Like status's landing fields, they sit beside the verdict rather than
 	// changing what `ready` means: a changeset that has landed is not integration-ready again. They are
@@ -220,6 +225,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		Integrating:     g.Declared() != nil,
 		IntegrateCommit: eventSHA(g.Declared()),
 		DriftCredited:   g.Summary.DriftCredited,
+		DriftCreditedBy: g.Summary.DriftCreditedBy,
 	}
 	out.Ready = len(out.Reasons) == 0
 	// Read once for the passing verdict, and carried to the human screen so the merge line and the hand-off
@@ -452,10 +458,18 @@ func (g integrationGate) Declared() *lifecycle.Event {
 }
 
 func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback bool, points ...hooks.Point) (*integrationGate, error) {
-	// The tree question — is the reviewed content still what HEAD carries? — is the one `status` asks
-	// observationally and the gate has to answer as a verdict. Asking it through the same derivation is
-	// what keeps the two from disagreeing about what drift is.
-	reviewed, err := lifecycle.SummarizeAgainstTreeHEAD(ctx, s.repo, s.cs.Slug, s.cs.Base, s.trunk.Ref)
+	// The refs the content question may credit are resolved first, because the question is not answerable
+	// without them: for a stack the ground is its parent, and only the stack reading says whether that
+	// branch is still ground or a finished branch whose name outlived its content. The reads are the same
+	// ones the stack finding below asks anyway, and git's answers are memoized per process.
+	credit, err := creditRefs(ctx, s.repo, s.cs, s.trunk)
+	if err != nil {
+		return nil, err
+	}
+	// The tree question — is the reviewed content still what HEAD carries, and where it is not, whose
+	// content is the difference? — is the one `status` asks observationally and the gate has to answer as a
+	// verdict. Asking it through the same derivation is what keeps the two from disagreeing about drift.
+	reviewed, err := lifecycle.SummarizeAgainstTreeHEAD(ctx, s.repo, s.cs.Slug, s.cs.Base, credit)
 	if err != nil {
 		return nil, err
 	}
