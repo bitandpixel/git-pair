@@ -74,6 +74,8 @@ an approval up by, and this is the same "nothing is claimed from a name" rule `p
 longer in the walk at all. The trunk citation is resolved to a commit at the same moment, so both halves of
 the credit are the ones this decision was about.
 
+> is this true? if the parent has a "false commit" on it, and it gets merged into the child, it would be non-stale while the parent is unlanded. but if the parent lands without the false commit, then when the child starts crediting trunk, that commit wouldnt be present anymore and show stale right?
+
 **Why the widening is safe.** Two things, not one. A child cannot be declared until the parent has landed
 (`unlandedParentReason`), so no child's verdict lands a parent's work, and nothing is credited that a reviewer
 of the parent did not cover. The alternative reading — that `base:` is author-controlled and so must not be
