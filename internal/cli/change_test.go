@@ -355,20 +355,20 @@ func TestChangeReadyChecksOnlyTheMostRecentReview(t *testing.T) {
 }
 
 // A review whose only additions are inside the changeset directory must not block
-// readiness (plan decision D3): answering a thread by appending keeps every line the
-// reviewer wrote.
+// readiness (plan decision D3): answering the discussion by appending keeps every line
+// the reviewer wrote.
 func TestChangeReadyNotBlockedByChangesetArtifactSurvivals(t *testing.T) {
 	f, slug := newChangeset(t, "booking", "main")
 	ready(t, f)
 
-	thread := filepath.Join("changesets", slug, "concurrency-tests.md")
-	f.Write(thread, "# Concurrency tests\n\nI'm not convinced the test makes these overlap.\n")
+	discussion := filepath.Join("changesets", slug, "DISCUSSION.md")
+	f.Write(discussion, "# Discussion\n\n## the overlap\n\nI'm not convinced the test makes these overlap.\n")
 	submit(t, f, "block")
 
 	// The author answers by appending, so every reviewer line still survives.
-	f.Commit("answer the thread", gittest.WithFile(thread,
-		"# Concurrency tests\n\nI'm not convinced the test makes these overlap.\n\n"+
-			"## Response\n\nBoth transactions now block before the capacity read.\n"))
+	f.Commit("answer in the discussion", gittest.WithFile(discussion,
+		"# Discussion\n\n## the overlap\n\nI'm not convinced the test makes these overlap.\n\n"+
+			"Both transactions now block before the capacity read.\n"))
 
 	ready(t, f)
 

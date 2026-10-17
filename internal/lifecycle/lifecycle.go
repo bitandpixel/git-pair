@@ -552,7 +552,7 @@ func markerReason(m Event) string {
 // `change unready` and a review submission are (PRD §12).
 //
 // The verdict comes from the tree rather than from the commit count, because committing
-// a fix to ABOUT.md or a review thread is not an implementation change and the reviewer
+// a fix to ABOUT.md or to the discussion file is not an implementation change and the reviewer
 // reads those files from HEAD anyway: anything outside changesets/<slug>/ differing
 // between the marker's parent and HEAD means the reviewed code is gone.
 //

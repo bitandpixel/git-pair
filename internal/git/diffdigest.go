@@ -34,8 +34,9 @@ import (
 // two ways here.
 //
 // Each `exclude` directory is dropped from the diff before hashing, as a pathspec of its own. The
-// caller passes the changeset's own directory: the review record lives in it, so a reply to a review
-// thread would otherwise change the digest and invalidate the approval it is written into.
+// caller passes the changeset's own directory: the review record lives in it, so what somebody
+// writes into DISCUSSION.md would otherwise change the digest and invalidate the approval it is
+// written into.
 //
 // An empty diff hashes the empty output, which is the right answer for a changeset that contributes no
 // content at all — a documentation-only changeset has nothing for a reviewer to have missed, and two

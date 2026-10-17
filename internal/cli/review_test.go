@@ -707,49 +707,73 @@ func TestReviewAboutRefusesWithoutTerminalAndKeepsAbout(t *testing.T) {
 	}
 }
 
-// PRD §10.3: the title is slugified into a thread file, and an existing thread for the
-// same title is reopened instead of duplicated.
-func TestReviewThreadSlugifiesAndDeduplicates(t *testing.T) {
+// PRD §10.3: the discussion file arrives from the scaffold the first time somebody asks for
+// it, and an entry somebody has already written is never overwritten. The command refuses
+// without a terminal — and it still leaves the file behind, because the refusal is about the
+// editor rather than about the file being off-limits.
+func TestReviewDiscussionScaffoldsAndNeverOverwrites(t *testing.T) {
 	f, slug := newChangeset(t, "booking", "main")
 
-	res := runIn(t, f.Dir(), "review", "thread", "Concurrency Tests")
-	if res.code == exitOK {
-		t.Error("`review thread` reported success without opening an editor")
+	res := runIn(t, f.Dir(), "review", "discussion")
+	if res.code != exitUsage {
+		t.Errorf("`review discussion` without a terminal exited %d, want %d\nstderr: %s",
+			res.code, exitUsage, res.stderr)
 	}
-	path := filepath.Join("changesets", slug, "concurrency-tests.md")
+	path := filepath.Join("changesets", slug, "DISCUSSION.md")
 	if !f.HasWorktreeFile(path) {
-		t.Fatalf("thread file %s was not created; stderr: %s", path, res.stderr)
+		t.Fatalf("%s was not scaffolded; stderr: %s", path, res.stderr)
 	}
-	if !strings.HasPrefix(f.Read(path), "# Concurrency Tests") {
-		t.Errorf("thread content = %q, want it to start with the title", f.Read(path))
+	if got := f.Read(path); got != "# Discussion\n" {
+		t.Errorf("scaffold = %q, want the built-in title and nothing else", got)
 	}
 
-	// The reviewer writes in the thread, then asks for the same title again.
-	reviewerText := "# Concurrency Tests\n\nI'm not convinced these overlap.\n"
+	// The reviewer writes, then asks for the file again.
+	reviewerText := "# Discussion\n\n## does the lock cover the map?\n\nNeeds a test.\n"
 	f.Write(path, reviewerText)
-	runIn(t, f.Dir(), "review", "thread", "concurrency tests")
-
+	if got := runIn(t, f.Dir(), "review", "discussion"); got.code != exitUsage {
+		t.Errorf("second `review discussion` exited %d, want %d", got.code, exitUsage)
+	}
 	if got := f.Read(path); got != reviewerText {
-		t.Errorf("reopening a thread overwrote it:\n%s", got)
-	}
-	var duplicates []string
-	for _, name := range f.Threads(slug) {
-		if strings.HasPrefix(name, "concurrency") {
-			duplicates = append(duplicates, name)
-		}
-	}
-	if len(duplicates) != 1 {
-		t.Errorf("thread files = %v, want a single concurrency-tests.md (PRD §10.3)", duplicates)
+		t.Errorf("opening the discussion again overwrote what was written:\n%s", got)
 	}
 }
 
-func TestReviewThreadWithoutTitleIsUsageError(t *testing.T) {
-	f, _ := newChangeset(t, "booking", "main")
+// The repository's own scaffold wins over the built-in, under the same rules ABOUT.md's
+// template follows: a non-blank file is the scaffold, and {{slug}} is the changeset id.
+func TestChangeDiscussionUsesTheRepositoryTemplate(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	f.Write(".git-pair/discussion-template.md", "# Discussion on {{slug}}\n\n## open question\n\n")
 
-	res := runIn(t, f.Dir(), "review", "thread")
-	if res.code != exitUsage {
-		t.Errorf("thread with no title and no terminal exited %d, want %d\nstderr: %s",
-			res.code, exitUsage, res.stderr)
+	runIn(t, f.Dir(), "change", "discussion").mustSucceed(t, "change discussion")
+	want := "# Discussion on booking\n\n## open question\n\n"
+	if got := f.Read(filepath.Join("changesets", slug, "DISCUSSION.md")); got != want {
+		t.Errorf("DISCUSSION.md = %q, want the repository template with {{slug}} replaced (%q)", got, want)
+	}
+
+	// A blank file is no template, so the built-in returns rather than an empty document.
+	f.Write(".git-pair/discussion-template.md", "   \n")
+	f.Remove(filepath.Join("changesets", slug, "DISCUSSION.md"))
+	runIn(t, f.Dir(), "change", "discussion").mustSucceed(t, "change discussion")
+	if got := f.Read(filepath.Join("changesets", slug, "DISCUSSION.md")); got != "# Discussion\n" {
+		t.Errorf("DISCUSSION.md = %q, want the built-in scaffold beside a blank template", got)
+	}
+}
+
+// The author's half is non-interactive: it reports rather than opening, so an agent can
+// create the file where a review reached it as a comment in a source file.
+func TestChangeDiscussionReportsCreatedOrFound(t *testing.T) {
+	f, slug := newChangeset(t, "booking", "main")
+	path := filepath.Join("changesets", slug, "DISCUSSION.md")
+
+	first := runIn(t, f.Dir(), "change", "discussion").mustSucceed(t, "change discussion")
+	mustContain(t, first.stdout, "Created "+path, "the first run says it wrote the file")
+
+	second := runIn(t, f.Dir(), "change", "discussion").mustSucceed(t, "change discussion")
+	mustContain(t, second.stdout, path+" already exists", "the second run says it found the file")
+
+	out := runIn(t, f.Dir(), "change", "discussion", "--json").mustSucceed(t, "change discussion --json").json(t)
+	if out["created"] != false || out["discussion"] != filepath.ToSlash(path) {
+		t.Errorf("--json = %v, want created false and the discussion path", out)
 	}
 }
 

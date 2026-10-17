@@ -13,7 +13,7 @@ import (
 
 // A reviewer's own checks, on the surface reviewers use. The reviewer-side points differ from the author's
 // in two ways that matter. They run after staging, so the hook sees the index the review commit is about to
-// carry — the source edits made while reading, the thread files, the ABOUT.md edit — rather than the tree as
+// carry — the source edits made while reading, the discussion file, the ABOUT.md edit — rather than the tree as
 // it was left. And they are the client's own: a reviewer reviewing a repository they cannot edit attaches
 // them under their own git directory, where there is nothing to accept and nobody to ask.
 

@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,32 +11,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The row area is shared by two regions, and the split is the feature: a changeset with forty threads
-// is a reason to scroll the changeset box, not a reason to hide the file tree behind it. These pin the
+// The row area is shared by two regions, and the split is the feature: a box with more rows than its
+// share is a reason to scroll the box, not a reason to hide the file tree behind it. These pin the
 // arithmetic of the split, the keys that move between the regions and within one, what each region's
 // shortcut bar promises, and the span row -- the one row in the box a reviewer changes.
-
-// withThreads grows the box to n threads, which is the case the split exists for. The rows go inside
-// the box's half of the list, because the list is one slice holding two regions and a file row
-// appended past the split would be a row of the tree.
-func withThreads(t *testing.T, m reviewModel, n int) reviewModel {
-	t.Helper()
-	extra := make([]row, 0, n)
-	for i := range n {
-		extra = append(extra, row{kind: rowThread, name: fmt.Sprintf("thread-%02d.md", i),
-			path: fmt.Sprintf("thread-%02d.md", i), file: -1})
-	}
-	rows := make([]row, 0, len(m.rows)+n)
-	rows = append(rows, m.rows[:m.metaStart]...)
-	rows = append(rows, extra...)
-	rows = append(rows, m.rows[m.metaStart:]...)
-	m.rows = rows
-	m.clamp()
-	if len(m.metaRows()) < n {
-		t.Fatalf("the box holds %d rows after adding %d threads", len(m.metaRows()), n)
-	}
-	return m
-}
 
 // manyFileModel is a session whose span changed n files at the top of the tree, which is the shape the
 // tree's scroll counts are for: more rows than the window has, and no directory rows among them. The
@@ -59,7 +39,6 @@ func TestTheChangesetBoxIsCappedAndTheTreeKeepsTheRest(t *testing.T) {
 	for _, height := range []int{16, 24, 40} {
 		m := navModel(t)
 		m.height = height
-		m = withThreads(t, m, 40)
 
 		meta, files := m.regionHeights()
 		area := m.rowArea()
@@ -82,9 +61,30 @@ func TestTheChangesetBoxIsCappedAndTheTreeKeepsTheRest(t *testing.T) {
 
 // The frame is written one line per row, so a box that grew past its share would push the shortcut bar
 // off the bottom of the terminal -- the failure a reviewer would feel as keys that do nothing.
-func TestALongChangesetBoxStillFitsTheTerminal(t *testing.T) {
+// boxPagingModel is the navigation fixture squeezed until the changeset box has a row off its own
+// window. The box asks for what it needs up to a third of the row area, so the way to give it rows to
+// hide is a short window rather than a tall box: the list is rebuilt from the session on every key, so
+// rows added to the model by hand are gone before the key arrives.
+func boxPagingModel(t *testing.T) reviewModel {
+	t.Helper()
 	m := navModel(t)
-	m = withThreads(t, m, 40)
+	for m.height = 24; m.height >= 8; m.height-- {
+		m.clamp()
+		if len(m.metaRows()) > m.metaWindow() {
+			return focusOnRow(t, m, m.metaStart)
+		}
+	}
+	t.Fatalf("no window height down to 8 rows leaves the box's %d rows with one off its window",
+		len(m.metaRows()))
+	return m
+}
+
+// A box with rows off its window still fits the terminal, and says how much it hides: the frame is
+// written one line per row, so a box that grew past its share would push the shortcut bar off the
+// bottom -- the failure a reviewer would feel as keys that do nothing. The counts go inside the box's
+// own borders, so they cannot change the column's height either.
+func TestABoxWithRowsOffItsWindowStillFitsTheTerminal(t *testing.T) {
+	m := boxPagingModel(t)
 
 	rows := viewRows(m.View())
 	if len(rows) > m.height {
@@ -93,25 +93,19 @@ func TestALongChangesetBoxStillFitsTheTerminal(t *testing.T) {
 	if !strings.Contains(strings.Join(rows, "\n"), "q quit") {
 		t.Errorf("the shortcut bar is not on the screen:\n%s", strings.Join(rows, "\n"))
 	}
-	// The box hides what it cannot show and says how much is hidden, inside its own borders so the
-	// counts cannot change the column's height. The scroll is an index into the list, so the count of
-	// what the window hides starts from where the box starts.
-	if above, below := m.metaHidden(); above > 0 || below > 0 {
-		view := strings.Join(rows, "\n")
-		if above > 0 && !strings.Contains(view, "\u2191") {
-			t.Errorf("the box hides %d rows above its window without saying so:\n%s", above, view)
-		}
-		if below > 0 && !strings.Contains(view, "\u2193") {
-			t.Errorf("the box hides %d rows below its window without saying so:\n%s", below, view)
-		}
+	_, below := m.metaHidden()
+	if below <= 0 {
+		t.Fatalf("the box hides nothing below its window, so the count below is not being tested")
+	}
+	if !strings.Contains(strings.Join(rows, "\n"), "\u2193") {
+		t.Errorf("the box hides %d rows below its window without saying so:\n%s", below, strings.Join(rows, "\n"))
 	}
 }
 
 // ctrl-d used to quit, which is why paging had to be ctrl-f and ctrl-b and nothing else. It pages now,
 // in whichever half of the list column has the keys, and the two keys that quit are ctrl-c and q.
 func TestCtrlDPagesTheFocusedRegionAndDoesNotQuit(t *testing.T) {
-	m := withThreads(t, navModel(t), 12)
-	m = focusOnRow(t, m, m.metaStart)
+	m := boxPagingModel(t)
 	before := m.metaCursor
 
 	m = paneKey(t, m, keyMsg(tea.KeyCtrlD))
@@ -175,24 +169,24 @@ func TestEachRegionHasItsOwnShortcutBar(t *testing.T) {
 	files := m.helpTextFor(focusFiles)
 	box := m.helpTextFor(focusMeta)
 
-	for _, want := range []string{"h/l fold", "space reviewed", "s submit", "a about", "t threads", "f files", "tab preview"} {
+	for _, want := range []string{"h/l fold", "space reviewed", "s submit", "a about", "f files", "tab preview"} {
 		if !strings.Contains(files, want) {
 			t.Errorf("the tree's bar does not mention %q: %q", want, files)
 		}
 	}
-	for _, want := range []string{"space span", "T new thread", "a about", "t threads", "f files", "tab preview"} {
+	for _, want := range []string{"space span", "a about", "f files", "tab preview"} {
 		if !strings.Contains(box, want) {
 			t.Errorf("the box's bar does not mention %q: %q", want, box)
 		}
 	}
-	for _, gone := range []string{"h/l fold", "s submit", "space reviewed"} {
+	for _, gone := range []string{"h/l fold", "s submit", "space reviewed", "t threads", "T new thread"} {
 		if strings.Contains(box, gone) {
 			t.Errorf("the box's bar offers %q, which it does not read: %q", gone, box)
 		}
 	}
-	for _, gone := range []string{"m changeset", "tab focus", "tab cycles"} {
+	for _, gone := range []string{"m changeset", "tab focus", "tab cycles", "t threads", "T new thread"} {
 		if strings.Contains(files, gone) || strings.Contains(box, gone) {
-			t.Errorf("a bar still names %q, which is the ring the session no longer has: %q / %q", gone, files, box)
+			t.Errorf("a bar still names %q, which is the ring or the box the session no longer has: %q / %q", gone, files, box)
 		}
 	}
 	if files == box {
@@ -375,7 +369,7 @@ func TestTabWalksTheDiffWhereThereIsNoPane(t *testing.T) {
 	}
 
 	// From the box it is the same stop -- and the box is what the keys come back to, on the row they left.
-	inBox := focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	inBox := focusOnRow(t, m, boxIndexOf(t, m, rowDiscussion))
 	at := inBox.metaCursor
 	fromBox := pressOverlay(t, inBox, tea.KeyMsg{Type: tea.KeyTab})
 	if fromBox.mode != modePreview {
@@ -383,7 +377,7 @@ func TestTabWalksTheDiffWhereThereIsNoPane(t *testing.T) {
 	}
 	back := pressOverlay(t, fromBox, tea.KeyMsg{Type: tea.KeyTab})
 	if back.mode != modeFiles || !back.metaHasFocus() || back.metaCursor != at {
-		t.Errorf("tab back from the diff gave %v on %d, want the box on the thread at %d",
+		t.Errorf("tab back from the diff gave %v on %d, want the box on the discussion row at %d",
 			back.focus, back.metaCursor, at)
 	}
 
@@ -481,11 +475,16 @@ func TestTheBoxClosesOnTheRightInBothLayouts(t *testing.T) {
 	}
 }
 
-// The handoff to the editor for a new thread used to move the file tree's cursor onto the thread's own
-// row. The consequence was on the other side of the screen: the pane is the file under the tree's cursor,
-// so the reviewer came back from the editor to a different diff -- or to none.
-func TestThePreviewSurvivesANewThread(t *testing.T) {
+// The handoff to the editor for a discussion file that did not exist used to move the file tree's cursor
+// onto the row the new file had just been given. The consequence was on the other side of the screen: the
+// pane is the file under the tree's cursor, so the reviewer came back from the editor to a different diff
+// -- or to none.
+func TestThePreviewSurvivesANewDiscussionFile(t *testing.T) {
 	m := previewModel(t)
+	if err := os.Remove(filepath.Join(m.sess.Repo().Dir, m.sess.DiscussionPath())); err != nil {
+		t.Fatalf("removing the fixture's DISCUSSION.md: %v", err)
+	}
+	m.refresh()
 	focusOnRow(t, m, 0)
 	m, cmd := m.ensurePreview()
 	m = deliver(t, m, cmd)
@@ -494,30 +493,38 @@ func TestThePreviewSurvivesANewThread(t *testing.T) {
 	}
 	file, cursor := m.previewPath, m.cursor
 
-	m = boxOn(t, m)
-	m = pressKey(t, m, runeKey('T'))
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a note about the lock")})
-	// Enter creates the thread and asks for the editor. The command is deliberately not run: it hands
+	m = boxTo(t, m, rowDiscussion)
+	// `e` writes the scaffold and asks for the editor. The command is deliberately not run: it hands
 	// this process's terminal to $EDITOR. The handoff itself is tested where the editor is faked.
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	created, cmd := m.Update(runeKey('e'))
+	m = created.(reviewModel)
+	if cmd == nil {
+		t.Fatal("e on the discussion row opened nothing, want the editor")
+	}
+	if _, err := os.Stat(filepath.Join(m.sess.Repo().Dir, m.sess.DiscussionPath())); err != nil {
+		t.Fatalf("e on the discussion row did not write the scaffold: %v", err)
+	}
+	if m.pendingNote != "Created "+m.sess.DiscussionPath() {
+		t.Errorf("the handoff carries %q, want it to say the file was created", m.pendingNote)
+	}
 
-	if m.mode != modeFiles {
-		t.Fatalf("the thread prompt left mode %v", m.mode)
-	}
-	if kind, _ := activeKind(t, m); kind != rowThread {
-		t.Errorf("the new thread left the box's cursor on a %v row, want the thread itself", kind)
-	}
 	if m.cursor != cursor {
-		t.Errorf("the new thread moved the tree's cursor from %d to %d; the pane belongs to that row", cursor, m.cursor)
+		t.Errorf("creating the discussion file moved the tree's cursor from %d to %d; the pane belongs to that row", cursor, m.cursor)
 	}
-	// The pane is the row the keys are standing on, and the keys are in the box, so what is on show is the
-	// thread the editor has just been opened on -- which is the file the reviewer is coming back to write.
+	// The pane is the row the keys are standing on, and the keys are in the box, so what is on show is
+	// the file the editor has just been opened on -- the one the reviewer is coming back to write.
 	if m.previewPath == file {
 		t.Fatalf("the box has the keys and the pane is still showing %q: the pane follows the cursor", file)
 	}
 
 	updated, cmd := m.Update(externalDoneMsg{})
 	m = updated.(reviewModel)
+	// The note is on screen the moment the child exits -- that is the whole point of carrying it on the
+	// handoff rather than printing it before the terminal is handed over. The pane's own re-fetch is
+	// delivered after it, because the assertions below need the diff back on screen.
+	if !strings.Contains(m.status, "Created "+m.sess.DiscussionPath()) {
+		t.Errorf("after the editor closed the status says %q, want it to name the file it created", m.status)
+	}
 	m = deliver(t, m, cmd)
 	// And the diff is one key away, because the cursor it belongs to never moved.
 	m = paneKey(t, m, runeKey('f'))
@@ -570,14 +577,14 @@ func countEqual(lines []string, want string) int {
 	return n
 }
 
-// --- where the box opens, and what the prompts leave on screen --------------------------------
+// --- where the box opens, and what the frame keeps on screen ------------------------------------
 
 // The box keeps the row it was left on, wherever the keys went: it is one half of a column the reviewer
-// walks, and a cursor that reset on every visit would lose their place in a changeset with forty threads.
+// walks, and a cursor that reset on every visit would lose their place in a box they had started to read.
 // `a` is the key that names a row of it -- ABOUT.md, what a reviewer comes to the box to read.
 func TestTheBoxKeepsItsRowAndATakesTheCursorToAbout(t *testing.T) {
 	m := newFileListModel(t)
-	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowDiscussion))
 	put := m.metaCursor
 
 	m.focusOn(focusFiles)
@@ -592,10 +599,11 @@ func TestTheBoxKeepsItsRowAndATakesTheCursorToAbout(t *testing.T) {
 	}
 }
 
-// The thread prompt is a line of the footer, not a screen of its own. It used to be a mode the diff
-// column refused to be drawn in, so pressing `T` next to a diff took the diff away for as long as the
-// title was being typed -- and the editor then covered what was left.
-func TestThePaneSurvivesTheThreadPrompt(t *testing.T) {
+// The discussion row is not a mode: it is a row of the box, and the box is a half of the column the
+// diff sits beside. Opening the editor from it must not take the diff column away -- the reviewer who
+// pressed `e` beside a diff comes back from the editor to the same diff, not to a screen that lost it on
+// the way there.
+func TestThePaneSurvivesOpeningTheDiscussionFile(t *testing.T) {
 	m := previewModel(t)
 	focusOnRow(t, m, 0)
 	m, cmd := m.ensurePreview()
@@ -605,27 +613,27 @@ func TestThePaneSurvivesTheThreadPrompt(t *testing.T) {
 		t.Fatal("the fixture has no diff column to lose")
 	}
 
-	m = pressRune(m, 'T')
-	if m.mode != modePrompt {
-		t.Fatalf("`T` gave mode %v, want the title prompt", m.mode)
+	m = boxTo(t, m, rowDiscussion)
+	_, cmd = m.Update(runeKey('e'))
+	if m.mode != modeFiles {
+		t.Fatalf("`e` on the discussion row gave mode %v, want the list still on the screen", m.mode)
 	}
 	if got := m.paneWidth(); got != wide {
-		t.Errorf("the prompt took the diff column: %d columns became %d", wide, got)
+		t.Errorf("opening the document took the diff column: %d columns became %d", wide, got)
 	}
-	if m.previewPath != file {
-		t.Errorf("the prompt moved the pane from %q to %q", file, m.previewPath)
-	}
-	view := m.View()
-	if !strings.Contains(view, "+added line") {
-		t.Errorf("the pane lost its diff while a title was typed:\n%s", view)
-	}
-	if !strings.Contains(view, "New thread:") {
-		t.Errorf("the prompt is not on screen:\n%s", view)
+	if m.previewPath == file {
+		t.Errorf("the box has the keys and the pane is still showing %q; it follows the cursor", file)
 	}
 
-	// Cancelling is the same screen again, and the box's cursor has not been touched by the trip.
-	if back := press(m, tea.KeyEsc); back.mode != modeFiles || back.paneWidth() != wide {
-		t.Errorf("esc left mode %v with a %d-column pane", back.mode, back.paneWidth())
+	// Taking the keys back to the tree is the same screen again: the pane goes back to the file the
+	// tree's cursor is on, which the trip through the box did not move.
+	back := pressKey(t, m, runeKey('f'))
+	if back.focus != focusFiles || back.paneWidth() != wide {
+		t.Errorf("f left mode %v with a %d-column pane", back.mode, back.paneWidth())
+	}
+	if back.previewPath != file {
+		t.Errorf("back at the tree the pane shows %q, want the %q it showed before the box had the keys",
+			back.previewPath, file)
 	}
 }
 
@@ -660,8 +668,7 @@ func TestFoldingTheTreeKeepsTheBoxAtItsTop(t *testing.T) {
 // box's own first row. A scroll read as a position in the list under-counts by the height of the tree,
 // so a box with rows still hidden says it has shown everything there is.
 func TestTheBoxCountsWhatItHidesFromItsOwnStart(t *testing.T) {
-	m := withThreads(t, navModel(t), 12)
-	m = focusOnRow(t, m, m.metaStart)
+	m := boxPagingModel(t)
 	_, hidden := m.metaHidden()
 	if hidden <= 0 {
 		t.Fatalf("the box shows all %d of its rows in a %d-row window", len(m.metaRows()), m.metaWindow())

@@ -1,5 +1,5 @@
 // Package changeset owns review identity: the branch-to-directory rule,
-// CHANGESET.yaml, ABOUT.md, and review threads.
+// CHANGESET.yaml, ABOUT.md, and the one file the review conversation is written in.
 package changeset
 
 import (
@@ -21,6 +21,10 @@ const Root = "changesets"
 const (
 	MetadataFile = "CHANGESET.yaml"
 	AboutFile    = "ABOUT.md"
+	// DiscussionFile is where the review conversation is written. It is one file
+	// rather than one file per subject, and its contents have no schema: headings,
+	// levels, and the shape of a reply belong to the people having the conversation.
+	DiscussionFile = "DISCUSSION.md"
 )
 
 // AboutTemplateFile is the repository's own ABOUT.md scaffold, named from the
@@ -29,6 +33,12 @@ const (
 // check then all read it instead of the built-in. It is a working-tree file, so
 // `init` never commits it and an author can try one without staging it.
 const AboutTemplateFile = ".git-pair/about-template.md"
+
+// DiscussionTemplateFile is the repository's own DISCUSSION.md scaffold, named from
+// the repository root and read the same way AboutTemplateFile is. The built-in is a
+// title alone, so this is the one place a team states how it wants a review
+// conversation shaped — an entry level, an author prefix, a standing question.
+const DiscussionTemplateFile = ".git-pair/discussion-template.md"
 
 // AboutSlugToken is the placeholder a scaffold uses for the changeset id. A printf
 // verb would do the same job and read worse: the file is Markdown a person also
@@ -980,7 +990,7 @@ func AboutIsUntouched(about, template string) bool {
 }
 
 // WriteIfAbsent creates path with content when it does not already exist, and
-// reports whether it was created. Used for ABOUT.md and thread files so opening
+// reports whether it was created. Used for ABOUT.md and DISCUSSION.md so opening
 // a document never damages an existing one.
 func WriteIfAbsent(repo *git.Repo, relPath, content string) (bool, error) {
 	abs := filepath.Join(repo.Dir, relPath)
@@ -1010,66 +1020,56 @@ func (c Changeset) EnsureAbout(repo *git.Repo) (bool, error) {
 	return WriteIfAbsent(repo, c.AboutPath(), template)
 }
 
-// EnsureThread resolves a thread title to a path, creating the file when needed.
-// It reports whether the file was created, so callers can say "created" versus
-// "opened existing" instead of silently duplicating a discussion.
-func (c Changeset) EnsureThread(repo *git.Repo, title string) (path string, created bool, err error) {
-	path, err = c.ThreadPath(title)
+// EnsureDiscussion creates DISCUSSION.md from the scaffold if it is missing and
+// reports whether it was created. `change discussion`, `review discussion` and the
+// review screen's edit key all call this, so the file cannot arrive in three shapes
+// depending on who asked for it.
+func (c Changeset) EnsureDiscussion(repo *git.Repo) (bool, error) {
+	template, err := ResolveDiscussionTemplate(repo, c.Slug)
 	if err != nil {
-		return "", false, err
+		return false, err
 	}
-	created, err = WriteIfAbsent(repo, path, ThreadTemplate(title))
-	if err != nil {
-		return path, false, err
-	}
-	return path, created, nil
+	return WriteIfAbsent(repo, c.DiscussionPath(), template)
 }
 
-// --- threads ----------------------------------------------------------------
+// --- discussion ---------------------------------------------------------------
 
-// ThreadSlug maps a thread title to a filename stem, lowercased for the same
-// readability reason filenames are normally lowercase.
-func ThreadSlug(title string) (string, error) {
-	slug, err := SlugFromBranch(title)
-	if err != nil {
-		return "", fmt.Errorf("thread title %q does not produce a usable file name", title)
-	}
-	return strings.ToLower(slug), nil
+// DiscussionPath returns the changeset-relative path of the discussion file. It
+// creates nothing.
+func (c Changeset) DiscussionPath() string {
+	return c.Path(DiscussionFile)
 }
 
-// ThreadPath returns the changeset-relative path for a thread title. It does
-// not create anything.
-func (c Changeset) ThreadPath(title string) (string, error) {
-	stem, err := ThreadSlug(title)
-	if err != nil {
-		return "", err
-	}
-	return c.Path(stem + ".md"), nil
+// discussionTemplateBuiltIn is a title and nothing else. The shape of a review
+// conversation belongs to the people having it, so the built-in invents no entry
+// format a repository then has to argue with; a team that wants one writes
+// DiscussionTemplateFile.
+const discussionTemplateBuiltIn = "# Discussion\n"
+
+// DiscussionTemplate is the built-in scaffold rendered for slug. {{slug}} is the same
+// token ABOUT.md scaffolds use, so one team's template reads the same in either file.
+func DiscussionTemplate(slug string) string {
+	return strings.ReplaceAll(discussionTemplateBuiltIn, AboutSlugToken, slug)
 }
 
-// Threads lists existing thread files in the changeset directory: every `.md`
-// file except ABOUT.md.
-func (c Changeset) Threads(repo *git.Repo) ([]string, error) {
-	abs := filepath.Join(repo.Dir, c.Dir)
-	entries, err := os.ReadDir(abs)
+// ResolveDiscussionTemplate returns the DISCUSSION.md scaffold to write for slug: the
+// repository's DiscussionTemplateFile when it holds anything, and the built-in scaffold
+// otherwise. The three rules are ResolveAboutTemplate's, because a person who committed
+// a template expects their template: a blank file counts as no template, and a file
+// that is there and cannot be read is an error rather than a quiet fallback.
+func ResolveDiscussionTemplate(repo *git.Repo, slug string) (string, error) {
+	if repo == nil {
+		return DiscussionTemplate(slug), nil
+	}
+	data, err := os.ReadFile(filepath.Join(repo.Dir, DiscussionTemplateFile))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return DiscussionTemplate(slug), nil
 	}
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("reading %s: %w", DiscussionTemplateFile, err)
 	}
-	var out []string
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".md" || e.Name() == AboutFile {
-			continue
-		}
-		out = append(out, c.Path(e.Name()))
+	if strings.TrimSpace(string(data)) == "" {
+		return DiscussionTemplate(slug), nil
 	}
-	sort.Strings(out)
-	return out, nil
-}
-
-// ThreadTemplate seeds a new thread file.
-func ThreadTemplate(title string) string {
-	return "# " + strings.TrimSpace(title) + "\n\n"
+	return strings.ReplaceAll(string(data), AboutSlugToken, slug), nil
 }

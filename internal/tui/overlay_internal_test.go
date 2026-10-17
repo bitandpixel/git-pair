@@ -62,8 +62,10 @@ func TestSmallTerminalGivesThePreviewTheWholeScreen(t *testing.T) {
 		t.Errorf("the overlay does not say which file it is showing:\n%s", view)
 	}
 	// The list's chrome is what the diff is being bought with. If any of it survives, the rows it
-	// costs come straight off the diff, which is the whole point.
-	for _, absent := range []string{"reviewed", "base: ", "Threads"} {
+	// costs come straight off the diff, which is the whole point. The changeset box's own two document
+	// rows are named here because they are rows of the list, not of the diff: a box drawn beside a
+	// whole-screen diff is a box that has taken rows from it.
+	for _, absent := range []string{"reviewed", "base: ", "ABOUT.md", "DISCUSSION.md"} {
 		if strings.Contains(view, absent) {
 			t.Errorf("the overlay still draws the list's %q:\n%s", absent, view)
 		}
@@ -210,8 +212,8 @@ func TestOverlayLetsNothingElseThrough(t *testing.T) {
 		{"e opens an editor", runeKey('e')},
 		{"a jumps the box's cursor to ABOUT.md", runeKey('a')},
 		{"d opens the difftool", runeKey('d')},
-		{"t jumps the box's cursor to the threads", runeKey('t')},
-		{"T starts a thread", runeKey('T')},
+		{"t, which named the thread list, is inert", runeKey('t')},
+		{"T, which started a thread, is inert", runeKey('T')},
 		{"1 votes a thread", runeKey('1')},
 		{"v walks spans", runeKey('v')},
 		{"V opens the picker", runeKey('V')},
@@ -303,11 +305,11 @@ func TestTheRegionKeysTakeTheOverlayDown(t *testing.T) {
 	// The other stop is the half of the list column that gave the keys up, so a reviewer who walked into
 	// the box and then into a diff comes back to the box rather than to the tree's top row.
 	base := overlayModel(t, 40)
-	inBox := focusOnRow(t, base, boxIndexOf(t, base, rowThread))
+	inBox := focusOnRow(t, base, boxIndexOf(t, base, rowDiscussion))
 	at := inBox.metaCursor
 	cameBack := pressOverlay(t, openOverlay(t, inBox), tea.KeyMsg{Type: tea.KeyTab})
 	if !cameBack.metaHasFocus() || cameBack.metaCursor != at {
-		t.Errorf("tab back to the box gave %v on %d, want the box on the thread at %d",
+		t.Errorf("tab back to the box gave %v on %d, want the box on the discussion row at %d",
 			cameBack.focus, cameBack.metaCursor, at)
 	}
 }
@@ -650,8 +652,8 @@ func TestZFromTheListOnANarrowTerminalTakesTheScreen(t *testing.T) {
 	}
 }
 
-// A row with nothing to read -- the span line, "+ new thread…" -- has no "this" for `z` to make big,
-// and the key says so rather than painting a screen with nothing on it.
+// A row with nothing to read -- the span line -- has no "this" for `z` to make big, and the key says
+// so rather than painting a screen with nothing on it.
 func TestZFromARowWithNothingToReadSaysSo(t *testing.T) {
 	m := focusFixture(t, 60)
 	m.previewKind, m.previewPath = previewDiff, ""

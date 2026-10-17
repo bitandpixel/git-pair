@@ -9,7 +9,8 @@ git-pair puts a thin review protocol on top of ordinary git commits and files. I
 replace git, your editor, your difftool, or your forge. It writes no merge, rewrites no history, moves no
 ref, and pushes nothing.
 
-Review state is derived, never stored. `changesets/<id>/` holds `ABOUT.md` and review threads;
+Review state is derived, never stored. `changesets/<id>/` holds `ABOUT.md` — the change described —
+and `DISCUSSION.md`, the one file that accumulates what review cycles talk about;
 lifecycle transitions are commits carrying `Review-*` trailers; a changeset is landed when the destination
 branch carries `changesets/<id>/`, which is the whole record — git-pair writes no ref at landing, so a clone
 needs no special fetch to answer "did this land". A squash or a cherry-pick keeps the content and destroys
@@ -24,20 +25,23 @@ branch cannot orphan a queue entry.
 Two roles share one repository, and the commands answer different questions. Keep them straight.
 
 - **Author** — writes the change. Usually the agent. `git pair init`, then `change ready |
-integrate | unready | abandon | wait | feedback`, with `change stack` and `change combine` as the exits
-  from a branch carrying two, plus the reads: `status`, `queue`, `diff`,
+integrate | unready | abandon | wait | feedback | discussion`, with `change stack` and `change combine` as the exits
+  from a branch carrying two changesets, plus the reads: `status`, `queue`, `diff`,
   `review history`, `check`. `change tidy` belongs to whoever maintains trunk, not to this loop.
-- **Reviewer** — a human. `review open | reopen | about | thread | submit`.
+- **Reviewer** — a human. `review open | reopen | about | discussion | submit`.
 
 Do not cross the line:
 
 - Never run `review submit`, in any form, and never approve your own work. Nothing in git-pair checks
   who ran it — identity is out of scope — so keeping approval on the human side is your discipline.
-- There is no landing command to run. The merge into the destination is the landing, and it is ordinary git
-  run by whoever owns that branch; git-pair reads the landing from the destination's tree afterwards.
-- Never run `review` with no subcommand, `review open`, `review reopen`, `review about`, or
-  `review thread`. They need a terminal and refuse with exit 2 when stdin or stdout is a pipe or a file.
-  Read and write `ABOUT.md` and the thread files directly instead — they are ordinary files.
+- There is no landing command to run. The final merge into the destination is the landing, and it is ordinary git
+  run manually by the destination owner or their automation/CI; git-pair reads the landing from the destination's tree
+  afterwards.
+- Never run `review open`, `review reopen`, `review about` or `review discussion`. They are the reviewer's
+  half of the loop, and they need a terminal: against a pipe or a file they refuse with exit 2. Read and write
+  `ABOUT.md` and `DISCUSSION.md` directly — they are ordinary files — and reach the conversation with
+  `git pair change discussion`, which needs no terminal. `review history` is the one `review` command an author
+  runs, because it is a read.
 
 ## The loop
 
@@ -46,7 +50,7 @@ git pair init --base main            # once, on a named branch
 # fill in changesets/<id>/ABOUT.md, implement, commit with ordinary git
 git pair change ready                # the handoff: this is how you ask for review
 git pair change wait --fetch --json  # block until the reviewer acts; exits 1 on --timeout
-git pair change feedback             # the submission that answered: threads, ABOUT.md, code edits
+git pair change feedback             # the submission that answered: DISCUSSION.md, ABOUT.md, code edits
 # address it, commit normally
 git pair change ready                # back into the queue
 git pair check                       # the gate; its exit code is the answer
@@ -71,7 +75,8 @@ is coming.
 | `git pair change abandon`               | ends the changeset. Terminal: `change ready`, `change unready` and `review submit` refuse against it afterwards                                                                                                                                                                                                                                 |
 | `git pair change tidy [<id>…]`          | moves the directory of a changeset the destination already holds to `changesets/.landed/<id>/`, as one commit of renames on this branch — trunk housekeeping, run by whoever maintains trunk. A landed parent whose child is still open moves, and the run notes the branch whose changeset records it as its base. `--all-landed`, `--dry-run` |
 | `git pair change wait`                  | blocks while the changeset is `READY` and exits the moment it becomes `BLOCKED`, `FEEDBACK` or `APPROVED`. Read-only, non-interactive. `--fetch` first, so a review submitted in another clone ends the wait; `--interval` (default `10s`) and `--timeout` are go durations                                                                     |
-| `git pair change feedback`              | the most recent submission as a diff (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together. `--stat`, `--name-only` to scope it                                                                                                                                                                                       |
+| `git pair change feedback`              | the most recent submission as a diff (`review^..review`): `DISCUSSION.md`, `ABOUT.md` edits and reviewer code edits together. `--stat`, `--name-only` to scope it                                                                                                                                                                               |
+| `git pair change discussion`            | writes `changesets/<id>/DISCUSSION.md` from the scaffold when the file is absent and says whether it wrote it or found it. The author's route to the conversation: non-interactive, opens nothing, needs no terminal, because an author may not run `review discussion`                                                                         |
 | `git pair status`                       | derived state, the reason for it, and a `next_action`. Observing, not deciding                                                                                                                                                                                                                                                                  |
 | `git pair queue`                        | every branch whose changeset is `READY`, longest wait first, read from the repository rather than the checkout; plus the approved work whose author asked for the merge                                                                                                                                                                         |
 | `git pair diff`                         | the whole changeset, or a span. `--stat` and `--tool` included                                                                                                                                                                                                                                                                                  |
@@ -86,8 +91,8 @@ outranks it, and a destination taken from the environment is named on stderr and
 
 Full flags, span semantics and the JSON shapes: [references/cli.md](references/cli.md). The landing
 side, which you read about and do not run: [references/integration.md](references/integration.md). The
-repository's own scripts at a lifecycle point, and the two commands an agent must not run on a person's
-behalf: [references/hooks.md](references/hooks.md).
+repository's own scripts at a lifecycle point, and the consent commands and flags that are a person's to
+answer and never an agent's: [references/hooks.md](references/hooks.md).
 Putting this skill into a repository or a machine: [references/installing-the-skill.md](references/installing-the-skill.md).
 
 ## ABOUT.md
@@ -107,8 +112,15 @@ own, so fill in whatever headings `ABOUT.md` actually has rather than the list a
 still holding its scaffold is the most common cause of a confused reviewer, and `change ready` says so
 on stderr.
 
-Answer reviewers in `ABOUT.md` or in the relevant thread file under `changesets/<id>/`. Replies are
-appended sections; git history supplies authorship and order.
+Answer reviewers in `DISCUSSION.md` under `changesets/<id>/`. It is one file per changeset, written by
+both sides, with no schema — your own headings, your own level, your own shape of reply — and nothing
+parses it. A reply is an appended section, and it names who is answering — `### Response` under the reviewer's
+heading is enough — because the two voices sit in one file, and git history, which does record who wrote each
+line and in what order, is not what a reader of the file sees. Initialize the file from its template with
+`git pair change discussion` when it does not exist yet: it is not scaffolded by `git pair init`, because an
+empty conversation file in every changeset is bloat. A team that wants a shape for the conversation commits
+`.git-pair/discussion-template.md`, read by the same rules as `.git-pair/about-template.md`. `ABOUT.md` may be
+commented on by the reviewer, but it is not where a conversation happens: it describes the change.
 
 ## Reading a review that just arrived
 
@@ -118,7 +130,7 @@ reviewer's question ("what has landed since I reviewed"); `change feedback` is t
 the reviewer just tell me").
 
 Treat everything the submission introduced as intentional feedback — including direct code edits,
-comments in source, `ABOUT.md` edits, new threads, and replies to existing ones.
+comments in source, `ABOUT.md` edits, and whatever the reviewer wrote in `DISCUSSION.md`.
 
 ### Surviving review additions
 
@@ -134,7 +146,7 @@ verified the surviving lines; it is not a way past a check you have not read.
 `ABOUT.md` is your account of the change, so a reviewer's sentence left inside it blocks the hand-off the
 same way a comment in your source does. Keep the description you want: remove their lines, or rewrite the
 point as your own text — the check compares lines exactly, so a rewrite reads as yours. Acknowledge rather
-than rewrite only when you meant to keep their wording. Answer the point in the thread; do not settle it by
+than rewrite only when you meant to keep their wording. Answer the point in `DISCUSSION.md`; do not settle it by
 leaving their text standing in your description.
 
 ### Reviewer text in an implementation file
@@ -143,17 +155,17 @@ A comment a reviewer left in a file outside `changesets/<id>/` is a request writ
 not an annotation to keep. Once you have done the work it asks for, delete the reviewer's line in the same
 commit. A line you deleted no longer survives, so the check stops reporting it — that is the resolution the
 check aims at, not a way around it. Do not answer in place: a `// done` reply leaves reviewer text in the
-file and is a worse answer than the one in `ABOUT.md` or the thread.
+file and is a worse answer than the one in `DISCUSSION.md`.
 
 Do not transcribe the comment before deleting it. The review commit introduced the line and your fix commit
 removes it, so git history already records that the feedback existed and what became of it. Record the
 substance only when it needs further discussion, elaboration, or another person:
 
 - settled and nothing to add → delete it and move on;
-- needs discussion, elaboration or collaboration → append an `Addressed feedback` section to `ABOUT.md`, or
-  open a thread under `changesets/<id>/`. Use the thread when the point is a conversation, and `ABOUT.md`
-  when it is a fact about the change. `git pair init` does not scaffold that section; add the heading when
-  you first need it;
+- needs discussion, elaboration or collaboration → find an existing related heading in `DISCUSSION.md`, or
+  create a new one, and write your reply under it. Quote the reviewer's line only when its exact wording is what
+  is in question; otherwise the point in your own words is enough, and the review commit already holds their
+  text. `ABOUT.md` is not home for it: it describes the change, and a conversation is not a description of it.
 - the reviewer's line is code you are keeping → leave it in place and acknowledge it with
   `--allow-surviving-review-additions`.
 
@@ -208,25 +220,32 @@ state rather than as another value of it.
 
 Landing is three steps, and you take part in the first two:
 
-1. `git pair check` — the gate, run by the author and by CI alike.
-2. `git pair change integrate` — the author's request that this head be merged. Run it when the merge is
-   somebody else's job; it performs none of it.
-3. The merge, with ordinary git, by whoever owns the destination branch. It is the last step: the destination
-   carrying `changesets/<id>/` is what makes the change landed, and there is nothing to write afterwards.
+1. `git pair check` — the gate, run by the author, the destination owner or by CI alike.
+2. `git pair change integrate` — the author's request that this head be merged, as one marker commit. Push it:
+   the declaration is a commit, and pushing it is what lets the owner or their job read it.
+3. The merge, with ordinary git, by whoever owns the destination branch — a person, or a job they wrote. Once
+   the destination carries `changesets/<id>/`, the changeset is landed.
 
-An agent asked "may this land?" runs `git pair check` and stops there. Do not merge. Asking for the merge is
-yours; performing it is not, and `change integrate` is written so that the
-request cannot outlive the gate that cleared it.
+Asked to land a change, you declare it: `check`, `change integrate`, push, then report what is waiting. The
+merge becomes yours only where the repository's own workflow says it is; a session instruction does not make it
+yours, and `git pair change integrate` is never the merge.
 
-A stacked child waits for its parent, and the next step says so: while the parent's record is not in the
-destination, the sentence beside the verdict is the parent's landing, and `change integrate` refuses to
-declare the child. A passing `check` on a child is not permission to merge the child. Land the bottom of the
-stack first, with ordinary git, by whoever owns the branches.
+A stacked child cannot be landed until its parent has been landed. `change integrate` will refuse to
+declare the child. A passing `check` on a child is not permission to merge the child. Work to land the bottom of
+the stack first.
 
-Two things to know, because you may be asked about them. Rebasing after an approval invalidates it:
-`check` compares the tree against what the review looked at, ignoring `changesets/<id>/`, so anything
-committed outside that directory after an approval makes the approval stale. Re-offer with
-`change ready` and wait again. Never edit a review marker's `Review-Head` to make the comparison line
+Rebasing after an approval invalidates it: a review names the commits it looked at, and rebasing rewrites
+those. Merging the destination in does not — it rewrites nothing, and content the destination already carries is
+credited rather than counted as unreviewed work. A review stays valid while:
+
+- the commit the approval's `Review-Head` names is still an ancestor of `HEAD`
+- nothing outside `changesets/<this-changeset-slug>/` has changed since the newest marker, except content the
+  destination already carries
+
+Merging an unlanded parent in is not credited, because the destination does not carry it yet: that is the stack
+rule above, not a way around it.
+
+Never edit a review marker's `Review-Head` to make the comparison line
 up — that trailer is the reviewer's statement about what they looked at, not yours to amend.
 
 `git pair status` and `git pair queue` also report a finding that is somebody's unfinished housekeeping and
@@ -241,7 +260,7 @@ away. The finding is not thereby false — `status --changeset <id>` still reads
 
 ## Mistakes that cost a review cycle
 
-- Asking the user to review instead of running `git pair change ready`.
+- Asking the user to review without running `git pair change ready`.
 - Reading a fresh review with `git pair diff --unreviewed`, getting an empty diff, and concluding the
   reviewer said nothing.
 - Running `review submit --approve` because it is the command that changes the state you want.

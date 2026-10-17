@@ -293,14 +293,14 @@ func newRootCommand(a *app) *cobra.Command {
 		Long: `git-pair adds a thin review protocol on top of ordinary git commits, files and
 refs. It does not replace git, your editor, your difftool, or your forge.
 
-Review state lives in the repository: a changeset directory holds ABOUT.md and
-review threads, lifecycle markers are commits carrying Review-* trailers, and a
+Review state lives in the repository: a changeset directory holds ABOUT.md, the review
+discussion file, lifecycle markers are commits carrying Review-* trailers, and a
 landing is the changeset directory in the history of the branch it merged into.
 git-pair writes no ref of its own.
 
 Author commands:   git pair init, then git pair change ready | integrate | unready | abandon, with
                    change stack and change combine as the exits from a branch carrying two
-Reviewer commands: git pair review open | about | thread | submit | history
+Reviewer commands: git pair review open | about | discussion | submit | history
 Reading state:     git pair queue | status | diff
 Gate:              git pair check, then merge into the destination with ordinary git`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -483,7 +483,7 @@ func (a *app) resolveNamed(ctx context.Context, repo *git.Repo, slug string, db 
 			return changeset.Changeset{}, lifecycle.Summary{}, "", err
 		}
 		// The range end is the newest commit in the run, and the range start is what the run sits on, so the
-		// markers, the verdict and the thread files are read from the same span the branch carried before it
+		// markers, the verdict and the discussion file are read from the same span the branch carried before it
 		// was merged away.
 		anchor := chain.Head
 		// The stack keys come from the same read as the base, because the landed read needs them for the same

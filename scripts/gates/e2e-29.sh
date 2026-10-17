@@ -85,11 +85,30 @@ fi
 $G change unready; check "unready again is a no-op, not a refusal" 0 $?
 $G change ready; check "ready again after unready" 0 $?
 
-step "reviewer: edits code, adds thread, submits --block"
+step "reviewer: edits code, writes the discussion, submits --block"
 printf '  // What happens if these execute concurrently?\n' >> src/service.ts
 printf '  // Please use a transaction here\n' >> src/service.ts
-$G review thread "concurrency tests" </dev/null; check "review thread (no tty refuses)" 2 $?
-[ -f changesets/booking-transaction/concurrency-tests.md ] && echo "  ok: thread file created" || { echo "  FAIL: thread not created"; FAILED=1; }
+# The discussion file arrives on demand rather than at `init`, so the replay asks for it the way an
+# author with no terminal would: `change discussion` writes the scaffold and reports it. The JSON form
+# is what an agent reads, so `created` is asserted on both runs — true the first time, false once the
+# file exists, which is the difference between writing a file and stamping an existing one.
+out=$($G change discussion --json)
+if printf '%s' "$out" | grep -q '"created": true'; then
+  echo "  ok: change discussion wrote the scaffold"
+else
+  echo "  FAIL: change discussion did not report created:true - $out"; FAILED=1
+fi
+out=$($G change discussion --json)
+if printf '%s' "$out" | grep -q '"created": false'; then
+  echo "  ok: the second run leaves the file alone"
+else
+  echo "  FAIL: the second run did not report created:false - $out"; FAILED=1
+fi
+[ -f changesets/booking-transaction/DISCUSSION.md ] && echo "  ok: DISCUSSION.md exists" || { echo "  FAIL: no DISCUSSION.md"; FAILED=1; }
+# The reviewer's route to the same file opens an editor, so it refuses with exit 2 here and names the
+# file instead of hanging on a terminal that is not there (PRD §10.3).
+$G review discussion </dev/null; check "review discussion (no tty refuses)" 2 $?
+printf '## Concurrency tests\n\nBlock both transactions immediately before the capacity read.\n' >> changesets/booking-transaction/DISCUSSION.md
 $G review submit --block; check "review submit --block" 0 $?
 $G review history; check "review history" 0 $?
 # Nothing under refs/git-pair. A review is a commit on the branch and nothing else: git-pair writes no ref at

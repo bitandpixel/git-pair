@@ -2,8 +2,8 @@
 
 `git-pair` is a local-first peer-review tool for human-plus-agent pairs. It puts a thin
 review protocol on top of ordinary git commits, files, editors and difftools rather
-than replacing any of them: a changeset directory holds the change description and review
-threads, lifecycle transitions are commits carrying `Review-*` trailers, review-relative
+than replacing any of them: a changeset directory holds the change description and the
+review conversation, lifecycle transitions are commits carrying `Review-*` trailers, review-relative
 diff spans answer "what happened since my last review", and a landing is read from the
 destination branch's own tree — the branch carrying `changesets/<id>/` is what makes a changeset
 landed, so there is no record to write, nothing to publish, and no ref to fetch. All review state lives
@@ -120,18 +120,18 @@ booking-transaction
 ```
 
 The reviewer runs `git pair review` for the TUI, or works from the CLI. Here they edited
-`src/service.ts` directly, added a thread, and blocked:
+`src/service.ts` directly, wrote the opening of the review conversation, and blocked:
 
 ```bash
-$ git pair review thread "concurrency tests"     # then edits the file in $EDITOR
-Created thread changesets/booking-transaction/concurrency-tests.md
+$ git pair review discussion                       # then edits the file in $EDITOR
+Wrote the scaffold to changesets/booking-transaction/DISCUSSION.md
 
 $ git pair review submit --block
 Review submitted: booking-transaction
   outcome: block
   commit:  332887c
   files:   2 changed
-           changesets/booking-transaction/concurrency-tests.md
+           changesets/booking-transaction/DISCUSSION.md
            src/service.ts
   next:    author: `git pair change feedback`, address it, then `git pair change ready`
 ```
@@ -141,7 +141,7 @@ line and the `Review-Outcome: block` / `Review-Changeset: booking-transaction` t
 
 The author waits for that submission and reads it. `change wait` blocks until a review makes
 the changeset actionable and names the commit; `change feedback` shows the submission itself —
-the thread, the `ABOUT.md` edits, and any code the reviewer touched:
+the `DISCUSSION.md` reply, the `ABOUT.md` edits, and any code the reviewer touched:
 
 ```bash
 $ git pair change wait --json
@@ -160,8 +160,8 @@ $ git pair change wait --json
 
 $ git pair change feedback --stat
 git pair change feedback: review 332887c (block) on booking-transaction
- changesets/booking-transaction/concurrency-tests.md | 12 ++++++++++++
- src/service.ts                                      |  1 +
+ changesets/booking-transaction/DISCUSSION.md | 12 ++++++++++++
+ src/service.ts                              |  1 +
  2 files changed, 13 insertions(+)
 ```
 
@@ -173,11 +173,12 @@ still reporting where things stand). `change feedback` is the author's "what did
 just tell me?". It is not the reviewer's command: right after a submission the
 reviewer's own span, `diff --unreviewed`, is empty because the submission is the newest commit.
 
-The author addresses the feedback in code, `ABOUT.md` and the thread, and deletes the reviewer's
+The author addresses the feedback in code, `ABOUT.md` and `DISCUSSION.md`, and deletes the reviewer's
 comment from the source once the work it asked for is done. History already holds the exchange: the
 review commit introduced the line and a later commit removed it, so the comment needs no
 transcription. Record it only when it still needs discussion, elaboration or another person, and
-then in an `Addressed feedback` section of `ABOUT.md` or in a new thread (PRD §19.5). What the
+then in `DISCUSSION.md` — one file, no schema, and `git pair change discussion` writes the scaffold when
+the author is somewhere without a terminal (PRD §19.5). What the
 reviewer sees next is the review-relative span, where review lines are deleted — that is how a
 reviewer sees feedback being consumed:
 
@@ -214,16 +215,16 @@ src/service.ts:11
 
 Review these additions before continuing: apply each one, then remove the comment it came
 from. The review commit keeps its history. Record anything that needs further discussion in
-ABOUT.md or in a new thread. Reviewer text in ABOUT.md counts the same way: keep the
-description you want, in your own words.
+DISCUSSION.md; git pair change discussion writes the scaffold. Reviewer text in ABOUT.md
+counts the same way: keep the description you want, in your own words.
 
 To intentionally preserve them:
   git pair change ready --allow-surviving-review-additions
 
 Also still present from review 332887c (changeset artifacts, not blocking):
-  changesets/booking-transaction/concurrency-tests.md:1  # concurrency tests
-  changesets/booking-transaction/concurrency-tests.md:4  ## Response
-  changesets/booking-transaction/concurrency-tests.md:6  Will do.
+  changesets/booking-transaction/DISCUSSION.md:1  # Discussion
+  changesets/booking-transaction/DISCUSSION.md:3  ## Concurrency tests
+  changesets/booking-transaction/DISCUSSION.md:5  Could we block both transactions before the check?
 git-pair: cannot mark changeset booking-transaction ready: 2 review addition(s) from 332887c still survive unchanged
 ```
 
@@ -443,14 +444,18 @@ tidy is a move into `changesets/.landed/` rather than a delete. Prune what has b
 wanted; a changeset retired by trunk's tree alone comes back with the deletion. A terminal record is a
 marker on a branch, so pruning trunk does not retire that either.
 
-**ABOUT.md and threads.** `changesets/<changeset>/ABOUT.md` is the canonical description of
+**ABOUT.md and DISCUSSION.md.** `changesets/<changeset>/ABOUT.md` is the canonical description of
 the change: the author writes it, the reviewer edits it, and edits committed by a review
 submission are high-level feedback — high-level enough that they do not block a merge, and
-blocking enough that `change ready` refuses until the author settles them (PRD §19.5). Any
-other `.md` file in that directory is a thread;
-`git pair review thread "concurrency tests"` creates or reopens
-`changesets/<changeset>/concurrency-tests.md`. Replies are appended sections and git history
-supplies authorship and order. Both are plain Markdown with no schema.
+blocking enough that `change ready` refuses until the author settles them (PRD §19.5).
+`changesets/<changeset>/DISCUSSION.md` is where the two of them talk: one file per changeset,
+written by both, with no schema — the headings, their level, and the shape of a reply belong to
+the people having the conversation, and nothing parses it. `git pair review discussion` opens it in
+the editor and `git pair change discussion` writes it without a terminal; either creates it from
+the scaffold when it is absent. Replies are appended sections and git history
+supplies authorship and order. Both are plain Markdown. A team that wants a shape for the
+conversation commits `.git-pair/discussion-template.md` and it becomes the scaffold, read by the
+same three rules as `.git-pair/about-template.md`.
 
 **Markers are commits.** `ready` and a review outcome are commits, not state variables:
 
@@ -484,7 +489,7 @@ deleted — which is why the first one is a commit.
 `Review-Diff-Id` is the third of the three, and the only one that names the content: the identity of the
 recorded diff between that base and that head, in two halves separated by `+`. The first hashes what the diff
 changes — modes, blob OIDs, statuses, paths — with the review record left out: this changeset's directory and
-every ancestor's, in both of their homes, so replying to a review thread cannot change the identity of the
+every ancestor's, in both of their homes, so a reply appended to `DISCUSSION.md` cannot change the identity of the
 approval the reply is written into, and a parent's landing cannot read as the child deleting the parent's
 review. The second is `git patch-id --verbatim` over the patch the same `git diff` prints, which is what
 changed and where: it is what lets an approval stand when the destination edited a file this branch also
@@ -558,7 +563,7 @@ visible: the reason line counts what arrived since the marker, e.g.
 One command asks the harder question, and it is the one whose output gets trusted.
 `git pair check` compares the tree between the newest marker and `HEAD` and refuses when anything
 outside `changesets/<slug>/` differs, because a merge is about to act on its answer and a gate that passed
-that head would certify unreviewed content as reviewed. A commit touching only `ABOUT.md` or a thread is
+that head would certify unreviewed content as reviewed. A commit touching only `ABOUT.md` or `DISCUSSION.md` is
 not that drift, and comparing trees rather than counting commits is what keeps merges and rebases from
 reporting a change that never happened.
 
@@ -614,7 +619,7 @@ disagreeing is a command to fix, not a precedence to remember.
 
 Those spans answer the reviewer's questions. The author's question — _what did the reviewer
 just tell me?_ — is `git pair change feedback`, which diffs the submission itself
-(`review^..review`) and so shows the threads, the `ABOUT.md` edits and any code the reviewer
+(`review^..review`) and so shows the `DISCUSSION.md` reply, the `ABOUT.md` edits and any code the reviewer
 edited in one place. Immediately after a submission the two disagree completely:
 `--unreviewed` is empty, because the submission _is_ the newest commit.
 
@@ -628,14 +633,14 @@ Coming back to a changeset you already reviewed is common enough to have its own
 `review open --unreviewed`. When nothing has been committed since that submission there is
 nothing after it to show, so the session opens instead on what the submission was reviewing:
 the changeset as it stood when it was made, `merge-base(base, review)..<review>^`. The end is
-the submission's _parent_ because a review commit carries what the reviewer wrote — threads,
-`ABOUT.md` edits, sometimes a file — and those are their output, not the work under review. It
+the submission's _parent_ because a review commit carries what the reviewer wrote — the
+`DISCUSSION.md` reply, `ABOUT.md` edits, sometimes a file — and those are their output, not the work under review. It
 says so on stderr. With no review
 submitted it refuses and points at `review open`. Every command without a span flag stays on
 the full changeset.
 
 The same range applies to source, `ABOUT.md` and
-threads, and the resolved span is always printed to stderr:
+`DISCUSSION.md`, and the resolved span is always printed to stderr:
 `git pair diff: last review..current`.
 
 **git-pair writes no refs.** Not at landing, not while work is in flight, not anywhere: `change ready`,
@@ -664,7 +669,7 @@ recent review submission is considered. Additions outside `changesets/` block, a
 addition to any `ABOUT.md`: the description is the author's account of the change, so the
 reviewer's text in it is feedback to settle rather than conversation to keep (PRD §19.5). The
 rest of what sits inside that directory is reported as "changeset artifacts, not blocking": a
-thread answered by appending still contains every line the reviewer wrote, so blocking on those
+reply appended to `DISCUSSION.md` still contains every line the reviewer wrote, so blocking on those
 would fail almost every real changeset and push users toward reflexive use
 of the override. See `docs/plans/completed/gitpr-mvp/research/git-plumbing-findings.md`.
 
@@ -802,15 +807,16 @@ duplicate it exists to catch.
 | `change integrate`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | `--allow-feedback`, `--no-hooks`, `--trust-hooks-once`                                                                                                                                                                                                                                                                                                                                                                                   | declares the approved head ready to be merged, as one empty marker commit (`Review-State: integrating`, `Review-Head`): no ref, no push, no merge (§9.9). Runs `git pair check`'s gate first, as the same code, and names every failed condition — so a declaration cannot be made for work the gate would refuse. The `pre-integrate` hooks run after the gate, so a suite that costs minutes is not started to find the declaration refused for a reason `check` already knew; `post-integrate` runs after the marker (§11.4). Refuses a stacked child whose parent is not landed: the automatic merge would land it on a branch review can still rewrite. Idempotent at the head it declared; a commit after that head is declared next time, and neither no-op fires a hook                                                                                                                                               |
 | `change unready`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `--no-hooks`                                                                                                                                                                                                                                                                                                                                                                                                                             | withdraws the changeset from the review queue; records `Review-State: working` when the changeset is in review (including a changeset whose declaration is being taken back), otherwise succeeds and records nothing; refuses a changeset the integration branch already holds; runs `pre-unready` before the marker and `post-unready` after it, and neither when there was nothing to withdraw (§11.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `change stack --base <branch>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | records the stack link between this branch's changeset and the one <branch> carries: writes `base: <branch>` and `base-changeset: <id>` into the child's `CHANGESET.yaml` and nowhere else, prints the old and new value of both keys, and says to offer the branch again; refuses when the two branches share no changeset, when more than one could be the level below, or when this branch carries more than one changeset of its own |
-| `change combine --into <id>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `--threads`                                                                                                                                                                                                                                                                                                                                                                                                                              | folds one changeset into another when the two directories are one piece of work: the disappeared one moves whole to `changesets/<id>/.combined/<gone>/` and stays inert there, the survivor keeps its own `base:` and `base-changeset:` and gains one line pointing at the archive, and the command refuses while either changeset is offered or under review. `--threads` copies the disappeared threads, prefixed with its id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `change combine --into <id>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `--discussion`                                                                                                                                                                                                                                                                                                                                                                                                                           | folds one changeset into another when the two directories are one piece of work: the disappeared one moves whole to `changesets/<id>/.combined/<gone>/` and stays inert there, the survivor keeps its own `base:` and `base-changeset:` and gains one line pointing at the archive, and the command refuses while either changeset is offered or under review. `--discussion` appends the disappeared changeset's `DISCUSSION.md` to the survivor's, under one line naming the archive the text came from; it appends and never rewrites, the archived original stays put, and a changeset that never had the file brings nothing across                                                                                                                                                                                                                                                                                      |
 | `change abandon`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `--no-hooks`                                                                                                                                                                                                                                                                                                                                                                                                                             | records the terminal `Review-State: abandoned` and nothing else; `change ready`, `change unready` and `review submit` refuse against it afterwards; refuses a changeset the integration branch already holds; idempotent, and the second run — which writes nothing — runs no hooks (§11.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `change tidy [<id>...]`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `--all-landed`, `--dry-run`, `--json`                                                                                                                                                                                                                                                                                                                                                                                                    | `git pair change tidy` moves the directory of a changeset the integration branch already holds from `changesets/<id>/` to `changesets/.landed/<id>/`, as one commit of renames on this branch. A changeset like any other: it rides a changeset and a review, the reviewer sees the whole list as renames in one span, and the move reaches trunk through the normal flow. Refuses an id that has not landed, a dirty working tree, and an id this branch does not carry — each with its own reason, and none of them moving part of the list. A landed parent whose child is still open moves, and the run notes the branch whose changeset records it as its base. A second run is a no-op naming the directory it found. Once the move is in the destination it also ends the `LANDED UNREVIEWED` report for that changeset, because the reviewed rename commit is the acknowledgement (§12)                               |
-| `change feedback`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `--stat`, `--name-only`, `--changeset <slug>`                                                                                                                                                                                                                                                                                                                                                                                            | the diff of the most recent review submission (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `change feedback`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `--stat`, `--name-only`, `--changeset <slug>`                                                                                                                                                                                                                                                                                                                                                                                            | the diff of the most recent review submission (`review^..review`): `DISCUSSION.md`, `ABOUT.md` edits and reviewer code edits together; exits 2 if there is no submission                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `change discussion`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `--json`                                                                                                                                                                                                                                                                                                                                                                                                                                 | writes `changesets/<id>/DISCUSSION.md` from the scaffold when it is absent and reports `Created <path>`, or `<path> already exists` when it is already there; fully non-interactive and opens nothing — the author's half of the file `review discussion` opens, and the scaffold a team shapes by committing `.git-pair/discussion-template.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `change wait`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | `--fetch`, `--interval <dur>` (default `10s`), `--timeout <dur>`                                                                                                                                                                                                                                                                                                                                                                         | blocks until the state leaves `READY` for `BLOCKED`/`FEEDBACK`/`APPROVED`; read-only; `--fetch` runs `git fetch` before each check so a review pushed from another clone is noticed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `review`, `review open`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `--unreviewed`, `--since-review[=N]`, `--base-review[=N]`, `--base-commit`, `--base-ref`, `--head-review[=N]`, `--head-commit`, `--head-ref`, `--no-hooks`, `--trust-hooks-once`                                                                                                                                                                                                                                                         | TUI; needs a terminal; full changeset unless a span flag says otherwise; a `--head-*` flag opens a historical span, which is read-only; with no subcommand `review` is `review open` and takes the same flags                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `review reopen`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `--no-hooks`, `--trust-hooks-once`                                                                                                                                                                                                                                                                                                                                                                                                       | TUI on `<last review>..current`, the work that has landed since you reviewed; needs a terminal; refuses if no review exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `review about`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | —                                                                                                                                                                                                                                                                                                                                                                                                                                        | opens `ABOUT.md` in the editor, creating it if missing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `review thread [title...]`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | —                                                                                                                                                                                                                                                                                                                                                                                                                                        | slugifies the title, reopens an existing match, prompts for a title only with a terminal                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `review discussion`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | —                                                                                                                                                                                                                                                                                                                                                                                                                                        | opens `changesets/<id>/DISCUSSION.md` in the editor, writing the scaffold first when the file is absent; needs a terminal — edit the file directly instead                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `review submit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | one of `--block`/`--feedback`/`--approve`, `-m/--message <text>`, `--no-stage`, `--allow-hook-failure`, `--no-hooks`, `--trust-hooks-once`                                                                                                                                                                                                                                                                                               | stages the whole tree by default, commits (empty commits allowed), and writes nothing else: a submission is a marker commit, not a ref move. The commit names what it reviewed with `Review-Head`, which is what lets `check` refuse a rewritten history, and where it measured with `Review-Base-Head`, which is what lets `check` tell which side moved, and what it measured with `Review-Diff-Id`, the identity of that diff in two halves — the content, and the rendered hunks (`<version>:<raw>+<patch>`) (§11.3). `pre-submit` hooks run after the staging and before the commit; `--allow-hook-failure` records the verdict over a refusing one and says so in both output forms, and `--trust-hooks-once` is the way to submit a review _of_ the hooks themselves — the submission that refuses while the tracked tree is unrecorded is refusing the reviewer of that content to record an opinion about it (§11.4) |
 | `hooks`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `--trust`                                                                                                                                                                                                                                                                                                                                                                                                                                | lifecycle hooks: what is configured, and the way to accept the tracked root. Reports both roots — `.git-pair/hooks/<point>/` committed, `<git-common-dir>/git-pair/hooks/<point>/` per-clone — each hook's path and executability, and any entry that is not a lifecycle point, since a misspelled directory is otherwise indistinguishable from no check at all. The points are both sides of the six actions a changeset meets — `pre-`/`post-ready`,                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `-unready`, `-abandon`, `-integrate` — both sides of the gate: `pre-check` and `post-check`, and the reviewer's `pre-submit` and `post-submit`. A pre-hook's nonzero exit refuses the operation with exit **1**; a post-hook's makes the command exit nonzero too, prints the hook's output, and reverses nothing — the message names the state the changeset is in, because a reader told only "failed" assumes the marker was never written. A tracked hook runs only after `git pair hooks --trust` records its content, and an edit after that is a new acceptance; the per-clone root is your own file and needs none, which is where a reviewer attaches a check for a repository they cannot edit. `--trust` prints the hook names and the hash it is approving. Acceptance has three states because there are two reasons a tracked tree does not run: `unrecorded` means nobody has accepted anything, `changed` means the repository shipped a new version since you did — `--json` answers `trust_state` beside `trusted` and carries `tree_hash` when the two differ, and the changed case names both hashes on stderr, because that is the moment a check starts not running for everybody who pulled. A clone in that state can keep running the version it read by copying that content into the per-clone root. PRD §11.4 |
@@ -903,7 +909,7 @@ the finding for work in the destination that the destination holds no approval o
 which prints a read rather than a command, because nothing closes it with one (a merged `change tidy` ends
 the report, and it is a commit rather than an invocation). Reading a landed changeset by
 id (`status --changeset <id>`, no branch carrying it) reads the same chain, so its `state`, its verdict and
-its thread files come from the destination's history — with the squash case above the honest limit, and the
+its discussion file come from the destination's history — with the squash case above the honest limit, and the
 fields say so rather than reporting an empty range as a verdict. `stack` walks the chain the child's
 `parent-changeset:` starts: one entry per ancestor, nearest first, with the ancestor's id, the branch it was
 stacked on and whether this clone still has that branch, and the commit the destination carries it at. It is
@@ -1301,8 +1307,8 @@ git pair change ready               # hand off to the reviewer
 # changed your mind about being done? git pair change unready
 # (do it before continuing, rather than leaving the offer standing)
 git pair change wait --fetch --json # block until a reviewer acts; exits 1 on --timeout
-git pair change feedback            # read that submission: threads, ABOUT.md, code edits
-# address feedback in code, ABOUT.md and threads; commit normally
+git pair change feedback            # read that submission: DISCUSSION.md, ABOUT.md, code edits
+# address feedback in code, in ABOUT.md, and in DISCUSSION.md; commit normally
 git pair review history --json      # enumerate review commits
 git pair change ready               # again
 git pair check                      # assert integration-readiness; $? is the answer
@@ -1327,8 +1333,8 @@ and exit instead of asking, even with a terminal attached.
 
 Refuse with exit 2 when stdin or stdout is a pipe or a regular file, because launching an
 editor or the TUI against one would hang: `review` with no subcommand, `review open`, `review reopen`,
-`review about`, and `review thread`
-(which creates the thread file and then refuses to open it). Read and write those files
+`review about`, and `review discussion`
+(which writes the scaffold and then refuses to open it). Read and write those files
 directly instead; they are ordinary files in the working tree. `/dev/null` counts as a
 character device, so redirecting to `/dev/null` does not produce this refusal — it makes
 `review open` and `review reopen` fail with `could not open a new TTY` (exit 1) and
@@ -1693,9 +1699,7 @@ and the reviewed counter under those:
 │ base   main                          │
 │ span   unreviewed ▸                  │
 │ ABOUT.md                             │
-│ ▾ Threads                            │
-│     does-the-lock-cover-the-map.md   │
-│     + new thread…                    │
+│ DISCUSSION.md                        │
 ╰──────────────────────────────────────╯
 ═══════════════════════════════════════
 ▾ ○ src/
@@ -1706,7 +1710,7 @@ and the reviewed counter under those:
 0 / 2 reviewed
 ────────────────────────────────────────
 j/k move  gg/G ends  ctrl-d/u half page  ctrl-f/b page  h/l fold  c fold all  enter open  d diff
-space reviewed  e edit  a about  t threads  T new thread  v spans  V picker  s submit  p preview
+space reviewed  e edit  a about  v spans  V picker  s submit  p preview
 z full  f files  tab preview  q quit
 ```
 
@@ -1737,15 +1741,15 @@ the moment the list was scrolled, and the row it cost was the one a page had jus
 has room for one, the diff. The box is not a third stop: it is the other half of the list column, so `k`
 from the tree's top row steps into it and `j` from its last row steps back out. `Tab` hands the keys back to
 the half that gave them up, and each half keeps its own cursor, so `Tab` returns to the row it left rather
-than to the top of a list. `f` names the tree from wherever the keys are, and `a` and `t` name a row of the
-box — `ABOUT.md`, the thread heading — and take the keys with them. Where there is no room for a column
+than to the top of a list. `f` names the tree from wherever the keys are, and `a` names a row of the
+box — `ABOUT.md` — and takes the keys with it. Where there is no room for a column
 beside the list, the diff's half of the toggle is its whole-screen form: `Tab` opens it, and from inside it
 `Tab` and `f` close it on the way back. The navigation keys belong to the half holding them and mean the
 same thing in both: `j`/`k` a row, `gg`/`G` the two ends of the half holding them, `ctrl-d`/`ctrl-u` half
 a page, `ctrl-f`/`ctrl-b` a page. A page is counted in the window you are standing in, which is why
 paging stops at the shared edge while a single step crosses it. A jump is counted the same way, for the
 same reason: the two halves are two windows of two heights, so `gg` and `G` stop at the ends of the half
-with the keys, and the way into the other half is `Tab`, `f`, `a` or `t` — keys that each say where they
+with the keys, and the way into the other half is `Tab`, `f` or `a` — keys that each say where they
 are going. A half with no rows has no ends of its own, and there the jump goes to the half that has them.
 (`ctrl-d` used to quit, which is why paging used to be
 `ctrl-f` and `ctrl-b` and nothing else; `ctrl-c` and `q` are what quit.) The shortcut bar is the bar of the
@@ -1761,7 +1765,7 @@ so at any depth below the top a directory and the files beside it name themselve
 what a flat list with arrows in it is supposed to look like. A child's name sits four cells right of the row
 holding it, and two under a top-level directory, which has no indent to spend its arrow on.
 `h` and `l` fold and unfold the directory under the cursor — arrows do the same, and `Enter` does
-both, the way it does for the thread heading — and `c` folds the whole tree and opens it again,
+both — and `c` folds the whole tree and opens it again,
 which is how a changeset of a hundred files gets read for shape before it gets read for detail.
 Folding a directory that was hiding the cursor leaves the cursor on the directory, not on whatever
 row its old index now points at.
@@ -1814,8 +1818,8 @@ column beside rows that do not.
 A directory's mark is its subtree's: `✓` when every file under it is reviewed, `○` when none is,
 and between the two the count of what is left (`▸ ◐ src/ 2/7`) — a tick there would be a claim about
 files nobody opened. `Enter` does whatever the row under the cursor is for: the difftool for a
-file, fold or unfold for a directory and for the `Threads` heading, the title prompt for `+ new
-thread…`, and for a changeset document the same decision `d` makes. `d` means diff on any row. A file
+file, fold or unfold for a directory, and for a changeset document the same decision `d` makes. `d` means
+diff on any row. A file
 row always has a comparison; so does a directory, where git expands the pathspec into every file the
 span changed under it — `d` is "diff this package". A document
 is worth diffing only when the span changed it _and_ it already existed where the span starts — on a
@@ -1829,12 +1833,12 @@ names the two keys that do reach what is under it instead. `Space`
 toggles reviewed on a file row — which stays under the cursor, since marking is not navigation — and
 on a directory row it sets every file under it, folded or not, because a fold is a way of looking at
 the list rather than a statement about what has been read; the next press clears them. The rows in the
-box are read rather than diffed, so marking one says so. `a` and `t` put the
-cursor on `ABOUT.md` and on the thread heading from wherever the keys are in the column, and take the keys
-with them; `Enter` on the heading collapses or expands the list, and `e` on the row `a` landed on opens
-`ABOUT.md` in the editor whatever the span did. `T` prompts for a new thread from anywhere — in the
-footer's own line, over the list and the diff both, rather than as a screen that takes them away while the
-title is typed; `v`
+box are read rather than diffed, so marking one says so. `a` puts the
+cursor on `ABOUT.md` from wherever the keys are in the column and takes the keys with it, and `e` on the row
+`a` landed on opens `ABOUT.md` in the editor whatever the span did. `DISCUSSION.md` is the row under it and
+needs no key of its own — it is one arrow away — and `e` there writes the scaffold first when the file is
+absent, so the reviewer is never handed an empty buffer. `d` and `Enter` decide on it exactly as they decide
+on `ABOUT.md`: both rows are the changeset's own documents, not entries in the tree. `v`
 steps to the next span this session has been in — the span it opened on, the full and
 unreviewed presets, and any span chosen with `V` — every stop in order, wrapping, so nothing on
 the ring is unreachable. It means _next_ whatever else just happened, a refusal included: one press
@@ -1842,23 +1846,20 @@ of `v` out of a read-only span is not something the ring can promise, since what
 whatever the session visited next, and getting to a span you can review in one keystroke is `V`,
 whose head column always offers `Current`. A stop whose commit, tag or ref has since gone is stepped
 over and named in the notification band, reason included — the span stays on the ring, so a tag that
-comes back is a stop again; `s` opens a submit prompt taking `b`, `f` or `a`; `q` quits.
-A thread created from the list is written, opened in the editor, and left selected in the box, so the
-reviewer can fill it in and come straight back to it; the preview keeps showing the file it was showing,
-because the row it reads that diff from is the file tree's cursor, which a thread has no business moving.
-The thread heading counts what it hides —
-`▸ Threads (3)` collapsed, plain `▾ Threads` once the threads are on screen — and a rule
-separates the whole list from the shortcut bar, so the bar reads as chrome rather than as more
-rows.
+comes back is a stop again; `s` opens a submit prompt taking `b`, `f` or `a` — the list column's only prompt,
+and it reads a key rather than a line of text; `q` quits.
+A rule separates the whole list from the shortcut bar, so the bar reads as chrome rather than as more rows.
 
 The box is a box because its rows are not files, and a row of paths under a counter of files reads as a
-file. It holds the span the review is measured against, `ABOUT.md`, the thread heading, the threads, and
-the row that starts another — what a reviewer reads before choosing a file, above the files it is
-choosing between. The first time the box takes the keys it opens on `ABOUT.md` rather than on its first
+file. It holds the span the review is measured against, `ABOUT.md`, and `DISCUSSION.md` — what a reviewer
+reads before choosing a file, above the files it is
+choosing between. `DISCUSSION.md` is on the list whether or not the file exists, because the row is how a
+reviewer learns the conversation has a home; with nothing there the reading pane says so and names `e`, the
+key that writes the scaffold and opens the editor. The first time the box takes the keys it opens on `ABOUT.md` rather than on its first
 row: the span above it is the thing a reviewer _changes_, and the span is what they set when they came,
 not what they came to read. Once the reviewer moves the cursor themselves the box leaves it where they put
 it, including across a trip to the editor. It is capped at a third of the space the terminal gives and scrolls inside its own
-borders, so forty threads are a reason to read the box rather than a reason to hide the tree behind it;
+borders, so a tall box is a reason to read the box rather than a reason to hide the tree behind it;
 each border says how many rows are off that end (`↑ 3` in the top border, `↓ 3` in the bottom one), which
 is a note inside the border rather than a row of its own because a note that came and went would move the
 whole layout. The borders
@@ -1899,14 +1900,14 @@ and a line too wide for the column is broken rather than cut, with its colour ca
 Tabs are shown as the spaces they advance to, because a tab the width maths scores as zero is a row the
 terminal wraps for you.
 
-The changeset box's rows come into the pane on the same terms: put the cursor on ABOUT.md or on a thread —
-with `a` or `t`, or by walking up out of the tree — and the pane shows the file's own text, with the file's
-own line numbers, rather than a diff of it. A diff of a document against nothing reports every line as
+The changeset box's rows come into the pane on the same terms: put the cursor on `ABOUT.md` or on
+`DISCUSSION.md` — with `a`, or by walking up out of the tree — and the pane shows the file's own text, with the
+file's own line numbers, rather than a diff of it. A diff of a document against nothing reports every line as
 added, which is true and says nothing about what the document says, and the pane is the place on this screen
-for reading text. The Threads heading is the whole conversation at once: every thread in the order the box
-lists them, each named above its own text, which is what the threads are when the list is collapsed. The
-header counts what is on show in the one place counts sit, beside the name: a diff's `+N −M`, a document's
-lines, the heading's threads.
+for reading text. A document row whose file is not there yet is answered rather than left blank: the pane
+prints the path and then `does not exist yet — e creates it`, which names both what is missing and the key
+that writes it. The header counts what is on show in the one place counts sit, beside the name: a diff's
+`+N −M`, or a document's lines.
 
 Two file rows come into the pane as the file, not as a patch: one the span created, one it moved unchanged.
 A new file's patch is its own text with a `+` on every line. An unchanged move's patch is two lines about a path.
@@ -1914,7 +1915,7 @@ Every other file row keeps its patch, because a rename with edits has edits to s
 
 `Enter` follows the same rule the pane applies: on a file the span created it opens the editor, because
 the comparison the key would otherwise open has nothing on one side of it. That is the choice the screen
-already makes for an `ABOUT.md` or a thread the changeset invented. It is a different choice from `d`,
+already makes for an `ABOUT.md` or a `DISCUSSION.md` the changeset invented. It is a different choice from `d`,
 which opens the difftool on that same row: a reviewer who wants to see the `+` on every line has a key
 that says so. An unchanged move keeps `Enter` on the difftool, because there the rename is the comparison
 and it is the reason the file is under review at all.
@@ -1972,13 +1973,13 @@ the one place it does not, and the reason is that the list is still drawn here. 
 leave the pane without quitting: the diff is one of the two stops the keys have, and a stop you can only
 leave by backing out of it is not a stop. What `p` no longer does is hide the pane — in a
 terminal with room for two columns the diff is on screen, and the key that leaves it alone is `Esc`. While the diff holds the keys nothing
-that changes the review happens: `Space`, `e`, `T`, `s` and the rest are keys that do not occur, the
+that changes the review happens: `Space`, `e`, `s` and the rest are keys that do not occur, the
 same promise the whole-screen preview makes, with the difference that here the list is still on the
-screen and the row you are not marking is one you can see. The two jumps into the box — `a` and `t` — work
-here and take the keys with them, the way `tab` and `f` do: the box is drawn beside the diff you are
-reading, so the cursor they move is one you can see move, and the pane follows the jump on to ABOUT.md or the
-threads, which is usually why you left the diff. The overlay is the exception and the rule is the box — the
-overlay is the one screen where the box is not drawn — so under it those two are keys that do not occur, and
+screen and the row you are not marking is one you can see. The one jump into the box — `a` — works
+here and takes the keys with it, the way `tab` and `f` do: the box is drawn beside the diff you are
+reading, so the cursor it moves is one you can see move, and the pane follows the jump on to `ABOUT.md`,
+which is usually why you left the diff. The overlay is the exception and the rule is the box — the
+overlay is the one screen where the box is not drawn — so under it that key is one that does not occur, and
 the way to the box is the key that brings the list back. The frame says which column has the keys
 three ways: the divider becomes a double rule (`║` instead of `│`), the pane's file line stops being a
 caption and becomes a title, and the list's cursor loses its reverse video so the screen never carries
@@ -2002,7 +2003,7 @@ search should not cost you the match you were reading; the second `Esc` gives th
 before the field existed. `Backspace` at an empty field closes it and `ctrl-u` kills what has been typed,
 as they do in a shell's prompt, and the field stays on the pane's bottom row whatever the length of the
 file — a short one is padded rather than leaving the prompt floating under its last line. While the field is open it owns the keys — `q` types a `q` rather than quitting,
-and the pane's scrolling keys wait — which is the same promise the thread title makes. The term outlives the
+and the pane's scrolling keys wait — which is the same promise the submit prompt makes. The term outlives the
 file it was typed in: move to another row and the same term marks that one too, which is how a name you are
 chasing across a changeset gets chased; the row it had landed on does not travel, because it means nothing
 in the new file.
@@ -2076,7 +2077,7 @@ computing the merge base itself, and how the same span can be described from eit
 A span can end at a commit instead of your working tree — `review open --head-review=-1`,
 `--head-commit=abc1234`, `--head-ref=origin/main` — and that is a look at history, not a review. The
 screen stops offering anything that changes something: the counter's place is taken by
-`HISTORICAL · READ ONLY`, files and directories lose their reviewed gutter, `+ new thread…` is gone, and the
+`HISTORICAL · READ ONLY`, files and directories lose their reviewed gutter, and the
 shortcut bar lists only what still works. Folding the tree is one of the things that still works — it
 changes nothing about the review, and a historical changeset is as worth reading for shape as a live
 one. Pressing a key that does not work says why, names the head
@@ -2412,7 +2413,7 @@ git pair change ready --allow-surviving-review-additions
 
 Only the most recent review counts. Additions outside `changesets/` block, and so does an
 addition to any `ABOUT.md`: keep the description you want in the author's own words, or use the
-flag to say you meant to keep the reviewer's wording. Surviving thread text is listed as
+flag to say you meant to keep the reviewer's wording. Surviving `DISCUSSION.md` text is listed as
 non-blocking. Resolving a blocking addition in an implementation file means applying it and then
 removing the reviewer's inline comment; an edit the author keeps
 is what the flag is for (PRD §19.5). It is the only hatch left:

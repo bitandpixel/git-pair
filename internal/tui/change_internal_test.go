@@ -85,7 +85,7 @@ func modelOver(t *testing.T, f *gittest.Fixture) reviewModel {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	m := reviewModel{ctx: ctx, sess: sess, width: 140, height: 30, threadsOpen: true, previewOn: true}
+	m := reviewModel{ctx: ctx, sess: sess, width: 140, height: 30, previewOn: true}
 	m.refresh()
 	return m
 }

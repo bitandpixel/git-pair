@@ -63,16 +63,16 @@ func printSurvivalReport(w io.Writer, r survival.Report, header, hint string) {
 	// hint below is what says so when the author meant to keep it.
 	fmt.Fprintf(w, "\nReview these additions before continuing: apply each one, then remove the comment it came\n"+
 		"from. The review commit keeps its history. Record anything that needs further discussion in\n"+
-		"ABOUT.md or in a new thread. Reviewer text in ABOUT.md counts the same way: keep the\n"+
-		"description you want, in your own words.\n")
+		"DISCUSSION.md; git pair change discussion writes the scaffold. Reviewer text in ABOUT.md\n"+
+		"counts the same way: keep the description you want, in your own words.\n")
 	if hint != "" {
 		fmt.Fprintf(w, "\nTo intentionally preserve them:\n  %s\n", hint)
 	}
 }
 
 // printArtifactSurvivals reports surviving reviewer text inside the changeset
-// directory. It never blocks: a thread answered by appending still contains
-// every line the reviewer wrote. Reviewer text in ABOUT.md is not here — it
+// directory. It never blocks: an answer appended to the discussion file still
+// contains every line the reviewer wrote. Reviewer text in ABOUT.md is not here — it
 // belongs to Code and blocks.
 func printArtifactSurvivals(w io.Writer, r survival.Report) {
 	if len(r.Artifacts) == 0 {

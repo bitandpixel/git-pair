@@ -50,23 +50,24 @@ func TestSubmissionRecordsTheIdentityOfTheDiffItReviewed(t *testing.T) {
 	}
 }
 
-// The changeset's own directory is outside the recorded identity, because that is where ABOUT.md keeps the
-// review threads. Without the exclusion, replying to a comment would change the identity of the approval
-// the reply is written into — the reader's own words turning against the review they were part of.
-func TestAReplyToTheReviewThreadKeepsTheRecordedIdentity(t *testing.T) {
+// The changeset's own directory is outside the recorded identity, because that is where the
+// review conversation is written. Without the exclusion, answering a point in the discussion
+// file would change the identity of the approval the answer is written into — the reader's own
+// words turning against the review they were part of.
+func TestAReplyInTheDiscussionKeepsTheRecordedIdentity(t *testing.T) {
 	f, slug, _, firstMarker := approvedChangeset(t)
 	before := f.Trailers(firstMarker)["Review-Diff-Id"]
 	if before == "" {
 		t.Fatal("the submission recorded no diff identity")
 	}
 
-	f.Append("changesets/"+slug+"/ABOUT.md", "\n### comment (author)\n\nfixed\n")
-	f.Commit("reply to the review thread")
+	f.Write("changesets/"+slug+"/DISCUSSION.md", "# Discussion\n\n## the comment\n\nfixed\n")
+	f.Commit("reply in the discussion")
 	ready(t, f)
 	submit(t, f, "approve")
 
 	if after := f.Trailers(f.Head())["Review-Diff-Id"]; after != before {
-		t.Errorf("the recorded identity moved from %s to %s across a reply to the review thread", before, after)
+		t.Errorf("the recorded identity moved from %s to %s across a reply in the discussion file", before, after)
 	}
 }
 

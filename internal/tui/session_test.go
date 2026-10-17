@@ -620,26 +620,21 @@ func TestSessionStaysOnTheRefItPinned(t *testing.T) {
 	}
 }
 
-// A thread created during a review appears in the thread list (PRD §14's `T`).
-func TestSessionThreadsAndChangesetAccessors(t *testing.T) {
+// The changeset box lists its rows whether or not the files exist, so the session has to name both
+// documents before either is written. DiscussionPath is the same helper the CLI uses for the file, so
+// the row and the command cannot drift apart and point at two different files.
+func TestSessionNamesTheChangesetDocumentsAndAccessors(t *testing.T) {
 	e := newEnv(t)
 	sess := e.session(t, span.Full())
 
-	threads, err := sess.Threads()
-	if err != nil {
-		t.Fatalf("Threads: %v", err)
+	if want := "changesets/" + slug + "/DISCUSSION.md"; sess.DiscussionPath() != want {
+		t.Errorf("DiscussionPath() = %q, want %q", sess.DiscussionPath(), want)
 	}
-	if len(threads) != 0 {
-		t.Errorf("Threads = %v, want none before a thread exists", threads)
-	}
-
-	e.f.WriteChangesetFile(slug, "concurrency-tests.md", "# Concurrency tests\n\nQuestion?\n")
-	threads, err = sess.Threads()
-	if err != nil {
-		t.Fatalf("Threads after creating one: %v", err)
-	}
-	if len(threads) != 1 || !strings.HasSuffix(threads[0], "concurrency-tests.md") {
-		t.Errorf("Threads = %v, want the new thread", threads)
+	// Neither document is scaffolded by opening a review, and the rows are listed either way: the
+	// row is the offer to write the file, so it cannot depend on the file being there.
+	if _, err := os.Stat(filepath.Join(e.repo.Dir, sess.DiscussionPath())); !os.IsNotExist(err) {
+		t.Errorf("opening a review wrote %s (stat err = %v); the session reads, it does not author",
+			sess.DiscussionPath(), err)
 	}
 	if sess.Changeset().Slug != slug {
 		t.Errorf("Changeset().Slug = %q, want %q", sess.Changeset().Slug, slug)
@@ -653,7 +648,8 @@ func TestSessionThreadsAndChangesetAccessors(t *testing.T) {
 }
 
 // A changeset document is read rather than diffed, so the Session hands over the file's own lines -- the same
-// text `e` opens in an editor -- and names each thread when the question is about the whole conversation.
+// text `e` opens in an editor. Nothing captions a part of it: the reviewer writes their own headings inside
+// the one discussion file, and the pane's title already says which file the text came from.
 func TestSessionDocumentsAreTheirOwnText(t *testing.T) {
 	e := newEnv(t)
 	sess := e.session(t, span.Full())
@@ -664,8 +660,16 @@ func TestSessionDocumentsAreTheirOwnText(t *testing.T) {
 		t.Fatalf("removing the changeset's ABOUT.md: %v", err)
 	}
 	doc := sess.Document(context.Background(), sess.AboutPath())
-	if !strings.Contains(doc.Err, "does not exist yet") {
+	if !doc.Missing || !strings.Contains(doc.Err, "does not exist yet") {
 		t.Errorf("Document for a file that is not there = %+v, want that said plainly", doc)
+	}
+	// The same answer for the discussion file, which is the row `e` on creates: the box lists it
+	// whether or not the conversation has started, so the pane has to be able to say it hasn't.
+	if _, err := os.Stat(filepath.Join(e.repo.Dir, sess.DiscussionPath())); err == nil {
+		t.Fatalf("the fixture already has a %s, so the missing-file case tests nothing", sess.DiscussionPath())
+	}
+	if doc := sess.Document(context.Background(), sess.DiscussionPath()); !doc.Missing {
+		t.Errorf("Document for a discussion that has not started = %+v, want Missing", doc)
 	}
 
 	e.f.WriteChangesetFile(slug, "ABOUT.md", "# booking\n\nWhy this changed.\n")
@@ -673,8 +677,8 @@ func TestSessionDocumentsAreTheirOwnText(t *testing.T) {
 	if doc.Err != "" {
 		t.Fatalf("Document: %v", doc.Err)
 	}
-	if len(doc.Sections) != 1 || doc.Sections[0].Name != "" {
-		t.Fatalf("one file's Document = %+v, want one section with no name: the pane's title says which file",
+	if len(doc.Sections) != 1 {
+		t.Fatalf("one file's Document = %+v, want one section: the pane's title says which file",
 			doc.Sections)
 	}
 	// The blank line between a heading and its prose is part of the prose.
@@ -682,18 +686,24 @@ func TestSessionDocumentsAreTheirOwnText(t *testing.T) {
 		t.Errorf("Document lines = %q, want the file's own lines with its blank kept", got)
 	}
 
-	e.f.WriteChangesetFile(slug, "locking.md", "# Locking\n\nWhy there?\n")
-	e.f.WriteChangesetFile(slug, "naming.md", "# Naming\n\nWhy not?\n")
-	all := sess.ThreadDocument(context.Background())
-	if len(all.Sections) != 2 {
-		t.Fatalf("ThreadDocument = %+v, want both threads", all.Sections)
+	// Two questions in the one discussion file. Nothing parses the file, so the reviewer's own headings
+	// are the only structure in it and the only thing that can order it: reading the document has to
+	// hand back the whole file, headings and all, in the order the reviewer wrote them.
+	e.f.WriteChangesetFile(slug, "DISCUSSION.md",
+		"# Discussion\n\n## Locking\n\nWhy there?\n\n## Naming\n\nWhy not?\n")
+	all := sess.Document(context.Background(), sess.DiscussionPath())
+	if all.Err != "" {
+		t.Fatalf("Document of the discussion: %v", all.Err)
 	}
-	if all.Sections[0].Name != "locking.md" || all.Sections[1].Name != "naming.md" {
-		t.Errorf("the threads are not named: %q, %q -- text with nothing saying where it came from reads as one file",
-			all.Sections[0].Name, all.Sections[1].Name)
+	if len(all.Sections) != 1 {
+		t.Fatalf("the discussion read as %d sections, want one body: it is one file", len(all.Sections))
 	}
-	if got := strings.Join(all.Sections[1].Lines, " "); !strings.Contains(got, "Why not?") {
-		t.Errorf("the second thread's text is missing: %q", got)
+	got := strings.Join(all.Sections[0].Lines, "\n")
+	if at, to := strings.Index(got, "## Locking"), strings.Index(got, "## Naming"); at < 0 || to < 0 || at > to {
+		t.Errorf("the discussion did not read as one file in its own order:\n%s", got)
+	}
+	if !strings.Contains(got, "Why not?") {
+		t.Errorf("the second heading's text is missing:\n%s", got)
 	}
 }
 

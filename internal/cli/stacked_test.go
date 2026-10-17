@@ -7,7 +7,7 @@ import (
 )
 
 // PRD §21: "Each stacked branch has its own independent changeset" — its own
-// ABOUT.md, threads, review history, review outcome and review archive ref. Stack
+// ABOUT.md, discussion file, review history, review outcome and review archive ref. Stack
 // relationships only influence the configured base ref.
 func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T) {
 	f := newRepo(t)
@@ -78,14 +78,16 @@ func TestStackedChangesetsResolveBaseToSiblingWithIndependentState(t *testing.T)
 	}
 	mustNotContain(t, got.stdout, "+func Lock()", "the lower changeset's implementation must not be in the upper span")
 
-	// Independent artifacts: each changeset directory has its own ABOUT.md and threads.
-	f.WriteChangesetFile("booking-transaction-tests", "flaky-test.md", "# Flaky test\n\nWhy is this one flaky?\n")
+	// Independent artifacts: each changeset directory has its own ABOUT.md and its own
+	// discussion file, and neither is read through the other's directory.
+	f.WriteChangesetFile("booking-transaction-tests", "DISCUSSION.md", "## flaky test\n\nWhy is this one flaky?\n")
 	f.WriteChangesetFile("booking-transaction", "ABOUT.md", "# booking-transaction\n\nLower description.\n")
 	if got := f.ChangesetFile("booking-transaction-tests", "ABOUT.md"); got == f.ChangesetFile("booking-transaction", "ABOUT.md") {
 		t.Error("stacked changesets share one ABOUT.md")
 	}
-	if threads := f.Threads("booking-transaction-tests"); len(threads) != 1 {
-		t.Errorf("upper threads = %v, want its own thread file", threads)
+	if got, want := f.ChangesetFile("booking-transaction-tests", "DISCUSSION.md"),
+		"## flaky test\n\nWhy is this one flaky?\n"; got != want {
+		t.Errorf("upper DISCUSSION.md = %q, want the upper changeset's own conversation", got)
 	}
 
 	// Reviewing the upper changeset writes a commit and no ref, so there is nothing for it to move

@@ -15,7 +15,7 @@ A review may consist naturally of:
 - direct edits to source code,
 - ordinary source-code comments,
 - edits to a changeset's high-level `ABOUT.md`,
-- creation or modification of focused Markdown discussion threads,
+- a section appended to the changeset's `DISCUSSION.md`,
 - an explicit review outcome such as blocked, feedback-only, or approved.
 
 The Git commit boundary provides the primary semantics. A commit identified as a review commit means that changes introduced by that commit should be interpreted as review feedback.
@@ -90,10 +90,10 @@ new source-code comment
 ABOUT.md edit
     → high-level review feedback
 
-new Markdown file
-    → focused review thread
+new section in DISCUSSION.md
+    → a turn in the review conversation
 
-edit to existing thread
+reply appended to that file
     → continuation of that discussion
 ```
 
@@ -124,7 +124,7 @@ names the branch in `base:` and the changeset that branch carries in `base-chang
 The command compares what the two branches carry and refuses rather than guess which of two directories is the level
 below.
 
-The other answer is `git pair change combine --into <id>`: when the two directories are one piece of work rather than a stack, the disappearing one moves whole under `changesets/<into>/.combined/<id>/` and the survivor keeps its own base. An archive there is inert - it answers no id, it is neither landed nor active, and it is not offered as a thread.
+The other answer is `git pair change combine --into <id>`: when the two directories are one piece of work rather than a stack, the disappearing one moves whole under `changesets/<into>/.combined/<id>/` and the survivor keeps its own base. An archive there is inert - it answers no id, it is neither landed nor active, and no command reads it as live state.
 
 ## Author
 
@@ -150,7 +150,7 @@ Files within the active changeset directory, including:
 
 - `ABOUT.md`
 - changeset metadata
-- Markdown review threads
+- `DISCUSSION.md`
 
 ## Landed
 
@@ -170,8 +170,7 @@ changesets/
   booking-transaction/
     CHANGESET.yaml
     ABOUT.md
-    concurrency-tests.md
-    transaction-boundary.md
+    DISCUSSION.md
   .landed/
     waitlist-rebooking/
       CHANGESET.yaml
@@ -523,35 +522,37 @@ directory.
 
 ---
 
-# 7. Review Threads
+# 7. The Discussion File
 
-Focused discussions live as ordinary Markdown files within the changeset directory.
-
-Example:
+The review conversation lives in one ordinary Markdown file within the changeset directory:
 
 ```text
 changesets/booking-transaction/
-  concurrency-tests.md
+  DISCUSSION.md
 ```
 
-No mandatory conversational schema is required.
+Both parties write it. The reviewer opens it with `git pair review discussion` (§10.3); the author
+reaches the same file with `git pair change discussion` (§9.11). A reply is an appended section, so the
+file grows by accretion rather than by editing under someone else's text.
+
+No schema is imposed on its contents. The headings, their level, and the shape of a reply belong to the
+two people having the conversation. Nothing parses the file: no command counts its headings, no command
+lists its subjects, and the review screen renders no list of topics from it.
 
 Example:
 
 ```md
-# Concurrency tests
+# Discussion
+
+## Concurrency tests
 
 I'm not convinced the current test actually causes the two transactions
 to overlap at the capacity check.
 
 Could we explicitly block both transactions immediately before the
 check, then release them together?
-```
 
-An agent may later append or modify the thread:
-
-```md
-## Response
+### Response
 
 The original test was concurrent at the promise level, but the fixture
 serialized access earlier than expected.
@@ -560,7 +561,41 @@ I changed the test to synchronize both transactions immediately before
 the capacity read.
 ```
 
-Git history provides authorship and sequencing, so the document format should remain natural and lightweight.
+Git history provides authorship and sequencing, so the format should remain natural and lightweight: a
+reply is an appended section and the commit that carried it already says who wrote it and when.
+Splitting the conversation into one file per subject was the earlier shape, and it was dropped: it bought
+a list of subjects nobody needed and a tool that had to keep that list named and ordered, and it charged
+every reviewer a title before they could write a sentence.
+
+### The scaffold
+
+The built-in scaffold is a title and nothing else:
+
+```md
+# Discussion
+```
+
+`git pair init` does not write the file. It arrives on demand — from `git pair change discussion`, from
+`git pair review discussion`, or from `e` on its row in the review screen (§14) — each of which writes
+the scaffold first when the file is absent. An empty scaffold in every changeset directory is visible
+bloat; a file somebody chose to open is not. The review screen lists the row whether or not the file
+exists, so a reviewer can still discover that it is there to write.
+
+A team that wants a shape for it writes `.git-pair/discussion-template.md` at the repository root and
+commits it. That file becomes the scaffold instead of the built-in title, and it is read by the same
+three rules as `.git-pair/about-template.md` (§6): a file with nothing in it is no template and the
+built-in is written; a file that exists and cannot be read is an error rather than a quiet fallback,
+because a person who committed a template expects their template; and `{{slug}}` is replaced with the
+changeset id, the same token `ABOUT.md` scaffolds use. The template is a working-tree file, so `init`
+never commits it.
+
+### No resolution state
+
+The file records no resolution state. Nothing in it is marked open, answered or resolved, and no command
+computes such a thing from it. A resolved/unresolved notion would be state, and state wants a ref, a
+file, or a server — all of which this product's thesis refuses while the commits can carry the answer
+(§13.4). Whether a point is settled is decided by the next review submission, not by a field the file
+would have to hold. §27 keeps the deferral.
 
 ---
 
@@ -589,6 +624,7 @@ git-pair
 │   ├── abandon
 │   ├── wait
 │   ├── feedback
+│   ├── discussion
 │   ├── stack
 │   ├── combine
 │   └── tidy
@@ -597,7 +633,7 @@ git-pair
 │   ├── open
 │   ├── reopen
 │   ├── about
-│   ├── thread
+│   ├── discussion
 │   ├── submit
 │   └── history
 │
@@ -815,7 +851,7 @@ git pair change feedback
 Requirements:
 
 - diff `latest-review^..latest-review`, using ordinary Git diff output,
-- include the review's changeset artifacts (threads, `ABOUT.md` edits) and any direct code edits the reviewer made,
+- include the review's changeset artifacts (`DISCUSSION.md`, `ABOUT.md` edits) and any direct code edits the reviewer made,
 - support `--stat` and `--name-only`,
 - exit non-zero with a clear message when the changeset has no review submission yet.
 
@@ -1011,10 +1047,12 @@ own means the answer is the other command.
 
 `git pair change combine --into <id>` folds two directories that describe one change. The disappearing changeset moves
 whole into `changesets/<into>/.combined/<id>/`, which every reader treats as inert: it answers no id, it is neither
-landed nor active, and it is not offered as a thread. The survivor keeps its own `base:` and `base-changeset:` - a
+landed nor active, and no command reads it as live state. The survivor keeps its own `base:` and `base-changeset:` - a
 fold is not a licence to move the comparison a review is measured against - and its `ABOUT.md` gains one line pointing
-at the archive rather than a copy of the disappeared prose. `--threads` copies the disappeared threads into the
-survivor, each prefixed with its id so two threads called `scope.md` do not collide.
+at the archive rather than a copy of the disappeared prose. `--discussion` appends the disappeared changeset's
+`DISCUSSION.md` to the survivor's, under one line naming the archive the text came from. It is appended and never
+rewritten, and the archived original stays where it is: the two conversations were held separately, and a fold does
+not get to pretend otherwise. A changeset that never had the file brings nothing across.
 
 Both commands refuse while either changeset is offered or under review, because a reviewer's diff must not change
 underneath them, and both leave the branch needing to be offered again: a record that changes the base changes what
@@ -1195,6 +1233,32 @@ Exit codes: `0` moved or nothing to do, `1` refused, `2` usage, `3` git failed (
 
 ---
 
+## 9.11 `git pair change discussion`
+
+Creates the changeset's discussion file, without a terminal.
+
+```bash
+git pair change discussion
+```
+
+Writes `changesets/<changeset>/DISCUSSION.md` from the scaffold (§7) when it is absent and reports
+`Created <path>`; when the file is already there it reports `<path> already exists` and changes nothing.
+It is non-interactive and opens nothing: the file is ordinary Markdown and the author edits it with their
+own editor.
+
+This is the author's half of one file the reviewer opens with `git pair review discussion` (§10.3), and it
+exists because the author is usually standing where a terminal is not: the answer to a comment in a source
+file, or to a line of `git pair change feedback`, written as prose where the rest of the conversation
+already lives. Neither command is the other's prerequisite — either writes the scaffold, so the file
+cannot arrive in two shapes depending on who asked first.
+
+`--json` emits `changeset`, `discussion` and `created`.
+
+Exit codes: `0` written or already present, `2` no changeset for this branch, `1` the file could not be
+written or the repository's template could not be read (§22).
+
+---
+
 # 10. Reviewer Commands
 
 ## 10.1 `git pair review open`
@@ -1213,7 +1277,7 @@ Responsibilities:
 - display local reviewed/unreviewed progress,
 - provide shortcuts to external editor/difftool,
 - expose `ABOUT.md`,
-- expose review threads,
+- expose the review discussion file,
 - allow user to mark files done/undone.
 
 The TUI is an orchestration interface rather than a source editor.
@@ -1255,31 +1319,36 @@ git pair review about
 
 The TUI should temporarily relinquish terminal control while the editor runs and resume/redraw after it exits.
 
-## 10.3 `git pair review thread`
+## 10.3 `git pair review discussion`
 
-Creates or opens a focused review-thread Markdown file.
+Opens the changeset's review discussion file.
 
 Example:
 
 ```bash
-git pair review thread "concurrency tests"
+git pair review discussion
 ```
 
-could create/open:
+opens:
 
 ```text
-changesets/booking-transaction/concurrency-tests.md
+changesets/booking-transaction/DISCUSSION.md
 ```
+
+This is where the review is talked about: what the reviewer wants changed, what the author answered, what
+the two of them settled and how. There is one file per changeset and it has no schema — the headings,
+their level, and the shape of a reply belong to the people writing it (§7).
 
 Requirements:
 
-- slugify title,
-- avoid accidental duplicate threads where possible,
-- if an existing matching thread exists, open it,
-- if no title is supplied in an interactive terminal, prompt for one,
-- open using the editor git resolves.
+- open using the editor git resolves, as `review about` does (§10.2),
+- write the scaffold first when the file is not there, so the reviewer is never handed an empty buffer and
+  the file cannot arrive in two shapes depending on who asked for it,
+- refuse with exit **2** when there is no terminal, and say what to do instead: edit
+  `changesets/<changeset>/DISCUSSION.md` directly, because it is an ordinary file in the working tree.
 
-Thread files should remain ordinary Markdown.
+The author's route to the same file is `git pair change discussion` (§9.11), which writes that scaffold
+without needing a terminal at all.
 
 ## 10.4 `git pair review submit`
 
@@ -1304,8 +1373,7 @@ The commit may include:
 - source-code edits,
 - source-code comments,
 - ABOUT edits,
-- new thread files,
-- thread responses/changes.
+- a section appended to `DISCUSSION.md`.
 
 ### `--feedback`
 
@@ -1360,7 +1428,7 @@ child is measured against is often deleted before the next clone arrives to read
 The first half hashes the raw name-status description of the diff between the recorded base and the recorded
 head — modes, pre- and post-image blob OIDs, statuses and paths — with the review record excluded: this
 changeset's directory and every ancestor's, in both of their homes, because the record lives there and a
-reply to a review thread must not change the identity of the approval that reply is written into, and because
+reply appended to `DISCUSSION.md` must not change the identity of the approval that reply is written into, and because
 a landing is a move of that record before it is a change of code (§21.1). The second half, where it exists,
 is the identity of the same diff _as rendered_: `git patch-id --verbatim` over the `-U3` patch that the same
 `git diff` prints beside those records, which is what changed and where.
@@ -2241,7 +2309,8 @@ Hooks placed inside the submission primitive instead would fire for the command 
 screen — which is the surface reviewers actually use.
 
 **They run after staging.** A submission stages the reviewer's content first: source edits made while reading,
-thread files, the `ABOUT.md` edit. A hook that ran before that would approve a submission it could not see.
+the `DISCUSSION.md` reply, the `ABOUT.md` edit. A hook that ran before that would approve a submission it could
+not see.
 So the hook sees the index the review commit is about to carry, and `pre-submit` fires before any review ref
 exists — a refusal writes no commit, no review ref, and no archive.
 
@@ -2533,7 +2602,7 @@ told about and the branch a pipeline would merge into cannot disagree.
   show are two questions, and a replayed landing is the case where they come apart.
 
 Reading a landed changeset by id, with no branch carrying it, reads the same chain: the `state`, the
-verdict and the thread files come from the destination's history. The stack above a child is walked the
+verdict and the discussion file come from the destination's history. The stack above a child is walked the
 same way — one entry per ancestor, each with the commit the destination carries it at — and the walk costs
 a bounded number of git reads per step, which is what keeps `status` cheap as a repository grows.
 
@@ -2627,10 +2696,7 @@ Example:
 │ base   booking-transaction   │
 │ span   unreviewed ▸          │
 │ ABOUT.md                     │
-│ ▾ Threads                    │
-│     concurrency-tests.md     │
-│     locking.md               │
-│     + new thread…            │
+│ DISCUSSION.md                │
 ╰──────────────────────────────╯
 
 ▾ ◐ src/booking/  2/3
@@ -2654,7 +2720,7 @@ the destination is the name a reader can use. What that name cannot carry goes o
 │ parent reporting landed      │
 │ span   main...current ▸      │
 │ ABOUT.md                     │
-│ ▾ Threads                    │
+│ DISCUSSION.md                │
 ╰──────────────────────────────╯
 ```
 
@@ -2664,14 +2730,16 @@ vanished read the same in the base row; this line is where the two are told apar
 
 Two regions share the row area and the keyboard: the changeset box above, and the file tree below it,
 with the reviewed counter under the tree. The box holds what the review is made of — the span it is
-measured against, `ABOUT.md`, the thread heading, the threads nested under it, and the entry that starts
-another — so reading what the changeset says about the code and choosing the next file are motions on the
-same screen rather than modes. The heading collapses and counts what it hides — `▸ Threads (2)` collapsed,
-plain `▾ Threads` when they are on screen — so a changeset with many threads stays scannable. `Tab` toggles
+measured against, then the two documents the changeset is written in, `ABOUT.md` and `DISCUSSION.md` —
+so reading what the changeset says about the code and choosing the next file are motions on the
+same screen rather than modes. `DISCUSSION.md` is listed whether or not the file exists yet, because the
+row is how a reviewer discovers it; the reading pane says the file is absent and names the key that writes
+it. `Tab` toggles
 the two stops the keys have — the list column and, where the terminal has room for one, the diff — and `f`
 names the tree instead of walking to the next stop. The box is not a third stop: `k` off the tree's top row
-steps into it and `j` off its last row steps back out, and `a` and `t` name a row of it — `ABOUT.md`, the
-thread heading — from wherever in the column the keys are. Each half keeps its own cursor, so the keys
+steps into it and `j` off its last row steps back out, and `a` names a row of it — `ABOUT.md` — from
+wherever in the column the keys are. The discussion row needs no such key: it is one arrow away from
+`ABOUT.md`, and a screen with two documents in it does not need a jump key for the second. Each half keeps its own cursor, so the keys
 return to the row they left. The navigation keys belong to the half holding them and mean the same thing in
 either: `j`/`k` a row — and one step across the edge the two halves share, which is the only place a step
 leaves the half it started in; `gg`/`G` the two ends of the half holding them, because the two halves are
@@ -2694,7 +2762,7 @@ not a row: a count with a row of its own took one out of the window as soon as t
 the row it took was the one a page had just landed the cursor on.
 
 The box is capped at a third of the space the terminal gives and scrolls inside its own borders, so a
-changeset with forty threads is a reason to read the box rather than a reason to hide the tree behind it;
+changeset with forty files is a reason to read the box rather than a reason to hide the tree behind it;
 each border counts what is off that end (`↑ 3` above the window, `↓ 3` below it), a note placed there
 because a note with
 a row of its own would move the layout as it came and went. The borders are also the box's focus light —
@@ -2722,7 +2790,7 @@ arrow — but those two come out of the indent rather than sitting after it, so 
 directory and the files beside it name themselves in one column. A child's name sits four cells right of the
 row holding it, and two under a top-level directory, which has no indent to spend its arrow on. `h` and `l` fold and unfold
 the directory under the cursor — the left and right arrows do the same, and `Enter` does both, the
-way it does for the thread heading — while `c` folds the whole tree and opens it again, which is how
+way it does for a directory — while `c` folds the whole tree and opens it again, which is how
 a changeset of a hundred files is read for its shape before it is read for its detail. Folding moves
 the cursor onto the directory when it was hiding the row the cursor was on, so no fold can leave the
 cursor somewhere the reviewer did not move it.
@@ -2847,9 +2915,10 @@ attribute. The frame fills the terminal — the row
 area holds the window's height and every row is padded to its width — so the shortcut bar
 sits against the bottom edge rather than under a short list.
 
-The prompts ask in a line of the footer and leave the screen otherwise as it was, so the diff column
-survives a thread title being typed and a submit prompt being answered: the reviewer who pressed `T`
-beside a diff comes back from the editor to that diff rather than to a screen that lost it on the way.
+The submit prompt asks in a line of the footer and leaves the screen otherwise as it was, so the diff
+column survives it: the reviewer who pressed `s` beside a diff comes back from the editor to that diff
+rather than to a screen that lost it on the way. It is the only prompt the list column has, and the screen
+reads no typed text in the list at all.
 
 `p` moves the keys into that column and does nothing else, so a diff longer than the column is read
 with the keys a diff is read with: `j`/`k`, `d`/`u` or `ctrl-d`/`ctrl-u`, `ctrl-f`/`ctrl-b`, `gg` and `G`
@@ -2880,12 +2949,12 @@ disk, so nothing is at stake in the difference. Over the whole-screen overlay `q
 way `esc` and `enter` do, because that screen carries nothing but the diff: the list the key would leave is
 not on it, and on the narrow terminal where the overlay is all the diff can be a `q` that quit would end the
 session for a reviewer who wanted the list back. While the pane holds the keys nothing that changes the review can happen —
-marking, editing, threading and
+marking, editing and
 submitting are keys that do not occur, which is the whole-screen preview's promise extended to a
-column that never hid its list. The two jumps into the box — `a` and `t` — are not among them: they name a
-row, take the keys to it and leave the diff, which is what makes the cursor they move a visible one, and the
-pane follows them on to the document the row points at. Under the whole-screen overlay they are keys that do
-not occur, because the box is not drawn there to receive them; the box is reached there by the keys that
+column that never hid its list. The one jump into the box — `a` — is not among them: it names a
+row, takes the keys to it and leaves the diff, which is what makes the cursor it moves a visible one, and the
+pane follows it on to the document the row points at. Under the whole-screen overlay it is a key that
+does not occur, because the box is not drawn there to receive them; the box is reached there by the keys that
 bring the list back. The frame says which column has the keys by changing what is drawn
 rather than only how it is styled: the divider becomes a double rule, the pane's file line becomes a
 title, and the shortcut bar becomes the pane's own, naming every key it reads and none it does not.
@@ -2927,14 +2996,15 @@ bytes git printed stay on the row as what it is a line of, so a search matches `
 painted with `×`.
 
 The list column's other half is documents rather than files, and the pane reads them the same way it reads
-a diff: ABOUT.md and each thread, when the box's cursor is on them, are shown as their own text with the
-file's own line numbers, and the Threads heading is every thread in the order the box lists them, each named
-above its text. The pane is the screen's place for reading text, and a changeset document is the one thing on
+a diff: `ABOUT.md` and `DISCUSSION.md`, when the box's cursor is on them, are shown as their own text with the
+file's own line numbers. The pane is the screen's place for reading text, and a changeset document is the one thing on
 this screen that is pure text to read; a diff of one against nothing would report every line as added, which
 is true and carries no information about what it says. The header counts what is on show in the one place
-counts sit, beside the name — git's `+N −M` for a diff, lines for a document, threads for the heading — and
+counts sit, beside the name — git's `+N −M` for a diff, lines for a document — and
 the pane follows the box's cursor the way it
-follows the tree's, which is what makes the two halves one column. `Enter` in the pane opens what is on show
+follows the tree's, which is what makes the two halves one column. A document row whose file is not there
+yet is answered rather than left blank: the pane says so and names `e`, the key that writes the scaffold and
+opens it. `Enter` in the pane opens what is on show
 with the rules the row itself would apply: the difftool for a diff, the editor for a document, and the row's
 own refusal where history makes the editor the wrong tool. Over a historical span the document is still read
 from the working tree — it is the file the editor would open — so the header says `working copy` rather than
@@ -2960,8 +3030,8 @@ for the patch of either.
 
 A span whose head is a commit rather than the working tree is a look at history, and the screen
 says so where the reviewer is already looking: the counter's slot carries `HISTORICAL · READ ONLY`,
-the reviewed gutter and the offer to start a thread are absent, and the shortcut bar advertises
-only the keys it can take. Marking, editing, threading and submitting are refused with a message
+the reviewed gutter is absent, and the shortcut bar advertises
+only the keys it can take. Marking, editing and submitting are refused with a message
 naming the head the span is stuck on and the key that gets out — `v`, which lands on a span the
 reviewer can review. Nothing is quietly redirected to a temporary copy of history: the difftool
 over a historical span compares its two pinned commits, so it never shows work the span does not
@@ -3037,14 +3107,14 @@ h/l      fold and unfold the directory under the cursor (left and right arrows d
          h from a file or a closed directory moves up to the directory holding it
 c        fold the whole tree, and open it again
 Enter    activate the row: the editor for a file the span added and for nothing else, difftool
-         for every other file, fold/unfold for a directory, the decision
-         below for ABOUT.md or a thread, collapse/expand for the Threads heading,
-         new-thread prompt for + new thread…
+         for every other file, fold/unfold for a directory, and for a changeset document
+         (ABOUT.md, DISCUSSION.md) the same decision d makes below
 d        open the difftool for the selected row: for a file, or for a directory every file
          the span changed under it; and for a document only when the span changed it and it
          already existed where the span starts — otherwise the document opens in the editor,
          with a note naming the reason
-e        open the selected row in the editor, whatever the span did
+e        open the selected row in the editor, whatever the span did; on a document row whose file
+         is not there yet, write the scaffold first
 p        move the keys into the diff preview column (wide terminals); inert where the diff already
          has them. Where the terminal is too narrow for a second column it takes the screen for the
          diff instead, since there is no column to move into, and is inert there too
@@ -3060,8 +3130,8 @@ j/k      scroll the diff a row; d/u or ctrl-d/ctrl-u half a page, ctrl-f/ctrl-b 
 /        search the file on show: the term marks its matches as it is typed, enter closes the
          field and jumps to the first match at or below the screen, n and N walk the matches
          (wrapping), and esc closes the field keeping the term already committed
-a, t     put the cursor and the keys on ABOUT.md or the Threads heading, leaving the diff;
-         the pane follows them on to the document (not under the overlay, where the box
+a        put the cursor and the keys on ABOUT.md, leaving the diff;
+         the pane follows it on to the document (not under the overlay, where the box
          is not drawn)
 Enter    open what the pane is showing: the difftool, or the editor for a document and for a file
          the span added — the same choice the row makes when the key is pressed on it
@@ -3075,8 +3145,8 @@ q        in the pane, quit — from here as from anywhere else; over the whole-s
          list back, as esc and enter do
 
 a        put the cursor on ABOUT.md (e on that row opens it in the editor)
-t        put the cursor on the Threads heading (Enter collapses or expands the list)
-T        create a review thread
+         DISCUSSION.md sits one arrow below it and has no key of its own; e there
+         writes the scaffold when the file is absent, then opens the editor
 
 v        step to the next span this session has been in: the span it opened on, the full
          and unreviewed presets, and any span chosen with V; from a read-only span, back to
@@ -3339,7 +3409,7 @@ The same range applies uniformly to:
 
 - source files,
 - `ABOUT.md`,
-- review threads,
+- `DISCUSSION.md`,
 - other review artifacts.
 
 ---
@@ -3424,7 +3494,7 @@ Examples may include:
 - inline review comments,
 - direct reviewer code edits,
 - additions to `ABOUT.md`,
-- review thread text.
+- text appended to `DISCUSSION.md`.
 
 The diagnostic should operate on additions from the latest review commit only.
 
@@ -3510,9 +3580,10 @@ conversation files under `changesets/<id>/` that it reports and forgives — is 
 - The author does not copy the comment before deleting it. Git history already holds the exchange: the
   review commit introduced the line (§19.1) and a later commit removed it.
 - The author records the substance when it needs further discussion, elaboration, or collaboration, and not
-  otherwise. There are two homes: an `Addressed feedback` section of `ABOUT.md` (§6), and a new thread
-  (§7). The choice follows the content — a thread is a conversation, `ABOUT.md` describes the change — and
-  neither is a requirement to fill in. `init` does not scaffold the section.
+  otherwise. There is one home: `DISCUSSION.md` (§7), written when the point is still a conversation. The
+  choice does not follow the content into `ABOUT.md`, because `ABOUT.md` describes the change and a
+  conversation is not a description of it; a reviewer's text that landed there is settled the bullet above
+  settles it. `init` scaffolds neither an `Addressed feedback` section nor anything else the author has to fill in.
 - An addition the author keeps is not resolved by deletion. It survives, and §19.2's override acknowledges
   it. That is the normal outcome for a direct code edit (§20) the author accepts.
 
@@ -3587,7 +3658,7 @@ recommends the same declaration for a changeset whose file predates this; it rec
 Each branch has:
 
 - its own `ABOUT.md`,
-- its own threads,
+- its own `DISCUSSION.md`,
 - its own review history,
 - its own review outcome,
 - its own landing, read from the destination when it has one (§13).
@@ -4015,7 +4086,7 @@ Agent behavior:
 5. run `git pair change ready`,
 6. if surviving review additions cause failure, inspect and consciously resolve or explicitly retain them,
 7. run `git pair change wait` — with `--fetch` when the reviewer works in another clone — until it reports an actionable state,
-8. read the submission with `git pair change feedback`: threads, `ABOUT.md` edits and any code the reviewer edited directly,
+8. read the submission with `git pair change feedback`: `DISCUSSION.md`, `ABOUT.md` edits and any code the reviewer edited directly,
 9. address blocking feedback,
 10. update code and discussion documents as appropriate,
 11. commit implementation changes normally,
@@ -4232,7 +4303,7 @@ Potential later enhancements include:
 
 Explicitly given up while the durable-ref layer was being taken out, each with what it would cost:
 
-- **Per-review anchors.** Attaching threads and marks to a specific review submission rather than
+- **Per-review anchors.** Attaching comments and marks to a specific review submission rather than
   to the changeset. Cost: the anchor has to survive the rewrite it describes — a rebase renames
   every commit around it — so it means either a content hash beside the anchor or a rule about
   which anchors die, and both are user-visible in the middle of a review.
@@ -4258,10 +4329,14 @@ Explicitly given up while the durable-ref layer was being taken out, each with w
   hand — which is the boundary
   `TestMergingInWorkThatIsNotTheDestinationsIsRefused` and
   `TestAHandResolvedConflictIsContentTheReviewNeverSaw` pin.
-- **Reviewer identity and thread resolution state.** Per-reviewer permissions, "who is this
-  comment from" as data, and resolved/unresolved threads. Cost: identity is not in git's commit
-  model in any way git-pair can enforce, and thread state is state — it wants a ref, a file, or a
-  server, all of which this product's thesis refuses while the commits can carry the answer.
+- **Reviewer identity and resolution state.** Per-reviewer permissions, "who is this
+  comment from" as data, and an open/resolved mark on a stretch of the discussion file. Cost: identity is
+  not in git's commit model in any way git-pair can enforce, and resolution is state — it wants a ref, a
+  file, or a server, all of which this product's thesis refuses while the commits can carry the answer. The
+  discussion file stays a file (§7) for that reason: nothing in it is marked settled, no command computes
+  what is still open, and the answer to "is this point finished?" is the next review submission. A second
+  file beside it holding that state would be a schema for the conversation, which is the thing §7 refuses
+  to have.
 
 ## Review progress
 
@@ -4340,10 +4415,10 @@ j/k      move through the region that holds the keys
 Tab      toggle the keys between the list column and the diff (f names the file tree; the changeset box
          is the other half of the list column, reached by walking up out of the tree)
 Enter    activate the selected row: the editor for a file the span added, otherwise the difftool,
-         or read a changeset document (whichever gives a real comparison), collapse the thread list,
-         create a thread
+         or read a changeset document (whichever gives a real comparison)
 d        open the difftool for the selected row, falling back to the editor with a note
-e        edit the selected file or document
+e        edit the selected file or document; on a document row with no file yet, write the scaffold
+         first and then open it
 p        move the keys into the diff preview column; inert where the diff already has them.
          Where there is no second column, it takes the screen for the diff
 z        take the whole screen: from the diff, give it the screen or give the screen back to the diff;
@@ -4354,8 +4429,6 @@ ctrl-b   page the preview up
 Space    mark file reviewed/unreviewed
 
 a        put the cursor on ABOUT.md
-t        put the cursor on the Threads heading
-T        create a review thread
 
 v        step through the spans this session has been in:
          opened-on, full changeset, unreviewed, then any span chosen with V;
@@ -4408,7 +4481,7 @@ Within the review:
 - directly edits implementation where useful,
 - adds normal source comments,
 - edits `ABOUT.md`,
-- creates Markdown review threads,
+- writes in `DISCUSSION.md`,
 - marks files reviewed.
 
 Then:
@@ -4433,10 +4506,11 @@ which exits once the submission makes the changeset actionable and names the rev
 git pair change feedback
 ```
 
-which shows the submission itself: the threads, the `ABOUT.md` edits, and the code the reviewer edited directly,
+which shows the submission itself: the `DISCUSSION.md` reply, the `ABOUT.md` edits, and the code the reviewer edited directly,
 
 - addresses review comments and direct edits,
-- responds in code/ABOUT/threads,
+- responds in code, in `ABOUT.md` where the description needs it, and in `DISCUSSION.md` where the point is
+  still a conversation,
 - commits changes.
 
 If any additions from the review submission still survive unchanged:
@@ -4502,7 +4576,7 @@ performed by whoever owns the destination branch. There is no step 4: the destin
 `changesets/<id>/` is the fact that the work landed, not a fact that needs somebody to state it (§13).
 
 **What the merge carried is what the landing keeps.** A merge brings the reviewed chain with it, so
-`git pair status --changeset <id>` reads the approval, the chain and the thread files out of the destination
+`git pair status --changeset <id>` reads the approval, the chain and the discussion file out of the destination
 afterwards. A squash, a rebase-merge or a cherry-pick brings the content and leaves the chain behind, and the
 status report says `reviewed: false` with an empty chain (§13.3). Where that loss matters, the order that
 preserves the history is: land, then `git pair change tidy` the directory into

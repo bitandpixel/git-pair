@@ -59,27 +59,47 @@ func TestChangeCombineArchivesTheDisappearedChangeset(t *testing.T) {
 	ready(t, f).mustSucceed(t, "change ready")
 }
 
-// `--threads` copies rather than moves, and prefixes with the disappeared id so two threads called scope.md do not
-// collide. A thread file is not an implementation change, so the copy cannot move what a reviewer is comparing.
-func TestChangeCombineCopiesThreadsUnderTheDisappearedID(t *testing.T) {
+// `--discussion` appends rather than overwrites: the survivor keeps its own conversation and
+// gains the disappeared changeset's under one line naming the archive, while the archived
+// original stays where the archive put it. Discussion text is not an implementation change, so
+// the append cannot move what a reviewer is comparing.
+func TestChangeCombineAppendsTheDisappearedDiscussion(t *testing.T) {
 	f := twoChangesetsOnOneWorkBranch(t)
-	f.Write("changesets/lexer/scope.md", "# scope\n\nwhat the lexer covers\n")
-	f.Write("changesets/parser/scope.md", "# scope\n\nwhat the parser covers\n")
-	f.Commit("thread files", gittest.WithFiles(map[string]string{
-		"changesets/lexer/scope.md":  "# scope\n\nwhat the lexer covers\n",
-		"changesets/parser/scope.md": "# scope\n\nwhat the parser covers\n",
+	f.Commit("discussion files", gittest.WithFiles(map[string]string{
+		"changesets/lexer/DISCUSSION.md":  "# Discussion\n\n## scope\n\nwhat the lexer covers\n",
+		"changesets/parser/DISCUSSION.md": "# Discussion\n\n## grammar\n\nwhat the parser covers\n",
 	}))
 
-	runIn(t, f.Dir(), "change", "combine", "--into", "parser", "--threads").mustSucceed(t, "change combine")
+	runIn(t, f.Dir(), "change", "combine", "--into", "parser", "--discussion").mustSucceed(t, "change combine")
 
-	if !f.HasWorktreeFile("changesets/parser/lexer-scope.md") {
-		t.Error("the copied thread is not in the survivor under its prefixed name")
+	got := f.Read("changesets/parser/DISCUSSION.md")
+	for _, want := range []string{"what the parser covers", "what the lexer covers", ".combined/lexer/DISCUSSION.md"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the survivor's DISCUSSION.md omits %q:\n%s", want, got)
+		}
 	}
-	if !f.HasWorktreeFile("changesets/parser/.combined/lexer/scope.md") {
-		t.Error("--threads copies: the archived thread has to stay where the archive holds it")
+	if !f.HasWorktreeFile("changesets/parser/.combined/lexer/DISCUSSION.md") {
+		t.Error("--discussion appends: the archived file has to stay where the archive holds it")
 	}
-	if got := f.Read("changesets/parser/scope.md"); strings.Contains(got, "lexer covers") {
-		t.Errorf("the survivor's own thread was overwritten instead of prefixed:\n%s", got)
+	// Order is the point of appending rather than merging: the survivor's own entry came first.
+	if strings.Index(got, "what the parser covers") > strings.Index(got, "what the lexer covers") {
+		t.Errorf("the brought-across text was placed before the survivor's own:\n%s", got)
+	}
+}
+
+// A changeset that never had the file brings nothing across, so the survivor's own discussion
+// is left exactly as it was: the flag has to be able to say nothing.
+func TestChangeCombineWithNothingToBringAcross(t *testing.T) {
+	f := twoChangesetsOnOneWorkBranch(t)
+	f.Commit("only the survivor has a discussion", gittest.WithFiles(map[string]string{
+		"changesets/parser/DISCUSSION.md": "# Discussion\n\n## grammar\n\nwhat the parser covers\n",
+	}))
+	before := f.Read("changesets/parser/DISCUSSION.md")
+
+	runIn(t, f.Dir(), "change", "combine", "--into", "parser", "--discussion").mustSucceed(t, "change combine")
+
+	if got := f.Read("changesets/parser/DISCUSSION.md"); got != before {
+		t.Errorf("the survivor's DISCUSSION.md changed with nothing to bring across:\n%s", got)
 	}
 }
 

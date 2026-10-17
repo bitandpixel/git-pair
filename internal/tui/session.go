@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -726,8 +725,9 @@ func (s *Session) Header() Header {
 // AboutPath is the changeset's ABOUT.md, relative to the repository root.
 func (s *Session) AboutPath() string { return s.cs.AboutPath() }
 
-// Threads lists the changeset's review thread files.
-func (s *Session) Threads() ([]string, error) { return s.cs.Threads(s.repo) }
+// DiscussionPath is the changeset's DISCUSSION.md, relative to the repository root. The box lists
+// the row whether or not the file exists, so this is asked for before the file is ever written.
+func (s *Session) DiscussionPath() string { return s.cs.DiscussionPath() }
 
 // HasVersionAt reports whether path existed in rev. It is what separates a document the span
 // rewrote from one the span invented, which is the difference between a diff with two sides
@@ -781,88 +781,55 @@ func (s *Session) WorkingPatch(ctx context.Context, path string) Patch {
 	return s.diff(ctx, s.current.To, "", path)
 }
 
-// Document is one thing the reviewer reads rather than diffs: ABOUT.md, a thread, or all the threads at
-// once. Its text is the file's own lines, not a diff of them -- a changeset document is prose the reviewer
-// is being asked to read, and diffing it against nothing would show every line as added.
+// Document is one thing the reviewer reads rather than diffs: ABOUT.md or DISCUSSION.md. Its text is
+// the file's own lines, not a diff of them -- a changeset document is prose the reviewer is being
+// asked to read, and diffing it against nothing would show every line as added.
 //
 // The text comes from the working tree, which is the same file `e` opens. Over a historical span that is
 // not the file that span contains, so the pane says so above it rather than quietly showing history that
 // is not there -- the same reason the editor is refused over history and the diff is not.
 type Document struct {
 	Sections []DocSection
-	Capped   bool   // longer than a preview can carry
-	Err      string // why there is nothing to read, if there is none
+	// Missing is the answer "that file is not there yet", as opposed to a read that failed: the box's
+	// two document rows are listed whatever the working tree holds, so the pane says which of the two
+	// this is and names the key that writes the file.
+	Missing bool
+	Capped  bool   // longer than a preview can carry
+	Err     string // why there is nothing to read, if there is none
 }
 
-// DocSection is one file's text inside a Document, with the name to write above it. A Document for a single
-// file has one section with no name, because the pane's title already says which file it is; the name is
-// for the case where several files are shown as one thing to read, where git's bytes -- and this file's --
-// would not say so themselves.
+// DocSection is one file's text inside a Document. A document is one file -- ABOUT.md or
+// DISCUSSION.md -- and the pane's title already says which, so nothing here carries a name: the
+// section exists so a document's text is a list of lines the pane can number, not a blob.
 type DocSection struct {
-	Name  string
 	Lines []string
 }
 
 // Document reads one changeset document.
 func (s *Session) Document(ctx context.Context, path string) Document {
-	return s.document([]string{path}, false)
-}
-
-// ThreadDocument is every thread in the changeset, in the order the box lists them, as one thing to read:
-// the reviewer is asking what the conversation has been, and opening each file in turn to find out is the
-// same read with more steps. Each thread is named above its own text for the same reason the pane's own
-// "you" section is captioned -- text with nothing saying where it came from reads as one document.
-func (s *Session) ThreadDocument(ctx context.Context) Document {
-	paths, err := s.cs.Threads(s.repo)
+	var doc Document
+	data, err := os.ReadFile(absPath(s.repo.Dir, path))
 	if err != nil {
-		return Document{Err: err.Error()}
-	}
-	return s.document(paths, true)
-}
-
-// document reads the named files, one section each, and stops at the same byte the pane stops at: a
-// document longer than that is one to open in the editor.
-func (s *Session) document(paths []string, named bool) Document {
-	var (
-		doc  Document
-		size int
-	)
-	for _, path := range paths {
-		data, err := os.ReadFile(absPath(s.repo.Dir, path))
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				// Not an error worth the word: the box's ABOUT.md row offers to write the file, so
-				// "there is none yet" is the answer the reviewer was looking for.
-				doc.Err = path + " does not exist yet"
-				return doc
-			}
-			doc.Err = err.Error()
+		if errors.Is(err, os.ErrNotExist) {
+			// Not an error worth the word: the box's document rows offer to write the file, so
+			// "there is none yet" is the answer the reviewer was looking for.
+			doc.Missing = true
+			doc.Err = path + " does not exist yet"
 			return doc
 		}
-		if size >= maxPreviewBytes {
-			// Nothing is left to give this file. The pane says it stopped, and the reviewer opens
-			// the rest in the editor.
-			doc.Capped = true
-			break
-		}
-		if size+len(data) > maxPreviewBytes {
-			// What fits, rather than nothing: a document the pane has part of is still the document
-			// the reviewer is deciding whether to go and open.
-			cut := strings.LastIndex(string(data[:maxPreviewBytes-size]), "\n")
-			if cut < 0 {
-				cut = maxPreviewBytes - size
-			}
-			data, doc.Capped = data[:cut], true
-		}
-		size += len(data)
-		name := ""
-		if named {
-			// The file's name is what the box calls the thread, so the pane and the list agree on what
-			// each part of this text is called.
-			name = filepath.Base(path)
-		}
-		doc.Sections = append(doc.Sections, DocSection{Name: name, Lines: splitLines(string(data))})
+		doc.Err = err.Error()
+		return doc
 	}
+	if len(data) > maxPreviewBytes {
+		// What fits, rather than nothing: a document the pane has part of is still the document
+		// the reviewer is deciding whether to go and open.
+		cut := strings.LastIndex(string(data[:maxPreviewBytes]), "\n")
+		if cut < 0 {
+			cut = maxPreviewBytes
+		}
+		data, doc.Capped = data[:cut], true
+	}
+	doc.Sections = []DocSection{{Lines: splitLines(string(data))}}
 	return doc
 }
 

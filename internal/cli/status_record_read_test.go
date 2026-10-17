@@ -8,7 +8,7 @@ import (
 
 // A landed child read after its branch has been tidied away is read from the destination's history: the run
 // of commits on its first-parent line that carries the changeset's directory. That run is the span the read
-// measures, so the markers, the verdict and the thread files are where the branch left them, and the answer
+// measures, so the markers, the verdict and the discussion file are where the branch left them, and the answer
 // is a marker sentence rather than the empty-range apology the ref-driven read used to print — after a merge
 // landing the chain sits *below* the recorded base, and `base..head` there is empty for exactly the changeset
 // whose verdicts matter most.
