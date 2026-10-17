@@ -71,14 +71,28 @@ func LandedDirPath(id string) string {
 // the question is what somebody has deliberately put out of sight, which is a different fact from landed and
 // one the reporting surfaces want on its own terms.
 //
-// The cost is two listings of one tree, so a caller asks it once for a revision rather than per id. The
-// order is the listing's, and filtering it keeps that order.
+// The cost is two listings of one tree, so a caller asks it once for a revision rather than per id. A caller
+// that came for both halves and already holds the active listing hands it in — `LandedIDs` does — rather than
+// making git answer the same question twice. The order is the listing's, and filtering it keeps that order.
 func TidiedIDs(ctx context.Context, repo *git.Repo, rev string) ([]string, error) {
-	filed, err := dirsUnder(ctx, repo, rev, ActiveDirPath(LandedDir))
+	inPlace, err := ActiveIDs(ctx, repo, rev)
 	if err != nil {
 		return nil, err
 	}
-	inPlace, err := ActiveIDs(ctx, repo, rev)
+	return tidiedIDs(ctx, repo, rev, inPlace)
+}
+
+// tidiedIDs is TidiedIDs with the revision's active listing handed in. That listing is the whole definition
+// of the filter — a filed directory that is also in place was not filed away — so a caller holding it holds
+// the answer to the second half, and asking git for the same `ls-tree` again buys nothing.
+//
+// The repeat was invisible where a product run is measured, because the in-process memo serves it, and cost a
+// subprocess everywhere the memo is off: `GIT_PAIR_NO_CACHE` switches off that memo as well as the facts on
+// disk, which is the state `gittest.SpawnShim` and the cost step of `scripts/gates/ci-integrate.sh` measure
+// in. A read that is free in one measurement and billed in the other is the kind of claim a comment should
+// not be trusted with, so the read is simply not made.
+func tidiedIDs(ctx context.Context, repo *git.Repo, rev string, inPlace []string) ([]string, error) {
+	filed, err := dirsUnder(ctx, repo, rev, ActiveDirPath(LandedDir))
 	if err != nil {
 		return nil, err
 	}

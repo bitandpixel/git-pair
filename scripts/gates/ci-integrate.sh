@@ -712,12 +712,28 @@ step "cost: what a stacked branch costs the gate"
 # The first hop costs more than the ones after it, and that is the honest shape rather than an accident to fix:
 # below one level there is nothing to look for, while at two the code has a parent to find, so the reads that
 # locate a changeset on another branch (the destination probe, its .landed tombstone, the branch probe) run for
-# the first time. Recorded 2026-08 with `check --json`: 25 invocations at one level, 43 at two, 52 at three, 61
+# the first time. Recorded 2026-10 with `check --json`: 27 invocations at one level, 46 at two, 55 at three, 64
 # at four. Each hop past the second costs nine - one tree read of that level, two landedness probes, a branch
-# probe, and the log that reads the level's markers.
+# probe, and the log that reads the level's markers. The step from one level to two costs eleven rather than
+# nine, because once there is a parent the destination is also resolved to a commit id so the chain can be keyed
+# by id and not by a ref that moves under the answer.
 #
 # The count comes from a shim placed ahead of git on PATH, because the number that matters is what the binary
 # asked for, not what the code appears to do. A change that moves either number has to say why in this paragraph.
+#
+# These figures are re-recorded because the ones above them had drifted by six and nothing said why. Since the
+# 2026-08 recording three changesets each asked for a read: `611af5b` added the landed-but-unreviewed finding,
+# whose `LandedIDs` asked the destination's active half twice per call; `901a883` resolved the destination to a
+# commit id for the chain's cache key; and `d03f1b1` added the two hook reads, of which `61cc01e` later gave one
+# back. The repeated listing is the one that was removed rather than budgeted for - `LandedIDs` now hands the
+# active listing to the filter that defines the filed half, so a destination is listed once per half - and the
+# other two reads stand, because each answers a fact the verdict asks for and neither is a repeat.
+#
+# One property of this measurement is not visible from the code: `GIT_PAIR_NO_CACHE`, which the assertion below
+# sets, switches off the in-process memo along with the facts on disk, so a read the memo would absorb in a CI
+# run is a subprocess here. That is why `LandedIDs` does not simply re-ask for a listing it already holds, and
+# why a comment saying a read is memoized is not on its own a reason to leave the read in. See
+# `TestLandedIDsListsEachHalfOfTheDestinationOnce`.
 
 ST=$T/stack
 git init -q -b main --bare "$ST.git"
@@ -768,7 +784,7 @@ TWO=$(count_calls stack-two)
 THREE=$(count_calls stack-three)
 FOUR=$(count_calls stack-four)
 ok "measured: $ONE invocations at one level, $TWO at two, $THREE at three, $FOUR at four"
-STACK_CEILING=50 # the recorded cost of a two-level stack, plus five invocations of slack
+STACK_CEILING=51 # the recorded cost of a two-level stack, plus five invocations of slack
 check "a child on a parent stays inside the recorded cost of the stack ($TWO measured, $STACK_CEILING allowed)" 0 \
   "$([ "$TWO" -le "$STACK_CEILING" ] && echo 0 || echo 1)"
 check "each hop past the second costs what the hop before it cost, so the chain is read level by level" 0 \

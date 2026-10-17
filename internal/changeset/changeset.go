@@ -451,15 +451,20 @@ func ActiveIDs(ctx context.Context, repo *git.Repo, rev string) ([]string, error
 // changeset as work in progress — the directory is simply not where it looked. Both halves come from
 // the destination's own tree, so there is nothing to keep in sync and nothing to fetch.
 //
-// The two halves are disjoint: `TidiedIDs` names only the directories that are *not* also in place, so the
-// union needs no dedupe and the two listings answer two questions instead of restating one. The repeat of
-// the active listing inside `TidiedIDs` costs nothing in one run — `ls-tree` is a memoized read.
+// The two halves are disjoint: the filter names only the filed directories that are *not* also in place, so the
+// union needs no dedupe and the two listings answer two questions instead of restating one. Each half is
+// listed once — the active listing built for the first half is handed to the filter rather than asked for
+// again — which is the difference between two `ls-tree` reads and three. The repeat was free in a normal run,
+// where the in-process memo serves it, and a subprocess in every run that measures with `GIT_PAIR_NO_CACHE`
+// set, because that switch takes the memo off along with the facts on disk. `scripts/gates/ci-integrate.sh`
+// measures that way when it bounds what a stacked `check --json` costs, so the number a reader can check is
+// the number with the repeat gone.
 func LandedIDs(ctx context.Context, repo *git.Repo, trunkRef string) ([]string, error) {
 	active, err := ActiveIDs(ctx, repo, trunkRef)
 	if err != nil {
 		return nil, err
 	}
-	filed, err := TidiedIDs(ctx, repo, trunkRef)
+	filed, err := tidiedIDs(ctx, repo, trunkRef, active)
 	if err != nil {
 		return nil, err
 	}
