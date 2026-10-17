@@ -1857,6 +1857,7 @@ credit is the one the decision was about and not a ref that moved underneath it.
 is refused (§21, and `TestAnAncestorsFileIsCreditedOnlyWhereARefCitesIt`,
 `TestMergingAnUnlandedParentInIsNotContentTheReviewNeverSaw`,
 `TestCheckRefusesWhatTheParentGainedAfterItsApproval`,
+`TestCheckRefusesWhatTheParentLandedWithout`,
 `TestCheckRefusesAParentThatHasNeverBeenApproved` and
 `TestCheckDoesNotCreditALandedParentsLaterWork`). `check --json` reports the paths it credited as
 `drift_credited` and the branch that supplied each of them as `drift_credited_by`, so the trust a verdict

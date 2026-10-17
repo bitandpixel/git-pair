@@ -1112,7 +1112,8 @@ parent read is what a child may be credited for, so a parent with no approval of
 branch was rewritten since that approval, and a parent that has landed are all cited for nothing. It is what
 the verdict rests on, reported rather than assumed, so a reader who does not believe a passing gate can see
 what was taken on trust, and by whom. Content no cited branch carries — somebody else's branch, the parent's
-work that arrived after that approval, a conflict resolved by hand — is in `reasons`, not here.
+work that arrived after that approval, the parent's content its own landing did not carry, a conflict resolved
+by hand — is in `reasons`, not here.
 
 This form carries the verdict in `ready` rather than in the exit code: a not-ready run prints its
 JSON and exits 0, so a job piping it into `jq` keeps git-pair's answer separate from the pipeline's.

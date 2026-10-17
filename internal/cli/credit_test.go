@@ -127,6 +127,68 @@ func TestCheckStillCreditsContentTheParentHasSinceTakenBack(t *testing.T) {
 	}
 }
 
+// The reviewer's question, pinned rather than argued: content the child took in on the parent's approval
+// stays citable while the parent is unlanded — the parent's reviewer read it — and stops being citable the
+// moment the parent lands without it. The credit follows content a cited ref actually carries, so a parent
+// that takes the file back before landing leaves the child holding something neither the destination nor any
+// live approval vouches for, and the child refuses rather than landing a file that never reached anyone.
+func TestCheckRefusesWhatTheParentLandedWithout(t *testing.T) {
+	f := approvedChildOnAnUnlandedParent(t)
+
+	f.SwitchTo("alpha")
+	f.Commit("alpha round two", gittest.WithFile("roundtwo.go", "package main\n\nfunc RoundTwo() string { return \"parent's\" }\n"))
+	ready(t, f)
+	submit(t, f, "approve")
+	f.SwitchTo("beta")
+	if _, err := f.Git("merge", "--no-edit", "alpha"); err != nil {
+		t.Fatalf("the merge should be clean: %v", err)
+	}
+	verdict := runIn(t, f.Dir(), "check", "--json").json(t)
+	if isReady, _ := verdict["ready"].(bool); !isReady {
+		t.Fatalf("the child was refused while its parent still held the file: reasons = %v", verdict["reasons"])
+	}
+	if by := creditedBy(t, verdict); by["roundtwo.go"] != "alpha" {
+		t.Fatalf("roundtwo.go credited to %q, want alpha while the parent is unlanded (%v)", by["roundtwo.go"], by)
+	}
+
+	// The parent takes the file back, and lands the smaller state.
+	f.SwitchTo("alpha")
+	f.MustGit("rm", "roundtwo.go")
+	f.Commit("alpha takes the file back before landing", gittest.WithNoStage())
+	landApproved(t, f, "alpha", "main")
+
+	// The child is now measured against a destination that never received the file, and its parent is a
+	// landed name that vouches for nothing.
+	f.SwitchTo("beta")
+	refuseUnreviewedParentContent(t, f, "roundtwo.go")
+}
+
+// The refinement the change record claims: on the declared path the child is refused before any landing, because
+// the parent cannot be declared on a state its newest approval does not cover, and the re-approval it needs to
+// land is the act that moves the citation. The file is still in the child's tree from the earlier merge; the
+// parent's newest approval simply no longer speaks about it.
+func TestCheckRefusesContentTheParentReApprovedWithout(t *testing.T) {
+	f := approvedChildOnAnUnlandedParent(t)
+
+	f.SwitchTo("alpha")
+	f.Commit("alpha round two", gittest.WithFile("roundtwo.go", "package main\n\nfunc RoundTwo() string { return \"parent's\" }\n"))
+	ready(t, f)
+	submit(t, f, "approve")
+	f.SwitchTo("beta")
+	if _, err := f.Git("merge", "--no-edit", "alpha"); err != nil {
+		t.Fatalf("the merge should be clean: %v", err)
+	}
+
+	f.SwitchTo("alpha")
+	f.MustGit("rm", "roundtwo.go")
+	f.Commit("alpha takes the file back", gittest.WithNoStage())
+	ready(t, f)
+	submit(t, f, "approve")
+
+	f.SwitchTo("beta")
+	refuseUnreviewedParentContent(t, f, "roundtwo.go")
+}
+
 // refuseUnreviewedParentContent is the refusal every parent citation has to earn: the file is named as
 // content the reviewer never read, and no branch is recorded as having vouched for it.
 func refuseUnreviewedParentContent(t *testing.T, f *gittest.Fixture, path string) {
