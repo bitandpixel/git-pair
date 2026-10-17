@@ -1,7 +1,6 @@
 package gittest
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -9,7 +8,7 @@ import (
 // Changeset layout helpers.
 //
 // These mirror PRD §4/§5/§7 (the `changesets/<slug>/` directory, its
-// CHANGESET.yaml, ABOUT.md and thread files) so engine tests can build a
+// CHANGESET.yaml, ABOUT.md and DISCUSSION.md) so engine tests can build a
 // scenario without running `git pair init`. A broken `init` must
 // therefore only fail the tests that exercise it. Product-written scaffolding is
 // asserted by the CLI tests in internal/cli.
@@ -83,22 +82,4 @@ func (f *Fixture) metadataValue(slug, key string) string {
 func (f *Fixture) MetadataBase(slug string) string {
 	f.t.Helper()
 	return f.metadataValue(slug, "base")
-}
-
-// Threads lists the thread file names in a changeset directory, ABOUT.md excluded.
-func (f *Fixture) Threads(slug string) []string {
-	f.t.Helper()
-	entries, err := os.ReadDir(filepath.Join(f.dir, "changesets", slug))
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || name == "ABOUT.md" || !strings.HasSuffix(name, ".md") {
-			continue
-		}
-		out = append(out, name)
-	}
-	return out
 }

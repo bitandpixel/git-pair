@@ -90,55 +90,19 @@ func TestSlugFromBranchIsStableAndInjective(t *testing.T) {
 	}
 }
 
-// PRD §7: `git pair review thread "concurrency tests"` creates
-// `changesets/<changeset>/concurrency-tests.md`.
-func TestThreadSlugAndPath(t *testing.T) {
-	tests := []struct {
-		title string
-		want  string
-	}{
-		{"concurrency tests", "concurrency-tests"},
-		{"Concurrency Tests", "concurrency-tests"},
-		{"  Transaction   boundary  ", "transaction-boundary"},
-		{"What happens if these execute concurrently?", "what-happens-if-these-execute-concurrently"},
-		{"transaction/boundary", "transaction-boundary"},
-	}
-	cs := changeset.Changeset{Slug: "booking-transaction", Dir: filepath.Join("changesets", "booking-transaction")}
-	for _, tc := range tests {
-		t.Run(tc.title, func(t *testing.T) {
-			stem, err := changeset.ThreadSlug(tc.title)
-			if err != nil {
-				t.Fatalf("ThreadSlug(%q): %v", tc.title, err)
-			}
-			if stem != tc.want {
-				t.Errorf("ThreadSlug(%q) = %q, want %q", tc.title, stem, tc.want)
-			}
-			path, err := cs.ThreadPath(tc.title)
-			if err != nil {
-				t.Fatalf("ThreadPath(%q): %v", tc.title, err)
-			}
-			want := filepath.Join("changesets", "booking-transaction", tc.want+".md")
-			if path != want {
-				t.Errorf("ThreadPath(%q) = %q, want %q", tc.title, path, want)
-			}
-		})
-	}
-	if _, err := changeset.ThreadSlug("///"); err == nil {
-		t.Error("ThreadSlug accepted a title with no usable characters")
-	}
-}
-
-func TestThreadTemplateAndAboutTemplate(t *testing.T) {
+func TestAboutTemplateAndTheDiscussionFileDiffer(t *testing.T) {
 	cs := changeset.Changeset{Slug: "booking", Dir: filepath.Join("changesets", "booking")}
-	thread := changeset.ThreadTemplate("Concurrency tests")
-	if thread != "# Concurrency tests\n\n" {
-		t.Errorf("ThreadTemplate = %q", thread)
-	}
 	about := changeset.AboutTemplate("booking")
 	for _, heading := range []string{"# booking", "## Summary", "## What changed", "## Design decisions", "## Validation"} {
 		if !strings.Contains(about, heading) {
 			t.Errorf("ABOUT.md scaffold is missing %q; PRD §6 lists it:\n%s", heading, about)
 		}
+	}
+	// The description carries the sections a reviewer reads; the discussion file
+	// carries none of them, because the shape of a conversation is not the tool's to
+	// decide. See discussion_test.go.
+	if strings.Contains(changeset.DiscussionTemplate("booking"), "## ") {
+		t.Error("the discussion scaffold offers sections")
 	}
 	if got := cs.AboutPath(); got != filepath.Join("changesets", "booking", "ABOUT.md") {
 		t.Errorf("AboutPath = %q", got)
@@ -285,7 +249,7 @@ func TestCurrentDetachedHeadAndMissingDirectory(t *testing.T) {
 	}
 }
 
-func TestActiveIDsAndThreads(t *testing.T) {
+func TestActiveIDs(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
 	repo := &git.Repo{Dir: f.Dir()}
@@ -322,51 +286,11 @@ func TestActiveIDsAndThreads(t *testing.T) {
 		}
 	}
 
+	// Reading the list must not author anything: a changeset gains its discussion file on
+	// first use, not because something listed the directory.
 	cs := changeset.Changeset{Slug: "booking-transaction", Dir: filepath.Join("changesets", "booking-transaction")}
-	f.Write(cs.Path("concurrency-tests.md"), "# Concurrency tests\n")
-	f.Write(cs.Path("transaction-boundary.md"), "# Transaction boundary\n")
-	threads, err := cs.Threads(fixRepo(f))
-	if err != nil {
-		t.Fatalf("Threads: %v", err)
-	}
-	if len(threads) != 2 {
-		t.Errorf("Threads = %v, want the two thread files (ABOUT.md excluded)", threads)
-	}
-	for _, path := range threads {
-		if filepath.Base(path) == changeset.AboutFile {
-			t.Errorf("Threads included the ABOUT.md scaffold: %v", threads)
-		}
-	}
-}
-
-func TestEnsureThreadReusesExistingFile(t *testing.T) {
-	f := gittest.New(t)
-	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
-	repo := &git.Repo{Dir: f.Dir()}
-	cs := changeset.Changeset{Slug: "booking", Dir: filepath.Join("changesets", "booking")}
-
-	path, created, err := cs.EnsureThread(repo, "concurrency tests")
-	if err != nil {
-		t.Fatalf("EnsureThread: %v", err)
-	}
-	if !created {
-		t.Error("first EnsureThread reported an existing file")
-	}
-	authorText := "# Concurrency tests\n\nReviewer question.\n"
-	f.Write(path, authorText)
-
-	path2, created, err := cs.EnsureThread(repo, "Concurrency Tests")
-	if err != nil {
-		t.Fatalf("second EnsureThread: %v", err)
-	}
-	if path2 != path {
-		t.Errorf("second EnsureThread = %q, want the same path %q (PRD §10.3: no duplicates)", path2, path)
-	}
-	if created {
-		t.Error("second EnsureThread reported creating an existing thread")
-	}
-	if f.Read(path) != authorText {
-		t.Error("EnsureThread overwrote the existing thread")
+	if _, err := os.Stat(filepath.Join(f.Dir(), cs.DiscussionPath())); !os.IsNotExist(err) {
+		t.Errorf("ActiveIDs wrote %s; it reads, it does not author", cs.DiscussionPath())
 	}
 }
 

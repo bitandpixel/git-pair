@@ -155,7 +155,7 @@ func TestTypingSearchesWithoutMoving(t *testing.T) {
 	// The field is the pane's bottom row -- the row the note about the rest of the file uses, which is why
 	// opening it moves nothing above it.
 	rows := m.previewLines()
-	if last := rows[len(rows)-1]; !strings.Contains(last, "/ line 007"+threadPromptCursor) {
+	if last := rows[len(rows)-1]; !strings.Contains(last, "/ line 007"+searchCaret) {
 		t.Errorf("the field is not on the pane's bottom row: %q", last)
 	}
 }
@@ -357,7 +357,7 @@ func TestTheFieldSitsAtTheBottomOfThePane(t *testing.T) {
 		t.Errorf("the pane is %d rows with the field open, want %d: the title, the body, the field's row",
 			len(rows), want)
 	}
-	if last := rows[len(rows)-1]; !strings.Contains(last, "/ line"+threadPromptCursor) {
+	if last := rows[len(rows)-1]; !strings.Contains(last, "/ line"+searchCaret) {
 		t.Errorf("the field is not the pane's last row: %q", last)
 	}
 }
@@ -466,7 +466,7 @@ func TestTheOverlaySearchesToo(t *testing.T) {
 	}
 	assertFrameFits(t, m)
 	view := m.View()
-	if !strings.Contains(view, "/ line 3"+threadPromptCursor) {
+	if !strings.Contains(view, "/ line 3"+searchCaret) {
 		t.Errorf("the overlay does not show the field:\n%s", view)
 	}
 	if !strings.Contains(view, sgrUnderline) {

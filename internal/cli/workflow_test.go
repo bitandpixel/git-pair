@@ -52,14 +52,14 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 		t.Fatalf("queue = %v, want %s waiting for review", rows, slug)
 	}
 
-	// --- reviewer: inspect, edit code, edit ABOUT.md, open a thread, submit -----
+	// --- reviewer: inspect, edit code, edit ABOUT.md, write in the discussion file, submit --
 	const blockingOne = "// Please use a transaction here"
 	const blockingTwo = "// What happens if these execute concurrently?"
 	f.Write("service.go", "package main\n\n"+blockingOne+"\nfunc CreateOffering() {}\n\n"+
 		blockingTwo+"\nfunc Enroll() {}\n")
 	f.Write(about, f.Read(about)+"\n## Review note\n\nThe concurrency story needs to be explicit.\n")
-	f.WriteChangesetFile(slug, "concurrency-tests.md",
-		"# Concurrency tests\n\nI'm not convinced the test makes the two transactions overlap.\n")
+	f.WriteChangesetFile(slug, "DISCUSSION.md",
+		"# Discussion\n\n## the overlap test\n\nI'm not convinced the test makes the two transactions overlap.\n")
 	submit(t, f, "block")
 
 	status := runIn(t, f.Dir(), "status", "--json").json(t)
@@ -122,12 +122,12 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 			"## Summary\n\nAdds transactional locking around offering creation.\n\n"+
 			"## Validation\n\n- unit tests\n- concurrent final-seat test\n\n"+
 			"## Concurrency\n\nBoth transactions take the booking row before the capacity read.\n"),
-		gittest.WithFile(filepath.Join("changesets", slug, "concurrency-tests.md"),
-			"# Concurrency tests\n\nI'm not convinced the test makes the two transactions overlap.\n\n"+
-				"## Response\n\nBoth transactions now block immediately before the capacity read.\n"))
+		gittest.WithFile(filepath.Join("changesets", slug, "DISCUSSION.md"),
+			"# Discussion\n\n## the overlap test\n\nI'm not convinced the test makes the two transactions overlap.\n\n"+
+				"Both transactions now block immediately before the capacity read.\n"))
 	ready(t, f)
 
-	// The reviewer's thread text survives (answering a thread by appending keeps the
+	// The reviewer's discussion text survives (answering in the file by appending keeps the
 	// question), and that alone must not block readiness (plan D3).
 	if got := f.Subject(f.Head()); got != "git-pair: ready "+slug {
 		t.Fatalf("HEAD = %q, want the ready marker", got)
@@ -135,8 +135,8 @@ func TestPRDTwentyNineGoldenWorkflow(t *testing.T) {
 
 	// --- reviewer: see the response, approve -----------------------------------
 	secondSpan := runIn(t, f.Dir(), "diff", "--unreviewed").mustSucceed(t, "diff", "--unreviewed")
-	if !strings.Contains(secondSpan.stdout, "## Response") {
-		t.Errorf("the reviewer's unreviewed span must contain the author's thread response:\n%s", secondSpan.stdout)
+	if !strings.Contains(secondSpan.stdout, "block immediately before the capacity read") {
+		t.Errorf("the reviewer's unreviewed span must contain the author's reply in the discussion file:\n%s", secondSpan.stdout)
 	}
 	// The TUI needs a terminal; the CLI equivalent must be available (PRD §15).
 	if refused := runIn(t, f.Dir(), "review", "open", "--unreviewed"); refused.code != exitUsage {

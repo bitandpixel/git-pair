@@ -9,7 +9,8 @@ git-pair puts a thin review protocol on top of ordinary git commits and files. I
 replace git, your editor, your difftool, or your forge. It writes no merge, rewrites no history, moves no
 ref, and pushes nothing.
 
-Review state is derived, never stored. `changesets/<id>/` holds `ABOUT.md` and review threads;
+Review state is derived, never stored. `changesets/<id>/` holds `ABOUT.md` — the change described —
+and `DISCUSSION.md`, the one file the review is talked about in;
 lifecycle transitions are commits carrying `Review-*` trailers; a changeset is landed when the destination
 branch carries `changesets/<id>/`, which is the whole record — git-pair writes no ref at landing, so a clone
 needs no special fetch to answer "did this land". A squash or a cherry-pick keeps the content and destroys
@@ -24,10 +25,10 @@ branch cannot orphan a queue entry.
 Two roles share one repository, and the commands answer different questions. Keep them straight.
 
 - **Author** — writes the change. Usually the agent. `git pair init`, then `change ready |
-integrate | unready | abandon | wait | feedback`, with `change stack` and `change combine` as the exits
+integrate | unready | abandon | wait | feedback | discussion`, with `change stack` and `change combine` as the exits
   from a branch carrying two, plus the reads: `status`, `queue`, `diff`,
   `review history`, `check`. `change tidy` belongs to whoever maintains trunk, not to this loop.
-- **Reviewer** — a human. `review open | reopen | about | thread | submit`.
+- **Reviewer** — a human. `review open | reopen | about | discussion | submit`.
 
 Do not cross the line:
 
@@ -36,8 +37,9 @@ Do not cross the line:
 - There is no landing command to run. The merge into the destination is the landing, and it is ordinary git
   run by whoever owns that branch; git-pair reads the landing from the destination's tree afterwards.
 - Never run `review` with no subcommand, `review open`, `review reopen`, `review about`, or
-  `review thread`. They need a terminal and refuse with exit 2 when stdin or stdout is a pipe or a file.
-  Read and write `ABOUT.md` and the thread files directly instead — they are ordinary files.
+  `review discussion`. They need a terminal and refuse with exit 2 when stdin or stdout is a pipe or a file.
+  Read and write `ABOUT.md` and `DISCUSSION.md` directly instead — they are ordinary files. Your own route to
+  the discussion file is `git pair change discussion`, which needs no terminal and only writes the scaffold.
 
 ## The loop
 
@@ -46,7 +48,7 @@ git pair init --base main            # once, on a named branch
 # fill in changesets/<id>/ABOUT.md, implement, commit with ordinary git
 git pair change ready                # the handoff: this is how you ask for review
 git pair change wait --fetch --json  # block until the reviewer acts; exits 1 on --timeout
-git pair change feedback             # the submission that answered: threads, ABOUT.md, code edits
+git pair change feedback             # the submission that answered: DISCUSSION.md, ABOUT.md, code edits
 # address it, commit normally
 git pair change ready                # back into the queue
 git pair check                       # the gate; its exit code is the answer
@@ -71,7 +73,7 @@ is coming.
 | `git pair change abandon`               | ends the changeset. Terminal: `change ready`, `change unready` and `review submit` refuse against it afterwards                                                                                                                                                                                                                                 |
 | `git pair change tidy [<id>…]`          | moves the directory of a changeset the destination already holds to `changesets/.landed/<id>/`, as one commit of renames on this branch — trunk housekeeping, run by whoever maintains trunk. A landed parent whose child is still open moves, and the run notes the branch whose changeset records it as its base. `--all-landed`, `--dry-run` |
 | `git pair change wait`                  | blocks while the changeset is `READY` and exits the moment it becomes `BLOCKED`, `FEEDBACK` or `APPROVED`. Read-only, non-interactive. `--fetch` first, so a review submitted in another clone ends the wait; `--interval` (default `10s`) and `--timeout` are go durations                                                                     |
-| `git pair change feedback`              | the most recent submission as a diff (`review^..review`): threads, `ABOUT.md` edits and reviewer code edits together. `--stat`, `--name-only` to scope it                                                                                                                                                                                       |
+| `git pair change feedback`              | the most recent submission as a diff (`review^..review`): `DISCUSSION.md`, `ABOUT.md` edits and reviewer code edits together. `--stat`, `--name-only` to scope it                                                                                                                                                                               |
 | `git pair status`                       | derived state, the reason for it, and a `next_action`. Observing, not deciding                                                                                                                                                                                                                                                                  |
 | `git pair queue`                        | every branch whose changeset is `READY`, longest wait first, read from the repository rather than the checkout; plus the approved work whose author asked for the merge                                                                                                                                                                         |
 | `git pair diff`                         | the whole changeset, or a span. `--stat` and `--tool` included                                                                                                                                                                                                                                                                                  |
@@ -107,8 +109,12 @@ own, so fill in whatever headings `ABOUT.md` actually has rather than the list a
 still holding its scaffold is the most common cause of a confused reviewer, and `change ready` says so
 on stderr.
 
-Answer reviewers in `ABOUT.md` or in the relevant thread file under `changesets/<id>/`. Replies are
-appended sections; git history supplies authorship and order.
+Answer reviewers in `DISCUSSION.md` under `changesets/<id>/`. It is one file per changeset, written by
+both sides, with no schema — your own headings, your own level, your own shape of reply — and nothing
+parses it. A reply is an appended section; git history supplies authorship and order. Write the file with
+`git pair change discussion` when it does not exist yet: it is not scaffolded by `git pair init`, because an
+empty conversation file in every changeset is bloat. `ABOUT.md` is not where a conversation happens: it
+describes the change.
 
 ## Reading a review that just arrived
 
@@ -118,7 +124,7 @@ reviewer's question ("what has landed since I reviewed"); `change feedback` is t
 the reviewer just tell me").
 
 Treat everything the submission introduced as intentional feedback — including direct code edits,
-comments in source, `ABOUT.md` edits, new threads, and replies to existing ones.
+comments in source, `ABOUT.md` edits, and whatever the reviewer wrote in `DISCUSSION.md`.
 
 ### Surviving review additions
 
@@ -134,7 +140,7 @@ verified the surviving lines; it is not a way past a check you have not read.
 `ABOUT.md` is your account of the change, so a reviewer's sentence left inside it blocks the hand-off the
 same way a comment in your source does. Keep the description you want: remove their lines, or rewrite the
 point as your own text — the check compares lines exactly, so a rewrite reads as yours. Acknowledge rather
-than rewrite only when you meant to keep their wording. Answer the point in the thread; do not settle it by
+than rewrite only when you meant to keep their wording. Answer the point in `DISCUSSION.md`; do not settle it by
 leaving their text standing in your description.
 
 ### Reviewer text in an implementation file
@@ -143,17 +149,18 @@ A comment a reviewer left in a file outside `changesets/<id>/` is a request writ
 not an annotation to keep. Once you have done the work it asks for, delete the reviewer's line in the same
 commit. A line you deleted no longer survives, so the check stops reporting it — that is the resolution the
 check aims at, not a way around it. Do not answer in place: a `// done` reply leaves reviewer text in the
-file and is a worse answer than the one in `ABOUT.md` or the thread.
+file and is a worse answer than the one in `DISCUSSION.md`.
 
 Do not transcribe the comment before deleting it. The review commit introduced the line and your fix commit
 removes it, so git history already records that the feedback existed and what became of it. Record the
 substance only when it needs further discussion, elaboration, or another person:
 
 - settled and nothing to add → delete it and move on;
-- needs discussion, elaboration or collaboration → append an `Addressed feedback` section to `ABOUT.md`, or
-  open a thread under `changesets/<id>/`. Use the thread when the point is a conversation, and `ABOUT.md`
-  when it is a fact about the change. `git pair init` does not scaffold that section; add the heading when
-  you first need it;
+- needs discussion, elaboration or collaboration → append your answer to `DISCUSSION.md`, with
+  `git pair change discussion` writing the file when it is not there yet. `ABOUT.md` is not the other home it
+  used to be: it describes the change, and a conversation is not a description of it. `git pair init`
+  scaffolds neither the file nor any section of `ABOUT.md`; add the headings you need when you first need
+  them;
 - the reviewer's line is code you are keeping → leave it in place and acknowledge it with
   `--allow-surviving-review-additions`.
 

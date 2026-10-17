@@ -12,8 +12,9 @@ import (
 )
 
 // Two regions share the row area: the file tree, and the changeset box above it holding the span,
-// ABOUT.md and the threads. Each keeps its own cursor, and Tab, f and m move the keys between them --
-// which is what these tests are mostly about, along with what a region does with a key once it has it.
+// ABOUT.md and the discussion file. Each keeps its own cursor, and Tab, f and m move the keys between
+// them -- which is what these tests are mostly about, along with what a region does with a key once it
+// has it.
 
 // viewRows splits a rendered frame into rows with the padding removed, which is how tests compare
 // against what the model wrote: the frame is padded to the edges of the terminal now.
@@ -38,7 +39,7 @@ func navModel(t *testing.T) reviewModel {
 	t.Helper()
 	m := newFileListModel(t)
 	if len(m.rows) < 5 {
-		t.Fatalf("fixture has %d rows, want files plus ABOUT.md, the heading and two threads", len(m.rows))
+		t.Fatalf("fixture has %d rows, want files plus the span, ABOUT.md and DISCUSSION.md", len(m.rows))
 	}
 	return m
 }
@@ -69,9 +70,9 @@ func lastIndexOfType(t *testing.T, m reviewModel, kind rowKind) int {
 	return last
 }
 
-// boxOf is the changeset box with the rows it is showing, and nothing else on the screen. A thread the
-// reviewer wrote is a file in the working tree as well as a row in the box, so a test about what the *box*
-// shows has to look at the box — the whole screen says the file's name either way.
+// boxOf is the changeset box with the rows it is showing, and nothing else on the screen. The discussion
+// file is a file in the working tree as well as a row in the box, so a test about what the *box* shows has
+// to look at the box — the whole screen says the file's name either way.
 func boxOf(m reviewModel) string {
 	_, section := m.window()
 	return strings.Join(m.boxLines(section), "\n")
@@ -131,7 +132,7 @@ func focusOnRow(t *testing.T, m reviewModel, idx int) reviewModel {
 	return m
 }
 
-// boxOn gives the keys to the changeset box, which is where the span, ABOUT.md and the threads are.
+// boxOn gives the keys to the changeset box, which is where the span, ABOUT.md and the discussion file are.
 func boxOn(t *testing.T, m reviewModel) reviewModel {
 	t.Helper()
 	m.focusOn(focusMeta)
@@ -264,11 +265,11 @@ func TestJkCrossTheEdgeBetweenTheBoxAndTheTree(t *testing.T) {
 
 // `gg` and `G` are the ends of the region holding the keys. The two halves are two windows of two
 // different heights, so the end worth jumping to is the one in the window being read -- the same reason
-// a page stays inside the window it started in. Crossing into the other half is `tab`, `f`, `a` and `t`,
-// which each name where they are going.
+// a page stays inside the window it started in. Crossing into the other half is `tab`, `f` and `a`, which
+// each name where they are going.
 func TestGgAndGMeanTheEndsOfTheRegionHoldingTheKeys(t *testing.T) {
-	m := withThreads(t, navModel(t), 12)
-	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	m := navModel(t)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowDiscussion))
 
 	m = pressRune(pressRune(m, 'g'), 'g')
 	if !m.metaHasFocus() || m.metaCursor != m.metaStart {
@@ -301,7 +302,7 @@ func TestGgAndGMeanTheEndsOfTheRegionHoldingTheKeys(t *testing.T) {
 // directly, because the list is rebuilt from the session on every key and an empty tree is not a state
 // this session can be put into.
 func TestGgAndGFallThroughWhenTheRegionHoldingTheKeysIsEmpty(t *testing.T) {
-	m := focusOnRow(t, withThreads(t, navModel(t), 4), 0)
+	m := focusOnRow(t, navModel(t), 0)
 	m.rows, m.metaStart, m.cursor, m.scroll = m.rows[m.metaStart:], 0, 0, 0
 	m.focus, m.metaCursor = focusFiles, 0
 	m.clamp()
@@ -345,8 +346,10 @@ func TestTabWalksTheFocusRing(t *testing.T) {
 	}
 
 	// From the box it is the same toggle, and the box is what tab comes back to: the half of the column
-	// that had the keys keeps them, so reading a diff from a thread returns to that thread.
-	inBox := focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	// that had the keys keeps them, so reading a diff from a box row returns to that row. The row is
+	// ABOUT.md rather than the discussion file because the discussion file is the box's last row, and `j`
+	// off the end of the box is the edge-crossing -- a different test, higher up this file.
+	inBox := focusOnRow(t, m, boxIndexOf(t, m, rowAbout))
 	at := inBox.metaCursor
 	there := press(inBox, tea.KeyDown)
 	if there.metaCursor <= at {
@@ -378,73 +381,32 @@ func TestTabWalksTheFocusRing(t *testing.T) {
 		t.Errorf("m moved the keys to %v in mode %v; it names nothing now", got.focus, got.mode)
 	}
 
-	// `a` and `t` are the jumps into the box: they name a row rather than a region, and the cursor goes
-	// with the keys, so the row they land on is on screen.
+	// `a` is the jump into the box: it names a row rather than a region, and the cursor goes with the
+	// keys, so the row it lands on is on screen. The discussion file has no such key — it sits one arrow
+	// below the row `a` names, and a key per box row is how the box turns into a menu — so `t` jumps
+	// nothing, and pressing it leaves the reviewer standing where they were.
 	if got := pressRune(m, 'a'); !got.metaHasFocus() || got.rows[got.metaCursor].kind != rowAbout {
 		t.Errorf("a left %v with its cursor on %v, want the box on the ABOUT.md row",
 			got.focus, got.rows[got.metaCursor].kind)
 	}
-	if got := pressRune(m, 't'); !got.metaHasFocus() || got.rows[got.metaCursor].kind != rowThreadsHead {
-		t.Errorf("t left %v with its cursor on %v, want the box on the thread heading",
-			got.focus, got.rows[got.metaCursor].kind)
-	}
-}
-
-func TestThreadsHeadingCollapsesAndExpands(t *testing.T) {
-	m := navModel(t)
-	open := len(m.rows)
-	head := boxIndexOf(t, m, rowThreadsHead)
-	m = focusOnRow(t, m, head)
-
-	// Enter on the heading is the key that hides the threads -- the row's own action, and the row `t`
-	// leaves the cursor on.
-	collapsed := press(m, tea.KeyEnter)
-	if collapsed.threadsOpen {
-		t.Fatal("T did not collapse the threads")
-	}
-	if len(collapsed.rows) >= open {
-		t.Errorf("collapsing left %d rows, want fewer than %d:\n%s", len(collapsed.rows), open, rowList(collapsed))
-	}
-	for _, r := range collapsed.rows {
-		if r.kind == rowThread || r.kind == rowNewThread {
-			t.Errorf("the collapsed section still lists %q", r.name)
-		}
-	}
-	// The heading stays put through its own toggle: that is the row being looked at.
-	if collapsed.metaCursor != head {
-		t.Errorf("collapse moved the box's cursor from the heading at %d to %d", head, collapsed.metaCursor)
-	}
-	if strings.Contains(boxOf(collapsed), "locking.md") {
-		t.Error("a collapsed box still showed its threads")
-	}
-	if !strings.Contains(boxOf(m), "locking.md") {
-		t.Error("the expanded box does not show the nested threads")
-	}
-
-	// Enter again is the same toggle the other way, for a reviewer who never reads the hint.
-	expanded := press(collapsed, tea.KeyEnter)
-	if !expanded.threadsOpen {
-		t.Error("Enter on the heading did not expand the threads")
-	}
-	if len(expanded.rows) != open {
-		t.Errorf("re-expanding gave %d rows, want the original %d", len(expanded.rows), open)
-	}
-	if expanded.metaCursor != head {
-		t.Errorf("expanding moved the box's cursor to %d, want the heading at %d", expanded.metaCursor, head)
+	if got := pressRune(m, 't'); got.focus != m.focus || got.metaCursor != m.metaCursor {
+		t.Errorf("t moved the box from %v on %d to %v on %d; the discussion row has no jump key",
+			m.focus, m.metaCursor, got.focus, got.metaCursor)
 	}
 }
 
 func TestEnterOpensWhatTheRowIsFor(t *testing.T) {
-	// The table itself, then the two rows that do not hand off the terminal.
+	// The Enter table, one row per thing the list can hold. The two document rows are the ones worth
+	// naming: both are prose, so both read rather than diff, and neither is a file the tree lists.
 	cases := []struct {
 		kind rowKind
 		want action
 	}{
 		{rowFile, actionDiff},
-		{rowThread, actionArtifact},
+		{rowDiscussion, actionArtifact},
 		{rowAbout, actionArtifact},
-		{rowThreadsHead, actionCollapse},
-		{rowNewThread, actionNewThread},
+		{rowDir, actionCollapse},
+		{rowSpan, actionSpan},
 	}
 	for _, c := range cases {
 		if got := activateBy(row{kind: c.kind}); got != c.want {
@@ -452,30 +414,12 @@ func TestEnterOpensWhatTheRowIsFor(t *testing.T) {
 		}
 	}
 
-	m := navModel(t)
-	m = focusOnRow(t, m, boxIndexOf(t, m, rowThreadsHead))
-	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil {
-		t.Error("the heading launched a process instead of collapsing")
-	}
-	if after.(reviewModel).threadsOpen {
-		t.Error("Enter on the heading did not collapse it")
-	}
-
-	m = focusOnRow(t, m, boxIndexOf(t, m, rowNewThread))
-	after, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	prompting := after.(reviewModel)
-	if prompting.mode != modePrompt || prompting.promptKind != promptThread {
-		t.Errorf("Enter on %q gave mode %d/kind %d, want the thread prompt",
-			newThreadLabel, prompting.mode, prompting.promptKind)
-	}
-
-	// A file row hands off to the difftool and a thread row to the editor; both return a
+	// A file row hands off to the difftool and a document row to the editor; both return a
 	// command, and only the table above distinguishes which program.
-	m = navModel(t)
-	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	m := navModel(t)
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowDiscussion))
 	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil {
-		t.Error("Enter on a thread opened nothing")
+		t.Error("Enter on the discussion file opened nothing")
 	}
 	m = focusOnRow(t, m, indexOfNameBySuffix(t, m, ".go"))
 	_, file := selectedKind(t, m)
@@ -514,10 +458,10 @@ func TestSpaceMarksFilesAndRefusesTheRest(t *testing.T) {
 		t.Error("refusing to mark a changeset row is a hint, not an error")
 	}
 
-	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowDiscussion))
 	m = press(m, tea.KeySpace)
 	if marked() != 0 {
-		t.Error("marking a thread marked a file")
+		t.Error("marking the discussion file marked a file")
 	}
 
 	m = focusOnRow(t, m, indexOf(t, m, rowFile))
@@ -527,53 +471,39 @@ func TestSpaceMarksFilesAndRefusesTheRest(t *testing.T) {
 	}
 }
 
-func TestNewThreadRowSitsUnderItsThreads(t *testing.T) {
-	m := navModel(t)
-	last := m.rows[len(m.rows)-1]
-	if last.kind != rowNewThread || last.name != newThreadLabel {
-		t.Errorf("the last row is %q (kind %d), want %q", last.name, last.kind, newThreadLabel)
-	}
-	for _, r := range m.rows[boxIndexOf(t, m, rowThreadsHead)+1:] {
-		if r.kind == rowThread && filepath.Base(r.path) != r.name {
-			t.Errorf("thread row prints %q, want the file name of %q", r.name, r.path)
-		}
-	}
-	// Nested rows are indented, so the group reads as one block under its heading.
-	view := m.View()
-	if !strings.Contains(view, threadIndent+"locking.md") {
-		t.Errorf("threads are not nested under the heading:\n%s", view)
-	}
-	// Expanded, the heading does not repeat a count that the rows below it already give. It is a row of
-	// the box rather than a row of the frame, so it is read off the row itself.
-	if head := m.rowText(m.rows[boxIndexOf(t, m, rowThreadsHead)]); strings.Contains(ansiCodes.ReplaceAllString(head, ""), "Threads (") {
-		t.Errorf("the expanded heading still shows a count the rows under it give: %q\n%s", head, view)
-	}
-	collapsed := m
-	collapsed.threadsOpen = false
-	if got := collapsed.rowText(collapsed.rows[boxIndexOf(t, m, rowThreadsHead)]); !strings.Contains(ansiCodes.ReplaceAllString(got, ""), "▸ Threads (2)") {
-		t.Errorf("the collapsed heading reads %q, want it to count the threads it hides", got)
-	}
-}
-
 func TestRefreshKeepsTheCursorOnTheSameRow(t *testing.T) {
 	m := navModel(t)
-	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowDiscussion))
 	_, before := activeKind(t, m)
+	repo := m.sess.Repo().Dir
+	path := filepath.Join(repo, m.sess.DiscussionPath())
 
-	// A thread created elsewhere — in an editor, or another window — must not move the
-	// reviewer off the row they were reading.
-	path := filepath.Join(m.sess.Repo().Dir, "changesets", "booking", "third.md")
-	if err := os.WriteFile(path, []byte("# Thread: third\n"), 0o644); err != nil {
-		t.Fatalf("write thread: %v", err)
+	// The row is the offer rather than the file, so taking the file away must not take the row with it,
+	// and must not move the reviewer who was reading it.
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove the discussion file: %v", err)
+	}
+	m.refresh()
+	after, row := activeKind(t, m)
+	if after != rowDiscussion || row.path != before.path {
+		t.Errorf("the discussion row vanished with its file: %v %q, want %v %q",
+			after, row.path, rowDiscussion, before.path)
+	}
+
+	// ... and an editor writing the file in another window must not move the reviewer off the row they
+	// were reading, either. The file appears in the tree's list only once the span contains it, so what
+	// this pins is the cursor, not the listing.
+	if err := os.WriteFile(path, []byte("# Discussion\n\n## a question\n"), 0o644); err != nil {
+		t.Fatalf("write the discussion file: %v", err)
 	}
 	m.refresh()
 
-	after, row := activeKind(t, m)
+	after, row = activeKind(t, m)
 	if after != row.kind || row.path != before.path {
 		t.Errorf("refresh moved the cursor from %q to %q:\n%s", before.path, row.path, rowList(m))
 	}
-	if _, ok := indexOfName(m, "third.md"); !ok {
-		t.Errorf("the new thread is not listed:\n%s", rowList(m))
+	if _, ok := indexOfName(m, "DISCUSSION.md"); !ok {
+		t.Errorf("the tree lost the discussion file row:\n%s", rowList(m))
 	}
 }
 
@@ -599,111 +529,6 @@ func indexOfName(m reviewModel, name string) (int, bool) {
 	return 0, false
 }
 
-// A thread title is prose, and bubbletea reports a lone space as KeySpace instead of
-// KeyRunes: without handling it, every space in a title disappeared before the file name
-// was derived from it.
-func TestThreadPromptKeepsSpacesInATitle(t *testing.T) {
-	m := navModel(t)
-	m = pressRune(m, 'T')
-	if m.mode != modePrompt {
-		t.Fatalf("T did not open the thread prompt (mode %d)", m.mode)
-	}
-
-	for _, step := range []tea.KeyMsg{
-		{Type: tea.KeyRunes, Runes: []rune("does the lock")},
-		{Type: tea.KeySpace},
-		{Type: tea.KeyRunes, Runes: []rune("cover the map")},
-	} {
-		updated, _ := m.Update(step)
-		m = updated.(reviewModel)
-	}
-	if m.input != "does the lock cover the map" {
-		t.Fatalf("prompt input = %q, want the title with its spaces", m.input)
-	}
-
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = updated.(reviewModel)
-	if cmd == nil {
-		t.Fatal("creating the thread did not hand off to the editor")
-	}
-	// The report rides the handoff, so it is on screen when the editor closes.
-	updated, _ = m.Update(externalDoneMsg{label: "Editor exited with an error"})
-	m = updated.(reviewModel)
-	if !strings.Contains(m.status, "Created") || !strings.Contains(m.status, "does-the-lock-cover-the-map.md") {
-		t.Errorf("creating the thread reported %q, want the created path:\n%s", m.status, rowList(m))
-	}
-	path := filepath.Join(m.sess.Repo().Dir, "changesets", "booking", "does-the-lock-cover-the-map.md")
-	if info, statErr := os.Stat(path); statErr != nil || info.IsDir() {
-		t.Errorf("the thread file is missing at %s: %v", path, statErr)
-	}
-}
-
-// The prompt is one field, not two labels: the ghost title says what the field wants, so the line
-// under it carries only the keys, and neither repeats the other.
-func TestThreadPromptShowsAGhostTitleAndTheKeys(t *testing.T) {
-	m := pressRune(navModel(t), 'T')
-	if m.mode != modePrompt {
-		t.Fatalf("T did not open the thread prompt (mode %d)", m.mode)
-	}
-
-	rows := viewRows(ansiCodes.ReplaceAllString(m.View(), ""))
-	field := lineWithPrefix(rows, threadPromptLabel)
-	if field < 0 {
-		t.Fatalf("no title field in:\n%s", strings.Join(rows, "\n"))
-	}
-	if want := threadPromptLabel + threadTitlePlaceholder; rows[field] != want {
-		t.Errorf("an empty field reads %q, want the caret on the ghost's first cell", rows[field])
-	}
-	// The caret over the ghost is a reverse-video cell, which the stripped frame cannot show; what
-	// the frame can show is that the caret is not waiting after a title nobody typed.
-	if strings.HasSuffix(rows[field], threadPromptCursor) {
-		t.Errorf("the caret sits after the ghost rather than on it: %q", rows[field])
-	}
-	if hint := lineWithExact(rows, threadPromptHint); hint != field+1 {
-		t.Errorf("the keys are on row %d, want them on the row under the field (%d):\n%s",
-			hint, field+1, strings.Join(rows, "\n"))
-	}
-	for _, row := range rows {
-		if strings.Contains(row, "New thread title") {
-			t.Errorf("the field's label is repeated below it: %q", row)
-		}
-	}
-
-	// The ghost stands in for a title, it is not one already entered: what the reviewer types
-	// replaces it.
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Does the lock")})
-	m = updated.(reviewModel)
-	rows = viewRows(ansiCodes.ReplaceAllString(m.View(), ""))
-	field = lineWithPrefix(rows, threadPromptLabel)
-	if want := threadPromptLabel + "Does the lock" + threadPromptCursor; rows[field] != want {
-		t.Errorf("the field reads %q, want the title typed over the ghost", rows[field])
-	}
-	if strings.Contains(strings.Join(rows, "\n"), threadTitlePlaceholder) {
-		t.Errorf("the ghost is still under the typed title:\n%s", strings.Join(rows, "\n"))
-	}
-	// The hint is the band's second row, whose height the frame already counts: neither line the
-	// prompt adds may push a row past the bottom of the terminal.
-	assertFrameFits(t, m)
-}
-
-// A ghost wider than the window would be cut rather than continued, and half a hint reads as a
-// rendering fault instead of an invitation, so a narrow field is left empty.
-func TestNarrowThreadPromptDropsItsGhostTitle(t *testing.T) {
-	m := pressRune(navModel(t), 'T')
-	m.width = 20 // less than the label, the ghost and the caret together
-
-	view := ansiCodes.ReplaceAllString(m.View(), "")
-	if strings.Contains(view, threadTitlePlaceholder) {
-		t.Errorf("the ghost survived a %d-column window it does not fit:\n%s", m.width, view)
-	}
-	for _, line := range wrapProse(threadPromptHint, m.width) {
-		if !strings.Contains(view, line) {
-			t.Errorf("the keys lost %q at %d columns:\n%s", line, m.width, view)
-		}
-	}
-	assertFrameFits(t, m)
-}
-
 // The box is over the tree, and the counter is under it: what the review is made of is what a reviewer
 // reads before choosing a file, and the count of files read belongs with the files it counts.
 func TestTheChangesetBoxRendersAboveTheFiles(t *testing.T) {
@@ -716,16 +541,16 @@ func TestTheChangesetBoxRendersAboveTheFiles(t *testing.T) {
 	}
 	top := lineWithPrefix(lines, "\u256d")
 	about := lineWithPrefix(lines, "\u2502 ABOUT.md")
-	head := lineWithPrefix(lines, "\u2502 \u25be Threads") // expanded: no count on the heading
-	if top < 0 || about < 0 || head < 0 {
-		t.Fatalf("the box's top (%d), ABOUT.md (%d) or the thread heading (%d) is missing from:\n%s",
-			top, about, head, strings.Join(lines, "\n"))
+	disc := lineWithPrefix(lines, "\u2502 DISCUSSION.md")
+	if top < 0 || about < 0 || disc < 0 {
+		t.Fatalf("the box's top (%d), ABOUT.md (%d) or DISCUSSION.md (%d) is missing from:\n%s",
+			top, about, disc, strings.Join(lines, "\n"))
 	}
-	if top >= about || about > counter || head > counter {
-		t.Errorf("the box does not frame its rows above the counter (top %d, ABOUT.md %d, heading %d, counter %d)",
-			top, about, head, counter)
+	if top >= about || about > counter || disc > counter {
+		t.Errorf("the box does not frame its rows above the counter (top %d, ABOUT.md %d, DISCUSSION.md %d, counter %d)",
+			top, about, disc, counter)
 	}
-	if bottom := lineWithPrefix(lines, "\u2570"); bottom < head || bottom > counter {
+	if bottom := lineWithPrefix(lines, "\u2570"); bottom < disc || bottom > counter {
 		t.Errorf("the box's bottom border is at %d, which does not close the rows it frames:\n%s",
 			bottom, strings.Join(lines, "\n"))
 	}
@@ -739,9 +564,9 @@ func TestTheChangesetBoxRendersAboveTheFiles(t *testing.T) {
 			t.Errorf("file %q is not rendered:\n%s", r.name, strings.Join(lines, "\n"))
 			continue
 		}
-		if at > counter || at < head {
+		if at > counter || at < disc {
 			t.Errorf("file %q renders at %d, outside the space between the box at %d and the counter at %d",
-				r.name, at, head, counter)
+				r.name, at, disc, counter)
 		}
 	}
 }
@@ -819,8 +644,8 @@ func TestRuleSeparatesTheListFromTheShortcuts(t *testing.T) {
 }
 
 // `d` is the difftool for whatever the keys are on, so a reviewer does not have to be in the file tree
-// to diff a file -- ABOUT.md and a thread are diffable from the box. Rows that cannot be diffed say why
-// instead of opening a difftool with nothing in it.
+// to diff a file -- ABOUT.md and the discussion file are diffable from the box. Rows that cannot be diffed
+// say why instead of opening a difftool with nothing in it.
 func TestDDiffsTheSelectedRow(t *testing.T) {
 	m := navModel(t)
 	if !strings.Contains(strings.Join(m.helpLines(), " "), "d diff") {
@@ -854,26 +679,27 @@ func TestDDiffsTheSelectedRow(t *testing.T) {
 			m.pendingNote)
 	}
 
-	// A thread written this session is not in the span: no empty difftool, the file instead.
+	// The discussion file is written this session and is not in the span: no empty difftool, the
+	// file instead.
 	m = navModel(t)
-	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowDiscussion))
 	_, at, _ := m.activeRow()
-	thread := m.rows[at]
+	discussion := m.rows[at]
 	after, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = after.(reviewModel)
 	if cmd == nil {
-		t.Errorf("d on %q opened nothing, want the editor", thread.name)
+		t.Errorf("d on %q opened nothing, want the editor", discussion.name)
 	}
 	if m.status != "" {
-		t.Errorf("d on %q reported %q before the handoff, where nothing can read it", thread.name, m.status)
+		t.Errorf("d on %q reported %q before the handoff, where nothing can read it", discussion.name, m.status)
 	}
 
-	// The heading is not a file at all.
-	m = focusOnRow(t, m, boxIndexOf(t, m, rowThreadsHead))
+	// The span row names what the review is measured against; it is not a file at all.
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowSpan))
 	after, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = after.(reviewModel)
 	if cmd != nil || !strings.Contains(m.status, "not a file") {
-		t.Errorf("d on the heading gave cmd=%v status=%q", cmd != nil, m.status)
+		t.Errorf("d on the span row gave cmd=%v status=%q", cmd != nil, m.status)
 	}
 }
 
@@ -881,7 +707,7 @@ func TestDDiffsTheSelectedRow(t *testing.T) {
 // under the editor's own screen and gone by the time the reviewer looks again.
 func TestDiffFallbackNoteSurvivesTheEditor(t *testing.T) {
 	m := navModel(t)
-	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread)) // a thread the span does not touch
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowDiscussion)) // the discussion file the span does not touch
 	after, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = after.(reviewModel)
 	if cmd == nil {
@@ -918,7 +744,7 @@ func TestDiffFallbackNoteSurvivesTheEditor(t *testing.T) {
 	}
 
 	// A handoff that failed reports the failure, and drops the note it was carrying.
-	m = focusOnRow(t, m, boxIndexOf(t, m, rowThread))
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowDiscussion))
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	m = updated.(reviewModel)
 	updated, _ = m.Update(externalDoneMsg{err: errors.New("no editor configured"),
@@ -955,14 +781,14 @@ func TestArtifactActionNeedsTwoSides(t *testing.T) {
 // TestEditorNoteNamesTheReason covers the two reasons something opens in the editor instead of a
 // difftool: they read differently, and the reviewer should get the right one.
 func TestEditorNoteNamesTheReason(t *testing.T) {
-	inSpan := reviewModel{inSpan: map[string]bool{"changesets/x/locking.md": true}}
-	got := inSpan.editorNote("changesets/x/locking.md", "locking.md")
+	inSpan := reviewModel{inSpan: map[string]bool{"changesets/x/DISCUSSION.md": true}}
+	got := inSpan.editorNote("changesets/x/DISCUSSION.md", "DISCUSSION.md")
 	if !strings.Contains(got, "added by this changeset") {
 		t.Errorf("note for a new document = %q", got)
 	}
 
 	outside := reviewModel{inSpan: map[string]bool{}}
-	got = outside.editorNote("changesets/x/locking.md", "locking.md")
+	got = outside.editorNote("changesets/x/DISCUSSION.md", "DISCUSSION.md")
 	if !strings.Contains(got, "has not changed in this span") {
 		t.Errorf("note for a document the span left alone = %q", got)
 	}

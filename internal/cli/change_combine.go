@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,15 +27,15 @@ import (
 const combinedDir = ".combined"
 
 type combineOptions struct {
-	into    string
-	threads bool
-	json    bool
+	into       string
+	discussion bool
+	json       bool
 }
 
 func newChangeCombineCommand(a *app) *cobra.Command {
 	opts := &combineOptions{}
 	cmd := &cobra.Command{
-		Use:   "combine --into <id> [--threads]",
+		Use:   "combine --into <id> [--discussion]",
 		Short: "Fold one changeset into another when the two are one piece of work",
 		Long: `Archive one changeset's files inside another, when the two directories describe one change.
 
@@ -43,25 +44,26 @@ yours is not below yours but is the same work - one changeset started before the
 meant - a stack record would be a lie and the two belong together. This command folds them.
 
 Nothing is deleted. The disappearing changeset moves whole into ` + "`changesets/<into>/.combined/<id>/`" + `, and an
-archive there is inert: it answers no id, it is neither landed nor active, and it is not offered as a thread. The
+archive there is inert: it answers no id, it is neither landed nor active, and no command reads it as live state. The
 survivor keeps its own ` + "`base:`" + ` and ` + "`base-changeset:`" + ` - folding a changeset in is not a licence to move
 the comparison underneath a review - and the command prints which links were kept and which were dropped. The
 survivor's ABOUT.md gains one line pointing at the archive rather than a copy of anything.
 
-With ` + "`--threads`" + ` the disappeared changeset's review threads are copied, not moved, each prefixed with its id so
-two threads called scope.md do not collide. A thread file is not an implementation change, so the copy cannot move
-what a reviewer is comparing.
+With ` + "`--discussion`" + ` the disappeared changeset's DISCUSSION.md is appended to the survivor's, under one line
+naming where the text came from. It is appended and never rewritten, and the original stays in the archive: the two
+conversations were held separately, and a fold does not get to pretend otherwise. A file that was never written
+brings nothing across.
 
 Refuses while either changeset is offered or under review, because a reviewer's diff must not change underneath them.`,
 		Example: `  git pair change combine --into booking
-  git pair change combine --into booking --threads`,
+  git pair change combine --into booking --discussion`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runChangeCombine(cmd.Context(), a, opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.into, "into", "", "the changeset that survives (required)")
-	cmd.Flags().BoolVar(&opts.threads, "threads", false, "copy the disappeared changeset's threads into the survivor")
+	cmd.Flags().BoolVar(&opts.discussion, "discussion", false, "append the disappeared changeset's discussion to the survivor's")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "emit JSON instead of prose")
 	_ = cmd.MarkFlagRequired("into")
 	return cmd
@@ -143,19 +145,18 @@ func runChangeCombine(ctx context.Context, a *app, opts *combineOptions) error {
 		return err
 	}
 
-	// A thread copy has to be read before the move, because after it the file is under the archive and the copy
-	// would be naming a path the command just relocated.
-	var copies []string
-	if opts.threads {
-		threads, err := vanishing.Threads(repo)
-		if err != nil {
+	// The discussion text has to be read before the move, because after it the file is under the archive and the
+	// copy would be naming a path the command just relocated.
+	var discussion string
+	if opts.discussion {
+		body, err := os.ReadFile(filepath.Join(repo.Dir, vanishing.Path(changeset.DiscussionFile)))
+		switch {
+		case err == nil:
+			discussion = strings.TrimSpace(string(body))
+		case errors.Is(err, os.ErrNotExist):
+			// The folded changeset never had a conversation, so there is nothing to bring across.
+		default:
 			return err
-		}
-		for _, th := range threads {
-			if th == changeset.AboutFile {
-				continue
-			}
-			copies = append(copies, th)
 		}
 	}
 
@@ -165,17 +166,8 @@ func runChangeCombine(ctx context.Context, a *app, opts *combineOptions) error {
 	if err := os.Rename(filepath.Join(repo.Dir, vanishing.Dir), filepath.Join(repo.Dir, archive)); err != nil {
 		return fmt.Errorf("cannot move %s to %s: %w", vanishing.Dir, archive, err)
 	}
-	// Threads names its results from the repository root, so the copy takes the base name: the archive is the
-	// directory that moved, and re-joining a root-relative path under it would name nothing.
-	for _, th := range copies {
-		name := filepath.Base(th)
-		src := filepath.Join(repo.Dir, archive, name)
-		dst := filepath.Join(repo.Dir, survivor.Dir, gone+"-"+name)
-		body, err := os.ReadFile(src)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(dst, body, 0o644); err != nil {
+	if discussion != "" {
+		if err := appendDiscussion(repo, survivor, filepath.Join(archive, changeset.DiscussionFile), discussion); err != nil {
 			return err
 		}
 	}
@@ -203,9 +195,9 @@ func runChangeCombine(ctx context.Context, a *app, opts *combineOptions) error {
 	// asked for: the dropped links are the disappeared changeset's, and keeping them would move the base.
 	a.printf("%s keeps base: %s and base-changeset: %s; dropped %s's base: %s and base-changeset: %s\n",
 		into, orNone(kept.Base), orNone(kept.BaseChangeset), gone, orNone(before.Base), orNone(before.BaseChangeset))
-	if len(copies) > 0 {
-		a.printf("copied %d thread(s) from %s into %s as %s-<name>.md; replies continue in those copies, and the "+
-			"archived originals stay in %s\n", len(copies), gone, into, gone, archive)
+	if discussion != "" {
+		a.printf("appended %s's discussion to %s under a line naming the archive; the original stays in %s\n",
+			gone, survivor.DiscussionPath(), archive)
 	}
 	a.printf("%s now carries one unlanded changeset, so offer it again with `git pair change ready`\n", branch)
 	if opts.json {
@@ -213,7 +205,7 @@ func runChangeCombine(ctx context.Context, a *app, opts *combineOptions) error {
 			"into": into, "combined": gone, "archive": archive, "commit": sha,
 			"keptBase": kept.Base, "keptBaseChangeset": kept.BaseChangeset,
 			"droppedBase": before.Base, "droppedBaseChangeset": before.BaseChangeset,
-			"threads": copies,
+			"discussionAppended": discussion != "",
 		})
 	}
 	return nil
@@ -240,6 +232,37 @@ func refuseIfOfferedOrReviewed(ctx context.Context, repo *git.Repo, cs changeset
 			cs.Slug, "this command", cs.Slug)}
 	}
 	return nil
+}
+
+// appendDiscussion brings the disappeared changeset's conversation into the survivor's file. It appends and never
+// rewrites: the discussion file has no schema, so the tool's part is one line naming where the text came from and
+// then the text exactly as it was. The archive keeps the original, which is the difference between a fold and a
+// delete, and the same content twice is what a re-run would look like without the guard below.
+func appendDiscussion(repo *git.Repo, survivor changeset.Changeset, archivePath, body string) error {
+	path := filepath.Join(repo.Dir, survivor.DiscussionPath())
+	existing, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+	case os.IsNotExist(err):
+		// The survivor had no conversation of its own yet, so the scaffold goes in first: the text below should
+		// read as something added to a discussion rather than as the whole file.
+		template, terr := changeset.ResolveDiscussionTemplate(repo, survivor.Slug)
+		if terr != nil {
+			return terr
+		}
+		existing = []byte(template)
+	default:
+		return err
+	}
+	if strings.Contains(string(existing), body) {
+		return nil
+	}
+	out := string(existing)
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	out += fmt.Sprintf("\nBrought across from %s:\n\n%s\n", archivePath, body)
+	return os.WriteFile(path, []byte(out), 0o644)
 }
 
 // appendArchiveLine adds the one line that tells a reader where the rest went. It is a pointer and not a copy: the

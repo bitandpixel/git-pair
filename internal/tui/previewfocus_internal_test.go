@@ -173,10 +173,12 @@ func TestTheListDoesNotMoveWhileThePaneHasTheKeys(t *testing.T) {
 	}
 }
 
-// The two jumps into the box work from the diff, keys and all: they name a row, take the keys to it, and the
+// The jump into the box works from the diff, keys and all: it names a row, takes the keys to it, and the
 // pane follows them on to the document -- which is the way to read ABOUT.md without leaving the screen. A
 // jump is not a reason to stay in the diff, and it is not a reason to move a cursor out of sight either, so
-// it does both things the list column's own keys do.
+// it does both things the list column's own keys do. The discussion file has no jump of its own -- the row
+// is one step below the one `a` lands on -- so the pane following the box's cursor onto it is walked here
+// rather than jumped.
 func TestTheJumpsIntoTheBoxLeaveThePaneWithTheKeys(t *testing.T) {
 	m := focusPane(t, docModel(t))
 	m = paneKey(t, m, runeKey('a'))
@@ -191,12 +193,15 @@ func TestTheJumpsIntoTheBoxLeaveThePaneWithTheKeys(t *testing.T) {
 		t.Errorf("the pane did not follow the jump on to the document:\n%s", view)
 	}
 
-	m = paneKey(t, m, runeKey('t'))
-	if kind, _ := activeKind(t, m); kind != rowThreadsHead {
-		t.Errorf("`t` landed on a %v row, want the Threads heading", kind)
+	// One step down the box is the other document, and the pane goes with the cursor the same way it
+	// went with the jump. The reviewer who wants the conversation has no key naming it, so the only
+	// thing that can be relied on is that walking to the row brings its text.
+	m = paneKey(t, m, keyMsg(tea.KeyDown))
+	if kind, _ := activeKind(t, m); kind != rowDiscussion {
+		t.Errorf("one step down from ABOUT.md landed on a %v row, want the discussion file", kind)
 	}
-	if view := ansi.Strip(strings.Join(m.previewLines(), "\n")); !strings.Contains(view, "── locking.md") {
-		t.Errorf("`t` did not bring the threads into the pane:\n%s", view)
+	if view := ansi.Strip(strings.Join(m.previewLines(), "\n")); !strings.Contains(view, "Why not call it reserve?") {
+		t.Errorf("the pane did not follow the cursor on to the discussion file:\n%s", view)
 	}
 }
 
@@ -225,6 +230,8 @@ func TestTheJumpsWaitForTheBoxToBeOnScreen(t *testing.T) {
 	m := openOverlay(t, overlayModel(t, 20))
 	before := m.metaCursor
 
+	// `a` is the one jump, and `t` is a key that names nothing at all now. Neither may move the box's
+	// cursor while the list is off the screen.
 	for _, r := range []rune{'a', 't'} {
 		m = paneKey(t, m, runeKey(r))
 		if m.mode != modePreview {
@@ -244,10 +251,12 @@ func TestNothingThatChangesTheReviewHappensWhileThePaneHasTheKeys(t *testing.T) 
 	// `V` is on the list's bar and opens a screen of its own, so it is the read-shaped key most
 	// likely to be pressed here by mistake. The keys that move the keys are not in this list: tab,
 	// shift-tab and f do leave the pane, on purpose, and TestTabMovesTheKeysOutOfThePane is
-	// where that is pinned -- and neither are `a` and `t`, which leave it the same way, keys and all,
-	// because a jump whose cursor you cannot see is the thing the focus exists to prevent.
-	// TestTheJumpsIntoTheBoxLeaveThePaneWithTheKeys is where those two are pinned.
-	for _, k := range []tea.KeyMsg{keyMsg(tea.KeySpace), runeKey('s'), runeKey('T'),
+	// where that is pinned -- and neither is `a`, which leaves it the same way, keys and all, because a
+	// jump whose cursor you cannot see is the thing the focus exists to prevent.
+	// TestTheJumpsIntoTheBoxLeaveThePaneWithTheKeys is where that is pinned. `t` and `T` are here
+	// because they used to open the thread list and the thread prompt: removed keys have to stay inert
+	// rather than turn into whatever the next key table happens to read.
+	for _, k := range []tea.KeyMsg{keyMsg(tea.KeySpace), runeKey('s'), runeKey('T'), runeKey('t'),
 		runeKey('e'), runeKey('c'), runeKey('V')} {
 		m = paneKey(t, m, k)
 	}

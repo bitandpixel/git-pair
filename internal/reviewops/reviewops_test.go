@@ -308,14 +308,15 @@ func TestEachSubmissionRecordsItsOwnDiff(t *testing.T) {
 }
 
 // The changeset's own directory is outside the digest, because that is where the review record lives.
-// Without the exclusion, replying to a review thread would change the identity of the approval the reply
-// is written into and invalidate it — the reader's own words turning against the review they were part of.
-func TestAReplyToTheReviewThreadLeavesTheRecordedDiffAlone(t *testing.T) {
+// Without the exclusion, what somebody writes into DISCUSSION.md would change the identity of the
+// approval it is written into and invalidate it — the reader's own words turning against the review
+// they were part of.
+func TestAReplyInTheDiscussionLeavesTheRecordedDiffAlone(t *testing.T) {
 	e := newEnv(t)
 
 	first := e.submit(t, model.OutcomeFeedback, "needs one change", true)
-	e.f.Append("changesets/"+slug+"/ABOUT.md", "\n### comment (author)\n\nfixed\n")
-	e.f.Commit("reply to the review thread")
+	e.f.Write("changesets/"+slug+"/DISCUSSION.md", "# Discussion\n\n## the comment\n\nfixed\n")
+	e.f.Commit("reply in the discussion")
 	second := e.submit(t, model.OutcomeApprove, "", true)
 
 	a := trailerValue(t, e.f.MustGit("log", "-1", "--format=%B", first.Commit), "Review-Diff-Id")
@@ -324,7 +325,7 @@ func TestAReplyToTheReviewThreadLeavesTheRecordedDiffAlone(t *testing.T) {
 		t.Fatalf("a submission recorded no diff identity (%q, %q)", a, b)
 	}
 	if a != b {
-		t.Errorf("the recorded identity moved from %s to %s across a reply to the review thread: the changeset's own directory must not be part of it", a, b)
+		t.Errorf("the recorded identity moved from %s to %s across a reply in the discussion file: the changeset's own directory must not be part of it", a, b)
 	}
 }
 

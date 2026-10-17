@@ -2,7 +2,6 @@ package changeset_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"gitpair/internal/changeset"
@@ -10,7 +9,7 @@ import (
 )
 
 // An archive under `.combined/` is inert to every reader: it answers no id, it is neither landed nor active, and it
-// is not offered as a thread of the changeset that hosts it. Three rules, so three assertions - they have to stay in
+// is not offered as a changeset of the one that hosts it. Three rules, so three assertions - they have to stay in
 // agreement, and the day one of them starts walking is the day a folded changeset comes back to life inside another
 // one's directory. `change combine` writes these, and the shape is what a hand-edited file can produce too.
 
@@ -23,11 +22,12 @@ func archivedFixture(t *testing.T, nested bool) *gittest.Fixture {
 	files := map[string]string{
 		"changesets/x/CHANGESET.yaml": "id: x\nbase: main\n",
 		"changesets/x/ABOUT.md":       "# x\n",
-		"changesets/x/scope.md":       "# scope\n\nx's own thread\n",
+		"changesets/x/DISCUSSION.md":  "# Discussion\n\nx's own entry\n",
 		// The archived file records a stack of its own, so a reader that walked the archive would have
 		// something to say about it: inertness has to hold against a file with content, not an empty stub.
 		"changesets/x/.combined/y/CHANGESET.yaml": "id: y\nbase: x\nbase-changeset: x\n",
 		"changesets/x/.combined/y/ABOUT.md":       "# y\n",
+		"changesets/x/.combined/y/DISCUSSION.md":  "# Discussion\n\ny's entry, kept for the record\n",
 		"work.go":                                 "package main\n",
 	}
 	if nested {
@@ -68,20 +68,32 @@ func TestAnArchiveUnderCombinedAnswersNoID(t *testing.T) {
 	}
 }
 
-// The host's thread list is the third reader. `Threads` reads the directory non-recursively and skips directories,
-// so the archive stays out of the list a reviewer is shown as the changeset's own threads.
-func TestAnArchiveIsNotAThreadOfItsHost(t *testing.T) {
+// The third reader is the discussion file. It is reached by one exact path, so an archived
+// discussion under `.combined/` is neither a source for the host's file nor a target of
+// writing it: the host keeps its own conversation and the archived one is left exactly as the
+// fold put it there.
+func TestAnArchiveIsNotTheHostsDiscussion(t *testing.T) {
 	f := archivedFixture(t, false)
-	threads, err := changeset.Changeset{Slug: "x", Dir: "changesets/x"}.Threads(repo(f))
+	hostText := "# Discussion\n\nx's own entry\n"
+	archived := "changesets/x/.combined/y/DISCUSSION.md"
+	archivedText := "# Discussion\n\ny's entry, kept for the record\n"
+	if got := f.Read(archived); got != archivedText {
+		t.Fatalf("the fixture's archived discussion = %q, want %q", got, archivedText)
+	}
+
+	cs := changeset.Changeset{Slug: "x", Dir: "changesets/x"}
+	created, err := cs.EnsureDiscussion(repo(f))
 	if err != nil {
-		t.Fatalf("Threads: %v", err)
+		t.Fatalf("EnsureDiscussion: %v", err)
 	}
-	joined := strings.Join(threads, " ")
-	if strings.Contains(joined, "y") || strings.Contains(joined, ".combined") {
-		t.Errorf("the host's threads are %v, want only its own scope.md", threads)
+	if created {
+		t.Error("EnsureDiscussion wrote a discussion the host already had")
 	}
-	if !strings.Contains(joined, "scope.md") {
-		t.Errorf("the host's own thread is missing from %v", threads)
+	if got := f.Read(cs.DiscussionPath()); got != hostText {
+		t.Errorf("host DISCUSSION.md = %q, want the host's own text %q", got, hostText)
+	}
+	if got := f.Read(archived); got != archivedText {
+		t.Errorf("the archived discussion changed when the host wrote its own:\n%s", got)
 	}
 }
 

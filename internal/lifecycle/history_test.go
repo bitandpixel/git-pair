@@ -350,7 +350,7 @@ func subjects(events []lifecycle.Event) []string {
 }
 
 // The tree verdict looks past a commit that touches nothing but changesets/<slug>/: that is
-// not an implementation change, and the reviewer reads ABOUT.md and threads from HEAD anyway.
+// not an implementation change, and the reviewer reads ABOUT.md and the discussion file from HEAD anyway.
 func TestSummarizeAgainstTreeChangesetOnlyCommitKeepsTheMarker(t *testing.T) {
 	f := gittest.New(t)
 	f.Commit("seed", gittest.WithFile("main.go", "package main\n"))

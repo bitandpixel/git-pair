@@ -264,8 +264,7 @@ func treeSession(t *testing.T, f *gittest.Fixture) *Session {
 func treeModel(t *testing.T) (reviewModel, *gittest.Fixture) {
 	t.Helper()
 	f := treeFixture(t)
-	m := reviewModel{ctx: context.Background(), sess: treeSession(t, f), width: 100, height: 24,
-		threadsOpen: true}
+	m := reviewModel{ctx: context.Background(), sess: treeSession(t, f), width: 100, height: 24}
 	m.refresh()
 	if len(m.sess.Files()) < 6 {
 		t.Fatalf("the fixture changed %d files, want the five it touches plus the changeset's own",
@@ -331,8 +330,7 @@ func TestTheListAsItRenders(t *testing.T) {
 		"○ main.go",
 		"span   main...current ▸",
 		"ABOUT.md",
-		"▾ Threads",
-		"    + new thread…",
+		"DISCUSSION.md",
 	}, "\n")
 	if got := visibleTree(m); got != want+"\n" {
 		t.Errorf("the list renders as:\n%s\nwant:\n%s\n", got, want)
@@ -455,8 +453,8 @@ func TestDirectoryMarksComeBackFromTheStore(t *testing.T) {
 
 // --- folding ----------------------------------------------------------------
 
-// Enter does for a directory what it already does for the thread heading: toggles the group. It is
-// not the difftool, which is `d` — and which stays one key away, not two.
+// Enter does for a directory what the box's span row does for a group: it is the row's own action
+// rather than a handoff. It is not the difftool, which is `d` — and which stays one key away, not two.
 func TestEnterFoldsADirectoryAndOpensItAgain(t *testing.T) {
 	m, _ := treeModel(t)
 	before := len(m.rows)

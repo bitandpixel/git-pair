@@ -107,7 +107,7 @@ func TestContributionCountsATrunkEditToAFileTheChildAlsoChanges(t *testing.T) {
 	}
 }
 
-// The review record is not the thing reviewed. A reply to a review thread, a landing that moves the parent's
+// The review record is not the thing reviewed. A reply in the discussion file, a landing that moves the parent's
 // directory into `.landed/`, and the parent's own record are all changes to files under `changesets/`, and
 // none of them may change the identity of the work an approval stands on.
 func TestContributionLeavesOutTheReviewRecord(t *testing.T) {
@@ -127,7 +127,7 @@ func TestContributionLeavesOutTheReviewRecord(t *testing.T) {
 	}
 
 	f.SwitchTo("beta")
-	f.Commit("beta: a reply to the review thread",
+	f.Commit("beta: a reply in the discussion",
 		gittest.WithFiles(map[string]string{
 			"changesets/beta/ABOUT.md":  "# beta\n\n## Addressed feedback\n\nanswered\n",
 			"changesets/alpha/ABOUT.md": "# alpha\n\nsomebody edited the parent's record too\n",

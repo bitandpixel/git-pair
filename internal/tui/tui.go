@@ -29,7 +29,6 @@ type mode int
 
 const (
 	modeFiles mode = iota
-	modePrompt
 	modeSubmit
 	// modeSpan is the `V` screen: a pending base and head, neither applied until Enter.
 	modeSpan
@@ -44,14 +43,13 @@ const (
 // rather than by a key of its own. The frame says which of them holds the keys rather than leaving it to
 // be inferred: a keystroke means something different in each, and a region that cannot be seen cannot be
 // changed by one.
-// previewKind is what the pane is a window onto: a file's diff across the span, one changeset document's
-// own text, every thread's text as one thing to read, or one file's own text at the span's head.
+// previewKind is what the pane is a window onto: a file's diff across the span, one changeset
+// document's own text, or one file's own text at the span's head.
 type previewKind int
 
 const (
 	previewDiff previewKind = iota
 	previewDocument
-	previewThreads
 	// previewContent is a file the span created or moved whole. Its patch says nothing the file does
 	// not say better, so the pane shows the text and the tree's sign says what happened to it.
 	previewContent
@@ -65,13 +63,6 @@ const (
 	focusMeta
 )
 
-type promptKind int
-
-const (
-	promptNone promptKind = iota
-	promptThread
-)
-
 // rowKind says what a navigable line stands for.
 type rowKind uint8
 
@@ -80,41 +71,20 @@ const (
 	// rowDir is a directory of the file tree: a prefix of the changed files, foldable, and the
 	// thing Space marks when a reviewer wants a whole subtree read at once.
 	rowDir
+	// rowAbout and rowDiscussion are the changeset's own two documents. Both rows are always in the
+	// box, whether or not the file exists: the row is the offer to read it, and `e` on it writes the
+	// scaffold when there is nothing there yet.
 	rowAbout
-	rowThreadsHead
-	rowThread
-	rowNewThread
+	rowDiscussion
 	// rowSpan is the span line inside the changeset box. It is a row rather than a caption because
 	// the span is the one thing in the box a reviewer changes: Enter or Space on it opens the picker.
 	rowSpan
 )
 
-// Labels the section rows print. A thread is shown by file name: they all live in one
-// directory, so the name is the whole distinction.
-const (
-	newThreadLabel = "+ new thread…"
-	threadIndent   = "    "
-)
-
-// The title prompt is one field: a label, the ghost of a title while the field is empty, the caret,
-// and the keys that finish or abandon it. The ghost says what the field wants, so the line under it
-// has no reason to say it again.
-const (
-	threadPromptLabel      = "New thread: "
-	threadTitlePlaceholder = "Thread title"
-	threadPromptCursor     = "█"
-)
-
-// threadPromptHint names the two keys that end the title prompt. It rides the second row of the band
-// rather than the notification slot: it says what the keys mean for as long as the field is up, so it
-// is chrome, and chrome cannot be dismissed by the reviewer or by a clock.
-const threadPromptHint = "Enter to create, Esc to cancel"
-
 // row is one line of the navigable list: a file in the span, or an entry of the changeset
-// section — ABOUT.md, the thread heading, one thread nested under it, or the action that
-// creates another. Both sections are in one list because a reviewer works down the screen:
-// the code, then what the changeset says about it, with `j` running off the bottom of the
-// files and into the artifacts instead of into a separate mode.
+// section — ABOUT.md and DISCUSSION.md. Both sections are in one list because a reviewer works
+// down the screen: the code, then what the changeset says about it, with `j` running off the bottom
+// of the files and into the artifacts instead of into a separate mode.
 type row struct {
 	kind rowKind
 	// path is repository-relative. A directory row's carries the trailing separator, which makes it
@@ -131,8 +101,6 @@ type row struct {
 	// are what the row promises and what Space is about to set. The files the working tree put on the list
 	// are in neither, because there is no patch of theirs to have read.
 	total, marked int
-	note          string // set on the thread heading when the threads could not be listed
-	count         int    // how many threads the heading is standing in for
 	// change is what the span did to this file, carried on the row rather than looked up again, so the
 	// tree's sign and the row's own Enter cannot disagree about what happened to the file. Only a file
 	// row has one: every other kind leaves it at the modification, whose sign is nothing at all.
@@ -167,7 +135,6 @@ const (
 	// comparison for it, the editor when it does not. See openArtifact.
 	actionArtifact
 	actionCollapse
-	actionNewThread
 	// actionSpan is Enter or Space on the span row: the picker, which changes nothing until its own
 	// Enter — so it is reachable over a historical span like any other read.
 	actionSpan
@@ -176,22 +143,19 @@ const (
 // activateBy is the Enter table: one row kind, one action. A file opens in the difftool because that
 // is the thing under review, with one exception spelled out in fileAction: a file the span added is
 // read in the editor, because there is no other side of it to compare against. The changeset documents
-// are markdown, so they get openArtifact: what a returning reviewer wants from ABOUT.md or a thread is
+// are markdown, so they get openArtifact: what a returning reviewer wants from ABOUT.md or DISCUSSION.md is
 // usually the two or three lines the author rewrote after the last review, and a diff is the only way to see
 // exactly those — while a document the changeset invented has no comparison worth opening.
-// The heading toggles its own group, and the last row of the group creates another thread. Enter on
-// a directory does the same to its own part of the tree — fold it, unfold it — which is what the key
+// Enter on a directory does the same to its own part of the tree — fold it, unfold it — which is what the key
 // already means for a group of rows; reading what a directory changed is `d`, as it is for a file.
 func activateBy(r row) action {
 	switch r.kind {
 	case rowFile:
 		return fileAction(r.change, r.untracked)
-	case rowThread, rowAbout:
+	case rowDiscussion, rowAbout:
 		return actionArtifact
-	case rowDir, rowThreadsHead:
+	case rowDir:
 		return actionCollapse
-	case rowNewThread:
-		return actionNewThread
 	case rowSpan:
 		return actionSpan
 	}
@@ -294,18 +258,14 @@ type reviewModel struct {
 	// rows is the navigable list: the file tree, then the changeset box's rows. It is rebuilt by
 	// refresh whenever the session or the view could have changed, and metaStart is where the box's
 	// rows begin in it — the two regions are two windows over one list.
-	rows        []row
-	metaStart   int
-	inSpan      map[string]bool
-	threadsOpen bool
+	rows      []row
+	metaStart int
+	inSpan    map[string]bool
 	// folded holds the directories whose contents are hidden, keyed by the directory path with
 	// its trailing separator. It is view state and nothing else: the marks a directory row shows
 	// are computed from the files under it every time the list is built, so there is no directory
 	// state to keep in step with them, or to save.
 	folded map[string]bool
-
-	promptKind promptKind
-	input      string
 
 	status    string
 	statusErr bool
@@ -333,8 +293,7 @@ type reviewModel struct {
 	// the span changed and which the pane shows as a diff or as the file's own text, and the changeset's
 	// own documents, which are prose the reviewer is asked to read and which the pane shows as their text.
 	previewKind previewKind
-	// docs is the cache of what has been read, one entry per path -- and one for the changeset directory,
-	// holding every thread at once, which is what the Threads heading is standing on.
+	// docs is the cache of what the changeset's own documents have been read as, one entry per path.
 	docs   map[string]Document
 	docFor func(ctx context.Context, path string) Document // nil asks the session; tests say so instead
 	// contents is the same cache for the files the pane reads as text. It is apart from `docs` because
@@ -402,7 +361,7 @@ func Run(ctx context.Context, opts Options) error {
 	}()
 
 	m := reviewModel{
-		ctx: ctx, sess: sess, out: out, width: 80, height: 24, threadsOpen: true, previewOn: true,
+		ctx: ctx, sess: sess, out: out, width: 80, height: 24, previewOn: true,
 		mouse: opts.Mouse,
 		// There is no match to pick out until `n` or `enter` says there is. Zero would be row zero,
 		// which is a row the reviewer never asked to be standing on.
@@ -562,8 +521,8 @@ func (m reviewModel) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the first moment the reviewer can actually read it.
 			m.setStatus(note, false)
 		}
-		// The editor may have written a new thread, so the section below the files
-		// has to be listed again, and any patch the preview is holding may be stale.
+		// The editor may have written the discussion file, so the box's rows have to be listed again,
+		// and any patch the preview is holding may be stale.
 		// Dropping it and stopping there would leave the pane blank on the file the cursor
 		// is already on, so ask for the fresh one in the same breath.
 		m.forgetPatches()
@@ -659,8 +618,6 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case modeSubmit:
 		return m.handleSubmitKey(key)
-	case modePrompt:
-		return m.handlePromptKey(key)
 	case modeSpan:
 		// The picker is how a reviewer gets *out* of a read-only span, so it is not
 		// subject to the gate below; it also changes nothing until Enter.
@@ -722,13 +679,13 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
 		m.move(-1)
 	case key.Type == tea.KeyCtrlD:
-		m.move(max(1, m.activeWindow()/2))
+		m.page(max(1, m.activeWindow()/2))
 	case key.Type == tea.KeyCtrlU:
-		m.move(-max(1, m.activeWindow()/2))
+		m.page(-max(1, m.activeWindow()/2))
 	case key.Type == tea.KeyCtrlF:
-		m.move(max(1, m.activeWindow()))
+		m.page(max(1, m.activeWindow()))
 	case key.Type == tea.KeyCtrlB:
-		m.move(-max(1, m.activeWindow()))
+		m.page(-max(1, m.activeWindow()))
 	case pressedG && key.Type == tea.KeyRunes && firstRune(key) == 'g':
 		m.activeTop()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'G':
@@ -773,13 +730,6 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.gotoRow(rowAbout) {
 			m.setRefusal("no ABOUT.md row in this changeset's box")
 		}
-	case key.Type == tea.KeyRunes && firstRune(key) == 't':
-		if !m.gotoRow(rowThreadsHead) {
-			m.setRefusal("no thread heading in this changeset's box")
-		}
-	case key.Type == tea.KeyRunes && firstRune(key) == 'T':
-		m.mode, m.input, m.promptKind = modePrompt, "", promptThread
-		m.setStatus("", false)
 	case key.Type == tea.KeyRunes && firstRune(key) == 'V':
 		return m.openSpanPicker()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'v':
@@ -832,8 +782,8 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// mutatingKey is the table of keys that change something: a reviewed mark, a file on disk, a thread, a
-// review submission. Keeping it in one place is what lets the read-only gate cover commands added
+// mutatingKey is the table of keys that change something: a reviewed mark, a file on disk, a review
+// submission. Keeping it in one place is what lets the read-only gate cover commands added
 // later. It is asked about the row the keys are on rather than about the keystroke alone, because Space
 // means two different things depending on where it lands: on a file it sets a mark, and on the span row
 // it opens the picker, which commits nothing.
@@ -849,9 +799,12 @@ func mutatingKey(key tea.KeyMsg, m reviewModel) (doing string, ok bool) {
 	}
 	switch key.Runes[0] {
 	case 'e':
+		// `e` on the discussion row writes the file when the changeset has none, which is a change to
+		// the working tree like any other edit, so the row says what it refuses rather than the key.
+		if r, _, found := m.activeRow(); found && r.kind == rowDiscussion {
+			return "create or edit " + r.name, true
+		}
 		return "edit files", true
-	case 'T':
-		return "start a thread", true
 	case 's':
 		return "submit a review", true
 	}
@@ -872,7 +825,7 @@ func (m reviewModel) cannot(doing string) string {
 }
 
 // toggleMark marks the file under the cursor reviewed, or explains why the row it is on cannot be:
-// ABOUT.md and threads are read rather than diffed, and the group rows are not things at all.
+// the changeset's documents are read rather than diffed, and the group rows are not things at all.
 //
 // A directory row marks what it stands for — every file under it, including the ones a fold has
 // hidden, since the fold is a way of looking and not a claim about what was read. One press marks
@@ -922,12 +875,6 @@ func (m *reviewModel) toggleMark() {
 	}
 	// Empty for a file, which is what clearing the line after a mark has always meant.
 	m.setStatus(note, false)
-}
-
-// toggleThreads collapses or expands the thread list under its heading.
-func (m *reviewModel) toggleThreads() {
-	m.threadsOpen = !m.threadsOpen
-	m.refresh()
 }
 
 // --- folding the file tree --------------------------------------------------
@@ -1118,69 +1065,10 @@ func (m reviewModel) handleSubmitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-func (m reviewModel) handlePromptKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch key.Type {
-	case tea.KeyEsc, tea.KeyCtrlC:
-		m.mode, m.input, m.promptKind = modeFiles, "", promptNone
-		m.setStatus("", false)
-		return m, nil
-	case tea.KeyEnter:
-		title := strings.TrimSpace(m.input)
-		m.mode, m.input, m.promptKind = modeFiles, "", promptNone
-		if title == "" {
-			m.setStatus("A thread needs a title", true)
-			return m, nil
-		}
-		return m.openThreadTitle(title)
-	case tea.KeyBackspace:
-		runes := []rune(m.input)
-		if len(runes) > 0 {
-			m.input = string(runes[:len(runes)-1])
-		}
-		return m, nil
-	case tea.KeySpace:
-		// A lone space arrives as KeySpace rather than KeyRunes, and titles are prose:
-		// "Does the lock cover the map?" used to arrive as "Doesthelockcoverthemap?".
-		m.input += " "
-	case tea.KeyRunes:
-		m.input += string(key.Runes)
-		return m, nil
-	}
-	return m, nil
-}
-
-func (m reviewModel) openThreadTitle(title string) (tea.Model, tea.Cmd) {
-	path, created, err := m.sess.Changeset().EnsureThread(m.sess.Repo(), title)
-	if err != nil {
-		m.setStatus(err.Error(), true)
-		return m, nil
-	}
-	note := "Opened existing thread " + path
-	if created {
-		note = "Created " + path
-	}
-	// The new file belongs in the box the reviewer was just reading, so the box's cursor goes to it and
-	// the keys go with it: the box draws its highlight only on the half that holds the keys, and a thread
-	// left selected in a box without the keys is a selection nobody sees. The file tree's cursor is left
-	// alone: it is the row the preview is showing, and coming back from the editor to a different diff
-	// than the one you left is the one thing a handoff should not do.
-	m.refresh()
-	for i, r := range m.rows {
-		if r.kind == rowThread && r.path == path {
-			m.metaCursor, m.focus = i, focusMeta
-			break
-		}
-	}
-	m.clamp()
-	// The note rides the handoff, so "Created …" is still on screen when the editor closes
-	// rather than having been covered by it.
-	return m.openPathNoted(path, note)
-}
-
-// openSpanPicker is `V`, and Enter or Space on the span row: the screen where both ends are chosen
-// before either takes effect. It is reachable from a historical span for the same reason reading is —
-// the picker is how a reviewer gets back to a span they can act on, and it changes nothing until its
-// own Enter.
+// The span and the base pickers are the two lists that change what the model measures
+// before either takes effect. It is reachable from a historical span for the same reason
+// reading is — the picker is how a reviewer gets back to a span they can act on, and it
+// changes nothing until its own Enter.
 func (m reviewModel) openSpanPicker() (tea.Model, tea.Cmd) {
 	m.mode = modeSpan
 	m.pick = m.newSpanPicker()
@@ -1208,18 +1096,8 @@ func (m reviewModel) activate() (tea.Model, tea.Cmd) {
 	case actionArtifact:
 		return m.openArtifact(r)
 	case actionCollapse:
-		if r.kind == rowDir {
-			m.setFolded(r.path, !m.folded[r.path])
-			return m, nil
-		}
-		m.toggleThreads()
-	case actionNewThread:
-		if why := m.cannot("start a thread"); why != "" {
-			m.setRefusal(why)
-			return m, nil
-		}
-		m.mode, m.input, m.promptKind = modePrompt, "", promptThread
-		m.setStatus("", false)
+		m.setFolded(r.path, !m.folded[r.path])
+		return m, nil
 	}
 	return m, nil
 }
@@ -1243,14 +1121,14 @@ func (m reviewModel) openDiffOfSelection() (tea.Model, tea.Cmd) {
 // the difftool when the span has a real comparison for the file, the editor when it does not.
 //
 // Two rounds of review are what makes this worth distinguishing. In an unreviewed span,
-// ABOUT.md and the threads already existed at its left end, so the span holds a genuine
+// ABOUT.md and the discussion file already existed at its left end, so the span holds a genuine
 // comparison — the lines the author rewrote after the last review, which is exactly what a
 // returning reviewer is after, in prose as much as in code. On a first look at the changeset
 // those files were invented by it, and the comparison has nothing on its left side: a
 // document diffed against /dev/null is the document with extra steps, so it opens plainly.
 func (m reviewModel) openArtifact(r row) (tea.Model, tea.Cmd) {
 	if r.path == "" {
-		m.setRefusal("nothing to diff: " + r.name + " is a heading, not a file")
+		m.setRefusal("nothing to diff: " + r.name + " is not a file")
 		return m, nil
 	}
 	if why := m.cannot("edit " + r.name); why != "" && m.documentAction(r) != actionDiff {
@@ -1260,25 +1138,48 @@ func (m reviewModel) openArtifact(r row) (tea.Model, tea.Cmd) {
 		m.setRefusal(why)
 		return m, nil
 	}
-	if r.kind == rowAbout && m.sess.Span().CanEdit() {
-		// A changeset made before ABOUT.md was scaffolded may not have one. Making it and
-		// opening it is the whole job there, and no note about the span would be true — but
-		// only in a span the reviewer can act on. Over history the gate above lets this row
-		// through because the *diff* is legitimate, and the diff is what they should get: the
-		// file on disk is not the file this span contains, and creating one here would be a
-		// write in the mode whose whole promise is that there are none.
+	if (r.kind == rowAbout || r.kind == rowDiscussion) && m.sess.Span().CanEdit() {
+		// A changeset made before either document was scaffolded may not have it. Making the file and
+		// opening it is the whole job there -- but only in a span the reviewer can act on: over history
+		// the gate above lets the row through because the *diff* is legitimate, and the file on disk is
+		// not the file that span contains.
 		if _, err := os.Stat(absPath(m.sess.Repo().Dir, r.path)); err != nil {
-			if _, err := m.sess.Changeset().EnsureAbout(m.sess.Repo()); err != nil {
-				m.setStatus(err.Error(), true)
-				return m, nil
-			}
-			return m.openPath(r.path)
+			return m.openDocument(r)
 		}
 	}
 	if artifactAction(m.inSpan[r.path], m.sess.HasVersionAt(m.ctx, m.sess.Span().From, r.path)) == actionDiff {
 		return m.openDiff(r.path)
 	}
 	return m.openPathNoted(r.path, m.editorNote(r.path, r.name))
+}
+
+// openDocument hands the terminal to the editor for one of the changeset's own documents, writing the
+// changeset's scaffold first when the file is not there. The two rows are listed whether or not the
+// files exist -- a reviewer who has not started the conversation still has to be offered the place to
+// start it -- so the key that names the file has to be able to make it as well as open it.
+//
+// The note says which of the two happened, because it is the one thing the reviewer cannot see from
+// the row, and it rides the handoff so it is still on screen when the editor closes.
+func (m reviewModel) openDocument(r row) (tea.Model, tea.Cmd) {
+	var (
+		created bool
+		err     error
+	)
+	switch r.kind {
+	case rowDiscussion:
+		created, err = m.sess.Changeset().EnsureDiscussion(m.sess.Repo())
+	default:
+		created, err = m.sess.Changeset().EnsureAbout(m.sess.Repo())
+	}
+	if err != nil {
+		m.setStatus(err.Error(), true)
+		return m, nil
+	}
+	note := "Opened existing " + r.path
+	if created {
+		note = "Created " + r.path
+	}
+	return m.openPathNoted(r.path, note)
 }
 
 // documentAction is the artifact decision for a row, apart from acting on it: the
@@ -1348,10 +1249,11 @@ func difftoolHead(sp span.Span) string {
 	return ""
 }
 
-// openEditor edits the row under the cursor: a file, a thread, or ABOUT.md.
-// openEditor edits the row under the cursor: a file, a thread, or ABOUT.md. A directory is not a
-// thing an editor has to open — the tool would find its own way in — and the keys that do want the
-// whole subtree are already there, so the row says so instead of sending a path to the editor.
+// openEditor edits the row under the cursor: a file, or one of the changeset's own documents. A
+// directory is not a thing an editor has to open — the tool would find its own way in — and the keys
+// that do want the whole subtree are already there, so the row says so instead of sending a path to
+// the editor. A document row whose file is not in the working tree writes the scaffold first: the row
+// is on the list either way, and `e` on it is the key that starts the file.
 func (m reviewModel) openEditor() (tea.Model, tea.Cmd) {
 	r, _, ok := m.activeRow()
 	if !ok || r.path == "" {
@@ -1360,6 +1262,14 @@ func (m reviewModel) openEditor() (tea.Model, tea.Cmd) {
 	if r.kind == rowDir {
 		m.setRefusal(r.name + " is a directory — enter folds it, d diffs what is under it")
 		return m, nil
+	}
+	if r.kind == rowAbout || r.kind == rowDiscussion {
+		// The row is on the list whether or not the file is, and `e` on it is the key that starts the
+		// file. `e` is a mutating key, so the read-only gate has already refused the historical span
+		// that would otherwise write this file into the working tree.
+		if _, err := os.Stat(absPath(m.sess.Repo().Dir, r.path)); err != nil {
+			return m.openDocument(r)
+		}
 	}
 	return m.openPath(r.path)
 }
@@ -1535,9 +1445,8 @@ func (m reviewModel) boxInner() int {
 }
 
 // boxLines draws the changeset box: the two borders, the base line inside them, and the rows of the
-// region — the span, ABOUT.md, the thread heading, the threads, and the row that starts another. The
-// borders are the box's focus light, the same job the double rule does for the preview: faint when the
-// keys are elsewhere, bold when the box holds them.
+// region — the span, ABOUT.md and DISCUSSION.md. The borders are the box's focus light, the same job
+// the double rule does for the preview: faint when the keys are elsewhere, bold when the box holds them.
 func (m reviewModel) boxLines(section []renderedRow) []string {
 	f := m.boxFrame()
 	frame := styleDim.Render
@@ -1684,10 +1593,10 @@ func (m reviewModel) listBlock() string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// footer is the band at the bottom of the screen: one fixed-height block that holds the prompt's
-// input line while a title is being typed, a notification while one is on screen, the drift warning
-// while a ref has moved, or the shortcut bar. It spans the whole terminal rather than the list
-// column, because it belongs to the session rather than to either column.
+// footer is the band at the bottom of the screen: one fixed-height block that holds a notification
+// while one is on screen, the drift warning while a ref has moved, or the shortcut bar. It spans the
+// whole terminal rather than the list column, because it belongs to the session rather than to either
+// column.
 func (m reviewModel) footer() string {
 	var b strings.Builder
 	for _, line := range m.band() {
@@ -1696,40 +1605,12 @@ func (m reviewModel) footer() string {
 	return b.String()
 }
 
-// promptText is the field's contents: the title being typed with the caret after it, or, while the
-// field is empty, the caret over the ghost of a title. The caret goes wherever the caret is -- after
-// what has been typed, and on the field's first cell when nothing has.
-func (m reviewModel) promptText() string {
-	if m.input != "" {
-		return m.input + threadPromptCursor
-	}
-	// A ghost too wide for the window is dropped rather than cut: the frame writes one row per
-	// line and cuts what overflows, and half a hint reads as a fault rather than as an invitation.
-	if lipgloss.Width(threadPromptLabel+threadTitlePlaceholder) > m.width {
-		return threadPromptCursor
-	}
-	return promptGhost()
-}
-
-// promptGhost is the caret resting on the first cell of the ghost title. The caret is a block, and a
-// block in front of a title nobody has typed reads as a title that is there, so it covers the ghost's
-// first letter the way a caret sitting on a cell does -- the letter stays legible inside it, which is
-// what says the field is still empty.
-func promptGhost() string {
-	first, _ := utf8.DecodeRuneInString(threadTitlePlaceholder)
-	return styleSelected.Render(string(first)) +
-		styleDim.Render(threadTitlePlaceholder[utf8.RuneLen(first):])
-}
-
 // band is footer's content, cut or padded to exactly bandRows() rows. Only one thing is shown at a
-// time, and the order is what the reviewer needs most: a prompt they are typing into, then what
-// their last key did, then the warning about the ground moving under the span.
+// time, and the order is what the reviewer needs most: what their last key did, then the warning about
+// the ground moving under the span.
 func (m reviewModel) band() []string {
 	var lines []string
 	switch {
-	case m.mode == modePrompt:
-		lines = append(lines, threadPromptLabel+m.promptText())
-		lines = append(lines, m.promptHint()...)
 	case m.status != "":
 		// Each line opens its own colour: the renderer skips rows that have not changed, and a
 		// style left open on a skipped row tints whatever is written under it.
@@ -1754,14 +1635,9 @@ func (m reviewModel) band() []string {
 // happens to be saying, so no notification can change the number of rows the list above it gets. In
 // the list that is helpRows, the budget of the tallest bar the session can show, for the reason
 // helpRows gives: the keys moving between the three regions must not move the band either. The picker,
-// the overlay and the submit prompt each draw one bar, and their band is that bar's height. The prompt
-// is the field plus however many rows its own hint takes at this width -- chrome like the bar, so its
-// height is settled by the window rather than by a message.
+// the overlay and the submit prompt each draw one bar, and their band is that bar's height.
 func (m reviewModel) bandRows() int {
-	switch m.mode {
-	case modePrompt:
-		return 1 + max(1, len(m.promptHint()))
-	case modeFiles:
+	if m.mode == modeFiles {
 		return max(1, m.helpRows())
 	}
 	return max(1, len(m.helpLines()))
@@ -1777,21 +1653,6 @@ func (m reviewModel) helpBar() []string {
 	}
 	for i, line := range lines {
 		lines[i] = styleDim.Render(line)
-	}
-	return lines
-}
-
-// promptHint is the row under the prompt's field: the two keys that end it, dimmed like the bar whose
-// rows they share. It is not a notification -- it says what the keys mean for as long as the field is
-// up, so no keystroke and no timer retires it -- and it wraps like the bar, because a hint cut in half
-// names neither key.
-func (m reviewModel) promptHint() []string {
-	if m.promptKind != promptThread {
-		return nil
-	}
-	var lines []string
-	for _, line := range wrapProse(threadPromptHint, m.width) {
-		lines = append(lines, styleDim.Render(line))
 	}
 	return lines
 }
@@ -1870,8 +1731,6 @@ func (m reviewModel) helpText() string {
 	switch m.mode {
 	case modeSubmit:
 		return "Submit review: [b]lock  [f]eedback  [a]pprove  [esc] cancel"
-	case modePrompt:
-		return "" // the thread prompt is the input line, not help
 	case modeSpan:
 		return helpSpan(m.pick.list != nil, m.pick.filtering)
 	case modePreview:
@@ -1920,11 +1779,11 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 		// column -- `esc` gives the keys back, `f` names the tree, `tab` walks the ring -- so they are
 		// one group on the bar rather than three claims on it. `/ find` is named with the two keys that
 		// walk what it finds: a search nobody can see the keys for is a feature nobody finds.
-		// The two jumps into the box are named here as they are in both bars of the list column: the box
-		// is on screen beside the diff, and the row they name is the reason to leave it.
-		jumps := "a about  t threads  "
+		// The jump into the box is named here as it is in both bars of the list column: the box is on
+		// screen beside the diff, and the row it names is the reason to leave it.
+		jumps := "a about  "
 		open := "enter diff"
-		if m.previewKind == previewDocument || m.previewKind == previewThreads ||
+		if m.previewKind == previewDocument ||
 			fileAction(m.previewFileChange(), m.previewFileUntracked()) == actionEdit {
 			// What is on show is a document, a file the span added, or one git has never been told about, and
 			// `enter` opens it in the editor rather than in the difftool -- the bar says "open" because that is
@@ -1935,12 +1794,10 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 		return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " +
 			jumps + open + "  z full  esc f tab list  q quit"
 	}
-	// The jumps name a row of the box from either half of the column and take the keys with them. `T`
-	// writes, so it is absent from every bar of a span that cannot.
-	jumps := "a about  t threads"
-	if m.sess.Span().Live() {
-		jumps += "  T new thread"
-	}
+	// The jump names a row of the box from either half of the column and takes the keys with it. There is
+	// no key for the discussion file and none that writes it: the row is one arrow-key away from ABOUT.md,
+	// and `e` on it is the key that starts the file.
+	jumps := "a about"
 	if target == focusMeta {
 		return page + "  enter open  space span  " + jumps + "  " + elsewhere + "  q quit"
 	}
@@ -2089,14 +1946,14 @@ func wrapWords(s string, width int) []string {
 // --- helpers ----------------------------------------------------------------
 
 // refresh rebuilds the navigable list from the session, keeping the cursor on the row it was
-// on while that row still exists — a thread created in the editor, a rescan after a difftool
+// on while that row still exists — a document written in the editor, a rescan after a difftool
 // closed, or a collapse should not move the reviewer somewhere else. When the row has gone off
 // the screen, the cursor goes to the directory that holds it rather than staying at its old
 // index, which after a fold would be some unrelated row further down the list.
 // refresh rebuilds the rows and puts each region's cursor back on the row it was on. A row is
 // identified by kind and path rather than by index, because the tree re-shapes itself when a directory
-// is folded and because a thread the reviewer just wrote appears in the box without being asked; the
-// index of a row that is still there is not the number it had.
+// is folded and because a file the reviewer writes in the editor appears in the list without anything
+// being told to add it; the index of a row that is still there is not the number it had.
 func (m *reviewModel) refresh() {
 	keepFile, keepMeta := m.rowUnder(m.cursor), m.rowUnder(m.metaCursor)
 	start := m.metaStart
@@ -2150,7 +2007,7 @@ func (m *reviewModel) buildRows() {
 	inSpan := make(map[string]bool, len(files))
 	for _, f := range files {
 		// The rows the working tree put on the list are not in the span, whatever the working tree says about
-		// the path: `d` on a thread the reviewer created is a file to read, not a comparison to open.
+		// the path: `d` on a document the reviewer wrote is a file to read, not a comparison to open.
 		if !f.OutsideSpan {
 			inSpan[f.Path] = true
 		}
@@ -2170,35 +2027,23 @@ func (m *reviewModel) buildRows() {
 			outside: files[e.file].OutsideSpan, untracked: files[e.file].Untracked})
 	}
 	// The split between the two regions: from here down are the rows the changeset box draws. One index
-	// into one list rather than two lists, because a thread the reviewer creates has to appear in the
-	// box without anything being told to update it.
+	// into one list rather than two lists, because the box and the tree are walked as one column with `j`
+	// and `k`, and each half keeps its own cursor into the same slice.
 	m.metaStart = len(rows)
 	// The span is the box's first row and the only one a reviewer changes: what the review is measured
 	// against is worth choosing, so it is a row with an action rather than a line to read.
 	rows = append(rows, row{kind: rowSpan, name: m.spanName(m.sess.Header().SpanLabel), file: -1})
 	rows = append(rows, row{kind: rowAbout, path: m.sess.AboutPath(),
 		name: filepath.Base(m.sess.AboutPath()), file: -1})
+	// The discussion row is there whether or not the file is, exactly like ABOUT.md's: the row is the
+	// offer to read the conversation, and `e` on it writes the scaffold when there is nothing to read.
+	rows = append(rows, row{kind: rowDiscussion, path: m.sess.DiscussionPath(),
+		name: filepath.Base(m.sess.DiscussionPath()), file: -1})
 
-	// Nothing is filtered out of the file list above: a thread or ABOUT.md that changed in
+	// Nothing is filtered out of the file list above: ABOUT.md or DISCUSSION.md that changed in
 	// the span is part of what is under review, so it keeps its file row as well as its
 	// place in the section below. The section is the shortcut to read them; the list is the
 	// record of what the diff did.
-	threads, err := m.sess.Threads()
-	head := row{kind: rowThreadsHead, name: "Threads", count: len(threads), file: -1}
-	if err != nil {
-		head.note = err.Error()
-	}
-	rows = append(rows, head)
-	if m.threadsOpen {
-		for _, path := range threads {
-			rows = append(rows, row{kind: rowThread, path: path, name: filepath.Base(path), file: -1})
-		}
-		// The offer to start a thread is an offer to change the working tree, and a
-		// historical span has no working tree in it.
-		if m.sess.Span().CanEdit() {
-			rows = append(rows, row{kind: rowNewThread, name: newThreadLabel, file: -1})
-		}
-	}
 	m.rows = rows
 }
 
@@ -2272,30 +2117,15 @@ func (m reviewModel) rowText(r row) string {
 			text += " " + signStyle(r.change).Render(sign)
 		}
 		return text
-	case rowAbout:
+	case rowAbout, rowDiscussion:
+		// Both documents print their plain file name: no indent, no gutter mark, no count. The rows
+		// are the changeset's own two files, not entries in a group, and a mark would claim the
+		// reviewer had read something the counter does not count.
 		return r.name
 	case rowSpan:
 		// The control rather than the caption: the arrow says the row goes somewhere, which is the
 		// whole difference between a line a reviewer reads and a line a reviewer presses.
 		return boxLabel("span") + r.name + " " + styleDim.Render("\u25b8")
-	case rowThreadsHead:
-		arrow := "▸ "
-		label := r.name
-		if m.threadsOpen {
-			arrow = "▾ "
-			// The count is the promise of what is hidden. Expanded, the threads are
-			// the count, and repeating it next to them is noise.
-		} else {
-			label = fmt.Sprintf("%s (%d)", r.name, r.count)
-		}
-		if r.note != "" {
-			return styleErr.Render("threads: " + r.note)
-		}
-		return styleDim.Render(arrow + label)
-	case rowThread:
-		return threadIndent + r.name
-	case rowNewThread:
-		return styleDim.Render(threadIndent + r.name)
 	}
 	return r.name
 }
@@ -2388,8 +2218,9 @@ func (m reviewModel) dirGutter(r row) string {
 // --- regions ----------------------------------------------------------------
 
 // The row area is split between the two regions. The box gets what it asks for up to a third of the
-// area and the list gets the rest, which is what makes a changeset with forty threads a reason to
-// scroll the box rather than a reason to hide the diff behind it. The floors are arithmetic rather
+// area and the list gets the rest, which is what keeps a tall box from turning into a reason to hide the
+// diff behind it: the box scrolls inside its own borders rather than pushing the tree off the screen.
+// The floors are arithmetic rather
 // than branches: at the smallest row area the tests allow, the box takes two rows and the list keeps
 // six.
 const (
@@ -2474,9 +2305,9 @@ func (m *reviewModel) clampRegion(cursor, scroll *int, start, end, window int) {
 	if *cursor >= *scroll+window {
 		*scroll = *cursor - window + 1
 	}
-	// ... and it never starts so far down that it cannot fill itself. A region that lost rows -- the
-	// threads folded away, a rebuild that found fewer files -- leaves a scroll pointing past what is
-	// left, and the box would draw two rows under a border built for six.
+	// ... and it never starts so far down that it cannot fill itself. A region that lost rows -- a
+	// rebuild that found fewer files, a box that no longer needs as many rows as it asked for -- leaves a
+	// scroll pointing past what is left, and the box would draw two rows under a border built for six.
 	if lowest := max(start, end-window); *scroll > lowest {
 		*scroll = lowest
 	}
@@ -2515,6 +2346,27 @@ func (m *reviewModel) move(delta int) {
 		m.clamp()
 		return
 	}
+	if m.metaHasFocus() {
+		if m.metaStart >= len(m.rows) {
+			return
+		}
+		m.metaCursor += delta
+	} else {
+		if m.metaStart == 0 {
+			return
+		}
+		m.cursor += delta
+	}
+	m.clamp()
+}
+
+// page is what ctrl-d, ctrl-u, ctrl-f and ctrl-b mean: a move of a window rather than of a row. It never
+// crosses the edge between the two halves of the column, which is the whole difference from `j` and `k` -- a
+// page that left the region you were reading would be a jump you did not ask for. The distinction is not
+// academic now that the changeset box holds three rows: a region shorter than half a window turns a page into
+// a step of one, and a step of one inherits the edge crossing, so paging at the bottom of the box would land
+// the reviewer at the top of the tree on the key that promised half a screen.
+func (m *reviewModel) page(delta int) {
 	if m.metaHasFocus() {
 		if m.metaStart >= len(m.rows) {
 			return
@@ -2659,8 +2511,9 @@ func (m *reviewModel) cycleFocus(dir int) {
 
 // gotoRow puts the list column's cursor on the first row of a kind and returns whether there was one. The
 // box's rows are the ones worth naming from anywhere in the column: ABOUT.md is what a reviewer comes to
-// the box to read, and the thread heading is the fold that decides how much of the box they read to get
-// to it. The span row above them is the box's one control, and a reviewer changes a span least often.
+// the box to read. The span row above it is the box's one control, and a reviewer changes a span least
+// often; the discussion file under ABOUT.md is one arrow-key away from the row `a` lands on, so it needs
+// no key of its own.
 func (m *reviewModel) gotoRow(kind rowKind) bool {
 	for i := m.metaStart; i < len(m.rows); i++ {
 		if m.rows[i].kind == kind {
@@ -2687,9 +2540,9 @@ func (m reviewModel) activeWindow() int {
 // and the pane is the place on this screen that shows text to read, so the pane follows the box's cursor the
 // way it has always followed the tree's -- `a` puts the cursor on ABOUT.md and ABOUT.md is what appears.
 //
-// A row with nothing to show -- the span line, "+ new thread…" -- keeps the pane where it was, the same way
-// a directory row with no diff in the span does: a pane that blanks out while the cursor passes over a
-// heading is a pane that loses the file you were reading.
+// A row with nothing to show -- the span line -- keeps the pane where it was, the same way a directory
+// row with no diff in the span does: a pane that blanks out while the cursor passes over a heading is a
+// pane that loses the file you were reading.
 func (m reviewModel) previewTarget() (previewKind, string, bool) {
 	if m.quitting {
 		return previewDiff, "", false
@@ -2727,23 +2580,17 @@ func (m reviewModel) previewRowTarget() (previewKind, string, bool) {
 		return previewDiff, r.path, true
 	case rowDir:
 		return previewDiff, r.path, true
-	case rowAbout, rowThread:
+	case rowAbout, rowDiscussion:
 		return previewDocument, r.path, true
-	case rowThreadsHead:
-		return previewThreads, m.sess.Changeset().Dir, true
 	}
 	return m.previewKind, m.previewPath, m.previewPath != ""
 }
 
-// documentFor reads the pane's text, which is one file for a document row and the whole thread list for the
-// heading. The seam is here rather than at the two call sites so that a test says what the changeset contains
-// without saying which of the two ways it was read.
+// documentFor reads the pane's text, which is one file for a document row. The seam is here rather than
+// at the call sites so that a test says what the changeset contains without saying how it was read.
 func (m reviewModel) documentFor(ctx context.Context, path string) Document {
 	if m.docFor != nil {
 		return m.docFor(ctx, path)
-	}
-	if path == m.sess.Changeset().Dir {
-		return m.sess.ThreadDocument(ctx)
 	}
 	return m.sess.Document(ctx, path)
 }
@@ -2774,8 +2621,8 @@ type renderedRow struct {
 }
 
 // window splits the rows that fit each region's window into the two blocks View draws: the changeset
-// box's rows and the file list's. Two windows over one list, because the list is one list — a thread
-// the reviewer creates lands in the box without the file list being told, and each region scrolls
+// box's rows and the file list's. Two windows over one list, because the list is one list — a file the
+// reviewer writes in the editor lands in it without the file list being told, and each region scrolls
 // without moving the other.
 func (m reviewModel) window() (files, section []renderedRow) {
 	for _, idx := range m.visibleMeta() {
@@ -3003,13 +2850,12 @@ func (m reviewModel) metaHasFocus() bool {
 // previewShowing is whether a diff is on the screen right now, in either layout. Fetching, key
 // handling and the frame all ask this rather than paneWidth, because the overlay has no pane to
 // measure -- and because a fetch keyed to a column that is not drawn is a git call for nothing.
-// paneAllowed is whether the mode leaves the screen shared. The prompts ask their question in a line of
-// the footer, so the diff stays beside the list while a thread title is being typed and while a submit
-// prompt is open: the reviewer who pressed `t` beside a diff comes back from the editor to the same diff,
-// not to a screen that lost it on the way. The picker and the whole-screen preview take the screen, so
-// they give the column up.
+// paneAllowed is whether the mode leaves the screen shared. The submit prompt asks its question in a
+// line of the footer, so the diff stays beside the list while it is open: the reviewer who pressed a key
+// beside a diff comes back from the editor to the same diff, not to a screen that lost it on the way.
+// The picker and the whole-screen preview take the screen, so they give the column up.
 func (m reviewModel) paneAllowed() bool {
-	return m.mode == modeFiles || m.mode == modePrompt || m.mode == modeSubmit
+	return m.mode == modeFiles || m.mode == modeSubmit
 }
 
 func (m reviewModel) previewShowing() bool {
@@ -3027,7 +2873,7 @@ func (m reviewModel) previewWidth() int {
 
 // overlayChrome counts the rows the overlay spends on itself rather than on the diff: the file line
 // above it, the note below it, the rule, and the band below that -- counted at the height it always
-// takes, whatever it is showing. The list's header, counter and threads are not drawn here, so they
+// takes, whatever it is showing. The list's header, counter and changeset box are not drawn here, so they
 // are not counted: that is what buys the extra rows of diff, and why the overlay is what a small
 // terminal gets.
 func (m reviewModel) overlayChrome() int {
@@ -3371,19 +3217,19 @@ func (m reviewModel) unzoom() (tea.Model, tea.Cmd) {
 // is not among them: it names the diff, so pressed here it is still the no-op its name promises, while
 // `tab` names the *other stop*, and taking the screen down follows from going somewhere else.
 //
-// The two jumps into the box -- `a` and `t` -- are not exceptions. They move the cursor as well as the
+// The jump into the box -- `a` -- is not an exception. It moves the cursor as well as the
 // keys, and a cursor that moves under a diff the reviewer is reading is the invisible action the focus is
-// there to prevent; they belong to the list column, and the bar here does not offer them.
+// there to prevent; it belongs to the list column, and the bar here does not offer it.
 //
 // Keys do mean different things here than in the list -- q closes the overlay rather than quitting over
 // it, enter opens the file being read rather than the one under the cursor, ctrl-d scrolls rather than
 // quits -- and that is the point: the shortcut bar names each of these keys while this screen is up, so
 // no meaning travels with a keystroke alone.
-// jumpFromPreview is `a` or `t` taken while the diff holds the keys: the keys go to the row the key names,
-// which leaves the diff -- the same way `tab` and `f` leave it -- and the pane follows them on to ABOUT.md or
-// the threads. A jump that landed on a row the reviewer cannot see would be the invisible action the focus
-// exists to prevent; taking the keys is what makes it visible, and reading the document is usually why the
-// reviewer left the diff in the first place.
+// jumpFromPreview is `a` taken while the diff holds the keys: the keys go to the row the key names,
+// which leaves the diff -- the same way `tab` and `f` leave it -- and the pane follows them on to
+// ABOUT.md. A jump that landed on a row the reviewer cannot see would be the invisible action the focus
+// exists to prevent; taking the keys is what makes it visible, and reading the document is usually why
+// the reviewer left the diff in the first place.
 func (m reviewModel) jumpFromPreview(kind rowKind, absent string) (tea.Model, tea.Cmd) {
 	if !m.gotoRow(kind) {
 		m.setRefusal(absent)
@@ -3446,17 +3292,14 @@ func (m reviewModel) newFilesUnder(path string) bool {
 	return false
 }
 
-// previewRow is the row the pane is a window onto, or false when it is no longer in the list: the rows are
-// rebuilt when a thread is created or the span changes, and the pane keeps what it was showing through that.
+// previewRow is the row the pane is a window onto, or false when it is no longer in the list: the rows
+// are rebuilt when the span changes or the tree re-shapes itself, and the pane keeps what it was showing
+// through that.
 func (m reviewModel) previewRow() (row, bool) {
 	for _, r := range m.rows {
 		switch r.kind {
-		case rowAbout, rowThread:
-			if m.previewKind != previewThreads && r.path == m.previewPath {
-				return r, true
-			}
-		case rowThreadsHead:
-			if m.previewKind == previewThreads {
+		case rowAbout, rowDiscussion:
+			if r.path == m.previewPath {
 				return r, true
 			}
 		}
@@ -3475,18 +3318,16 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.searching {
 		return m.handleSearchKey(key)
 	}
-	// The two jumps into the box work from the diff as they do from either half of the list column, keys
-	// and all. They used to be keys that did not occur here, on the grounds that a cursor moving under a
+	// The jump into the box works from the diff as it does from either half of the list column, keys
+	// and all. It used to be a key that did not occur here, on the grounds that a cursor moving under a
 	// diff you are reading is an invisible action -- but the answer to that is not to refuse the jump, it
 	// is to go where the jump points, which is what taking the keys along does. The overlay is the
-	// exception, and the rule is the box: these two work wherever it is drawn, and the overlay is the one
+	// exception, and the rule is the box: this works wherever it is drawn, and the overlay is the one
 	// screen where it is not, so a cursor moved there would be one you could not see move.
 	if m.mode != modePreview {
 		switch {
 		case key.Type == tea.KeyRunes && firstRune(key) == 'a':
 			return m.jumpFromPreview(rowAbout, "no ABOUT.md row in this changeset's box")
-		case key.Type == tea.KeyRunes && firstRune(key) == 't':
-			return m.jumpFromPreview(rowThreadsHead, "no thread heading in this changeset's box")
 		}
 	}
 	// `g` waits for its partner, as it does in the list. The guard on previewG is what makes the
@@ -3663,17 +3504,19 @@ func (m reviewModel) previewContent(mk marks) []previewRow {
 // means there is something to draw.
 func (m reviewModel) previewNotice() string {
 	switch m.previewKind {
-	case previewDocument, previewThreads:
+	case previewDocument:
 		doc, cached := m.docs[m.previewPath]
 		switch {
 		case !cached:
 			return "(reading…)"
+		case doc.Missing:
+			// The box lists both of its document rows whatever the working tree holds, so the pane says
+			// which of the two this is and names the key that writes the file. A blank column tells the
+			// reviewer nothing, and the row itself cannot say it.
+			return m.previewPath + " does not exist yet \u2014 e creates it"
 		case doc.Err != "":
 			return doc.Err
 		case len(doc.Sections) == 0:
-			if m.previewKind == previewThreads {
-				return "no threads yet"
-			}
 			return "nothing to read"
 		}
 	case previewContent:
@@ -3729,7 +3572,7 @@ func (m reviewModel) previewNotice() string {
 // too long is one to open in the editor.
 func (m reviewModel) previewTooLong() string {
 	switch m.previewKind {
-	case previewDocument, previewThreads:
+	case previewDocument:
 		if doc, ok := m.docs[m.previewPath]; ok && doc.Capped {
 			return "too long to read here"
 		}
@@ -3760,11 +3603,9 @@ func (m reviewModel) previewTitle(width int) string {
 		header = m.spanName(m.sess.Header().SpanLabel) + "  \u00b7  " + m.previewPath
 	}
 	switch m.previewKind {
-	case previewDocument, previewThreads:
+	case previewDocument:
 		if doc, cached := m.docs[m.previewPath]; cached {
-			if m.previewKind == previewThreads {
-				header = fmt.Sprintf("%s  %d threads", header, len(doc.Sections))
-			} else if lines := docLines(doc); lines > 0 {
+			if lines := docLines(doc); lines > 0 {
 				header = fmt.Sprintf("%s  %d lines", header, lines)
 			}
 			if m.sess.Span().Historical() {
@@ -3934,10 +3775,16 @@ func (m reviewModel) searchStep(dir int) (tea.Model, tea.Cmd) {
 }
 
 // handleSearchKey is the field: it reads the term and the two keys that end it, and nothing else. The
-// scrolling keys are not read here for the same reason they are not read in the thread title, and for a
-// better one: the highlights move under the reviewer's fingers as they type, so the pane is already saying
+// scrolling keys are not read here for the same reason they are not read in a shell's line editor, and for
+// a better one: the highlights move under the reviewer's fingers as they type, so the pane is already saying
 // what the term means without moving. `q` types a q rather than quitting -- the field is where the
 // reviewer is, not the pane.
+
+// searchCaret is the block that sits where the reviewer's typing goes in the pane's search field. It is
+// a block rather than an underline for the reason a terminal editor uses one: a field that renders like
+// prose gets typed into by accident.
+const searchCaret = "\u2588"
+
 func (m reviewModel) handleSearchKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Type == tea.KeyCtrlC:
@@ -4024,12 +3871,13 @@ func (m reviewModel) previewLines() []string {
 		// prompt on, and the layout has already counted a row there, so the field can arrive and leave
 		// without moving anything above it. A file shorter than the pane has to be padded up to that row
 		// first: a prompt that floats under the last line of a short file is a prompt in the middle of the
-		// screen, and the eye looks for it at the bottom. The caret is the block the thread prompt uses,
-		// for the same reason it does: a field that looks like prose gets typed into by accident.
+		// screen, and the eye looks for it at the bottom. The caret is a block rather than an
+		// underline for the reason a terminal editor uses one: a field that looks like prose gets typed
+		// into by accident.
 		for len(out) < body+1 {
 			out = append(out, "")
 		}
-		out = append(out, clip("/ "+m.searchInput+threadPromptCursor, width))
+		out = append(out, clip("/ "+m.searchInput+searchCaret, width))
 	case end < len(rows) || offset > 0:
 		// The keys the note may point at. In the pane ctrl-b/ctrl-f page it and enter opens the
 		// difftool; in the overlay the whole screen is already the diff, enter closes it, and a note

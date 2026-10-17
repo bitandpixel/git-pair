@@ -226,9 +226,9 @@ func TestFixtureChangesetHelpers(t *testing.T) {
 		t.Error("StageChangeset files were not committed by the next commit")
 	}
 
-	f.WriteChangesetFile("booking", "concurrency-tests.md", "# Concurrency tests\n\nQuestion.\n")
-	if got := f.Threads("booking"); len(got) != 1 || got[0] != "concurrency-tests.md" {
-		t.Errorf("Threads = %v, want [concurrency-tests.md]", got)
+	f.WriteChangesetFile("booking", "DISCUSSION.md", "# Discussion\n\nQuestion.\n")
+	if got := f.ChangesetFile("booking", "DISCUSSION.md"); got != "# Discussion\n\nQuestion.\n" {
+		t.Errorf("DISCUSSION.md = %q, want the text the fixture wrote", got)
 	}
 }
 

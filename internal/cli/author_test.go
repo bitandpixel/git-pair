@@ -16,10 +16,10 @@ func TestChangeFeedbackShowsTheReviewItself(t *testing.T) {
 	f, slug := newChangeset(t, "booking", "main")
 	ready(t, f)
 
-	// One submission, one commit: a thread plus the edit the reviewer made while
-	// reading, which is what an author has to consume.
-	f.Write(filepath.Join("changesets", slug, "concurrency.md"),
-		"# Thread: does the lock cover the map?\n\nNeeds a test.\n")
+	// One submission, one commit: a discussion entry plus the edit the reviewer made
+	// while reading, which is what an author has to consume.
+	f.Write(filepath.Join("changesets", slug, "DISCUSSION.md"),
+		"# Discussion\n\n## does the lock cover the map?\n\nNeeds a test.\n")
 	f.Write("service.go", "package main\n\n// reviewer: cover the lock\n\nfunc Lock() {}\n")
 	submit(t, f, "feedback")
 
@@ -33,9 +33,9 @@ func TestChangeFeedbackShowsTheReviewItself(t *testing.T) {
 		}
 	})
 
-	t.Run("file selection lists threads and code alike", func(t *testing.T) {
+	t.Run("file selection lists the discussion and code alike", func(t *testing.T) {
 		got := runIn(t, f.Dir(), "change", "feedback", "--name-only").mustSucceed(t, "change", "feedback", "--name-only")
-		for _, want := range []string{"service.go", "changesets/booking/concurrency.md"} {
+		for _, want := range []string{"service.go", "changesets/booking/DISCUSSION.md"} {
 			if !strings.Contains(got.stdout, want) {
 				t.Errorf("--name-only omits %q:\n%s", want, got.stdout)
 			}
@@ -250,7 +250,7 @@ func TestChangeWaitFetchesAndSeesAReviewFromAnotherClone(t *testing.T) {
 	// changeset branch, main exists solely as a remote-tracking ref.
 	runGit(t, f.Env(), clone, "branch", "main", "origin/main")
 
-	if got := runIn(t, clone, "review", "submit", "--feedback", "--message", "see the thread"); got.code != exitOK {
+	if got := runIn(t, clone, "review", "submit", "--feedback", "--message", "see the discussion"); got.code != exitOK {
 		t.Fatalf("reviewer's submit exited %d\n%s\n%s", got.code, got.stdout, got.stderr)
 	}
 	runGit(t, f.Env(), clone, "push", "--quiet", "origin", "booking")

@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -56,7 +58,7 @@ func readonlyModel(t *testing.T, sel span.Selector) (reviewModel, *gittest.Fixtu
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	m := reviewModel{ctx: ctx, sess: sess, width: 100, height: 24, threadsOpen: true}
+	m := reviewModel{ctx: ctx, sess: sess, width: 100, height: 24}
 	m.refresh()
 	return m, f
 }
@@ -84,7 +86,6 @@ func TestHistoricalSpanRefusesEverythingThatChangesSomething(t *testing.T) {
 	}{
 		{"space marks reviewed", tea.KeyMsg{Type: tea.KeySpace}},
 		{"e edits a file", runeKey('e')},
-		{"T starts a thread", runeKey('T')},
 		{"s submits a review", runeKey('s')},
 	}
 	for _, tc := range tests {
@@ -157,9 +158,11 @@ func TestHistoricalSpanRefusesEnterOnAnAddedFile(t *testing.T) {
 	}
 }
 
-// The two jumps into the box name rows rather than actions, so they are the keys that came out of the
+// The jumps into the box name rows rather than actions, so they are the keys that came out of the
 // read-only gate: a reviewer reading history still comes to the box to read what the author said, and
-// `e` on the row they land on is the key that stays refused.
+// `e` on the row they land on is the key that stays refused. There used to be a second jump, to the
+// threads, and `t` is no longer one of them; the row beside ABOUT.md is one keystroke away and the bar
+// names no key for it.
 func TestHistoricalSpanStillJumpsAroundTheBox(t *testing.T) {
 	m, _ := readonlyModel(t, historySel())
 
@@ -169,7 +172,6 @@ func TestHistoricalSpanStillJumpsAroundTheBox(t *testing.T) {
 		want rowKind
 	}{
 		{"a goes to ABOUT.md", runeKey('a'), rowAbout},
-		{"t goes to the threads", runeKey('t'), rowThreadsHead},
 	} {
 		updated, cmd := m.Update(tc.key)
 		got := updated.(reviewModel)
@@ -183,6 +185,18 @@ func TestHistoricalSpanStillJumpsAroundTheBox(t *testing.T) {
 			t.Errorf("%s left %v on a %v row, want the box on a %v row",
 				tc.name, got.focus, got.rows[got.metaCursor].kind, tc.want)
 		}
+	}
+
+	// `t` is the key that walked the thread list. Nothing moved the box before it, and pressing it now
+	// must not move the box either: a key that silently relocates the cursor is worse than one that does
+	// nothing, because the reviewer cannot tell which rows the screen has.
+	still := pressKey(t, m, runeKey('t'))
+	if still.focus != m.focus || still.rows[still.metaCursor].kind != m.rows[m.metaCursor].kind {
+		t.Errorf("t moved the box from a %v row to a %v row; the key names nothing now",
+			m.rows[m.metaCursor].kind, still.rows[still.metaCursor].kind)
+	}
+	if f := still; strings.Contains(f.status, "read-only") {
+		t.Errorf("t was refused as though it changed something: %q", f.status)
 	}
 }
 
@@ -221,7 +235,7 @@ func TestHistoricalScreenSaysWhatItIs(t *testing.T) {
 	}
 	// A number of files reviewed over a span nobody is reviewing reads as progress
 	// that was not made, so the counter and the gutter are simply absent.
-	for _, absent := range []string{"reviewed", "○ ", "+ new thread"} {
+	for _, absent := range []string{"reviewed", "○ "} {
 		if strings.Contains(view, absent) {
 			t.Errorf("the historical screen still offers %q:\n%s", absent, view)
 		}
@@ -232,7 +246,7 @@ func TestHistoricalScreenSaysWhatItIs(t *testing.T) {
 		t.Fatal("the comparison model is not live")
 	}
 	liveView := live.View()
-	for _, want := range []string{"reviewed", "○ ", "+ new thread"} {
+	for _, want := range []string{"reviewed", "○ "} {
 		if !strings.Contains(liveView, want) {
 			t.Errorf("the live screen lost %q", want)
 		}
@@ -242,7 +256,7 @@ func TestHistoricalScreenSaysWhatItIs(t *testing.T) {
 func TestHistoricalHelpBarOffersOnlyWhatItCanDo(t *testing.T) {
 	m, _ := readonlyModel(t, historySel())
 	help := m.helpText()
-	for _, absent := range []string{"space reviewed", "e edit", "T new thread", "s submit"} {
+	for _, absent := range []string{"space reviewed", "e edit", "s submit"} {
 		if strings.Contains(help, absent) {
 			t.Errorf("the historical shortcut bar still advertises %q:\n%s", absent, help)
 		}
@@ -369,6 +383,80 @@ func TestLiveSpanStillCreatesAWorkingTreeAbout(t *testing.T) {
 	}
 	if !f.HasWorktreeFile(about) {
 		t.Errorf("%s was not created for a span the reviewer can edit", about)
+	}
+}
+
+// The same rule on the other document row, and the one that used to need a key of its own: the
+// discussion file is written on first use, so `e` on a row that names a file nobody has made yet is
+// the only way to start the conversation. Refusing it would leave the row on screen with no way out.
+func TestLiveSpanStillCreatesAWorkingTreeDiscussion(t *testing.T) {
+	m, f := readonlyModel(t, span.Full())
+	disc := m.sess.DiscussionPath()
+	if f.HasWorktreeFile(disc) {
+		f.Remove(disc)
+	}
+
+	// The row is the offer, so it is in the box while the file is not on disk at all -- a box that
+	// dropped the row would leave `e` with nothing to stand on.
+	if _, err := os.Stat(filepath.Join(m.sess.Repo().Dir, disc)); !os.IsNotExist(err) {
+		t.Fatalf("the fixture left %s on disk (stat err = %v)", disc, err)
+	}
+	listed := false
+	for _, r := range m.metaRows() {
+		if r.kind == rowDiscussion && r.path == disc {
+			listed = true
+		}
+	}
+	if !listed {
+		t.Errorf("the box has no %s row while the file is absent; the row is the offer to write it", disc)
+	}
+
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowDiscussion))
+	updated, cmd := m.Update(runeKey('e'))
+	got := updated.(reviewModel)
+
+	if cmd == nil {
+		t.Fatalf("e on a missing %s opened nothing (status %q)", disc, got.status)
+	}
+	if !f.HasWorktreeFile(disc) {
+		t.Errorf("%s was not written for a span the reviewer can edit", disc)
+	}
+	// The note rides the handoff, because the editor covers whatever was said before it.
+	if got.pendingNote != "Created "+disc {
+		t.Errorf("the handoff carries %q, want it to say the file was created", got.pendingNote)
+	}
+}
+
+// The historical half of the same row, so the guard above is known to be a mode boundary rather than a
+// dead branch: `e` is a mutating key, and over history it is refused before anything is written.
+func TestHistoricalSpanDoesNotCreateTheDiscussionItHasNoneOf(t *testing.T) {
+	m, f := readonlyModel(t, historySel())
+	disc := m.sess.DiscussionPath()
+	if f.HasWorktreeFile(disc) {
+		f.Remove(disc)
+	}
+	before := f.MustGit("status", "--porcelain")
+
+	m = focusOnRow(t, m, boxIndexOf(t, m, rowDiscussion))
+	updated, cmd := m.Update(runeKey('e'))
+	got := updated.(reviewModel)
+
+	if cmd != nil {
+		t.Error("e handed the terminal to the editor over a historical span")
+	}
+	if f.HasWorktreeFile(disc) {
+		t.Errorf("the read-only screen created %s in the working tree", disc)
+	}
+	if after := f.MustGit("status", "--porcelain"); after != before {
+		t.Errorf("the read-only screen changed the working tree:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	// The refusal names the row rather than the key, and names the head the span is stuck on with the
+	// way out: `mutatingKey` treats `e` on this row as the write it is, so the gate has to reach the
+	// create as well as the edit.
+	for _, want := range []string{"read-only", "V chooses", "DISCUSSION.md", "create or edit"} {
+		if !strings.Contains(got.status, want) {
+			t.Errorf("status = %q, want it to say %q", got.status, want)
+		}
 	}
 }
 

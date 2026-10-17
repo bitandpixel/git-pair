@@ -269,6 +269,11 @@ session box a,q
 expect "the box's borders turn to a double rule" 0 "$T/box.raw" $'\u2554'
 expect "the box's bar names the key its own" 0 "$T/box.raw" "space span"
 expect "the box's bar names the key that goes back" 0 "$T/box.raw" "f files"
+expect "the box lists the discussion file beside ABOUT.md" 0 "$T/box.raw" "DISCUSSION.md"
+# Nothing in this fixture writes that file: the changeset directory holds CHANGESET.yaml and ABOUT.md
+# alone. The row is on screen anyway, which is the point — it is how a reviewer learns the conversation
+# has a home, and `e` on the row is what writes the scaffold.
+refuse "and the box offers no key for starting a discussion" 0 "$T/box.raw" "T new"
 refuse "the tree's fold keys are off the bar while the box has them" 0 "$T/box.raw" "h/l fold"
 
 step "the changeset box: tab out of the diff comes back to the box"
@@ -277,8 +282,9 @@ step "the changeset box: tab out of the diff comes back to the box"
 session ring2 a,tab,tab,q
 expect "the keys come back to the box" 2 "$T/ring2.raw" $'\u2554'
 # The bar of the region that holds the keys, and not the tree's: `space span` belongs to the box alone
-# (the tree's row of the same key reads `space reviewed`). `T new thread` is in both bars, and at this
-# width it wraps onto the second bar line anyway, so it would prove nothing about which region has them.
+# (the tree's row of the same key reads `space reviewed`). A key the box used to carry for starting a
+# discussion would prove nothing about which region has them either, so the bar's own keys are what this
+# asserts.
 expect "with the box's own shortcut bar" 2 "$T/ring2.raw" "space span"
 
 step "the changeset box: space on the span row opens the picker"

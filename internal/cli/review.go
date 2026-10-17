@@ -54,7 +54,7 @@ command spelled two ways.`,
 		newReviewOpenCommand(a),
 		newReviewReopenCommand(a),
 		newReviewAboutCommand(a),
-		newReviewThreadCommand(a),
+		newReviewDiscussionCommand(a),
 		newReviewSubmitCommand(a),
 		newReviewHistoryCommand(a),
 	)
@@ -75,7 +75,7 @@ is here for the readers who look for a verb.
 
 The TUI is not an editor and renders no diff. It lists the files in the chosen
 span, tracks which ones you have looked at, and launches your editor, your
-difftool, ABOUT.md, and review threads around it, releasing the terminal while
+difftool, ABOUT.md, and the review discussion file around it, releasing the terminal while
 those processes run.
 
 Press s to submit without leaving the screen, then b (block), f (feedback) or
@@ -134,7 +134,9 @@ func newReviewAboutCommand(a *app) *cobra.Command {
 
 Edits made here and committed by ` + "`git pair review submit`" + ` are high-level review
 feedback on the whole changeset. The file is the canonical description of the
-change and the reviewer edits it directly rather than using comment syntax.`,
+change and the reviewer edits it directly rather than using comment syntax. What a
+submission adds to it blocks ` + "`git pair change ready`" + ` until the author settles it, because
+the description stays the author's (PRD §19.5).`,
 		Example: `  git pair review about`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -150,58 +152,42 @@ change and the reviewer edits it directly rather than using comment syntax.`,
 	}
 }
 
-// --- review thread ----------------------------------------------------------
+// --- review discussion ------------------------------------------------------
 
-func newReviewThreadCommand(a *app) *cobra.Command {
+func newReviewDiscussionCommand(a *app) *cobra.Command {
 	return &cobra.Command{
-		Use:   "thread [title...]",
-		Short: "Create or open a focused review thread",
-		Long: `Create or open a Markdown discussion file inside the changeset directory.
+		Use:   "discussion",
+		Short: "Open the changeset's review discussion file",
+		Long: `Open changesets/<changeset>/DISCUSSION.md in $VISUAL or $EDITOR, writing the scaffold
+first when the file is not there yet.
 
-The title is slugified into the file name, so "concurrency tests" becomes
-changesets/<changeset>/concurrency-tests.md. An existing file for the same title
-is reopened instead of creating a duplicate.
+This is where the review is talked about: what the reviewer wants changed, what the author
+answered, what the two of them settled and how. It is one file per changeset, written by
+both of them, and it has no schema — the headings, their level, and the shape of a reply
+belong to the people having the conversation. Git history supplies authorship and
+sequencing, so a reply is an appended section and nobody needs a tool to say who spoke.
 
-Threads are ordinary Markdown with no required structure. Git history supplies
-authorship and sequencing, so a reply is just an appended section.`,
-		Example: `  git pair review thread "concurrency tests"
-  git pair review thread            # prompts, when attached to a terminal`,
-		Args: cobra.ArbitraryArgs,
+A team that wants a shape for it writes .git-pair/discussion-template.md and commits it;
+that file becomes the scaffold instead of the built-in title.
+
+The author's route to the same file is ` + "`git pair change discussion`" + `, which writes the scaffold
+without needing a terminal.`,
+		Example: `  git pair review discussion`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runReviewThread(cmd.Context(), a, args)
+			s, err := a.load(cmd.Context())
+			if err != nil {
+				return err
+			}
+			return openFile(cmd.Context(), a, s.repo, s.cs.DiscussionPath(), func() error {
+				created, err := s.cs.EnsureDiscussion(s.repo)
+				if created {
+					a.printf("Wrote the scaffold to %s\n", s.cs.DiscussionPath())
+				}
+				return err
+			})
 		},
 	}
-}
-
-func runReviewThread(ctx context.Context, a *app, titleArgs []string) error {
-	s, err := a.load(ctx)
-	if err != nil {
-		return err
-	}
-	title := strings.TrimSpace(strings.Join(titleArgs, " "))
-	if title == "" {
-		title, err = console.PromptLine("Thread title:")
-		if err != nil {
-			return &usageError{err}
-		}
-	}
-	if title == "" {
-		return &usageError{errors.New("a thread needs a title")}
-	}
-	path, err := s.cs.ThreadPath(title)
-	if err != nil {
-		return &usageError{err}
-	}
-	existed := fileExists(s.repo, path)
-	if err := writeIfMissing(s.repo, path, changeset.ThreadTemplate(title)); err != nil {
-		return err
-	}
-	if existed {
-		a.printf("Opening existing thread %s\n", path)
-	} else {
-		a.printf("Created thread %s\n", path)
-	}
-	return openFile(ctx, a, s.repo, path, nil)
 }
 
 // --- review submit ----------------------------------------------------------
@@ -242,7 +228,7 @@ message: the marker that survives says which commit it approved, and ` + "`git p
 read that approval as covering the rewritten history. Merging the base in rewrites nothing and costs
 nothing.
 
-Source edits, inline comments, ABOUT.md edits, and thread files all become part
+Source edits, inline comments, ABOUT.md edits, and the review discussion file all become part
 of the review; a review commit with no changes at all is valid, which is what
 makes a clean-tree approval work.`,
 		Example: `  git pair review submit --block
@@ -292,7 +278,7 @@ func (o submitOptions) outcome() (model.Outcome, error) {
 // call site where one of them would stop firing without anyone noticing.
 //
 // The order is stage, hooks, commit. A `pre-submit` hook exists to read what the review commit is about to
-// carry — the source edits made in the screen, the thread files, the ABOUT.md edit — and those are only in
+// carry — the source edits made in the screen, the discussion file, the ABOUT.md edit — and those are only in
 // the index once staging has happened. Running the hook first would have it inspect the tree before the
 // reviewer's edits were part of the submission.
 //
@@ -581,24 +567,6 @@ func openFile(ctx context.Context, a *app, repo *git.Repo, relPath string, ensur
 	return nil
 }
 
-func writeIfMissing(repo *git.Repo, relPath, content string) error {
-	abs := filepath.Join(repo.Dir, relPath)
-	if _, err := os.Stat(abs); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(abs, []byte(content), 0o644)
-}
-
-func fileExists(repo *git.Repo, relPath string) bool {
-	info, err := os.Stat(filepath.Join(repo.Dir, relPath))
-	return err == nil && !info.IsDir()
-}
-
 func newReviewReopenCommand(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "reopen",
@@ -658,7 +626,7 @@ func openSession(ctx context.Context, a *app, s *session, sel span.Selector, inv
 	if !console.Interactive() {
 		return &usageError{fmt.Errorf(
 			"`%s` needs a terminal; use `git pair diff`, `git pair review about`, "+
-				"`git pair review thread`, and `git pair review submit` instead", invocation)}
+				"`git pair review discussion`, and `git pair review submit` instead", invocation)}
 	}
 	if note != "" {
 		a.warn("%s\n", note)

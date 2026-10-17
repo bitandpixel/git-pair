@@ -169,12 +169,13 @@ func TestDiffRawDigestIsNotMovedByWorkOnAnotherBranch(t *testing.T) {
 	}
 }
 
-// The changeset's own directory is excluded by the caller because the review record lives there: a reply
-// to a review thread must not change the identity of the approval it is written into.
+// The changeset's own directory is outside the digest a reviewer's identity is measured from, because that is
+// where the review conversation is written: what somebody puts in DISCUSSION.md must not change the identity
+// of the approval it is written into.
 func TestDiffRawDigestExcludesWhatTheCallerNames(t *testing.T) {
 	f, repo, base, before := changedFixture(t, map[string]string{"a.txt": "one\nchanged\n"})
-	f.Write("changesets/booking-transaction/ABOUT.md", "### comment\n\nfixed\n")
-	f.Commit("reply to the review thread")
+	f.Write("changesets/booking-transaction/DISCUSSION.md", "## the comment\n\nfixed\n")
+	f.Commit("reply in the discussion")
 	after := headOf(t, f)
 
 	beforeDigest := digestOf(t, repo, base, before, "changesets/booking-transaction")
@@ -183,7 +184,7 @@ func TestDiffRawDigestExcludesWhatTheCallerNames(t *testing.T) {
 		t.Errorf("excluding the directory still let it move the digest: %s then %s", beforeDigest, afterDigest)
 	}
 	if digestOf(t, repo, base, before) == digestOf(t, repo, base, after) {
-		t.Error("with nothing excluded the reply to the thread was invisible: the exclusion is doing real work")
+		t.Error("with nothing excluded the reply in the discussion was invisible: the exclusion is doing real work")
 	}
 }
 

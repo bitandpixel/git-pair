@@ -40,10 +40,10 @@ func newFileListModelWith(t *testing.T, files map[string]string) reviewModel {
 	f.CreateBranch(slug)
 	f.CommitChangeset(slug, "main")
 	f.Commit("implement", gittest.WithFiles(files))
-	// Two threads exist as working files, which is how a reviewer leaves them between
+	// The discussion file exists as a working file, which is how a reviewer leaves it between
 	// sessions: untracked until the review is submitted, listed either way.
-	f.Write(filepath.Join("changesets", slug, "locking.md"), "# Thread: locking\n\nWhy the mutex?\n")
-	f.Write(filepath.Join("changesets", slug, "naming.md"), "# Thread: naming\n\nServe or Handle?\n")
+	f.Write(filepath.Join("changesets", slug, "DISCUSSION.md"),
+		"# Discussion\n\nWhy the mutex inside the store?\n\nServe or Handle?\n")
 
 	repo := &git.Repo{Dir: f.Dir()}
 	cs, err := changeset.Current(context.Background(), repo, "")
@@ -63,7 +63,7 @@ func newFileListModelWith(t *testing.T, files map[string]string) reviewModel {
 	}
 	// The navigable list is built from the session, so a model that tests are handed must
 	// have it built too, exactly as Run does.
-	m := reviewModel{ctx: ctx, sess: sess, width: 80, height: 24, threadsOpen: true}
+	m := reviewModel{ctx: ctx, sess: sess, width: 80, height: 24}
 	m.refresh()
 	return m
 }

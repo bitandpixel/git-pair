@@ -15,7 +15,7 @@ import (
 // in half explains nothing, and a line the terminal wraps on its own also steals rows the
 // file list thought it had.
 
-const keyHelp = "j/k move  enter difftool  e edit  space reviewed  a about  t thread  T browse  v spans  s submit  q quit"
+const keyHelp = "j/k move  enter difftool  e edit  space reviewed  a about  v spans  s submit  q quit"
 
 var ansiCodes = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
@@ -61,8 +61,8 @@ func TestWrapGroupsFillsEachLineBeforeWrapping(t *testing.T) {
 	got := wrapGroups(keyHelp, 40)
 	want := []string{
 		"j/k move  enter difftool  e edit",
-		"space reviewed  a about  t thread",
-		"T browse  v spans  s submit  q quit",
+		"space reviewed  a about  v spans",
+		"s submit  q quit",
 	}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("wrapGroups(40) =\n%q\nwant\n%q", got, want)

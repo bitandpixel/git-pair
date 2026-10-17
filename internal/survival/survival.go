@@ -43,8 +43,8 @@ type Report struct {
 	Code []Addition `json:"code"`
 	// Artifacts holds additions inside a changesets/ directory that are not the
 	// description. Reviewer text there is conversation surface rather than code to
-	// resolve — a thread answered by appending still contains every original line
-	// — so it is reported but never blocks. See
+	// resolve — an answer appended to DISCUSSION.md still contains every original
+	// line — so it is reported but never blocks. See
 	// docs/plans/completed/gitpr-mvp/research/git-plumbing-findings.md.
 	Artifacts []Addition `json:"artifacts"`
 	// AddedLines is the total number of non-blank lines the review added.
@@ -152,7 +152,7 @@ func sortReport(r *Report) {
 // isArtifactPath reports whether path is review state rather than code.
 //
 // Everything under the changeset root is conversation surface except the description.
-// A reply appended to a thread still holds every line the reviewer wrote, and that is
+// A reply appended to DISCUSSION.md still holds every line the reviewer wrote, and that is
 // what makes it worth keeping. ABOUT.md is the exception: it is the author's account of
 // the change, so text a reviewer put into it is feedback the author settles before the
 // work goes back to the queue — the same duty a comment in an implementation file

@@ -257,43 +257,12 @@ func TestNoteTooLongForTheBandIsCutNotStacked(t *testing.T) {
 	assertFrameFits(t, m)
 }
 
-// The thread prompt is not a notification: the line under the input says what the keys mean for as
-// long as the prompt is up, so it is chrome and no clock retires it.
-func TestPromptKeepsItsHintWhileTyping(t *testing.T) {
-	m := navModel(t)
-	m = pressRune(m, 'T')
-	if m.mode != modePrompt {
-		t.Fatalf("T did not open the prompt (mode %d)", m.mode)
-	}
-	chrome := m.chromeRows()
-
-	for _, r := range []rune("lock") {
-		m = send(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		m = send(t, m, notifExpireMsg{seq: m.notifGen})
-	}
-	m = press(m, tea.KeySpace)
-
-	if m.status != "" {
-		t.Errorf("the prompt hint is stored as a notification: %q", m.status)
-	}
-	if got := m.chromeRows(); got != chrome {
-		t.Errorf("typing into the prompt changed the chrome from %d to %d rows", chrome, got)
-	}
-	band := strings.Join(bandOf(t, m), "\n")
-	for _, want := range []string{"New thread: lock ", "Enter to create, Esc to cancel"} {
-		if !strings.Contains(band, want) {
-			t.Errorf("the prompt band lost %q:\n%s", want, band)
-		}
-	}
-}
-
 // Every mode draws the band at its own height, and every one of them has to be counted at that
 // height by whatever windows the list: the preview overlay is the layout with the least slack.
 func TestBandHeightIsWhatTheChromeCounts(t *testing.T) {
-	for _, mode := range []mode{modeFiles, modeSubmit, modePrompt, modeSpan, modePreview} {
+	for _, mode := range []mode{modeFiles, modeSubmit, modeSpan, modePreview} {
 		m := navModel(t)
 		m.mode = mode
-		m.promptKind = promptThread
 		if m.scroll != 0 {
 			t.Fatalf("mode %d: the fixture scrolls, so chrome counts a hint row too", mode)
 		}

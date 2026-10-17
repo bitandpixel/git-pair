@@ -204,7 +204,8 @@ func TestExitCodeUsageError(t *testing.T) {
 		{"contradictory bases", []string{"diff", "--base-commit=abc", "--base-ref=main"}},
 		{"base named twice across the families", []string{"diff", "--since-review=-1", "--base-review=-1"}},
 		{"extra argument", []string{"queue", "extra"}},
-		{"thread without a title", []string{"review", "thread"}},
+		{"discussion with an argument", []string{"review", "discussion", "now"}},
+		{"change discussion with an argument", []string{"change", "discussion", "now"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			res := runIn(t, f.Dir(), tc.args...)

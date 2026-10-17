@@ -32,6 +32,7 @@ func newChangeCommand(a *app) *cobra.Command {
 	}
 	cmd.AddCommand(newChangeReadyCommand(a), newChangeUnreadyCommand(a),
 		newChangeAbandonCommand(a), newChangeFeedbackCommand(a), newChangeWaitCommand(a),
+		newChangeDiscussionCommand(a),
 		newChangeStackCommand(a), newChangeCombineCommand(a),
 		newChangeIntegrateCommand(a), newChangeTidyCommand(a))
 	return cmd
@@ -629,8 +630,9 @@ func newChangeFeedbackCommand(a *app) *cobra.Command {
 		Long: `Print the diff of the latest review submission: <review>^ .. <review>.
 
 This is the author's command for consuming review feedback. It shows everything the
-reviewer introduced — source edits, added comments, ABOUT.md changes, new threads and
-replies to existing ones — through git's own diff plumbing, with no custom renderer.
+reviewer introduced — source edits, added comments, ABOUT.md changes, and what the
+reviewer wrote in the review discussion file — through git's own diff plumbing, with no
+custom renderer.
 
 ` + "`git pair diff --unreviewed`" + ` is the reviewer's command and answers a different question:
 ` + "`<last review>..current`" + `, what changed *after* the review. Immediately after a submission
@@ -708,6 +710,59 @@ func reviewParent(ctx context.Context, repo *git.Repo, review *lifecycle.Event) 
 		return "", err
 	}
 	return sha, nil
+}
+
+// --- change discussion ------------------------------------------------------
+
+func newChangeDiscussionCommand(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "discussion",
+		Short: "Create the changeset's review discussion file",
+		Long: `Write changesets/<changeset>/DISCUSSION.md from the repository's scaffold, or report that
+it is already there. The command is non-interactive and opens nothing: the file is ordinary
+Markdown and you edit it with your own editor.
+
+This is the author's half of a file the reviewer opens with ` + "`git pair review discussion`" + `. Reach
+for it when the review reached you somewhere other than that file — a comment in a source file, or
+a line of ` + "`git pair change feedback`" + ` you would rather answer in prose — and you want the answer to
+live where the rest of the conversation lives.
+
+The file has no schema, and nothing reads it: the headings, their level, and the shape of a reply
+belong to the two people writing it, and git history says who wrote what. A team that wants a shape
+writes .git-pair/discussion-template.md and commits it, and that becomes the scaffold instead of the
+built-in title.`,
+		Example: `  git pair change discussion
+  git pair change discussion --json`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChangeDiscussion(cmd.Context(), a)
+		},
+	}
+}
+
+func runChangeDiscussion(ctx context.Context, a *app) error {
+	s, err := a.load(ctx)
+	if err != nil {
+		return err
+	}
+	created, err := s.cs.EnsureDiscussion(s.repo)
+	if err != nil {
+		return err
+	}
+	path := s.cs.DiscussionPath()
+	if a.json {
+		return a.emitJSON(map[string]any{
+			"changeset":  s.cs.Slug,
+			"discussion": path,
+			"created":    created,
+		})
+	}
+	if created {
+		a.printf("Created %s\n", path)
+	} else {
+		a.printf("%s already exists\n", path)
+	}
+	return nil
 }
 
 // --- change wait ------------------------------------------------------------

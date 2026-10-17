@@ -404,8 +404,8 @@ func (l laidOut) line(text, number string, first int, mk marks) []previewRow {
 }
 
 // docRows lays a document out the way a diff is laid out, and numbers it with the file's own lines, which is
-// how a reviewer points at a paragraph. A section with a name gets the caption the diff's "you" section gets,
-// for the same reason: text with nothing above it saying where it came from reads as one document.
+// how a reviewer points at a paragraph. The pane's own title already says which file the text is, so nothing
+// here captions the sections the way the diff's "you" section is captioned.
 func docRows(doc Document, width int, mk marks) []previewRow {
 	lines := 0
 	for _, sec := range doc.Sections {
@@ -417,12 +417,6 @@ func docRows(doc Document, width int, mk marks) []previewRow {
 	}
 	var out []previewRow
 	for _, sec := range doc.Sections {
-		if sec.Name != "" {
-			if len(out) > 0 {
-				out = append(out, previewRow{})
-			}
-			out = append(out, previewRow{text: styleDim.Render(clip("\u2500\u2500 "+sec.Name, width))})
-		}
 		for i, line := range sec.Lines {
 			out = append(out, l.line(line, strconv.Itoa(i+1), len(out), mk)...)
 		}

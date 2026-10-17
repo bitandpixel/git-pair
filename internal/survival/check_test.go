@@ -392,28 +392,29 @@ func TestCheckEmptyReviewDiff(t *testing.T) {
 func TestCheckChangesetArtifactsAreNonBlockingAndCodeBlocks(t *testing.T) {
 	x := newFixture(t)
 
-	const threadLine = "I'm not convinced the test makes these overlap."
+	const discussionLine = "I'm not convinced the test makes these overlap."
+	const discussionPath = "changesets/" + slug + "/DISCUSSION.md"
 	const codeLine = "// Please use a transaction here"
 	const aboutHeading = "## Review note"
 	const aboutLine = "Please document the lock scope."
 	about := x.f.ChangesetFile(slug, "ABOUT.md")
 	review := x.f.CommitReviewMarker(slug, "block", gittest.WithFiles(map[string]string{
-		"changesets/" + slug + "/concurrency-tests.md": "# Concurrency tests\n\n" + threadLine + "\n",
-		"changesets/" + slug + "/ABOUT.md":             about + "\n" + aboutHeading + "\n\n" + aboutLine + "\n",
-		"service.go":                                   "package main\n\n" + codeLine + "\nfunc Lock() {}\n",
+		discussionPath:                     "# Discussion\n\n## the overlap test\n\n" + discussionLine + "\n",
+		"changesets/" + slug + "/ABOUT.md": about + "\n" + aboutHeading + "\n\n" + aboutLine + "\n",
+		"service.go":                       "package main\n\n" + codeLine + "\nfunc Lock() {}\n",
 	}))
 
 	report := x.check(t, review)
 	if len(report.Artifacts) == 0 {
-		t.Fatalf("Artifacts is empty, want the thread's added lines: %+v", report.Artifacts)
+		t.Fatalf("Artifacts is empty, want the discussion's added lines: %+v", report.Artifacts)
 	}
 	for _, a := range report.Artifacts {
 		if strings.HasSuffix(a.Path, "/ABOUT.md") {
 			t.Errorf("Artifacts includes %s: reviewer text in the description blocks instead", a.Path)
 		}
 	}
-	if _, ok := findAddition(report.Artifacts, "changesets/"+slug+"/concurrency-tests.md", threadLine); !ok {
-		t.Errorf("Artifacts = %+v, want the reviewer's thread line", report.Artifacts)
+	if _, ok := findAddition(report.Artifacts, discussionPath, discussionLine); !ok {
+		t.Errorf("Artifacts = %+v, want the reviewer's discussion line", report.Artifacts)
 	}
 	if _, ok := findAddition(report.Code, "service.go", codeLine); !ok {
 		t.Errorf("Code = %+v, want the source comment", report.Code)
@@ -430,15 +431,15 @@ func TestCheckChangesetArtifactsAreNonBlockingAndCodeBlocks(t *testing.T) {
 	}
 
 	// Resolving the code and settling the description unblocks even though every
-	// conversation line still survives: a thread answered by appending keeps the
-	// reviewer's text (this is exactly the false-positive the findings document
-	// measured). The description is settled by taking an exit of each kind — one
-	// reviewer line removed, the other rewritten as the author's own.
-	x.f.Commit("respond in the thread, fix the code, and rewrite the note", gittest.WithFiles(map[string]string{
+	// conversation line still survives: a point answered in the discussion file by
+	// appending keeps the reviewer's text (this is exactly the false-positive the
+	// findings document measured). The description is settled by taking an exit of each
+	// kind — one reviewer line removed, the other rewritten as the author's own.
+	x.f.Commit("answer in the discussion, fix the code, and rewrite the note", gittest.WithFiles(map[string]string{
 		"service.go":                       "package main\n\nfunc Lock() { transaction() }\n",
 		"changesets/" + slug + "/ABOUT.md": about + "\nThe lock scope is the booking row, taken before the capacity read.\n",
-		"changesets/" + slug + "/concurrency-tests.md": "# Concurrency tests\n\n" + threadLine +
-			"\n\n## Response\n\nI synchronise both transactions before the read.\n",
+		discussionPath: "# Discussion\n\n## the overlap test\n\n" + discussionLine +
+			"\n\nI synchronise both transactions before the read.\n",
 	}))
 
 	after := x.check(t, review)
@@ -448,8 +449,8 @@ func TestCheckChangesetArtifactsAreNonBlockingAndCodeBlocks(t *testing.T) {
 	if len(after.Artifacts) == 0 {
 		t.Error("Artifacts is empty: surviving reviewer text must still be reported, not silenced")
 	}
-	if _, ok := findAddition(after.Artifacts, "changesets/"+slug+"/concurrency-tests.md", threadLine); !ok {
-		t.Errorf("Artifacts = %+v, want the answered thread's original line reported", after.Artifacts)
+	if _, ok := findAddition(after.Artifacts, discussionPath, discussionLine); !ok {
+		t.Errorf("Artifacts = %+v, want the answered discussion entry's original line reported", after.Artifacts)
 	}
 }
 

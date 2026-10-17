@@ -78,7 +78,7 @@ what they looked at, not the author's to amend.
 ## What survives a landing, and what does not
 
 A merge landing keeps everything: the branch's commits are in the destination's history, so the approval,
-the responses and the thread replies are all readable from the destination, and `status --changeset <id>`
+the responses and the `DISCUSSION.md` replies are all readable from the destination, and `status --changeset <id>`
 reports them.
 
 A squash, cherry-pick, or forge button keeps only the content. The directory arrives, so the changeset is

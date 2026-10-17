@@ -23,7 +23,7 @@ var ErrNoChain = errors.New("no landed chain")
 //
 //   - A merge landing keeps its chain off the destination's own line. The landing commit's second parent
 //     is the branch tip, and everything under it down to the merge base — implementation commits, review
-//     submissions, verdict trailers, thread files — is in the object database and reachable from trunk.
+//     submissions, verdict trailers, the discussion file — is in the object database and reachable from trunk.
 //     That range is exact: it cannot include trunk's later commits, because they are not under the second
 //     parent.
 //   - A linear landing — fast-forward, rebase, squash — leaves no landing commit at all. Trunk's tip
