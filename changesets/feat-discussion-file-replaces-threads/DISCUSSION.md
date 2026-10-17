@@ -72,5 +72,24 @@ so too, because that is the list an agent actually follows.
 - The dev-profiles Never lists still name `review thread`, which this changeset deletes. Recorded in `ABOUT.md`
   as an upstream fix, since those files are vendored.
 
+### A second pass, after the offer was refused
+
+`change ready` came back with 14 of your lines still standing in `skills/git-pair/SKILL.md` — the survival check
+working on a document rather than on a comment. They are all wording you improved and I kept deliberately: the
+description of the file in the opener, the landing bullet, the stacked-child paragraph, the `Review-Head`
+warning, the "ask for review with `change ready`" mistake. Each was read, so the offer goes in with
+`--allow-surviving-review-additions`, which is what that flag exists to state.
+
+Going through them that way turned up one your rewrite left behind. The bullet under _Reviewer text in an
+implementation file_ said to "append the reviewer content and your reply under the relevant heading" — three
+lines under a paragraph that says "do not transcribe the comment before deleting it". Both cannot be the rule.
+The bullet now says to write your reply under the heading and to quote their line only when the exact wording is
+what is in question.
+
+One thing you will see that is not in this branch: the refusal quoted "in `ABOUT.md` or in a new thread". That
+came from `~/.local/bin/git-pair`, which is built at `0cb0d1d` and still has the old thread vocabulary; the code
+here prints `DISCUSSION.md; git pair change discussion writes the scaffold`, and the handoff was done with a
+binary built from this branch.
+
 I deleted `skill-edits.md` after answering here. It was the per-topic file shape this changeset removes, and the
 review commit already keeps your wording in history.

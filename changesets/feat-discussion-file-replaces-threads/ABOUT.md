@@ -149,6 +149,11 @@ The changeset also eats its own cooking: this `DISCUSSION.md` was written by `gi
 reported `Created` and then `already exists` on the second run, and the exit-2 refusal was read from the command
 line before the gate script asserted it.
 
+The second offer runs `git pair change ready --allow-surviving-review-additions`. Fourteen lines the reviewer
+wrote into `skills/git-pair/SKILL.md` stand unchanged because their wording is better than mine, which is the
+case that flag states rather than a way past the check: each was read, and the one that was wrong — "append the
+reviewer content", three lines under a paragraph that says not to transcribe — was corrected before the offer.
+
 ## Known limitations
 
 A thread file that already exists in an active changeset has no command that lists it any more. It is still

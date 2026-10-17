@@ -163,8 +163,9 @@ substance only when it needs further discussion, elaboration, or another person:
 
 - settled and nothing to add → delete it and move on;
 - needs discussion, elaboration or collaboration → find an existing related heading in `DISCUSSION.md`, or
-  create a new one. Append the reviewer content and your reply under the relevant heading. `ABOUT.md` is not
-  home for it: it describes the change, and a conversation is not a description of it.
+  create a new one, and write your reply under it. Quote the reviewer's line only when its exact wording is what
+  is in question; otherwise the point in your own words is enough, and the review commit already holds their
+  text. `ABOUT.md` is not home for it: it describes the change, and a conversation is not a description of it.
 - the reviewer's line is code you are keeping → leave it in place and acknowledge it with
   `--allow-surviving-review-additions`.
 
