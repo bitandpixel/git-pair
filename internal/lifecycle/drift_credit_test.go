@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"gitpair/internal/gittest"
+	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 )
 
@@ -389,8 +390,13 @@ func TestCreditIsAttributedToTheRefThatSuppliesEachFile(t *testing.T) {
 
 	f.SwitchTo("main")
 	f.Commit("trunk adds a file", gittest.WithFile("trunkonly.go", "package main\n\nfunc Trunk() {}\n"))
+	// A file both branches carry, so the fixture also settles where a path with more than one possible
+	// supplier is reported: the integration branch is asked first and is the name a reader gets.
+	f.Commit("trunk adds a file the parent has too", gittest.WithFile("shared.go", "package main\n\nfunc Shared() {}\n"))
 	f.SwitchTo("booking")
 	f.Commit("booking adds a helper", gittest.WithFile("authhelper.go", "package main\n\nfunc Auth() bool { return true }\n"))
+	f.Commit("booking carries the same file trunk has",
+		gittest.WithFile("shared.go", "package main\n\nfunc Shared() {}\n"))
 	f.SwitchTo("booking-tests")
 	if _, err := f.Git("merge", "--no-edit", "main"); err != nil {
 		t.Fatalf("merging trunk should be clean: %v", err)
@@ -404,7 +410,7 @@ func TestCreditIsAttributedToTheRefThatSuppliesEachFile(t *testing.T) {
 	if got.State != model.StateApproved {
 		t.Fatalf("state = %s (reason %q), want APPROVED", got.State, got.Reason)
 	}
-	want := map[string]string{"authhelper.go": "booking", "trunkonly.go": "main"}
+	want := map[string]string{"authhelper.go": "booking", "trunkonly.go": "main", "shared.go": "main"}
 	for path, cited := range want {
 		if got.DriftCreditedBy[path] != cited {
 			t.Errorf("%s attributed to %q, want %q (attribution: %v)", path, got.DriftCreditedBy[path], cited, got.DriftCreditedBy)
@@ -412,5 +418,51 @@ func TestCreditIsAttributedToTheRefThatSuppliesEachFile(t *testing.T) {
 	}
 	if !strings.Contains(got.Reason, "content main and booking carry") {
 		t.Errorf("reason = %q, want it to name both branches and agree with two of them", got.Reason)
+	}
+}
+
+// What may be cited is a question the derivation asks rather than an answer its caller computes, and this
+// is the pin for that shape. Deciding the citations costs the stack reads that locate a parent, ask the
+// destination whether it landed, and look up the parent's approval; a gate run where nothing moved above
+// the marker has nothing to credit, so it must not pay for them. `scripts/gates/ci-integrate.sh` bounds the
+// git invocations `check --json` makes on a two-level stack, and a source resolved eagerly is how a change
+// that only wanted to ask a rarer question breaks that bound.
+func TestTheCreditSourceIsAskedOnlyWhenContentMovedAboveTheMarker(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		after func(f *gittest.Fixture)
+		asked int
+	}{
+		{"nothing followed the approval", func(f *gittest.Fixture) {}, 0},
+		{"only the changeset's own description followed", func(f *gittest.Fixture) {
+			f.WriteChangesetFile("booking-tests", "ABOUT.md", "# booking-tests\n\n## Summary\n\nNotes written after the review.\n")
+			f.Commit("describe the change")
+		}, 0},
+		{"the parent's work arrived", func(f *gittest.Fixture) {
+			f.SwitchTo("booking")
+			f.Commit("booking adds a helper", gittest.WithFile("authhelper.go", "package main\n\nfunc Auth() bool { return true }\n"))
+			f.SwitchTo("booking-tests")
+			if _, err := f.Git("merge", "--no-edit", "booking"); err != nil {
+				t.Fatalf("the fixture's merge should be clean: %v", err)
+			}
+		}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := stackedPairOffMain(t)
+			f.CommitReadyMarker("booking-tests")
+			f.CommitReviewMarker("booking-tests", "approve")
+			tc.after(f)
+
+			asked := 0
+			got := summarizeAgainstCreditLookup(t, f, "booking-tests", "booking", "HEAD",
+				func() ([]lifecycle.CreditRef, error) {
+					asked++
+					return creditRefsNamed("main", "booking"), nil
+				})
+			if asked != tc.asked {
+				t.Errorf("the credit source was asked %d time(s), want %d (state %s, reason %q)",
+					asked, tc.asked, got.State, got.Reason)
+			}
+		})
 	}
 }

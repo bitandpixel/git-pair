@@ -1839,18 +1839,25 @@ reader who sees only "history moved" cannot tell a rebase from a fetch gap.
 The content condition **credits the ground the branch is measured on**. A branch that took the integration
 branch in has changed files since its marker, and none of that content is the author's: the reviewer had no
 reason to read trunk, and the destination vouches for what it carries. A stacked child that took its parent
-in has done the same act one level down, so the parent branch is cited beside the destination — the parent's
-content has its own changeset, its own approval and its own gate, and the child cannot be declared until the
-parent has landed, which is what makes a child's verdict unable to land a parent's work. So a path is not
-drift where head carries a cited ref's content there, and a whole merge is not drift where head is what
-`git merge-tree` would make of the reviewed commit and that ref. That last reading is why a resolution
-written by hand after a conflict _is_ drift: the merge git would have produced does not contain it. The refs
-that may be cited are the integration branch and the parent the changeset's own `base:` records — not any
-branch the author merges, and not a parent that has landed, because a branch keeps its name after the content
-it carried was merged and the name then vouches for nothing. Each is read where it stands now rather than as
-a snapshot, which is what takes the credit off when a parent later drops the content its child had taken in.
-Content no cited ref carries is refused (§21, and `TestAnAncestorsFileIsCreditedOnlyWhereARefCitesIt`,
-`TestMergingAnUnlandedParentInIsNotContentTheReviewNeverSaw` and
+in has done the same act one level down, so the parent is cited beside the destination — at the commit the
+parent's own newest approval spoke about, which is the only evidence in the repository that anybody read the
+parent's content. The child's reviewer never saw those files: the child's diff is measured from the parent,
+and excludes them by construction. So a path is not drift where head carries a cited ref's content there, and
+a whole merge is not drift where head is what `git merge-tree` would make of the reviewed commit and that
+ref. That last reading is why a resolution written by hand after a conflict _is_ drift: the merge git would
+have produced does not contain it. The refs that may be cited are the integration branch and the parent the
+changeset's `base:` records — not any branch the author merges, and not a parent that has landed, because a
+branch keeps its name after the content it carried was merged and the name then vouches for nothing. Ask the
+parent at a commit rather than at its branch and two refusals follow, both in the direction of less trust:
+content the parent took on after its approval is credited by nobody, which is what stops an author pushing
+their own work onto the parent and merging it back as somebody else's; and a parent with no approval of its
+own, a record naming the parent as a branch alone, or a parent whose branch was rewritten since its approval
+offers nothing to cite at all. Each cited ref is resolved to a commit when the verdict is taken, so the
+credit is the one the decision was about and not a ref that moved underneath it. Content no cited ref carries
+is refused (§21, and `TestAnAncestorsFileIsCreditedOnlyWhereARefCitesIt`,
+`TestMergingAnUnlandedParentInIsNotContentTheReviewNeverSaw`,
+`TestCheckRefusesWhatTheParentGainedAfterItsApproval`,
+`TestCheckRefusesAParentThatHasNeverBeenApproved` and
 `TestCheckDoesNotCreditALandedParentsLaterWork`). `check --json` reports the paths it credited as
 `drift_credited` and the branch that supplied each of them as `drift_credited_by`, so the trust a verdict
 rests on is visible to a reader who does not believe it, while the paths it refused stay in `reasons`.
@@ -4248,8 +4255,9 @@ Explicitly given up while the durable-ref layer was being taken out, each with w
   destination in — are answered, and the parent's own movement is a note rather than a reason. What
   was still deferred beside it is taken now too: the rule that counts content the review never saw
   credits the ground the branch stands on — the destination, and the parent a stacked changeset is measured
-  on while that parent has not landed — so a branch that merged the integration branch or its parent in
-  keeps its approval where the content it took is not its own (§11.3), and the rendered half of
+  on while that parent has not landed, cited at the commit the parent's own approval covered — so a branch
+  that merged the integration branch or its parent in keeps its approval where the content it took is not its
+  own (§11.3), and the rendered half of
   `Review-Diff-Id` keeps the landed-parent approval where a destination edit sits in the same file but
   nowhere near the reviewed hunks (§21.1). What those two readings still refuse is content no cited ref
   carries — somebody else's branch, a parent's work that arrived after that parent landed, a conflict

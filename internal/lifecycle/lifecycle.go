@@ -249,6 +249,14 @@ func SummarizeHEAD(ctx context.Context, repo *git.Repo, slug, base string) (Summ
 	return Summarize(ctx, repo, slug, base, "HEAD")
 }
 
+// CreditLookup answers which refs the drift rule may credit, and is asked only when the comparison has
+// found content the marker does not account for. That laziness is the point: deciding what may be cited
+// costs the stack reads that locate the parent on its branch and ask the destination whether it landed,
+// and where nothing moved above the marker no citation can change the answer. `scripts/gates/ci-integrate.sh`
+// bounds the git invocations `check --json` makes on a two-level stack, and a credit source resolved
+// eagerly is how that bound gets broken by a change that only wanted to ask a rarer question.
+type CreditLookup func() ([]CreditRef, error)
+
 // SummarizeAgainstTree derives state, then asks whether the content the newest
 // marker spoke about is still at headRef. A marker whose code has been changed
 // underneath it reads as WORKING here and nowhere else.
@@ -259,11 +267,11 @@ func SummarizeHEAD(ctx context.Context, repo *git.Repo, slug, base string) (Summ
 // commits (PRD §12).
 //
 // `credit` names the refs the drift rule may credit: content head shares with one of them is content
-// the branch took in rather than content the author added. An empty list costs the credit and never
+// the branch took in rather than content the author added. A nil source costs the credit and never
 // adds a refusal — the reading without it is the one every approval written before the credit was
 // measured under. See `CreditRef` for what qualifies.
 func SummarizeAgainstTree(ctx context.Context, repo *git.Repo, slug, base, headRef string,
-	credit []CreditRef) (Summary, error) {
+	credit CreditLookup) (Summary, error) {
 	s, err := Summarize(ctx, repo, slug, base, headRef)
 	if err != nil {
 		return s, err
@@ -273,7 +281,7 @@ func SummarizeAgainstTree(ctx context.Context, repo *git.Repo, slug, base, headR
 
 // SummarizeAgainstTreeHEAD is SummarizeAgainstTree for the checked-out branch.
 func SummarizeAgainstTreeHEAD(ctx context.Context, repo *git.Repo, slug, base string,
-	credit []CreditRef) (Summary, error) {
+	credit CreditLookup) (Summary, error) {
 	return SummarizeAgainstTree(ctx, repo, slug, base, "HEAD", credit)
 }
 
@@ -603,7 +611,7 @@ func markerReason(m Event) string {
 // named for it, so the integration branch — the citation that means most — is the one reported wherever
 // it supplies the file.
 func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef string, s Summary,
-	credit []CreditRef) (Summary, error) {
+	credit CreditLookup) (Summary, error) {
 	if !s.Stale || s.Marker == nil {
 		return s, nil
 	}
@@ -632,9 +640,17 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 		return s, err
 	}
 	var creditUsed []string
-	if len(changed) > 0 && len(credit) > 0 {
-		res := creditContent(ctx, repo, changed, from, headRef, credit)
-		changed, s.DriftCredited, s.DriftCreditedBy, creditUsed = res.drift, res.credited, res.by, res.used
+	if len(changed) > 0 && credit != nil {
+		// Only now is it worth asking what may be cited: with nothing above the marker there is nothing
+		// to credit, and the question costs the stack reads that locate a parent and its landing.
+		refs, err := credit()
+		if err != nil {
+			return s, err
+		}
+		if len(refs) > 0 {
+			res := creditContent(ctx, repo, changed, from, headRef, refs)
+			changed, s.DriftCredited, s.DriftCreditedBy, creditUsed = res.drift, res.credited, res.by, res.used
+		}
 	}
 	if len(changed) > 0 {
 		s.State = model.StateWorking
@@ -660,51 +676,6 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 	s.Reason = fmt.Sprintf("%s (%d changeset-only commit%s since)",
 		markerReason(marker), s.Trailing, plural(s.Trailing))
 	return s, nil
-}
-
-// creditDestination removes from `changed` the paths whose content the destination supplies, and returns
-// what is left beside what was credited.
-//
-// Two readings, the whole-branch one first because it is one comparison and covers what the file-by-file
-// reading cannot.
-//
-// The whole-branch reading asks what merging the reviewed commit with the destination would produce, and
-// compares that tree with the tree at head. Equal means head *is* that merge: nothing was written on top of
-// it by hand, and every difference from the marker is git's own merge of the destination's content. A merge
-// with a conflict in it produces no tree, so a resolution somebody wrote by hand is not covered — which is
-// the point: the content the reviewer read is no longer what is there, and the resolution is content nobody
-// read.
-//
-// The file-by-file reading asks, for each path, whether head carries the destination's content there. A
-// path where it does is a path the branch took in rather than one it changed, which is what makes an edit
-// the author added since the review still drift: it matches neither the marker nor the destination.
-//
-// An unreadable destination costs the credit and not the verdict — what is left is reported as drift, the
-// reading this rule exists to soften (PRD §21).
-func creditDestination(ctx context.Context, repo *git.Repo, changed []string, marker, head,
-	destination string) (drift, credited []string) {
-	if res, err := repo.MergeTree(ctx, marker, destination); err == nil && res.Clean {
-		if tree, err := repo.RevParse(ctx, head+"^{tree}"); err == nil && tree == res.Tree {
-			return nil, changed
-		}
-	}
-	theirs, err := repo.PathsChanged(ctx, destination, head)
-	if err != nil {
-		return changed, nil
-	}
-	differsFromDestination := make(map[string]bool, len(theirs))
-	for _, p := range theirs {
-		differsFromDestination[p] = true
-	}
-	drift, credited = make([]string, 0, len(changed)), make([]string, 0, len(changed))
-	for _, p := range changed {
-		if differsFromDestination[p] {
-			drift = append(drift, p)
-			continue
-		}
-		credited = append(credited, p)
-	}
-	return drift, credited
 }
 
 // creditResult is what the credit rule decided: the paths left as drift, the paths credited, who
@@ -742,6 +713,19 @@ type creditResult struct {
 func creditContent(ctx context.Context, repo *git.Repo, changed []string, marker, head string,
 	credit []CreditRef) creditResult {
 	headTree, treeErr := repo.RevParse(ctx, head+"^{tree}")
+	if treeErr == nil {
+		// The whole-branch reading of every ref before any ref is asked the file-by-file question, because
+		// it is one comparison per ref and it settles the case the rule exists for — a clean take-in of the
+		// ground under the work — without a single per-path read.
+		for _, c := range credit {
+			if c.Ref == "" {
+				continue
+			}
+			if res, err := repo.MergeTree(ctx, marker, c.Ref); err == nil && res.Clean && res.Tree == headTree {
+				return wholeBranchCredit(changed, firstNonEmpty(c.Name, c.Ref))
+			}
+		}
+	}
 	type reading struct {
 		name    string
 		differs map[string]bool
@@ -752,11 +736,6 @@ func creditContent(ctx context.Context, repo *git.Repo, changed []string, marker
 			continue
 		}
 		name := firstNonEmpty(c.Name, c.Ref)
-		if treeErr == nil {
-			if res, err := repo.MergeTree(ctx, marker, c.Ref); err == nil && res.Clean && res.Tree == headTree {
-				return wholeBranchCredit(changed, name)
-			}
-		}
 		theirs, err := repo.PathsChanged(ctx, c.Ref, head)
 		if err != nil {
 			// This ref cannot answer, which costs its own credit. The others are still asked.

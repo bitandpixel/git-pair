@@ -458,17 +458,17 @@ func (g integrationGate) Declared() *lifecycle.Event {
 }
 
 func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback bool, points ...hooks.Point) (*integrationGate, error) {
-	// The refs the content question may credit are resolved first, because the question is not answerable
-	// without them: for a stack the ground is its parent, and only the stack reading says whether that
-	// branch is still ground or a finished branch whose name outlived its content. The reads are the same
-	// ones the stack finding below asks anyway, and git's answers are memoized per process.
-	credit, err := creditRefs(ctx, s.repo, s.cs, s.trunk)
-	if err != nil {
-		return nil, err
-	}
 	// The tree question — is the reviewed content still what HEAD carries, and where it is not, whose
 	// content is the difference? — is the one `status` asks observationally and the gate has to answer as a
 	// verdict. Asking it through the same derivation is what keeps the two from disagreeing about drift.
+	//
+	// What may be cited is handed in as a question rather than an answer, because most gate runs have
+	// nothing to cite: nothing moved above the marker, and the stack reads that locate a parent and ask the
+	// destination whether it landed would be paid for nothing. `scripts/gates/ci-integrate.sh` bounds those
+	// reads by counting the git invocations `check --json` makes on a two-level stack.
+	credit := lifecycle.CreditLookup(func() ([]lifecycle.CreditRef, error) {
+		return creditRefs(ctx, s.repo, s.cs, s.trunk)
+	})
 	reviewed, err := lifecycle.SummarizeAgainstTreeHEAD(ctx, s.repo, s.cs.Slug, s.cs.Base, credit)
 	if err != nil {
 		return nil, err

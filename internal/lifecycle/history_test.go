@@ -39,11 +39,23 @@ func summarizeAgainstTreeCrediting(t *testing.T, f *gittest.Fixture, slug, base,
 }
 
 // summarizeAgainstCreditRefs is the reading with the credit refs named outright — the shape the gate
-// assembles, where a stacked child is credited for more than the integration branch.
+// assembles, where a stacked child is credited for more than the integration branch. The refs are handed
+// in as a source rather than a list because that is what the gate does: the derivation asks for them only
+// once it has found content above the marker that a citation could account for.
 func summarizeAgainstCreditRefs(t *testing.T, f *gittest.Fixture, slug, base, headRef string,
 	credit []lifecycle.CreditRef) lifecycle.Summary {
 	t.Helper()
-	summary, err := lifecycle.SummarizeAgainstTree(context.Background(), repo(f), slug, base, headRef, credit)
+	return summarizeAgainstCreditLookup(t, f, slug, base, headRef,
+		func() ([]lifecycle.CreditRef, error) { return credit, nil })
+}
+
+// summarizeAgainstCreditLookup is the same reading with the caller's own source, for the fixtures that
+// care about whether it was asked at all.
+func summarizeAgainstCreditLookup(t *testing.T, f *gittest.Fixture, slug, base, headRef string,
+	source func() ([]lifecycle.CreditRef, error)) lifecycle.Summary {
+	t.Helper()
+	summary, err := lifecycle.SummarizeAgainstTree(context.Background(), repo(f), slug, base, headRef,
+		lifecycle.CreditLookup(source))
 	if err != nil {
 		t.Fatalf("SummarizeAgainstTree(%s, base %s, head %s): %v", slug, base, headRef, err)
 	}

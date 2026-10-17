@@ -6,7 +6,8 @@ A stacked child that merges its approved-but-unlanded parent into its own branch
 content condition credited only the integration branch, so a child could follow trunk for free and could not
 follow the branch it is actually built on: merging the parent in read as "content the review never saw" and cost
 a re-review. The condition now credits the ground the branch is measured on — the integration branch, as
-before, and the child's parent branch while that parent has not landed.
+before, and the child's parent branch while that parent has not landed, cited at the commit the parent's own
+approval covered.
 
 ## What changed
 
@@ -32,6 +33,10 @@ OK: beta is integration-ready
 one branch could be cited. The reason line names the branch too: `… (1 commit since, all of it content alpha
 carries)`. PRD §11.3, README's `check --json` section and the `git-pair` CLI reference say the same thing.
 
+The gate asks for the citations rather than computing them up front: `lifecycle.ReconcileStaleness` takes a
+`CreditLookup` and calls it only after the tree comparison has found paths above the marker. The old
+single-destination helper `creditDestination` is gone, since `creditContent` is the one rule now.
+
 ## Design decisions
 
 **Credit the ground, not the destination.** The refs that qualify are the ones the changeset's own diff is
@@ -49,18 +54,41 @@ parent gained after landing is drift again.
 content the parent later drops — the parent's own review asking for it to go, say — stops being credited and
 refuses the child. That is `TestContentTheParentHasSinceDroppedStopsBeingCredited`.
 
-**Each ref gets both readings.** The whole-branch `merge-tree` reading is asked of every cited ref before the
-file-by-file one, because a clean merge against the parent should be credited wholesale even where trunk's
-merge would conflict; the file-by-file reading then attributes each path to the first ref that accounts for
-it, which is what lets one merge credit one file and the other ref credit the next.
+**Each ref gets both readings.** The whole-branch `merge-tree` reading is asked of every cited ref before any
+of them is asked the file-by-file one, because a clean merge against the parent should be credited wholesale
+even where trunk's merge would conflict; the file-by-file reading then attributes each path to the first ref
+that accounts for it, which is what lets one merge credit one file and the other ref credit the next. The
+lifecycle rule reads each cited commit live rather than from a cache of the merge, which is what takes the
+credit off a ref that no longer carries the content — `TestContentTheParentHasSinceDroppedStopsBeingCredited`.
 
-**Why the widening is safe.** The parent's content has its own changeset, its own approval and its own gate,
-and a child cannot be declared until the parent has landed (`unlandedParentReason`), so no child's verdict
-lands a parent's work. The alternative reading — that `base:` is author-controlled and so must not be trusted —
-was investigated and does not hold: content inherited below the measurement ground is already invisible to both
-content rules, and a merge done one commit earlier, before `change ready`, is not refused at all. A rule that
-refuses the merge after the approval and permits it before is an ordering tax on the honest workflow rather
-than a boundary.
+**The parent is cited at its approval, not at its tip.** The credit exists because a reviewer read the
+content, and the only reviewer of the parent's own files is the parent's — the child's diff is measured from
+the parent, so it never contained them. Citing the branch tip would take whatever that branch happens to hold
+as ground, which an author can arrange: commit a file to the parent, or copy the child's own post-approval
+commit onto it, then merge the parent back and the file arrives as somebody else's content with no reviewer
+anywhere. So the parent is cited at the commit its newest approving review spoke about, read out of a walk of
+the parent's own history from its tip. Three cases therefore cite nothing: a parent with no approval of its
+own, a record that names the parent as a branch alone (with no `base-changeset:` there is no changeset to look
+an approval up by, and this is the same "nothing is claimed from a name" rule `parentLanded` and
+`parentAbandoned` follow), and a parent whose branch was rewritten since the approval, whose approval is no
+longer in the walk at all. The trunk citation is resolved to a commit at the same moment, so both halves of
+the credit are the ones this decision was about.
+
+**Why the widening is safe.** Two things, not one. A child cannot be declared until the parent has landed
+(`unlandedParentReason`), so no child's verdict lands a parent's work, and nothing is credited that a reviewer
+of the parent did not cover. The alternative reading — that `base:` is author-controlled and so must not be
+trusted at all — was investigated and does not hold on its own terms: content inherited below the measurement
+ground is already invisible to both content rules, and a merge done one commit earlier, before `change ready`,
+is not refused at all. A rule that refuses the merge after the approval and permits it before is an ordering
+tax on the honest workflow rather than a boundary; what the boundary has to be is about _content_, which is
+what the approval-bounded citation makes it.
+
+**The citation is asked for, not computed.** Deciding it costs the stack reads that locate the parent, ask the
+destination whether it landed, and walk the parent's history. `scripts/gates/ci-integrate.sh` counts the git
+invocations `check --json` makes on a two-level stack — 43 recorded, ceiling 50 — and resolving the citations
+eagerly measured 52 for a change whose common path is a branch with nothing above its marker. That is why the
+lookup is lazy and why `TestTheCreditSourceIsAskedOnlyWhenContentMovedAboveTheMarker` pins the three shapes:
+nothing after the marker, a changeset-only commit, and the parent's work arriving.
 
 **What did not change.** Lineage: `Review-Head` ancestry still refuses a rebase, so the approval stays a claim
 about a commit. A conflict resolved by hand is still drift, because the whole-branch reading produces no clean
@@ -71,11 +99,18 @@ refused — that refusal is what makes the widening safe, and it is tested besid
 
 `go test ./internal/...` and `mise run check` (format, gofmt, vet, tests) from this branch. New cases:
 
-- `TestMergingAnUnlandedParentInIsNotContentTheReviewNeverSaw`, `TestCreditIsAttributedToTheRefThatSuppliesEachFile`,
-  `TestAnEditOnTopOfAParentMergeIsStillDrift`, `TestContentTheParentHasSinceDroppedStopsBeingCredited`
+- `TestMergingAnUnlandedParentInIsNotContentTheReviewNeverSaw`,
+  `TestCreditIsAttributedToTheRefThatSuppliesEachFile` (including a file both cited branches carry, which goes
+  to the integration branch), `TestAnEditOnTopOfAParentMergeIsStillDrift`,
+  `TestContentTheParentHasSinceDroppedStopsBeingCredited`,
+  `TestTheCreditSourceIsAskedOnlyWhenContentMovedAboveTheMarker`
 - `TestCheckKeepsTheApprovalWhenAChildTakesItsParentIn`, `TestCheckStillRefusesContentNoCitedBranchCarries`,
-  `TestCheckDoesNotCreditALandedParentsLaterWork` — the gate end to end, including the refusal
-- `TestCreditRefs` — the citation policy alone, because a wrong list reads as a correct refusal
+  `TestCheckRefusesWhatTheParentGainedAfterItsApproval` (the parent's own new work, and the child's own commit
+  copied onto the parent and merged back), `TestCheckRefusesAParentThatHasNeverBeenApproved`,
+  `TestCheckStillCreditsContentTheParentHasSinceTakenBack`,
+  `TestCheckDoesNotCreditALandedParentsLaterWork` — the gate end to end, including the refusals
+- `TestCreditRefs` — the citation policy alone, because a wrong list reads as a correct refusal and a too-wide
+  list reads as a correct pass
 
 `TestMergingTheDestinationInIsNotContentTheReviewNeverSaw` was updated for the reason line, which now names the
 branch instead of saying "the destination". `TestAnAncestorsFileIsCreditedOnlyWhenTheDestinationCarriesIt` is
@@ -89,9 +124,18 @@ change ready to offer it for review again`, including where this change makes `c
 trailing commits and never ask the tree question, and the reason they do is a deliberate cost decision. Acting
 on that advice discards a passing approval, so it is worth its own change; it is not in this one.
 
-The parent is cited whenever `base:` names a branch, including a stack that records no `base-changeset:`. The
-ordering rule — a child is not declarable until its parent is shown landed — is what keeps that from mattering,
-and it is the rule to re-read if that refusal is ever relaxed.
+Two readings are accepted here rather than left to fall out of the code. A parent that deletes a file after
+approving it does not unreview what its approval covered: that deletion is unreviewed, unlanded work on the
+parent's own branch, and it is not the state that decides whether the child's copy was ever read
+(`TestCheckStillCreditsContentTheParentHasSinceTakenBack`). And a path that neither cited ref carries is
+credited today because the file-by-file reading asks only whether a ref differs from head — so a reviewed file
+the author deletes after the approval passes, and `drift_credited_by` has nothing true to name. That half is
+pre-existing (`creditDestination` on `main` behaved the same way), it needs a presence check rather than a
+difference check, and it is worth its own change.
+
+The parent is cited whenever `base:` names a branch and `base-changeset:` names its changeset. A record with
+no `base-changeset:` cites nothing, which is the conservative direction: such a child cannot be declared in
+any case (`parentLanded` needs the same record).
 
 ## Open questions
 
