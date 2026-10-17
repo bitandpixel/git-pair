@@ -74,27 +74,14 @@ an approval up by, and this is the same "nothing is claimed from a name" rule `p
 longer in the walk at all. The trunk citation is resolved to a commit at the same moment, so both halves of
 the credit are the ones this decision was about.
 
-> is this true? if the parent has a "false commit" on it, and it gets merged into the child, it would be non-stale while the parent is unlanded. but if the parent lands without the false commit, then when the child starts crediting trunk, that commit wouldnt be present anymore and show stale right?
-
-Yes, on both halves, and which test refuses depends on where the parent's newest approval sits relative to
-that commit.
-
-If the commit arrived on the parent after that approval, the child never passes at all: the parent is cited at
-the approved commit, so the file matches no cited ref and the merge is refused the moment it lands on the child
-(`TestCheckRefusesWhatTheParentGainedAfterItsApproval`, both ways of producing it). The case you describe —
-credit while unlanded, refusal after the landing — is the one where the parent's approval _did_ cover the
-content and the parent then drops it. While the parent is unlanded the child is credited, because the parent's
-reviewer read that content and the parent's own deletion is unreviewed work on the parent's branch
-(`TestCheckStillCreditsContentTheParentHasSinceTakenBack`). Once the parent lands the smaller state, the parent
-is a landed name that vouches for nothing and the destination never received the file, so the path differs from
-trunk and the child refuses (`TestCheckRefusesWhatTheParentLandedWithout`). That is the credit doing its job:
-the content stops being citable exactly when no live approval and no destination carries it, and the child is
-sent back rather than landing a file nobody's tree has.
-
-One refinement worth having beside it. On the declared path the refusal arrives earlier than the landing: a
-parent cannot be declared in a state whose newest approval does not cover what it now holds, so the parent is
-re-approved on the smaller head, and it is that re-approval — not the merge into the destination — that takes
-the citation away from the child. The landing is what removes it when the parent is merged by hand instead.
+**What a parent landing without content takes with it.** A parent that lands a state missing content its newest
+approval had covered leaves the child holding a file that neither the destination nor a live approval carries:
+the parent has become a landed name that vouches for nothing, and the child refuses
+(`TestCheckRefusesWhatTheParentLandedWithout`). On the declared path the refusal arrives earlier, at the parent's
+re-approval on the smaller head, because a parent cannot be declared on a state its newest approval does not
+cover (`TestCheckRefusesContentTheParentReApprovedWithout`). The case-by-case answer — including the content the
+parent's reviewer did cover and the parent later dropped, which stays citable until the landing takes it — is in
+`DISCUSSION.md`.
 
 **Why the widening is safe.** Two things, not one. A child cannot be declared until the parent has landed
 (`unlandedParentReason`), so no child's verdict lands a parent's work, and nothing is credited that a reviewer
