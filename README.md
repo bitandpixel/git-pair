@@ -2423,8 +2423,10 @@ about a decision the author can no longer un-take (PRD §19.3).
 
 `opening an editor needs a terminal`, `` `git pair review open` needs a terminal `` and
 `` `git pair review reopen` needs a terminal `` (exit 2) — both stdin and stdout must be
-character devices. Under an agent, a pipe or cron, edit the
-files directly and use `git pair diff`, `git pair status` and `git pair review submit`.
+character devices. Under an agent, a pipe or cron, edit the files directly and use `git pair diff`,
+`git pair status` and `git pair review history` — reads, every one. `git pair review submit` also runs with no
+terminal, but it is a verdict and stays the reviewer's to give: an author reads a submission with
+`git pair change feedback`, and no agent runs `review submit` for anyone (PRD §22).
 
 `changeset has no review submissions yet; run git pair diff for the full changeset` (exit 2) —
 `--unreviewed` and `--since-review` need a review submission. Out of range:
