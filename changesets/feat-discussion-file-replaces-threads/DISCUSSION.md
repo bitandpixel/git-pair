@@ -63,6 +63,8 @@ and keyed the exception to the workflow rather than to the instruction:
 If you intended a real escape hatch for "the human said just merge it", the honest version needs PRD §22 to say
 so too, because that is the list an agent actually follows.
 
+> Ok sounds good.
+
 ### Two things I found and did not touch
 
 - `README.md:2426` advises, for an agent or a cron job with no terminal: "edit the files directly and use
