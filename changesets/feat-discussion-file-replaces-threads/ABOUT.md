@@ -32,6 +32,18 @@ the two places left that take typed input, and neither is a row's key.
 product skill, README and the two gate scripts moved with them, because the docs contract test fails a document
 that names a command the code does not have.
 
+The review round rewrote three paragraphs of `skills/git-pair/SKILL.md` that were wrong rather than wordy, and
+the file now carries this changeset's first real `DISCUSSION.md`. What the skill says, and what it may not, was
+checked against the code rather than against memory: the reviewer-command rule names the four commands and gives
+both reasons (the reviewer's role, and the terminal), because the blanket "avoid any `review <subcommand>`" also
+forbade `review history`, which the same table lists as an author's command. The approval-validity conditions
+cite what `check` actually compares — the commit the approval's `Review-Head` names, tested with
+`git merge-base --is-ancestor`, and a name-only tree diff from the newest marker with this changeset's directory
+excluded — and drop the claim that merging an unlanded parent in preserves a review, which
+`internal/cli/contribution_gate_test.go:46` refuses. The one sentence that changed a policy rather than a fact
+is where the merge belongs; it is raised in `DISCUSSION.md` for the reviewer's ruling, and the wording there keys
+it to the repository's declared workflow, which is what PRD §22 and §26 admit.
+
 ## Example
 
 The reviewer blocks the change, and the point is one they want talked through rather than folded into the
@@ -114,6 +126,10 @@ on "the last box row" now stand on the edge. `TestJkCrossTheEdgeBetweenTheBoxAnd
 than count from the end: `j` off the box's last row is the crossing, which is what made the old
 "stand on the discussion row and press `j`" test stop moving.
 
+The third is the skill's policy text, which outlives the code: `Do not cross the line` and `What is not yours` in
+`skills/git-pair/SKILL.md`. Both were rewritten during review, both restate rules that PRD §22 and §26 own, and
+the sentence about where the merge belongs is the one to read against them and against `DISCUSSION.md`.
+
 ## Validation
 
 `mise run check` — markdown format, `gofmt`, `go vet`, then the sharded suite. `mise run gates` runs the whole
@@ -128,6 +144,10 @@ creating the file.
 `TestReviewDiscussionScaffoldsAndNeverOverwrites` and `TestChangeDiscussionReportsCreatedOrFound` drive the two
 commands, including the exit-2 refusal that still leaves the scaffold behind. `TestChangeCombineAppendsTheDisappearedDiscussion`
 and `TestChangeCombineWithNothingToBringAcross` are the append, in both directions.
+
+The changeset also eats its own cooking: this `DISCUSSION.md` was written by `git pair change discussion`, which
+reported `Created` and then `already exists` on the second run, and the exit-2 refusal was read from the command
+line before the gate script asserted it.
 
 ## Known limitations
 
@@ -145,3 +165,8 @@ one without the other makes the tree fail its own check, and editing both makes 
 library it says it matches. The change belongs in the dev-profiles profiles and will arrive here on the next sync.
 Nothing in this repository's verification depends on it: `docs_contract_test` reads `PRD.md`, `README.md` and the
 shipped `skills/git-pair` skill, not the vendored workflow profiles.
+
+One contradiction turned up during the accuracy pass and is left alone: `README.md:2426` advises anyone with no
+terminal — an agent, a pipe, a cron job — to "use `git pair diff`, `git pair status` and `git pair review
+submit`". That is correct about terminals and wrong about roles, and it predates this change. It is not about
+the discussion file either, so it is a follow-up rather than a line in this changeset.
