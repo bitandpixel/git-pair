@@ -1,6 +1,16 @@
 # git-pair-loop profile changelog
 
 
+## 3 — 2026-10-17
+
+- `git-pair-workflow` stops naming a command the tool no longer has. `git pair review thread` is gone: the review
+  conversation is one file per changeset, `changesets/<id>/DISCUSSION.md`, which the reviewer opens with
+  `git pair review discussion` and the author writes without a terminal through `git pair change discussion`. The
+  `Never` list names `review discussion` beside the other reviewer commands, and the loop's step after
+  `change feedback` says which file a reply goes into rather than what topic it needs.
+- Why this is a version rather than a typo fix: the `Never` list is the sentence an agent obeys without opening
+  the tool, and a name in it that the tool does not answer to makes everything around it look optional.
+
 ## 2 — 2026-10-14
 
 - `git-pair-workflow` is now declared as a `[[router]]` entry with a `reason`, and the entry line in `AGENTS.md` carries

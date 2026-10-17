@@ -1,6 +1,14 @@
 # git-pair-manual-integration profile changelog
 
 
+## 3 — 2026-10-17
+
+- The `Never` list names `git pair review discussion` where it named the removed `git pair review thread`, so the
+  commands an author may not run are the commands the tool answers to: `submit`, `open`, `reopen`, `discussion`,
+  `about`. The conversation the removed command wrote to is now one file per changeset,
+  `changesets/<id>/DISCUSSION.md`, and the author's route to it is `git pair change discussion`, which needs no
+  terminal.
+
 ## 2 — 2026-10-14
 
 - `git-pair-manual-integration` is now declared as a `[[router]]` entry with a `reason`, and the entry line in `AGENTS.md` carries

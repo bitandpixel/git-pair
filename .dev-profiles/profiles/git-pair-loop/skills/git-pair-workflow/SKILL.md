@@ -23,7 +23,7 @@ git pair init --base main            # once, on a named branch
 # fill changesets/<id>/ABOUT.md before the handoff, against the change-description skill below
 git pair change ready                # the handoff. This IS the review request
 git pair change feedback             # when a review lands: read it here, not with `diff --unreviewed`
-# address every thread and every surviving reviewer line, commit normally
+# answer the reviewer in DISCUSSION.md and resolve every surviving line, commit normally
 git pair change ready                # back into the queue
 git pair check                       # the gate; exit 0 means it may land
 git pair change integrate            # the ask, and the expected one once the gate is clear — then stop
@@ -61,7 +61,7 @@ shown. Declining is a position a person can take, not a gap to work around.
 
 ## Never
 
-- `git pair review submit`, `review open`, `review reopen`, `review about`, `review thread`. Approval is the
+- `git pair review submit`, `review open`, `review reopen`, `review about`, `review discussion`. Approval is the
   reviewer's act.
 - Merging, squashing, or pushing to the destination. Performing the merge is not yours. Asking for it is, and
   `git pair change integrate` is the ask: an approved changeset with a clear gate should be declared.

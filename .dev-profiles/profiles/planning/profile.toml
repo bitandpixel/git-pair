@@ -1,0 +1,15 @@
+# Planning applies alongside a repository's development workflow, not in place of its review route.
+name = "planning"
+summary = "Plan, execute, and audit multi-step work in verifiable milestones with explicit parallel work boundaries."
+
+[[router]]
+name = "project-planning"
+reason = "when multi-step work needs a plan: define verifiable milestones, dependencies, and independent workstreams"
+
+[[router]]
+name = "plan-execution"
+reason = "when implementing an existing plan: keep status, dependencies, and verification current"
+
+[[router]]
+name = "plan-audit"
+reason = "on request, review plan progress against evidence without implementing the work"

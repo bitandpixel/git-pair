@@ -15,14 +15,22 @@
 # and cannot block one either. Keeping the two jobs apart is also what lets that file be dispatched by the forge ask
 # below: the file the ask pokes merges nothing, by construction rather than by convention.
 #
-# Two things this file opens, both answered by the consumer's own marker and resolved by the one resolver `doctor`
-# checks, so no repository has to edit a file the profile owns and byte-compares:
+# Two things this file opens, so no repository has to edit a file the profile owns and byte-compares:
 #
-#   toolchain    what prepares the tree before it is tested — a compiler, a toolchain, a build. Unanswered is legal
-#                and means the runner needs nothing; misspelled fails at the handoff rather than at the run.
+#   setup        `.github/actions/git-pair-setup/action.yml`, a composite action the consumer writes and this file
+#                calls by path. The path is the profile's because GitHub resolves `uses:` while it reads the file;
+#                the bytes are the consumer's because a repository's runner is nobody else's to configure. Having no
+#                such file is a legal answer — the step carries an `if:` on the file's own existence, so GitHub
+#                skips it before it ever resolves the path — and `doctor` reports the absence while failing a file
+#                that exists and is not a composite action.
 #   ci-request   a script that asks the forge to run the destination branch after a landing, by dispatching that
 #                check file. Unanswered means the trunk gets no run of its own, which `doctor` reports instead of
 #                hiding.
+#
+# What the consumer's `verify` answer runs is the merged tree, and nothing between the merge and the push may
+# change it. The driver compares the working tree against the merge commit before it pushes, so a build that
+# rewrites tracked files is a refusal rather than a landing nobody tested. Installation that depends on the merged
+# tree belongs at the top of `verify`, where it is asked of the tree it is meant to serve.
 #
 # Three things this file deliberately does not have:
 #
@@ -158,33 +166,26 @@ jobs:
           GIT_PAIR_VERSION: ${{ vars.GIT_PAIR_VERSION }}
         run: scripts/ci/install-git-pair.sh
 
-      # The consumer's toolchain, if it has one. `toolchain` is a seam the profile offers rather than demands, so an
-      # empty answer is legal: a repository whose suite needs nothing beyond the runner answers nothing, says so in the
-      # log, and moves on. A *misspelled* answer is not legal, and `doctor` fails it at the handoff — the resolver
-      # prints nothing and exits 0 for an unanswered offer, and exits 2 for a role nobody declared, which is what lets
-      # one step tell "nothing to prepare" apart from a typo instead of quietly skipping the preparation.
+      # The consumer's own preparation, in a file the profile neither writes nor byte-compares. The path is the
+      # profile's, because GitHub resolves `uses:` while it reads the file and no marker can supply one; the bytes
+      # are the consumer's, because what a repository needs on a runner is nobody else's to write. A composite
+      # action runs here — in this job, on this runner, against this checkout — so caches restored, toolchains
+      # installed, and a build of this tree's own tool placed on `$GITHUB_PATH` all reach the steps after it.
       #
-      # It sits after the pinned install on purpose. A repository that builds the tool from the tree being merged
-      # replaces what the installer put there; a step before it would have its build overwritten by a published release
-      # that cannot contain the change under review.
+      # The guard is the answer to "must every repository have this file". GitHub evaluates `if:` before it resolves
+      # a local `uses:` path, so a repository with no action.yml reports this step `skipped` and bills nothing.
+      # Absence is a decision and `doctor` reports it; what `doctor` fails is a file that exists and is not a
+      # composite action, or one named `action.yaml`, because either leaves the tree unprepared while the job looks
+      # green — the failure this profile refuses everywhere it can see it.
       #
-      # The command runs with `$GITHUB_ENV` in reach, so an answer that has to hand something to the steps after it — a
-      # built binary's name, a PATH entry — can write it, and `GIT_PAIR_BIN` among them: the driver and the report
-      # below ask for the tool by that name, so a consumer that builds git-pair from the tree under review lands and
-      # reports on its own build rather than on the release the installer fetched. The check file runs this same
-      # step, so a check and a candidate can never be answered about differently built trees.
-      - name: toolchain
-        run: |
-          set -uo pipefail
-          toolchain=$(.dev-profiles/bin/dev-profiles command toolchain) || {
-            printf 'the toolchain answer in .dev-profiles.toml could not be resolved\n' >&2
-            exit 2
-          }
-          if [ -z "$toolchain" ]; then
-            printf 'no toolchain answered — nothing to prepare\n'
-          else
-            eval "$toolchain"
-          fi
+      # After the pinned install on purpose: a repository that builds the tool from the tree being merged replaces
+      # what the installer put there, rather than having its build overwritten by a published release that cannot
+      # contain the change under review. Export `GIT_PAIR_BIN` from the composite when it builds the tool: the
+      # driver and the report below ask for the tool by that name, so the merge and its report are made with this
+      # tree's build rather than with the release the installer fetched.
+      - name: setup
+        if: ${{ hashFiles('.github/actions/git-pair-setup/action.yml') != '' }}
+        uses: ./.github/actions/git-pair-setup
 
       - name: gate it, build it, verify it, push it
         id: gate
@@ -224,7 +225,7 @@ jobs:
             printf 'no verify command named in .dev-profiles.toml — nothing merges without its condition\n' >&2
             exit 2
           }
-          # The ask is optional in the same sense the toolchain is: the profile offers the role, and a repository that
+          # The ask is optional in the same sense the setup seam is: the profile offers the role, and a repository that
           # wants a run of its own on the tree it just landed answers it with a script of its own. Refusal is a note
           # rather than a failure, because this is paper trail and not evidence — the tree the destination keeps is
           # the tree this job tested a moment ago. Nothing here waits on the run the ask produces, and the file it
@@ -238,8 +239,8 @@ jobs:
 
       # The log a human reads. After the run it answers the two questions that matter here: what is still waiting,
       # and what landed without a review. A green run that merged nothing used to be normal; now it has a reason,
-      # and this step is where to look for it. Named, not hardcoded to `git-pair`: the toolchain answer may have
-      # built this tree's own binary and exported where it landed, and the report should ask the tool that decided
+      # and this step is where to look for it. Named, not hardcoded to `git-pair`: the consumer's setup step may
+      # have built this tree's own binary and exported where it landed, and the report should ask the tool that decided
       # the merge rather than the release the installer fetched.
       - name: what the queue says now
         if: always()
