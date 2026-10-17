@@ -1103,11 +1103,14 @@ is why a landed parent can be reported with no restack in `next_action`: the com
 contributes what the approval recorded, and the branch merges cleanly, so the rewrite would cost the approval
 the verdict rests on.
 
-A branch that merged the integration branch in also carries `drift_credited`: the paths that differ from the
-reviewed commit and were not counted as drift because the destination carries that content (PRD §11.3). It is
-what the verdict rests on, reported rather than assumed, so a reader who does not believe a passing gate can
-see what was taken on trust. Content the destination does not carry — an ancestor still sitting on its own
-branch, somebody else's branch, a conflict resolved by hand — is in `reasons`, not here.
+A branch that merged its ground in also carries `drift_credited`: the paths that differ from the
+reviewed commit and were not counted as drift because a cited branch carries that content, and
+`drift_credited_by`, which names the branch behind each of them (PRD §11.3). The branches that may be cited
+are the integration branch and the parent a stacked changeset is measured on while that parent has not
+landed. It is what the verdict rests on, reported rather than assumed, so a reader who does not believe a
+passing gate can see what was taken on trust, and by whom. Content no cited branch carries — somebody else's
+branch, a parent's work that arrived after that parent landed, a conflict resolved by hand — is in `reasons`,
+not here.
 
 This form carries the verdict in `ready` rather than in the exit code: a not-ready run prints its
 JSON and exits 0, so a job piping it into `jq` keeps git-pair's answer separate from the pipeline's.
