@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"gitpair/internal/changeset"
@@ -72,6 +73,46 @@ func TestTidiedIDsNamesOnlyWhatHasBeenFiledAway(t *testing.T) {
 	}
 	if got := landedIDsAt(t, f, "main"); !reflect.DeepEqual(got, []string{"both", "filed", "inplace"}) {
 		t.Errorf("LandedIDs = %v, want all three named once each", got)
+	}
+}
+
+// The destination question is two listings rather than three. The filed half is defined by the active half —
+// a filed directory that is also in place was not filed away — so the run that came for both has the filter's
+// input in hand after the first listing and must not ask git for it again. That repeat cost nothing in a
+// normal run, where the in-process memo serves it, and one subprocess per call with the memo off, which is
+// the state `gittest.SpawnShim` measures in and the state the cost bound in `scripts/gates/ci-integrate.sh`
+// runs in. The bound below is therefore the number a reader can reproduce, not the number the memo makes
+// invisible.
+func TestLandedIDsListsEachHalfOfTheDestinationOnce(t *testing.T) {
+	f := gittest.New(t)
+	f.Commit("seed", gittest.WithFile("a.txt", "a\n"))
+	f.CreateBranch("landed")
+	f.CommitChangeset("landed", "main")
+	f.SwitchTo("main")
+	f.MustGit("merge", "--quiet", "--no-ff", "-m", "land landed", "landed")
+	f.Write(filepath.Join("changesets", ".landed", ".keep"), "the namespace, tracked\n")
+	f.MustGit("mv", "changesets/landed", filepath.Join("changesets", ".landed", "landed"))
+	f.CommitChangeset("active", "main")
+	f.Commit("active work", gittest.WithFile("active.txt", "1\n"))
+
+	_, lines := f.SpawnShimLines(t)
+	if got := landedIDsAt(t, f, "main"); !reflect.DeepEqual(got, []string{"active", "landed"}) {
+		t.Fatalf("LandedIDs = %v, want the directory in place and the one filed away", got)
+	}
+	var asked []string
+	for _, line := range lines() {
+		// The logged line carries whatever global flags the git layer puts in front of every call, so the
+		// assertion is about the read that was asked for rather than how it was spelled to the subprocess.
+		if at := strings.Index(line, "ls-tree "); at >= 0 {
+			asked = append(asked, line[at:])
+		}
+	}
+	want := []string{
+		"ls-tree -d --name-only main -- changesets/",
+		"ls-tree -d --name-only main -- changesets/.landed/",
+	}
+	if !reflect.DeepEqual(asked, want) {
+		t.Errorf("LandedIDs asked %v, want one listing of each half", asked)
 	}
 }
 
