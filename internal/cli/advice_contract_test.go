@@ -55,21 +55,31 @@ func TestEmittedAdviceNamesCommandsThisBuildAnswersTo(t *testing.T) {
 
 	for _, a := range corpus {
 		for _, c := range adviceCommands(a.text, paths) {
-			if !paths[c.path] {
-				t.Errorf("%s advises `git pair %s`, which is not a command of this build", a.where, c.path)
-				continue
-			}
-			if hasChild(paths, c.path) && c.followed != "" && !paths[c.path+" "+c.followed] {
-				// A group followed by a word that is not one of its children: either a subcommand
-				// that was renamed away, or prose that ran on. Both read as a broken step.
-				t.Errorf("%s advises `git pair %s %s`, and %s has no such subcommand", a.where, c.path, c.followed, c.path)
-			}
-			for _, flag := range c.flags {
-				if !flags[c.path][flag] {
-					t.Errorf("%s advises `git pair %s --%s`, and that command declares no such flag. It exists on "+
-						"another command, which is how the sentence survives a glance at it.", a.where, c.path, flag)
-				}
-			}
+			checkCommandReference(t, a.where, "advises", c, paths, flags)
+		}
+	}
+}
+
+// checkCommandReference holds one `git pair …` reference to the built tree: the path has to be a command,
+// a group may not be followed by a word that is not one of its children, and every flag has to belong to the
+// command it is spelled on. Emitted advice and built help text read it through this one function, so a name
+// that is wrong in the help screen is wrong in the advice too, and neither can drift past the other.
+func checkCommandReference(t *testing.T, where, verb string, c adviceCommand, paths map[string]bool,
+	flags map[string]map[string]bool) {
+	t.Helper()
+	if !paths[c.path] {
+		t.Errorf("%s %s `git pair %s`, which is not a command of this build", where, verb, c.path)
+		return
+	}
+	if hasChild(paths, c.path) && c.followed != "" && !paths[c.path+" "+c.followed] {
+		// A group followed by a word that is not one of its children: either a subcommand
+		// that was renamed away, or prose that ran on. Both read as a broken step.
+		t.Errorf("%s %s `git pair %s %s`, and %s has no such subcommand", where, verb, c.path, c.followed, c.path)
+	}
+	for _, flag := range c.flags {
+		if !flags[c.path][flag] {
+			t.Errorf("%s %s `git pair %s --%s`, and that command declares no such flag. It exists on "+
+				"another command, which is how the sentence survives a glance at it.", where, verb, c.path, flag)
 		}
 	}
 }
