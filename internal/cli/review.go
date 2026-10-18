@@ -220,7 +220,8 @@ Exactly one outcome is required:
 
 The commit carries Review-Outcome, Review-Changeset and Review-Head trailers, and it is the whole
 submission: no ref is written, because while work is in flight the branch is what holds
-the chain. ` + "`git pair integration record`" + ` writes the durable refs, once, at landing.
+the chain. A landing is read the same way: the integration branch carrying ` + "`changesets/<id>/`" + ` is
+the record, and no ref is written for that either.
 
 Review-Head is the commit being reviewed — ` + "`HEAD`" + ` as the submission was made, which is the new
 commit's own parent. It is written down because a rebase rewrites the review commit and keeps its
