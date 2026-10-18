@@ -1904,16 +1904,32 @@ NOT READY:
 The name of the rewritten head is in that sentence because it is the other half of the comparison — a
 reader who sees only "history moved" cannot tell a rebase from a fetch gap.
 
-The content condition **credits the destination**. A branch that took the integration branch in has changed
-files since its marker, and none of that content is the author's: the reviewer had no reason to read trunk,
-and the destination vouches for what it carries. So a path is not drift where head carries the destination's
-content there, and a whole merge is not drift where head is what `git merge-tree` would make of the reviewed
-commit and the destination. That last reading is why a resolution written by hand after a conflict _is_ drift:
-the merge git would have produced does not contain it. Content from an ancestor that has not landed belongs
-to the author until the destination carries it, and is refused (§21, and
-`TestAnAncestorsFileIsCreditedOnlyWhenTheDestinationCarriesIt`). `check --json` reports the paths it credited
-as `drift_credited`, so the trust a verdict rests on is visible to a reader who does not believe it, while the
-paths it refused stay in `reasons`.
+The content condition **credits the ground the branch is measured on**. A branch that took the integration
+branch in has changed files since its marker, and none of that content is the author's: the reviewer had no
+reason to read trunk, and the destination vouches for what it carries. A stacked child that took its parent
+in has done the same act one level down, so the parent is cited beside the destination — at the commit the
+parent's own newest approval spoke about, which is the only evidence in the repository that anybody read the
+parent's content. The child's reviewer never saw those files: the child's diff is measured from the parent,
+and excludes them by construction. So a path is not drift where head carries a cited ref's content there, and
+a whole merge is not drift where head is what `git merge-tree` would make of the reviewed commit and that
+ref. That last reading is why a resolution written by hand after a conflict _is_ drift: the merge git would
+have produced does not contain it. The refs that may be cited are the integration branch and the parent the
+changeset's `base:` records — not any branch the author merges, and not a parent that has landed, because a
+branch keeps its name after the content it carried was merged and the name then vouches for nothing. Ask the
+parent at a commit rather than at its branch and two refusals follow, both in the direction of less trust:
+content the parent took on after its approval is credited by nobody, which is what stops an author pushing
+their own work onto the parent and merging it back as somebody else's; and a parent with no approval of its
+own, a record naming the parent as a branch alone, or a parent whose branch was rewritten since its approval
+offers nothing to cite at all. Each cited ref is resolved to a commit when the verdict is taken, so the
+credit is the one the decision was about and not a ref that moved underneath it. Content no cited ref carries
+is refused (§21, and `TestAnAncestorsFileIsCreditedOnlyWhereARefCitesIt`,
+`TestMergingAnUnlandedParentInIsNotContentTheReviewNeverSaw`,
+`TestCheckRefusesWhatTheParentGainedAfterItsApproval`,
+`TestCheckRefusesWhatTheParentLandedWithout`,
+`TestCheckRefusesAParentThatHasNeverBeenApproved` and
+`TestCheckDoesNotCreditALandedParentsLaterWork`). `check --json` reports the paths it credited as
+`drift_credited` and the branch that supplied each of them as `drift_credited_by`, so the trust a verdict
+rests on is visible to a reader who does not believe it, while the paths it refused stay in `reasons`.
 
 The passing verdict names the commit it cleared, not only the changeset: a log that says "ready" without
 saying what it looked at cannot be re-read after the branch has moved. `next` is the rest of the handoff
@@ -1940,7 +1956,8 @@ flag is on the command that runs the gate, which is the one place the policy is 
 
 `--json` prints `changeset`, `ready`, `state`, `head`, `reasons`, `policy` (`approve-only` or
 `approve-or-feedback`, so a verdict in a log carries the policy that produced it), `reviewed_head`,
-`drift_credited`, `integrated`, `integrated_commit`, `integrating`, `integrate_commit` and `next_action`.
+`drift_credited`, `drift_credited_by`, `integrated`, `integrated_commit`, `integrating`, `integrate_commit`
+and `next_action`.
 `head` and `reviewed_head` are full SHAs rather than the short
 forms the human output prints, because the consumer compares them against the revision it built —
 `integrated_commit` and `integrate_commit` are short in `status` and full here, matching the other
@@ -4321,13 +4338,17 @@ Explicitly given up while the durable-ref layer was being taken out, each with w
   the older two-base comparison could not answer — a squash landing, and a child that has taken the
   destination in — are answered, and the parent's own movement is a note rather than a reason. What
   was still deferred beside it is taken now too: the rule that counts content the review never saw
-  credits the destination, so a branch that merged the integration branch in keeps its approval where
-  the content it took is the destination's own (§11.3), and the rendered half of `Review-Diff-Id` keeps
-  the landed-parent approval where a destination edit sits in the same file but nowhere near the
-  reviewed hunks (§21.1). What those two readings still refuse is content the destination does not
-  carry — an ancestor that has not landed, somebody else's branch, a conflict resolution written by
+  credits the ground the branch stands on — the destination, and the parent a stacked changeset is measured
+  on while that parent has not landed, cited at the commit the parent's own approval covered — so a branch
+  that merged the integration branch or its parent in keeps its approval where the content it took is not its
+  own (§11.3), and the rendered half of
+  `Review-Diff-Id` keeps the landed-parent approval where a destination edit sits in the same file but
+  nowhere near the reviewed hunks (§21.1). What those two readings still refuse is content no cited ref
+  carries — somebody else's branch, a parent's work that arrived after that parent landed, a conflict
+  resolution written by
   hand — which is the boundary
-  `TestMergingInWorkThatIsNotTheDestinationsIsRefused` and
+  `TestMergingInWorkThatIsNotTheDestinationsIsRefused`,
+  `TestCheckDoesNotCreditALandedParentsLaterWork` and
   `TestAHandResolvedConflictIsContentTheReviewNeverSaw` pin.
 - **Reviewer identity and resolution state.** Per-reviewer permissions, "who is this
   comment from" as data, and an open/resolved mark on a stretch of the discussion file. Cost: identity is

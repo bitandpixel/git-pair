@@ -35,11 +35,45 @@ func summarizeAgainstTree(t *testing.T, f *gittest.Fixture, slug, base, headRef 
 func summarizeAgainstTreeCrediting(t *testing.T, f *gittest.Fixture, slug, base, headRef,
 	destination string) lifecycle.Summary {
 	t.Helper()
-	summary, err := lifecycle.SummarizeAgainstTree(context.Background(), repo(f), slug, base, headRef, destination)
+	return summarizeAgainstCreditRefs(t, f, slug, base, headRef, creditRefsNamed(destination))
+}
+
+// summarizeAgainstCreditRefs is the reading with the credit refs named outright — the shape the gate
+// assembles, where a stacked child is credited for more than the integration branch. The refs are handed
+// in as a source rather than a list because that is what the gate does: the derivation asks for them only
+// once it has found content above the marker that a citation could account for.
+func summarizeAgainstCreditRefs(t *testing.T, f *gittest.Fixture, slug, base, headRef string,
+	credit []lifecycle.CreditRef) lifecycle.Summary {
+	t.Helper()
+	return summarizeAgainstCreditLookup(t, f, slug, base, headRef,
+		func() ([]lifecycle.CreditRef, error) { return credit, nil })
+}
+
+// summarizeAgainstCreditLookup is the same reading with the caller's own source, for the fixtures that
+// care about whether it was asked at all.
+func summarizeAgainstCreditLookup(t *testing.T, f *gittest.Fixture, slug, base, headRef string,
+	source func() ([]lifecycle.CreditRef, error)) lifecycle.Summary {
+	t.Helper()
+	summary, err := lifecycle.SummarizeAgainstTree(context.Background(), repo(f), slug, base, headRef,
+		lifecycle.CreditLookup(source))
 	if err != nil {
 		t.Fatalf("SummarizeAgainstTree(%s, base %s, head %s): %v", slug, base, headRef, err)
 	}
 	return summary
+}
+
+// creditRefsNamed turns the names a fixture reaches for into credit refs, dropping the empty ones a
+// fixture passes to mean "this clone cannot name one". The name is what a credited path is attributed to,
+// so a fixture that cares about the attribution asks for it here.
+func creditRefsNamed(names ...string) []lifecycle.CreditRef {
+	var out []lifecycle.CreditRef
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		out = append(out, lifecycle.CreditRef{Ref: name, Name: name})
+	}
+	return out
 }
 
 // TestSummarizePRD12GoldenHistory replays the PRD §12 lifecycle against real
