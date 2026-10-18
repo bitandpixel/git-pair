@@ -132,6 +132,16 @@ type checkJSON struct {
 	// into WORKING and `ready` off, and the declaration is still the newest marker on the branch.
 	Integrating     bool   `json:"integrating"`
 	IntegrateCommit string `json:"integrate_commit,omitempty"`
+	// Declarable answers the third question about the hand-off, beside the two above: is a declaration wanted
+	// at this head? True means `git pair change integrate` would record one; false means one of three things —
+	// the gate refused, the parent has not landed so the command refuses ahead of the gate, or this head is
+	// already declared, where the command succeeds and records nothing. It is the gate's own verdict conjoined
+	// with the command's two early conditions, not the cheaper predicate the human screens print the hand-off
+	// line by: that one skips the content and history questions on purpose, and a field that called a
+	// rewritten branch declarable would send a reader into a refusal. The only thing `check` cannot see is the
+	// declaration's own hooks. It is not implied by `ready`, which asks about the merge, and it does not imply
+	// `integrating`, which reports the marker a declaration wrote.
+	Declarable bool `json:"declarable"`
 	// ParentLanded says the branch this changeset is stacked on has landed: the base is
 	// finished work. It sits beside the verdict and never inside `reasons`, because a parent that landed
 	// changes nothing this child owns — the diff the reviewer approved is the diff still under test.
@@ -228,6 +238,12 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		DriftCreditedBy: g.Summary.DriftCreditedBy,
 	}
 	out.Ready = len(out.Reasons) == 0
+	// The declaration question, answered from what the gate already read: the parent rule is `change
+	// integrate`'s own refusal, spelled by the function that refuses, and the landing is the destination read
+	// the gate made. Neither asks git again, which is what keeps a fourth field off the cost the gate is
+	// bounded by. The machine answer and the human hand-off line read this one value, so the field and the
+	// screen cannot disagree about whether a declaration is wanted.
+	df := declareFacts{WaitingOnParent: len(unlandedParentReason(s.cs, g.Parent)) > 0, Landed: g.Landed != ""}
 	// Read once for the passing verdict, and carried to the human screen so the merge line and the hand-off
 	// line name the same destination. A refused verdict never reaches either, so the read stays off the path
 	// CI takes when the answer is no.
@@ -290,6 +306,10 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		// stops at `next_action` to merge a change the gate refused.
 		out.NextAction = ""
 	}
+	// The declaration question is asked last, because it is a claim about what `change integrate` would do and
+	// that command runs this gate before it writes anything: a verdict the hooks refused is not one a
+	// declaration should be offered against.
+	out.Declarable = out.Ready && declarable(s, df)
 	hookResults = append(hookResults, postResults...)
 	out.Hooks = hooksForJSON(hookResults)
 	if out.Reasons == nil {
@@ -301,6 +321,13 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	}
 	if !out.Ready {
 		a.printf("NOT READY:\n")
+		// The state the verdict does not act on, printed from the same value `--json` reports for this run:
+		// "a reviewer said no" and "a reviewer said yes and something else moved" are different visits to the
+		// same screen, and `NOT READY:` alone cannot tell them apart. It is the tree-reconciled reading, so a
+		// refusal for content says WORKING where `status` still says APPROVED — the disagreement README
+		// explains, and now on one screen rather than across two. Beside the verdict rather than inside it,
+		// for the reason `state` sits beside `ready` in the machine form.
+		a.printf("state: %s\n", out.State)
 		for _, r := range out.Reasons {
 			a.printf("- %s\n", r)
 		}
@@ -353,7 +380,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		// next step, and the author's own merge stays offered beside it so waiting is never the only thing on
 		// the screen.
 		a.printf("       %s\n", alt)
-	} else if declarable(s, lc) {
+	} else if declarable(s, df) {
 		// The second exit, and the human form only: `next_action` above stays one instruction. Which of the
 		// two is right is the author's and the destination owner's decision, not something git-pair can
 		// know — git-pair asks nothing about who merges, or with what (PRD §26).
