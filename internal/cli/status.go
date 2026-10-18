@@ -101,11 +101,12 @@ type parentJSON struct {
 	// itself", which `landed_reach` spells out in prose.
 	LandedInDefaultBranch bool   `json:"landed_in_default_branch"`
 	LandedReach           string `json:"landed_reach,omitempty"`
-	// StaleBranch says this changeset's own head already carries the landing, so the parent's branch is
-	// dead weight: the record holds the chain it was holding, and deleting the branch loses nothing
-	// git-pair can still read. False for a child that has not rebased onto the landing yet, where that
-	// branch is still the base the diff is measured on, and false when the branch is gone — which is where
-	// `head_carries_landing` takes over, because a deleted branch is not a stale one.
+	// StaleBranch says the parent's branch is dead weight: this head already carries the landing, and the
+	// branch's own tip holds no commit the destination lacks, so deleting the branch loses nothing git-pair
+	// can still read. False for a child that has not rebased onto the landing yet, where that
+	// branch is still the base the diff is measured on; false when the parent took work after its landing,
+	// which is the case `head_carries_landing` still answers; and false when the branch is gone, because a
+	// deleted branch is not a stale one.
 	StaleBranch bool `json:"stale_branch"`
 	// HeadCarriesLanding says this changeset's own head already carries the parent's landing commit, so
 	// the diff under test is this branch's work above landed ground and no rebase is owed. It is the

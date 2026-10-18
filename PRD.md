@@ -3893,14 +3893,19 @@ to live, so:
   `parent_head_carries_landing`, `parent_measured_base`, `parent_comparison` and
   `parent_approval_survives_landing`. The last two of those are one reading reported
   twice, because they are statements about two different things: `stale_branch` is about the parent's
-  branch still being here to delete, and `head_carries_landing` is about this head sitting on the landing
+  branch still being here and holding nothing the destination lacks — the only state in which deleting it
+  destroys nothing — and `head_carries_landing` is about this head sitting on the landing
   commit, which is the half that survives the branch being deleted and the half that decides whether any
-  rebase is owed.
+  rebase is owed. A parent that took another round of work after its landing is the case the pair separates:
+  the child is above the landing, and the branch is not spent.
 - the step is printed as the command, because "rebase onto it" is a sentence the author has to translate
   into three arguments and gets wrong: `git rebase --onto <landing> <parent-branch> <child-branch>` while
-  the child's head does not carry the landing, and `git branch -D <parent-branch>` once it does — with the
+  the child's head does not carry the landing, and `git branch -D <parent-branch>` once it does and the
+  parent's branch holds no commit the destination lacks — with the
   worktree named, and `git worktree remove <path>` as text, when another worktree holds that branch and the
-  delete would stop there. git-pair runs neither (§26).
+  delete would stop there. Where the head is on the landing and the branch still holds work, neither command
+  is printed and the step says that instead: the deletion is the one advice in this family that cannot be
+  undone, so it is printed only when the branch is spent. git-pair runs neither (§26).
 
 **The verdict does not advise a rewrite that costs the approval it rests on.** The step above is a fact about
 where commits sit, and `status` and `queue` print it on that reading: neither carries a verdict, so nothing

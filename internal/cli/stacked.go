@@ -40,6 +40,11 @@ type parentStatus struct {
 	Measured string
 	// Tip is the parent branch's current tip, empty when the branch is gone.
 	Tip string
+	// BranchGone says the parent's branch is not in this clone at all, so no command may name it. It is the
+	// same fact `Tip` carries on the path that reads the tip, said out loud because the queue builds this
+	// struct without reading the tip — and a step that inferred "gone" from an empty `Tip` would tell a
+	// present branch that its name no longer resolves.
+	BranchGone bool
 	// Reason says why the approval no longer stands. Empty means the approval stands.
 	Reason string
 	// Next is the step the author can take, and travels with Reason.
@@ -74,10 +79,13 @@ type parentStatus struct {
 	// LandedReach is that prose: ", reachable from main", ", not reachable from main", or nothing when
 	// no branch identifies itself as the destination.
 	LandedReach string
-	// StaleBranch says the child's own head already carries the landing, so the parent's branch is dead
-	// weight — the destination holds the chain the branch was holding. It is false for a child that has not
-	// rebased yet, where that branch is still the base the child is measured on, and false when the branch
-	// is gone, because stale is a statement about a branch that is here.
+	// StaleBranch says the parent's branch is dead weight: this head already carries the landing, and the
+	// branch's own tip holds nothing the destination does not. Both halves are needed, because they are about
+	// different things — the first is where this child sits, the second is what the branch still carries — and
+	// a parent that took another round of work after landing has a branch full of commits the destination has
+	// never held. It is false for a child that has not rebased yet, where that branch is still the base the
+	// child is measured on, and false when the branch is gone, because stale is a statement about a branch
+	// that is here.
 	StaleBranch bool
 	// LandingUnderHead says this changeset's own head already carries the parent's landing commit. It is
 	// the same reading as `StaleBranch` and a separate field, because the two are statements about
@@ -112,7 +120,8 @@ func (a *app) parentSinceApproval(ctx context.Context, repo *git.Repo, c changes
 		return parentStatus{}, err
 	}
 	isApproval := approved != nil && approved.Kind == lifecycle.KindReview && approved.Outcome == model.OutcomeApprove
-	st := parentStatus{Branch: parent.Branch, Changeset: c.BaseChangeset, Tip: parent.Tip}
+	st := parentStatus{Branch: parent.Branch, Changeset: c.BaseChangeset, Tip: parent.Tip,
+		BranchGone: parent.Tip == ""}
 	if isApproval {
 		st.Recorded = approved.ReviewedParentHead
 		st.Measured = approved.ReviewedBase
@@ -322,17 +331,29 @@ func (a *app) parentLanded(ctx context.Context, repo *git.Repo, c changeset.Chan
 	if err != nil {
 		return st, err
 	}
-	st.StaleBranch = on
 	st.LandingUnderHead = on
 	if on {
-		// `git branch -D` is the step this leaves, and in a repository where the parent is still checked
-		// out somewhere it fails before it does anything. Read the blocker rather than guess at it: one
-		// `worktree list` for the case that prints the deletion.
-		path, err := worktreeHolding(ctx, repo, st.Branch)
-		if err != nil {
-			return st, err
+		// The child no longer needs the branch as the base it is measured on. Whether the branch may be
+		// deleted is a second question, about the branch rather than about this head, and it is the one that
+		// decides whether a command is advised at all.
+		switch parentBranchReading(ctx, repo, st.Branch, db.Ref) {
+		case branchSpent:
+			st.StaleBranch = true
+			// `git branch -D` is the step this leaves, and in a repository where the parent is still checked
+			// out somewhere it fails before it does anything. Read the blocker rather than guess at it: one
+			// `worktree list` for the case that prints the deletion.
+			path, err := worktreeHolding(ctx, repo, st.Branch)
+			if err != nil {
+				return st, err
+			}
+			st.ParentWorktree = path
+		case branchAbsent:
+			// The name stopped resolving between the tip read above and this one. Nothing may be advised as
+			// a command against a branch that is not here, so say it is gone, which is the sentence the
+			// branch-gone path already prints for a head on the landing.
+			st.BranchGone = true
+		case branchHoldsWork:
 		}
-		st.ParentWorktree = path
 	}
 	// The observation and the command are written apart so a surface can print one without the other: the
 	// verdict reads the fact and withholds the rewrite while an approval stands on exactly this head, and
@@ -382,11 +403,11 @@ func conflictStep(destination string) string {
 // arguments, and the translation is the part that goes wrong: the argument people reach for is the parent
 // branch's name where the landing commit belongs, and vice versa.
 func landedParentStep(cs changeset.Changeset, st parentStatus) string {
-	// The rebase below names the parent's branch, and on the branch-is-gone path (`Tip` is empty only
-	// there: the live path has read the tip before it arrives, and the queue's note sets `StaleBranch` from
-	// its own read and leaves this one alone) the branch the command would name no longer exists. Where
-	// this head is already on the landing nothing is owed at all, and that is the sentence this case needs.
-	if st.LandingUnderHead && st.Tip == "" {
+	// The first case is the branch-is-gone path, named rather than inferred: `Tip` is empty only there on the
+	// path that reads the tip, and the queue leaves it empty while the branch is present. Where this head is
+	// already on the landing and the branch cannot be named at all, nothing is owed, and that is the sentence
+	// this case needs.
+	if st.LandingUnderHead && st.BranchGone {
 		return "this head is already on it, so there is nothing to rebase"
 	}
 	if st.StaleBranch {
@@ -400,11 +421,67 @@ func landedParentStep(cs changeset.Changeset, st parentStatus) string {
 		}
 		return step
 	}
+	if st.LandingUnderHead {
+		// The head is on the landing, so no rebase is owed, and the branch still holds commits the destination
+		// does not, so no deletion is safe either: the command the stale case leaves would drop that work. The
+		// sentence says which of the two states this is, and where the work belongs — on its own changeset, not
+		// on the child that happens to sit above the landing.
+		owner := st.Changeset
+		if owner == "" {
+			owner = st.Branch
+		}
+		return fmt.Sprintf("the branch %s still holds commits the destination does not, so it is not stale — land or drop that work on %s before the branch goes",
+			st.Branch, owner)
+	}
 	child := cs.Branch
 	if child == "" {
 		child = cs.Slug
 	}
 	return fmt.Sprintf("rebase onto it: `git rebase --onto %s %s %s`", st.Landed, st.Branch, child)
+}
+
+// parentBranchReading is what the parent's branch is to the destination, and one containment question answers
+// all three of the states the step distinguishes.
+type branchReading int
+
+const (
+	// branchAbsent is a name this clone cannot resolve: the branch has been deleted, or was never here.
+	branchAbsent branchReading = iota
+	// branchSpent is a branch whose every commit the destination already holds, which is the only state in
+	// which `git branch -D <branch>` destroys nothing.
+	branchSpent
+	// branchHoldsWork is a branch carrying a commit the destination has never had — a parent that took
+	// another round of work after landing, or a read that could not answer.
+	branchHoldsWork
+)
+
+// parentBranchReading asks the deletion question of the parent's branch, apart from "is this head on the
+// landing", because the two come apart: a parent that took another round of work after landing has a branch
+// whose commits the destination has never held, and nothing about the child's head says so. The branch is
+// resolved before it is compared, because a name this clone cannot resolve is the answer `branchAbsent` and
+// `git merge-base` reports it in its own words; a read that failed for any other reason answers
+// `branchHoldsWork`, since the failure this guards is a deletion advised on an unanswered question.
+func parentBranchReading(ctx context.Context, repo *git.Repo, branch, destination string) branchReading {
+	if branch == "" || destination == "" {
+		return branchHoldsWork
+	}
+	rev, err := repo.RevParse(ctx, branch)
+	if err != nil {
+		// `RevParse` names absence with its own sentinel rather than with git's stderr, which is what
+		// `IsUnknownRevision` reads.
+		if errors.Is(err, git.ErrUnknownRevision) {
+			return branchAbsent
+		}
+		return branchHoldsWork
+	}
+	contained, err := repo.IsAncestor(ctx, rev, destination)
+	if err != nil {
+		return branchHoldsWork
+	}
+	if contained {
+		return branchSpent
+	}
+	return branchHoldsWork
 }
 
 // worktreeHolding is the path of the worktree that has <branch> checked out, or "" when none does.
