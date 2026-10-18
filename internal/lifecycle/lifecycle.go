@@ -635,7 +635,7 @@ func ReconcileStaleness(ctx context.Context, repo *git.Repo, slug, headRef strin
 		return s, nil
 	}
 
-	changed, err := repo.PathsChangedOutside(ctx, from, headRef, filepath.Join("changesets", slug))
+	changed, err := repo.ContentPathsChangedOutside(ctx, from, headRef, filepath.Join("changesets", slug))
 	if err != nil {
 		return s, err
 	}
@@ -708,6 +708,12 @@ type creditResult struct {
 // also what lets one merge credit one file and another ref credit the next, which is what a branch that
 // took both trunk and its parent in produces.
 //
+// "Carries" is literal, because a comparison of two trees calls two paths that both hold nothing
+// identical. A path is credited only where the ref accounts for it: the ref has the path, or the ref had
+// it where the branch was cut. The second half is what keeps a deletion honest — a file the ground deleted
+// and the branch merged in stays credited, while a file the branch's own work held and no ground ever
+// carried is content the author removed after the review, which is drift and is credited to nobody.
+//
 // An unreadable ref costs its own credit and not the verdict — what is left is reported as drift, the
 // reading this rule exists to soften (PRD §21).
 func creditContent(ctx context.Context, repo *git.Repo, changed []string, marker, head string,
@@ -729,6 +735,7 @@ func creditContent(ctx context.Context, repo *git.Repo, changed []string, marker
 	type reading struct {
 		name    string
 		differs map[string]bool
+		holds   map[string]bool
 	}
 	readings := make([]reading, 0, len(credit))
 	for _, c := range credit {
@@ -736,16 +743,31 @@ func creditContent(ctx context.Context, repo *git.Repo, changed []string, marker
 			continue
 		}
 		name := firstNonEmpty(c.Name, c.Ref)
-		theirs, err := repo.PathsChanged(ctx, c.Ref, head)
+		theirs, err := repo.ContentPathsChanged(ctx, c.Ref, head)
 		if err != nil {
 			// This ref cannot answer, which costs its own credit. The others are still asked.
 			continue
 		}
-		set := make(map[string]bool, len(theirs))
+		differs := make(map[string]bool, len(theirs))
 		for _, p := range theirs {
-			set[p] = true
+			differs[p] = true
 		}
-		readings = append(readings, reading{name: name, differs: set})
+		holds, err := repo.TreeHasPaths(ctx, c.Ref, changed)
+		if err != nil {
+			continue
+		}
+		// The ref as it stands is one answer; the ref where the branch was cut is the other, and the pair is
+		// what separates a deletion the ground made from a deletion the author made.
+		if base, err := repo.MergeBase(ctx, c.Ref, marker); err == nil && base != "" {
+			if was, err := repo.TreeHasPaths(ctx, base, changed); err == nil {
+				for p, v := range was {
+					if v {
+						holds[p] = true
+					}
+				}
+			}
+		}
+		readings = append(readings, reading{name: name, differs: differs, holds: holds})
 	}
 	out := creditResult{drift: make([]string, 0, len(changed)),
 		credited: make([]string, 0, len(changed)), by: map[string]string{}}
@@ -753,7 +775,7 @@ func creditContent(ctx context.Context, repo *git.Repo, changed []string, marker
 	for _, p := range changed {
 		supplied := ""
 		for _, r := range readings {
-			if !r.differs[p] {
+			if !r.differs[p] && r.holds[p] {
 				supplied = r.name
 				break
 			}

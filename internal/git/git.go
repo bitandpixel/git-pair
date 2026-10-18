@@ -624,11 +624,24 @@ const EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 // The exclusion is on the *result*, which is what makes a rename out of an
 // excluded directory show up: the deletion is excluded, the new path is not.
 func (r *Repo) PathsChangedOutside(ctx context.Context, from, to string, exclude ...string) ([]string, error) {
+	return r.pathsChangedOutside(ctx, false, from, to, exclude...)
+}
+
+// ContentPathsChangedOutside is PathsChangedOutside with rename detection off, and it is what the drift rule
+// reads. Where PathsChanged answers "what would a reader of this diff see", this answers "at which paths does
+// the content or its presence differ", and the two part company on a deletion paired with an unrelated
+// addition: git calls that a rename, reports one path, and the deleted one is in neither list — invisible to
+// the comparison that is supposed to catch content leaving the tree after an approval.
+func (r *Repo) ContentPathsChangedOutside(ctx context.Context, from, to string, exclude ...string) ([]string, error) {
+	return r.pathsChangedOutside(ctx, true, from, to, exclude...)
+}
+
+func (r *Repo) pathsChangedOutside(ctx context.Context, noRenames bool, from, to string, exclude ...string) ([]string, error) {
 	spec := []string{"."}
 	for _, dir := range exclude {
 		spec = append(spec, ":(exclude)"+filepath.ToSlash(dir)+"/")
 	}
-	return r.PathsChanged(ctx, from, to, spec...)
+	return r.pathsChanged(ctx, noRenames, from, to, spec...)
 }
 
 // PathsChanged lists the paths that differ between two revisions under the given
@@ -636,13 +649,56 @@ func (r *Repo) PathsChangedOutside(ctx context.Context, from, to string, exclude
 // PathsChangedOutside and the single-directory comparison used to recognise a
 // landed changeset cannot drift apart.
 func (r *Repo) PathsChanged(ctx context.Context, from, to string, pathspec ...string) ([]string, error) {
-	args := []string{"diff", "--name-only", from, to, "--"}
+	return r.pathsChanged(ctx, false, from, to, pathspec...)
+}
+
+// ContentPathsChanged is PathsChanged with rename detection off, for a caller that is asking which paths
+// differ rather than what a diff would show. See ContentPathsChangedOutside for why the difference is not
+// cosmetic: with renames on, a file deleted next to an unrelated file added is reported as one renamed path,
+// and the deleted path appears in no list at all.
+func (r *Repo) ContentPathsChanged(ctx context.Context, from, to string, pathspec ...string) ([]string, error) {
+	return r.pathsChanged(ctx, true, from, to, pathspec...)
+}
+
+func (r *Repo) pathsChanged(ctx context.Context, noRenames bool, from, to string, pathspec ...string) ([]string, error) {
+	args := []string{"diff", "--name-only"}
+	if noRenames {
+		// `diff.renames` is on by default, so asking for no renames is a flag rather than the absence of one.
+		args = append(args, "--no-renames")
+	}
+	args = append(args, from, to, "--")
 	args = append(args, pathspec...)
 	out, err := r.Git(ctx, args...)
 	if err != nil {
 		return nil, err
 	}
 	return splitLines(out), nil
+}
+
+// TreeHasPaths reports which of the given paths the revision's tree carries, keyed by the path as it was
+// asked. One `ls-tree` per revision, with the paths as the pathspec, because the question is always asked of
+// a whole list at once — the credit rule asks it for the paths that moved since the marker.
+//
+// A revision that is not here answers "none of them" rather than an error, the way TreeEntries treats an
+// unknown revision: the caller's question is whether this ref can vouch for the content, and a ref that
+// cannot be read vouches for nothing.
+func (r *Repo) TreeHasPaths(ctx context.Context, rev string, paths []string) (map[string]bool, error) {
+	have := make(map[string]bool, len(paths))
+	if len(paths) == 0 {
+		return have, nil
+	}
+	args := append([]string{"ls-tree", "-r", "--name-only", rev, "--"}, paths...)
+	out, err := r.Git(ctx, args...)
+	if err != nil {
+		if IsUnknownRevision(err) {
+			return have, nil
+		}
+		return nil, err
+	}
+	for _, p := range splitLines(out) {
+		have[p] = true
+	}
+	return have, nil
 }
 
 func (r *Repo) DiffNames(ctx context.Context, from, to string) ([]string, error) {
