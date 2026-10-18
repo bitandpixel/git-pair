@@ -1140,6 +1140,11 @@ and out of the human verdict alike, and `parent_approval_survives_landing` says 
 
 `integrating` answers the other half of a merge gate, and the two are reported apart because they are two
 questions: `ready` is "may this merge", `integrating` is "did the author ask for one" (§9.9).
+`declarable` is the third: is a declaration wanted at this head? True says `git pair change integrate`
+would record one; false means the gate refused, the parent has not landed so that command refuses ahead of
+the gate, or this head is already declared, where the command succeeds and records nothing. It is the gate's
+verdict conjoined with the command's own early conditions, so a `true` never leads to a refusal — and it is
+not `ready`, because a child whose parent is still open is permitted to merge and is not ready to declare.
 `integrate_commit` is the declaration, full like `head`, and absent when the newest marker is not one. A
 superseded declaration — put back in review, re-offered, or answered by a reviewer — reads false, so a
 pipeline cannot perform a merge the author has just taken back. CI's gate is one command and both fields:
@@ -1203,6 +1208,7 @@ verdict:
 $ git pair check
 make test: 3 tests failed
 NOT READY:
+state: APPROVED
 - the pre-check hook "01-suite" failed with exit 1
 ```
 
@@ -2457,7 +2463,10 @@ directories the revision carries, not which branch you are standing on, and `--c
 one from any branch while HEAD stays where it is.
 
 `git pair check` printing `NOT READY:` while `git pair status` says `APPROVED` is one of three things,
-and every bullet names which:
+and the refusing screen says which before you read a bullet: it prints `state:` beside the verdict, from the
+same value `--json` reports as `state`. `state: APPROVED` under a `NOT READY:` is the rewritten branch or the
+policy below, and `state: WORKING` is the content — the gate reads the tree, so it reports what the approval
+can still be held to where `status` reports what the newest marker is. Every bullet then names its own case:
 
 - **The branch was rewritten.** `review 91bf204 reviewed a7f3c98, which is no longer in this history` —
   the approval named a commit (`Review-Head`) that this branch no longer contains, so a rebase, amend or
