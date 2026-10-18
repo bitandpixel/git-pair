@@ -63,7 +63,12 @@ hand-written conflict resolution remains drift.
 
 ## Validation
 
-`mise run check` and `mise run gates` (sharded suites plus the e2e, pty and CI-integration gates).
+`mise run check` and `mise run gates` (sharded suites plus the e2e, pty and CI-integration gates). The cost
+measurement in the CI-integration gate came back at the recorded 27, 46, 55 and 64 invocations with the
+two-level bound at 51, because the three reads this change adds run only where paths moved above the marker,
+and that fixture's branches have nothing above their markers. The number the change could move is the cost of
+checking a branch that moved content, which no gate measures; it is bounded by three reads per cited ref, and
+the whole-branch reading still answers the clean-merge case before any of them are asked.
 
 The behaviour is pinned at two levels. `internal/git/contentpaths_test.go` pins the collapse itself — that
 `PathsChanged` does not list the deleted path where `ContentPathsChanged` does — so the reason the two helpers
