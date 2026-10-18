@@ -354,9 +354,12 @@ land the parent, then settle the child, then delete.
 A stack says what is left of it at the same moment, and this is the ordinary next thing an author hits after
 landing a parent: `git pair status` and `git pair queue` name the landing and print the command that settles
 the child. While the child's head is not on the landing it is
-`git rebase --onto <landing> <parent-branch> <child-branch>`; once it is, the parent's branch is stale and the
+`git rebase --onto <landing> <parent-branch> <child-branch>`; once it is, and the parent's branch holds nothing the
+destination lacks, the branch is stale and the
 command is `git branch -D <parent-branch>` — with the worktree named when another worktree has that branch
-checked out, because the delete fails there and removing a worktree is not git-pair's to do. Once the parent's
+checked out, because the delete fails there and removing a worktree is not git-pair's to do. A parent that took
+another round of work after landing has commits the destination never held, and there the step says that and names
+no delete, because `git branch -D` is the one piece of advice in this family that cannot be undone. Once the parent's
 branch is deleted as well and this head is already on the landing, the step is nothing, and the command says
 that instead of printing a rebase onto a branch that no longer exists. Nothing in
 git-pair runs either one: the rebase and the delete are ordinary git, performed by whoever owns the branches

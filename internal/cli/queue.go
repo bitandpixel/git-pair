@@ -393,8 +393,21 @@ func (a *app) landedParentNote(ctx context.Context, repo *git.Repo, cs changeset
 	}
 	// The step is spelled by the same helper `status` and `check` print, with one thing left out: the
 	// worktree lookup. The queue is a reviewer's surface and its cost is per row, so it names the command
-	// and leaves the blocker to the command the author runs before deleting anything.
-	st := parentStatus{Branch: branch, Landed: short(sha), StaleBranch: on}
+	// and leaves the blocker to the command the author runs before deleting anything. The deletion half is
+	// asked for properly here too: the containment of this head in the landing says where the child sits, and
+	// only the branch's own tip says whether `git branch -D` would drop work the destination never held.
+	st := parentStatus{Branch: branch, Changeset: cs.BaseChangeset, Landed: short(sha), LandingUnderHead: on}
+	if on {
+		switch parentBranchReading(ctx, repo, branch, db.Ref) {
+		case branchSpent:
+			st.StaleBranch = true
+		case branchAbsent:
+			// The row names a parent branch this clone no longer has. The step must not name a command
+			// against it, which is the sentence the branch-gone reading prints.
+			st.BranchGone = true
+		case branchHoldsWork:
+		}
+	}
 	return fmt.Sprintf("%s: parent %s landed as %s — %s",
 		cs.Slug, cs.BaseChangeset, short(sha), landedParentStep(cs, st)), nil
 }

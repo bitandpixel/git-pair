@@ -159,9 +159,10 @@ type checkJSON struct {
 	ParentMeasuredBase string `json:"parent_measured_base,omitempty"`
 	ParentComparison   string `json:"parent_comparison,omitempty"`
 	// ParentHeadCarriesLanding says this changeset's own head already carries the parent's landing commit.
-	// `parent_stale_branch` is the same reading where the parent's branch is still in this clone, and false
-	// where it has been deleted; this one answers in both cases, and a gate that advises a rebase should
-	// read it before it does.
+	// `parent_stale_branch` is that reading plus the branch's own: the parent's branch is still in this clone
+	// and holds no commit the destination lacks. It is false where the branch has been deleted, and false
+	// where the parent took work after landing — the case the two fields separate, since this one answers in
+	// both. A gate that advises a rebase should read it before it does.
 	ParentHeadCarriesLanding bool `json:"parent_head_carries_landing"`
 	// ParentApprovalSurvivesLanding is the reason a passing verdict can name a landed parent without naming
 	// the restack: the content comparison ran, this branch still contributes what the approval recorded, and
