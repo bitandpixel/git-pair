@@ -1921,7 +1921,14 @@ in has done the same act one level down, so the parent is cited beside the desti
 parent's own newest approval spoke about, which is the only evidence in the repository that anybody read the
 parent's content. The child's reviewer never saw those files: the child's diff is measured from the parent,
 and excludes them by construction. So a path is not drift where head carries a cited ref's content there, and
-a whole merge is not drift where head is what `git merge-tree` would make of the reviewed commit and that
+_carries_ is literal: two paths that both hold nothing compare as identical, so the ref has to account for the
+path — by holding it now, or by having held it where the branch was cut. That second half is what keeps a
+deletion honest in both directions: a file the destination deleted and the branch merged in stays credited, and
+a file the branch's own work held and no ground ever carried is content the author removed after the review,
+which is drift and is credited to nobody. The comparisons run with rename detection off, so a file deleted in
+the same commit as a similar new file is one path leaving and one arriving; with renames on, git calls that one
+path moving and the deleted path is in neither list, so content can leave the tree unremarked.
+A whole merge is not drift where head is what `git merge-tree` would make of the reviewed commit and that
 ref. That last reading is why a resolution written by hand after a conflict _is_ drift: the merge git would
 have produced does not contain it. The refs that may be cited are the integration branch and the parent the
 changeset's `base:` records — not any branch the author merges, and not a parent that has landed, because a
