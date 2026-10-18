@@ -294,6 +294,19 @@ func mustNotContain(t *testing.T, haystack, needle, what string) {
 	}
 }
 
+// bulletLines counts the reason bullets of a refusing screen. A refusal's header, its `state:` line and its
+// `recommend:` lines are all output and none of them is a reason, so counting lines made a test's assertion
+// about how many problems the gate found into an assertion about the screen's layout.
+func bulletLines(out string) int {
+	n := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "- ") {
+			n++
+		}
+	}
+	return n
+}
+
 func describe(t *testing.T, res result, args ...string) {
 	t.Helper()
 	t.Logf("git-pair %s -> %d\nstdout:\n%s\nstderr:\n%s", strings.Join(args, " "), res.code, res.stdout, res.stderr)

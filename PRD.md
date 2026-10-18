@@ -1883,6 +1883,7 @@ next:  `git pair check`, then merge into main with ordinary git
 $ git pair check
 
 NOT READY:
+state: BLOCKED
 - latest review outcome is blocking
 - content outside changesets/booking-transaction/ changed since 91bf204: src/booking/service.ts
 ```
@@ -1898,11 +1899,20 @@ A rewritten branch says so in the same list:
 $ git pair check
 
 NOT READY:
+state: APPROVED
 - review 91bf204 reviewed a7f3c98, which is no longer in this history: the branch was rewritten since the review, so the approval does not license integration
 ```
 
 The name of the rewritten head is in that sentence because it is the other half of the comparison — a
 reader who sees only "history moved" cannot tell a rebase from a fetch gap.
+
+The refusing screen names the state it refused beside, from the same value `--json` prints as `state` for
+that run. `NOT READY:` alone cannot tell "a reviewer said no" from "a reviewer said yes and something else
+moved", and those are different next commands. It is printed on the refusal only, because the passing
+verdict already states everything it would add. It is the tree-reconciled reading rather than the marker
+reading, so a refusal for content says `WORKING` where `git pair status` still says `APPROVED`: the state
+says what the newest marker is, and this says what the tree can still be held to — the two readings are
+documented as different (README's troubleshooting) and one run now shows the one it acted on.
 
 The content condition **credits the ground the branch is measured on**. A branch that took the integration
 branch in has changed files since its marker, and none of that content is the author's: the reviewer had no
@@ -1956,8 +1966,8 @@ flag is on the command that runs the gate, which is the one place the policy is 
 
 `--json` prints `changeset`, `ready`, `state`, `head`, `reasons`, `policy` (`approve-only` or
 `approve-or-feedback`, so a verdict in a log carries the policy that produced it), `reviewed_head`,
-`drift_credited`, `drift_credited_by`, `integrated`, `integrated_commit`, `integrating`, `integrate_commit`
-and `next_action`.
+`drift_credited`, `drift_credited_by`, `integrated`, `integrated_commit`, `integrating`, `integrate_commit`,
+`declarable` and `next_action`.
 `head` and `reviewed_head` are full SHAs rather than the short
 forms the human output prints, because the consumer compares them against the revision it built —
 `integrated_commit` and `integrate_commit` are short in `status` and full here, matching the other
@@ -1985,6 +1995,16 @@ the branch, and two commands would be two answers waiting to disagree.
 or a retraction supersedes a declaration without erasing it, and a merge performed on a superseded request
 is the merge the author has just taken back. The human form prints the declaration beside the verdict as
 `declared: <sha>`, because a log that says "ready" about a branch somebody handed over should say that too.
+
+`declarable` is the third question about the hand-off, and the one that used to cost a `git pair change
+integrate` and its exit code: is a declaration wanted at this head? `true` says the command would record
+one. `false` covers three answers, and the reader tells them apart with the two fields above — the gate
+refused (`ready` false), the parent has not landed so the command refuses ahead of the gate (§21), or this
+head is already declared, where the command succeeds and records nothing so a script can declare
+unconditionally (`integrating` true). It is the gate's verdict conjoined with the command's two early
+conditions, not the cheaper predicate the human screens print the hand-off line by: that one skips the
+content and history questions on purpose, and a field calling a rewritten branch declarable would send a
+reader into a refusal. What `check` cannot see from here is the declaration's own hooks.
 
 `next_action` is the handoff the passing verdict licenses (§9.5) — the gate, then the merge, then the
 record — and it is present only when `ready` is true. For a stacked child whose parent has not landed, that

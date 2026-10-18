@@ -509,7 +509,8 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 	// The second exit, offered exactly where `change integrate` would accept the changeset. It is computed
 	// after the three overrides above, because a screen whose next step is "switch to that branch" or "this
 	// has landed" is not offering a merge to anybody.
-	if !s.baseIsOwnBranch && s.onCurrentBranch && !view.json.Landed && declarable(s, lc) {
+	if !s.baseIsOwnBranch && s.onCurrentBranch && !view.json.Landed &&
+		declarable(s, declareFacts{WaitingOnParent: lc.WaitingOn != "", Landed: view.json.Landed}) {
 		view.handoff = handoffLine(lc, s.cs.Branch)
 	}
 	// The same slot on the other side of the declaration: once the request is out, the wait is the machine

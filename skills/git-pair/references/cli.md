@@ -139,9 +139,14 @@ was cut, and `span` is named by the measurement, not by the record.
 
 `git pair check --json` carries the verdict in `ready` and exits 0 either way, so a gate asks `jq`
 rather than `$?`. `reasons` names every failed condition, empty when it passed; `policy` is
-`approve-only` or `approve-or-feedback`; `next_action` appears only when `ready` is true. `integrating`
+`approve-only` or `approve-or-feedback`; `next_action` appears only when `ready` is true. The human form
+prints `state:` beside `NOT READY:` — the same value as this `state` — so "a reviewer said no" and "a
+reviewer said yes and something else moved" read differently without a second command. `integrating`
 is the separate question of whether the author asked for this merge — true only while the declaration is
-the newest marker, so a re-offer or a re-review stops an automatic merge without a rebase.
+the newest marker, so a re-offer or a re-review stops an automatic merge without a rebase. `declarable`
+asks whether a declaration is wanted at this head: true says `git pair change integrate` would record one,
+and false means the gate refused, the parent has not landed, or this head is already declared (where the
+command succeeds and records nothing, which is what lets a script declare unconditionally).
 
 ```json
 {
@@ -150,9 +155,10 @@ the newest marker, so a re-offer or a re-review stops an automatic merge without
   "state": "APPROVED",
   "head": "941266b18686624cb624722b4e8c348bf03451a7",
   "reviewed_head": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
-  "reasons": ["content outside changesets/feat/ changed since 1a2b3c4: src/service.ts"],
+  "reasons": ["review 1a2b3c4 reviewed 941266b, which is no longer in this history: the branch was rewritten since the review, so the approval does not license integration"],
   "policy": "approve-only",
-  "integrating": false
+  "integrating": false,
+  "declarable": false
 }
 ```
 

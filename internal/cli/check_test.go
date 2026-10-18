@@ -66,8 +66,7 @@ func TestCheckListsEveryFailure(t *testing.T) {
 	mustContain(t, res.stdout, "- the newest review is feedback",
 		"the policy condition must be reported alongside the drift, not instead of it")
 
-	lines := strings.Split(strings.TrimSpace(res.stdout), "\n")
-	if got := len(lines) - 1; got != 2 {
+	if got := bulletLines(res.stdout); got != 2 {
 		t.Errorf("got %d bullets, want both conditions reported at once:\n%s", got, res.stdout)
 	}
 	// The verdict is the command's answer, not an error: a failing check must not also
@@ -165,7 +164,7 @@ func TestCheckRefusesWhatTheGateMustRefuse(t *testing.T) {
 			t.Fatalf("check exited %d, want %d\nstdout: %s", out.code, exitRefusal, out.stdout)
 		}
 		mustContain(t, out.stdout, "abandoned by "+at, "the bullet must name the ending")
-		if lines := strings.Split(strings.TrimSpace(out.stdout), "\n"); len(lines) != 2 {
+		if got := bulletLines(out.stdout); got != 1 {
 			// The archive is current here — abandoning moved the ref onto the terminal
 			// marker — so the only thing worth saying is that the changeset has ended.
 			t.Errorf("want the verdict and one bullet, got:\n%s", out.stdout)

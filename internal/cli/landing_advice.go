@@ -113,7 +113,24 @@ func landingContractFor(ctx context.Context, repo *git.Repo, s *session) landing
 // marker rather than a state. Two copies of "this head is already handed over" would drift the first time a
 // re-offer superseded a declaration — and it costs nothing to ask, since it compares the session's head
 // against the marker it has already read.
-func declarable(s *session, lc landingContract) bool {
+//
+// False covers two answers, and the field that publishes it says so: a condition that would make the command
+// refuse, and a head already declared, where the command succeeds and records nothing. The claim is "a
+// declaration is wanted at this head", not "the command would fail".
+// declareFacts is what `declarable` needs beyond the summary, and it is passed in rather than read so the
+// predicate stays as cheap as the screen that asks. Each field names the command's own condition rather than
+// a screen's approximation of it: `check` supplies the parent rule from the same `parentStatus` its gate
+// refused on, and the landing from the destination it already read.
+type declareFacts struct {
+	// WaitingOnParent says the branch this changeset sits on has not landed. `change integrate` refuses a
+	// child until the parent's record is in the destination, so a declaration here would be refused.
+	WaitingOnParent bool
+	// Landed says the destination already carries this changeset's directory. There is nothing left to hand
+	// over, and the command refuses rather than declaring finished work.
+	Landed bool
+}
+
+func declarable(s *session, f declareFacts) bool {
 	switch {
 	case s.summary.State != model.StateApproved:
 		// WORKING and READY have no verdict to declare, and FEEDBACK is declarable only under a policy the
@@ -126,7 +143,10 @@ func declarable(s *session, lc landingContract) bool {
 	case s.summary.Abandoned != nil:
 		// Nothing is owed on an ended changeset, least of all a merge request.
 		return false
-	case lc.WaitingOn != "":
+	case f.Landed:
+		// The work is already where it was going, so there is no request to make and the command says so.
+		return false
+	case f.WaitingOnParent:
 		// The parent's turn, and `change integrate` refuses the child until the parent's record is in the
 		// destination. The waiting sentence already says whose step it is.
 		return false
