@@ -51,6 +51,12 @@ FAILED=0
 GATE_FAILMARK="$T/failure"
 COLS=100
 ROWS=30
+# How long the terminal under test must have been quiet before the harness types the next keystroke.
+# It is spelled here rather than left to the driver's default because every scenario runs with it, and
+# the number that decides whether a keystroke arrives alone is one an author has to be able to find.
+# The wait's ceiling is four times this value, so the cost of a program that never goes quiet is
+# bounded by it too.
+PTY_STEADY=${PTY_STEADY:-0.12}
 
 step()  { printf '\n\033[1m### %s\033[0m\n' "$1"; }
 ok()    { printf '  ok: %s\n' "$1"; }
@@ -102,7 +108,7 @@ expectbytes() {
 # it chose, which is the only thing that differs between them.
 session() {
   local name=$1 keys=$2; shift 2
-  python3 "$DRIVER" --raw "$T/$name.raw" --settle 1 --timeout 30 --term "${PTY_TERM:-xterm-256color}" \
+  python3 "$DRIVER" --raw "$T/$name.raw" --settle 1 --steady "$PTY_STEADY" --timeout 30 --term "${PTY_TERM:-xterm-256color}" \
     "$COLS" "$ROWS" "$R" "$keys" "$G" review open "$@" >"$T/$name.exit" 2>"$T/$name.err"
   local code=$?
   case $code in
@@ -132,6 +138,76 @@ else
   fail "the probe marked the run: the self-test is not isolated, so a green here would prove nothing"
 fi
 rm -f "$probe"
+
+# The other piece of plumbing worth proving: a keystroke has to reach the program as itself. A TUI
+# reads the pty when it gets to it, so two keystrokes typed while it is busy come back in one read
+# and are folded into one event — the same folding the comma in a key list exists to prevent,
+# arriving from the other side. `--steady` is the wait that prevents it, and the way to check a wait
+# is a program that reads slowly: this stub takes one read, says how many bytes that read brought,
+# and sleeps. A harness that types on before the screen settles sees a `READ 2`; one that waits sees
+# a `READ 1` for each keystroke. The invariant that makes the passing case deterministic is that a
+# keystroke is typed only after the previous one's line came back, and that line is written at the
+# start of the read that consumed it — so the read for key N is over before key N+1 is written.
+step "the harness waits for the screen to settle before typing the next key"
+cat >"$T/slowtty.py" <<'PY'
+import os, time, termios
+
+# A program that owns the terminal puts it in raw input mode; a stub that does not is reading the
+# line discipline, which withholds anything without a newline. Only ICANON and ECHO are cleared, so
+# output post-processing stays and the lines this writes are the lines a capture shows.
+attrs = termios.tcgetattr(0)
+attrs[3] &= ~(termios.ICANON | termios.ECHO)
+termios.tcsetattr(0, termios.TCSADRAIN, attrs)
+
+os.write(1, b"READY\n")
+while True:
+    try:
+        data = os.read(0, 64)
+    except OSError:
+        break
+    if not data:
+        break
+    os.write(1, ("READ %d %s\n" % (len(data), data.decode("utf-8", "replace"))).encode())
+    time.sleep(0.2)
+    if b"q" in data:
+        break
+os.write(1, b"DONE\n")
+PY
+slowtty_keys="a,b,c,q"
+settle_session() { # settle_session <raw-name> <steady-seconds> — the stub under the driver, typed as three keys and a quit
+  python3 "$DRIVER" --raw "$T/$1.raw" --settle 1 --steady "$2" --timeout 20 \
+    --term "${PTY_TERM:-xterm-256color}" 40 12 "$T" "$slowtty_keys" python3 "$T/slowtty.py" \
+    >"$T/$1.exit" 2>&1
+}
+settle_session settle "$PTY_STEADY"
+settle_out=$(paintedall "$T/settle.raw")
+for k in a b c; do
+  if [[ "$settle_out" == *"READ 1 $k"* ]]; then ok "key $k arrived as an event of its own"; else
+    fail "key $k did not arrive as an event of its own"
+    printf '%s\n' "$settle_out" | head -6 | sed 's/^/      | /'
+  fi
+done
+for n in 2 3 4; do
+  if [[ "$settle_out" == *"READ $n "* ]]; then
+    fail "keystrokes arrived folded into one read (READ $n) - the next key was typed before the screen settled"
+    break
+  fi
+done
+# The same probe with the wait taken away, which is what makes the checks above mean something: a
+# guard that passes whether or not the property holds has proved nothing, and this is the state in
+# which it has to fail. It reports through `ok` and never through `fail`, because the run is not
+# broken by the folded reads — the probe is supposed to see them.
+settle_session settle-fast 0
+fast_out=$(paintedall "$T/settle-fast.raw")
+fast_folded=0
+for n in 2 3 4; do
+  if [[ "$fast_out" == *"READ $n "* ]]; then fast_folded=1; fi
+done
+if [ "$fast_folded" = 1 ]; then
+  ok "and the probe does see folded reads when the wait is off, so the checks above can fail"
+else
+  fail "the settle probe cannot tell a waiting harness from a typing-one: with --steady 0 the keystrokes still arrived one per read"
+fi
 
 step "fixture: a changeset with a review in it and work after it"
 R=$T/repo
@@ -531,7 +607,7 @@ git -C "$CR" add -A && git -C "$CR" commit -qm "tidied: the work"
 git -C "$CR" switch -q main
 git -C "$CR" merge -q --no-ff -m "tidied: land it" tidied
 
-python3 "$DRIVER" --raw "$T/tidy.raw" --settle 1 --timeout 20 --term "${PTY_TERM:-xterm-256color}" \
+python3 "$DRIVER" --raw "$T/tidy.raw" --settle 1 --steady "$PTY_STEADY" --timeout 20 --term "${PTY_TERM:-xterm-256color}" \
   "$COLS" "$ROWS" "$CR" "" "$G" change tidy tidied >"$T/tidy.exit" 2>"$T/tidy.err"
 case $? in
   0) ok "the tidy finished with nobody typing" ;;
