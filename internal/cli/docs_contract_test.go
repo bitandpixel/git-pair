@@ -112,19 +112,187 @@ func TestEveryCommandIsNamedInTheDocs(t *testing.T) {
 	}
 }
 
-// TestRefPathsInTheDocsAreOnesWeWrite checks the durable namespace, where drift is expensive: a
-// document naming a ref family the code never writes teaches a reader to fetch nothing.
+// TestNoDocNamesADurableRef checks the durable namespace, where drift is expensive: a document naming a ref
+// family the code never writes teaches a reader to fetch nothing.
 func TestNoDocNamesADurableRef(t *testing.T) {
 	// git-pair writes no refs. A document that names one teaches a reader to fetch, configure a refspec
 	// for, or audit something that does not exist, and every such line in the past was a promise the tool
 	// kept by writing a ref nobody needed. The bare namespace is allowed only in the prose that explains
 	// what was retired; anything shaped like a ref path under it is not.
-	path := regexp.MustCompile(`refs/git-pair/[A-Za-z0-9_.<>*-]+(?:/[A-Za-z0-9_.<>*-]+)*`)
 	for _, file := range docFiles(t) {
-		for _, m := range path.FindAllString(readDoc(t, file), -1) {
+		for _, m := range durableRefPath.FindAllString(readDoc(t, file), -1) {
 			t.Errorf("%s names %s: git-pair writes no refs, so no document should name one", filepath.Base(file), m)
 		}
 	}
+}
+
+// durableRefPath is the git-pair ref namespace, and it is a package-level pattern because two surfaces are
+// held to it: the documents, and the help text the built tree prints.
+var durableRefPath = regexp.MustCompile(`refs/git-pair/[A-Za-z0-9_.<>*-]+(?:/[A-Za-z0-9_.<>*-]+)*`)
+
+// TestHelpTextNamesCommandsThisBuildAnswersTo holds the built help text to the rules the documents obey.
+//
+// The documents are checked against the command tree in both directions, and the sentences the advice
+// builders emit are checked by advice_contract_test.go. Help text is neither of those: it is not a file on
+// disk the document checks read, and it is not a sentence the tool prints at run time. That gap is how
+// `git pair integration record` kept shipping in `git pair review submit --help` through the milestone that
+// deleted the command, the refs it wrote, and the code that wrote them.
+//
+// Two fields per command are read: `Long`, which is the screen a person reads immediately before running the
+// command, and `Example`, which is the line they copy out of it. Short is left alone — cobra writes the
+// command's own name into the listing around it, so a name there is cobra's rather than the author's.
+//
+// The rules are the ones the prose already obeys, read through the same helpers so a reference cannot be
+// wrong in one surface and right in another: every `git pair …` reference names a command this build has,
+// with flags that belong to the command it is spelled on, and nothing names a ref under the git-pair
+// namespace or claims a durable ref. Help states what the tool does today. The history of what it stopped
+// doing belongs to the spec, where §13.4 carries the deleted refs and says plainly that there is no
+// `integration record`.
+func TestHelpTextNamesCommandsThisBuildAnswersTo(t *testing.T) {
+	root := newRootCommand(&app{})
+	paths := commandPaths(root)
+	paths["help"] = true
+	flags := adviceFlagTree(root)
+
+	checked := 0
+	var walk func(path string, c *cobra.Command)
+	walk = func(path string, c *cobra.Command) {
+		for _, field := range []struct{ what, text string }{{"Long", c.Long}, {"Example", c.Example}} {
+			if strings.TrimSpace(field.text) == "" {
+				continue
+			}
+			checked++
+			where := "`git pair` " + field.what
+			if path != "" {
+				where = "`git pair " + path + "` " + field.what
+			}
+			for _, c := range helpCommandRefs(field.what, field.text, paths) {
+				if c.path == "" {
+					if c.followed == "" {
+						continue
+					}
+					t.Errorf("%s names `git pair %s`, which this build has no command for. Help states what the tool does; "+
+						"the history of what it stopped doing is the spec's to carry (§13.4), not the screen a person reads "+
+						"before running the command", where, c.followed)
+					continue
+				}
+				checkCommandReference(t, where, "names", c, paths, flags)
+			}
+			for _, m := range durableRefPath.FindAllString(field.text, -1) {
+				t.Errorf("%s names %s: git-pair writes no refs, so no surface should name one", where, m)
+			}
+			if strings.Contains(strings.ToLower(field.text), "durable ref") {
+				t.Errorf("%s speaks of a durable ref: git-pair writes none, and the sentence that explains the ones it "+
+					"deleted is the spec's", where)
+			}
+		}
+		for _, sub := range c.Commands() {
+			if sub.Name() == "help" || sub.Name() == "completion" {
+				continue
+			}
+			walk(strings.TrimSpace(path+" "+sub.Name()), sub)
+		}
+	}
+	walk("", root)
+	if checked < 20 {
+		t.Fatalf("only %d help fields were checked: the walk stopped collecting", checked)
+	}
+}
+
+// helpCommandRefs finds the command references help text cites and parses each into a command path plus the
+// flags spelled on it.
+//
+// Which spans count as a citation depends on the field, because the two fields are written in different
+// registers. A `Long` cites a command inside backticks and writes English around it, so the span is the
+// reference and the words outside it are prose — the reading that lets "`git pair review` is `git pair review
+// open`" mean what it says instead of reporting the second mention as a subcommand of the first. An `Example`
+// block is a command line somebody copies, so each of its lines is a reference in full, flags included.
+//
+// This is deliberately not `adviceCommands`. That scanner walks a sentence and stops where the tree stops
+// continuing, which is right for a sentence the tool assembles and wrong for two here: a deleted command is
+// exactly a reference whose first word the tree does not continue, and dropping it is how `git pair
+// integration record` survived in `--help` through the milestone that deleted it.
+func helpCommandRefs(field, text string, paths map[string]bool) []adviceCommand {
+	var cited []string
+	if field == "Long" {
+		for _, span := range backtickSpans(text) {
+			if strings.HasPrefix(span, "git pair ") {
+				cited = append(cited, span)
+			}
+		}
+	} else {
+		for _, line := range strings.Split(text, "\n") {
+			line = strings.TrimSpace(line)
+			if i := strings.Index(line, "  #"); i >= 0 {
+				line = strings.TrimSpace(line[:i])
+			}
+			if strings.HasPrefix(line, "git pair ") {
+				cited = append(cited, line)
+			}
+		}
+	}
+	var out []adviceCommand
+	for _, line := range cited {
+		out = append(out, parseCitedCommandLine(strings.TrimPrefix(line, "git pair "), paths))
+	}
+	return out
+}
+
+// backtickSpans returns the contents of each `…` span of a help field, which is how its author marks a command
+// citation.
+func backtickSpans(text string) []string {
+	var out []string
+	for len(text) > 0 {
+		open := strings.IndexByte(text, '`')
+		if open < 0 {
+			break
+		}
+		rest := text[open+1:]
+		end := strings.IndexByte(rest, '`')
+		if end < 0 {
+			break
+		}
+		if span := strings.TrimSpace(rest[:end]); span != "" {
+			out = append(out, span)
+		}
+		text = rest[end+1:]
+	}
+	return out
+}
+
+// parseCitedCommandLine splits one cited command into the path the tree continues and the flags spelled on it.
+// The token where the path stopped is kept as `followed`, so a group named with a word that is not one of its
+// children — and a first word that is not a command at all — are reported rather than trimmed away. A flag
+// written with its value is checked by name, and a bare `--` names nothing, so neither reaches the caller as a
+// flag the command has to declare.
+func parseCitedCommandLine(line string, paths map[string]bool) adviceCommand {
+	var c adviceCommand
+	var words []string
+	for _, raw := range strings.Fields(line) {
+		token := strings.Trim(raw, "`\"'`,.;:!?) ]}")
+		if token == "" || token == "--" {
+			continue
+		}
+		if strings.HasPrefix(token, "--") {
+			name, _, _ := strings.Cut(strings.TrimPrefix(token, "--"), "=")
+			if name != "" {
+				c.flags = append(c.flags, name)
+			}
+			continue
+		}
+		if strings.HasPrefix(token, "-") || !adviceWord.MatchString(token) {
+			break
+		}
+		candidate := strings.Join(append(append([]string{}, words...), token), " ")
+		if adviceHasPathOrPrefix(paths, candidate) {
+			words = append(words, token)
+			continue
+		}
+		c.followed = token
+		break
+	}
+	c.path = strings.Join(words, " ")
+	return c
 }
 
 // TestSkillFrontmatterIsLoadable checks what a harness reads before it reads anything else. A skill
