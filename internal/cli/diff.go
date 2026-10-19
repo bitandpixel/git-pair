@@ -237,7 +237,7 @@ func pathArgs(paths []string) []string {
 // requirePathsInSpan turns "you asked for a file that is not in this span" from
 // a silently empty diff into an actionable error.
 func requirePathsInSpan(ctx context.Context, s *session, sp span.Span, paths []string) error {
-	changed, err := s.repo.DiffNames(ctx, sp.From, sp.To)
+	changed, err := s.repo.ContentPathsChanged(ctx, sp.From, sp.To)
 	if err != nil {
 		return err
 	}

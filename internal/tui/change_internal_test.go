@@ -518,9 +518,10 @@ func TestTheTextPaneSaysAFileIsNotText(t *testing.T) {
 	}
 }
 
-// Rename detection is git's setting, not this code's: the list of files and the sign beside each one come
-// from two calls that have to agree. With detection off, git answered a delete and an add, and the tree
-// says `-` and `+` about that pair rather than `~` about a move it was never told about.
+// Rename detection is git's setting, not this code's: the sign beside a row comes from git's own verdict, so
+// a clone with `diff.renames=false` says `+` and `-` about a pair because that is what its `git diff` prints.
+// What no setting decides is which rows exist — the list runs `--no-renames`, so the pair is two rows here
+// whatever git was told, and the signs then follow git about those two.
 func TestWithoutRenameDetectionTheTreeSaysDeleteAndAdd(t *testing.T) {
 	byPath := filesByPath(changeModel(t, [2]string{"diff.renames", "false"}))
 	gone, ok := byPath["pure.go"]
@@ -533,6 +534,63 @@ func TestWithoutRenameDetectionTheTreeSaysDeleteAndAdd(t *testing.T) {
 	}
 	if moved.MovedFrom != "" {
 		t.Errorf("%s claims to come from %q, which git did not say", movedPure, moved.MovedFrom)
+	}
+}
+
+// A move is two paths, not one: the bytes that left `pure.go` are gone from `pure.go`, and a reviewer who
+// never sees that row never learns to look for them. git folds the pair into one status line, which earns
+// the destination its `~` — it does not get to remove the origin from the tree.
+func TestTheTreeListsThePathAMoveLeftBehind(t *testing.T) {
+	byPath := filesByPath(changeModel(t))
+	for _, pair := range []struct{ origin, dest string }{
+		{"pure.go", movedPure},
+		{"edited.go", movedEdit},
+	} {
+		from, ok := byPath[pair.origin]
+		if !ok {
+			t.Errorf("%s has no row: the span left content missing from that path, and a change with no row is a change nobody comes back for", pair.origin)
+			continue
+		}
+		if from.Change.Sign() != "-" {
+			t.Errorf("%s is signed %q, want the deletion it is: %+v", pair.origin, from.Change.Sign(), from)
+		}
+		to, ok := byPath[pair.dest]
+		if !ok {
+			t.Fatalf("%s has no row", pair.dest)
+		}
+		if to.Change.Sign() != "~" || to.MovedFrom != pair.origin {
+			t.Errorf("%s: %+v, want the move git reported from %s", pair.dest, to, pair.origin)
+		}
+	}
+}
+
+// The pair that started this: one commit drops a file and writes another whose bytes read alike, and git
+// calls that a rename. The reviewer used to get one row, for the file that arrived, and nothing about the
+// file that left. Both halves are rows now, wherever git put its rename verdict.
+func TestTheTreeListsBothHalvesOfAChangeGitFoldsIntoOne(t *testing.T) {
+	f := gittest.New(t)
+	body := thirty("ledger")
+	f.Commit("seed", gittest.WithFile("account.go", body))
+	f.CreateBranch("booking")
+	f.CommitChangeset("booking", "main")
+	f.Remove("account.go")
+	f.Write("ledger.go", body)
+	f.Commit("drop the reviewed file and write one that reads alike")
+
+	byPath := filesByPath(modelOver(t, f))
+	gone, ok := byPath["account.go"]
+	if !ok {
+		t.Fatalf("account.go has no row: git folded the pair and the deleted path disappeared with it")
+	}
+	if gone.Change.Sign() != "-" {
+		t.Errorf("account.go is signed %q, want a deletion: %+v", gone.Change.Sign(), gone)
+	}
+	arrived, ok := byPath["ledger.go"]
+	if !ok {
+		t.Fatalf("ledger.go has no row")
+	}
+	if arrived.Change.Sign() == "" {
+		t.Errorf("ledger.go carries no sign: %+v", arrived)
 	}
 }
 

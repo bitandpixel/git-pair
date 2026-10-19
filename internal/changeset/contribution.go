@@ -156,7 +156,7 @@ func MeasureContribution(ctx context.Context, repo *git.Repo, c Changeset, db De
 	}
 	// The file list is a convenience for the notes, not part of the identity: a note that cannot name the
 	// overlapping files still says the parent moved, so a failure here costs a detail rather than the answer.
-	paths, err := repo.PathsChangedOutside(ctx, base, head, dirs...)
+	paths, err := repo.ContentPathsChangedOutside(ctx, base, head, dirs...)
 	if err != nil {
 		paths = nil
 	}
