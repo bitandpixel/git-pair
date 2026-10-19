@@ -87,3 +87,5 @@ which is why a count typed and then scrolled past is still there for the next ke
 - The mouse wheel ignores a pending count: a count belongs to a keystroke, and the wheel is not one.
 - A count typed and then left is not visible, so the number has to be re-typed rather than corrected. That is
   vim's behaviour too, and it is the trade for the bar staying where it is.
+
+Does any interaction that isn't a digit after a digit clear the prefix?
