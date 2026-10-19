@@ -2789,7 +2789,14 @@ either: `j`/`k` a row — and one step across the edge the two halves share, whi
 leaves the half it started in; `gg`/`G` the two ends of the half holding them, because the two halves are
 two windows of two heights and a jump to the end of the other one lands the reviewer on a list they were
 not reading; `ctrl-d`/`ctrl-u` half a page and
-`ctrl-f`/`ctrl-b` a page, counted in the window you are standing in. A half with no rows has no ends of
+`ctrl-f`/`ctrl-b` a page, counted in the window you are standing in. A number typed before one of these
+keys says how far that key goes, in the convention vim uses: `10j` walks ten rows and `2 ctrl-f` pages two
+pages, both counted in the same window the single key counts. The half-page pair reads no number, because
+half a page is the distance that keeps a line of context across the break and the key for two pages is
+`ctrl-f`, and `gg`/`G` reach the two ends whatever number precedes them. The number belongs to the next key
+alone: any other key spends it, so a count typed and then left cannot move the row the following key lands
+on. A digit is a motion nowhere the screen takes text — the diff's search field and the drill's filter read
+digits as what was typed, and arm no count. A half with no rows has no ends of
 its own, and there the jump goes to the half that has them. Each half's shortcut bar names the keys
 of that half and none of the others, which is what makes a key of the other half an absence a reviewer can
 read rather than a keystroke that vanishes. A rule separates the list from the
@@ -2969,7 +2976,9 @@ with the keys a diff is read with: `j`/`k`, `d`/`u` or `ctrl-d`/`ctrl-u`, `ctrl-
 scroll the file already on show (`d`/`u` being `less`'s spelling of the same half page, kept because a
 reviewer who reaches for it in a diff is reaching for something they know), `Enter` opens the file on show
 — the difftool, or the editor for a file the span added, which has no other side of it to compare
-against — and `/` searches it. `z` changes the shape of the screen rather than the keys: it gives the diff
+against — and `/` searches it. A number typed before the row keys counts rows of the file and a number
+before the whole-page keys counts pages, as it does out in the list column, and the search field reads
+digits as the term. `z` changes the shape of the screen rather than the keys: it gives the diff
 the whole screen, and gives the screen back to whichever region asked for it — the preview column, or the
 list column if `z` was pressed there — keeping the keys, the file and the place in the file.
 These are the two shapes the terminal chooses by itself. Where a column was given and no longer fits, `z`
@@ -3088,7 +3097,8 @@ which is what makes choosing a historical range safe rather than a negotiation w
 column is one timeline rather than two lists: the submissions by alias (the newest as `Last Review`,
 then `Review -2` and `Review -3`, older ones by the index you would type) with the changeset's own
 commits written between them where they happened, so `j` walks from a submission into the commits
-that followed it. Where they happened is git's walk of the range, taken topologically, and not the
+that followed it. A number typed before `j` or `k` walks that many rows of the column, as it does in the
+list. Where they happened is git's walk of the range, taken topologically, and not the
 commits' dates: a rebase replays every commit it touches, so a rebased stack carries the minute of
 the rebase as the committer date of all of it, and a timeline sorted by that date cannot tell which
 submission came first. The dates are still what an age beside a row says. The commits are the ones the
@@ -3114,7 +3124,9 @@ remote refs, tags and other refs under headings, shows the name a reviewer would
 keeps the full `refs/...` name in the checkpoint: a branch and a tag called `main` are two different
 choices, and drift has to be watched on the one that was meant. Each drill has two modes and its
 shortcut bar names the keys of the one it is in. The list holds the keys first — `j`/`k`, `gg`/`G`,
-`d`/`u` or `ctrl-d`/`ctrl-u` for half a page, and `f`/`b` or `ctrl-f`/`ctrl-b` for a whole one — with
+`d`/`u` or `ctrl-d`/`ctrl-u` for half a page, and `f`/`b` or `ctrl-f`/`ctrl-b` for a whole one, with a
+number typed before the row keys for that many rows and before the whole-page keys for that many pages —
+with
 `/` putting the keys on the filter, where a fresh one starts and what you type is the filter; `esc`
 hands them back with the
 filter kept, and `esc` again leaves.
@@ -3145,6 +3157,10 @@ Suggested bindings:
 ```text
 j/k      navigate the half of the list column that holds the keys, one step at a time across the edge it
          shares with the other half; gg and G are the two ends of the half holding them
+10j      a number typed before a row key or a whole-page key says how far that key goes: 10j walks ten
+         rows and 2 ctrl-f pages two pages, counted in the window holding the keys. The half-page keys
+         and gg/G read no number, and any key that is not a motion spends it, so a count typed and then
+         left cannot move the next row
 Tab      toggle the keys between the list column and the diff where there is room for one (shift-tab the
          other way); f names the file tree from wherever the keys are
 h/l      fold and unfold the directory under the cursor (left and right arrows do the same);
@@ -3169,7 +3185,8 @@ ctrl-b   page the preview up
 Space    toggle reviewed for a file row, or for every file under a directory row
 
 In the preview column, after p:
-j/k      scroll the diff a row; d/u or ctrl-d/ctrl-u half a page, ctrl-f/ctrl-b a page,
+j/k      scroll the diff a row (a number before them scrolls that many rows); d/u or ctrl-d/ctrl-u half
+         a page, ctrl-f/ctrl-b a page (a number before them pages that many pages),
          gg the top, G the bottom
 /        search the file on show: the term marks its matches as it is typed, enter closes the
          field and jumps to the first match at or below the screen, n and N walk the matches
@@ -4464,7 +4481,7 @@ into a GitHub/GitLab PR description while keeping the repository version as the 
 Suggested defaults:
 
 ```text
-j/k      move through the region that holds the keys
+j/k      move through the region that holds the keys (a number typed before the key counts rows)
 Tab      toggle the keys between the list column and the diff (f names the file tree; the changeset box
          is the other half of the list column, reached by walking up out of the tree)
 Enter    activate the selected row: the editor for a file the span added, otherwise the difftool,
