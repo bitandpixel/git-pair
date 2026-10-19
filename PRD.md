@@ -2796,7 +2796,11 @@ half a page is the distance that keeps a line of context across the break and th
 `ctrl-f`, and `gg`/`G` reach the two ends whatever number precedes them. The number belongs to the next key
 alone: any other key spends it, so a count typed and then left cannot move the row the following key lands
 on. A digit is a motion nowhere the screen takes text — the diff's search field and the drill's filter read
-digits as what was typed, and arm no count. A half with no rows has no ends of
+digits as what was typed, and arm no count. What spends a count is the next thing the reviewer does to the
+screen: any key the region holding the keys reads, including one it does nothing with, and any turn of the
+wheel, which moves its own three rows whatever was typed before it. What leaves a count standing is what
+nobody typed — the drift check, an expiring note, a resize, a patch arriving — because a count typed a row
+at a time would not survive the clock. A half with no rows has no ends of
 its own, and there the jump goes to the half that has them. Each half's shortcut bar names the keys
 of that half and none of the others, which is what makes a key of the other half an absence a reviewer can
 read rather than a keystroke that vanishes. A rule separates the list from the

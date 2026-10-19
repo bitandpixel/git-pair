@@ -760,6 +760,46 @@ func TestDigitsTypedIntoTheDrillFilterStayText(t *testing.T) {
 	assertFrameFits(t, m)
 }
 
+// A turn of the wheel is the reviewer doing something to the screen, so a count typed before it is over
+// by the time the hand comes back to the keys: a notch rolled between `10` and `j` is a reviewer who
+// changed their mind about the distance, not one who wants ten rows after a scroll. The notch keeps its
+// own fixed three rows -- the wheel is not a motion key and takes no count -- and a notch that had
+// nothing to scroll spends the count just the same, because the reviewer still moved the pointer.
+func TestTheWheelSpendsACountWithoutMultiplyingIt(t *testing.T) {
+	m := focusPane(t, askPreview(t, tall(previewModel(t), 60)))
+	total, body := m.previewRowsTouched()
+	if total-body < wheelStep+3 {
+		t.Fatalf("the fixture's diff is %d rows and the pane shows %d: a notch and a row is not a thing to test here",
+			total, body)
+	}
+	at := m.previewOffset
+
+	counted := pressKey(t, m, runeKey('5'))
+	counted = roll(t, counted, tea.MouseButtonWheelDown)
+	if counted.previewOffset != at+wheelStep {
+		t.Errorf("one notch after a count of 5 scrolled %d rows, want the notch's own %d: the wheel is not a "+
+			"motion key", counted.previewOffset-at, wheelStep)
+	}
+	counted = pressKey(t, counted, runeKey('j'))
+	if want := at + wheelStep + 1; counted.previewOffset != want {
+		t.Errorf("the j after a count spent by the wheel went to %d, want one row past the notch at %d",
+			counted.previewOffset, want)
+	}
+	assertFrameFits(t, counted)
+
+	// ... and the same where the notch has nothing to move: the pointer was still moved, and the
+	// number is still the reviewer's own, so the next `j` is one row rather than a jump.
+	off := focusOnRow(t, manyFileModel(t, 24), 4)
+	off = pressKey(t, off, runeKey('7'))
+	updated, _ := off.Update(wheelMsg(tea.MouseButtonWheelDown, tea.MouseActionPress))
+	off = updated.(reviewModel)
+	off = pressKey(t, off, runeKey('j'))
+	if off.cursor != 5 {
+		t.Errorf("the j after a count and a wheel event with no diff on screen went to row %d, want one row to 5",
+			off.cursor)
+	}
+}
+
 // A key nobody can see is a key nobody uses, and a count is the least visible thing on this screen: each
 // region's bar has to say that a number can stand in front of the row keys, in the unit that region moves
 // in -- rows for a list, lines for a file. The drill's filter bar names none of it, because while the

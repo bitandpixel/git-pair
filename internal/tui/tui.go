@@ -259,7 +259,8 @@ type reviewModel struct {
 	// that key spends it: a counted motion moves by it and any other key drops it, so a count typed
 	// and then abandoned cannot move the row the next key lands on. One field serves every region,
 	// because the count belongs to the keystroke rather than to the screen, and the key that hands the
-	// keys to another screen is itself a key -- it spends the count on its way out. The two `g` leaders
+	// keys to another screen is itself a key -- it spends the count on its way out, and so does a
+	// turn of the wheel, which is an interaction rather than a message. The two `g` leaders
 	// above are kept per-region because half of a pair can be left on one screen; a count is never
 	// split across two, it is only left over.
 	count int

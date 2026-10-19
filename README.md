@@ -1777,7 +1777,11 @@ pair reads no number, because half a page is the distance that keeps a line of c
 the key for two pages is `ctrl-f`. `gg` and `G` reach the two ends whatever number precedes them. The
 number belongs to the next key alone: any other key spends it, so a number typed and then left goes away
 instead of moving the row the following key lands on. A digit is a key of its own nowhere else on the
-screen — in the diff's search field and in the drill's filter it is text.
+screen — in the diff's search field and in the drill's filter it is text. What spends a count is the next
+thing the reviewer does to this screen: any key the region holding the keys reads, including one it does
+nothing with, and any turn of the wheel, which takes its own three rows whatever was typed before it. What
+leaves a count standing is what nobody typed — the drift check, an expiring note, a resize, a patch arriving
+— because a count typed a row at a time would not survive the clock.
 
 Each file sits under its directory, and a row prints only the name the rows above it have not said.
 A directory that holds nothing but one directory is folded into that row. `src/` above holds `a.ts` and `ui/`,
