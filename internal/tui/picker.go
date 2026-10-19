@@ -308,6 +308,13 @@ func (m reviewModel) handleSpanKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	items := m.endpointsFor(p.col == 0)
 	p.cursor[p.col] = clampIndex(p.cursor[p.col], 0, len(items)-1)
 
+	// The same count the rest of the screen takes: `10j` walks ten rows of the column. The columns
+	// have no paging keys, so the two row keys are the only ones that read the number.
+	count, waiting := m.countPrefix(key)
+	if waiting {
+		return m, nil
+	}
+
 	switch {
 	case key.Type == tea.KeyEsc, key.Type == tea.KeyRunes && firstRune(key) == 'q':
 		// Cancel means the span on screen is the span that stays. The pending pair is
@@ -321,9 +328,9 @@ func (m reviewModel) handleSpanKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		p.col = 1 - p.col
 
 	case key.Type == tea.KeyDown, key.Type == tea.KeyRunes && firstRune(key) == 'j':
-		p.cursor[p.col]++
+		p.cursor[p.col] += count
 	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
-		p.cursor[p.col]--
+		p.cursor[p.col] -= count
 
 	case key.Type == tea.KeySpace:
 		return m.setEndpoint(items[p.cursor[p.col]])
@@ -596,7 +603,13 @@ func (m reviewModel) handleListKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Navigation mode. `g` waits for its partner, as it does in the list and the overlay.
+	// Navigation mode. Digits are the count a motion is typed with -- ten rows for `10j`, two pages
+	// for `2 f` -- and they are text in the filter above, which is why the count is read after that
+	// mode has taken the key. `g` waits for its partner, as it does in the list and the overlay.
+	count, waiting := m.countPrefix(key)
+	if waiting {
+		return m, nil
+	}
 	if key.Type == tea.KeyRunes && firstRune(key) == 'g' && !p.gPrefix {
 		p.gPrefix = true
 		m.pick = p
@@ -616,9 +629,9 @@ func (m reviewModel) handleListKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Type == tea.KeyEnter, key.Type == tea.KeySpace:
 		return m.pickFromList(list, visible)
 	case key.Type == tea.KeyDown, key.Type == tea.KeyRunes && firstRune(key) == 'j':
-		step = 1
+		step = count
 	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
-		step = -1
+		step = -count
 	// Half a page, both distances the rest of the screen offers: `less`'s plain `d` and `u`, which the
 	// preview overlay already takes, and the ctrl pairs. Out in the columns `u` is the unreviewed
 	// preset; the keys belong to whichever screen's bar is on screen, and each of the two bars names
@@ -628,9 +641,9 @@ func (m reviewModel) handleListKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Type == tea.KeyCtrlU, key.Type == tea.KeyRunes && firstRune(key) == 'u':
 		step = -rows / 2
 	case key.Type == tea.KeyCtrlF, key.Type == tea.KeyRunes && firstRune(key) == 'f':
-		step = rows
+		step = count * rows
 	case key.Type == tea.KeyCtrlB, key.Type == tea.KeyRunes && firstRune(key) == 'b':
-		step = -rows
+		step = -count * rows
 	case pressedG && key.Type == tea.KeyRunes && firstRune(key) == 'g':
 		list.sel = 0
 	case key.Type == tea.KeyRunes && firstRune(key) == 'G':
@@ -981,9 +994,9 @@ func helpSpan(drilled, filtering bool) string {
 		return "type to filter  \u2191/\u2193 move  backspace delete  enter pick  esc navigate"
 	}
 	if drilled {
-		return "j k line  gg top  G bottom  d/u ctrl-d/u half  f/b ctrl-f/b page  / filter  space/enter pick  esc/q back"
+		return "j k line  10j 10 lines  gg top  G bottom  d/u ctrl-d/u half  f/b ctrl-f/b page  / filter  space/enter pick  esc/q back"
 	}
-	return "tab column  j/k move  space choose  enter apply  c commits  r refs  u unreviewed  f full  esc cancel"
+	return "tab column  j/k move  10j 10 rows  space choose  enter apply  c commits  r refs  u unreviewed  f full  esc cancel"
 }
 
 // ago is how long ago a commit was, short enough for a detail column.

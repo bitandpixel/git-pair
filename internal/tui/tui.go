@@ -254,6 +254,15 @@ type reviewModel struct {
 	// that region's top. It is kept apart from the diff's own previewG so the two jumps cannot read
 	// each other's half-press.
 	gPrefix bool
+	// count is the digits typed before a motion, the way vim takes them: `10j` walks ten rows and
+	// `2 ctrl-f` pages two pages. A digit is not a motion, so it waits for the key it belongs to, and
+	// that key spends it: a counted motion moves by it and any other key drops it, so a count typed
+	// and then abandoned cannot move the row the next key lands on. One field serves every region,
+	// because the count belongs to the keystroke rather than to the screen, and the key that hands the
+	// keys to another screen is itself a key -- it spends the count on its way out. The two `g` leaders
+	// above are kept per-region because half of a pair can be left on one screen; a count is never
+	// split across two, it is only left over.
+	count int
 
 	// rows is the navigable list: the file tree, then the changeset box's rows. It is rebuilt by
 	// refresh whenever the session or the view could have changed, and metaStart is where the box's
@@ -652,6 +661,14 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// A digit is the count a motion is typed with, not a key of its own: `10j` walks ten rows and
+	// `2 ctrl-f` pages two pages. A digit waits for the key it belongs to, and draws nothing while it
+	// waits.
+	count, waiting := m.countPrefix(key)
+	if waiting {
+		return m, nil
+	}
+
 	// `g` waits for its partner, as it does in the diff: the pair means the top of whichever region
 	// holds the keys. The guard is what makes the pair possible at all — without it the second `g`
 	// would be read as another prefix and the jump would never happen.
@@ -673,19 +690,22 @@ func (m reviewModel) handleKey(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// The navigation keys belong to the region holding them, and they mean the same thing in both:
 	// a row, half a page, a page, the two ends. ctrl-d used to quit, which is why paging was ctrl-f
 	// and ctrl-b and nothing else; ctrl-c and q still quit, and the key a pager means it to have gets
-	// back to paging.
+	// back to paging. A count belongs to the row keys and to the page keys, in each case counted in the
+	// window being read: `10j` is ten rows, `2 ctrl-f` two pages. The half-page pairs take no count,
+	// because the distance they promise is the one that keeps a line of context -- a counted half page
+	// is a page key the reviewer did not press.
 	case key.Type == tea.KeyDown, key.Type == tea.KeyRunes && firstRune(key) == 'j':
-		m.move(1)
+		m.move(count)
 	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
-		m.move(-1)
+		m.move(-count)
 	case key.Type == tea.KeyCtrlD:
 		m.page(max(1, m.activeWindow()/2))
 	case key.Type == tea.KeyCtrlU:
 		m.page(-max(1, m.activeWindow()/2))
 	case key.Type == tea.KeyCtrlF:
-		m.page(max(1, m.activeWindow()))
+		m.page(count * max(1, m.activeWindow()))
 	case key.Type == tea.KeyCtrlB:
-		m.page(-max(1, m.activeWindow()))
+		m.page(-count * max(1, m.activeWindow()))
 	case pressedG && key.Type == tea.KeyRunes && firstRune(key) == 'g':
 		m.activeTop()
 	case key.Type == tea.KeyRunes && firstRune(key) == 'G':
@@ -1755,7 +1775,7 @@ func (m reviewModel) overlayHelp() string {
 	if m.previewShortfall() == "" {
 		back = "z pane  " + back
 	}
-	return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " + back +
+	return "j k line  10j 10 lines  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " + back +
 		"  f tab list"
 }
 
@@ -1770,7 +1790,10 @@ func (m reviewModel) overlayHelp() string {
 // and the one the layout budgets rows for, so the two shorter bars leave a blank row above the status
 // line rather than moving the divider when focus changes.
 func (m reviewModel) helpTextFor(target focusTarget) string {
-	page := "j/k move  gg/G ends  ctrl-d/u half page  ctrl-f/b page"
+	// The count a motion is typed with is named with the row keys, since that is where a reviewer
+	// reaches for it: `10j` walks ten rows of the half holding the keys, and the same number before
+	// `ctrl-f` pages that many pages.
+	page := "j/k move  10j 10 rows  gg/G ends  ctrl-d/u half page  ctrl-f/b page"
 	// The keys that leave the column for the diff, and the one that names a half of it. `tab` names the
 	// stop it walks to rather than the ring: with two stops there is only one place it can go.
 	elsewhere := "p preview  z full  f files  tab preview"
@@ -1791,7 +1814,7 @@ func (m reviewModel) helpTextFor(target focusTarget) string {
 			// opening.
 			open = "enter open"
 		}
-		return "j k line  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " +
+		return "j k line  10j 10 lines  d/u ctrl-d/u half  ctrl-f/b page  gg top  G bottom  / find  n N next  " +
 			jumps + open + "  z full  esc f tab list  q quit"
 	}
 	// The jump names a row of the box from either half of the column and takes the keys with it. There is
@@ -2327,6 +2350,31 @@ func (m reviewModel) activeRow() (row, int, bool) {
 		return row{}, 0, false
 	}
 	return m.rows[m.cursor], m.cursor, true
+}
+
+// countLimit caps what a reviewer can type. Every counted motion clamps at both ends anyway, so the cap
+// is only there to stop a held digit from overflowing the accumulator -- and no list on this screen has
+// ten thousand rows.
+const countLimit = 9999
+
+// countPrefix reads a keystroke against the count being typed before it. A digit extends the count and
+// reports that the screen is still waiting, because a digit on its own moves nothing and draws nothing.
+// Any other key hands over the count it was holding and clears it, so a count belongs to exactly one key:
+// one when no digit preceded it, and however many were typed when a count did. Whether the key uses the
+// number is the caller's, and the keys that do not -- the half-page pairs, `gg` and `G` -- spend it all
+// the same.
+func (m *reviewModel) countPrefix(key tea.KeyMsg) (count int, waiting bool) {
+	if key.Type == tea.KeyRunes && len(key.Runes) == 1 && key.Runes[0] >= '0' && key.Runes[0] <= '9' {
+		if m.count < countLimit {
+			m.count = m.count*10 + int(key.Runes[0]-'0')
+		}
+		return 1, true
+	}
+	count, m.count = m.count, 0
+	if count < 1 {
+		count = 1
+	}
+	return count, false
 }
 
 // move steps the list column's cursor. The box and the tree are one navigable list drawn as two windows,
@@ -3318,6 +3366,12 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.searching {
 		return m.handleSearchKey(key)
 	}
+	// A digit is the count a motion is typed with, and nothing else: `10j` scrolls ten rows and
+	// `2 ctrl-f` two pages. It waits for the key it belongs to, the way the list does.
+	count, waiting := m.countPrefix(key)
+	if waiting {
+		return m, nil
+	}
 	// The jump into the box works from the diff as it does from either half of the list column, keys
 	// and all. It used to be a key that did not occur here, on the grounds that a cursor moving under a
 	// diff you are reading is an invisible action -- but the answer to that is not to refuse the jump, it
@@ -3386,9 +3440,9 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.openPreview()
 	case key.Type == tea.KeyDown, key.Type == tea.KeyRunes && firstRune(key) == 'j':
-		return m.scrollPreview(1, 1)
+		return m.scrollPreview(1, count)
 	case key.Type == tea.KeyUp, key.Type == tea.KeyRunes && firstRune(key) == 'k':
-		return m.scrollPreview(-1, 1)
+		return m.scrollPreview(-1, count)
 	// Half a page, three ways: `less`'s `d` and `u`, and the ctrl pairs the list column already uses for
 	// the same distance. The half is what makes it a reading key rather than a paging key -- consecutive
 	// presses keep a line of context, so the line you were reading is still on screen.
@@ -3407,9 +3461,9 @@ func (m reviewModel) handleDiffKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Type == tea.KeyRunes && firstRune(key) == 'N':
 		return m.searchStep(-1)
 	case key.Type == tea.KeyCtrlF:
-		return m.scrollPreview(1, m.previewBodyRows())
+		return m.scrollPreview(1, count*m.previewBodyRows())
 	case key.Type == tea.KeyCtrlB:
-		return m.scrollPreview(-1, m.previewBodyRows())
+		return m.scrollPreview(-1, count*m.previewBodyRows())
 	case pressedG && key.Type == tea.KeyRunes && firstRune(key) == 'g':
 		m.previewOffset = 0
 		return m, nil
