@@ -11,7 +11,7 @@ Only the standard library is used, and no terminal emulator: the harness capture
 stream, and the checks look for the strings and the escape sequences that must appear in it.
 Geometry the screen model would check is already asserted by Go tests (internal/tui).
 
-usage: pty-tui.py [--raw FILE] [--settle S] [--gap S] [--tail S] [--timeout S]
+usage: pty-tui.py [--raw FILE] [--settle S] [--gap S] [--steady S] [--tail S] [--timeout S]
                   [--quiet S] [--term TERM]
                   COLS ROWS CWD KEYS PROGRAM [ARGS...]
 
@@ -34,6 +34,17 @@ about — "did this *not* paint from here on" — and a window shortened on sile
 such a check pass more easily. The three are the explicit ~<seconds> waits, which wait for a timer
 the harness cannot observe; the tail, which closes the last window; and the --gap after each
 keystroke, which is what bounds the window a keystroke opens.
+
+The fourth wait is not fixed, and it does not shorten a window either; `--steady 0` turns it off.
+After the --gap window closes,
+--steady keeps reading until the program has been quiet for that many seconds before the next
+keystroke is typed, with a ceiling of four times that so the wait is bounded whatever the program
+does. It exists because a keystroke typed while the last one is still being drawn sits in the pty
+buffer until the program next reads, and two keystrokes picked up in one read arrive as one event —
+the same folding the comma in KEYS exists to prevent, arriving from the other side. Because this wait
+reads into the same capture, it only ever lengthens the window it follows, so a `refuse` check gets
+more bytes to judge, never fewer. A keystroke the program answers with nothing is waited for to the
+ceiling, which is the cost of the property.
 
 Only the startup --settle shortens early, at --quiet seconds of silence, and it is the one window a
 check reads where that is defensible: what it can lose is a repaint arriving after a screen already
@@ -86,10 +97,10 @@ QUERIES = (
 
 def parse(argv):
     opts = {"settle": 0.8, "gap": 0.06, "tail": 0.8, "timeout": 25.0, "raw": None,
-            "term": "xterm-256color", "quiet": 0.4}
+            "term": "xterm-256color", "quiet": 0.4, "steady": 0.12}
     while argv and argv[0].startswith("--"):
         name = argv[0][2:]
-        if name not in ("settle", "gap", "tail", "timeout", "raw", "term", "quiet"):
+        if name not in ("settle", "gap", "tail", "timeout", "raw", "term", "quiet", "steady"):
             sys.exit(f"pty-tui.py: unknown option --{name}")
         opts[name] = argv[1]
         argv = argv[2:]
@@ -100,6 +111,7 @@ def parse(argv):
     opts["tail"] = float(opts["tail"])
     opts["timeout"] = float(opts["timeout"])
     opts["quiet"] = float(opts["quiet"])
+    opts["steady"] = float(opts["steady"])
     return opts, int(argv[0]), int(argv[1]), argv[2], argv[3].split(","), argv[4:]
 
 
@@ -207,6 +219,16 @@ def main():
             continue
         os.write(master, KEYS.get(key, key.encode()))
         pump(time.time() + opts["gap"])
+        if running and opts["steady"] > 0 and index + 1 < len(keys):
+            # Wait for the screen to go quiet before the next keystroke is typed, so two of them
+            # cannot be picked up in one read and folded into one event. It reads into the same
+            # capture, so the window this keystroke owns only gets longer — a `refuse` check about
+            # this keystroke judges more bytes, never fewer. The ceiling is four times the threshold
+            # rather than --settle, because this wait runs once per keystroke and a program that
+            # paints forever (a spinner) must not cost the startup ceiling each time. The last
+            # keystroke is exempt: the tail already reads after it, and nothing follows that could be
+            # folded with it.
+            pump(time.time() + 4 * opts["steady"], opts["steady"])
 
     if running:
         pump(time.time() + opts["tail"])
