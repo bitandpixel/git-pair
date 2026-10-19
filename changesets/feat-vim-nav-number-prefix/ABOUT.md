@@ -54,26 +54,28 @@ clamps at both ends of its window anyway, which is what makes a count larger tha
 Two places deserve the reviewer's attention. The half-page keys are the one place this change leaves vim on
 deliberate grounds, so the argument above is the thing to disagree with if it is wrong. And the single
 `count` field is what a future screen would have to change first: it holds because every way the reviewer
-moves the keys is itself a keystroke that spends the count, and the mouse wheel is the one input that is not,
-which is why a count typed and then scrolled past is still there for the next key.
+acts on the screen — a keystroke the region holding the keys reads, a turn of the wheel — spends the count
+from one place, while the messages the program receives on its own never touch it.
 
 ## Validation
 
 - `go test ./internal/tui/` — `internal/tui/count_internal_test.go` drives keys through `m.Update` one
-  keystroke at a time, which is what `10j` is: three messages. Sixteen tests cover the counted row keys and
+  keystroke at a time, which is what `10j` is: three messages. Seventeen tests cover the counted row keys and
   counted pages in each of the five lists (tree, changeset box, diff pane, overlay, picker columns, drill);
   `5 ctrl-d`/`5 d` moving exactly what the plain key moves; `9G` and `9gg` still being the two ends; a digit
   that starts no command, leaves every cursor, mode and offset alone, leaves `View()` byte-identical, and is
   not swallowed; `5` then `space` marking the one file under the cursor and the `j` after it moving one row;
   the leading zero (`0j`, `00j`, `007j`) and a held digit clamping at both ends of every list; a count that
   does not follow the reviewer across `tab`, `esc`, `z`, `a` or `V`; digits typed into the diff's search field
-  and the drill's filter staying text; and each region's bar naming the count in the unit that region moves
+  and the drill's filter staying text; the wheel taking its own three rows after a count and spending it, with
+  and without a diff on screen to scroll; and each region's bar naming the count in the unit that region moves
   in, with the drill's filter bar naming none of it. Expected positions come from the fixture
   (`m.metaStart`, `activeWindow()`, `previewRowsTouched()`, `listRows()`), not from numbers typed into the
   test.
-- Seven deliberate breakages of the implementation — `m.move(count)` → `m.move(1)`, the page keys and the
+- Eight deliberate breakages of the implementation — `m.move(count)` → `m.move(1)`, the page keys and the
   drill's page step losing the count, the pane's `scrollPreview(1, count)` → `(1, 1)`, the picker column's
-  `+= count` → `++`, `countPrefix` not clearing the count, and the half-page keys multiplying by it — each
+  `+= count` → `++`, `countPrefix` not clearing the count, the half-page keys multiplying by it, and the wheel
+  leaving the count standing — each
   failed the test that should catch it, so none of the cases above are vacuous.
 - `bash scripts/gates/pty-walkthrough.sh` — `PTY: all checks passed`. Scenario 7b types `1`, `0`, `j`,
   `enter` at a real terminal and checks the marker the difftool leaves behind: the tree's last row is the row
@@ -84,8 +86,8 @@ which is why a count typed and then scrolled past is still there for the next ke
 
 ## Known limitations
 
-- The mouse wheel ignores a pending count: a count belongs to a keystroke, and the wheel is not one.
+- The wheel takes its own three rows whatever was typed before it: the count belongs to the row keys and the
+  page keys, and the wheel is neither. It does spend a count being typed, on the grounds that a notch is the
+  reviewer doing something to the screen.
 - A count typed and then left is not visible, so the number has to be re-typed rather than corrected. That is
   vim's behaviour too, and it is the trade for the bar staying where it is.
-
-Does any interaction that isn't a digit after a digit clear the prefix?
