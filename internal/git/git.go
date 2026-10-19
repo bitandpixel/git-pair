@@ -614,59 +614,37 @@ func parseRecords(out string) [][]string {
 	return records
 }
 
-// DiffNames returns the paths changed in `git diff` over the given range.
 // EmptyTree is git's empty tree, the diff target for a commit with no parent.
 const EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-// PathsChangedOutside lists paths that differ between two revisions, ignoring
-// anything under the given directory prefixes.
+// ContentPathsChangedOutside lists the paths whose content or presence differs between two revisions,
+// ignoring anything under the given directory prefixes.
 //
-// The exclusion is on the *result*, which is what makes a rename out of an
-// excluded directory show up: the deletion is excluded, the new path is not.
-func (r *Repo) PathsChangedOutside(ctx context.Context, from, to string, exclude ...string) ([]string, error) {
-	return r.pathsChangedOutside(ctx, false, from, to, exclude...)
-}
-
-// ContentPathsChangedOutside is PathsChangedOutside with rename detection off, and it is what the drift rule
-// reads. Where PathsChanged answers "what would a reader of this diff see", this answers "at which paths does
-// the content or its presence differ", and the two part company on a deletion paired with an unrelated
-// addition: git calls that a rename, reports one path, and the deleted one is in neither list — invisible to
-// the comparison that is supposed to catch content leaving the tree after an approval.
+// Together with ContentPathsChanged this is the one way this package turns a diff into a list, and it runs
+// `--no-renames`. That is not a preference: `diff.renames` is on by default, so a file deleted in the same
+// commit as a similar new file is reported as one renamed path, and the path that left the tree is in no
+// list at all. Every reader of these lists is asking "at which paths does the content or its presence
+// differ" — the drift rule, the file list a review shows, the contribution note, the queue's landedness
+// comparison — and none of them can afford a path that is missing because git found a lookalike. A caller
+// that wants git's rename verdict asks git itself: the review TUI's change statuses read `diff
+// --name-status` under git's own rename settings, so a moved file can be drawn as `~`, and the path it left
+// behind is signed there as the deletion the list carries it as.
+//
+// The exclusion is on the *result*, which is what makes a move out of an excluded directory show up: the
+// deletion is excluded, the new path is not.
 func (r *Repo) ContentPathsChangedOutside(ctx context.Context, from, to string, exclude ...string) ([]string, error) {
-	return r.pathsChangedOutside(ctx, true, from, to, exclude...)
-}
-
-func (r *Repo) pathsChangedOutside(ctx context.Context, noRenames bool, from, to string, exclude ...string) ([]string, error) {
 	spec := []string{"."}
 	for _, dir := range exclude {
 		spec = append(spec, ":(exclude)"+filepath.ToSlash(dir)+"/")
 	}
-	return r.pathsChanged(ctx, noRenames, from, to, spec...)
+	return r.ContentPathsChanged(ctx, from, to, spec...)
 }
 
-// PathsChanged lists the paths that differ between two revisions under the given
-// pathspecs. It is the one place a diff becomes a list, so the exclusion in
-// PathsChangedOutside and the single-directory comparison used to recognise a
-// landed changeset cannot drift apart.
-func (r *Repo) PathsChanged(ctx context.Context, from, to string, pathspec ...string) ([]string, error) {
-	return r.pathsChanged(ctx, false, from, to, pathspec...)
-}
-
-// ContentPathsChanged is PathsChanged with rename detection off, for a caller that is asking which paths
-// differ rather than what a diff would show. See ContentPathsChangedOutside for why the difference is not
-// cosmetic: with renames on, a file deleted next to an unrelated file added is reported as one renamed path,
-// and the deleted path appears in no list at all.
+// ContentPathsChanged lists the paths whose content or presence differs between two revisions under the
+// given pathspecs. See ContentPathsChangedOutside for why rename detection is off rather than left to
+// git's default.
 func (r *Repo) ContentPathsChanged(ctx context.Context, from, to string, pathspec ...string) ([]string, error) {
-	return r.pathsChanged(ctx, true, from, to, pathspec...)
-}
-
-func (r *Repo) pathsChanged(ctx context.Context, noRenames bool, from, to string, pathspec ...string) ([]string, error) {
-	args := []string{"diff", "--name-only"}
-	if noRenames {
-		// `diff.renames` is on by default, so asking for no renames is a flag rather than the absence of one.
-		args = append(args, "--no-renames")
-	}
-	args = append(args, from, to, "--")
+	args := []string{"diff", "--name-only", "--no-renames", from, to, "--"}
 	args = append(args, pathspec...)
 	out, err := r.Git(ctx, args...)
 	if err != nil {
@@ -699,14 +677,6 @@ func (r *Repo) TreeHasPaths(ctx context.Context, rev string, paths []string) (ma
 		have[p] = true
 	}
 	return have, nil
-}
-
-func (r *Repo) DiffNames(ctx context.Context, from, to string) ([]string, error) {
-	out, err := r.Git(ctx, "diff", "--name-only", from, to)
-	if err != nil {
-		return nil, err
-	}
-	return splitLines(out), nil
 }
 
 // NumstatEntry is one `git diff --numstat` row. Added/Deleted are -1 for

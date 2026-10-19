@@ -325,7 +325,7 @@ func classifyOrphan(ctx context.Context, repo *git.Repo, db changeset.DefaultBra
 	// Identical changeset content on both sides is what a merge leaves behind, so the comparison decides
 	// whether anything is actually missing.
 	dir := filepath.Join(changeset.Root, slug)
-	changed, err := repo.PathsChanged(ctx, base, head, dir)
+	changed, err := repo.ContentPathsChanged(ctx, base, head, dir)
 	if err != nil {
 		return "", err
 	}

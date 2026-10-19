@@ -611,7 +611,7 @@ func runReviewReopen(ctx context.Context, a *app) error {
 		return &usageError{err}
 	}
 	note := ""
-	if names, err := s.repo.DiffNames(ctx, sp.From, sp.To); err != nil {
+	if names, err := s.repo.ContentPathsChanged(ctx, sp.From, sp.To); err != nil {
 		return err
 	} else if len(names) == 0 {
 		note = fmt.Sprintf("nothing has landed since %s", reviewLabel(s.summary.LatestReview))

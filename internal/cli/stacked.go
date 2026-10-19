@@ -273,7 +273,7 @@ func parentOverlapPhrase(ctx context.Context, repo *git.Repo, st parentStatus, m
 	if err != nil || fork == "" {
 		return ""
 	}
-	theirs, err := repo.PathsChanged(ctx, fork, st.Tip)
+	theirs, err := repo.ContentPathsChanged(ctx, fork, st.Tip)
 	if err != nil {
 		return ""
 	}

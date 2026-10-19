@@ -1795,8 +1795,10 @@ wears the colour git's own diff wears for the same fact — green for a file the
 deleted, blue for one it moved — so the tree and the diff column beside it say one thing in one colour. The
 name of a deleted file goes faint with its red sign, because that is the one row whose subject is not there to
 read. A terminal with no colour to give gets the character alone, which is what every terminal got before.
-The move is git's rename detection, so a repository with `diff.renames` off gets `-` and `+` for the pair git
-called two files.
+Which rows exist is not git's verdict. The list is taken with rename detection off, so a file that leaves and
+a file that arrives are two rows even where git reads them as one move: the path under its new name, and the
+path the bytes left, signed `-`. What each row wears is git's rename detection, so a repository with
+`diff.renames` off gets `-` and `+` for the pair git called two files.
 
 A row also says when the working tree holds a change the commit under review does not: a file written into
 since the span ended, or a folded directory hiding one. No span can say it, because both of its ends are
@@ -2451,7 +2453,8 @@ terminal, but it is a verdict and stays the reviewer's to give: an author reads 
 `no review at index 9: this changeset has 1 review(s) (valid: 0..0 or -1..-1)`.
 
 `"<path>" does not appear in main...HEAD; changed paths: ...` (exit 2) — the path is not in
-the resolved span; the error lists what is.
+the resolved span; the error lists what is, which is every path whose content or presence changed — a path a
+move emptied is in it too.
 
 `working tree must be clean ...` (exit 1) — `change ready` and `change unready` act
 on committed state. `init` commits its scaffolding, so a fresh changeset does not block `change

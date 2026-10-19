@@ -665,10 +665,11 @@ mkdir -p "$SR/src/moved"
 git -C "$SR" mv src/pure.go src/moved/pure.go
 git -C "$SR" rm -q src/gone.go
 printf 'package main\n\n// worth a read\n' > "$SR/src/keep.go"
-# Nothing here may look like the file that went away: git pairs a deletion with an addition when they
-# read alike, and the pair it makes is one `~` row where this fixture wants a `+` and a `-`.
+# The two files here stay unlike each other on purpose: `+` and `-` are this fixture's own claim about the
+# pair, not git's verdict on it. The move below is the pair git does fold — the same bytes under a new name —
+# and the row for the path that move left behind is asserted beside it.
 printf 'package signs\n\nimport "fmt"\n\nfunc Fresh() {\n\tfmt.Println("a different file entirely")\n}\n' > "$SR/src/fresh.go"
-git -C "$SR" add -A && git -C "$SR" commit -qm "four changes"
+git -C "$SR" add -A && git -C "$SR" commit -qm "every kind of change"
 R=$SR
 session signs q
 # The glyphs first, in the plain text the driver reads back: the colour check below is about the codes
@@ -676,6 +677,10 @@ session signs q
 expectall "the file the span created carries +" "$T/signs.raw" $'\u25cb fresh.go +'
 expectall "the file it deleted carries -" "$T/signs.raw" $'\u25cb gone.go -'
 expectall "the file it moved carries ~" "$T/signs.raw" $'\u25cb pure.go ~'
+# git reports a move as one status line, and the tree used to have one row for it: the path the bytes left
+# was not listed, so nothing on the screen said the file was gone. The list answers "at which paths does the
+# content or its presence differ", so both halves are rows and the origin carries the deletion it is.
+expectall "and the path the move left behind is a row of its own" "$T/signs.raw" $'\u25cb pure.go -'
 expectall "and the file it only changed carries nothing" "$T/signs.raw" $'\u25cb keep.go'
 #
 # Which codes carry them is lipgloss's and the terminal's business: this run advertises xterm-256color and

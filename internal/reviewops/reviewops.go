@@ -67,7 +67,7 @@ func Submit(ctx context.Context, repo *git.Repo, cs changeset.Changeset,
 	if err != nil {
 		return Result{}, err
 	}
-	files, err := repo.DiffNames(ctx, before, sha)
+	files, err := repo.ContentPathsChanged(ctx, before, sha)
 	if err != nil {
 		return Result{Commit: sha}, err
 	}

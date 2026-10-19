@@ -295,7 +295,7 @@ func (s *Session) Selector() span.Selector { return s.sel }
 func (s *Session) scan(ctx context.Context, sp span.Span) error {
 	s.current = sp
 
-	names, err := s.repo.DiffNames(ctx, sp.From, sp.To)
+	names, err := s.repo.ContentPathsChanged(ctx, sp.From, sp.To)
 	if err != nil {
 		return err
 	}
@@ -367,12 +367,16 @@ type change struct {
 // changeStatuses asks git what the span did to each file, keyed by the path the span leaves the file at
 // — for a rename, the new path, which is the one the tree already lists.
 //
-// It passes no `-M`, because `DiffNames` — the call whose list this labels — passes none either. The two
-// have to agree about what a rename is. A repository that turns rename detection off gets a delete and
-// an add from both, and the tree says `-` and `+` about the same pair, which is what git itself printed.
+// The signs follow git's own rename settings, the way the patch pane does: a clone with `diff.renames=false`
+// is told `+` and `-` about a pair because that is what its `git diff` prints. The list of rows above does
+// not follow them, and that is deliberate rather than an oversight — it runs `--no-renames` so no path can
+// be missing because git found a lookalike, and the two readings still agree about which rows exist because
+// the list decides that. Where git did report a rename, the path it left behind is a row the list carries
+// and git spent its own status line on, so its sign is written here: the content that was there is gone from
+// that path, whether or not git thinks it arrived somewhere else.
 //
-// It returns no error on purpose. A failure here costs the signs and leaves the patch pane as it was;
-// the list above came from git already, and a failure there is the error the reviewer hears about.
+// It returns no error on purpose. A failure here costs the signs and leaves the patch pane as it was; the
+// list above came from git already, and a failure there is the error the reviewer hears about.
 func (s *Session) changeStatuses(ctx context.Context, sp span.Span) map[string]change {
 	out, err := s.repo.Git(ctx, "diff", "--name-status", sp.From, sp.To)
 	if err != nil {
@@ -386,7 +390,15 @@ func (s *Session) changeStatuses(ctx context.Context, sp span.Span) map[string]c
 		}
 		c := change{Change: changeOf(fields[0])}
 		if len(fields) == 3 {
+			// `R100<TAB>old<TAB>new`, or the copy form. The destination is the row git named; the origin is a
+			// row the list carries because the content left it, and git spent its own line on the pair, so its
+			// sign is written here. A copy leaves its source alone, so only a rename signs it as a deletion.
 			c.From = fields[1]
+			if strings.HasPrefix(fields[0], "R") {
+				if _, ok := statuses[fields[1]]; !ok {
+					statuses[fields[1]] = change{Change: ChangeDeleted}
+				}
+			}
 		}
 		statuses[fields[len(fields)-1]] = c
 	}

@@ -674,7 +674,7 @@ func runChangeFeedback(ctx context.Context, a *app, opts *feedbackOptions) error
 	if err != nil {
 		return err
 	}
-	names, err := s.repo.DiffNames(ctx, from, review.SHA)
+	names, err := s.repo.ContentPathsChanged(ctx, from, review.SHA)
 	if err != nil {
 		return err
 	}

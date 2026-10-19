@@ -2,6 +2,7 @@ package git_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"gitpair/internal/gittest"
@@ -9,9 +10,11 @@ import (
 
 // The two readings of "which paths changed" part company on a deletion paired with an unrelated addition.
 // `git diff` finds renames by default, so dropping one file and writing a similar one in the same commit is
-// reported as one path moving rather than one leaving and one arriving — and the path that left appears in no
-// list at all. A caller asking what a branch still holds cannot afford that, because the content that left is
-// content its reviewer may never have seen deleted; a caller asking what a diff would show can.
+// reported as one path moving rather than one leaving and one arriving — and the path that left appears in no list
+// at all. Every list this package hands a caller is a content list for that reason: the callers ask what
+// differs, and a path missing because git found a lookalike is a lie about a branch. The one reader that
+// wants git's rename verdict is the review TUI's change signs, which asks `diff --name-status` for itself
+// (see TestChangeStatusesSignsBothHalvesOfAMove).
 func TestContentPathsChangedKeepsADeletedPathVisible(t *testing.T) {
 	f, repo := openFixture(t)
 	body := "package main\n\nfunc Account() string { return \"reviewed\" }\n"
@@ -23,18 +26,20 @@ func TestContentPathsChangedKeepsADeletedPathVisible(t *testing.T) {
 
 	ctx := context.Background()
 
-	// The defect, pinned: with rename detection on, the deleted path is not in the list at all, so a caller
-	// that reads the list as "these paths differ" never learns that content left the tree.
-	withRenames, err := repo.PathsChanged(ctx, reviewed, head)
+	// The defect, pinned: with git's rename detection — on by default — the pair is one rename, and the path
+	// that left the tree is in no list. This is what every caller of these lists used to read, so if a future
+	// git or a future refactor makes the plain question answer like the content question, the reading below
+	// stops meaning anything and this is the assertion that says so.
+	withRenames, err := repo.Git(ctx, "diff", "--name-only", reviewed, head)
 	if err != nil {
-		t.Fatalf("PathsChanged: %v", err)
+		t.Fatalf("git diff --name-only: %v", err)
 	}
-	if containsPath(withRenames, "account.go") {
-		t.Fatalf("PathsChanged reported account.go (%v): rename detection is off by default in this git, so the"+
-			" contrast between the two helpers needs re-thinking rather than a green test", withRenames)
+	if lineListed(withRenames, "account.go") {
+		t.Fatalf("git diff --name-only reported account.go (%q): rename detection is off by default in this git, so"+
+			" the contrast this test draws needs re-thinking rather than a green test", withRenames)
 	}
-	if !containsPath(withRenames, "ledger.go") {
-		t.Fatalf("PathsChanged = %v, want the added path listed", withRenames)
+	if !lineListed(withRenames, "ledger.go") {
+		t.Fatalf("git diff --name-only = %q, want the added path listed", withRenames)
 	}
 
 	// The same comparison asked of content rather than of a diff lists both halves.
@@ -68,6 +73,15 @@ func TestContentPathsChangedKeepsADeletedPathVisible(t *testing.T) {
 func containsPath(paths []string, want string) bool {
 	for _, p := range paths {
 		if p == want {
+			return true
+		}
+	}
+	return false
+}
+
+func lineListed(out, want string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		if line == want {
 			return true
 		}
 	}

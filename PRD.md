@@ -2859,8 +2859,12 @@ the one row whose subject is not there to read, and no other change takes the na
 on a file still in the tree would be a claim about the review rather than about the span. A terminal with no
 colour to give gets the character alone, which is what every terminal got before; that the codes reach a real
 one is a pty walkthrough check rather than a Go one, because a unit test is a terminal lipgloss will not colour
-for. The move is git's rename detection, so a repository with `diff.renames` off gets `-` and `+` for the pair
-git called two files.
+for. Which rows exist is not git's verdict: the list is taken with rename detection off, so a file that leaves
+and a file that arrives are two rows even where git reads them as one move — the path under its new name, and
+the path the bytes left, signed `-`. A content question must not lose a path because git found a lookalike,
+and the same rule covers the review submission's file report, `change feedback --name-only`, and the list of
+changed paths a refused `git pair diff` prints. What each row wears is git's rename detection, so a repository
+with `diff.renames` off gets `-` and `+` for the pair git called two files.
 
 A directory's mark is its subtree's: `✓` when every file under it is reviewed, `○` when none is, and
 between the two the count of what is left (`◐ 2/3`), because a tick there would be a claim about
