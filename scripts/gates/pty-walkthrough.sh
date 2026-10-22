@@ -250,6 +250,9 @@ expect "a file the span created carries a + after its name" -1 "$T/paint.raw" "A
 refuse "a file the span only changed carries no sign" -1 "$T/paint.raw" "service.ts +"
 expect "the shortcut bar offers the span picker" -1 "$T/paint.raw" "V picker"
 expect "the shortcut bar offers quit" -1 "$T/paint.raw" "q quit"
+# The count a motion is typed with is a key the list reads, so the bar has to name it: a reviewer
+# who never hears of `10j` has no reason to try it.
+expect "and the bar names the count a row key is typed with" -1 "$T/paint.raw" "10j 10 rows"
 # The box is closed on all four sides in a real terminal, including the side nearest the diff column.
 expect "the changeset box closes on its right" -1 "$T/paint.raw" $'\u256e'
 expect "and a child sits deeper than the directory over it" -1 "$T/paint.raw" $'    \u25cb'
@@ -302,6 +305,7 @@ expect "the drill opens over the list" 2 "$T/drill.raw" "Pick Commit"
 expect "the drill says which end the pick lands on" 2 "$T/drill.raw" "for BASE"
 expect "the list's bar names the key that asks for the filter" 2 "$T/drill.raw" "/ filter"
 expect "and names the paging keys without the modifier too" 2 "$T/drill.raw" "d/u ctrl-d/u half"
+expect "and the count a row key is typed with" 2 "$T/drill.raw" "10j 10 lines"
 # Each window starts at the keystroke whose effect it wants to see, not at the wait after it: the
 # frame a key paints belongs to that key, and the frames after it show the *next* state -- the filter
 # one character shorter, the bar of the mode the reviewer has already left.
@@ -397,6 +401,19 @@ expectfile "the difftool actually ran" "$T/tool-ran"
 expectbytes "the session took an alternate screen" "$T/tool.raw" $'\033[?1049h'
 expectbytes "the session left the alternate screen on quit" "$T/tool.raw" $'\033[?1049l'
 
+# --- 7b. a count typed before a row key is how far it goes -------------------
+step "count: 10j walks the tree to its last row, and Enter works on the row it landed on"
+# The tree holds five rows, so a count of ten clamps at its last one: src/service.ts, the row
+# scenario 7 reaches by typing four `j`s. Enter on that row is the difftool, so the marker the tool
+# leaves behind is the evidence that ten rows were walked: read the digits as nothing, and the
+# cursor stays two rows up on ABOUT.md, whose Enter is the editor and leaves no marker. The editor
+# is pinned to a no-op for the same reason -- a count that regressed should fail a check, not hang
+# the harness on a real vi.
+git config diff.tool marker
+git config difftool.marker.cmd "touch $T/counted-tool-ran"
+GIT_EDITOR=true session counted 1,0,j,enter,q
+expectfile "the difftool opened on the row 10j landed on" "$T/counted-tool-ran"
+
 # --- 8. a terminal the renderer does not know ------------------------------
 # What this asserts is hygiene, not usability: with TERM=dumb nothing paints (bubbletea has no
 # colour capability to build a frame from), so the session is harmless and useless. It quits
@@ -418,6 +435,7 @@ step "small terminal: p takes the screen with the diff"
 # has to leave with the key that only ever exits.
 ( COLS=60 ROWS=14; session overlay p,ctrl-c )
 expect "the overlay's shortcut bar is the overlay's own" 0 "$T/overlay.raw" "ctrl-f/b page"
+expect "and it names the count a row key is typed with" 0 "$T/overlay.raw" "10j 10 lines"
 expect "the overlay shows git's diff" 0 "$T/overlay.raw" "@@"
 expect "the overlay carries the span the diff is measured against" 0 "$T/overlay.raw" "current"
 refuse "the list's counter is off screen while the diff has the screen" 0 "$T/overlay.raw" "reviewed"

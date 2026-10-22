@@ -79,6 +79,14 @@ const wheelStep = 3
 // Nothing else reads the mouse. A click changes no review state, so a reviewer can rest a finger
 // on the button without wondering what the screen is about to mark.
 func (m reviewModel) handleWheel(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// The pointer is an interaction with this screen the way a keystroke is, so a count still being
+	// typed is spent here rather than left for the next `j` to honour -- a notch the reviewer rolled
+	// between the number and the key is the reviewer changing their mind about the distance. What
+	// does not spend it is the clock and the terminal: the drift tick, an expiring note, a resize and
+	// a patch arriving are nobody's keystroke, and a count typed a row at a time would not survive
+	// one of them. The wheel reports motion only under a held button, so a pointer dragged across
+	// the window cannot be the thing that clears it either.
+	m.count = 0
 	if !m.mouse.Report || !m.previewShowing() {
 		return m, nil
 	}

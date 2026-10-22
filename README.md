@@ -1724,7 +1724,7 @@ and the reviewed counter under those:
 ═══════════════════════════════════════
 0 / 2 reviewed
 ────────────────────────────────────────
-j/k move  gg/G ends  ctrl-d/u half page  ctrl-f/b page  h/l fold  c fold all  enter open  d diff
+j/k move  10j 10 rows  gg/G ends  ctrl-d/u half page  ctrl-f/b page  h/l fold  c fold all  enter open  d diff
 space reviewed  e edit  a about  v spans  V picker  s submit  p preview
 z full  f files  tab preview  q quit
 ```
@@ -1770,6 +1770,18 @@ are going. A half with no rows has no ends of its own, and there the jump goes t
 `ctrl-f` and `ctrl-b` and nothing else; `ctrl-c` and `q` are what quit.) The shortcut bar is the bar of the
 half that holds the keys, which is how a key belonging to the other half is a key that is not offered rather
 than a key that quietly does nothing.
+
+A number typed before one of these keys says how far that key goes, the way vim takes it: `10j` walks ten
+rows and `2 ctrl-f` pages two pages, both counted in the same window the single key counts. The half-page
+pair reads no number, because half a page is the distance that keeps a line of context across the break, and
+the key for two pages is `ctrl-f`. `gg` and `G` reach the two ends whatever number precedes them. The
+number belongs to the next key alone: any other key spends it, so a number typed and then left goes away
+instead of moving the row the following key lands on. A digit is a key of its own nowhere else on the
+screen — in the diff's search field and in the drill's filter it is text. What spends a count is the next
+thing the reviewer does to this screen: any key the region holding the keys reads, including one it does
+nothing with, and any turn of the wheel, which takes its own three rows whatever was typed before it. What
+leaves a count standing is what nobody typed — the drift check, an expiring note, a resize, a patch arriving
+— because a count typed a row at a time would not survive the clock.
 
 Each file sits under its directory, and a row prints only the name the rows above it have not said.
 A directory that holds nothing but one directory is folded into that row. `src/` above holds `a.ts` and `ui/`,
@@ -1959,7 +1971,8 @@ chased through the prose the way it is chased through a hunk.
 
 `p` moves into the pane and does nothing else: the keys go to the diff, and it scrolls with the
 keys the whole-screen preview uses — `j`/`k` a row, `d`/`u` or `ctrl-d`/`ctrl-u` half a page,
-`ctrl-f`/`ctrl-b` a page, `gg` the top and `G` the bottom — over the file the pane was already showing. Paging a diff that
+`ctrl-f`/`ctrl-b` a page, `gg` the top and `G` the bottom — over the file the pane was already showing, and
+with the same number before the row keys and the page keys that the list column takes. Paging a diff that
 way is the whole point: the four page keys belong to whichever region holds them, so a diff too long to
 fit is paged by moving into it rather than by borrowing the list's keys from across the screen.
 The wheel does the same job without the moving into it: one notch is three rows of the diff on
@@ -2033,7 +2046,8 @@ the keyboard, and the list takes the keys back. Same git bytes, same numbers, sa
 width, with the file and the span it is measured against on the line above it (the span is named in
 the list otherwise, and the list is gone). It scrolls with `j`/`k`, `d`/`u` or `ctrl-d`/`ctrl-u` for half a page,
 `ctrl-f`/`ctrl-b` for a page, `gg` for the top and `G` for the bottom, and `/` searches it the same way the
-pane does. `Esc`, `Enter` or `q` gives the list
+pane does — a number before the row keys counts rows of the file and a number before the page keys counts
+pages, as it does out in the list. `Esc`, `Enter` or `q` gives the list
 back, and so do the keys that move the keys — `tab`, `shift-tab` and `f` — since the half of the list one of
 them names is only drawn once the diff stops covering the screen. The diff is a stop on the ring here as much as anywhere, which is what lets `tab` reach it: a narrow
 terminal is the one case where the ring would otherwise have a hole where the pane cannot be. Keys mean
@@ -2105,7 +2119,8 @@ show you work the span does not contain. `git pair diff` takes the same flags an
 read-only half is about the screen, where the mistakes would be made.
 
 `V` opens the span picker, where both ends are chosen before either takes effect: `Tab` moves between
-the BASE and HEAD columns, `j`/`k` move, `Space` sets the end under the cursor, and `Enter` applies
+the BASE and HEAD columns, `j`/`k` move — with a number typed before them moving that many rows, as they do
+in the list — `Space` sets the end under the cursor, and `Enter` applies
 the pair — with the lines under the columns saying what that pair resolves to, in the same words the
 header and the band use (`main...current`, not a second spelling of the same span), and whether
 the screen would go read-only, before you commit to it. When git cannot resolve the pair there is no
@@ -2136,7 +2151,8 @@ with the same name are two different choices, and drift has to be watched on the
 
 Inside either drill the keys are in one of two modes, and the shortcut bar names the keys of the mode
 you are in. The list has them first — `j`/`k`, `gg`/`G`, `d`/`u` or `ctrl-d`/`ctrl-u` for half a page,
-and `f`/`b` or `ctrl-f`/`ctrl-b` for a whole one — with `Space` or `Enter` picking and `esc` or `q`
+and `f`/`b` or `ctrl-f`/`ctrl-b` for a whole one, with a number before the row keys for that many rows and
+before the page keys for that many pages — with `Space` or `Enter` picking and `esc` or `q`
 stepping back to the
 columns. `/` puts the keys on the filter instead, starting a fresh one as `less` does, because the text
 you are replacing is the reason you typed `/`; there what you type is the filter — a space included,
