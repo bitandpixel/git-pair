@@ -1,0 +1,6 @@
+# The merge is the integrate job's, so the advice names the hand-off and never the author's own
+# merge — the sentence this repository could not afford is the one that offers the merge as an
+# exit. This file is also the feature's first customer: the changeset that added the route
+# declares it here, and every screen that reads it now says what this repository actually does.
+[landing]
+route = "automated"

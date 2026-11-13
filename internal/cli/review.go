@@ -415,6 +415,7 @@ func runReviewSubmit(ctx context.Context, a *app, opts *submitOptions) error {
 			"empty":           result.Empty(),
 			"previous_review": previous,
 			"next_action":     nextActionFor(result.Outcome, lc),
+			"landing_route":   string(lc.Route.Effective()),
 			"hooks":           hooksForJSON(hookResults),
 			"overridden":      overridden,
 		})

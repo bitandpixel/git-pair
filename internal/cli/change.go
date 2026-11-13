@@ -823,6 +823,9 @@ type waitResult struct {
 	WaitedSeconds    int    `json:"waited_seconds"`
 	TimedOut         bool   `json:"timed_out"`
 	NextAction       string `json:"next_action"`
+	// LandingRoute is the route the repository declared, resolved — the same field `check --json` and
+	// `status --json` carry. The sentence `next_action` spells was selected by it.
+	LandingRoute string `json:"landing_route"`
 }
 
 // waitInput is what a check found; reportWait turns it into the printed contract.
@@ -1025,6 +1028,7 @@ func reportWait(a *app, slug string, lc landingContract, r waitInput) error {
 		out.ReviewCommitFull = r.Review.SHA
 	}
 	out.NextAction = waitNextAction(r.State, r.Ref, lc)
+	out.LandingRoute = string(lc.Route.Effective())
 
 	if a.json {
 		if err := a.emitJSON(out); err != nil {

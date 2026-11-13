@@ -118,7 +118,8 @@ whether it exists.
   "reason": "marked ready by 8065dae",
   "span": "main...current",
   "stack": [],
-  "next_action": "waiting for a reviewer: `git pair review open` (author: `git pair change wait` to block on it)"
+  "next_action": "waiting for a reviewer: `git pair review open` (author: `git pair change wait` to block on it)",
+  "landing_route": "default"
 }
 ```
 
@@ -139,7 +140,9 @@ was cut, and `span` is named by the measurement, not by the record.
 
 `git pair check --json` carries the verdict in `ready` and exits 0 either way, so a gate asks `jq`
 rather than `$?`. `reasons` names every failed condition, empty when it passed; `policy` is
-`approve-only` or `approve-or-feedback`; `next_action` appears only when `ready` is true. The human form
+`approve-only` or `approve-or-feedback`; `next_action` appears only when `ready` is true, and
+`landing_route` names the route the repository declared that selected it — `default` when the file is
+absent or a declaration could not be honored, with the defect on stderr. The human form
 prints `state:` beside `NOT READY:` — the same value as this `state` — so "a reviewer said no" and "a
 reviewer said yes and something else moved" read differently without a second command. `integrating`
 is the separate question of whether the author asked for this merge — true only while the declaration is

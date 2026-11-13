@@ -3,6 +3,8 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"gitpair/internal/landingconfig"
 )
 
 // The consolidation this changeset asked for is only real while the documents quote the code. Two sentences
@@ -21,10 +23,16 @@ func TestDocumentsQuoteTheLandingSentencesTheCodeBuilds(t *testing.T) {
 	)
 	waiting := waitingNextAction(landingContract{Destination: destination, WaitingOn: parent})
 	landing := landingNextAction(landingContract{Destination: destination})
-	handoff := handoffLine(landingContract{Destination: destination}, branch)
+	// The automated route's sentence: the hand-off promoted to the whole answer, the gate still first.
+	// The PRD and the README quote it as the example of what a declared route prints.
+	automated := landingNextAction(landingContract{Destination: destination,
+		Route: landingconfig.RouteAutomated, Branch: branch})
+	// The hand-off contract carries the branch now; the default route leaves both exits on, which is what
+	// these quotes describe.
+	handoff := handoffLine(landingContract{Destination: destination, Branch: branch})
 	// The same line with the branch left as a placeholder, which is how prose quotes a command it cannot
 	// name: the words around it still come from the builder.
-	handoffCommands := handoffLine(landingContract{Destination: destination}, "<branch>")
+	handoffCommands := handoffLine(landingContract{Destination: destination, Branch: "<branch>"})
 	start := strings.Index(handoffCommands, "`git pair change integrate`")
 	if start < 0 {
 		t.Fatalf("the hand-off line does not name the declaration command: %q", handoffCommands)
@@ -39,12 +47,14 @@ func TestDocumentsQuoteTheLandingSentencesTheCodeBuilds(t *testing.T) {
 	push := pushNextAction(branch, destination)
 
 	quotes := map[string][]string{
-		// The canonical statement quotes the sentences in full, including the declared path's.
-		"../../PRD.md": {waiting, landing, handoff, waitStep, takeLine},
+		// The canonical statement quotes the sentences in full, including the declared path's — and the
+		// automated route's, which is the sentence a repository with a merge job reads instead.
+		"../../PRD.md": {waiting, landing, handoff, waitStep, takeLine, automated},
 		// The human guide and the agent reference quote the waiting sentence and the hand-off's commands,
 		// in their own surrounding prose. The README also carries the push sentence in two transcripts, which
-		// is the test that moving it into a shared builder left them byte-identical.
-		"../../README.md":                         {waiting, handoffCommands, push},
+		// is the test that moving it into a shared builder left them byte-identical — and the automated
+		// route's sentence, in the configuration section's transcript.
+		"../../README.md":                         {waiting, handoffCommands, push, automated},
 		"../../skills/git-pair/references/cli.md": {waiting, handoffCommands},
 		// The agent that declares and pushes reports a wait, so it has to have seen the sentence.
 		"../../skills/git-pair/references/integration.md": {waitStep},

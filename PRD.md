@@ -4023,16 +4023,22 @@ Two facts decide the sentence, both read from the repository rather than from th
 the work is going, which the destination walk above answers and a stacked child's recorded base does not; and
 whether something below it has to land first.
 
-**A sentence names the step and the destination, never the actor.** The merge is ordinary git performed by
+**A sentence names the step and the destination; the route names the exit.** The landing is ordinary git performed by
 whoever owns the destination branch (§9.5, §13.4), and git-pair asks nothing about who that is or what they
 run: a person with merge rights and a job set up to merge declared work satisfy the same three facts —
 approved, declared, and green on the declared head (§11.3). So no sentence names a forge, a workflow, a
 runner, or a job, and none depends on detecting one. A workflow file existing is not a workflow merging, and
-guidance built on reading one would be wrong in every repository that merged some other way.
+guidance built on reading one would be wrong in every repository that merged some other way. What a
+repository may do is say so. `.git-pair/config` declares a landing route, and the route selects which exit
+the sentence offers — the author's own merge, the hand-off, or a sentence the repository writes itself. A
+stated fact is not a detected one: the declaration is read from a file the repository owns, never inferred
+from a workflow's presence, and git-pair still runs no merge and names no tool the repository did not name
+first.
 
-**Both exits are printed where a human reads; one is printed where a machine reads.** Beside the author's own
-merge, `status` and `check` name the other way the work gets taken — the hand-off, which is a request and a
-push and nothing else:
+**Both exits are printed where a human reads; one is printed where a machine reads.** Under the default
+route — an absent file, or `route = "default"` — the author's own merge is the next step and `status` and
+`check` name the other way the work gets taken beside it — the hand-off, which is a request and a push and
+nothing else:
 
 ```text
 Next: `git pair check`, then merge into main with ordinary git
@@ -4046,13 +4052,39 @@ offer the command answers with exit 1 is the failure the rule exists to prevent:
 would say the merge is available two lines under "wait for a reviewer". `next_action` in `--json` stays one
 instruction, because a consumer parsing advice should never have to choose between two exits.
 
+**A declared route answers the question the fork leaves open.** `manual` prints the merge alone, `automated`
+the hand-off alone, `custom` the repository's own sentence — and each of the three removes the other exits
+from every surface, human or machine, because a repository that answered has no fork to print. The automated
+sentence is the hand-off promoted, the gate still first:
+
+```text
+Next: `git pair check`, then hand it to main's owner: `git pair change integrate`, then `git push origin booking-transaction`
+```
+
+This is the sentence a repository whose merge runs behind a job cannot afford to be without. The default
+route offers the author's own merge as an exit, and a reader that takes the primary instruction at its word
+— which is what an agent is — merges straight to the destination and past the job that was set up to verify
+the merge it is about to receive. Under `automated` that sentence prints nowhere: not as the next step, not
+as an "or" line beside the wait, not in the tail of a stacked child's waiting sentence. A custom route
+fills its own sentence from a template — `next` in the same table, with `{branch}`, `{destination}` and
+`{changeset}` as the placeholders git-pair substitutes; the destination is the one the walk resolved, so a
+stacked child's template names where its work actually goes. A declaration this build cannot honor — an
+unknown route value, a template naming a placeholder git-pair does not fill, a `custom` route without a
+`next` — shows the default view with the defect named on stderr of every command that read the file: the
+fallback is the unopinionated answer, never a guess at what the repository meant, and never a gate failure,
+because a wrong label makes advice wrong rather than work unmergeable. `check --json`, `status --json`,
+`change wait --json` and `review submit --json` carry the resolved route as `landing_route`, so a consumer
+branches on a field instead of parsing the sentence it selected.
+
 **The declared path is that statement one step later.** Once the request for this head is recorded, the merge
 sentence is nobody's next step — and neither is a second `change integrate`, which records nothing. So
 `check` (§11.3), `status` (§11.1) and a re-run of `change integrate` (§9.9) say the same three things in the
 same order: while the branch is not on the remote, the step is the push, because a merge somebody else
 performs can only be performed on what they can see; once it is, the step is the wait — waiting on main's owner to merge it: `git pair status --changeset booking-transaction`
 reports the landing — with the author's own merge printed beside it (or land it yourself: `git pair check`,
-then merge into main with ordinary git) so waiting is never the only exit offered. Which of the two the screen picks is measured against `origin` and the branch the changeset records,
+then merge into main with ordinary git) so waiting is never the only exit offered. That alternative is the
+merge exit, and a route that removed the merge as an exit removes the line with it: under `automated` and
+`custom` the wait is the whole answer, which is the repository's own declaration doing what it said. Which of the two the screen picks is measured against `origin` and the branch the changeset records,
 because that is the remote and the ref the advice itself names; anything it cannot read answers unpublished,
 which costs a re-run of a harmless command. And when the newest marker is a declaration that names a commit
 the branch has left behind, the step is to declare this head — not a push of a request nobody will act on.

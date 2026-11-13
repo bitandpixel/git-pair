@@ -931,7 +931,10 @@ under it — `git pair change integrate`, then `git push origin <branch>`, handi
 destination — exactly where that command would record a declaration, and nowhere it would refuse one. Past the
 declaration the sentence changes again: while the branch is unpublished it names `git push origin <branch>`, and
 once the request is on the remote it names the wait for the destination's owner, with the author's own merge
-printed under it on the human screens as the other exit (§PRD §21).
+printed under it on the human screens as the other exit (§PRD §21). Which exit the sentence offers is the
+route the repository declared in `.git-pair/config`, resolved and reported beside it as `landing_route` —
+`default` when the file is absent and when a declaration could not be honored, with the defect named on
+stderr — so a consumer branches on the field instead of parsing the sentence it selected.
 
 ```json
 {
@@ -1136,7 +1139,9 @@ Usage errors and git failures still exit 2 and 3 here.
 A passing verdict also carries `next_action` — the same sentence `status` prints in its `next_action`,
 naming the merge — so an agent that gates on `ready` learns what
 comes next without parsing the human output. It is present only when `ready` is true, because on a
-failing gate the next step is `reasons`. Where a landed parent leaves a restack the verdict is free to advise,
+failing gate the next step is `reasons`. The route the repository declared selected that sentence, and
+`landing_route` names it — the same resolved value `status --json` carries, read on a failing gate too
+because it is a fact about the configuration rather than about the verdict. Where a landed parent leaves a restack the verdict is free to advise,
 that step is appended to it; where the restack would cost the standing approval it is left out of this field
 and out of the human verdict alike, and `parent_approval_survives_landing` says which of the two happened
 (PRD §21).
@@ -2225,6 +2230,51 @@ that is empty or whitespace-only counts as no template at all: the built-in scaf
 that names it, not a quiet return to the built-in — an author who committed a template expects their
 template. And a repository that has adopted a template still gets the warning for a changeset holding
 the built-in scaffold, which was written before the template arrived and is just as undescribed.
+
+The landing route is the repository's answer to the question the landing advice otherwise leaves to the
+reader: who lands the work. `git pair check`, `status`, `change wait` and `review submit` all end in the
+same sentence — `check`, then the merge into the destination with ordinary git — and a reader that takes
+the primary instruction at its word merges straight to the destination. That is correct where the author
+owns the destination, and wrong exactly where a repository set up a job to merge declared work, because
+the merge an agent performs by hand is the merge that runs past the verification the job exists to run.
+`.git-pair/config` declares the route, and the advice follows it:
+
+```toml
+# .git-pair/config
+[landing]
+route = "automated"
+```
+
+Four routes exist. `default` — also what an absent file means — prints both exits: the merge as the next
+step, the hand-off beside it (``or hand it to main's owner: `git pair change integrate`, then `git push
+origin <branch>``). `manual` names the merge as the whole answer and prints nothing beside it.
+`automated` names the hand-off as the whole answer, and the merge sentence is then removed from every
+surface — not demoted to an alternative, removed — because the sentence a repository with a merge job
+cannot afford is the one that offers the merge as an exit:
+
+```text
+Next: `git pair check`, then hand it to main's owner: `git pair change integrate`, then `git push origin booking-transaction`
+```
+
+`custom` replaces both with a sentence the repository writes, in `next` under the same table:
+`next = "push {branch}, then open the pull request into {destination} and merge it there once its checks
+pass"`. The pull request reviewed by a human is the shape that needs it — the step names a forge, so the
+repository names the forge and git-pair never has to. Three placeholders are filled: `{branch}` is the
+branch the work sits on, `{destination}` the branch the walk resolved — a stacked child's destination is
+where its parent landed, so the template names the right branch without the repository knowing the stack
+— and `{changeset}` the changeset id. The gate stays git-pair's: the sentence that offers the template
+puts `git pair check` in front of it, whatever the template says.
+
+A file this build cannot honor is reported, not guessed at. An unknown route value, an unknown key, an
+unknown section, a `custom` route with no `next`, a `next` under any other route, or a template naming a
+placeholder git-pair does not fill each prints
+`git-pair: warning: .git-pair/config: <defect>; the default landing advice is shown` on stderr — once per
+run, however many commands and surfaces read the file — and the default route's advice is shown. The
+fallback is never a gate failure: a wrong label makes advice wrong, not work unmergeable. The resolved
+route is reported beside the sentence it selected as `landing_route` in `check --json`, `status --json`,
+`change wait --json` and `review submit --json` — `default`, `manual`, `automated` or `custom` — so a
+consumer branches on the field rather than parsing the prose. Commit the file: the declaration is
+repository policy, and the next checkout starts from it.
 
 ## Development
 

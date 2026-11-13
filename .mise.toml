@@ -103,11 +103,12 @@ run = """
 set -eu
 mise run build
 bash scripts/gates/e2e-29.sh
+bash scripts/gates/landing-route.sh
 bash scripts/gates/pty-walkthrough.sh
 bash scripts/gates/ci-integrate.sh
 """
 depends = ["check"]
-description = "check, then replay the PRD §29 loop, the pty TUI walkthrough, and the CI merge job (needs python3)"
+description = "check, then replay the PRD §29 loop, the landing routes, the pty TUI walkthrough, and the CI merge job (needs python3)"
 
 # Markdown is formatted the way Go is: one tool, its output checked by `check`. The two modes are split
 # on purpose. `check` is what the gate runs and it rewrites nothing — a gate that fixes what it finds
