@@ -10,6 +10,8 @@ follows it.
 
 ## What changed
 
+> can you also adopt the automated landing route for this very project to dogfood the feature?
+
 `.git-pair/config` gains a `[landing]` table with one decision in it:
 
 ```toml
