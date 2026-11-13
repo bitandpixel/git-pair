@@ -10,8 +10,6 @@ follows it.
 
 ## What changed
 
-> can you also adopt the automated landing route for this very project to dogfood the feature?
-
 `.git-pair/config` gains a `[landing]` table with one decision in it:
 
 ```toml
@@ -40,6 +38,10 @@ A declaration this build cannot honor — an unknown route value, an unknown key
 `next`, a `next` under any other route, a template naming a placeholder git-pair does not fill — shows the
 default view with the defect named on stderr, once per run. Never a gate failure. `check --json`,
 `status --json`, `change wait --json` and `review submit --json` carry the resolved route as `landing_route`.
+
+This repository adopts the route it adds: `.git-pair/config` declares `automated`, so the tool's own screens
+in this repository stop offering the merge as an exit and name the declaration and the push instead. The
+integrate job has been the merge's owner here since the CI profile landed; the advice now says so.
 
 ## Design decisions
 
@@ -70,6 +72,10 @@ default view with the defect named on stderr, once per run. Never a gate failure
   the merge exit, and both defect fallbacks.
 - `mise run check` passes: markdown format, gofmt, vet, full suite. The landing-route gate passes:
   `bash scripts/gates/landing-route.sh`.
+- The dogfood is read, not only built: with `.git-pair/config` in place, this changeset's own `git pair check`
+  and `status`, read through a build of this changeset, name the hand-off and print no merge sentence. The
+  shared `git pair` on PATH is an older build and answers with the default advice — the designed degradation,
+  observed live: a binary older than the feature ignores a file it does not read.
 
 ## Known limitations
 
