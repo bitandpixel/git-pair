@@ -230,6 +230,13 @@ Asked to land a change, you declare it: `check`, `change integrate`, push, then 
 merge becomes yours only where the repository's own workflow says it is; a session instruction does not make it
 yours, and `git pair change integrate` is never the merge.
 
+The repository may also declare which of those steps the advice's answer is: `.git-pair/config` states a
+landing route, and the sentence `check`, `status`, `change wait` and `review submit` print follows it. Under
+`automated` the sentence names the declaration and the push, and the merge is offered nowhere — the
+repository saying the merge is a job's. Under `custom` it names the step the repository wrote, such as
+opening a pull request. Read the sentence the tool prints rather than a remembered one, and let
+`landing_route` in `--json` tell you which route you are standing in.
+
 A stacked child cannot be landed until its parent has been landed. `change integrate` will refuse to
 declare the child. A passing `check` on a child is not permission to merge the child. Work to land the bottom of
 the stack first.

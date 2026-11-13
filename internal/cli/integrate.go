@@ -293,7 +293,8 @@ func reportIntegrate(ctx context.Context, a *app, s *session, dest changeset.Des
 			// Nothing was written because the head is already handed over — the declared path, read from the
 			// same builder `check` and `status` use. This path used to compute an action and never show it, so
 			// an author re-running the command was told "nothing recorded" and left without a step.
-			out.NextAction = declaredNextAction(landingContract{Destination: dest.Ref}, s.cs.Branch, s.cs.Slug,
+			out.NextAction = declaredNextAction(landingContract{Destination: dest.Ref, Route: s.landing.Route},
+				s.cs.Branch, s.cs.Slug,
 				declaredPath{CoversHead: alreadyDeclared(s) != "",
 					Pushed: declarationPushed(ctx, s.repo, s.cs.Branch, s.head)})
 		}
@@ -320,8 +321,9 @@ func reportIntegrate(ctx context.Context, a *app, s *session, dest changeset.Des
 		a.printf("  merge into: %s%s\n", displayRef(dest.Ref), destinationNote(dest))
 		a.printf("  next:        %s\n", out.NextAction)
 		// Indented under the step it stands beside, at the width of the `next:` prefix above. The other exit,
-		// offered where the request is already visible to the person who can act on it.
-		if alt := declaredAlternative(landingContract{Destination: dest.Ref},
+		// offered where the request is already visible to the person who can act on it — and where the route
+		// still offers the author's own merge at all.
+		if alt := declaredAlternative(landingContract{Destination: dest.Ref, Route: s.landing.Route},
 			declaredPath{CoversHead: alreadyDeclared(s) != "",
 				Pushed: declarationPushed(ctx, s.repo, s.cs.Branch, s.head)}); alt != "" {
 			a.printf("               %s\n", alt)

@@ -6,6 +6,7 @@ import (
 
 	"gitpair/internal/changeset"
 	"gitpair/internal/git"
+	"gitpair/internal/landingconfig"
 	"gitpair/internal/lifecycle"
 	"gitpair/internal/model"
 )
@@ -48,6 +49,22 @@ type landingContract struct {
 	// screen that answers with an error is the advice M1 exists to remove — so this fact decides whether the
 	// sentence points, or says what is missing and names the command that resolves it.
 	ParentGone bool
+	// Route is the landing route the repository declared in `.git-pair/config`, and Next the template a
+	// custom route reads. They travel with the contract because they select the exit the sentence offers:
+	// the same destination and the same waiting-on parent are offered as the author's own merge, as the
+	// hand-off, or as the repository's own sentence, and the choice is the repository's, not the reader's.
+	// The zero value is the default route, so a contract built without a declaration advises the way an
+	// undeclared repository always has.
+	Route landingconfig.Route
+	// Next is the custom route's template, with {branch}, {destination} and {changeset} as the
+	// placeholders the sentence fills. Read only when Route is custom; Parse guarantees a custom route
+	// carries a template, so an empty Next here is never read.
+	Next string
+	// Branch is the branch the work sits on, and Slug the changeset's id: the hand-off's push and the
+	// template's placeholders name them. Empty falls back to the display forms the sentences already used
+	// ("<branch>", "<changeset>").
+	Branch string
+	Slug   string
 }
 
 // landingContractFor reads the two facts a landing sentence states, from the repository rather than from the
@@ -58,6 +75,15 @@ type landingContract struct {
 // integrate`'s refusal — ask the same questions of the same tree and do return the error, because a merge that
 // goes ahead on an unreadable destination is the expensive direction.
 func landingContractFor(ctx context.Context, repo *git.Repo, s *session) landingContract {
+	// The declaration travels with the contract: the route selects which exit the sentence offers, and the
+	// branch and slug name the work inside the exits that name them — the hand-off's push, the template a
+	// custom route fills.
+	out := landingContract{
+		Route:  s.landing.Route,
+		Next:   s.landing.Next,
+		Branch: s.cs.Branch,
+		Slug:   s.cs.Slug,
+	}
 	below, err := stackBelow(ctx, repo, s.cs, s.trunk)
 	if err != nil {
 		below = stackUnder{}
@@ -65,7 +91,8 @@ func landingContractFor(ctx context.Context, repo *git.Repo, s *session) landing
 	if !below.stacked() {
 		// Work measured against the integration branch: the base is the destination, and there is nothing
 		// below it to wait for. This is the sentence exactly as it has always read.
-		return landingContract{Destination: s.cs.Base}
+		out.Destination = s.cs.Base
+		return out
 	}
 	// Ask the parent where its own work is going rather than walking the child's chain: the child follows the
 	// parent there, so it is the same answer, and the walk is what would make this cost grow with the stack.
@@ -79,7 +106,7 @@ func landingContractFor(ctx context.Context, repo *git.Repo, s *session) landing
 			target = s.cs.Base
 		}
 	}
-	out := landingContract{Destination: target}
+	out.Destination = target
 	if below.Landed == "" {
 		out.WaitingOn = below.name()
 		// `Tip` is empty only for a parent branch this clone no longer has (`ParentOf` distinguishes that
@@ -157,24 +184,90 @@ func declarable(s *session, f declareFacts) bool {
 }
 
 // handoffLine is the second exit beside the author's own merge: hand it to whoever owns the destination
-// branch. It is printed on the human screens and nowhere else — `next_action` stays one instruction, so a
-// machine consumer is never asked to parse a fork out of advice — and it names no actor beyond "the owner of
-// <destination>": whoever that is, person or pipeline, satisfies the same three facts of approved, declared,
-// and green, and git-pair asks nothing about how they merge (PRD §26).
+// branch. Under the default route it is printed on the human screens and nowhere else — `next_action` stays
+// one instruction, so a machine consumer is never asked to parse a fork out of advice — and it names no actor
+// beyond "the owner of <destination>": whoever that is, person or pipeline, satisfies the same three facts of
+// approved, declared, and green, and git-pair asks nothing about how they merge (PRD §26). A route that names
+// the hand-off as the whole answer (`automated`) does not print this line at all: the same body is then the
+// primary sentence, built by `handoffStep` straight into `next_action`.
 //
 // The push is part of the step rather than a courtesy. A merge performed by somebody else can only be
 // performed on what they can see, which is what makes the hand-off a different instruction from the author
 // merging from their own clone.
-func handoffLine(lc landingContract, branch string) string {
+func handoffLine(lc landingContract) string {
+	return "or " + lc.handoffStep()
+}
+
+// handoffStep is the hand-off exit without the "or" that prefixes it when it stands beside the author's own
+// merge: the ask and the push that makes it visible, in one line. The default route prints it as the second
+// exit and adds the "or" on top; the automated route prints it as the whole answer, because the repository
+// has said the merge is not the author's. One spelling of the body, two positions — the sentence the
+// destination owner reads is the same one the alternative line offered.
+func (lc landingContract) handoffStep() string {
 	target := displayRef(lc.Destination)
 	if target == "" {
 		target = "the destination branch"
 	}
+	branch := lc.Branch
 	if branch == "" {
 		branch = "<branch>"
 	}
-	return fmt.Sprintf("or hand it to %s's owner: `git pair change integrate`, then `git push origin %s`",
+	return fmt.Sprintf("hand it to %s's owner: `git pair change integrate`, then `git push origin %s`",
 		target, branch)
+}
+
+// mergeStep is the author's own merge exit: the step and the destination, never the actor — whoever owns
+// the destination branch performs it, with whatever merge git runs (PRD §26). The destination note travels
+// with it, because the note explains a destination the changeset's own record does not name; the waiting
+// sentence omits it and builds its tail from `afterTheGate` instead, since a parent that has not landed
+// anywhere has no landing to name.
+func (lc landingContract) mergeStep() string {
+	target := displayRef(lc.Destination)
+	if target == "" {
+		target = "the base branch"
+	}
+	return fmt.Sprintf("merge into %s with ordinary git%s", target, lc.DestinationNote)
+}
+
+// templateStep is the custom route's exit: the repository's own sentence with the facts git-pair holds
+// filled in. The gate is not part of it — the sentence offering this exit puts "`git pair check`, then "
+// in front, because the gate is git-pair's contract and the template is the step that follows it. Parse has
+// already refused a template naming a placeholder Expand does not fill, so the substitution is total.
+func (lc landingContract) templateStep() string {
+	branch := lc.Branch
+	if branch == "" {
+		branch = "<branch>"
+	}
+	target := displayRef(lc.Destination)
+	if target == "" {
+		target = "the destination branch"
+	}
+	slug := lc.Slug
+	if slug == "" {
+		slug = "<changeset>"
+	}
+	return landingconfig.Expand(lc.Next, branch, target, slug)
+}
+
+// afterTheGate is the tail the waiting sentence ends on: this changeset's own step once the parent's
+// landing is in, under the route the repository declared. The default tail is the merge without the
+// destination note — while waiting, the parent has not landed anywhere to name — which is the one place
+// the merge exit loses it. The automated and custom tails keep the gate and name the exit the same way
+// the non-waiting sentence does, so a repository with a merge job is never told, at any point of a stack,
+// that its own merge is the step.
+func (lc landingContract) afterTheGate() string {
+	switch lc.Route.Effective() {
+	case landingconfig.RouteAutomated:
+		return "`git pair check` and " + lc.handoffStep()
+	case landingconfig.RouteCustom:
+		return "`git pair check`, then " + lc.templateStep()
+	default:
+		target := displayRef(lc.Destination)
+		if target == "" {
+			target = "the base branch"
+		}
+		return fmt.Sprintf("`git pair check` and merge into %s", target)
+	}
 }
 
 // The declared path. A head covered by its own declaration has already been asked for, so the merge sentence
@@ -247,6 +340,11 @@ func selfMergeLine(lc landingContract) string {
 // appear lives here once. It is deliberately not the same condition as `declarable`: the hand-off belongs to
 // the state before a declaration, this one to the state after it.
 func declaredAlternative(lc landingContract, d declaredPath) string {
+	if !lc.Route.Effective().OffersMerge() {
+		// The route that removed the author's own merge as an exit removed this line with it: a repository
+		// that declared automated or custom never sees the merge offered beside the wait, on any surface.
+		return ""
+	}
 	if !d.CoversHead || !d.Pushed {
 		return ""
 	}
@@ -419,24 +517,32 @@ func stackBelow(ctx context.Context, repo *git.Repo, cs changeset.Changeset, db 
 
 // landingNextAction is the landing contract (PRD §21) in one line, spelled once because four commands tell an
 // author this same thing and a fifth spelling is how a contract drifts. git-pair performs the gate and the
-// record and nothing in between: the merge itself is ordinary git, performed by whoever owns the branch,
-// which is what keeps PRD §26's no-merge posture intact.
+// record and nothing in between: the landing itself is ordinary git, performed by whoever owns the branch,
+// which is what keeps PRD §26's no-merge posture intact. Which exit the sentence offers — the author's own
+// merge, the hand-off, or the repository's own sentence — is the route the repository declared, and the
+// frame does not change with it: the gate first, then the step.
 //
 // The waiting form exists because the merge is not always the next step. A child whose parent has not landed
 // is one merge away from a branch review can still rewrite, and `git pair change integrate` refuses to
 // declare it for exactly that reason. So the sentence names what is waiting and then names only its own
-// merge; the parent's step belongs to the parent's screen. Spelling it here was the second copy of a sentence
+// step; the parent's step belongs to the parent's screen. Spelling it here was the second copy of a sentence
 // this file was written to reduce to one — and it went stale the first time the landing contract changed,
 // because nothing tied the two copies together.
 func landingNextAction(lc landingContract) string {
 	if lc.WaitingOn != "" {
 		return waitingNextAction(lc)
 	}
-	target := displayRef(lc.Destination)
-	if target == "" {
-		target = "the base branch"
+	// The route selects the exit; the frame is the same for all of them. The gate is git-pair's contract
+	// and comes first whatever the repository declared, and the exit — the author's own merge, the
+	// hand-off, or the repository's own sentence — is the step that follows it.
+	switch lc.Route.Effective() {
+	case landingconfig.RouteAutomated:
+		return "`git pair check`, then " + lc.handoffStep()
+	case landingconfig.RouteCustom:
+		return "`git pair check`, then " + lc.templateStep()
+	default:
+		return "`git pair check`, then " + lc.mergeStep()
 	}
-	return fmt.Sprintf("`git pair check`, then merge into %s with ordinary git%s", target, lc.DestinationNote)
 }
 
 // waitingNextAction is the child's sentence while a parent's landing is owed. It names the parent and refers
@@ -465,14 +571,10 @@ func waitingNextAction(lc landingContract) string {
 	if parent == "" {
 		parent = "<parent>"
 	}
-	target := displayRef(lc.Destination)
-	if target == "" {
-		target = "the base branch"
-	}
 	if lc.ParentGone {
-		return fmt.Sprintf("waiting on parent %s: its branch is gone and the destination carries no record of it, so its landing cannot be shown — choose a new base with `git pair init --parent <branch> --set-parent`, then `git pair check` and merge into %s",
-			parent, target)
+		return fmt.Sprintf("waiting on parent %s: its branch is gone and the destination carries no record of it, so its landing cannot be shown — choose a new base with `git pair init --parent <branch> --set-parent`, then %s",
+			parent, lc.afterTheGate())
 	}
-	return fmt.Sprintf("waiting on parent %s: its landing is owed first (`git pair status --changeset %s` names the step), then `git pair check` and merge into %s",
-		parent, parent, target)
+	return fmt.Sprintf("waiting on parent %s: its landing is owed first (`git pair status --changeset %s` names the step), then %s",
+		parent, parent, lc.afterTheGate())
 }

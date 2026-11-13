@@ -269,9 +269,9 @@ func adviceCorpus(t *testing.T) []adviceLine {
 	add("conflictStep", conflictStep("main"))
 
 	// The hand-off line, and its fallbacks: both name commands, and neither is allowed to name one the
-	// build does not have.
-	add("handoffLine", handoffLine(lc, "beta"))
-	add("handoffLine/unknown", handoffLine(landingContract{}, ""))
+	// build does not have. The contract carries the branch now, and the default route leaves both exits on.
+	add("handoffLine", handoffLine(landingContract{Destination: lc.Destination, Branch: "beta"}))
+	add("handoffLine/unknown", handoffLine(landingContract{}))
 
 	// The declared path's own sentences, each named directly so a flag that drifts on one of them is caught
 	// even where no screen happens to print it today.

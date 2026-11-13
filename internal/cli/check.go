@@ -177,6 +177,11 @@ type checkJSON struct {
 	// fields to believe. An agent reading this verdict rather than the exit code should not have to
 	// parse a sentence to learn what comes next.
 	NextAction string `json:"next_action,omitempty"`
+	// LandingRoute is the route the repository declared in `.git-pair/config`, resolved: `default` when the
+	// file is absent and `default` when a declaration could not be honored, with the defect named on
+	// stderr. It sits beside `next_action` because the route is what selected that sentence — a consumer
+	// branching on what the next step is reads the field instead of parsing the prose.
+	LandingRoute string `json:"landing_route"`
 	// Recommendations is advice a person can act on that the gate neither requires nor refuses: what would
 	// make the next round easier about the file rather than about the code. It is an array in both verdicts
 	// for the reason `reasons` is one, and empty in the ordinary case, so a consumer that ignores it loses
@@ -225,6 +230,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		Landed:       g.Landed != "",
 		LandedCommit: short(g.Landed),
 		LandedAt:     g.Where,
+		LandingRoute: string(s.landing.Route.Effective()),
 		Reasons:      append(append([]string{}, g.Reasons...), hookReasons(hookResults)...),
 		// Advice the verdict does not depend on. It is computed after the gate, never inside it: a reason
 		// refuses a merge, and this does not.
@@ -379,13 +385,14 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	if alt := declaredAlternative(lc, declared); alt != "" {
 		// The mirror of the hand-off line, for the state where the hand-off is already done: the wait is the
 		// next step, and the author's own merge stays offered beside it so waiting is never the only thing on
-		// the screen.
+		// the screen. A route that removed the merge as an exit removes the line with it.
 		a.printf("       %s\n", alt)
-	} else if declarable(s, df) {
+	} else if declarable(s, df) && lc.Route.Effective().ShowsBothExits() {
 		// The second exit, and the human form only: `next_action` above stays one instruction. Which of the
 		// two is right is the author's and the destination owner's decision, not something git-pair can
-		// know — git-pair asks nothing about who merges, or with what (PRD §26).
-		a.printf("       %s\n", handoffLine(lc, s.cs.Branch))
+		// know — git-pair asks nothing about who merges, or with what (PRD §26). A repository that declared
+		// a route answered the question, so the fork prints only where the repository left it open.
+		a.printf("       %s\n", handoffLine(lc))
 	}
 	return nil
 }

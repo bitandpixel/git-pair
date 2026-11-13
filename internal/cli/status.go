@@ -202,11 +202,16 @@ type statusJSON struct {
 	Stack []stackStep `json:"stack"`
 	// StackNote is the one sentence for where the walk stopped — a cycle, a depth cap, or a read that
 	// failed — rather than a silent short list that reads as the whole chain.
-	StackNote    string   `json:"stack_note,omitempty"`
-	Reviews      int      `json:"reviews"`
-	Reason       string   `json:"reason"`
-	Span         string   `json:"span"`
-	NextAction   string   `json:"next_action"`
+	StackNote  string `json:"stack_note,omitempty"`
+	Reviews    int    `json:"reviews"`
+	Reason     string `json:"reason"`
+	Span       string `json:"span"`
+	NextAction string `json:"next_action"`
+	// LandingRoute is the route the repository declared, resolved — the same field `check --json`
+	// carries, for the same reason: `next_action` here was selected by it, and a consumer branching on
+	// the step reads the field rather than the prose. A declaration that could not be honored resolves
+	// to `default` with the defect on stderr.
+	LandingRoute string   `json:"landing_route"`
 	Unrecognised []string `json:"unrecognised_markers,omitempty"`
 }
 
@@ -381,16 +386,17 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 	// the same pair.
 	lc := landingContractFor(ctx, s.repo, s)
 	view.json = statusJSON{
-		Changeset:   s.cs.Slug,
-		Branch:      s.cs.Branch,
-		Base:        s.cs.Base,
-		State:       string(s.summary.State),
-		Head:        short(s.head),
-		HeadFull:    s.head,
-		Uncommitted: uncommitted(s),
-		Reviews:     len(s.summary.Reviews),
-		Reason:      s.summary.Reason,
-		NextAction:  nextAction(s.summary, lc, s.cs.Branch, s.cs.Slug, s.declaredPath(ctx)),
+		Changeset:    s.cs.Slug,
+		Branch:       s.cs.Branch,
+		Base:         s.cs.Base,
+		State:        string(s.summary.State),
+		Head:         short(s.head),
+		HeadFull:     s.head,
+		Uncommitted:  uncommitted(s),
+		Reviews:      len(s.summary.Reviews),
+		Reason:       s.summary.Reason,
+		NextAction:   nextAction(s.summary, lc, s.cs.Branch, s.cs.Slug, s.declaredPath(ctx)),
+		LandingRoute: string(lc.Route.Effective()),
 	}
 	// A derived base is reported beside the recorded one rather than over it: `base` is what the changeset
 	// says its stack is, and `base_ref` is what every diff in this document was measured against. A stacked
@@ -510,9 +516,9 @@ func buildStatus(ctx context.Context, a *app, s *session) (*statusView, error) {
 	// The second exit, offered exactly where `change integrate` would accept the changeset. It is computed
 	// after the three overrides above, because a screen whose next step is "switch to that branch" or "this
 	// has landed" is not offering a merge to anybody.
-	if !s.baseIsOwnBranch && s.onCurrentBranch && !view.json.Landed &&
+	if !s.baseIsOwnBranch && s.onCurrentBranch && !view.json.Landed && lc.Route.Effective().ShowsBothExits() &&
 		declarable(s, declareFacts{WaitingOnParent: lc.WaitingOn != "", Landed: view.json.Landed}) {
-		view.handoff = handoffLine(lc, s.cs.Branch)
+		view.handoff = handoffLine(lc)
 	}
 	// The same slot on the other side of the declaration: once the request is out, the wait is the machine
 	// answer and the author's own merge becomes the offered alternative.

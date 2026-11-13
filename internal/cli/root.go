@@ -25,6 +25,7 @@ import (
 	"gitpair/internal/changeset"
 	"gitpair/internal/git"
 	"gitpair/internal/hooks"
+	"gitpair/internal/landingconfig"
 	"gitpair/internal/lifecycle"
 )
 
@@ -65,6 +66,11 @@ type app struct {
 	// named the integration branch. Resolving the destination is not one call — a single command
 	// resolves it several times — and a note repeated for each would be noise rather than visibility.
 	defaultBranchEnvNoted bool
+	// landingDefectNoted records that this run has already said on stderr that the landing
+	// declaration could not be honored. Every session-loading command reads the config, and a
+	// command that polls (`change wait`) loads repeatedly, so the defect is named once per run
+	// for the same reason the environment note is.
+	landingDefectNoted bool
 	// hookRun holds the facts every hook point needs that are not about the point — whether hooks are switched
 	// off, and where the clone's git directory is — taken from git the first time a point asks. A command with
 	// two points (`check`: `pre-check` then `post-check`) or twelve (`git pair hooks`) would otherwise ask the
@@ -373,6 +379,12 @@ type session struct {
 	// session because "which changeset is this?" is a comparison against trunk, and a surface
 	// that reports the answer should be able to report the other side of it.
 	trunk changeset.DefaultBranchRef
+	// landing is the repository's landing declaration, read once per command run from
+	// `.git-pair/config`. It selects which landing exit the advice offers — the author's own
+	// merge, the hand-off, or the repository's own sentence — and every surface that builds a
+	// landing sentence reads it from here rather than re-reading the file, so four surfaces
+	// cannot disagree about what was declared.
+	landing landingconfig.Config
 }
 
 // destination is the integration branch this run should measure against, or the zero value when the
@@ -440,7 +452,8 @@ func (a *app) loadNamed(ctx context.Context, slug string) (*session, error) {
 	}
 	onBranch := current == branch
 	return &session{repo: repo, cs: cs, summary: summary, clean: onBranch,
-		onCurrentBranch: onBranch, head: head, baseIsOwnBranch: own, trunk: db}, nil
+		onCurrentBranch: onBranch, head: head, baseIsOwnBranch: own, trunk: db,
+		landing: a.resolveLanding(repo)}, nil
 }
 
 // resolveNamed finds the changeset a slug names. Two branches can carry the same directory
@@ -697,7 +710,40 @@ func (a *app) sessionFor(ctx context.Context, repo *git.Repo, cs changeset.Chang
 		return nil, err
 	}
 	return &session{repo: repo, cs: cs, summary: summary, clean: clean, onCurrentBranch: true,
-		head: head, baseIsOwnBranch: own, trunk: db}, nil
+		head: head, baseIsOwnBranch: own, trunk: db, landing: a.resolveLanding(repo)}, nil
+}
+
+// resolveLanding reads the repository's landing declaration once per run. A missing file is
+// the default route and no defect; a file that cannot be honored is the default route with
+// the defect named on stderr, once, however many sessions this run loads (`change wait`
+// polls) and however many surfaces print the advice it would have steered.
+func (a *app) resolveLanding(repo *git.Repo) landingconfig.Config {
+	data, err := os.ReadFile(filepath.Join(repo.Dir, landingconfig.File))
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			cfg := landingconfig.Config{Route: landingconfig.RouteDefault,
+				Defect: fmt.Sprintf("could not be read: %v", err)}
+			a.noteLandingDefect(cfg.Defect)
+			return cfg
+		}
+		return landingconfig.Config{Route: landingconfig.RouteDefault}
+	}
+	cfg := landingconfig.Parse(string(data))
+	if cfg.Defect != "" {
+		a.noteLandingDefect(cfg.Defect)
+	}
+	return cfg
+}
+
+// noteLandingDefect says once per run what the declaration got wrong and what the screens
+// show instead. It is stderr rather than a `recommend:` line because every surface that
+// loads a session carries the fact and only `check` has recommendations to print beside.
+func (a *app) noteLandingDefect(defect string) {
+	if a.landingDefectNoted {
+		return
+	}
+	a.landingDefectNoted = true
+	a.warn("git-pair: warning: %s: %s; the default landing advice is shown\n", landingconfig.File, defect)
 }
 
 // usageWrap marks an error as a usage problem rather than a git failure.
