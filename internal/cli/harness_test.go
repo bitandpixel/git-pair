@@ -311,3 +311,15 @@ func describe(t *testing.T, res result, args ...string) {
 	t.Helper()
 	t.Logf("git-pair %s -> %d\nstdout:\n%s\nstderr:\n%s", strings.Join(args, " "), res.code, res.stdout, res.stderr)
 }
+
+// withFeedbackAllowed commits the repository's enablement of the feedback policy: `allow-feedback
+// = true` under [landing] in .git-pair/config, as an ordinary commit on the changeset's branch —
+// the same move a repository makes. The ordering is forced twice over: a file left untracked is a
+// dirty tree to every command that commits, and one written after the review is drift the gate
+// refuses. Call it before `ready`, so the review that follows covers the branch that carries the
+// key. The route stays undeclared, so the landing advice the fixtures read is unchanged.
+func withFeedbackAllowed(t *testing.T, f *gittest.Fixture) {
+	t.Helper()
+	withLandingConfig(t, f, "[landing]\nallow-feedback = true\n")
+	f.Commit("Enable the feedback policy")
+}

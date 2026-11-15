@@ -59,6 +59,11 @@ than an imitation of it: no approval standing, the approved commit rewritten out
 outside ` + "`changesets/<id>/`" + ` changed since the approval, a stacked parent that moved or ended, and an
 abandoned or already-landed changeset are each refused, every failed condition named in one run.
 
+` + "`--allow-feedback`" + ` relaxes the outcome condition, and the repository decides whether that
+relaxation exists: the flag is refused unless ` + "`.git-pair/config`" + ` sets ` + "`allow-feedback = true`" + ` under
+` + "`[landing]`" + `. A declaration asks for a merge without asking anyone again, so the policy it rests on is
+the repository's, committed in its config — not the seat of whoever typed the command.
+
 Two things about a declaration are worth holding onto:
 
 It is about a commit. ` + "`Review-Head`" + ` names the head that was declared, for the reason a review
@@ -88,7 +93,7 @@ Exit codes: 0 declared or already declared, 1 refused, 2 usage, 3 git failed.`,
 		},
 	}
 	cmd.Flags().BoolVar(&opts.allowFeedback, "allow-feedback", false,
-		"accept non-blocking feedback as sufficient, as git pair check --allow-feedback does")
+		"accept non-blocking feedback as sufficient, as git pair check --allow-feedback does; refused unless .git-pair/config sets allow-feedback = true under [landing]")
 	// The gate's two flags, for the same reasons as `git pair check`: this command declares a merge, and what
 	// permits the merge is the approval underneath the declaration, not the hooks this invocation ran. The job
 	// that lands the change builds the merge commit and verifies that tree with its own invocation, so a person

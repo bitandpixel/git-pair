@@ -15,8 +15,15 @@
 // root, it lives under `.git-pair/` — repository policy, shared by everyone
 // who clones, unlike the clone-level hooks root which is one person's own.
 // And like `parseMetadata`, it is parsed by hand rather than by a format
-// library: the file has one table and two keys, and a parser that small is
+// library: the file has one table and three keys, and a parser that small is
 // safer written down than imported.
+//
+// The route is the second thing the file declares. The first is what the gate
+// accepts: whether a non-blocking review is enough to land is a policy of the
+// repository, and `allow-feedback` is where the repository states it. Without
+// the key the `--allow-feedback` flag is refused — the policy lives in the
+// file the repository commits, not in the seat of whoever happens to run the
+// gate.
 //
 // A declaration this tool cannot honor is reported, never silently ignored —
 // the same rule `git pair hooks` applies to a hook configured under an unknown
@@ -73,6 +80,14 @@ type Config struct {
 	// {changeset} as the placeholders Expand fills. Read only under
 	// RouteCustom; a template under any other route is a defect.
 	Next string
+	// AllowFeedback is the repository's answer to whether a non-blocking
+	// review is enough to land. True lets `--allow-feedback` accept a
+	// feedback verdict on `check` and `change integrate`; the zero value —
+	// also what an absent key means — refuses the flag, so the policy is
+	// only ever the one the repository committed. A file with any defect
+	// resolves to false along with the default route: a declaration this
+	// tool only partly understands is not one to relax a gate by.
+	AllowFeedback bool
 	// Defect names what made the declaration unusable, empty when the file was
 	// absent or valid. The surfaces that read the config print it on stderr
 	// and show the default advice; it never fails a command, because a wrong
@@ -116,12 +131,13 @@ func (r Route) ShowsBothExits() bool {
 // Parse resolves a declaration from the file's text. An empty text is a
 // missing file: the default route, no defect.
 //
-// The grammar is the one table and two keys the feature needs, and every
+// The grammar is the one table and three keys the feature needs, and every
 // deviation from it is a defect rather than a tolerated extra: an unknown
-// section, an unknown key, an unknown route value, a template under a route
-// that does not read one, a custom route without a template, a key outside a
-// table. Each is reported; any one of them resolves the whole file to the
-// default route, because a file this tool only partly understands is a file
+// section, an unknown key, an unknown route value, an allow-feedback value
+// that is neither true nor false, a template under a route that does not read
+// one, a custom route without a template, a key outside a table. Each is
+// reported; any one of them resolves the whole file to the default route and
+// the refused flag, because a file this tool only partly understands is a file
 // whose other settings may not mean what the repository believes.
 func Parse(text string) Config {
 	if strings.TrimSpace(text) == "" {
@@ -130,6 +146,7 @@ func Parse(text string) Config {
 	var defects []string
 	route := RouteDefault
 	next := ""
+	allowFeedback := false
 	inLanding := false
 	for i, raw := range strings.Split(text, "\n") {
 		lineNo := i + 1
@@ -179,6 +196,15 @@ func Parse(text string) Config {
 			}
 		case "next":
 			next = value
+		case "allow-feedback":
+			switch value {
+			case "true":
+				allowFeedback = true
+			case "false":
+				allowFeedback = false
+			default:
+				defects = append(defects, fmt.Sprintf("line %d: unknown allow-feedback value %q, want \"true\" or \"false\"", lineNo, value))
+			}
 		default:
 			defects = append(defects, fmt.Sprintf("line %d: unknown landing key %q", lineNo, key))
 		}
@@ -198,7 +224,7 @@ func Parse(text string) Config {
 	if len(defects) > 0 {
 		return Config{Route: RouteDefault, Defect: strings.Join(defects, "; ")}
 	}
-	return Config{Route: route, Next: next}
+	return Config{Route: route, Next: next, AllowFeedback: allowFeedback}
 }
 
 // Expand fills the template's placeholders with the facts the sentence layer
