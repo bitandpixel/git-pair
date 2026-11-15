@@ -180,11 +180,13 @@ func TestChangeIntegrateRefusesHistoryTheApprovalDidNotReview(t *testing.T) {
 	}
 }
 
-// The policy switch is one flag with the same meaning it has on `check` and on `integration record`, and it
-// is not a per-command invention: a declaration made under `--allow-feedback` is the same permission that
-// flag already grants at the gate, and nothing more.
+// The policy switch is one flag with the same meaning it has on `check`, and it is not a per-command
+// invention: a declaration made under `--allow-feedback` is the same permission that flag already
+// grants at the gate, and nothing more. The permission is also the repository's to grant: the fixture
+// commits `allow-feedback = true`, the same enablement a repository makes before the flag does anything.
 func TestChangeIntegrateFollowsTheFeedbackPolicy(t *testing.T) {
 	f, _ := newChangeset(t, "booking-transaction", "main")
+	withFeedbackAllowed(t, f)
 	ready(t, f)
 	submit(t, f, "feedback")
 
@@ -197,6 +199,29 @@ func TestChangeIntegrateFollowsTheFeedbackPolicy(t *testing.T) {
 	runIn(t, f.Dir(), "change", "integrate", "--allow-feedback").mustSucceed(t, "change", "integrate")
 	if got := f.Trailers(f.Head())["Review-State"]; got != "integrating" {
 		t.Errorf("the newest commit's Review-State = %q, want integrating", got)
+	}
+}
+
+// A declaration asks for a merge without asking anyone again, so the policy it rests on is the
+// repository's, committed in its config. A repository that has not set `allow-feedback = true`
+// refuses the flag instead of the review: the refusal names the key, nothing is declared, and no
+// hook runs — the gate said no before any of that could start.
+func TestChangeIntegrateRefusesTheFeedbackFlagWhereTheRepositoryHasNotEnabledIt(t *testing.T) {
+	f, _ := newChangeset(t, "booking-transaction", "main")
+	ready(t, f)
+	submit(t, f, "feedback")
+	before := f.Head()
+
+	res := runIn(t, f.Dir(), "change", "integrate", "--allow-feedback")
+	if res.code != exitRefusal {
+		t.Fatalf("integrate exited %d, want %d\nstdout: %s", res.code, exitRefusal, res.stdout)
+	}
+	mustContain(t, res.stdout, "`--allow-feedback` is refused",
+		"the flag is the repository's to allow, and it has not")
+	mustContain(t, res.stdout, "allow-feedback = true",
+		"the refusal names the file edit that would honor it")
+	if f.Head() != before {
+		t.Error("a refused declaration still wrote a commit")
 	}
 }
 

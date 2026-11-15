@@ -41,7 +41,7 @@ and git-pair ran none of the merge, so a summary that says "merged" is reporting
 ```bash
 git pair check                # verdict in the exit code: 0 ready, 1 not ready
 git pair check --json | jq -e '.ready'      # verdict in `ready`, exit 0 either way
-git pair check --allow-feedback             # when this repository's policy says feedback is enough
+git pair check --allow-feedback             # only where .git-pair/config enables it: allow-feedback = true
 ```
 
 `check` asks what a merge would act on: the newest marker is a review whose outcome permits integration
@@ -60,9 +60,12 @@ It is the last step an agent runs, unless the repository's flow asks for a decla
 run after a passing gate because the declaration refuses everything the gate refuses and merges nothing. An
 agent asked "may this land?" runs `git pair check`, reports `reasons`, and stops.
 
-`check` accepts a `feedback` outcome only with `--allow-feedback`. Whether a non-blocking review is
-enough to land is a policy of the repository, and that flag is the place it is stated — there is no
-config key for it, because the command running the gate is the only place the policy is known.
+`check` accepts a `feedback` outcome only with `--allow-feedback`, and the flag only where the repository
+enables it: `allow-feedback = true` under `[landing]` in `.git-pair/config`. Whether a non-blocking review
+is enough to land is a policy of the repository, and the committed file is where it is stated — a flag
+passed without the key is refused, so the policy is never relaxed from the seat of whoever runs the gate.
+Where the verdict is feedback and the key is absent, the refusal names it and a `recommend:` line points
+at the same edit.
 
 ## What invalidates an approval
 

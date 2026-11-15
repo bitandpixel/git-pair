@@ -81,6 +81,81 @@ func TestParseReportsEachDefectAndFallsBackToDefault(t *testing.T) {
 	}
 }
 
+// The feedback policy is the second declaration the file carries: whether a
+// non-blocking review is enough to land. The zero value and an explicit false
+// both refuse the flag; only a literal true enables it, quoted or bare, with
+// or without a route beside it.
+func TestParseResolvesTheFeedbackPolicy(t *testing.T) {
+	tests := []struct {
+		name    string
+		text    string
+		allowed bool
+	}{
+		{"absent key", "[landing]\nroute = \"manual\"\n", false},
+		{"explicit false", "[landing]\nallow-feedback = false\n", false},
+		{"true", "[landing]\nallow-feedback = true\n", true},
+		{"quoted true", "[landing]\nallow-feedback = \"true\"\n", true},
+		{"true beside a route", "[landing]\nroute = \"automated\"\nallow-feedback = true # the job merges feedback too\n", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := landingconfig.Parse(tt.text)
+			if got.AllowFeedback != tt.allowed {
+				t.Errorf("AllowFeedback = %v, want %v", got.AllowFeedback, tt.allowed)
+			}
+			if got.Defect != "" {
+				t.Errorf("defect = %q, want none", got.Defect)
+			}
+		})
+	}
+}
+
+// A value the parser cannot read is a defect like any other: the whole file
+// falls back, and the fallback refuses the flag. A gate policy this tool
+// cannot read is not one to relax a gate by.
+func TestParseRefusesABadFeedbackValue(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   string
+		defect string
+	}{
+		{"yes", "[landing]\nallow-feedback = yes\n", `unknown allow-feedback value "yes"`},
+		{"upper case", "[landing]\nallow-feedback = TRUE\n", `unknown allow-feedback value "TRUE"`},
+		{"empty", "[landing]\nallow-feedback =\n", `unknown allow-feedback value ""`},
+		{"outside the table", "allow-feedback = true\n", "outside [landing]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := landingconfig.Parse(tt.text)
+			if got.Route != landingconfig.RouteDefault {
+				t.Errorf("route = %q, want the default fallback", got.Route)
+			}
+			if got.AllowFeedback {
+				t.Error("AllowFeedback = true, want the fallback to refuse the flag")
+			}
+			if !strings.Contains(got.Defect, tt.defect) {
+				t.Errorf("defect = %q, want it to name %q", got.Defect, tt.defect)
+			}
+		})
+	}
+}
+
+// A defect anywhere in the file drops the feedback policy with the route: a
+// file this tool only partly understands is not one to relax a gate by, even
+// where the line it stumbled over had nothing to do with the flag.
+func TestParseDropsTheFeedbackPolicyWhenAnyDefectFires(t *testing.T) {
+	got := landingconfig.Parse("[landing]\nallow-feedback = true\nroute = \"ci\"\n")
+	if got.Route != landingconfig.RouteDefault {
+		t.Errorf("route = %q, want the default fallback", got.Route)
+	}
+	if got.AllowFeedback {
+		t.Error("AllowFeedback = true, want it dropped with the rest of the file")
+	}
+	if !strings.Contains(got.Defect, `unknown landing route "ci"`) {
+		t.Errorf("defect = %q, want it to name the bad route", got.Defect)
+	}
+}
+
 // A template naming two unknown placeholders names both, once each, so one
 // fix pass over the file silences the warning.
 func TestParseNamesEachUnknownPlaceholderOnce(t *testing.T) {

@@ -147,7 +147,18 @@ $G status | sed 's/^/  /'
 # The gate's deliverable is `$?`, which is the one thing the Go harness cannot assert: it calls
 # the same cli.Execute that main passes to os.Exit, so only a shell sees an exit status.
 $G check; check "check: feedback alone is not integration-ready" 1 $?
+# The flag is the repository's to allow: without `allow-feedback = true` under [landing] in
+# .git-pair/config the gate refuses the flag itself, beside the outcome reason, whatever the verdict
+# underneath would have been, and names the file that would honor it.
+$G check --allow-feedback >/dev/null; check "check --allow-feedback refused where the repository has not enabled it" 1 $?
+mkdir -p .git-pair
+printf '[landing]\nallow-feedback = true\n' > .git-pair/config
+# `check` asserts the commit, not the checkout, so the uncommitted key is read from disk and the
+# verdict covers the head the feedback review named. The key is committed before the next command that
+# needs a clean tree, and that commit is drift to the review above — which is the next assertion's point.
 $G check --allow-feedback >/dev/null; check "check --allow-feedback accepts it" 0 $?
+git add .git-pair/config
+git commit -qm "enable the feedback policy"
 printf '\n// tighten naming\n' >> src/service.ts
 git commit -qam "rename for clarity"
 $G check >/dev/null 2>&1; check "check refuses: the reviewed content moved" 1 $?

@@ -1842,7 +1842,7 @@ The conditions, all of them reported rather than the first:
 
 1. the changeset has not ended (§9.7),
 2. the newest lifecycle marker is a review whose outcome permits integration — `approve`, or
-   `feedback` under `--allow-feedback` — or a declaration (§9.9) standing on such a review, in which case
+   `feedback` under an enabled `--allow-feedback` (§11.3) — or a declaration (§9.9) standing on such a review, in which case
    the review underneath it is the verdict. A changeset that is merely marked ready, or withdrawn by
    `change unready`, is not reviewed,
 3. no marker after it carries `Review-*` trailers this build cannot read,
@@ -1956,7 +1956,7 @@ Exit codes are the existing table: 0 integration-ready, 1 not ready, 2 usage, 3 
 Failing is the command working, so the verdict is written to stdout and no `git-pair:` diagnostic is
 printed over it.
 
-`--allow-feedback` is the only policy switch:
+`--allow-feedback` is the only policy switch, and the repository decides whether it exists:
 
 ```text
                     default    --allow-feedback
@@ -1966,10 +1966,15 @@ BLOCKED             fail       fail
 ended               fail       fail
 ```
 
-`feedback` is the case the switch exists for. A non-blocking review is a review of that head, and
-whether it is enough to land is a policy of the repository rather than a fact about the commit, so the
-default refuses and `--allow-feedback` says otherwise. There is no per-changeset config for this: the
-flag is on the command that runs the gate, which is the one place the policy is known.
+The column is the switch, and the switch is the repository's to allow: `allow-feedback = true` under
+`[landing]` in `.git-pair/config` is what makes `--allow-feedback` mean anything, on `check` and on
+`change integrate` alike. `feedback` is the case the switch exists for — a non-blocking review is a
+review of that head, and whether it is enough to land is a policy of the repository rather than a fact
+about the commit — so the policy is stated in the file the repository commits, not in the seat of
+whoever happens to run the gate. Without the key the default column governs and the flag is refused: a
+run that passes it is named in `reasons` beside the outcome reason, whatever the verdict underneath
+would have been, and where the verdict is `feedback` `check` adds a `recommend:` line naming the key,
+so the decision the repository has not made is named where its gate refused.
 
 `--json` prints `changeset`, `ready`, `state`, `head`, `reasons`, `policy` (`approve-only` or
 `approve-or-feedback`, so a verdict in a log carries the policy that produced it), `reviewed_head`,
@@ -2337,9 +2342,10 @@ cheap answer available first, and because firing the gate's hooks there would st
 twice in one author action. That is why the points are attached to the command and not to the gate function.
 
 **There is no override.** `change ready` and `review submit` carry an `--allow-*` flag for the judgement of
-the person standing at them. `check` carries none, for the reason §19.3 gives for the absence of
-`--allow-feedback` in its own list: the command that runs the gate is the only place the policy is known, and
-a policy relaxed from the seat of whoever is running it is not a policy. A repository that wants its own gate
+the person standing at them. `check` carries one policy switch, and even that is not the runner's to pull:
+`--allow-feedback` is honored only where `.git-pair/config` enables it (§11.3), so the policy the gate
+applies is the repository's, committed in its config — a policy relaxed from the seat of whoever is running
+it is not a policy. A repository that wants its own gate
 on its own result writes it as a `pre-check` hook that reads what it recorded.
 
 ### The reviewer's submission
@@ -4030,7 +4036,9 @@ approved, declared, and green on the declared head (§11.3). So no sentence name
 runner, or a job, and none depends on detecting one. A workflow file existing is not a workflow merging, and
 guidance built on reading one would be wrong in every repository that merged some other way. What a
 repository may do is say so. `.git-pair/config` declares a landing route, and the route selects which exit
-the sentence offers — the author's own merge, the hand-off, or a sentence the repository writes itself. A
+the sentence offers — the author's own merge, the hand-off, or a sentence the repository writes itself. The
+same table declares what the gate accepts: `allow-feedback` (§11.3) is where the repository says a
+non-blocking review is enough to land, and without it the flag that would relax the gate is refused. A
 stated fact is not a detected one: the declaration is read from a file the repository owns, never inferred
 from a workflow's presence, and git-pair still runs no merge and names no tool the repository did not name
 first.
@@ -4069,7 +4077,7 @@ as an "or" line beside the wait, not in the tail of a stacked child's waiting se
 fills its own sentence from a template — `next` in the same table, with `{branch}`, `{destination}` and
 `{changeset}` as the placeholders git-pair substitutes; the destination is the one the walk resolved, so a
 stacked child's template names where its work actually goes. A declaration this build cannot honor — an
-unknown route value, a template naming a placeholder git-pair does not fill, a `custom` route without a
+unknown route value, an `allow-feedback` value that is neither `true` nor `false`, a template naming a placeholder git-pair does not fill, a `custom` route without a
 `next` — shows the default view with the defect named on stderr of every command that read the file: the
 fallback is the unopinionated answer, never a guess at what the repository meant, and never a gate failure,
 because a wrong label makes advice wrong rather than work unmergeable. `check --json`, `status --json`,
@@ -4268,7 +4276,10 @@ Meaning:
 
 > Feedback exists but is non-blocking.
 
-Integration is permitted once other requirements pass.
+Integration is permitted once other requirements pass, and only where the repository has enabled it:
+`--allow-feedback` is refused unless `.git-pair/config` sets `allow-feedback = true` under `[landing]`
+(§11.3). The refusal names the key, and `check` recommends it beside a feedback verdict, so the
+repository that wants feedback to suffice makes the decision in its config rather than in a command.
 
 ## Approve
 

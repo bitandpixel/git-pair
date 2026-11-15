@@ -61,6 +61,8 @@ func landedParentOfAnUnapprovedChild(t *testing.T) landedChild {
 // certified, so the verdict prints the command it would withhold from an approved child.
 func TestCheckAdvisesTheRestackToAChildWhoseVerdictIsFeedback(t *testing.T) {
 	f := landedParentOfAnUnapprovedChild(t)
+	// The enablement lands before the review, so the verdict covers the branch that carries the key.
+	withFeedbackAllowed(t, f.Fixture)
 	submit(t, f.Fixture, "feedback")
 
 	out := runIn(t, f.Dir(), "check", "--allow-feedback", "--json").mustSucceed(t, "check").json(t)

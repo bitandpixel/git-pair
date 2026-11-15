@@ -147,6 +147,7 @@ func TestCheckAsksTheRebaseRuleOnlyWhereIntegrationIsPermitted(t *testing.T) {
 
 	t.Run("feedback", func(t *testing.T) {
 		f, _ := newChangeset(t, "booking-transaction", "main")
+		withFeedbackAllowed(t, f)
 		ready(t, f)
 		submit(t, f, "feedback")
 		rewrite(t, f)

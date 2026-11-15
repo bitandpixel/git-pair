@@ -34,8 +34,8 @@ two-minute fix into two round trips, and a log that explains itself once is the 
 a check people read and one they re-run.
 
 The conditions are that the changeset has not ended and has not been recorded as landed; that the
-newest marker is a review whose outcome permits integration (` + "`approve`" + `, or ` + "`feedback`" + ` with
-` + "`--allow-feedback`" + `); that the commit that review spoke about (` + "`Review-Head`" + `) is still in this
+newest marker is a review whose outcome permits integration (` + "`approve`" + `, or ` + "`feedback`" + ` where
+the repository has enabled ` + "`--allow-feedback`" + `); that the commit that review spoke about (` + "`Review-Head`" + `) is still in this
 line of history; and that the content it looked at is still what ` + "`HEAD`" + ` carries.
 
 The lineage condition and the content condition are different questions, and a rewrite separates them.
@@ -44,9 +44,13 @@ test refuses — which is the point: an approval is about a commit, and git-pair
 approval of one commit as approval of the rewritten version of it. Merging the base in, or committing
 on top, rewrites nothing and passes.
 
-` + "`check`" + ` refuses feedback on its own unless you say otherwise. Non-blocking feedback is still a
-review of a head, so it permits integration in the tool's own terms — but the repository decides at
-the gate whether feedback alone is enough to land, and the default is that it is not.
+` + "`check`" + ` refuses feedback on its own, and it refuses ` + "`--allow-feedback`" + ` unless the repository
+has said otherwise. Non-blocking feedback is still a review of a head, so it permits integration in
+the tool's own terms — but whether feedback alone is enough to land is a policy of the repository,
+stated in ` + "`.git-pair/config`" + ` as ` + "`allow-feedback = true`" + ` under ` + "`[landing]`" + `. Without that key the
+flag is refused: the policy lives in the file the repository commits, not in the seat of whoever
+runs the gate. Where the key is absent and the newest review is feedback, the refusal names the
+key, so making the decision explicit is one edit away.
 
 The assertion is about the commit, not the checkout: uncommitted changes are not in ` + "`HEAD`" + ` and
 cannot invalidate a review of it, so a dirty working tree does not change the answer.
@@ -70,7 +74,7 @@ Exit codes: 0 integration-ready, 1 not ready, 2 usage, 3 git failed.`,
 		},
 	}
 	cmd.Flags().BoolVar(&allowFeedback, "allow-feedback", false,
-		"accept non-blocking feedback as sufficient for integration")
+		"accept non-blocking feedback as sufficient for integration; refused unless .git-pair/config sets allow-feedback = true under [landing]")
 	// Both hook flags are on the verdict, in opposite directions. `--trust-hooks-once` runs the scripts the clone
 	// has not recorded, which is more checking. `--no-hooks` runs none of them, which is less, and is here because
 	// this verdict is what a person reads to find out what is wrong: a hook that fails or misbehaves should not
@@ -84,7 +88,9 @@ Exit codes: 0 integration-ready, 1 not ready, 2 usage, 3 git failed.`,
 
 // The feedback policy, named in the output so a CI log explains its own verdict without the
 // command line next to it. `--allow-feedback` is the only policy switch git-pair has, and a
-// verdict recorded without its policy is a number nobody can re-derive.
+// verdict recorded without its policy is a number nobody can re-derive. The switch itself is
+// repository policy: it is honored only where `.git-pair/config` enables it, so the policy a
+// verdict records is always the one the repository committed.
 const (
 	policyApproveOnly       = "approve-only"
 	policyApproveOrFeedback = "approve-or-feedback"
@@ -218,7 +224,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 	}
 
 	policy := policyApproveOnly
-	if allowFeedback {
+	if allowFeedback && s.landing.AllowFeedback {
 		policy = policyApproveOrFeedback
 	}
 	out := checkJSON{
@@ -234,7 +240,7 @@ func runCheck(ctx context.Context, a *app, allowFeedback bool) error {
 		Reasons:      append(append([]string{}, g.Reasons...), hookReasons(hookResults)...),
 		// Advice the verdict does not depend on. It is computed after the gate, never inside it: a reason
 		// refuses a merge, and this does not.
-		Recommendations: stackLinkRecommendations(ctx, a, s),
+		Recommendations: append(stackLinkRecommendations(ctx, a, s), feedbackPolicyRecommendation(g, s)...),
 		// The CI half of the gate. `ready` answers "may this merge"; `integrating` answers "did the
 		// author ask for one", and a pipeline that merges on the first alone takes the decision out of
 		// the author's hands. Both in one command is the point: a CI job should not have to run a second
@@ -441,6 +447,22 @@ func stackLinkRecommendations(ctx context.Context, a *app, s *session) []string 
 	return nil
 }
 
+// feedbackPolicyRecommendation is the encouragement that runs beside a feedback verdict in a
+// repository that has not decided whether feedback may land. The gate refuses either way — the
+// outcome is the fact, and the flag is unavailable without the key — so this is advice about the
+// repository's config rather than a second way past the verdict: enabling the key is a decision
+// for the people who own the file, made once and committed, not a per-run override.
+func feedbackPolicyRecommendation(g *integrationGate, s *session) []string {
+	if s.landing.AllowFeedback || g.Landed != "" || g.Terminal != nil {
+		return nil
+	}
+	v := g.Verdict
+	if v == nil || v.Kind != lifecycle.KindReview || v.Outcome != model.OutcomeFeedback {
+		return nil
+	}
+	return []string{"if feedback alone should be enough to land in this repository, set `allow-feedback = true` under `[landing]` in .git-pair/config"}
+}
+
 // integrationGate asks everything the integration policy asks, in one read of the repository, and
 // lists every failed condition instead of the first.
 //
@@ -537,7 +559,17 @@ func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback boo
 	// The lineage question, asked of the same derivation so the two conditions cannot disagree about
 	// which marker is newest or what it approved. It is the check the tree cannot do: a rebase that
 	// changes no file passes the drift test and fails this one.
-	lineage, head, err := lineageReason(ctx, s.repo, reviewed, s.head, allowFeedback)
+	//
+	// The policy the invocation asked for is the repository's to allow. `--allow-feedback` without
+	// `allow-feedback = true` in `.git-pair/config` is refused as its own condition, beside the
+	// outcome reason, so a gate that names every problem names this one too: an agent that guessed
+	// at the flag reads the refusal and the file edit that would honor it in the same run. The
+	// lineage question asks about the policy that actually applies, which is the requested one
+	// only where the repository permits it.
+	feedbackPermitted := s.landing.AllowFeedback
+	feedbackFlagRefused := allowFeedback && !feedbackPermitted
+	effective := allowFeedback && feedbackPermitted
+	lineage, head, err := lineageReason(ctx, s.repo, reviewed, s.head, effective)
 	if err != nil {
 		return nil, err
 	}
@@ -549,7 +581,7 @@ func (a *app) integrationGate(ctx context.Context, s *session, allowFeedback boo
 	if g.Parent, err = a.parentSinceApproval(ctx, s.repo, s.cs, s.trunk, g.Verdict, s.head); err != nil {
 		return nil, err
 	}
-	g.Reasons = integrationReasons(s.cs.Slug, g.Terminal, reviewed, s.head, allowFeedback, g.Where, lineage, g.Parent.Reason)
+	g.Reasons = integrationReasons(s.cs.Slug, g.Terminal, reviewed, s.head, effective, feedbackFlagRefused, g.Where, lineage, g.Parent.Reason)
 	// The shape question, added last: it is the condition with the fewest ways out, and the fixes change what
 	// the branch carries rather than what was said about it. It gates the merge because the second changeset
 	// arrives in the destination with no approval of its own, and no review of the first one covers it.
@@ -637,7 +669,7 @@ func eventSHA(e *lifecycle.Event) string {
 // outside that directory moved since the marker and that the author was asked before the marker,
 // and it promises nothing more.
 func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summary,
-	head string, allowFeedback bool, landed landing, lineage, parent string) []string {
+	head string, allowFeedback, feedbackFlagRefused bool, landed landing, lineage, parent string) []string {
 	if landed.Commit != "" {
 		// The other early return, and it comes first. Once the destination carries the directory the
 		// review is over: the drift question below it describes a changeset still being worked on,
@@ -678,9 +710,19 @@ func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summ
 		case model.OutcomeApprove:
 			// Integration is permitted at this head.
 		case model.OutcomeFeedback:
-			if !allowFeedback {
+			switch {
+			case allowFeedback:
+				// The repository enabled the policy and the flag asked for it: a non-blocking
+				// review of this head is sufficient.
+			case feedbackFlagRefused:
+				// The invocation reached for the flag the repository has not enabled. The refusal
+				// of the flag itself is named below, so this bullet states the verdict's own
+				// consequence and no more.
 				reasons = append(reasons, fmt.Sprintf(
-					"the newest review is feedback, which is non-blocking and is not sufficient without --allow-feedback (%s)", verdict.Short))
+					"the newest review is feedback, which is non-blocking and is not sufficient to land (%s)", verdict.Short))
+			default:
+				reasons = append(reasons, fmt.Sprintf(
+					"the newest review is feedback, which is non-blocking and is not sufficient to land (%s); --allow-feedback is refused because the repository has not enabled `allow-feedback` in .git-pair/config", verdict.Short))
 			}
 		default:
 			// `block`, and anything git-pair could not read as an outcome: the gate fails
@@ -689,6 +731,14 @@ func integrationReasons(slug string, terminal *lifecycle.Event, s lifecycle.Summ
 		}
 	default:
 		reasons = append(reasons, fmt.Sprintf("the newest lifecycle marker (%s) is not one git-pair can classify", verdict.Short))
+	}
+
+	if feedbackFlagRefused {
+		// The invocation asked for a policy the repository has not committed. Its own condition
+		// rather than a clause on the outcome reason: it applies whatever the verdict is — an
+		// approved head checked with the flag is refused for the flag alone — and the fix is a
+		// file edit rather than a review.
+		reasons = append(reasons, "`--allow-feedback` is refused: the repository has not set `allow-feedback = true` under `[landing]` in .git-pair/config")
 	}
 
 	if s.TrailingUnrecognised > 0 {

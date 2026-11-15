@@ -78,22 +78,29 @@ func TestCheckListsEveryFailure(t *testing.T) {
 // Requirements §29: the feedback rule is the one policy switch, and a verdict recorded without
 // its policy is a number nobody can re-derive.
 func TestCheckFeedbackPolicy(t *testing.T) {
-	feedbackChangeset := func(t *testing.T) *gittest.Fixture {
+	// enabled commits the repository's enablement before the review, so the verdict covers the
+	// branch that carries the key; disabled leaves the file absent, which is the default policy.
+	feedbackChangeset := func(t *testing.T, enabled bool) *gittest.Fixture {
 		t.Helper()
 		f, _ := newChangeset(t, "booking-transaction", "main")
+		if enabled {
+			withFeedbackAllowed(t, f)
+		}
 		ready(t, f)
 		submit(t, f, "feedback")
 		return f
 	}
 
 	t.Run("default policy requires an approval", func(t *testing.T) {
-		f := feedbackChangeset(t)
+		f := feedbackChangeset(t, false)
 		res := runIn(t, f.Dir(), "check")
 		if res.code != exitRefusal {
 			t.Fatalf("check exited %d, want %d\nstdout: %s", res.code, exitRefusal, res.stdout)
 		}
 		mustContain(t, res.stdout, "feedback", "the bullet must name the outcome it is refusing")
 		mustContain(t, res.stdout, "--allow-feedback", "the bullet must name the switch that would accept it")
+		mustContain(t, res.stdout, "has not enabled `allow-feedback` in .git-pair/config",
+			"the bullet says why the switch is not available here")
 
 		out := runIn(t, f.Dir(), "check", "--json").json(t)
 		if out["policy"] != "approve-only" {
@@ -102,7 +109,7 @@ func TestCheckFeedbackPolicy(t *testing.T) {
 	})
 
 	t.Run("--allow-feedback accepts it", func(t *testing.T) {
-		f := feedbackChangeset(t)
+		f := feedbackChangeset(t, true)
 		args := []string{"check", "--allow-feedback"}
 		res := runIn(t, f.Dir(), args...).mustSucceed(t, args...)
 		mustContain(t, res.stdout, "OK: booking-transaction is integration-ready",
@@ -112,6 +119,61 @@ func TestCheckFeedbackPolicy(t *testing.T) {
 		if out["policy"] != "approve-or-feedback" {
 			t.Errorf("policy = %v, want approve-or-feedback", out["policy"])
 		}
+	})
+
+	t.Run("the flag is refused where the repository has not enabled it", func(t *testing.T) {
+		f := feedbackChangeset(t, false)
+		args := []string{"check", "--allow-feedback"}
+		res := runIn(t, f.Dir(), args...)
+		if res.code != exitRefusal {
+			t.Fatalf("check exited %d, want %d\nstdout: %s", res.code, exitRefusal, res.stdout)
+		}
+		mustContain(t, res.stdout, "`--allow-feedback` is refused",
+			"the invocation reached for a policy the repository has not committed")
+		mustContain(t, res.stdout, "allow-feedback = true",
+			"the refusal names the file edit that would honor it")
+
+		out := runIn(t, f.Dir(), "check", "--allow-feedback", "--json").json(t)
+		if out["policy"] != "approve-only" {
+			t.Errorf("policy = %v, want approve-only: the flag is not honored here", out["policy"])
+		}
+		if reasons, ok := out["reasons"].([]any); !ok || len(reasons) != 2 {
+			t.Errorf("reasons = %v, want two: the outcome and the refused flag", out["reasons"])
+		}
+	})
+
+	t.Run("the flag is refused even where an approval stands", func(t *testing.T) {
+		f, _, _, _ := approvedChangeset(t)
+		res := runIn(t, f.Dir(), "check", "--allow-feedback")
+		if res.code != exitRefusal {
+			t.Fatalf("check exited %d, want %d\nstdout: %s", res.code, exitRefusal, res.stdout)
+		}
+		mustContain(t, res.stdout, "`--allow-feedback` is refused",
+			"the repository refuses the policy switch itself, whatever the verdict would have been")
+		mustNotContain(t, res.stdout, "is feedback",
+			"an approved head has no feedback reason to state")
+	})
+
+	t.Run("an undecided repository is told where the decision is made", func(t *testing.T) {
+		f := feedbackChangeset(t, false)
+		res := runIn(t, f.Dir(), "check")
+		mustContain(t, res.stdout, "recommend: if feedback alone should be enough to land",
+			"the gate neither requires nor refuses the key; it names where the decision is made")
+		out := runIn(t, f.Dir(), "check", "--json").json(t)
+		recs, ok := out["recommendations"].([]any)
+		if !ok || len(recs) != 1 {
+			t.Fatalf("recommendations = %v, want one", out["recommendations"])
+		}
+		if rec, _ := recs[0].(string); !strings.Contains(rec, "allow-feedback = true") {
+			t.Errorf("recommendation = %q, want it to name the key", rec)
+		}
+	})
+
+	t.Run("an enabled repository recommends nothing about the policy", func(t *testing.T) {
+		f := feedbackChangeset(t, true)
+		res := runIn(t, f.Dir(), "check")
+		mustNotContain(t, res.stdout, "recommend: if feedback",
+			"the repository has decided, and the refusal names the flag it may run")
 	})
 }
 
@@ -143,6 +205,7 @@ func TestCheckRefusesWhatTheGateMustRefuse(t *testing.T) {
 
 	t.Run("a withdrawn changeset, even after an approval", func(t *testing.T) {
 		f, _, _, _ := approvedChangeset(t)
+		withFeedbackAllowed(t, f)
 		runIn(t, f.Dir(), "change", "unready").mustSucceed(t, "change", "unready")
 
 		res := runIn(t, f.Dir(), "check", "--allow-feedback")
