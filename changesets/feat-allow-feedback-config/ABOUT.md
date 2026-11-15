@@ -74,8 +74,8 @@ Three behavior notes:
 
 ## Validation
 
-`mise run check` (markdown formatting, gofmt, go vet, full Go suite) passes. The new behavior is pinned by
-tests at each layer:
+`mise run check` (markdown formatting, gofmt, go vet, full Go suite) and `mise run gates` (the four E2E
+replays, including the CI merge-job driver) both pass. The new behavior is pinned by tests at each layer:
 
 - `internal/landingconfig`: the key parses quoted and bare, beside a route; `yes`, `TRUE`, empty and
   out-of-table values are defects; a defect anywhere in the file drops the enablement with the route.
@@ -86,6 +86,14 @@ tests at each layer:
 - Existing tests that exercise the permissive policy now commit the key first through a `withFeedbackAllowed`
   fixture helper — the same move a repository makes, placed before the review so the verdict covers the branch
   that carries it.
+
+One failure is part of this change's record: the first `git pair integrate` run refused the merge candidate
+because the §29 E2E gate (`scripts/gates/e2e-29.sh`) asserted the old contract — `check --allow-feedback`
+accepting a feedback verdict in a repository that had not enabled it. Nothing had merged; the fix updates that
+scenario to assert the refusal without the key, the acceptance with it, and the enablement as an ordinary
+commit. The author had run `mise run check` but not `mise run gates` before the hand-off; the gates are what
+the merge job's verify runs, and a hand-off that skips them is a break the job finds two minutes later.
+Both are run before this re-offer.
 
 ## Reviewer attention
 
